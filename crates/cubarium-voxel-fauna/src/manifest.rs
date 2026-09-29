@@ -94,10 +94,15 @@ pub enum Founder {
     /// The sighted foliage browser (frondgrazer founder): the same shared prefix plus
     /// `Cone(3, foliage/body)` — **37 inputs**.
     Browser,
+    /// The **lanternjaw**, the ambush carnivore (`design/predation-and-flight-2026-09-28.md`
+    /// §2.12): the Browser's 37-input layout with a carrion taste, and a fourth action,
+    /// `lure`. An interim contract so a policy file could load; P2's contract v3 replaces
+    /// it. No trained centre exists: its heuristic drives it.
+    Lanternjaw,
 }
 
 impl Founder {
-    pub const ALL: [Founder; 2] = [Founder::Blind, Founder::Browser];
+    pub const ALL: [Founder; 3] = [Founder::Blind, Founder::Browser, Founder::Lanternjaw];
     pub const COUNT: usize = Founder::ALL.len();
 
     /// Index into a per-founder array, in [`Founder::ALL`] order: stable, like the
@@ -106,6 +111,7 @@ impl Founder {
         match self {
             Founder::Blind => 0,
             Founder::Browser => 1,
+            Founder::Lanternjaw => 2,
         }
     }
 
@@ -114,6 +120,7 @@ impl Founder {
         match self {
             Founder::Blind => "littershredder",
             Founder::Browser => "frondgrazer",
+            Founder::Lanternjaw => "lanternjaw",
         }
     }
 
@@ -122,6 +129,7 @@ impl Founder {
         match self {
             Founder::Blind => "blind",
             Founder::Browser => "browser",
+            Founder::Lanternjaw => "hunter",
         }
     }
 
@@ -130,6 +138,7 @@ impl Founder {
         match self {
             Founder::Blind => Manifest::blind(),
             Founder::Browser => Manifest::browser(),
+            Founder::Lanternjaw => Manifest::lanternjaw(),
         }
     }
 }
@@ -434,6 +443,22 @@ const ACTIONS: [Action; 3] = [
     },
 ];
 
+/// The lanternjaw's four actions: the three above, and `lure_effort` (§2.2): its lure is
+/// lit while it is held. Resolved by [`crate::resolve_actions`] for the first three; the
+/// fourth reaches the body through [`crate::Controller::lure`] until P2's contract v3
+/// carries it in the response.
+const LANTERNJAW_ACTIONS: [Action; 4] = [
+    ACTIONS[0],
+    ACTIONS[1],
+    ACTIONS[2],
+    Action {
+        name: "lure_effort",
+        low: 0.0,
+        high: 1.0,
+        transfer: Transfer::Sigmoid,
+    },
+];
+
 /// Fixed action deadband. `abs(turn)` is compared, so it is symmetric.
 pub const ACTION_DEADBAND: f64 = 0.05;
 
@@ -474,6 +499,9 @@ const BROWSER_TUNINGS: Tunings = Tunings {
 /// foods, because a mouth on a corpse or a cap is not on bare ground. Adding a class
 /// would have moved the digest and refused the shipped centre.
 const BLIND_TASTE_RESISTANCES: [(&str, f64); 2] = [("litter", 0.2), ("ground", 0.5)];
+
+/// The lanternjaw's mouth mapping: soft carrion, firm ground.
+const LANTERNJAW_TASTE_RESISTANCES: [(&str, f64); 2] = [("carrion", 0.2), ("ground", 0.5)];
 
 /// The browser's mouth mapping: pliable foliage, stiff wood, firm ground.
 const BROWSER_TASTE_RESISTANCES: [(&str, f64); 3] =
@@ -517,7 +545,17 @@ fn anchors(founder: Founder) -> Anchors {
         wade: p.wade_height_fraction,
         drown: p.drown_height_fraction,
         drown_after: p.drown_after_s,
-        cruise: CRUISE_BODY_LENGTHS_PER_S * p.adult_length_m,
+        cruise: cruise_body_lengths_per_s(founder) * p.adult_length_m,
+    }
+}
+
+/// A lineage's cruise in body lengths per second: [`CRUISE_BODY_LENGTHS_PER_S`] for the
+/// two grazing lineages, 0.6 for the lanternjaw (§2.12), which wins by the lunge and not
+/// the chase — slower than a fleeing grazer.
+pub fn cruise_body_lengths_per_s(founder: Founder) -> f64 {
+    match founder {
+        Founder::Blind | Founder::Browser => CRUISE_BODY_LENGTHS_PER_S,
+        Founder::Lanternjaw => 0.6,
     }
 }
 
@@ -608,6 +646,55 @@ impl Manifest {
             mouth_reach_up_voxels: 1,
             taste_cue: "foliage",
             taste_resistances: &BROWSER_TASTE_RESISTANCES,
+            tunings: BROWSER_TUNINGS,
+            visible_classes: &BROWSER_VISIBLE_CLASSES,
+            sector_centres_deg: &BROWSER_SECTOR_CENTRES_DEG,
+            ray_yaw_offsets_deg: &BROWSER_RAY_YAW_OFFSETS_DEG,
+            ray_pitch_offsets_deg: &BROWSER_RAY_PITCH_OFFSETS_DEG,
+            cone_range_m: 2.0,
+            pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
+            occlusion_rule: OCCLUSION_RULE,
+            birth_readiness_rule: BIRTH_READINESS_RULE,
+        }
+    }
+
+    /// The lanternjaw (interim, P1): the Browser's layout and cone, its own 1.0 × 0.25 ×
+    /// 0.45 m body cruising at 0.6 BL/s, a carrion taste, and the `lure` action. P2's
+    /// contract v3 replaces it.
+    pub fn lanternjaw() -> Manifest {
+        let a = anchors(Founder::Lanternjaw);
+        Manifest {
+            schema_version: SCHEMA_VERSION,
+            founder: Founder::Lanternjaw,
+            modules: &BROWSER_MODULES,
+            actions: &LANTERNJAW_ACTIONS,
+            deadband: ACTION_DEADBAND,
+            controller_period_s: CONTROLLER_PERIOD_S,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            contact_height_fraction: a.contact,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
+            body_reference: 0.035,
+            // `energy_density · (body_max + reserve_cap · body_max)`, the other two's rule.
+            adult_energy_reference: 0.14,
+            adult_reserve_reference: 0.035,
+            structural_reference: 0.035,
+            cruise_m_per_s: a.cruise,
+            yaw_cap_rad_per_s: 2.0,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
+            turn_reference_rad: 0.5,
+            mouth_reach_body_lengths: a.reach,
+            mouth_reach_up_voxels: 1,
+            taste_cue: "carrion",
+            taste_resistances: &LANTERNJAW_TASTE_RESISTANCES,
             tunings: BROWSER_TUNINGS,
             visible_classes: &BROWSER_VISIBLE_CLASSES,
             sector_centres_deg: &BROWSER_SECTOR_CENTRES_DEG,
@@ -840,7 +927,11 @@ mod tests {
     /// 0.05 deadband.
     #[test]
     fn the_actions_are_the_plans_three() {
-        for m in Founder::ALL.into_iter().map(Founder::manifest) {
+        let lj = Manifest::lanternjaw();
+        assert_eq!(lj.actions.len(), 4, "the lanternjaw adds `lure`");
+        assert_eq!(&lj.actions[..3], &ACTIONS[..]);
+        assert_eq!(lj.actions[3].name, "lure_effort");
+        for m in [Founder::Blind, Founder::Browser].into_iter().map(Founder::manifest) {
             assert_eq!(m.actions.len(), 3);
             assert_eq!(m.deadband, 0.05);
             assert_eq!(m.actions[0].name, "forward_effort");

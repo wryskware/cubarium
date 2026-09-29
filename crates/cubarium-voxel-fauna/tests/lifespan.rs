@@ -76,9 +76,14 @@ fn residuals(fauna: &Fauna, flora: &Flora) {
 fn the_shipped_median_is_four_hours() {
     let c = FaunaConfig::default();
     assert_eq!(c.frondgrazer.lifespan_median_s, 4.0 * 3600.0);
-    for f in Founder::ALL {
+    for f in [Founder::Blind, Founder::Browser] {
         assert_eq!(c.founder(f).core.lifespan_median_s, 4.0 * 3600.0);
     }
+    // The lanternjaw lives three times as long (predation §2.12).
+    assert_eq!(
+        c.founder(Founder::Lanternjaw).core.lifespan_median_s,
+        3.0 * 4.0 * 3600.0
+    );
 }
 
 /// A body past its lifespan departs as `Aged`, leaves its whole body as carrion, and both

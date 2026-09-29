@@ -74,6 +74,24 @@ pub trait Controller: Send + Sync {
     /// Drop all private memory. A fresh episode starts from here: hidden state is
     /// episode-private and never carried across one.
     fn reset(&mut self);
+
+    /// The **lure** effort (`[0, 1]`) this controller holds after its last [`drive`]: the
+    /// lanternjaw manifest's fourth action (predation §2.2). An interim seam — P2's
+    /// contract v3 carries it in the response — so every controller that is not a
+    /// lanternjaw's answers 0, and the body only reads it for a carnivore.
+    ///
+    /// [`drive`]: Controller::drive
+    fn lure(&self) -> f64 {
+        0.0
+    }
+
+    /// Whether the tick applies the **prey flee rule** to this controller's body
+    /// (predation §2.7) while a hunter is in the world: the prey heuristics say yes, and
+    /// nothing else does — a trained policy's behaviour changes only through the world,
+    /// and a test's scripted control is left exactly as scripted.
+    fn flees(&self) -> bool {
+        false
+    }
 }
 
 /// The shared action adapter: transfer, clamp, deadband — in that order, identically
@@ -162,6 +180,27 @@ impl FounderControllers {
     pub fn drive(&mut self, id: u64, observation: &[f64]) -> Option<Response> {
         let at = self.entries.binary_search_by_key(&id, |e| e.0).ok()?;
         Some(self.entries[at].1.drive(observation))
+    }
+
+    /// The lure a body's controller holds after its last drive; 0 with no controller.
+    pub fn lure(&self, id: u64) -> f64 {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .map_or(0.0, |at| self.entries[at].1.lure())
+    }
+
+    /// Whether a body's controller opts into the prey flee rule ([`Controller::flees`]).
+    pub fn flees(&self, id: u64) -> bool {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .is_some_and(|at| self.entries[at].1.flees())
+    }
+
+    /// Whether this body has a controller.
+    pub fn has(&self, id: u64) -> bool {
+        self.entries.binary_search_by_key(&id, |e| e.0).is_ok()
     }
 
     /// How many bodies currently have a controller.
@@ -572,6 +611,10 @@ impl Controller for BlindForager {
         self.wander = Wander::default();
         self.escape = 0;
     }
+
+    fn flees(&self) -> bool {
+        true
+    }
 }
 
 /// Observation-only **sighted browser** heuristic: gaze at the cone sector with the most
@@ -680,6 +723,191 @@ impl Controller for BrowserForager {
         self.wander_ticks = 0;
         self.escape = 0;
     }
+
+    fn flees(&self) -> bool {
+        true
+    }
+}
+
+// The lanternjaw's ambush teacher (P1, predation §2.12's "ambush teacher"). Heuristic
+// internals: nothing in the world reads them.
+
+/// A centre-sector body this close (`body_proximity`, `1 − d / 2 m`) is inside or at the
+/// edge of the strike capsule of an adult (jaw 0.5 m + reach 0.6 m ahead of its centre).
+const STRIKE_PROXIMITY: f64 = 0.45;
+/// Forward effort while stalking a body: 0.07 × 0.6 m/s = 0.042 m/s, under 0.1 BL/s for
+/// every lanternjaw down to a hatchling, so a stalker stays still to its prey's eyes.
+const STALK: f64 = 0.07;
+/// A crown this near ahead (`foliage_proximity`, within about 0.8 m) is a waiting spot.
+const NEAR_CROWN: f64 = 0.6;
+/// Samples it waits at a spot with nothing in sight before it leaves: 60 s.
+const WAIT_SAMPLES: u32 = 240;
+/// Samples it walks off after a fruitless wait, not turning to foliage: 5 s.
+const LEAVE_SAMPLES: u32 = 20;
+/// A reserve this full (`Self.reserve`) does not hunt: the satiated rest is near.
+const SATED: f64 = 0.85;
+
+/// What the ambush teacher is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ambush {
+    /// Walking to a crown the grazers feed on.
+    Seek,
+    /// Stopped beside it with the lure lit, or stalking a body it sees.
+    Wait,
+    /// Leaving a spot that gave nothing.
+    Leave,
+    /// Eating, or full.
+    Idle,
+}
+
+/// **The lanternjaw's ambush teacher** (predation §2.12, the brief's item 9), on the
+/// interim lanternjaw manifest (the Browser's layout) and nothing else: walk to a crown —
+/// where grazers feed and, at night, sleep — and wait beside it with the lure lit; turn
+/// to a body it sees and creep toward it slower than 0.1 BL/s, so it stays a still shape;
+/// hold `feed` while a body is close ahead, which the body turns into a strike when a
+/// prey is in the capsule and into a mouthful of carrion when one is under the mouth; eat
+/// the carcass its kill left; stand down when full (the tick's satiated rest takes over
+/// at 0.9 of its cap). A fruitless wait of a minute sends it on to another crown.
+#[derive(Clone, Debug)]
+pub struct LanternjawAmbush {
+    mode: Ambush,
+    wait_left: u32,
+    leave_left: u32,
+    wander_bias: f64,
+    wander_ticks: u32,
+    escape: u32,
+    lure: f64,
+    contact: crate::manifest::Module,
+    taste: crate::manifest::Module,
+    cone: crate::manifest::Module,
+}
+
+impl LanternjawAmbush {
+    /// The lanternjaw's heuristic, pre-indexed against its manifest.
+    pub fn new() -> LanternjawAmbush {
+        let manifest = Founder::Lanternjaw.manifest();
+        LanternjawAmbush {
+            mode: Ambush::Seek,
+            wait_left: 0,
+            leave_left: 0,
+            wander_bias: 1.0,
+            wander_ticks: 0,
+            escape: 0,
+            lure: 0.0,
+            contact: module_slot(&manifest, "Contact(4)"),
+            taste: module_slot(&manifest, "Taste(1)"),
+            cone: module_slot(&manifest, "Cone(3, foliage/body)"),
+        }
+    }
+
+    fn act(&mut self, mode: Ambush, forward: f64, turn: f64, feed: f64) -> Response {
+        self.mode = mode;
+        self.lure = if mode == Ambush::Wait { 1.0 } else { 0.0 };
+        Response::Bounded(Actions {
+            forward,
+            turn,
+            feed,
+        })
+    }
+}
+
+impl Default for LanternjawAmbush {
+    fn default() -> Self {
+        LanternjawAmbush::new()
+    }
+}
+
+impl Controller for LanternjawAmbush {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        let reserve = o[1];
+        let front = o[self.contact.offset];
+        let (taste_cue, taste_valid) = (o[self.taste.offset], o[self.taste.offset + 2]);
+        let base = self.cone.offset;
+        let body = [o[base + 4], o[base + 10], o[base + 16]];
+        let body_near = o[base + 11];
+        let foliage = [o[base + 2], o[base + 8], o[base + 14]];
+        let foliage_near = o[base + 9];
+
+        // Carrion at the mouth: eat it until full.
+        if taste_valid > 0.5 && taste_cue > 0.0 && reserve < SATED {
+            return self.act(Ambush::Idle, 0.0, 0.0, 1.0);
+        }
+        if reserve >= SATED {
+            return self.act(Ambush::Idle, 0.0, 0.0, 0.0);
+        }
+        // A body in sight: face it, and creep up on one ahead with feed held.
+        if body.iter().any(|&b| b > 0.0) {
+            self.wait_left = WAIT_SAMPLES;
+            if body[1] > 0.0 && body[1] >= body[0] && body[1] >= body[2] {
+                let forward = if body_near >= STRIKE_PROXIMITY || front > 0.5 {
+                    0.0
+                } else {
+                    STALK
+                };
+                return self.act(Ambush::Wait, forward, 0.0, 1.0);
+            }
+            let turn = if body[0] >= body[2] { -0.4 } else { 0.4 };
+            return self.act(Ambush::Wait, 0.0, turn, 1.0);
+        }
+        // The browser teacher's escape from a refused motor or a drop ahead.
+        let (clear, proximity) = (o[base + 6], o[base + 7]);
+        let drop = clear > FLAT_CLEAR + HALF_RAY
+            || (clear >= FLAT_CLEAR - HALF_RAY && proximity < DROP_PROXIMITY);
+        let away = self.wander_bias;
+        if let Some((forward, turn)) = escape(&mut self.escape, o[7] < MOTOR_REFUSED || drop, away)
+        {
+            return self.act(Ambush::Seek, forward, turn, 0.0);
+        }
+        match self.mode {
+            Ambush::Wait if self.wait_left > 0 => {
+                self.wait_left -= 1;
+                if self.wait_left == 0 {
+                    self.leave_left = LEAVE_SAMPLES;
+                    self.wander_bias = -self.wander_bias;
+                    return self.act(Ambush::Leave, 1.0, self.wander_bias, 0.0);
+                }
+                return self.act(Ambush::Wait, 0.0, 0.0, 0.0);
+            }
+            Ambush::Leave if self.leave_left > 0 => {
+                self.leave_left -= 1;
+                let forward = if front > 0.5 { 0.1 } else { 1.0 };
+                return self.act(Ambush::Leave, forward, 0.2 * self.wander_bias, 0.0);
+            }
+            _ => {}
+        }
+        // Seek a crown; stop beside one and wait there.
+        if foliage[1] > 0.02 && foliage_near >= NEAR_CROWN {
+            self.wait_left = WAIT_SAMPLES;
+            return self.act(Ambush::Wait, 0.0, 0.0, 0.0);
+        }
+        let forward = if front > 0.5 { 0.1 } else { 1.0 };
+        let turn = if foliage.iter().any(|&f| f > 0.02) {
+            self.wander_ticks = 0;
+            if foliage[0] >= foliage[1] && foliage[0] >= foliage[2] {
+                -0.8
+            } else if foliage[2] > foliage[1] {
+                0.8
+            } else {
+                0.0
+            }
+        } else {
+            self.wander_ticks += 1;
+            if self.wander_ticks >= 8 {
+                self.wander_ticks = 0;
+                self.wander_bias = -self.wander_bias;
+            }
+            self.wander_bias * 0.4
+        };
+        self.act(Ambush::Seek, forward, turn, 0.0)
+    }
+
+    fn reset(&mut self) {
+        *self = LanternjawAmbush::new();
+    }
+
+    fn lure(&self) -> f64 {
+        self.lure
+    }
 }
 
 #[cfg(test)]
@@ -700,6 +928,7 @@ mod tests {
                 let mut c: Box<dyn Controller> = match founder {
                     Founder::Blind => Box::new(BlindForager::new()),
                     Founder::Browser => Box::new(BrowserForager::new()),
+                    Founder::Lanternjaw => Box::new(LanternjawAmbush::new()),
                 };
                 c.reset();
                 let mut o = quiet(&manifest);

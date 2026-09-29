@@ -66,6 +66,7 @@ mod controller;
 mod encounter;
 mod manifest;
 mod pose;
+mod predation;
 mod senses;
 mod snapshot;
 mod step;
@@ -80,12 +81,18 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    Body, Face, FounderPhysiology, StepLimits, birth_readiness, effective_config, has_headroom,
-    step_voxels, wall_ascent, wall_descent,
+    Body, Counter, Face, FounderPhysiology, Hunter, StepLimits, birth_readiness,
+    effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
-    FounderFactories, Response, Scripted, resolve_actions,
+    FounderFactories, LanternjawAmbush, Response, Scripted, resolve_actions,
+};
+pub use predation::{
+    BodyKind, Dormancy, FOOTFALL_RADIUS_M, FOOTFALL_TREMOR_MIN, HATCH_SUPPRESS_M, Hit, Rest,
+    STILL_AFTER_S, STILL_SPEED_BL_PER_S, Strike, StrikePhase, TREMOR_RADIUS_M, apply_hit,
+    dodge_chance, dodges, egg_hatches, is_prey_of, kind_of, moved_recently, still_after_ticks,
+    tremor_of,
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use cubarium_voxel_flora::Reach;
@@ -98,7 +105,7 @@ pub use encounter::{
 pub use manifest::{
     ACTION_DEADBAND, Action, BIRTH_READINESS_RULE, BROWSER_RAY_PITCH_OFFSETS_DEG,
     BROWSER_RAY_YAW_OFFSETS_DEG, BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES,
-    CRUISE_BODY_LENGTHS_PER_S, Founder, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
+    CRUISE_BODY_LENGTHS_PER_S, Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
     Transfer, Tunings, gru32_parameter_count,
 };
 pub use pose::Pose;
@@ -644,7 +651,45 @@ pub struct Animal {
     pub state: State,
     /// On a wall, and how long under water (package mobility).
     pub mobility: Mobility,
+    /// **The wound stock** in `[0, 1)` (`design/predation-and-flight-2026-09-28.md`
+    /// §2.4): each hit adds to it, at 1 the body dies [`Departure::Killed`]. It slows the
+    /// body (speed cap × `1 − 0.5 · wound`) and heals at [`WOUND_HEAL_PER_S`], paying
+    /// [`HEAL_COST`] out of the reserve; a starving body does not heal.
+    pub wound: f64,
+    /// A strike in progress: a carnivore only (§2.3).
+    pub strike: Option<Strike>,
+    /// Why it rests: `Some` exactly while `state` is [`State::Asleep`] (§2.8).
+    pub rest: Option<Rest>,
+    /// Ticks since it last moved faster than 0.1 of its own lengths a second (§2.2): a
+    /// threat is still, and reads as other beyond 0.5 m, once this is past 2 s.
+    pub still_ticks: u64,
+    /// Its ground speed on the last tick, metres a second: what tremor reads (§2.2).
+    pub speed_m_s: f64,
+    /// Ticks it is kept awake after a hit woke it ([`ALERT_S`]).
+    pub alert_ticks: u32,
 }
+
+/// The rate a wound heals, wound units a second (§2.4: 0.5 per 30 min).
+pub const WOUND_HEAL_PER_S: f64 = 0.5 / 1800.0;
+
+/// **Organic matter a unit of wound costs to heal, per unit of body** (§2.4 names
+/// `heal_cost` and pins no value). 1.0: healing at the note's rate then burns
+/// `2.8e-4 × body` a second, about a quarter again a grazer's or a shredder's basal upkeep
+/// — a wound is dear but not ruinous — and an adult grazer's three-hit wound costs it a
+/// twentieth of its own body to mend.
+pub const HEAL_COST: f64 = 1.0;
+
+/// **What a dormant egg respires, per unit of its own organic matter per second** (§2.13:
+/// "a tiny upkeep"; no value pinned). 5e-6 /s: an e-fold of 55 h, a tenth of a resting
+/// lanternjaw's torpor rate per unit, so over its 12 h median viability an egg spends a
+/// fifth of itself; an egg that falls below its lineage's `body_min` can build no
+/// hatchling and dies to the litter.
+pub const EGG_UPKEEP_PER_S: f64 = 5.0e-6;
+
+/// How long a hit keeps its prey awake, seconds: long enough that a struck sleeper does
+/// not lie straight back down (the brief's "a hit wakes the prey"; the note pins no
+/// duration).
+pub const ALERT_S: f64 = 60.0;
 
 impl Animal {
     /// The feet's height over the standing surface of `site`, metres: zero on the ground,
@@ -751,6 +796,11 @@ pub struct Clutch {
     /// The lineage that laid it, which is the lineage its hatchlings carry and the
     /// factory their controllers come from.
     pub lineage: Founder,
+    /// `Some` for a **dormant** egg (§2.13): a lanternjaw's clutch is laid or buried as
+    /// one `Clutch` per egg, each with its own footfall threshold and viability; it
+    /// hatches by [`egg_hatches`], not by incubation, pays [`EGG_UPKEEP_PER_S`], and dies
+    /// to the litter when its viability runs out.
+    pub dormancy: Option<Dormancy>,
 }
 
 impl Clutch {
@@ -805,6 +855,10 @@ pub struct Reproduction {
     pub egg_organic: f64,
     /// Seconds a clutch incubates before it hatches.
     pub incubation_s: f64,
+    /// **Dormant eggs** (§2.13): each egg is buried as its own clutch on the face the
+    /// parent stands on — soil or litter, no litter required — and waits for its
+    /// hatching trigger instead of an incubation.
+    pub dormant: bool,
 }
 
 impl Reproduction {
@@ -834,6 +888,7 @@ impl Reproduction {
         clutch_size: 0,
         egg_organic: 0.0,
         incubation_s: 0.0,
+        dormant: false,
     };
 
     /// The littershredder's egg placeholders.
@@ -861,6 +916,26 @@ impl Reproduction {
         clutch_size: 1,
         egg_organic: 0.004,
         incubation_s: 300.0,
+        dormant: false,
+    };
+
+    /// The lanternjaw's **dormant egg bank** (§2.13): a clutch of 3 buried eggs laid
+    /// after a sustained surplus, each `egg_organic` 0.005 — a `body_min` hatchling
+    /// (0.0034) and a small reserve (0.0016), "each egg's organic matter plus a small
+    /// reserve". The floor 0.0125 puts the surplus at 0.0275, 0.79 of a full reserve: a
+    /// lanternjaw lays after a real meal, not on an ordinary one. Hold and interval are
+    /// the other egg-layer's.
+    pub const DORMANT_EGGS_PLACEHOLDER: Reproduction = Reproduction {
+        mode: BirthMode::Eggs,
+        surplus_floor: 0.0125,
+        surplus_hold_s: 900.0,
+        gestation_s: 0.0,
+        gestation_loss_fraction: 0.25,
+        birth_interval_s: 1800.0,
+        clutch_size: 3,
+        egg_organic: 0.005,
+        incubation_s: 0.0,
+        dormant: true,
     };
 
     /// What one offspring package costs the parent's reserve: a gestation's `birth_cost`
@@ -956,6 +1031,9 @@ pub struct FounderState {
     /// next sampling. The `Self` channels are built from this; it never carries a
     /// prediction of success.
     pub feedback: IntervalFeedback,
+    /// The held **lure** effort, a carnivore's fourth action (predation §2.2): lit while
+    /// above zero, costing its `lure_power`. Zero for every other lineage.
+    pub lure: f64,
 }
 
 /// What one controller interval actually did, from the body's own ledger events and
@@ -1248,6 +1326,7 @@ impl Default for FaunaConfig {
             founders: [
                 FounderPhysiology::frozen(Founder::Blind),
                 FounderPhysiology::frozen(Founder::Browser),
+                FounderPhysiology::frozen(Founder::Lanternjaw),
             ],
         }
     }
@@ -1297,6 +1376,8 @@ impl FaunaConfig {
             for (name, value) in [
                 ("sleep_upkeep", phys.sleep_upkeep),
                 ("wake_hunger", phys.wake_hunger),
+                ("armour", phys.armour),
+                ("agility", phys.agility),
             ] {
                 if !value.is_finite() || !(0.0..=1.0).contains(&value) {
                     return Err(format!(
@@ -1363,14 +1444,26 @@ pub enum Departure {
     /// ([`step`]'s step 1). Booked `removed_*_out` and **not** counted in
     /// [`FaunaLedger::deaths`].
     Removed,
+    /// Its wound reached 1 (`design/predation-and-flight-2026-09-28.md` §2.5): a corpse,
+    /// with a carcass record, killed by a body of lineage `by`.
+    Killed { by: Founder },
 }
 
 impl Departure {
-    pub const ALL: [Departure; 4] = [
+    pub const ALL: [Departure; 4 + Founder::COUNT] = [
         Departure::Starved,
         Departure::Drowned,
         Departure::Aged,
         Departure::Removed,
+        Departure::Killed {
+            by: Founder::Blind,
+        },
+        Departure::Killed {
+            by: Founder::Browser,
+        },
+        Departure::Killed {
+            by: Founder::Lanternjaw,
+        },
     ];
     pub const COUNT: usize = Departure::ALL.len();
 
@@ -1381,6 +1474,7 @@ impl Departure {
             Departure::Drowned => 1,
             Departure::Aged => 2,
             Departure::Removed => 3,
+            Departure::Killed { by } => 4 + by.index(),
         }
     }
 
@@ -1395,6 +1489,11 @@ impl Departure {
             Departure::Drowned => "drowned",
             Departure::Aged => "aged",
             Departure::Removed => "removed",
+            Departure::Killed { by } => match by {
+                Founder::Blind => "killed_by_littershredder",
+                Founder::Browser => "killed_by_frondgrazer",
+                Founder::Lanternjaw => "killed_by_lanternjaw",
+            },
         }
     }
 }
@@ -1497,6 +1596,9 @@ pub enum Diet {
     Vascular,
     /// Saprotroph tissue only: the shredder's glowcap cap.
     Fungal,
+    /// No stand's tissue at all: a carnivore's mouth, which takes carrion off the ground
+    /// and nothing that grows (`design/predation-and-flight-2026-09-28.md` §2.3).
+    Carrion,
     /// No permission test at all. A diagnostic and observer scan of what physically
     /// stands in a band, which is a geometry question and not a diet one.
     Any,
@@ -1508,6 +1610,7 @@ impl Diet {
         match self {
             Diet::Vascular => matches!(trophic, cubarium_voxel_flora::Trophic::Photo),
             Diet::Fungal => matches!(trophic, cubarium_voxel_flora::Trophic::Saprotroph),
+            Diet::Carrion => false,
             Diet::Any => true,
         }
     }
@@ -1517,6 +1620,7 @@ impl Diet {
         match founder {
             Founder::Blind => Diet::Fungal,
             Founder::Browser => Diet::Vascular,
+            Founder::Lanternjaw => Diet::Carrion,
         }
     }
 }
@@ -1673,6 +1777,28 @@ pub struct FaunaLedger {
     pub founder_ticks_by_founder: [u64; Founder::COUNT],
     pub ledges_up_by_founder: [u64; Founder::COUNT],
     pub ledges_down_by_founder: [u64; Founder::COUNT],
+    /// Predation (`design/predation-and-flight-2026-09-28.md` §2.3), by the **striker's**
+    /// lineage: strikes begun, and contacts resolved as a hit or a dodge.
+    pub strikes_by_founder: [u64; Founder::COUNT],
+    pub hits_by_founder: [u64; Founder::COUNT],
+    pub dodges_by_founder: [u64; Founder::COUNT],
+    /// Wound units healed, by the healed body's lineage (§2.4).
+    pub healed_by_founder: [f64; Founder::COUNT],
+    /// Carrion taken by each lineage's mouths, gross organic matter: who ate the carcasses.
+    pub eaten_carrion_by_founder: [f64; Founder::COUNT],
+    /// The `respired_out` share that was a **hunt**: strikes and a lit lure.
+    pub respired_hunt_out: f64,
+    /// The `respired_out` share that was **healing** a wound.
+    pub respired_heal_out: f64,
+    /// Eggs laid and hatched, by lineage.
+    pub eggs_laid_by_founder: [u64; Founder::COUNT],
+    pub eggs_hatched_by_founder: [u64; Founder::COUNT],
+    /// Dormant eggs whose viability ran out (or whose upkeep took them below a hatchling),
+    /// gone to the litter of their face (§2.13).
+    pub eggs_died: u64,
+    /// Eggs a [`Command::BuryClutch`] put into the world (a founding bank or the viewer's
+    /// key), booked `introduced_*_in`.
+    pub eggs_buried: u64,
 }
 
 impl FaunaLedger {
@@ -1789,6 +1915,41 @@ impl<'a> FaunaView<'a> {
     pub fn clutches_at(&self, site: Site) -> impl Iterator<Item = &'a Clutch> {
         self.clutches.iter().filter(move |c| c.site == site)
     }
+
+    /// **Tremor** at `observer` (§2.2): the sum over the other bodies within 1.5 m of
+    /// `mass × speed / distance²`, split into its left and right halves by the observer's
+    /// heading — `[left, right]`. A still body makes none. Zero for an observer that is
+    /// not alive.
+    pub fn tremor(&self, view: &VoxelView<'_>, observer: u64) -> [f64; 2] {
+        let Some(o) = self.animal(observer) else {
+            return [0.0, 0.0];
+        };
+        let ring = f64::from(view.config.width) * view.config.voxel_m;
+        let (fx, fz) = o.pose.forward();
+        let (rx, rz) = (fz, -fx);
+        let mut out = [0.0, 0.0];
+        for a in self.animals {
+            if a.id == observer || !(a.speed_m_s > 0.0) {
+                continue;
+            }
+            let (dx, dz) = pose::wrapped_delta(o.pose.x, o.pose.z, a.pose.x, a.pose.z, ring);
+            let d = (dx * dx + dz * dz).sqrt();
+            if d > TREMOR_RADIUS_M {
+                continue;
+            }
+            let t = tremor_of(a, d);
+            let side = dx * rx + dz * rz;
+            if side > 0.0 {
+                out[1] += t;
+            } else if side < 0.0 {
+                out[0] += t;
+            } else {
+                out[0] += 0.5 * t;
+                out[1] += 0.5 * t;
+            }
+        }
+        out
+    }
 }
 
 /// A frontend, a harness or a test changes this layer only through these.
@@ -1844,6 +2005,16 @@ pub enum Command {
     /// material as `removed_*_out`. No corpse: this is a frontend's undo, not a death.
     /// Refused if there is none.
     Remove { x: i64, z: u32 },
+    /// **Bury `eggs` dormant eggs** of `lineage` on the support face `site`
+    /// (`design/predation-and-flight-2026-09-28.md` §2.9, §2.13): a world's founding bank
+    /// and the viewer's key. Each egg is its own clutch, its lineage's `egg_organic` with
+    /// its tissue mineral and energy, booked `introduced_*_in`. Refused off a support face,
+    /// for zero eggs, and for a lineage whose eggs are not dormant.
+    BuryClutch {
+        site: Site,
+        lineage: Founder,
+        eggs: u32,
+    },
 }
 
 /// How full a founder body arrives, as fractions of what its physiology lets it hold.
@@ -1948,6 +2119,10 @@ pub struct Fauna {
     /// silently swapped, both of which `always-fresh-never-migrate` forbids. This is
     /// the identity a loader compares against.
     policy_digest: [u64; Founder::COUNT],
+    /// The world's `life_daylight` on the last tick stepped, so a tick can tell **dusk**
+    /// — daylight falling below [`Activity::DAY_LINE`] — for the egg bank's trigger
+    /// (§2.13). `None` before the first tick.
+    last_daylight: Option<f64>,
 }
 
 impl Fauna {
@@ -1976,6 +2151,7 @@ impl Fauna {
             factories: FounderFactories::default(),
             policy_driven: [false; Founder::COUNT],
             policy_digest: [0; Founder::COUNT],
+            last_daylight: None,
         })
     }
 
@@ -2194,6 +2370,11 @@ impl Fauna {
                     heading_rad,
                 )
             }
+            Command::BuryClutch {
+                site,
+                lineage,
+                eggs,
+            } => self.bury_clutch(world, site, lineage, eggs),
             Command::Remove { x, z } => {
                 let view = world.view();
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
@@ -2218,6 +2399,46 @@ impl Fauna {
                 self.animals.len() != before
             }
         }
+    }
+
+    /// [`Command::BuryClutch`]'s placement: `eggs` dormant eggs, one clutch each.
+    fn bury_clutch(&mut self, world: &World, site: Site, lineage: Founder, eggs: u32) -> bool {
+        let view = world.view();
+        let c = view.config;
+        if eggs == 0
+            || site.x >= c.width
+            || site.z >= c.depth
+            || site.y + 1 >= c.height
+            || !view.is_support(i64::from(site.x), site.y, site.z)
+        {
+            return false;
+        }
+        let sc = self.config.founder(lineage).core;
+        let rule = sc.reproduction;
+        if !(rule.mode == BirthMode::Eggs && rule.dormant && rule.egg_organic > 0.0) {
+            return false;
+        }
+        for _ in 0..eggs {
+            let organic = rule.egg_organic;
+            let mineral = sc.n_tissue * organic;
+            let energy = sc.energy_density * organic;
+            let serial = self.ledger.eggs_laid + self.ledger.eggs_buried;
+            self.clutches.push(Clutch {
+                site,
+                count: 1,
+                organic,
+                mineral,
+                energy,
+                laid_tick: self.tick,
+                lineage,
+                dormancy: Some(Dormancy::draw(c.seed, serial, self.tick)),
+            });
+            self.ledger.eggs_buried += 1;
+            self.ledger.introduced_organic_in += organic;
+            self.ledger.introduced_mineral_in += mineral;
+            self.ledger.introduced_energy_in += energy;
+        }
+        true
     }
 
     /// One body placed on a column's highest support face: shared by [`Command::Introduce`]
@@ -2301,6 +2522,13 @@ impl Fauna {
             gut: Taken::default(),
             state: State::Resting,
             mobility: crate::Mobility::default(),
+            wound: 0.0,
+            strike: None,
+            rest: None,
+            // It arrives still: it has not moved.
+            still_ticks: still_after_ticks(),
+            speed_m_s: 0.0,
+            alert_ticks: 0,
         };
         self.ledger.births += 1;
         self.ledger.introduced += 1;
@@ -2355,9 +2583,9 @@ impl Fauna {
     /// refuses it; there is nothing to lose and nothing is booked. A triplet it refuses
     /// for any *other* reason would otherwise strand material on a dead animal, so it is
     /// booked out as `removed_*` instead — this layer never keeps an inert remainder.
-    fn book_deposit(&mut self, flora: &mut Flora, site: Site, kind: DepositKind, d: Taken) {
+    fn book_deposit(&mut self, flora: &mut Flora, site: Site, kind: DepositKind, d: Taken) -> bool {
         if d.organic <= 0.0 && d.mineral <= 0.0 && d.energy <= 0.0 {
-            return;
+            return false;
         }
         let deposit = Deposit {
             kind,
@@ -2369,10 +2597,12 @@ impl Fauna {
             self.ledger.deposited_organic_out += deposit.organic;
             self.ledger.deposited_mineral_out += deposit.mineral;
             self.ledger.deposited_energy_out += deposit.energy;
+            true
         } else {
             self.ledger.removed_organic_out += deposit.organic;
             self.ledger.removed_mineral_out += deposit.mineral;
             self.ledger.removed_energy_out += deposit.energy;
+            false
         }
     }
 
@@ -2460,9 +2690,11 @@ mod starting_stores_tests {
                 .expect("hungry is valid");
             assert_eq!(body, 0.5 * sc.body_max);
             assert_eq!(reserve, 0.0, "hungry means no reserve at all");
-            // The headroom that buys: a whole body_max of organic matter to eat into.
+            // The headroom that buys: a whole body_max of organic matter to eat into (at
+            // the grazing lineages' reserve cap of 0.5; the lanternjaw's is 1.0).
             let full = sc.body_max + sc.reserve_of(sc.body_max);
             assert!(
+                founder == Founder::Lanternjaw ||
                 ((full - body) - sc.body_max).abs() < 1e-15,
                 "{founder:?}: headroom {} is not one body_max",
                 full - body

@@ -72,6 +72,19 @@ impl Pose {
     }
 }
 
+/// `(to − from)` in metres on the ring: `x` the short way round a ring `ring_m` long, `z`
+/// as it is.
+pub(crate) fn wrapped_delta(from_x: f64, from_z: f64, to_x: f64, to_z: f64, ring_m: f64) -> (f64, f64) {
+    let mut dx = to_x - from_x;
+    if ring_m > 0.0 && ring_m.is_finite() {
+        dx = dx.rem_euclid(ring_m);
+        if dx > 0.5 * ring_m {
+            dx -= ring_m;
+        }
+    }
+    (dx, to_z - from_z)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

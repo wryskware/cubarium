@@ -67,6 +67,7 @@ use cubarium_voxel_flora::{DepositKind, Flora, Site, Taken};
 use crate::body;
 use crate::controller::Actions;
 use crate::manifest::Founder;
+use crate::predation::{Hit, Rest, Strike, StrikePhase};
 use crate::{Animal, Departure, Fauna, Food, IntervalFeedback, SpeciesConfig, State, steppable};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that draws.
@@ -92,16 +93,20 @@ enum Respiration {
     /// An interrupted gestation: the loss fraction of an escrow whose parent could not
     /// pay the next instalment, or died carrying it.
     Gestation,
+    /// A hunt: a strike's cost and a lit lure (predation §2.3, §2.2).
+    Hunt,
+    /// Healing a wound (predation §2.4).
+    Heal,
 }
 
 /// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
 /// draw rather than seeded from stored state. The flora layer's `Rng`, field for field, so
 /// the two layers draw the same way; it is small enough that sharing it through a public
 /// API would be a worse dependency than writing it twice.
-struct Rng(u64);
+pub(crate) struct Rng(u64);
 
 impl Rng {
-    fn keyed(domain: u64, a: u64, b: u64, c: u64) -> Rng {
+    pub(crate) fn keyed(domain: u64, a: u64, b: u64, c: u64) -> Rng {
         let mut state = 0u64;
         for part in [domain, a, b, c] {
             state = mix(state ^ part);
@@ -109,13 +114,18 @@ impl Rng {
         Rng(state)
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(crate) fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         mix(self.0)
     }
 
     fn below(&mut self, n: usize) -> usize {
         (self.next_u64() % n as u64) as usize
+    }
+
+    /// A uniform draw on `[0, 1)`.
+    pub(crate) fn unit(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
     }
 }
 
@@ -168,18 +178,26 @@ fn tick_inner(
     let tick = fauna.tick;
     let view = world.view();
     let seed = view.config.seed;
+    // Dusk (the egg bank's hour, predation §2.13): the tick the world's daylight first
+    // falls below the day line, with the clock on.
+    let clock_on = view.config.day.mode != cubarium_voxel::weather::DayMode::Off;
+    let daylight = world.life_daylight();
+    let dusk = clock_on
+        && fauna
+            .last_daylight
+            .is_some_and(|before| before >= crate::Activity::DAY_LINE)
+        && daylight < crate::Activity::DAY_LINE;
+    fauna.last_daylight = Some(daylight);
 
     cubarium_voxel::voxel_phase!(FaunaStep, {
         cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
         cubarium_voxel::voxel_phase!(FaunaMaintenance, {
             // WX4: who is asleep this tick is settled before anything is paid, so the
             // upkeep, the controller stage and the act all read the same answer.
-            circadian(
-                fauna,
-                view.config.day.mode != cubarium_voxel::weather::DayMode::Off,
-                world.life_daylight(),
-            );
+            circadian(fauna, clock_on, daylight);
             maintenance(fauna);
+            heal(fauna);
+            egg_upkeep(fauna);
             grow(fauna);
             void_guts(fauna, flora);
         });
@@ -198,8 +216,16 @@ fn tick_inner(
             controllers(fauna, &view, flora, senses);
             sense(fauna, &view, flora, seed, tick, threads)
         });
-        cubarium_voxel::voxel_phase!(FaunaAct, { act(fauna, &view, flora, &plans, seed, tick) });
-        cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora) });
+        cubarium_voxel::voxel_phase!(FaunaAct, {
+            // Strike outcomes are events: the act only reads other bodies, and the hits
+            // are applied here, serially, in the order the strikers acted.
+            let mut hits: Vec<Hit> = Vec::new();
+            act(fauna, &view, flora, &plans, seed, tick, &mut hits);
+            for hit in hits {
+                apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
+            }
+        });
+        cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora, dusk) });
         cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
         #[cfg(feature = "profile")]
         cubarium_voxel::profile::add(
@@ -289,6 +315,8 @@ fn book_respired(fauna: &mut Fauna, paid: f64, kind: Respiration) {
         Respiration::Motor => fauna.ledger.respired_motor_out += paid,
         Respiration::Digestion => fauna.ledger.respired_digestion_out += paid,
         Respiration::Gestation => fauna.ledger.respired_gestation_out += paid,
+        Respiration::Hunt => fauna.ledger.respired_hunt_out += paid,
+        Respiration::Heal => fauna.ledger.respired_heal_out += paid,
     }
 }
 
@@ -318,6 +346,12 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
 /// there is nothing else to time: the phase's own change, or a rule, wakes it at once.
 /// A body that falls asleep drops its held actions, so waking does not replay a stale
 /// stride; heuristic bodies carry no lineage and never sleep.
+///
+/// **A rest with a reason** (predation §2.8): the same state carries WX4's [`Rest::Sleep`]
+/// and a carnivore's [`Rest::Satiated`] — down in any phase once its reserve is at
+/// `rest_at` of its cap, up again below `wake_at` (or by the hunger rule), at its
+/// `torpor_upkeep`. A body a hit woke stays up for [`crate::ALERT_S`]; a body mid-strike
+/// does not lie down, and a recovery is dropped by a rest that outlasts it.
 fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
     for i in 0..fauna.animals.len() {
         let Some(founder) = fauna.animals[i].founder else {
@@ -325,18 +359,51 @@ fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
         };
         let phys = fauna.config.founder(founder);
         let a = &fauna.animals[i];
-        let asleep = !phys.active.awake(clock_on, daylight)
-            && hunger(a, &phys.core) < phys.wake_hunger
+        let hungry = hunger(a, &phys.core);
+        let free = a.alert_ticks == 0
             && a.mobility.climb.is_none()
-            && a.mobility.submerged_ticks == 0;
-        let a = &mut fauna.animals[i];
-        if asleep {
-            if a.state != State::Asleep {
-                a.state = State::Asleep;
-                a.founder_state.held = Actions::REST;
+            && a.mobility.submerged_ticks == 0
+            && !a
+                .strike
+                .is_some_and(|s| s.phase != StrikePhase::Recovery);
+        let satiated = phys.hunter.is_some_and(|h| {
+            let cap = phys.core.reserve_of(a.body);
+            let fraction = if cap > 0.0 { a.reserve / cap } else { 0.0 };
+            if a.rest == Some(Rest::Satiated) {
+                fraction >= h.wake_at && hungry < phys.wake_hunger
+            } else {
+                fraction >= h.rest_at
             }
-        } else if a.state == State::Asleep {
-            a.state = State::Resting;
+        });
+        let rest = if !free {
+            None
+        } else if satiated {
+            Some(Rest::Satiated)
+        } else if !phys.active.awake(clock_on, daylight) && hungry < phys.wake_hunger {
+            Some(Rest::Sleep)
+        } else {
+            None
+        };
+        let a = &mut fauna.animals[i];
+        a.alert_ticks = a.alert_ticks.saturating_sub(1);
+        match rest {
+            Some(reason) => {
+                if a.state != State::Asleep {
+                    a.state = State::Asleep;
+                    a.founder_state.held = Actions::REST;
+                    a.founder_state.lure = 0.0;
+                }
+                a.rest = Some(reason);
+                if a.strike.is_some_and(|s| s.phase == StrikePhase::Recovery) {
+                    a.strike = None;
+                }
+            }
+            None => {
+                if a.state == State::Asleep {
+                    a.state = State::Resting;
+                }
+                a.rest = None;
+            }
         }
     }
 }
@@ -346,10 +413,15 @@ fn maintenance(fauna: &mut Fauna) {
         // A founder body pays upkeep under its own physiology's rate.
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let is_founder = fauna.animals[i].founder.is_some();
-        // Asleep it pays the lineage's fraction of it (WX4).
+        // Asleep it pays the lineage's fraction of it (WX4): its sleep factor, or a
+        // carnivore's torpor in a satiated rest (predation §2.8).
         let rest = match fauna.animals[i].founder {
             Some(founder) if fauna.animals[i].state == State::Asleep => {
-                fauna.config.founder(founder).sleep_upkeep
+                let phys = fauna.config.founder(founder);
+                match (fauna.animals[i].rest, phys.hunter) {
+                    (Some(Rest::Satiated), Some(h)) => h.torpor_upkeep,
+                    _ => phys.sleep_upkeep,
+                }
             }
             _ => 1.0,
         };
@@ -360,6 +432,53 @@ fn maintenance(fauna: &mut Fauna) {
         if is_founder && from_body > 0.0 {
             fauna.animals[i].founder_state.feedback.structural_loss += from_body;
         }
+    }
+}
+
+/// Step 2: **healing** (predation §2.4). A wound heals at [`crate::WOUND_HEAL_PER_S`],
+/// each unit costing [`crate::HEAL_COST`] × its body out of the **reserve** alone: a body
+/// whose reserve cannot pay heals only as far as it can, and a starving one not at all.
+fn heal(fauna: &mut Fauna) {
+    for i in 0..fauna.animals.len() {
+        let a = &fauna.animals[i];
+        if !(a.wound > 0.0) || !(a.reserve > 0.0) || !(a.body > 0.0) {
+            continue;
+        }
+        let unit = crate::HEAL_COST * a.body;
+        let mut healed = a.wound.min(crate::WOUND_HEAL_PER_S * DT);
+        if unit > 0.0 && healed * unit > a.reserve {
+            healed = a.reserve / unit;
+        }
+        if !(healed > 0.0) {
+            continue;
+        }
+        let (paid, _) = respire(fauna, i, healed * unit, Respiration::Heal);
+        if !(paid > 0.0) && unit > 0.0 {
+            continue;
+        }
+        let a = &mut fauna.animals[i];
+        a.wound = (a.wound - healed).max(0.0);
+        if let Some(f) = a.founder {
+            fauna.ledger.healed_by_founder[f.index()] += healed;
+        }
+    }
+}
+
+/// Step 2: a **dormant egg's upkeep** (predation §2.13): [`crate::EGG_UPKEEP_PER_S`] of
+/// its own organic matter, respired with the energy at its own density; its mineral stays
+/// in the egg.
+fn egg_upkeep(fauna: &mut Fauna) {
+    for k in 0..fauna.clutches.len() {
+        let c = &mut fauna.clutches[k];
+        if c.dormancy.is_none() || !(c.organic > 0.0) {
+            continue;
+        }
+        let paid = (crate::EGG_UPKEEP_PER_S * c.organic * DT).min(c.organic);
+        let heat = (c.energy * (paid / c.organic)).min(c.energy);
+        c.organic -= paid;
+        c.energy -= heat;
+        book_respired(fauna, paid, Respiration::Maintenance);
+        fauna.ledger.heat_out += heat;
     }
 }
 
@@ -479,9 +598,24 @@ fn controllers(
     // once, patched from bites and deaths, bodies re-indexed — the same grid either way.
     let observers: Vec<f64> = due
         .iter()
-        .filter(|&&i| fauna.animals[i].founder == Some(Founder::Browser))
+        .filter(|&&i| {
+            fauna.animals[i]
+                .founder
+                .is_some_and(|f| f.manifest().cone_range_m > 0.0)
+        })
         .map(|&i| fauna.animals[i].pose.x)
         .collect();
+    // A heuristic prey looks for threats out to `FLEE_SIGHT_M`, farther than its cone:
+    // the window covers it whenever there is a hunter in the world to look for.
+    let hunters_here = fauna
+        .animals
+        .iter()
+        .any(|a| a.founder.is_some_and(|f| fauna.config.founder(f).hunter.is_some()));
+    let window_m = if hunters_here {
+        Founder::Browser.manifest().cone_range_m.max(FLEE_SIGHT_M)
+    } else {
+        Founder::Browser.manifest().cone_range_m
+    };
     let mut held = senses.as_deref_mut().and_then(|s| s.take_cone());
     let windowed;
     let cone_occupancy = if observers.is_empty() {
@@ -494,7 +628,7 @@ fn controllers(
             &fv,
             &fauna.view(),
             observers.iter().copied(),
-            Founder::Browser.manifest().cone_range_m,
+            window_m,
         );
         Some(&windowed)
     };
@@ -526,21 +660,125 @@ fn controllers(
         );
         // Reject rather than train through: an observation with a non-finite channel
         // holds rest instead of reaching the controller at all.
-        let actions = if obs.iter().all(|v| v.is_finite()) {
+        let (mut actions, mut lure, driven) = if obs.iter().all(|v| v.is_finite()) {
             let response = fauna.controllers.drive(id, &obs);
-            response.map_or(Actions::REST, |r| {
-                crate::controller::resolve_actions(r, &manifest)
-            })
+            let driven = response.is_some();
+            let lure = if driven { fauna.controllers.lure(id) } else { 0.0 };
+            (
+                response.map_or(Actions::REST, |r| {
+                    crate::controller::resolve_actions(r, &manifest)
+                }),
+                lure,
+                driven,
+            )
         } else {
-            Actions::REST
+            (Actions::REST, 0.0, false)
         };
+        // The prey heuristics' flee rule (predation §2.7): a body driven by its own
+        // heuristic — not a saved policy, whose behaviour changes only through the world
+        // — turns away from a seen threat within 3 m, or from tremor, and resumes after.
+        // Only while a hunter is in the world: a teacher in a world with none behaves as
+        // it always did.
+        if driven && hunters_here && fauna.controllers.flees(id) {
+            if let Some(flee) = flee(fauna, i, view, cone_occupancy) {
+                actions = flee;
+                lure = 0.0;
+            }
+        }
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;
+        a.founder_state.lure = if lure.is_finite() { lure.clamp(0.0, 1.0) } else { 0.0 };
         a.founder_state.feedback = IntervalFeedback::default();
     }
     if let Some(s) = senses {
         s.return_cone(held);
     }
+}
+
+/// How far a sighted prey heuristic looks for a threat (predation §2.7, the grazer's 3 m).
+pub(crate) const FLEE_SIGHT_M: f64 = 3.0;
+/// The tremor, `[left + right]`, a blind prey heuristic flees (predation §2.7): a walking
+/// lanternjaw anywhere inside the 1.5 m radius (≥ 0.019), a walking grazer inside it, a
+/// walking shredder within about 0.7 m. A heuristic's number, not the model's.
+pub(crate) const FLEE_TREMOR: f64 = 0.015;
+
+/// **The flee rule** of the prey heuristics (predation §2.7), `None` when there is
+/// nothing to flee: the grazer turns away from the nearest threat it can see within 3 m
+/// ([`crate::kind_of`], so a still hunter beyond 0.5 m is not one), inside its field of
+/// view and not hidden by terrain or foliage; the blind shredder turns away from tremor
+/// above [`FLEE_TREMOR`]. Full forward, no feeding.
+fn flee(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    occupancy: Option<&crate::senses::ConeOccupancy>,
+) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let config = &fauna.config;
+    let hunted = Founder::ALL
+        .iter()
+        .any(|&f| config.founder(f).hunter.is_some_and(|h| h.hunts(founder)));
+    if !hunted {
+        return None;
+    }
+    let away = |turn: f64| Actions {
+        forward: 1.0,
+        turn,
+        feed: 0.0,
+    };
+    if founder.manifest().cone_range_m <= 0.0 {
+        let [left, right] = fauna.view().tremor(view, a.id);
+        if left + right < FLEE_TREMOR {
+            return None;
+        }
+        return Some(away(if left > right { 1.0 } else { -1.0 }));
+    }
+    let occupancy = occupancy?;
+    let geometry = crate::body_of(config, a)?;
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let origin = crate::senses::cone_origin(view, &a.pose, a.sense_layer(v), &geometry);
+    let (fx, fz) = a.pose.forward();
+    let (rx, rz) = (fz, -fx);
+    let mut nearest: Option<(f64, f64)> = None;
+    for o in &fauna.animals {
+        if o.id == a.id {
+            continue;
+        }
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+        let d = (dx * dx + dz * dz).sqrt();
+        if d > FLEE_SIGHT_M || nearest.is_some_and(|(n, _)| d >= n) {
+            continue;
+        }
+        if crate::kind_of(config, a, o, d) != crate::BodyKind::Threat {
+            continue;
+        }
+        // The cone looks forward: a threat behind it is not seen.
+        if dx * fx + dz * fz < 0.0 {
+            continue;
+        }
+        let Some(og) = crate::body_of(config, o) else {
+            continue;
+        };
+        let ty = crate::surface_m(o.sense_layer(v), v) + 0.5 * og.height_m;
+        let (tx, tz) = (origin.0 + dx, origin.2 + dz);
+        let (ex, ey, ez) = (tx - origin.0, ty - origin.1, tz - origin.2);
+        let dist = (ex * ex + ey * ey + ez * ez).sqrt();
+        if !(dist > 0.0) {
+            continue;
+        }
+        let dir = (ex / dist, ey / dist, ez / dist);
+        let seen = matches!(
+            crate::senses::ray_first_hit(view, occupancy, a.id, origin, dir, dist + og.width_m),
+            Some((hit, crate::senses::Fine::Body)) if hit >= dist - og.width_m - v
+        );
+        if seen {
+            nearest = Some((d, dx * rx + dz * rz));
+        }
+    }
+    let (_, side) = nearest?;
+    Some(away(if side > 0.0 { -1.0 } else { 1.0 }))
 }
 
 /// Step 4: one snapshot of what every animal can reach and smell.
@@ -782,18 +1020,51 @@ fn act(
     plans: &[Plan],
     seed: u64,
     tick: u64,
+    hits: &mut Vec<Hit>,
 ) {
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
     for i in 0..fauna.animals.len() {
+        let before = fauna.animals[i].pose;
+        act_one(fauna, view, flora, plans, seed, tick, hits, i);
+        // What the body did, for the senses of others (predation §2.2): its ground speed
+        // this tick, and how long it has been still.
+        let length = crate::body_of(&fauna.config, &fauna.animals[i]).map_or(v, |b| b.length_m);
+        let a = &mut fauna.animals[i];
+        let (dx, dz) = crate::pose::wrapped_delta(before.x, before.z, a.pose.x, a.pose.z, ring);
+        let speed = (dx * dx + dz * dz).sqrt() / DT;
+        a.speed_m_s = if speed.is_finite() { speed } else { 0.0 };
+        if a.speed_m_s > crate::STILL_SPEED_BL_PER_S * length {
+            a.still_ticks = 0;
+        } else {
+            a.still_ticks = a.still_ticks.saturating_add(1);
+        }
+    }
+}
+
+/// One body's act (step 5).
+#[allow(clippy::too_many_arguments)]
+fn act_one(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    plans: &[Plan],
+    seed: u64,
+    tick: u64,
+    hits: &mut Vec<Hit>,
+    i: usize,
+) {
+    {
         if fauna.animals[i].state == State::Asleep {
             // WX4: no movement, no feeding; the founder's tick is still counted alive.
             if let Some(founder) = fauna.animals[i].founder {
                 fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
             }
-            continue;
+            return;
         }
         if fauna.animals[i].founder.is_some() {
-            founder_act(fauna, i, view, flora);
-            continue;
+            founder_act(fauna, i, view, flora, seed, tick, hits);
+            return;
         }
         let sc = *fauna.config.species(fauna.animals[i].species);
         let bite = sc.bite_per_s * DT;
@@ -807,15 +1078,15 @@ fn act(
             } else {
                 State::Resting
             };
-            continue;
+            return;
         }
         let Some(target) = plan.target else {
             fauna.animals[i].state = State::Resting;
-            continue;
+            return;
         };
         fauna.animals[i].state = State::Walking;
         if fauna.animals[i].age_ticks % sc.step_period_ticks() != 0 {
-            continue;
+            return;
         }
         let a = fauna.animals[i];
         let config = fauna.config;
@@ -835,8 +1106,16 @@ fn act(
 /// attempt the one local bite. A founder with a zero held action set (no controller
 /// yet, or a controller at rest) pays no motor budget and eats nothing, exactly as in
 /// P1-A.
-fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Flora) {
-    let (founder, held, due) = {
+fn founder_act(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    seed: u64,
+    tick: u64,
+    hits: &mut Vec<Hit>,
+) {
+    let (founder, mut held, due) = {
         let a = &fauna.animals[i];
         let founder = a.founder.expect("a founder body");
         (
@@ -849,6 +1128,35 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     let phys = *fauna.config.founder(founder);
     let sc = phys.core;
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+
+    // A carnivore's lit lure costs `lure_power` × its awake upkeep (predation §2.2).
+    if let Some(h) = phys.hunter {
+        if fauna.animals[i].founder_state.lure > 0.0 {
+            let cost = h.lure_power * sc.maintenance_per_s * fauna.animals[i].body * DT;
+            respire(fauna, i, cost, Respiration::Hunt);
+        }
+        // A strike's windup and lunge own the tick; a recovery counts down.
+        match fauna.animals[i].strike {
+            Some(s) if s.phase != StrikePhase::Recovery => {
+                strike_tick(fauna, i, view, &phys, h, seed, tick, hits);
+                return;
+            }
+            Some(mut s) => {
+                s.ticks_left = s.ticks_left.saturating_sub(1);
+                fauna.animals[i].strike = (s.ticks_left > 0).then_some(s);
+            }
+            None => {}
+        }
+    }
+    // The speed cap (predation §2.4): × (1 − 0.5·wound), and half speed in a recovery.
+    {
+        let a = &fauna.animals[i];
+        let mut slow = (1.0 - 0.5 * a.wound).clamp(0.0, 1.0);
+        if a.strike.is_some_and(|s| s.phase == StrikePhase::Recovery) {
+            slow *= 0.5;
+        }
+        held.forward *= slow;
+    }
 
     // On a wall the tick is the climb's, and nothing else: no feeding, no sweep.
     if fauna.animals[i].mobility.climb.is_some() {
@@ -949,6 +1257,28 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     // no-contact attempt transfers nothing.
     let mut fed = false;
     if due && held.feed > 0.0 {
+        // A carnivore's `feed` is a strike when a prey is in its capsule (predation
+        // §2.3), and a mouthful of carrion otherwise.
+        let target = match phys.hunter {
+            Some(h) if fauna.animals[i].strike.is_none() => {
+                prey_in_capsule(fauna, i, view, &geometry, &h)
+            }
+            _ => None,
+        };
+        if let Some(prey) = target {
+            let h = phys.hunter.expect("a hunter");
+            let a = &mut fauna.animals[i];
+            a.strike = Some(Strike {
+                phase: StrikePhase::Windup,
+                ticks_left: crate::Hunter::ticks(h.windup_s),
+                prey,
+                from_x: a.pose.x,
+                from_z: a.pose.z,
+            });
+            a.state = State::Resting;
+            fauna.ledger.strikes_by_founder[founder.index()] += 1;
+            return;
+        }
         fed = founder_feed(fauna, i, view, flora, &manifest, &geometry, &sc, held.feed);
     }
 
@@ -959,6 +1289,288 @@ fn founder_act(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &mut Fl
     } else {
         State::Resting
     };
+}
+
+/// The jaw's point: the body's nose, half its length ahead of its centre.
+fn jaw_of(x: f64, z: f64, heading: f64, length_m: f64) -> (f64, f64) {
+    (
+        x + 0.5 * length_m * heading.sin(),
+        z + 0.5 * length_m * heading.cos(),
+    )
+}
+
+/// The horizontal distance from `(px, pz)` to the segment `a → b`, `x` on the ring.
+fn segment_distance(a: (f64, f64), b: (f64, f64), p: (f64, f64), ring: f64) -> f64 {
+    let (bx, bz) = crate::pose::wrapped_delta(a.0, a.1, b.0, b.1, ring);
+    let (px, pz) = crate::pose::wrapped_delta(a.0, a.1, p.0, p.1, ring);
+    let len2 = bx * bx + bz * bz;
+    let t = if len2 > 0.0 {
+        ((px * bx + pz * bz) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let (dx, dz) = (px - t * bx, pz - t * bz);
+    (dx * dx + dz * dz).sqrt()
+}
+
+/// Whether `prey`'s cylinder meets a capsule of radius `radius` along `jaw_from → jaw_to`
+/// over the striker's jaw band (predation §2.3).
+#[allow(clippy::too_many_arguments)]
+fn meets_capsule(
+    config: &crate::FaunaConfig,
+    view: &VoxelView<'_>,
+    striker: &Animal,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    jaw_from: (f64, f64),
+    jaw_to: (f64, f64),
+    prey: &Animal,
+) -> bool {
+    let Some(pg) = crate::body_of(config, prey) else {
+        return false;
+    };
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let reach = geometry.footprint_radius() + pg.footprint_radius();
+    if segment_distance(jaw_from, jaw_to, (prey.pose.x, prey.pose.z), ring) > reach {
+        return false;
+    }
+    let s0 = crate::surface_m(striker.site.y, v) + striker.wall_offset_m();
+    let band = (s0, s0 + h.jaw_band_height_fraction * geometry.height_m);
+    let p0 = crate::surface_m(prey.site.y, v) + prey.wall_offset_m();
+    let body = (p0, p0 + pg.height_m);
+    body.0 < band.1 && band.0 < body.1
+}
+
+/// The prey whose cylinder meets the **strike capsule** now — forward from the jaw by
+/// `strike_reach` over the jaw band — nearest the jaw first; `None` when there is none
+/// (predation §2.3). The prey list and the size window are [`crate::is_prey_of`]'s.
+fn prey_in_capsule(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+) -> Option<u64> {
+    let a = &fauna.animals[i];
+    if a.mobility.climb.is_some() {
+        return None;
+    }
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let jaw = jaw_of(a.pose.x, a.pose.z, a.pose.heading_rad, geometry.length_m);
+    let reach = h.strike_reach_length_fraction * geometry.length_m;
+    let tip = (
+        jaw.0 + reach * a.pose.heading_rad.sin(),
+        jaw.1 + reach * a.pose.heading_rad.cos(),
+    );
+    let mut best: Option<(f64, u64)> = None;
+    for o in &fauna.animals {
+        if o.id == a.id
+            || o.mobility.climb.is_some()
+            || !crate::is_prey_of(&fauna.config, a, o)
+            || !meets_capsule(&fauna.config, view, a, geometry, h, jaw, tip, o)
+        {
+            continue;
+        }
+        let (dx, dz) = crate::pose::wrapped_delta(jaw.0, jaw.1, o.pose.x, o.pose.z, ring);
+        let d = dx * dx + dz * dz;
+        if best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, o.id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// One tick of a strike's **windup** or **lunge** (predation §2.3). The windup is a
+/// crouch; at its end the strike's cost is paid, hit or miss, and the lunge begins. The
+/// lunge moves the body forward `strike_reach` over its ticks under the ordinary step rule
+/// — its own motion paid inside the strike cost — and on its last tick the jaw's swept
+/// capsule is tested against the prey's cylinder **where the prey is now**: a miss by
+/// geometry, or a contact, which the prey then dodges or takes as a [`Hit`] event.
+#[allow(clippy::too_many_arguments)]
+fn strike_tick(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    phys: &crate::FounderPhysiology,
+    h: crate::Hunter,
+    seed: u64,
+    tick: u64,
+    hits: &mut Vec<Hit>,
+) {
+    let founder = fauna.animals[i].founder.expect("a founder body");
+    let mut s = fauna.animals[i].strike.expect("a strike in progress");
+    fauna.animals[i].state = State::Resting;
+    if s.phase == StrikePhase::Windup {
+        s.ticks_left = s.ticks_left.saturating_sub(1);
+        if s.ticks_left > 0 {
+            fauna.animals[i].strike = Some(s);
+            return;
+        }
+        // The lunge: paid now, whatever it meets.
+        let body = fauna.animals[i].body;
+        let cost = h.strike_cost_s * phys.core.maintenance_per_s * body;
+        respire(fauna, i, cost, Respiration::Hunt);
+        let a = &fauna.animals[i];
+        s = Strike {
+            phase: StrikePhase::Lunge,
+            ticks_left: crate::Hunter::ticks(h.lunge_s),
+            from_x: a.pose.x,
+            from_z: a.pose.z,
+            ..s
+        };
+    }
+    // One lunge tick: `strike_reach / lunge ticks` forward, turn held still.
+    let geometry = phys.body_at(fauna.animals[i].body);
+    let manifest = founder.manifest();
+    let reach = h.strike_reach_length_fraction * geometry.length_m;
+    let per_tick = reach / f64::from(crate::Hunter::ticks(h.lunge_s));
+    let lunge = Actions {
+        forward: per_tick / (manifest.cruise_m_per_s * DT),
+        turn: 0.0,
+        feed: 0.0,
+    };
+    let step_limits = phys.step_limits(view.config.voxel_m);
+    let standing_y = {
+        let a = &mut fauna.animals[i];
+        let mut standing_y = a.site.y;
+        body::resolve_motion(
+            view,
+            &mut a.pose,
+            &mut standing_y,
+            &manifest,
+            &geometry,
+            phys.wade_depth_m(&geometry),
+            step_limits,
+            lunge,
+        );
+        standing_y
+    };
+    {
+        let a = &mut fauna.animals[i];
+        if let Some((cx, cz)) = a.pose.column(view.config.voxel_m, view.config.depth) {
+            a.site = Site {
+                x: cx.rem_euclid(i64::from(view.config.width)) as u32,
+                y: standing_y,
+                z: cz,
+            };
+        }
+    }
+    s.ticks_left = s.ticks_left.saturating_sub(1);
+    if s.ticks_left > 0 {
+        fauna.animals[i].strike = Some(s);
+        return;
+    }
+    // Contact: the jaw's sweep from where the lunge began to where it ended.
+    let a = fauna.animals[i];
+    let heading = a.pose.heading_rad;
+    let jaw_from = jaw_of(s.from_x, s.from_z, heading, geometry.length_m);
+    let jaw_to = jaw_of(a.pose.x, a.pose.z, heading, geometry.length_m);
+    let prey = fauna
+        .animals
+        .binary_search_by_key(&s.prey, |p| p.id)
+        .ok()
+        .map(|j| fauna.animals[j]);
+    if let Some(p) = prey {
+        if meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p) {
+            let pf = p.founder.expect("a prey has a lineage");
+            let pp = fauna.config.founder(pf);
+            let ring = f64::from(view.config.width) * view.config.voxel_m;
+            let (dx, dz) = crate::pose::wrapped_delta(p.pose.x, p.pose.z, a.pose.x, a.pose.z, ring);
+            let (fx, fz) = p.pose.forward();
+            let from_rear = dx * fx + dz * fz < 0.0;
+            let cap = pp.core.reserve_of(p.body);
+            let condition = if cap > 0.0 { p.reserve / cap } else { 0.0 };
+            let chance = crate::dodge_chance(pp.agility, p.state, from_rear, condition);
+            if crate::dodges(chance, seed, a.id, p.id, tick) {
+                fauna.ledger.dodges_by_founder[founder.index()] += 1;
+            } else {
+                fauna.ledger.hits_by_founder[founder.index()] += 1;
+                let damage = if p.body > 0.0 {
+                    h.strike_power * (a.body / p.body) * (1.0 - pp.armour)
+                } else {
+                    1.0
+                };
+                hits.push(Hit {
+                    prey: p.id,
+                    damage,
+                    by: founder,
+                });
+            }
+        }
+    }
+    fauna.animals[i].strike = Some(Strike {
+        phase: StrikePhase::Recovery,
+        ticks_left: crate::Hunter::ticks(h.recovery_s),
+        ..s
+    });
+}
+
+/// **One [`Hit`] applied** (predation §2.4, §2.5): the wound adds, the hit wakes the prey
+/// and keeps it up for [`crate::ALERT_S`], and a wound of 1 kills — the whole body to
+/// carrion on its face, a carcass record on the pool, departed `Killed { by }`. A prey
+/// that is gone already is left alone: it dies once.
+pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Founder) {
+    let Ok(j) = fauna.animals.binary_search_by_key(&prey, |a| a.id) else {
+        return;
+    };
+    let a = &mut fauna.animals[j];
+    if damage.is_finite() && damage > 0.0 {
+        a.wound += damage;
+    }
+    if a.state == State::Asleep {
+        a.state = State::Resting;
+    }
+    a.rest = None;
+    a.alert_ticks = ((crate::ALERT_S / DT).round() as u32).max(1);
+    if a.wound >= 1.0 {
+        kill(fauna, flora, j, Departure::Killed { by });
+    }
+}
+
+/// A death by `cause` of the body at `j`, now: an open gestation is resolved first, then
+/// the whole body goes to carrion on its face and the death is booked; a kill also lays
+/// the carcass record.
+fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
+    let rule = body::effective_config(&fauna.config, &fauna.animals[j]).reproduction;
+    fail_gestation(fauna, j, &rule);
+    let a = fauna.animals.remove(j);
+    fauna.controllers.take(a.id);
+    let organic = a.organic() + a.gut.organic;
+    let laid = bury_corpse(fauna, flora, &a, cause);
+    if laid && matches!(cause, Departure::Killed { .. }) {
+        if let Some(f) = a.founder {
+            flora.lay_carcass(
+                a.site,
+                cubarium_voxel_flora::Carcass {
+                    lineage: f.index() as u8,
+                    heading_rad: a.pose.heading_rad,
+                    organic,
+                },
+            );
+        }
+    }
+}
+
+/// The whole animal to carrion on its face, and the death booked. Whether the plant
+/// layer took the corpse.
+fn bury_corpse(fauna: &mut Fauna, flora: &mut Flora, a: &Animal, cause: Departure) -> bool {
+    // The whole animal, whatever is left of it: a corpse with no organic matter left is
+    // still a corpse with mineral in it, and keeping an inert remainder on a dead animal
+    // is how a ledger stops closing.
+    let laid = fauna.book_deposit(
+        flora,
+        a.site,
+        DepositKind::Carrion,
+        Taken {
+            organic: a.organic() + a.gut.organic,
+            mineral: a.mineral + a.gut.mineral,
+            energy: a.energy + a.gut.energy,
+        },
+    );
+    fauna.ledger.deaths += 1;
+    fauna.book_departure(a, cause);
+    laid
 }
 
 /// What a blocked climber did with the face in front of it.
@@ -1271,6 +1883,18 @@ fn founder_feed(
     // with — before anything is withdrawn.
     let meal = match founder {
         Founder::Blind => body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry),
+        // The carnivore's mouth takes carrion and nothing else (predation §2.6).
+        Founder::Lanternjaw => {
+            body::mouth_pool_site(&flora.view(), &cols, site_y, Food::Carrion).map(|(site, stock)| {
+                (
+                    body::Meal::Pool {
+                        site,
+                        food: Food::Carrion,
+                    },
+                    stock,
+                )
+            })
+        }
         Founder::Browser => body::mouth_foliage_stand(
             &flora.view(),
             view,
@@ -1291,6 +1915,7 @@ fn founder_feed(
         body::Meal::Stand { .. } => match founder {
             Founder::Blind => Food::CapTissue,
             Founder::Browser => Food::Foliage,
+            Founder::Lanternjaw => unreachable!("a carnivore's mouth takes no stand"),
         },
     };
     // The bite this hunger, this stock and this room allow.
@@ -1328,6 +1953,9 @@ fn founder_feed(
     if let Some(plant) = plant {
         fauna.ledger.bites_by_plant[plant.index()] += 1;
         fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
+    }
+    if food == Food::Carrion {
+        fauna.ledger.eaten_carrion_by_founder[founder.index()] += taken.organic;
     }
     let placed = assimilate(fauna, i, sc, taken, yield_fraction);
     fauna.ledger.bites_by_founder[founder.index()] += 1;
@@ -1583,7 +2211,7 @@ fn wrapped_dx(width: i64, a: i64, b: i64) -> i64 {
 /// its lineage from that lineage's registered [`crate::ControllerFactory`] — never the
 /// parent's instance, which would mean two bodies sharing one memory. A lineage with no
 /// factory registered breeds resting bodies, which is the pre-existing behaviour.
-fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
+fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: bool) {
     if !fauna.births_enabled {
         return;
     }
@@ -1600,10 +2228,11 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
                     newborns.push(newborn);
                 }
             }
-            crate::BirthMode::Eggs => lay(fauna, i, flora, &sc, &rule),
+            crate::BirthMode::Eggs => lay(fauna, i, flora, &sc, &rule, view.config.seed),
         }
     }
     hatch(fauna, view, &mut newborns);
+    dormant_eggs(fauna, view, flora, dusk, &mut newborns);
     let fresh: Vec<(u64, Founder)> = newborns
         .iter()
         .filter_map(|n| n.founder.map(|f| (n.id, f)))
@@ -1749,6 +2378,12 @@ fn gestate(
         gut: Taken::default(),
         state: State::Resting,
         mobility: crate::Mobility::default(),
+        wound: 0.0,
+        strike: None,
+        rest: None,
+        still_ticks: crate::still_after_ticks(),
+        speed_m_s: 0.0,
+        alert_ticks: 0,
     })
 }
 
@@ -1790,7 +2425,14 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 /// The face has to hold litter — the littershredder lays in the litter it lives in —
 /// and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
 /// no refractory, and the surplus keeps standing for the next tick.
-fn lay(fauna: &mut Fauna, i: usize, flora: &Flora, sc: &SpeciesConfig, rule: &crate::Reproduction) {
+fn lay(
+    fauna: &mut Fauna,
+    i: usize,
+    flora: &Flora,
+    sc: &SpeciesConfig,
+    rule: &crate::Reproduction,
+    seed: u64,
+) {
     if fauna.animals[i].reproduction.surplus_ticks < rule.hold_ticks() {
         return;
     }
@@ -1802,7 +2444,9 @@ fn lay(fauna: &mut Fauna, i: usize, flora: &Flora, sc: &SpeciesConfig, rule: &cr
         return;
     };
     let site = fauna.animals[i].site;
-    if !flora.view().ground_at(site).is_some_and(|g| g.litter > 0.0) {
+    // A dormant egg is buried in soil or litter (predation §2.13); the shredder lays in
+    // the litter it lives in.
+    if !rule.dormant && !flora.view().ground_at(site).is_some_and(|g| g.litter > 0.0) {
         return;
     }
     let cost = rule.package_cost(sc);
@@ -1824,17 +2468,50 @@ fn lay(fauna: &mut Fauna, i: usize, flora: &Flora, sc: &SpeciesConfig, rule: &cr
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
     let laid_tick = fauna.tick;
-    fauna.clutches.push(crate::Clutch {
-        site,
-        count: rule.clutch_size,
-        organic: cost,
-        mineral,
-        energy,
-        laid_tick,
-        lineage,
-    });
+    if rule.dormant {
+        // One clutch per egg, each with its own dormancy; the last egg takes the
+        // remainder so the three currencies add back up to what was paid.
+        let n = rule.clutch_size.max(1);
+        let (mut left_o, mut left_m, mut left_e) = (cost, mineral, energy);
+        for k in 0..n {
+            let last = k + 1 == n;
+            let share = 1.0 / f64::from(n);
+            let (o, m, e) = if last {
+                (left_o, left_m, left_e)
+            } else {
+                (cost * share, mineral * share, energy * share)
+            };
+            left_o -= o;
+            left_m -= m;
+            left_e -= e;
+            let serial = fauna.ledger.eggs_laid + fauna.ledger.eggs_buried;
+            fauna.clutches.push(crate::Clutch {
+                site,
+                count: 1,
+                organic: o,
+                mineral: m,
+                energy: e,
+                laid_tick,
+                lineage,
+                dormancy: Some(crate::Dormancy::draw(seed, serial, laid_tick)),
+            });
+            fauna.ledger.eggs_laid += 1;
+        }
+    } else {
+        fauna.clutches.push(crate::Clutch {
+            site,
+            count: rule.clutch_size,
+            organic: cost,
+            mineral,
+            energy,
+            laid_tick,
+            lineage,
+            dormancy: None,
+        });
+        fauna.ledger.eggs_laid += u64::from(rule.clutch_size);
+    }
     fauna.ledger.clutches_laid += 1;
-    fauna.ledger.eggs_laid += u64::from(rule.clutch_size);
+    fauna.ledger.eggs_laid_by_founder[lineage.index()] += u64::from(rule.clutch_size);
 }
 
 /// A clutch whose face the terrain took away, or that standing water has covered deeper
@@ -1886,21 +2563,24 @@ fn hatch(fauna: &mut Fauna, view: &VoxelView<'_>, newborns: &mut Vec<Animal>) {
         return;
     }
     let tick = fauna.tick;
+    let at_term = |fauna: &Fauna, c: &crate::Clutch| {
+        let rule = fauna.config.founder(c.lineage).core.reproduction;
+        c.dormancy.is_none() && tick.saturating_sub(c.laid_tick) >= rule.incubation_ticks()
+    };
     let due: Vec<crate::Clutch> = fauna
         .clutches
         .iter()
-        .filter(|c| {
-            let rule = fauna.config.founder(c.lineage).core.reproduction;
-            tick.saturating_sub(c.laid_tick) >= rule.incubation_ticks()
-        })
+        .filter(|c| at_term(fauna, c))
         .copied()
         .collect();
     if due.is_empty() {
         return;
     }
-    fauna.clutches.retain(|c| {
-        let rule = fauna.config.founder(c.lineage).core.reproduction;
-        tick.saturating_sub(c.laid_tick) < rule.incubation_ticks()
+    let keep: Vec<bool> = fauna.clutches.iter().map(|c| !at_term(fauna, c)).collect();
+    let mut k = 0;
+    fauna.clutches.retain(|_| {
+        k += 1;
+        keep[k - 1]
     });
     let voxel_m = view.config.voxel_m;
     for c in due {
@@ -1919,34 +2599,129 @@ fn hatch(fauna: &mut Fauna, view: &VoxelView<'_>, newborns: &mut Vec<Animal>) {
             left_o -= o;
             left_m -= m;
             left_e -= e;
-            let id = fauna.ledger.births;
-            fauna.ledger.births += 1;
-            fauna.ledger.born += 1;
-            fauna.ledger.hatched += 1;
-            newborns.push(Animal {
-                id,
-                species: crate::Species::Frondgrazer,
-                site: c.site,
-                pose: crate::Pose::at_site(c.site, voxel_m),
-                founder: Some(c.lineage),
-                founder_state: crate::FounderState::default(),
-                reproduction: crate::ReproductionState::default(),
-                body: sc.body_min,
-                reserve: o - sc.body_min,
-                mineral: m,
-                energy: e,
-                age_ticks: 0,
-                lifespan_ticks: crate::draw_lifespan_ticks(
-                    sc.lifespan_median_s,
-                    id,
-                    crate::lifespan_salt(c.site, fauna.tick),
-                    false,
-                ),
-                gut: Taken::default(),
-                state: State::Resting,
-                mobility: crate::Mobility::default(),
-            });
+            let young = hatchling(fauna, &c, sc.body_min, o, m, e, voxel_m);
+            newborns.push(young);
         }
+    }
+}
+
+/// One hatchling out of an egg holding `(o, m, e)`: a `body_min` juvenile of the clutch's
+/// lineage with the rest as its reserve, booked born and hatched.
+fn hatchling(
+    fauna: &mut Fauna,
+    c: &crate::Clutch,
+    body_min: f64,
+    o: f64,
+    m: f64,
+    e: f64,
+    voxel_m: f64,
+) -> Animal {
+    let sc = fauna.config.founder(c.lineage).core;
+    let id = fauna.ledger.births;
+    fauna.ledger.births += 1;
+    fauna.ledger.born += 1;
+    fauna.ledger.hatched += 1;
+    fauna.ledger.eggs_hatched_by_founder[c.lineage.index()] += 1;
+    Animal {
+        id,
+        species: crate::Species::Frondgrazer,
+        site: c.site,
+        pose: crate::Pose::at_site(c.site, voxel_m),
+        founder: Some(c.lineage),
+        founder_state: crate::FounderState::default(),
+        reproduction: crate::ReproductionState::default(),
+        body: body_min,
+        reserve: o - body_min,
+        mineral: m,
+        energy: e,
+        age_ticks: 0,
+        lifespan_ticks: crate::draw_lifespan_ticks(
+            sc.lifespan_median_s,
+            id,
+            crate::lifespan_salt(c.site, fauna.tick),
+            false,
+        ),
+        gut: Taken::default(),
+        state: State::Resting,
+        mobility: crate::Mobility::default(),
+        wound: 0.0,
+        strike: None,
+        rest: None,
+        still_ticks: crate::still_after_ticks(),
+        speed_m_s: 0.0,
+        alert_ticks: 0,
+    }
+}
+
+/// **The dormant egg bank's tick** (predation §2.13): each dormant egg hears the prey of
+/// its lineage that pass within 2 m loudly enough ([`crate::FOOTFALL_TREMOR_MIN`], the
+/// tremor rule); an egg whose viability has run out, or whose upkeep has taken it below a
+/// hatchling, dies to the litter of its face; and at **dusk** an egg whose footfall over
+/// the last clock-day has reached its threshold hatches, unless an adult of its lineage
+/// is within 4 m ([`crate::egg_hatches`]).
+fn dormant_eggs(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    dusk: bool,
+    newborns: &mut Vec<Animal>,
+) {
+    if !fauna.clutches.iter().any(|c| c.dormancy.is_some()) {
+        return;
+    }
+    let tick = fauna.tick;
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let day_ticks = ((view.config.day.length_min * 60.0 / DT).round() as u64).max(1);
+    let mut k = 0;
+    while k < fauna.clutches.len() {
+        let c = fauna.clutches[k];
+        let Some(mut d) = c.dormancy else {
+            k += 1;
+            continue;
+        };
+        let phys = *fauna.config.founder(c.lineage);
+        if tick >= d.viable_until_tick || c.organic < phys.core.body_min {
+            fauna.clutches.remove(k);
+            fauna.ledger.eggs_died += 1;
+            fauna.book_deposit(
+                flora,
+                c.site,
+                DepositKind::Litter,
+                Taken {
+                    organic: c.organic,
+                    mineral: c.mineral,
+                    energy: c.energy,
+                },
+            );
+            continue;
+        }
+        let (ex, ez) = ((f64::from(c.site.x) + 0.5) * v, (f64::from(c.site.z) + 0.5) * v);
+        let mut nearest_adult: Option<f64> = None;
+        for a in &fauna.animals {
+            let Some(f) = a.founder else { continue };
+            let (dx, dz) = crate::pose::wrapped_delta(ex, ez, a.pose.x, a.pose.z, ring);
+            let dist = (dx * dx + dz * dz).sqrt();
+            if f == c.lineage && a.body >= phys.core.birth_body {
+                nearest_adult = Some(nearest_adult.map_or(dist, |n: f64| n.min(dist)));
+            }
+            let prey = phys.hunter.is_some_and(|h| h.hunts(f));
+            if prey
+                && dist <= crate::FOOTFALL_RADIUS_M
+                && crate::tremor_of(a, dist) >= crate::FOOTFALL_TREMOR_MIN
+            {
+                d.hear(a.id, tick);
+            }
+        }
+        fauna.clutches[k].dormancy = Some(d);
+        if dusk && crate::egg_hatches(d.threshold, d.footfall(tick, day_ticks), dusk, nearest_adult)
+        {
+            fauna.clutches.remove(k);
+            let young = hatchling(fauna, &c, phys.core.body_min, c.organic, c.mineral, c.energy, v);
+            newborns.push(young);
+            continue;
+        }
+        k += 1;
     }
 }
 
@@ -2028,21 +2803,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.controllers.take(*id);
     }
     for (a, cause) in &dead {
-        // The whole animal, whatever is left of it: a corpse with no organic matter left
-        // is still a corpse with mineral in it, and keeping an inert remainder on a dead
-        // animal is how a ledger stops closing.
-        fauna.book_deposit(
-            flora,
-            a.site,
-            DepositKind::Carrion,
-            Taken {
-                organic: a.organic() + a.gut.organic,
-                mineral: a.mineral + a.gut.mineral,
-                energy: a.energy + a.gut.energy,
-            },
-        );
-        fauna.ledger.deaths += 1;
-        fauna.book_departure(a, *cause);
+        bury_corpse(fauna, flora, a, *cause);
     }
 }
 

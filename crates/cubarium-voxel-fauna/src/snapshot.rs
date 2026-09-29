@@ -98,7 +98,12 @@ use crate::Fauna;
 /// Schema 19 is **circadian rhythms** (WX4): [`crate::State`] gained `Asleep` and
 /// [`crate::FounderPhysiology`] its `active`, `sleep_upkeep` and `wake_hunger`: refused,
 /// not migrated.
-pub const SCHEMA: u32 = 19;
+/// Schema 20 is **predation** (P1, `design/predation-and-flight-2026-09-28.md` §2): a
+/// third lineage (the lanternjaw), wounds, strikes, rests with a reason, stillness and
+/// speed on every [`crate::Animal`], dormant eggs on [`crate::Clutch`], the hunter,
+/// armour and agility in the config, the ledger's predation and egg counters and the
+/// `Killed` departures, and the layer's last daylight: refused, not migrated.
+pub const SCHEMA: u32 = 20;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -311,6 +316,12 @@ mod tests {
             gut: cubarium_voxel_flora::Taken::default(),
             state: State::Resting,
             mobility: crate::Mobility::default(),
+            wound: 0.0,
+            strike: None,
+            rest: None,
+            still_ticks: 0,
+            speed_m_s: 0.0,
+            alert_ticks: 0,
         }
     }
 

@@ -223,7 +223,8 @@ fn record(fauna: &mut Fauna, id: u64, action: Actions) -> Arc<Mutex<Vec<Vec<f64>
 /// receptor, exactly as it would a wall.
 #[test]
 fn a_contact_probe_past_the_z_edge_reads_solid() {
-    for founder in Founder::ALL {
+    // The two contract-v2 lineages: a full lanternjaw lies down (its satiated rest).
+    for founder in [Founder::Blind, Founder::Browser] {
         let world = flat(16, 4);
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = empty_fauna();
@@ -350,7 +351,8 @@ fn birth_readiness_is_zero_during_the_refractory_and_while_surplus_is_held() {
 /// first sampling has held no surplus yet, so it reads 0 (the old rule read 1).
 #[test]
 fn the_observed_birth_readiness_is_the_step_rule() {
-    for founder in Founder::ALL {
+    // The two contract-v2 lineages: a full lanternjaw lies down (its satiated rest).
+    for founder in [Founder::Blind, Founder::Browser] {
         let world = flat(8, 4);
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = empty_fauna();
@@ -468,6 +470,7 @@ fn the_windowed_occupancy_reads_what_the_full_build_reads() {
 /// per second. The anchors are the frozen physiology's, not a second copy.
 #[test]
 fn the_manifest_carries_the_physiologys_anchors_and_cruises_at_one_body_length() {
+    // The lanternjaw's anchors are checked too; its cruise is 0.6 BL/s (predation §2.12).
     for founder in Founder::ALL {
         let m = founder.manifest();
         let p = FounderPhysiology::frozen(founder);
@@ -484,7 +487,11 @@ fn the_manifest_carries_the_physiologys_anchors_and_cruises_at_one_body_length()
         assert_eq!(m.wade_height_fraction, p.wade_height_fraction);
         assert_eq!(m.drown_height_fraction, p.drown_height_fraction);
         assert_eq!(m.drown_after_s, p.drown_after_s);
-        assert_eq!(m.cruise_m_per_s, p.adult_length_m, "{founder:?}: 1 BL/s");
+        assert_eq!(
+            m.cruise_m_per_s,
+            cubarium_voxel_fauna::cruise_body_lengths_per_s(founder) * p.adult_length_m,
+            "{founder:?}: 1 BL/s (0.6 for the lanternjaw)"
+        );
         assert!(
             (m.forward_reference_m - m.cruise_m_per_s * m.controller_period_s).abs() < 1e-15,
             "{founder:?}: the forward reference follows the cruise"

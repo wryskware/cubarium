@@ -494,7 +494,8 @@ fn turning_while_stopped_moves_only_the_heading_and_is_paid() {
 /// through terrain, and every claim about "reaching" food would be vacuous.
 #[test]
 fn full_cruise_cannot_tunnel_through_a_one_voxel_wall() {
-    for founder in Founder::ALL {
+    // The two contract-v2 lineages: a full lanternjaw lies down (its satiated rest).
+    for founder in [Founder::Blind, Founder::Browser] {
         let _manifest = founder.manifest();
         let mut world = flat(24, 3);
         // A one-voxel-thick wall three voxels tall, so no step goes over it; and no
@@ -1387,7 +1388,8 @@ fn a_body_behind_the_rock_is_not_seen() {
 /// or a value outside the range the manifest's normalization promises.
 #[test]
 fn a_controller_receives_exactly_the_manifest_length_and_nothing_else() {
-    for founder in Founder::ALL {
+    // The two contract-v2 lineages: a full lanternjaw lies down (its satiated rest).
+    for founder in [Founder::Blind, Founder::Browser] {
         let manifest = founder.manifest();
         let world = flat(16, 3);
         let mut flora = Flora::new(FloraConfig::default());

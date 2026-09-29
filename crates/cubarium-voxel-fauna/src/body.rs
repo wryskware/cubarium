@@ -303,6 +303,96 @@ pub struct FounderPhysiology {
     /// 0 full to 1 empty) is at or above this stays awake and forages. 0.5, a placeholder:
     /// there was no earlier threshold to reuse.
     pub wake_hunger: f64,
+    /// `Some` for a **carnivore** (`design/predation-and-flight-2026-09-28.md` §2.1,
+    /// §2.3, §2.8, §2.12): its prey list and size window, the strike, the lure and the
+    /// satiated rest. `None` for every lineage that eats no animal.
+    pub hunter: Option<Hunter>,
+    /// The damage multiplier a hit is reduced by, `1 − armour` (§2.7): the grazer's saddle
+    /// shield 0.25, the shredder 0.
+    pub armour: f64,
+    /// The species factor of the dodge (§2.3's table): frondgrazer 0.5, littershredder
+    /// 0.3. The lanternjaw is in nobody's prey list yet, so its 0 is never read.
+    pub agility: f64,
+    /// The counter-strike seam (§2.7): fired when struck, wounding the attacker. `None`
+    /// for every lineage until the loftstrider's kick.
+    pub counter: Option<Counter>,
+}
+
+/// A carnivore's numbers (`design/predation-and-flight-2026-09-28.md` §2.12, every one
+/// a placeholder for `design/backlog.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Hunter {
+    /// Its **prey list**, by [`Founder::index`]: the lineages whose bodies it strikes.
+    pub prey: [bool; Founder::COUNT],
+    /// A hit adds `strike_power × (S_pred / S_prey) × (1 − armour)` to the prey's wound
+    /// (§2.4).
+    pub strike_power: f64,
+    /// The **size window**: a prey body at most this × its own (§2.1). The window follows
+    /// its own body, so a juvenile takes juvenile prey.
+    pub prey_max_ratio: f64,
+    /// The strike capsule's reach ahead of the jaw, × its current length.
+    pub strike_reach_length_fraction: f64,
+    /// The jaw band `[0, jaw_band_height_fraction × height]` over its standing surface.
+    pub jaw_band_height_fraction: f64,
+    /// The three phases, seconds (§2.3): a crouch, the lunge, and the recovery in which it
+    /// cannot strike and moves at half speed.
+    pub windup_s: f64,
+    pub lunge_s: f64,
+    pub recovery_s: f64,
+    /// The strike's cost, in **seconds of its awake upkeep**, paid at the lunge, hit or
+    /// miss.
+    pub strike_cost_s: f64,
+    /// A lit lure's cost, × its awake upkeep (§2.12: "doubles its burn").
+    pub lure_power: f64,
+    /// The satiated rest (§2.8): down at `rest_at` of its reserve cap, at `torpor_upkeep`
+    /// × its basal upkeep, up again below `wake_at` of the cap.
+    pub rest_at: f64,
+    pub torpor_upkeep: f64,
+    pub wake_at: f64,
+}
+
+impl Hunter {
+    /// The lanternjaw's table (§2.12): power 0.7, window 1.5, reach 0.6 L over the jaw
+    /// band 0.6 H, windup 0.15 s, lunge 0.25 s, recovery 3 s, a strike at 100 s of awake
+    /// upkeep, the lure at its awake upkeep, and the satiated rest at 0.9 / 0.25 / 0.5.
+    pub const LANTERNJAW: Hunter = Hunter {
+        prey: [true, true, false],
+        strike_power: 0.7,
+        prey_max_ratio: 1.5,
+        strike_reach_length_fraction: 0.6,
+        jaw_band_height_fraction: 0.6,
+        windup_s: 0.15,
+        lunge_s: 0.25,
+        recovery_s: 3.0,
+        strike_cost_s: 100.0,
+        lure_power: 1.0,
+        rest_at: 0.9,
+        torpor_upkeep: 0.25,
+        wake_at: 0.5,
+    };
+
+    /// Whether `prey`'s lineage is on its list.
+    pub fn hunts(&self, prey: Founder) -> bool {
+        self.prey[prey.index()]
+    }
+
+    /// Whole ticks for a phase, never below one.
+    pub fn ticks(seconds: f64) -> u32 {
+        let t = (seconds * f64::from(cubarium_voxel::TICK_HZ)).round();
+        if !t.is_finite() || t < 1.0 {
+            1
+        } else {
+            t as u32
+        }
+    }
+}
+
+/// The counter-strike seam (§2.7): a struck animal's answer, wounding its attacker. Unused.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Counter {
+    pub reach: f64,
+    pub damage: f64,
+    pub cost: f64,
 }
 
 impl FounderPhysiology {
@@ -383,6 +473,10 @@ impl FounderPhysiology {
                 active: crate::Activity::Nocturnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
+                hunter: None,
+                armour: 0.0,
+                agility: 0.3,
+                counter: None,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -417,6 +511,83 @@ impl FounderPhysiology {
                 active: crate::Activity::Diurnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
+                hunter: None,
+                // The saddle shield (§2.7).
+                armour: 0.25,
+                agility: 0.5,
+                counter: None,
+            },
+            // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
+            // scorpid ambusher, 1.0 × 0.25 × 0.45 m, a fifth of the grazer's upkeep.
+            // Numbers the note pins are its own; the others are stated where they sit.
+            Founder::Lanternjaw => FounderPhysiology {
+                core: SpeciesConfig {
+                    maintenance_per_s: 0.0002,
+                    // The other two lineages' mouth, 0.04 body per second, at its body: a
+                    // grazer carcass fills it in a few minutes of feeding (§2.6, "handling
+                    // time is how long filling its reserve takes").
+                    bite_per_s: 0.0014,
+                    // The browser's K scaled by body (0.005 × 0.035 / 0.05).
+                    bite_half_stock: 0.0035,
+                    yield_fraction: 0.5,
+                    // Set from carrion's own composition, as the shredder's is from
+                    // litter's: a corpse carries its dead body's tissue mineral (0.02 to
+                    // 0.05), so 0.02 never binds the budget.
+                    n_tissue: 0.02,
+                    body_max: 0.035,
+                    // Hatchling to laying size (0.0034 → 0.021) in about two hours on a
+                    // full reserve: a sixth of its 12 h lifespan.
+                    growth_max_per_s: 2.5e-6,
+                    // A hatchling is 0.46 of the adult's length (§2.13): 0.46³ × 0.035.
+                    body_min: 0.0034,
+                    // Laying size: 0.6 of body_max, the browser's ratio.
+                    birth_body: 0.021,
+                    // Unread by an egg-layer; one egg, so the validator's floor holds.
+                    birth_cost: 0.005,
+                    // §2.6: an adult grazer carcass fills it.
+                    reserve_cap: 1.0,
+                    reach: Reach {
+                        horizontal: 1,
+                        up: 1,
+                    },
+                    climb: 0,
+                    wade_depth_m: 0.05,
+                    drown_depth_m: 0.2,
+                    step_period_s: 1.0,
+                    sense_radius: 8,
+                    energy_density: 2.0,
+                    reproduction: Reproduction::DORMANT_EGGS_PLACEHOLDER,
+                    // §2.12: three times the grazers' if lifespan lands (it has).
+                    lifespan_median_s: 3.0 * crate::LIFESPAN_MEDIAN_S,
+                },
+                // Full cruise at its basal rate, both other lineages' rule.
+                motor_respiration_per_s: 0.0002,
+                // Its own height both ways, the browser's rule.
+                step_up_m: 0.45,
+                step_down_m: 0.45,
+                climbs_walls: false,
+                wall_climb_cost_factor: WALL_CLIMB_COST_FACTOR,
+                wade_height_fraction: 0.5,
+                drown_height_fraction: 1.0,
+                drown_after_s: DROWN_AFTER_S,
+                adult_length_m: 1.0,
+                adult_width_m: 0.25,
+                adult_height_m: 0.45,
+                eye_height_fraction: EYE_HEIGHT_FRACTION,
+                mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
+                contact_height_fraction: CONTACT_HEIGHT_FRACTION,
+                mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
+                // Carrion is the one food its mouth takes; every class carries the same
+                // number so none is a silent zero.
+                yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
+                organ_structure_fraction: 0.10,
+                active: crate::Activity::Nocturnal,
+                sleep_upkeep: SLEEP_UPKEEP,
+                wake_hunger: WAKE_HUNGER,
+                hunter: Some(Hunter::LANTERNJAW),
+                armour: 0.0,
+                agility: 0.0,
+                counter: None,
             },
         }
     }
@@ -1670,6 +1841,18 @@ pub(crate) fn taste_reading(
                 valid: true,
             },
         },
+        Founder::Lanternjaw => match mouth_pool_site(fv, &cols, standing_y, crate::Food::Carrion) {
+            Some((_, stock)) => TasteReading {
+                cue: response(stock),
+                resistance: resistance_of(manifest, "carrion"),
+                valid: true,
+            },
+            None => TasteReading {
+                cue: 0.0,
+                resistance: resistance_of(manifest, "ground"),
+                valid: true,
+            },
+        },
         Founder::Browser => {
             match mouth_foliage_stand(fv, view, &cols, standing_y, body, crate::Diet::Vascular) {
                 Some((_, foliage)) => TasteReading {
@@ -1855,7 +2038,8 @@ pub fn birth_readiness(
     match rule.mode {
         crate::BirthMode::Gestation => true,
         crate::BirthMode::Eggs => {
-            animal.founder.is_some() && flora.ground_at(animal.site).is_some_and(|g| g.litter > 0.0)
+            animal.founder.is_some()
+                && (rule.dormant || flora.ground_at(animal.site).is_some_and(|g| g.litter > 0.0))
         }
     }
 }

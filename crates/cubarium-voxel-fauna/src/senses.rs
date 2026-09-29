@@ -936,7 +936,12 @@ impl ConeOccupancy {
         self.bodies.clear();
     }
 
-    /// Every body's occupied cell (the layer over its standing face), in animal order.
+    /// **Bodies with volume** (`design/predation-and-flight-2026-09-28.md` §2.2): every
+    /// body fills its footprint disc — the columns whose centres lie within its radius,
+    /// and always its own — times its current height, from the layer over its standing
+    /// face up through `ceil(height / voxel)` layers, in animal order. A 0.45 m lanternjaw
+    /// is four cells tall at 0.125 m. A heuristic body with no geometry is the one cell
+    /// over its face it always was. Movement still ignores other animals.
     fn lay_bodies(
         &mut self,
         view: &VoxelView<'_>,
@@ -944,16 +949,47 @@ impl ConeOccupancy {
         window: Option<&[bool]>,
     ) {
         let c = view.config;
+        let v = c.voxel_m;
         for a in fauna.animals {
-            if let Some((ax, az)) = a.pose.column(c.voxel_m, c.depth) {
-                if !column_seen(c, window, ax) {
+            let Some((ax, az)) = a.pose.column(v, c.depth) else {
+                continue;
+            };
+            let base = i64::from(a.sense_layer(v)) + 1;
+            let (radius, tall) = match crate::body_of(fauna.config, a) {
+                Some(b) => (
+                    b.footprint_radius(),
+                    (b.height_m / v).ceil().max(1.0).min(f64::from(c.height)) as i64,
+                ),
+                None => (0.0, 1),
+            };
+            let span = (radius / v).ceil() as i64;
+            for dz in -span..=span {
+                let z = i64::from(az) + dz;
+                if z < 0 || z >= i64::from(c.depth) {
                     continue;
                 }
-                let layer = i64::from(a.sense_layer(c.voxel_m)) + 1;
-                if layer > 0 && layer < i64::from(c.height) {
-                    let cell = c.index(ax, layer as u32, az);
-                    self.cells[cell] |= BODY_BIT;
-                    self.bodies.push((cell as u32, a.id));
+                for dx in -span..=span {
+                    let x = ax + dx;
+                    if dx != 0 || dz != 0 {
+                        // The column's centre against the body's centre, metres.
+                        let cx = (x as f64 + 0.5) * v - a.pose.x;
+                        let cz = (z as f64 + 0.5) * v - a.pose.z;
+                        if cx * cx + cz * cz > radius * radius {
+                            continue;
+                        }
+                    }
+                    let wx = x.rem_euclid(i64::from(c.width));
+                    if !column_seen(c, window, wx) {
+                        continue;
+                    }
+                    for layer in base..base + tall {
+                        if layer <= 0 || layer >= i64::from(c.height) {
+                            continue;
+                        }
+                        let cell = c.index(wx, layer as u32, z as u32);
+                        self.cells[cell] |= BODY_BIT;
+                        self.bodies.push((cell as u32, a.id));
+                    }
                 }
             }
         }
