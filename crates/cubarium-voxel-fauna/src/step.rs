@@ -1631,6 +1631,7 @@ fn advance_eligibility(
     if a.reproduction.refractory_ticks > 0 {
         a.reproduction.refractory_ticks -= 1;
         a.reproduction.surplus_ticks = 0;
+        a.reproduction.window.reset();
         return;
     }
     if a.reproduction.escrow.is_some() {
@@ -1639,11 +1640,10 @@ fn advance_eligibility(
     let eligible = a.body >= sc.birth_body
         && a.reserve >= rule.surplus_reserve(sc)
         && rule.package_cost(sc) > 0.0;
-    if eligible {
-        a.reproduction.surplus_ticks += 1;
-    } else {
-        a.reproduction.surplus_ticks = 0;
-    }
+    let hold = rule.hold_ticks();
+    a.reproduction.window.tick(eligible, hold);
+    a.reproduction.surplus_ticks = a.reproduction.window.count_for(hold);
+    a.reproduction.eligible_now = eligible;
 }
 
 /// One gestating body's tick: open an escrow when the hold has elapsed, pay this tick's
@@ -1656,7 +1656,7 @@ fn gestate(
 ) -> Option<Animal> {
     let a = &fauna.animals[i];
     if a.reproduction.escrow.is_none() {
-        if a.reproduction.surplus_ticks < rule.hold_ticks() {
+        if !rule.hold_met(&a.reproduction) {
             return None;
         }
         fauna.animals[i].reproduction.escrow = Some(crate::Escrow::default());
@@ -1723,6 +1723,7 @@ fn gestate(
     let a = &mut fauna.animals[i];
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
+    a.reproduction.window.reset();
     let (site, species, pose, founder) = (a.site, a.species, a.pose, a.founder);
     let id = fauna.ledger.births;
     fauna.ledger.births += 1;
@@ -1791,7 +1792,7 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 /// and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
 /// no refractory, and the surplus keeps standing for the next tick.
 fn lay(fauna: &mut Fauna, i: usize, flora: &Flora, sc: &SpeciesConfig, rule: &crate::Reproduction) {
-    if fauna.animals[i].reproduction.surplus_ticks < rule.hold_ticks() {
+    if !rule.hold_met(&fauna.animals[i].reproduction) {
         return;
     }
     // Not on a wall: a clutch goes on the litter the body is standing in.
@@ -1823,6 +1824,7 @@ fn lay(fauna: &mut Fauna, i: usize, flora: &Flora, sc: &SpeciesConfig, rule: &cr
     a.energy -= energy;
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
+    a.reproduction.window.reset();
     let laid_tick = fauna.tick;
     fauna.clutches.push(crate::Clutch {
         site,

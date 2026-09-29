@@ -98,7 +98,10 @@ use crate::Fauna;
 /// Schema 19 is **circadian rhythms** (WX4): [`crate::State`] gained `Asleep` and
 /// [`crate::FounderPhysiology`] its `active`, `sleep_upkeep` and `wake_hunger`: refused,
 /// not migrated.
-pub const SCHEMA: u32 = 19;
+/// Schema 20: breeding eligibility is a share of the last hold — `ReproductionState`
+/// carries its `SurplusWindow` and `eligible_now`, `Reproduction` its `surplus_share`
+/// (`design/handoffs/voxel-audit-round-2026-09-28.md` §3). Refused, not migrated.
+pub const SCHEMA: u32 = 20;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

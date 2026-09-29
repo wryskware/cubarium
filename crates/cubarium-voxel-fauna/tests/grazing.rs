@@ -414,7 +414,8 @@ fn two_births_by_one_parent_are_at_least_the_interval_apart() {
     }
     assert!(births.len() >= 2, "two births in the window: {births:?}");
     let gap = u64::from(births[1] - births[0]);
-    let least = rule.interval_ticks() + rule.hold_ticks() + rule.gestation_ticks() - 1;
+    // The hold is met at `surplus_share` of it (package: audit round 2026-09-28 §3).
+    let least = rule.interval_ticks() + rule.hold_required() + rule.gestation_ticks() - 1;
     assert!(
         gap >= least,
         "births {births:?} are {gap} ticks apart, under {least}"

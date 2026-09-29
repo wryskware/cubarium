@@ -217,6 +217,15 @@ fn no_birth_before_the_surplus_has_stood_for_the_hold() {
         "the fixture is eligible from the first tick: {a:?}"
     );
 
+    // The surplus must have stood for `surplus_share` of the hold (80 %: a short trip is
+    // not a reset, audit round 2026-09-28 §3); unbroken, that is 16 of these 20 ticks.
+    let hold = fauna
+        .config()
+        .founder(Founder::Browser)
+        .core
+        .reproduction
+        .hold_required();
+    assert_eq!(hold, 16);
     for tick in 1..hold {
         fauna.step(&world, &mut flora);
         let a = *fauna.view().animal(id).expect("alive");
