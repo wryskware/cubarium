@@ -73,6 +73,9 @@ pub struct LiveSpec {
     /// The ecology every world is founded under (training only; defaults: the shipped
     /// world).
     pub ecology: EcologyParams,
+    /// The world every training world is founded from: a host file's `[world]`
+    /// (`--world`, e.g. the desktop terrarium), or the still `small` preset when `None`.
+    pub world: Option<cubarium_voxel::Config>,
 }
 
 /// One lineage's side of a generation.
@@ -171,7 +174,7 @@ pub fn ascend(
 }
 
 fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> LiveWorld {
-    let cfg = world::training_config();
+    let cfg = spec.world.clone().unwrap_or_else(world::training_config);
     let ecology = spec.ecology.clone();
     let (mut sim, info) = world::found_world(
         &cfg,

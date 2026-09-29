@@ -84,7 +84,7 @@ pub use body::{
     step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
-    Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
+    Actions, BlindForager, FEED_GATE, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, Response, Scripted, resolve_actions,
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
