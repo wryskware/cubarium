@@ -237,13 +237,18 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         // above is where the stand sits (a view); this is the clock. Twilight is smooth,
         // and it is always 1 with the day clock off.
         let life_daylight = world.life_daylight();
+        // WX3 round 2: plant maintenance follows the air, by a Q10 around the climate's mean.
+        let upkeep = upkeep_factor(
+            world.life_temperature_c(),
+            world.config().climate.temperature_c,
+        );
         let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
         let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
         let world = target.world();
         let substrate =
             cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads) });
         cubarium_voxel::voxel_phase!(Grow, {
-            grow(flora, world, &light, life_daylight, &moisture, &substrate, threads)
+            grow(flora, world, &light, life_daylight, upkeep, &moisture, &substrate, threads)
         });
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world) });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
@@ -2177,8 +2182,8 @@ fn split_shares(taken: Taken, wants: &[Want], shares: &mut Vec<Taken>) {
 pub const UPKEEP_Q10: f64 = 2.0;
 
 /// Multiplier on plant maintenance at `t_c` in a climate whose mean is `t_mean_c`.
-pub fn upkeep_factor(_t_c: f64, _t_mean_c: f64) -> f64 {
-    1.0
+pub fn upkeep_factor(t_c: f64, t_mean_c: f64) -> f64 {
+    UPKEEP_Q10.powf((t_c - t_mean_c) / 10.0)
 }
 
 fn grow(
@@ -2186,6 +2191,7 @@ fn grow(
     world: &World,
     light: &[f64],
     daylight: f64,
+    upkeep: f64,
     drink: &[Drink],
     substrate: &[Substrate],
     threads: usize,
@@ -2267,6 +2273,7 @@ fn grow(
                     &mut ground[slots[si] - base],
                     light[si],
                     daylight,
+                    upkeep,
                     drink[si],
                     substrate[si],
                     &mut books[k],
@@ -2390,6 +2397,7 @@ fn grow_stand(
     g: &mut Ground,
     light: f64,
     daylight: f64,
+    upkeep: f64,
     drink: Drink,
     substrate: Substrate,
     book: &mut Booked,
@@ -2450,7 +2458,8 @@ fn grow_stand(
     };
     let p_cap = sc.alpha * w0;
     let q_max = sc.reserve_cap * w0;
-    let m = sc.maintenance * w0 * DT;
+    // Maintenance alone follows the temperature; growth respiration does not.
+    let m = sc.maintenance * upkeep * w0 * DT;
     let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * DT);
     let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * DT);
     let d_q = (q_max - q0).max(0.0);
@@ -4029,8 +4038,8 @@ mod tests {
                 .collect();
             let substrate = feed(&mut flora, &world, &drink, 1);
             let (mut one, mut split) = (flora.clone(), flora.clone());
-            grow(&mut one, &world, &light, 1.0, &drink, &substrate, 1);
-            grow(&mut split, &world, &light, 1.0, &drink, &substrate, threads);
+            grow(&mut one, &world, &light, 1.0, 1.0, &drink, &substrate, 1);
+            grow(&mut split, &world, &light, 1.0, 1.0, &drink, &substrate, threads);
             assert!(one.stands.len() < n, "some stands died");
             assert_eq!(one.stands.len(), split.stands.len());
             for (a, b) in one.stands.iter().zip(&split.stands) {

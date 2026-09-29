@@ -1267,6 +1267,11 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
     let thr = vc.contest_threshold;
     // WX3: a vine's leaves earn only what the world's day lets them.
     let daylight = world.life_daylight();
+    // WX3 round 2: its upkeep follows the air like every plant's.
+    let upkeep_q = crate::step::upkeep_factor(
+        world.life_temperature_c(),
+        world.config().climate.temperature_c,
+    );
 
     // ---- 1. dormancy and the economy, per vine
     for vi in 0..cover.vines.len() {
@@ -1303,7 +1308,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
         ledger.fixed_in += income;
         ledger.light_in += e * income;
 
-        let upkeep = (vc.leaf_upkeep * a.leaf + vc.wood_upkeep * f64::from(a.faces)) * DT;
+        let upkeep = (vc.leaf_upkeep * a.leaf + vc.wood_upkeep * f64::from(a.faces)) * upkeep_q * DT;
         let paid = upkeep.min(v.reserve).max(0.0);
         v.reserve -= paid;
         book_respired(ledger, e, paid);
