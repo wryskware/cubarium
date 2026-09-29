@@ -1371,10 +1371,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     pr.ticks,
                     if pr.opening_shower {
                         format!(
-                            "opened with a {}-tick shower, drained in {} ticks ({})",
+                            "opened with a {}-tick shower, drained in {} ticks ({}), lake \
+                             at rest after {} more",
                             pr.shower_ticks,
                             pr.drain.ticks,
                             if pr.drain.converged { "converged" } else { "at the cap" },
+                            pr.lake_rest_ticks,
                         )
                     } else {
                         "no opening shower".to_string()

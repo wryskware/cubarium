@@ -554,6 +554,67 @@ is the commit messages). Round 3 left four problems. Fable's calls:
    - main (the merge point) arms: terrarium seed 2 and default seed 1.
 4. Report: round 3's table columns, plus the gap-off answer.
 
+## Brief WX3: night stops photosynthesis
+
+Wrysk: yes (2026-09-24). Started before WX1b merges, hedged ("if stuff changes its mainly
+tuning"). Base: the WX1 branch `worktree-agent-a59f66055b203890d` (merge it first), which
+has `World::life_daylight()` (0..1, smooth through twilight, always 1 with the clock off)
+and `World::day_phase()`.
+
+- **Rule:** every place where light becomes plant income (the light response in
+  `crates/cubarium-voxel-flora/src/step.rs`) is multiplied by `life_daylight()`.
+  - At night, income is 0 and maintenance and respiration continue.
+  - Views, diagnostics and site-viability estimates that are not income are left alone.
+    Name each call site you touched and each you left.
+- **Tests first:**
+  - a lit stand earns nothing at midnight;
+  - it earns exactly what it did before at full daylight;
+  - it earns half at `life_daylight` 0.5;
+  - `mode = "off"` changes nothing;
+  - the ledgers stay closed.
+- **Re-check:** 4 h census, heuristic founders, on default seeds 1–2 and terrarium seeds
+  1–2. Compare stands against the WX1b arms
+  (`/tmp/claude-1000/-home-wrysk-wryskware-cubarium/ab9e8bca-24b8-474b-ae31-074b4fca57a6/scratchpad/wx1c/*.csv`).
+  - Expect fewer stands.
+  - If any arm falls by more than 30 %, report the mechanism and propose a lever. Do
+    not tune; tuning is Wrysk's call with numbers.
+
+## Brief WX4: animal circadian rhythms
+
+Wrysk: "animals probably need to have circadians with restful and active phases"
+(2026-09-24). Same base and hedge as WX3. Fable's calls:
+
+- **Activity:** each founder species gets `active: Diurnal | Nocturnal | Crepuscular |
+  Always`. Browsers (frondgrazer) are Diurnal and shredders (littershredder) are
+  Nocturnal. They are awake when:
+  - Diurnal: `life_daylight > 0.3`;
+  - Nocturnal: `life_daylight < 0.3`;
+  - Crepuscular: within the twilight of either;
+  - with the clock off, everyone is always awake.
+- **Sleep:** a new `State::Asleep`.
+  - The controller is not consulted: no movement, no feeding. Upkeep is `sleep_upkeep`
+    (0.5) × basal.
+  - It sleeps where it stands. There is no shelter-seeking yet.
+  - It wakes when its phase comes, or at once if a wake rule fires.
+- **Hunger overrides sleep:** an animal whose reserve is below its hunger threshold
+  (the existing threshold the heuristics use) stays awake and forages.
+- **Brains:** none are needed now, because an asleep animal skips its controller. A
+  phase input for trained brains is the next training round's job; leave a `// WX4:`
+  note at the sensor manifest.
+- This is the same cheap-rest state the predation line needs for a predator's long rest
+  (`predation-and-flight-2026-09-23.md`). Keep it general: a rest state with an upkeep
+  factor, not something tied to night.
+- **Census:** an `asleep_<lineage>` column per founder lineage.
+- **Tests first:**
+  - a diurnal browser is asleep at midnight and pays 0.5 of its basal upkeep;
+  - the same browser is awake at noon;
+  - a starving browser stays awake at midnight;
+  - a nocturnal shredder is awake at midnight;
+  - with the clock off, no animal sleeps;
+  - the ledgers stay closed.
+- **Re-check:** a 4 h census on the same four arms as WX3. Report animal counts, births,
+  starvation and drowning against the WX1b arms. Don't tune.
+
 ## Integration notes
 
 - **WX2 checkpoint 1** (`1aac1abb`, branch `worktree-agent-a305b95986d3f88e4`): day/night,
