@@ -41,6 +41,16 @@
 //! cargo run --release -p cubarium --example voxel_census -- 1 load=runs/h6 threads=16
 //! ```
 //!
+//! Predation (P1, `design/predation-and-flight-2026-09-28.md`): a fresh world is founded
+//! with its lanternjaw **egg bank**; `eggbank=off` founds the same world without it (the
+//! control arm), and `introduce=lanternjaw:N` adds N adult lanternjaws where the prey
+//! live once the world is founded. The rows carry the predation columns at the end.
+//!
+//! ```text
+//! cargo run --release -p cubarium --example voxel_census -- 8 preset=small seed=1 heuristic
+//! cargo run --release -p cubarium --example voxel_census -- 8 preset=small seed=1 heuristic eggbank=off
+//! ```
+//!
 //! `gap=off` turns the climate's dry gap off on a `preset=` or `config=` arm.
 //! `--weather-log FILE` writes one CSV row per rain event that ends during the run (start
 //! and end tick, mode, cause, RH, °C and day phase at the start, seconds since the
@@ -173,11 +183,28 @@ fn main() {
         return;
     }
     let nofauna = args.iter().any(|a| a == "nofauna");
+    // `eggbank=off`: the predation control arm, the same world with no egg bank.
+    let egg_bank = !args.iter().any(|a| a == "eggbank=off");
     let founder_counts = || {
         if nofauna {
             [0; habitat::FOUNDER_COUNTS.len()]
-        } else {
+        } else if egg_bank {
             habitat::FOUNDER_COUNTS
+        } else {
+            habitat::NO_EGG_BANK
+        }
+    };
+    // `introduce=lanternjaw:N`: N adult lanternjaws where the prey live, after founding.
+    let introduce: usize = args
+        .iter()
+        .find_map(|a| a.strip_prefix("introduce=lanternjaw:"))
+        .map_or(0, |n| n.parse().expect("introduce=lanternjaw:N"));
+    let introduce_into = |world: &World, flora: &Flora, fauna: &mut Fauna| {
+        if introduce > 0 {
+            match habitat::introduce_lanternjaws(world, flora, fauna, introduce) {
+                Ok(ids) => eprintln!("introduced {} adult lanternjaws", ids.len()),
+                Err(why) => eprintln!("introduce=lanternjaw:{introduce} refused — {why}"),
+            }
         }
     };
     // `world=<file>` starts from a live host's world snapshot (terrain and water only), and
@@ -206,6 +233,7 @@ fn main() {
         } else {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
+        introduce_into(&world, &flora, &mut fauna);
         let mut senses = Senses::new();
         senses.settle(&world.view(), &flora.view());
         if world.config().closed_water_budget && !world.outlet_open() {
@@ -275,18 +303,25 @@ fn main() {
             if founded.accepted { "accepted" } else { "NOT accepted" },
         );
         eprintln!(
-            "seeded: stands={} logs={} litter_tiles={} founders={:?} animals={}",
+            "seeded: stands={} logs={} litter_tiles={} founders={:?} animals={} \
+             lanternjaw_eggs={}{}",
             seeded.stands,
             seeded.logs,
             seeded.litter_tiles,
             seeded.founders,
-            seeded.animals()
+            seeded.animals(),
+            seeded.founding_eggs,
+            seeded
+                .founding_bank_refused
+                .as_ref()
+                .map_or(String::new(), |why| format!(" (no egg bank: {why})")),
         );
         if heuristic {
             eprintln!("founders: the observation-only heuristic (control)");
         } else {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
+        introduce_into(&world, &flora, &mut fauna);
         let mut senses = Senses::new();
         senses.settle(&world.view(), &flora.view());
         let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
@@ -352,6 +387,7 @@ fn main() {
     } else {
         install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
     }
+    introduce_into(&world, &flora, &mut fauna);
 
     // The live founders sense a settled litter field; the ambient run settles it the
     // same way before the first tick.
@@ -867,6 +903,23 @@ fn print_header() {
     for f in Founder::ALL {
         header.push_str(&format!(",asleep_{}", f.name()));
     }
+    // Predation (P1), per lineage: strikes, hits and dodges by the striker's lineage;
+    // wound units healed; deaths killed (by any lineage); bodies in a satiated rest and
+    // wounded now; carrion eaten; eggs laid and hatched — all cumulative but the two
+    // "now" counts. Then kills by killer and prey lineage, and the world's carrion
+    // stock, carcass records, dormant eggs, eggs died and eggs buried.
+    for f in Founder::ALL {
+        header.push_str(&format!(
+            ",strikes_{0},hits_{0},dodges_{0},healed_{0},killed_{0},satiated_{0},wounded_{0},carrion_eaten_{0},eggs_laid_{0},eggs_hatched_{0}",
+            f.name()
+        ));
+    }
+    for killer in Founder::ALL {
+        for prey in Founder::ALL {
+            header.push_str(&format!(",kills_{}_{}", killer.name(), prey.name()));
+        }
+    }
+    header.push_str(",carrion,carcasses,dormant_eggs,eggs_died,eggs_buried");
     println!("{header}");
 }
 
@@ -1023,5 +1076,45 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
             .count();
         row.push(asleep.to_string());
     }
+    let l = a.ledger;
+    for founder in Founder::ALL {
+        let i = founder.index();
+        let killed: u64 = Founder::ALL
+            .iter()
+            .map(|&by| l.departed_founder(founder, Departure::Killed { by }))
+            .sum();
+        let of = |p: &dyn Fn(&cubarium_voxel_fauna::Animal) -> bool| {
+            a.animals
+                .iter()
+                .filter(|an| an.founder == Some(founder) && p(an))
+                .count()
+        };
+        row.push(l.strikes_by_founder[i].to_string());
+        row.push(l.hits_by_founder[i].to_string());
+        row.push(l.dodges_by_founder[i].to_string());
+        row.push(format!("{:.4}", l.healed_by_founder[i]));
+        row.push(killed.to_string());
+        row.push(of(&|an| an.rest == Some(cubarium_voxel_fauna::Rest::Satiated)).to_string());
+        row.push(of(&|an| an.wound > 0.0).to_string());
+        row.push(format!("{:.6}", l.eaten_carrion_by_founder[i]));
+        row.push(l.eggs_laid_by_founder[i].to_string());
+        row.push(l.eggs_hatched_by_founder[i].to_string());
+    }
+    for killer in Founder::ALL {
+        for prey in Founder::ALL {
+            row.push(
+                l.departed_founder(prey, Departure::Killed { by: killer })
+                    .to_string(),
+            );
+        }
+    }
+    let carrion: f64 = f.ground.iter().map(|g| g.carrion).sum();
+    let carcasses = f.ground.iter().filter(|g| g.carcass.is_some()).count();
+    let dormant = a.clutches.iter().filter(|c| c.dormancy.is_some()).count();
+    row.push(format!("{carrion:.6}"));
+    row.push(carcasses.to_string());
+    row.push(dormant.to_string());
+    row.push(l.eggs_died.to_string());
+    row.push(l.eggs_buried.to_string());
     println!("{}", row.join(","));
 }

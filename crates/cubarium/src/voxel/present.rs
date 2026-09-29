@@ -481,6 +481,9 @@ impl VoxelPresenter {
                 self.animals.rebuild(view, fauna);
             }
         }
+        if let Some(fauna) = fauna {
+            self.animals.stamp_carcasses(view, &flora, fauna.config);
+        }
         let plants = !self.stands.is_empty();
         let beasts = !self.animals.is_empty();
 

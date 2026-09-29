@@ -96,6 +96,8 @@ const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 cha
                         f X Z bloomcrown|umbrellafrond [wood] seed a stand, \
                         c X Z clear a stand, \
                         g X Z frondgrazer [body] introduce an animal, \
+                        e [N] bury N lanternjaw egg clutches where prey live, \
+                        j [N] introduce N adult lanternjaws where prey live, \
                         w PATH save the terrain only, \
                         l PATH load a terrain only (refused once anything is alive), \
                         i X Y Z inspect, o outlet, q quit";
@@ -971,7 +973,7 @@ fn load_or_create_world(
                                     Fauna::new(FaunaConfig::default()),
                                 )
                             },
-                            habitat::FOUNDER_COUNTS,
+                            args.founder_counts(),
                             |s: &habitat::Seeded| s.acceptance.accepted,
                         );
                         let rejected = founded.lake_rejected + founded.habitat_rejected;
@@ -1285,7 +1287,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                             &mut flora,
                             &mut fauna,
                             &pre,
-                            habitat::FOUNDER_COUNTS,
+                            args.founder_counts(),
                         )
                     });
                     (flora, fauna, seeded)
@@ -1356,6 +1358,14 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     seeded.founders[Founder::Blind.index()],
                     seeded.founders[Founder::Browser.index()],
                 );
+                match &seeded.founding_bank_refused {
+                    Some(why) => eprintln!("cubarium voxel: no lanternjaw egg bank — {why}"),
+                    None => eprintln!(
+                        "cubarium voxel: {} lanternjaw eggs buried where the prey live{}",
+                        seeded.founding_eggs,
+                        if args.no_egg_bank { " (--no-egg-bank)" } else { "" },
+                    ),
+                }
                 for founder in Founder::ALL {
                     let short = seeded.shortfall[founder.index()];
                     if short > 0 {
@@ -1401,6 +1411,22 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 }
             }
             install_founder_controllers(&mut fauna, &drivers)?;
+            // `--introduce lanternjaw:N` (predation §2.9): adults where the prey live, or
+            // the reason there are none.
+            for (founder, n) in args.introductions()? {
+                anyhow::ensure!(
+                    founder == Founder::Lanternjaw,
+                    "--introduce takes lanternjaw:N; the {} lineage is founded by the habitat",
+                    founder.name()
+                );
+                match habitat::introduce_lanternjaws(&world, &flora, &mut fauna, n) {
+                    Ok(ids) => eprintln!(
+                        "cubarium voxel: introduced {} adult lanternjaws where the prey live",
+                        ids.len()
+                    ),
+                    Err(why) => eprintln!("cubarium voxel: --introduce lanternjaw:{n} refused — {why}"),
+                }
+            }
             // Say what is actually driving each lineage, every run: the default is now a
             // trained centre, and a trained animal and a reflex animal are told apart
             // from outside only by being told apart here.
@@ -1831,6 +1857,10 @@ pub fn install_founders_with(fauna: &mut Fauna, policies: &[(Founder, PathBuf)])
             );
             drivers.push((founder, file.driver().map_err(anyhow::Error::msg)?));
             sources.push(format!("the policy file {}", path.display()));
+        } else if !BUILT_IN_POLICIES.iter().any(|(f, _, _)| *f == founder) {
+            // No trained centre exists for this lineage (the lanternjaw, until P2): it
+            // keeps the heuristic the seeder registered, and nothing is refused.
+            continue;
         } else if let Some(driver) = built_in_or_fallback(founder) {
             drivers.push((founder, driver));
             sources.push("the built-in centre".to_string());
@@ -1912,6 +1942,12 @@ fn founder_recipes(args: &Voxel) -> Result<Vec<FounderRecipe>> {
                 founder,
                 driver: None,
                 source: "--founder-heuristic, the disclosed control".to_string(),
+            });
+        } else if !BUILT_IN_POLICIES.iter().any(|(f, _, _)| *f == founder) {
+            out.push(FounderRecipe {
+                founder,
+                driver: None,
+                source: "no trained centre exists yet (predation P2)".to_string(),
             });
         } else {
             let name = BUILT_IN_POLICIES
@@ -2959,6 +2995,34 @@ impl Control {
                     eprintln!("cubarium voxel: no stand to clear at ({x}, {z})");
                 }
             }
+            // Development controls (predation §2.9): a clutch of lanternjaw eggs, or
+            // adult lanternjaws, where the prey live — refused with the reason when none do.
+            "e" | "eggs" | "j" | "lanternjaw" => {
+                let n = match rest.first().map(|t| t.parse::<usize>()) {
+                    None => 1,
+                    Some(Ok(n)) if n > 0 => n,
+                    _ => {
+                        eprintln!("cubarium voxel: `{verb} [N]` wants a positive count");
+                        return;
+                    }
+                };
+                if matches!(verb, "e" | "eggs") {
+                    match habitat::bury_founding_clutches(world, flora, fauna, n) {
+                        Ok(eggs) => eprintln!(
+                            "cubarium voxel: buried {eggs} lanternjaw eggs where the prey live"
+                        ),
+                        Err(why) => eprintln!("cubarium voxel: no clutch buried — {why}"),
+                    }
+                } else {
+                    match habitat::introduce_lanternjaws(world, flora, fauna, n) {
+                        Ok(ids) => eprintln!(
+                            "cubarium voxel: introduced {} adult lanternjaws (ids {ids:?})",
+                            ids.len()
+                        ),
+                        Err(why) => eprintln!("cubarium voxel: no lanternjaw introduced — {why}"),
+                    }
+                }
+            }
             "g" | "grazer" => {
                 let usage = "g X Z frondgrazer [body]";
                 let Some((x, z)) = column(world, usage, &rest) else {
@@ -3693,6 +3757,8 @@ mod tests {
             policy: None,
             founder_policy: Vec::new(),
             founder_heuristic: Vec::new(),
+            introduce: Vec::new(),
+            no_egg_bank: false,
             arena_seed: 1,
             arena_diagnostics: false,
             empty: true, // about loading and seeds, not founding a habitat
@@ -4064,9 +4130,13 @@ mod tests {
     fn the_built_in_centres_drive_their_own_lineage_by_default() {
         use clap::Parser;
 
+        // A lineage with no built-in centre (the lanternjaw, until P2) runs its heuristic.
+        let has_centre =
+            |founder: Founder| BUILT_IN_POLICIES.iter().any(|(f, _, _)| *f == founder);
         let validates: Vec<bool> = Founder::ALL
             .iter()
             .map(|&founder| match built_in_driver(founder) {
+                _ if !has_centre(founder) => false,
                 Ok(driver) => {
                     assert!(
                         driver.name().contains("gru"),
@@ -4101,6 +4171,10 @@ mod tests {
         let recipes = founder_recipes(&voxel(&[])).expect("the default run");
         assert_eq!(recipes.len(), Founder::ALL.len());
         for recipe in &recipes {
+            if !has_centre(recipe.founder) {
+                assert!(recipe.driver.is_none(), "{}", recipe.source);
+                continue;
+            }
             assert_eq!(
                 recipe.driver.is_some(),
                 validates[recipe.founder.index()],
@@ -4481,6 +4555,8 @@ mod tests {
             policy: None,
             founder_policy: Vec::new(),
             founder_heuristic: Vec::new(),
+            introduce: Vec::new(),
+            no_egg_bank: false,
             arena_seed: 1,
             arena_diagnostics: false,
             empty: true, // about loading and seeds, not founding a habitat
@@ -4534,6 +4610,8 @@ mod tests {
             policy: None,
             founder_policy: Vec::new(),
             founder_heuristic: Vec::new(),
+            introduce: Vec::new(),
+            no_egg_bank: false,
             arena_seed: 1,
             arena_diagnostics: false,
             empty: true, // about loading and seeds, not founding a habitat

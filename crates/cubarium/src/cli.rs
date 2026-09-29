@@ -137,6 +137,16 @@ pub struct Voxel {
     /// disclosed control for the trained default, not a second default.
     #[arg(long, value_name = "FOUNDER|all", conflicts_with = "arena")]
     pub founder_heuristic: Vec<String>,
+    /// Development control (`design/predation-and-flight-2026-09-28.md` §2.9): put `N`
+    /// adult lanternjaws with full stores into the **ambient** run's world, on faces
+    /// where their prey live: `--introduce lanternjaw:4`. Repeatable. Refused, with the
+    /// reason, when no prey component exists.
+    #[arg(long, value_name = "LINEAGE:N", conflicts_with = "arena")]
+    pub introduce: Vec<String>,
+    /// Found a fresh world **without** its lanternjaw egg bank (§2.9): the predation
+    /// measurement's control arm.
+    #[arg(long, conflicts_with = "arena")]
+    pub no_egg_bank: bool,
     /// Frozen arena layout seed. It changes the prepared layout, never the sensory
     /// schema or controller interface.
     #[arg(long, default_value_t = 1, requires = "arena")]
@@ -304,6 +314,34 @@ impl Voxel {
             out.push((founder, PathBuf::from(path.trim())));
         }
         Ok(out)
+    }
+
+    /// The parsed `--introduce` list, `(lineage, count)` per flag in order. An unknown
+    /// lineage, a missing `:`, or a count that is not a whole number is refused by name.
+    pub fn introductions(&self) -> anyhow::Result<Vec<(Founder, usize)>> {
+        let mut out = Vec::new();
+        for spec in &self.introduce {
+            let Some((name, n)) = spec.split_once(':') else {
+                anyhow::bail!("--introduce takes `<lineage>:<N>`, not `{spec}` (e.g. lanternjaw:2)");
+            };
+            let founder = cubarium_search::es::voxel::parse_founder(name)
+                .map_err(|e| anyhow::anyhow!("--introduce `{spec}`: {e}"))?;
+            let n: usize = n.trim().parse().map_err(|_| {
+                anyhow::anyhow!("--introduce `{spec}`: the count is not a whole number")
+            })?;
+            out.push((founder, n));
+        }
+        Ok(out)
+    }
+
+    /// The founder counts this run founds a fresh world with: the habitat's own, or the
+    /// same world with no egg bank (`--no-egg-bank`).
+    pub fn founder_counts(&self) -> [usize; Founder::COUNT] {
+        if self.no_egg_bank {
+            crate::voxel::habitat::NO_EGG_BANK
+        } else {
+            crate::voxel::habitat::FOUNDER_COUNTS
+        }
     }
 
     /// The parsed `--founder-heuristic` list: the lineages this run puts back on their

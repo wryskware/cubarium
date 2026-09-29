@@ -141,6 +141,9 @@ pub fn animal(founder: Founder, material: u8, band: u8, accent: bool, cropping: 
         Founder::Browser => (0xA2_2A4A, 0xFF_8A6E, 0x5F_F0FF),
         // Littershredder: a gold segmented back, magenta feelers (dossier D4's pixel).
         Founder::Blind => (0xB0_6A18, 0xFF_D860, SENSE),
+        // Lanternjaw (interim, stage 1: its body plan is open): a dark teal carapace, an
+        // ember jaw. No model is baked for it, so this serves a future bake only.
+        Founder::Lanternjaw => (0x14_2A2E, 0x30_5A58, 0xFF_5A3C),
     };
     if accent {
         let c = if cropping { CROPPING_FLASH } else { eye };

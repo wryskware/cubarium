@@ -33,7 +33,7 @@
 //! is submerged under the water's blend.
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_fauna::{Animal, DT, FaunaConfig, FaunaView, Founder, Species, State};
+use cubarium_voxel_fauna::{Animal, DT, FaunaConfig, FaunaView, Founder, Species, State, StrikePhase};
 use rustc_hash::FxHashMap;
 
 use crate::present::srgb_linear;
@@ -88,6 +88,20 @@ pub const FRONDGRAZER_EYE_SRGB: u32 = 0x00D0_F4FF;
 /// Interaction accents:
 pub const ANIMAL_CROPPING_FLASH_SRGB: u32 = 0x00FF_9B50;
 pub const ANIMAL_STARVING_BODY_SRGB: u32 = 0x0028_2834;
+
+/// Lanternjaw (ambush carnivore) interim palette — stage-1 looks, no taste call; its body
+/// plan is open (`design/predation-and-flight-2026-09-28.md` §5): a dark teal box, an ember
+/// jaw, and the lit lure's one warm emissive voxel at the tail tip.
+pub const LANTERNJAW_BODY_SRGB: u32 = 0x0014_2A2E;
+pub const LANTERNJAW_BACK_SRGB: u32 = 0x0030_5A58;
+pub const LANTERNJAW_JAW_SRGB: u32 = 0x00FF_5A3C;
+pub const LANTERNJAW_LURE_SRGB: u32 = 0x00FF_E27A;
+/// A carcass is its body's colour at this brightness, lying flat.
+pub const CARCASS_DARKEN: f32 = 0.35;
+/// Remains (below 30 % of the body, §2.5): one small pale glyph.
+pub const REMAINS_SRGB: u32 = 0x00D8_D0C0;
+/// A wounded body takes the starving tint at half strength (the brief's item 11).
+pub const WOUNDED_TINT: f32 = 0.5 * STARVING_TINT;
 
 /// How far, in voxels, the interim block reaches from the animal's own column: one, in `x`
 /// and in `z`, for the 2×1×2 body the brief asks for. The cell it stands in is the void
@@ -167,21 +181,20 @@ struct AnimalKey {
     accent: bool,
     starving: bool,
     cropping: bool,
+    wounded: bool,
 }
 
 impl AnimalKey {
     const MATERIALS: usize = model::PALETTE.len();
-    const COUNT: usize = 2 * Self::MATERIALS * colours::BANDS as usize * 8;
+    const COUNT: usize = Founder::COUNT * Self::MATERIALS * colours::BANDS as usize * 16;
 
     fn index(self) -> usize {
-        let founder = match self.founder {
-            Founder::Blind => 0,
-            Founder::Browser => 1,
-        };
+        let founder = self.founder.index();
         let material = usize::from(self.material).min(Self::MATERIALS - 1);
         let mut i = founder * Self::MATERIALS + material;
         i = i * colours::BANDS as usize + usize::from(self.band.min(colours::BANDS - 1));
-        i * 8
+        i * 16
+            + usize::from(self.wounded) * 8
             + usize::from(self.accent) * 4
             + usize::from(self.starving) * 2
             + usize::from(self.cropping)
@@ -194,9 +207,28 @@ pub fn is_starving(animal: &Animal) -> bool {
     animal.reserve <= 0.001 && animal.body <= 0.015
 }
 
+/// Whether an animal shows as wounded (predation §2.4): any wound it has not healed.
+pub fn is_wounded(animal: &Animal) -> bool {
+    animal.wound > 0.0
+}
+
 /// One animal's style this frame: distinct palettes for founders, cropping flash,
-/// starvation desaturation, or interim fallback.
+/// starvation desaturation, or interim fallback. A wounded body that is not starving takes
+/// the starving tint at half strength.
 pub fn animal_style(animal: &Animal) -> Style {
+    let style = animal_style_unwounded(animal);
+    if is_wounded(animal) && !is_starving(animal) {
+        Style {
+            wood: wilted(style.wood, WOUNDED_TINT),
+            crown: wilted(style.crown, WOUNDED_TINT),
+            heart: style.heart,
+        }
+    } else {
+        style
+    }
+}
+
+fn animal_style_unwounded(animal: &Animal) -> Style {
     let Some(founder) = animal.founder else {
         return interim_style(animal.species);
     };
@@ -229,6 +261,28 @@ pub fn animal_style(animal: &Animal) -> Style {
                 heart: srgb_linear(accent),
             }
         }
+        Founder::Lanternjaw => {
+            let body = if is_starving {
+                ANIMAL_STARVING_BODY_SRGB
+            } else {
+                LANTERNJAW_BODY_SRGB
+            };
+            let back = if is_starving {
+                0x0038_3C4A
+            } else {
+                LANTERNJAW_BACK_SRGB
+            };
+            let jaw = if is_cropping {
+                ANIMAL_CROPPING_FLASH_SRGB
+            } else {
+                LANTERNJAW_JAW_SRGB
+            };
+            Style {
+                wood: srgb_linear(body),
+                crown: srgb_linear(back),
+                heart: srgb_linear(jaw),
+            }
+        }
         Founder::Browser => {
             let body = if is_starving {
                 ANIMAL_STARVING_BODY_SRGB
@@ -254,6 +308,15 @@ pub fn animal_style(animal: &Animal) -> Style {
             }
         }
     }
+}
+
+/// A lineage's body colour in linear light, for a carcass.
+fn animal_colour(founder: Founder) -> [f32; 3] {
+    srgb_linear(match founder {
+        Founder::Blind => LITTERSHREDDER_BODY_SRGB,
+        Founder::Browser => FRONDGRAZER_BODY_SRGB,
+        Founder::Lanternjaw => LANTERNJAW_BODY_SRGB,
+    })
 }
 
 /// The cells one animal occupies, with the part each holds.
@@ -330,6 +393,52 @@ pub fn cells_of_local(
     let mut out = Vec::new();
 
     match founder {
+        Founder::Lanternjaw => {
+            // Interim (stage 1, its body plan open): a box of its ladder size, the front
+            // column the jaw. The strike is a pose offset: a crouch (one row lower) in the
+            // windup, a stretch (one cell longer) in the lunge.
+            let (length, height) = match animal.strike.map(|s| s.phase) {
+                Some(StrikePhase::Windup) => (length, height.saturating_sub(1).max(1)),
+                Some(StrikePhase::Lunge) => (length + 1, height),
+                _ => (length, height),
+            };
+            let mut local = Vec::new();
+            for along in 0..length {
+                for across in 0..width {
+                    let a = (along - length / 2) as i32;
+                    let c = (across - width / 2) as i32;
+                    let front = along + 1 == length;
+                    for row in 0..height {
+                        let top = row + 1 == height;
+                        local.push((
+                            sleep::Local {
+                                a,
+                                c,
+                                row: row as i32,
+                                bump: top && !front,
+                            },
+                            if front && top {
+                                AnimalPart::Head {
+                                    style,
+                                    facing_right,
+                                }
+                            } else {
+                                AnimalPart::Body {
+                                    style,
+                                    head: front,
+                                    facing_right,
+                                }
+                            },
+                        ));
+                    }
+                }
+            }
+            place_local(&mut out, &local, |a, c, row| Cell {
+                x: anchor_x + i64::from(a) * step_x + i64::from(c) * side_x,
+                y: site.y + 1 + row as u32,
+                z: (anchor_z + i64::from(a) * step_z + i64::from(c) * side_z) as u32,
+            });
+        }
         Founder::Blind if animal.mobility.climb.is_some() => {
             // On a wall (package mobility, interim): the crawler stood on end in the air
             // column beside the face, head up the face or down it.
@@ -708,6 +817,9 @@ impl Animals {
                 }
                 self.styles.push(animal_style(animal));
                 let cells = cells_of_local(animal, fauna.config, style, c.voxel_m);
+                if animal.founder == Some(Founder::Lanternjaw) {
+                    self.stamp_lure(view, animal, fauna.config, c.voxel_m);
+                }
                 let local: Option<Vec<sleep::Local>> =
                     weight.and_then(|_| cells.iter().map(|(_, _, l)| *l).collect());
                 match (weight, local) {
@@ -822,6 +934,7 @@ impl Animals {
         };
         let starving = is_starving(animal);
         let cropping = animal.state == State::Cropping;
+        let wounded = is_wounded(animal) && !starving;
         let Some(founder) = animal.founder else {
             return true;
         };
@@ -839,6 +952,7 @@ impl Animals {
                 accent: m.tag == Tag::Accent,
                 starving,
                 cropping,
+                wounded,
             };
             let Some(style) = self.model_style(key) else {
                 ok = false;
@@ -898,6 +1012,8 @@ impl Animals {
             let c = srgb_linear(rgb);
             if key.starving {
                 wilted(c, STARVING_TINT)
+            } else if key.wounded {
+                wilted(c, WOUNDED_TINT)
             } else {
                 c
             }
@@ -918,6 +1034,133 @@ impl Animals {
         }
         self.model_styles[index] = style;
         Some(style)
+    }
+
+    /// A style of its own for one flat colour, with its emission when the emissive tier is
+    /// on and `emits`. `None` when the styles would alias.
+    fn flat_style(&mut self, srgb: [f32; 3], emits: bool) -> Option<u16> {
+        let style = u16::try_from(self.styles.len())
+            .ok()
+            .filter(|&s| s != u16::MAX)?;
+        self.styles.push(Style {
+            wood: srgb,
+            crown: srgb,
+            heart: srgb,
+        });
+        if emits && self.emission {
+            let s = usize::from(style);
+            self.emits.resize(s + 1, None);
+            self.emits[s] = Some(srgb);
+        }
+        Some(style)
+    }
+
+    /// **The lit lure** (predation §2.2, interim): one emissive voxel at a lanternjaw's
+    /// tail tip, a row over its back, while its lure is held and it is awake.
+    fn stamp_lure(&mut self, view: &VoxelView<'_>, animal: &Animal, config: &FaunaConfig, voxel_m: f64) {
+        if !(animal.founder_state.lure > 0.0) || animal.state == State::Asleep {
+            return;
+        }
+        let Some(founder) = animal.founder else { return };
+        if !(voxel_m > 0.0) || !animal.pose.is_finite() {
+            return;
+        }
+        let body = config.founder(founder).body_at(animal.body);
+        let (fx, fz) = animal.pose.forward();
+        let back = 0.5 * body.length_m;
+        let x = ((animal.pose.x - back * fx) / voxel_m).floor() as i64;
+        let z = ((animal.pose.z - back * fz) / voxel_m).floor();
+        if z < 0.0 {
+            return;
+        }
+        let rows = ((body.height_m / voxel_m).ceil() as u32).max(1);
+        let Some(style) = self.flat_style(srgb_linear(LANTERNJAW_LURE_SRGB), true) else {
+            return;
+        };
+        let cell = Cell {
+            x,
+            y: animal.sense_layer(voxel_m) + 1 + rows,
+            z: z as u32,
+        };
+        self.place(view, cell, AnimalPart::Model(style));
+    }
+
+    /// **Carcasses** (predation §2.5, interim): every carcass record on the ground drawn
+    /// as its dead animal's box lying flat and darkened, or — below 30 % of the body it
+    /// died with — as one small pale glyph. Call after [`Animals::rebuild`] or
+    /// [`Animals::rebuild_with`]; a living body already on a cell keeps it.
+    pub fn stamp_carcasses(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: &cubarium_voxel_flora::FloraView<'_>,
+        config: &FaunaConfig,
+    ) {
+        let v = view.config.voxel_m;
+        if !(v > 0.0) {
+            return;
+        }
+        for g in flora.ground.iter() {
+            let Some(carcass) = g.carcass else { continue };
+            let Some(&founder) = Founder::ALL.get(usize::from(carcass.lineage)) else {
+                continue;
+            };
+            let phys = config.founder(founder);
+            let y = g.site.y + 1;
+            let (cx, cz) = (i64::from(g.site.x), i64::from(g.site.z));
+            if carcass.remains(g.carrion) {
+                let Some(style) = self.flat_style(srgb_linear(REMAINS_SRGB), false) else {
+                    return;
+                };
+                self.place_if_empty(view, Cell { x: cx, y, z: g.site.z }, AnimalPart::Model(style));
+                continue;
+            }
+            // The body it died with, sized from its organic matter at the lineage's reserve
+            // cap: structure + reserve ≈ body · (1 + reserve_cap).
+            let body_organic = (carcass.organic / (1.0 + phys.core.reserve_cap))
+                .clamp(phys.core.body_min, phys.core.body_max);
+            let body = phys.body_at(body_organic);
+            let length = ((body.length_m / v).ceil() as i64).max(1);
+            let width = ((body.width_m / v).ceil() as i64).max(1);
+            let (fx, fz) = (carcass.heading_rad.sin(), carcass.heading_rad.cos());
+            let (step_x, step_z) = if fx.abs() >= fz.abs() {
+                (if fx >= 0.0 { 1 } else { -1 }, 0)
+            } else {
+                (0, if fz >= 0.0 { 1 } else { -1 })
+            };
+            let (side_x, side_z) = (-step_z, step_x);
+            let base = animal_colour(founder);
+            let dark = [
+                base[0] * CARCASS_DARKEN,
+                base[1] * CARCASS_DARKEN,
+                base[2] * CARCASS_DARKEN,
+            ];
+            let Some(style) = self.flat_style(dark, false) else {
+                return;
+            };
+            for along in 0..length {
+                for across in 0..width {
+                    let a = along - length / 2;
+                    let c = across - width / 2;
+                    let z = cz + a * step_z + c * side_z;
+                    if z < 0 {
+                        continue;
+                    }
+                    let cell = Cell {
+                        x: cx + a * step_x + c * side_x,
+                        y,
+                        z: z as u32,
+                    };
+                    self.place_if_empty(view, cell, AnimalPart::Model(style));
+                }
+            }
+        }
+    }
+
+    /// [`Animals::place`] on a cell no body holds.
+    fn place_if_empty(&mut self, view: &VoxelView<'_>, cell: Cell, part: AnimalPart) {
+        if self.at(cell.x, i64::from(cell.y), cell.z) == AnimalPart::None {
+            self.place(view, cell, part);
+        }
     }
 
     /// Write one cell, unless it is outside the world or inside solid terrain: a body does

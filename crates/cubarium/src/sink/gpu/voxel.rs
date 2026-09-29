@@ -852,6 +852,7 @@ impl Packer {
                 self.animals.rebuild(view, Some(fauna));
             }
         }
+        self.animals.stamp_carcasses(view, &flora, fauna.config);
         self.vines.clear();
         if self.vine_tiles {
             let draws = match &self.cover_override {
