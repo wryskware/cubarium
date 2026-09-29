@@ -416,7 +416,12 @@ fn fast_afternoon() -> (World, u64) {
 fn afternoon(threshold: u32, adult_m: Option<f64>) -> (Option<u64>, u64, Fauna) {
     let (mut world, dusk) = fast_afternoon();
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    // Every egg past its gate hatches at this dusk: the per-dusk draw is not what this
+    // case is about.
+    let mut fauna = Fauna::new(FaunaConfig {
+        hatch_chance_per_dusk: 1.0,
+        ..FaunaConfig::default()
+    });
     bury(&mut fauna, &world, EGG_SITE, 1);
     fauna
         .clutches

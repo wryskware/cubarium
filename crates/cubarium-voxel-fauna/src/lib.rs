@@ -1318,6 +1318,10 @@ pub struct FaunaConfig {
     /// [`Founder`] marker runs its founder's numbers instead of its placeholder
     /// species'; [`effective_config`] is the one lookup every rule uses.
     pub founders: [FounderPhysiology; Founder::COUNT],
+    /// The chance a dormant egg past its footfall gate hatches at one dusk
+    /// ([`hatch_draw`]; default [`HATCH_CHANCE_PER_DUSK`], a third: the bank bet-hedges
+    /// across nights).
+    pub hatch_chance_per_dusk: f64,
 }
 
 impl Default for FaunaConfig {
@@ -1329,6 +1333,7 @@ impl Default for FaunaConfig {
                 FounderPhysiology::frozen(Founder::Browser),
                 FounderPhysiology::frozen(Founder::Lanternjaw),
             ],
+            hatch_chance_per_dusk: HATCH_CHANCE_PER_DUSK,
         }
     }
 }
@@ -1352,6 +1357,14 @@ impl FaunaConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if !(self.hatch_chance_per_dusk.is_finite()
+            && (0.0..=1.0).contains(&self.hatch_chance_per_dusk))
+        {
+            return Err(format!(
+                "hatch_chance_per_dusk must be within 0..=1, not {}",
+                self.hatch_chance_per_dusk
+            ));
+        }
         for s in Species::ALL {
             self.species(s).validate(s.name())?;
         }

@@ -2717,7 +2717,12 @@ fn dormant_eggs(
         // The threshold gate, then the per-dusk draw (bet-hedging across dusks).
         if dusk
             && crate::egg_hatches(d.threshold, d.footfall(tick, day_ticks), dusk, nearest_adult)
-            && crate::hatch_draw(view.config.seed, d.serial, tick)
+            && crate::hatch_draw(
+                fauna.config.hatch_chance_per_dusk,
+                view.config.seed,
+                d.serial,
+                tick,
+            )
         {
             fauna.clutches.remove(k);
             let young = hatchling(fauna, &c, phys.core.body_min, c.organic, c.mineral, c.energy, v);

@@ -202,12 +202,13 @@ pub const HATCH_CHANCE_PER_DUSK: f64 = 1.0 / 3.0;
 /// Stream key for the per-dusk hatch draw.
 const DOMAIN_HATCH: u64 = 0x4A7C4;
 
-/// **The per-dusk hatch draw**, beside [`egg_hatches`]'s gate: keyed by the world seed, the
+/// **The per-dusk hatch draw**, beside [`egg_hatches`]'s gate: true with `chance` (the
+/// config's [`crate::FaunaConfig::hatch_chance_per_dusk`]), keyed by the world seed, the
 /// egg's own serial ([`Dormancy::serial`]) and the dusk's tick, so each egg draws once at
 /// each dusk and the same egg at the same dusk always draws the same.
-pub fn hatch_draw(seed: u64, egg_serial: u64, dusk_tick: u64) -> bool {
+pub fn hatch_draw(chance: f64, seed: u64, egg_serial: u64, dusk_tick: u64) -> bool {
     let mut rng = crate::step::Rng::keyed(DOMAIN_HATCH, seed, egg_serial, dusk_tick);
-    rng.unit() < HATCH_CHANCE_PER_DUSK
+    rng.unit() < chance
 }
 
 /// Apply one [`Hit`] event: the serial pass's act on the prey. The wound adds (armour was
@@ -321,7 +322,7 @@ mod hatch_tests {
             for serial in 0..300u64 {
                 assert!(egg_hatches(4, 6, true, None));
                 drawn += 1;
-                if hatch_draw(seed, serial, dusk_tick) {
+                if hatch_draw(HATCH_CHANCE_PER_DUSK, seed, serial, dusk_tick) {
                     hatched += 1;
                 }
                 assert!(!egg_hatches(4, 3, true, None), "below its threshold, never");
