@@ -112,15 +112,25 @@ pub const PARAMS: &[ParamSpec] = &[
         max: 4.0,
         what: "grazing defence half-life, every species (1.5 h shipped)",
     },
+    // The audit round (2026-09-28, audit §8.1): walking is priced as a multiple of
+    // upkeep, so an upkeep multiplier no longer silently changes what a metre costs.
+    ParamSpec {
+        name: "founder.motor_factor",
+        kind: Kind::Scale,
+        min: 0.5,
+        max: 4.0,
+        what: "walking cost as a multiple of upkeep, on the shipped ratio (1)",
+    },
 ];
 
 /// The founder parameters that also take a **per-lineage** multiplier
 /// (`name@<lineage>`, or an `[ecology.<lineage>]` table in a file), on top of the shared
 /// one (`design/handoffs/voxel-browser-movement-2026-09-28.md`, 2). The two multiply.
-pub const LINEAGE_PARAMS: [&str; 3] = [
+pub const LINEAGE_PARAMS: [&str; 4] = [
     "founder.yield_by_food",
     "founder.maintenance_per_s",
     "founder.lifespan_median_s",
+    "founder.motor_factor",
 ];
 
 /// One world's parameter vector, aligned with [`PARAMS`], plus the per-lineage
@@ -372,6 +382,10 @@ impl EcologyParams {
             }
             phys.core.reproduction.surplus_floor *= floor;
             phys.core.maintenance_per_s *= upkeep * own[1];
+            // Walking is priced against upkeep: it keeps its shipped ratio to it, times
+            // the motor factor.
+            phys.motor_respiration_per_s *=
+                upkeep * own[1] * self.v("founder.motor_factor") * own[3];
             phys.core.lifespan_median_s *= life * own[2];
         }
         c
