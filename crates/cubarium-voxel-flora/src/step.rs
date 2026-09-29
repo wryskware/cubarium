@@ -2561,9 +2561,16 @@ fn grow_stand(
     let dp_a = (rem / build).min(d_p).min(tissue_left).max(0.0);
     rem -= build * dp_a;
     tissue_left -= dp_a;
+    // WX3: a photosynthetic stand reflushes from its reserve only as far as the day lets
+    // the new leaves earn. In the dark they would earn nothing and senesce before dawn,
+    // and the reserve they cost is what pays the night's maintenance.
+    let flush_light = match sc.trophic {
+        Trophic::Photo => daylight,
+        Trophic::Saprotroph => 1.0,
+    };
     let dp_q = if p0 < sc.reflush_below * p_cap {
         (stand.reserve / build)
-            .min(d_p - dp_a)
+            .min((d_p - dp_a) * flush_light)
             .min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0))
             .max(0.0)
     } else {
