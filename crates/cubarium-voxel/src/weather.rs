@@ -1643,6 +1643,12 @@ impl World {
         }
     }
 
+    /// The temperature plants and animals live by, °C. The climate's mean with the day
+    /// clock off, whatever the picture shows.
+    pub fn life_temperature_c(&self) -> f64 {
+        self.weather.temp_c
+    }
+
     /// The simulation's place in the day: 0 midnight, 0.5 noon (always noon with the
     /// clock off).
     pub fn day_phase(&self) -> f64 {

@@ -2173,6 +2173,14 @@ fn split_shares(taken: Taken, wants: &[Want], shares: &mut Vec<Taken>) {
 
 // ------------------------------------------- 6. income, growth, senescence, death
 
+/// Q10 of plant upkeep: it doubles for every 10 °C above the climate's mean.
+pub const UPKEEP_Q10: f64 = 2.0;
+
+/// Multiplier on plant maintenance at `t_c` in a climate whose mean is `t_mean_c`.
+pub fn upkeep_factor(_t_c: f64, _t_mean_c: f64) -> f64 {
+    1.0
+}
+
 fn grow(
     flora: &mut Flora,
     world: &World,

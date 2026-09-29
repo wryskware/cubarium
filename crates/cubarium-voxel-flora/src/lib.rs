@@ -76,6 +76,7 @@ pub use layers::{
 /// harness picking founder columns, a diagnosis of which gate is shut. There is one
 /// predicate, and this is it.
 pub use step::can_establish;
+pub use step::{UPKEEP_Q10, upkeep_factor};
 /// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
 /// `Gates::passes()` is exactly `can_establish`.
 pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
