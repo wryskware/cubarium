@@ -2329,4 +2329,26 @@ mod tests {
             "one heavy founder by a bloomcrown is founded as a light one would be: {at:?}"
         );
     }
+
+    /// Founders arrive grown with half a reserve ([`FOUNDER_ARRIVAL`]): at the shipped
+    /// mass a half-grown, empty founder starved on the terrarium before it had settled
+    /// (x30, 60 min: 5-7 of 8 browsers dead by minute 30), and a full one would have no
+    /// appetite. Half a reserve is hunger 0.5, awake by day or night.
+    #[test]
+    fn a_seeded_founder_arrives_grown_with_half_a_reserve() {
+        let world = plain(24, 6);
+        for founder in Founder::ALL {
+            let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());
+            assert!(introduce_founder(&world, &mut fauna, founder, Site { x: 6, y: 2, z: 3 }, 0.0));
+            let a = fauna.view().animals[0];
+            let sc = fauna.config().founder(founder).core;
+            assert!((a.body - sc.body_max).abs() < 1e-12, "{founder:?}: grown");
+            assert!(
+                (a.reserve - 0.5 * sc.reserve_of(sc.body_max)).abs() < 1e-12,
+                "{founder:?}: half a reserve"
+            );
+        }
+        assert_eq!(FOUNDER_ARRIVAL.body, 1.0);
+        assert_eq!(FOUNDER_ARRIVAL.reserve, 0.5);
+    }
 }
