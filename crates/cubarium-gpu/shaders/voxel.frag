@@ -77,6 +77,9 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
                         // flash (0..1)
     vec4 strikeK;       // the bolt: its column's x centre, top y and z (voxels), its brightness
     vec4 strikeL;       // the bolt's seed, as two 16-bit halves
+    // The sleep pose this frame (WX4, `cubarium_gpu::voxel::pose_rows`): entry k's settle
+    // and breath dip, in pixel rows, evaluated on the frame's clock.
+    vec4 poseK[64];
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -110,6 +113,10 @@ layout(constant_id = 7) const bool WEATHER = false;
 // slab to the end of the shader costs the walk about 0.1 ms at 13 px, which a clear sky
 // does not pay.
 layout(constant_id = 8) const bool WEATHER_DEPTH = false;
+// The sleep pose (WX4, `posedFind`): a second walk pipeline, bound only on frames whose
+// pack has an animal posing. The search costs the walk registers (a step of occupancy on
+// the desktop's RDNA) even where no animal is, so the rest of the time it is dead code.
+layout(constant_id = 9) const bool POSE = false;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
@@ -791,42 +798,57 @@ bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout ve
 // Organism anatomy and markings are already resolved in glyphTex by the shared
 // appearance layer. This is deliberately generic: the shader knows only pigment slots
 // and treatments, never bodies, heads, eyes or facing.
-bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb, out bool lum) {
+// `row` is the face's row from its top (S - 1 - r for a cell where it stands); a row from
+// S on is row `row - S` of its cap, from the back edge, as the atlas lays them out. A
+// posing body's cap (WX4) is drawn through here from the band's own voxel, so the walk
+// still calls each glyph function from one place.
+bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, out bool lum) {
     lum = false;
-    int localY = S - 1 - r;
-    int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + localY;
+    int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + row;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
     vec3 base = pigment.rgb;
     int tone = int(q >> 2);
-    if (tone == 63) { return false; }
+    bool top = POSE && row >= S;
+    int localY = top ? row - S : row;
+    float hz = hazeAt(float(z) + (top ? float(RISE - 1 - localY) / float(RISE) : 0.0));
+    if (tone == 63 && !top) { return false; }
     if (LIT && (tone == TONE_EMIT || emitsWhole(pigment.a))) {
         // An emitter: its style's emissive colour, unshadowed and at full value.
         vec3 e = styleEmit(int(v.a));
         if (any(greaterThan(e, vec3(0.0)))) {
-            rgb = hazed(e, hazeAt(float(z)));
+            rgb = hazed(e, hz);
             lum = true;
             return true;
         }
     }
-    if (!plantTexel(x, y, z, v, false, dx, localY, base)) { return false; }
-    bool coveredUp = solidAt(x, y + 1, z)
-        || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
+    if (!plantTexel(x, y, z, v, top, dx, localY, base)) { return false; }
     if (LIT) {
+        bool coveredUp = !top && (solidAt(x, y + 1, z)
+            || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z)))));
         // The atlas's tones on the lit base: the rim and the lit column lean toward the
         // base under the cell's top light, every other tone keeps its pigment rule under
-        // this face's light.
+        // this face's light. A cap is the base under its top light, its edge tones leaning
+        // toward it over PLANT_TOP_GAIN. One top light and one front light at most, so
+        // each shading function is inlined once.
         // A plant cell's own stand does not shade it; an animal reads the column.
         bool animal = partOf(v) == ANIMAL_INTERIM;
         float cf = animal ? canopyAt(x, z - 1, y) : plantCanopy(v);
         float ct = animal ? canopyAt(x, z, y) : plantCanopy(v);
-        vec3 c;
-        if (tone == 2 && !coveredUp) {
-            c = mix(shadeFront(base, x, y, z, dx, localY, cf),
-                    shadeTop(base, x, y, z, dx, RISE - 1, ct), u.plantA.z);
-        } else if (tone == 3) {
-            c = shadeTop(base, x, y, z, dx, RISE - 1, ct);
-        } else {
+        bool rim = !top && tone == 2 && !coveredUp;
+        vec3 tl = vec3(0.0);
+        if (top || rim || tone == 3) {
+            tl = shadeTop(base, x, y, z, dx, top ? localY : RISE - 1, ct);
+        }
+        vec3 c = tl;
+        if (top) {
+            if (tone == 1) {
+                c *= u.plantA.w;
+            } else if (tone >= 32 && tone <= 47) {
+                float gain = 0.5 + float(tone & 15) / 16.0;
+                c = mix(c, tl / u.plantA.x * gain, u.shadeB.y);
+            }
+        } else if (tone != 3) {
             if (tone == 1) {
                 base *= u.shadeB.x;
             } else if (tone == 4 || tone == 5) {
@@ -835,11 +857,26 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb, out b
             } else if (tone >= 16 && tone <= 31) {
                 base *= 0.5 + float(tone & 15) / 16.0;
             }
-            c = shadeFront(base, x, y, z, dx, localY, cf);
+            vec3 f = shadeFront(base, x, y, z, dx, localY, cf);
+            c = rim ? mix(f, tl, u.plantA.z) : f;
         }
-        rgb = hazed(c, hazeAt(float(z)));
+        rgb = hazed(c, hz);
         return true;
     }
+    if (top) {
+        // A cap, as `glyphCapAt` draws it.
+        vec3 c = plantLit(base, roofShade(roofGap(x, y, z)));
+        if (tone == 1) {
+            c *= u.plantA.w;
+        } else if (tone >= 32 && tone <= 47) {
+            float gain = 0.5 + float(tone & 15) / 16.0;
+            c = mix(c, base * gain, u.shadeB.y);
+        }
+        rgb = hazed(c, hz);
+        return true;
+    }
+    bool coveredUp = solidAt(x, y + 1, z)
+        || (inY(y + 1) && isBlockPart(partOf(at(x, y + 1, z))));
     if (tone == 1) {
         base *= u.shadeB.x;
     } else if (tone == 2 && !coveredUp) {
@@ -852,13 +889,14 @@ bool glyphFront(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb, out b
     } else if (tone >= 16 && tone <= 31) {
         base *= 0.5 + float(tone & 15) / 16.0;
     }
-    rgb = hazed(base, hazeAt(float(z)));
+    rgb = hazed(base, hz);
     return true;
 }
 
-bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb, out bool lum) {
+// `localY` is the cap's row from its back edge (RISE - 1 - r for a cell where it stands).
+bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, out bool lum) {
     lum = false;
-    int localY = RISE - 1 - r;
+    int r = RISE - 1 - localY;
     int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S + localY;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
@@ -898,6 +936,78 @@ bool glyphCap(int x, int y, int z, uvec4 v, int r, int dx, out vec3 rgb, out boo
     }
     rgb = hazed(cap, hazeAt(float(z) + float(r) / float(RISE)));
     return true;
+}
+
+// --- the sleep pose (WX4, `cubarium::voxel::sleep`) ----------------------------------------
+//
+// A sleeping body is stamped where it stands awake. Each of its cells carries its class
+// (b's top two bits) and its pose entry (b's low six; b = 0 is a body not posing, drawn as
+// it always was), and is drawn displaced by a fraction of a voxel recomputed from the
+// frame's clock: a torso cell down by the settle, a breathing cell's top also down by the
+// breath's dip, a leg cut off at the settling torso's bottom. So the settle and the breath
+// move a pixel row at a time and no cell ever appears or goes. The host evaluates each
+// pose on the frame's clock (`pose_rows`), so the walk only reads two integers. The empty voxels under a
+// settling torso are faceless leg cells (glyph 0): they draw nothing and only send the walk
+// looking for the torso. Nothing is drawn above its own voxel's top, so the walk's own
+// voxel and the cap under it are the only places a search starts.
+
+bool isPosed(uvec4 v) { return POSE && partOf(v) == ANIMAL_INTERIM && v.b != 0u; }
+
+// Where posing cell c of row sy is drawn: its front face's bottom and top, in the walk's
+// q (y * S plus rows up). `sleep::span`.
+ivec2 posedSpan(uvec4 c, int sy) {
+    int cls = int(c.b >> 6);
+    ivec2 db = ivec2(u.poseK[int(c.b & 63u)].xy);
+    if (cls >= 2) {
+        return ivec2(sy * S, max(sy * S, min((sy + 1) * S, (sy + cls - 1) * S - db.x)));
+    }
+    return ivec2(sy * S - db.x, (sy + 1) * S - db.x - (cls == 1 ? db.y : 0));
+}
+
+// The face row of posing cell c at q, given its span: a leg is cut at its top, its face
+// where it was; a torso cell's face moves with it, and a breathing cell brought down by a
+// dip keeps its rim row on top and loses the rows under it.
+int posedRow(uvec4 c, int sy, ivec2 sp, int q) {
+    if (int(c.b >> 6) >= 2) { return (sy + 1) * S - 1 - q; }
+    int t = sp.y - 1 - q;
+    return t > 0 ? t + S - (sp.y - sp.x) : 0;
+}
+
+// Which posing cell owns row r of band `level`, and which of its rows (a cap's from S on,
+// for `glyphFrontAt`): from the rows a settling cell can reach the band from, two over it
+// (a torso settles up to two rows) and the band's own. A front face wins, since they all
+// lie in the slab's front plane with every cap behind; else the highest cap. The cell
+// under the band shows only its cap, which the walk's cap site draws.
+bool posedFind(int x, int level, int z, int r, out int gy, out int row) {
+    int q = level * S + r;
+    gy = level;
+    row = -1;
+    for (int i = 0; i < 3; ++i) {
+        int sy = level + 2 - i;
+        if (!inY(sy)) { continue; }
+        uvec4 c = at(x, sy, z);
+        if (!isPosed(c) || glyphOf(c) == 0) { continue; }
+        ivec2 sp = posedSpan(c, sy);
+        if (q >= sp.x && q < sp.y) {
+            gy = sy;
+            row = posedRow(c, sy, sp, q);
+            return true;
+        }
+        if (row < 0 && q >= sp.y && q < sp.y + RISE) {
+            gy = sy;
+            row = S + RISE - 1 - (q - sp.y);
+        }
+    }
+    return row >= 0;
+}
+
+// The cap row of posing cell v under band `level` at row r, or -1: where its settle and
+// breath put its cap.
+int posedCapRow(uvec4 v, int level, int r) {
+    if (glyphOf(v) == 0) { return -1; }
+    ivec2 sp = posedSpan(v, level - 1);
+    int q = level * S + r;
+    return q >= sp.y && q < sp.y + RISE ? RISE - 1 - (q - sp.y) : -1;
 }
 
 // --- water ----------------------------------------------------------------------------
@@ -2370,9 +2480,18 @@ void main() {
             }
             int p = partOf(v);
             if (p != 0) {
+                // A posing body (WX4): whichever of its cells (or their caps) the settle
+                // has moved over this pixel, if any, instead of the band's own voxel.
+                int fy = level;
+                int fl = S - 1 - r;
+                bool found = true;
+                if (isPosed(v)) {
+                    found = posedFind(x, level, z, r, fy, fl);
+                    v = at(x, fy, z);
+                }
                 vec3 art;
                 bool lum;
-                if (glyphFront(x, level, z, v, r, dx, art, lum)) {
+                if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, lum)) {
                     acc += trans * art;
                     trans = LIT && lum ? emitterTrans(trans, art, hazeAt(float(z))) : vec3(0.0);
                     break;
@@ -2401,7 +2520,9 @@ void main() {
             int p = partOf(v);
             vec3 cap;
             bool lum;
-            if (isBlockPart(p) && glyphCap(x, below, z, v, r, dx, cap, lum)) {
+            // A posing cell's cap is where its settle and breath put it (WX4).
+            int cl = isPosed(v) ? posedCapRow(v, level, r) : RISE - 1 - r;
+            if (isBlockPart(p) && cl >= 0 && glyphCapAt(x, below, z, v, cl, dx, cap, lum)) {
                 acc += trans * cap;
                 trans = LIT && lum
                     ? emitterTrans(trans, cap, hazeAt(float(z) + float(r) / float(RISE)))

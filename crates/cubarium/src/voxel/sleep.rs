@@ -1,24 +1,32 @@
 //! **The sleep pose** (WX4): what `State::Asleep` looks like on the voxel grid.
 //!
-//! An asleep animal is **lowered** onto the ground by up to [`MAX_DROP_ROWS`] rows, its legs
-//! tucked (the rows the torso came down through are simply gone), and its back **breathes**:
-//! a slow swell, one cell up, along the middle of the body, on a [`BREATH_PERIOD_S`] cycle.
-//! Falling asleep and waking blend over [`BLEND_S`] seconds.
+//! An asleep animal **settles** onto the ground by up to [`MAX_DROP_ROWS`] rows, its legs
+//! folding under it, and its back **breathes**: the top of the middle of the back falls
+//! [`BREATH_AMP_VOXELS`] below where it stood and rises back, on a [`BREATH_PERIOD_S`]
+//! cycle. (Falls, not rises: a breath never reaches past the cell's own voxel, so the walk
+//! needs no look above the back.) Falling asleep and waking move a
+//! per-animal sleep **weight** from 0 to 1 (or back) over [`BLEND_S`].
 //!
-//! # Why it is dithered
+//! # Where the motion happens
 //!
-//! The animal is voxels, and the presenter has no sub-voxel motion, so a row is the smallest
-//! step there is. Rather than move a whole body a whole row at one instant (a pop), each
-//! **column** of the body takes its own moment inside the blend, drawn from a hash of the
-//! column: at blend `b` a column has lowered iff its hash is under `smooth(b)`. The body
-//! settles column by column over the second, and the breath fills the same way, one cell at a
-//! time along the back, and empties. The same trick the models' foliage thinning uses
-//! ([`super::model::keeps`]). Everything here is a pure function of the pose and a seed, so a
-//! frame is a function of its inputs and two runs draw the same picture.
+//! Nothing here moves a cell. The body is stamped where it stands awake, and every cell of
+//! a posing body carries a [`Class`] (how it moves) and the index of its animal's
+//! [`PoseEntry`] (how far it has moved). The GPU walk (`voxel.frag`, `posedFind`) draws each
+//! such cell displaced by a fraction of a voxel, recomputed from the frame's clock, so the
+//! settle and the breath are continuous and never add or remove a whole cell:
 //!
-//! The pose works in the body's **own frame** (`a` along the body, `c` across it, `row` up
-//! from the lowest cell), so one function serves the glyph path and the baked models, and
-//! rotation to the heading stays where it was.
+//! * a **torso** cell (the fullest row and everything above it) comes down by the settle
+//!   `D = drop · smooth(w)`;
+//! * a **breathing** torso cell (the top of a column of the middle of the back) also has
+//!   its top brought down by the breath's dip `B`, its rim row kept on top;
+//! * a **leg** cell `d` rows under the torso stays where it is, its top cut off where the
+//!   settling torso's bottom has reached (`torso − D`): the legs fold by the same offset.
+//!   The empty voxels under the torso (the belly gap) are stamped as faceless leg cells
+//!   (glyph 0), so the walk looks for the settling torso from there too.
+//!
+//! [`span`] is that rule on the CPU, the shader's `posedSpan` port of it, and what the tests
+//! read. The pose works in the body's **own frame** (`a` along the body, `c` across it,
+//! `row` up), so one classification serves the glyph path and the baked models.
 
 use std::collections::BTreeMap;
 
@@ -29,31 +37,41 @@ pub const MAX_DROP_ROWS: i32 = 2;
 pub const BLEND_S: f64 = 1.0;
 /// Seconds per breath.
 pub const BREATH_PERIOD_S: f64 = 4.0;
+/// How far the back falls at the bottom of a breath, in voxels.
+pub const BREATH_AMP_VOXELS: f32 = 0.2;
+/// Distinct breath phases: animals share pose entries when their phases match, so the
+/// phase is quantised. Eight keeps a herd out of step (1 in 8 share a phase) and the
+/// asleep entries to at most `3 · 8`.
+pub const BREATH_PHASES: u64 = 8;
+/// Pose entries a frame may use, index 0 being the header ([`header`]); the GPU uniform's
+/// `poseK` array and the texel's six entry bits.
+pub const POSE_ENTRIES: usize = 64;
 /// The part of the body's length, front to back, that breathes: the middle of the back.
 const BREATH_BAND: (f32, f32) = (0.2, 0.8);
 
-/// How asleep an animal is drawn this frame: both `0..=1`.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SleepPose {
-    /// 0 awake, 1 fully lowered; moves at `1 / BLEND_S` per second toward its target.
-    pub blend: f32,
-    /// The breath's swell, 0 (out) to 1 (in), already scaled by nothing else.
-    pub breath: f32,
+/// How one cell of a posing body moves. Packed in the texel's top two bits of `b`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Class {
+    /// Comes down by the settle.
+    Torso = 0,
+    /// Comes down by the settle and its top rises with the breath.
+    Breathing = 1,
+    /// One row under the torso: stays, its top cut at the settling torso's bottom.
+    Leg1 = 2,
+    /// Two rows under the torso.
+    Leg2 = 3,
 }
 
-impl SleepPose {
-    pub const AWAKE: SleepPose = SleepPose {
-        blend: 0.0,
-        breath: 0.0,
-    };
-
-    pub fn is_awake(self) -> bool {
-        !(self.blend > 0.0)
+impl Class {
+    /// The texel byte: class in the top two bits, the pose entry (1..64) below.
+    pub fn byte(self, entry: u8) -> u8 {
+        debug_assert!(entry != 0 && usize::from(entry) < POSE_ENTRIES);
+        (self as u8) << 6 | (entry & 63)
     }
 }
 
-/// One cell of a body in its own frame. `bump` says a breath may raise a cell above it (the
-/// back, not a head or a sense patch).
+/// One cell of a body in its own frame. `bump` says a breath may raise it (the back, not a
+/// head or a sense patch).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Local {
     pub a: i32,
@@ -62,20 +80,127 @@ pub struct Local {
     pub bump: bool,
 }
 
-/// One cell of the posed body: `src` indexes the cell it came from (a breath cell is a copy
-/// of the cell below it).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Posed {
-    pub src: usize,
-    pub a: i32,
-    pub c: i32,
-    pub row: i32,
+/// A body's classification: its torso row, how many rows it settles, and each cell's
+/// class (`None` for a cell that never moves: a leg further under the torso than it comes
+/// down).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Classified {
+    pub torso: i32,
+    pub drop: i32,
+    pub class: Vec<Option<Class>>,
 }
 
-/// The breath at `time_s`, `0..=1`, out of step between animals by their id.
-pub fn breath(time_s: f64, id: u64) -> f32 {
-    let phase = hash01(id, 0, 0, 7) as f64;
-    (0.5 - 0.5 * (std::f64::consts::TAU * (time_s / BREATH_PERIOD_S + phase)).cos()) as f32
+impl Classified {
+    /// The class of an empty voxel `d` rows under the torso row: a faceless leg.
+    pub fn under(d: i32) -> Option<Class> {
+        match d {
+            1 => Some(Class::Leg1),
+            2 => Some(Class::Leg2),
+            _ => None,
+        }
+    }
+}
+
+/// Classify a body. The torso is the fullest row, the lowest of a tie; the rows under it
+/// are legs.
+pub fn classify(cells: &[Local]) -> Classified {
+    if cells.is_empty() {
+        return Classified {
+            torso: 0,
+            drop: 0,
+            class: Vec::new(),
+        };
+    }
+    let mut per_row: BTreeMap<i32, usize> = BTreeMap::new();
+    for l in cells {
+        *per_row.entry(l.row).or_insert(0) += 1;
+    }
+    let most = per_row.values().copied().max().unwrap_or(0);
+    let torso = per_row
+        .iter()
+        .find(|(_, n)| **n == most)
+        .map(|(r, _)| *r)
+        .unwrap_or(0);
+    let lowest = *per_row.keys().next().expect("a cell");
+    let drop = (torso - lowest).clamp(0, MAX_DROP_ROWS);
+    let (lo, hi) = cells
+        .iter()
+        .fold((i32::MAX, i32::MIN), |(lo, hi), l| (lo.min(l.a), hi.max(l.a)));
+    let span = (hi - lo + 1) as f32;
+    let mut top: BTreeMap<(i32, i32), i32> = BTreeMap::new();
+    for l in cells {
+        let t = top.entry((l.a, l.c)).or_insert(l.row);
+        *t = (*t).max(l.row);
+    }
+    let class = cells
+        .iter()
+        .map(|l| {
+            if l.row < torso {
+                return match torso - l.row {
+                    1 if drop >= 1 => Some(Class::Leg1),
+                    2 if drop >= 2 => Some(Class::Leg2),
+                    _ => None,
+                };
+            }
+            let f = ((l.a - lo) as f32 + 0.5) / span;
+            let breathes = l.bump
+                && l.row == top[&(l.a, l.c)]
+                && f >= BREATH_BAND.0
+                && f <= BREATH_BAND.1;
+            Some(if breathes {
+                Class::Breathing
+            } else {
+                Class::Torso
+            })
+        })
+        .collect();
+    Classified { torso, drop, class }
+}
+
+/// One animal's pose as the GPU reads it, `poseK[entry]`: its sleep weight at the staged
+/// tick, the weight's change per tick, the rows it settles, and its breath phase (0..1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PoseEntry {
+    pub weight: f32,
+    pub rate: f32,
+    pub drop: f32,
+    pub phase: f32,
+}
+
+impl PoseEntry {
+    pub fn to_array(self) -> [f32; 4] {
+        [self.weight, self.rate, self.drop, self.phase]
+    }
+
+    /// The sleep weight `ticks` after the staged tick: what the shader computes every frame.
+    /// Clamped, so extrapolating past the end of a blend holds.
+    pub fn weight_at(self, ticks: f32) -> f32 {
+        (self.weight + self.rate * ticks.clamp(0.0, 8.0)).clamp(0.0, 1.0)
+    }
+}
+
+/// The weight's change per tick of `dt_s` seconds while falling asleep.
+pub fn rate_per_tick(dt_s: f64) -> f32 {
+    (dt_s / BLEND_S) as f32
+}
+
+/// The pose table's header, `poseK[0]`: the staged tick (wrapped as the frame clock wraps
+/// it), the breath's own phase at that tick (0..1, so the clock's wrap never shows), the
+/// breath period in ticks, and its amplitude in voxels.
+pub fn header(tick: u64, tick_wrap: u64, dt_s: f64) -> [f32; 4] {
+    let period_ticks = BREATH_PERIOD_S / dt_s;
+    let base = (tick as f64 / period_ticks).fract();
+    [
+        (tick % tick_wrap) as f32,
+        base as f32,
+        period_ticks as f32,
+        BREATH_AMP_VOXELS,
+    ]
+}
+
+/// The breath phase of animal `id`, one of [`BREATH_PHASES`], out of step between animals.
+pub fn phase(id: u64) -> f32 {
+    (splitmix(id ^ 0x5EED_B8EA_7400_0007) % BREATH_PHASES) as f32 / BREATH_PHASES as f32
 }
 
 /// The blend one step on: toward asleep or awake at `1 / BLEND_S` per second. Never more
@@ -90,117 +215,53 @@ pub fn advance_blend(blend: f32, asleep: bool, dt_s: f64) -> f32 {
     }
 }
 
-fn smooth(b: f32) -> f32 {
-    let b = b.clamp(0.0, 1.0);
-    b * b * (3.0 - 2.0 * b)
+/// The settle's ease: a smoothstep of the weight, so the body starts and stops gently.
+pub fn smooth(w: f32) -> f32 {
+    let w = w.clamp(0.0, 1.0);
+    w * w * (3.0 - 2.0 * w)
 }
 
-/// A hash of a seed and a column, uniform in `[0, 1)`.
-pub fn hash01(seed: u64, a: i32, c: i32, tag: u64) -> f32 {
-    let mut z = seed
-        ^ (a as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ (c as i64 as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
-        ^ tag.wrapping_mul(0x1656_67B1_9E37_79F9);
+/// The settle (voxels down) and the breath's dip (voxels down from a full breath) of
+/// `entry`, `ticks` after the staged tick, with `header` from [`header`]: the renderer's
+/// own per-frame evaluation ([`cubarium_gpu::voxel::pose_at`]).
+pub fn settle_and_breath(entry: PoseEntry, header: [f32; 4], ticks: f32) -> (f32, f32) {
+    cubarium_gpu::voxel::pose_at(entry.to_array(), header, ticks)
+}
+
+/// Where a posing cell at row `sy` is drawn, as `(bottom, top)` pixel rows over the
+/// bottom of row 0 at `s` pixels a voxel, under a settle `d` and a breath's dip `b`
+/// (voxels). The shader's `posedSpan`. A leg's top may fall to its bottom: it is folded
+/// away. Nothing reaches above its own voxel's top.
+pub fn span(class: Class, sy: i32, d: f32, b: f32, s: i32) -> (i32, i32) {
+    let dp = (d * s as f32 + 0.5).floor() as i32;
+    match class {
+        Class::Torso | Class::Breathing => {
+            let bp = if class == Class::Breathing {
+                (b * s as f32 + 0.5).floor() as i32
+            } else {
+                0
+            };
+            (sy * s - dp, (sy + 1) * s - dp - bp)
+        }
+        Class::Leg1 | Class::Leg2 => {
+            let dist = if class == Class::Leg1 { 1 } else { 2 };
+            (sy * s, ((sy + 1) * s).min((sy + dist) * s - dp).max(sy * s))
+        }
+    }
+}
+
+fn splitmix(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^= z >> 31;
-    ((z >> 40) as f32) / (1u32 << 24) as f32
-}
-
-/// The body under `pose`. An awake pose returns the cells as they were, in order.
-pub fn pose(cells: &[Local], pose: SleepPose, seed: u64) -> Vec<Posed> {
-    let identity = |c: &[Local]| {
-        c.iter()
-            .enumerate()
-            .map(|(src, l)| Posed {
-                src,
-                a: l.a,
-                c: l.c,
-                row: l.row,
-            })
-            .collect::<Vec<_>>()
-    };
-    if pose.is_awake() || cells.is_empty() {
-        return identity(cells);
-    }
-    // The torso is the fullest row, the lowest of a tie; the rows under it are legs.
-    let mut per_row: BTreeMap<i32, usize> = BTreeMap::new();
-    for l in cells {
-        *per_row.entry(l.row).or_insert(0) += 1;
-    }
-    let most = per_row.values().copied().max().unwrap_or(0);
-    let torso = per_row
-        .iter()
-        .find(|(_, n)| **n == most)
-        .map(|(r, _)| *r)
-        .unwrap_or(0);
-    let lowest = *per_row.keys().next().expect("a cell");
-    let drop = (torso - lowest).clamp(0, MAX_DROP_ROWS);
-    let eased = smooth(pose.blend);
-    let mut out = Vec::with_capacity(cells.len() + 8);
-    for (src, l) in cells.iter().enumerate() {
-        let down = hash01(seed, l.a, l.c, 0) < eased;
-        let row = if !down {
-            Some(l.row)
-        } else if l.row < torso {
-            // A leg: what is under the lowered torso stays, what the torso came down
-            // through is tucked away.
-            (l.row < torso - drop).then_some(l.row)
-        } else {
-            Some(l.row - drop)
-        };
-        if let Some(row) = row {
-            out.push(Posed {
-                src,
-                a: l.a,
-                c: l.c,
-                row,
-            });
-        }
-    }
-    // The breath: along the middle of the back, one cell up, each column at its own point
-    // of the swell.
-    let amp = pose.breath.clamp(0.0, 1.0) * eased;
-    if amp > 0.0 {
-        let (lo, hi) = out
-            .iter()
-            .fold((i32::MAX, i32::MIN), |(lo, hi), p| (lo.min(p.a), hi.max(p.a)));
-        let span = (hi - lo + 1) as f32;
-        let mut top: BTreeMap<(i32, i32), i32> = BTreeMap::new();
-        for p in &out {
-            let t = top.entry((p.a, p.c)).or_insert(p.row);
-            *t = (*t).max(p.row);
-        }
-        let mut swell = Vec::new();
-        for p in &out {
-            let f = (p.a - lo) as f32 + 0.5;
-            let f = f / span;
-            if !cells[p.src].bump
-                || p.row != top[&(p.a, p.c)]
-                || f < BREATH_BAND.0
-                || f > BREATH_BAND.1
-                // Only a column that has come down breathes: one still standing is not
-                // yet asleep.
-                || hash01(seed, p.a, p.c, 0) >= eased
-                || hash01(seed, p.a, p.c, 1) >= amp
-            {
-                continue;
-            }
-            swell.push(Posed {
-                row: p.row + 1,
-                ..*p
-            });
-        }
-        out.extend(swell);
-    }
-    out
+    z ^ (z >> 31)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A browser-like body: two legs a row under a 6 x 3 torso.
+    /// A browser-like body: two legs two rows under a 6 x 3 torso.
     fn body() -> Vec<Local> {
         let mut v = Vec::new();
         for a in 0..6 {
@@ -226,54 +287,41 @@ mod tests {
         v
     }
 
-    fn rows(cells: &[Local], posed: &[Posed]) -> Vec<(i32, i32, i32, usize)> {
-        let mut v: Vec<_> = posed.iter().map(|p| (p.a, p.c, p.row, p.src)).collect();
-        v.sort();
-        let _ = cells;
-        v
-    }
-
     #[test]
-    fn an_awake_pose_is_the_body_untouched() {
+    fn a_standing_body_settles_two_rows_on_legs_that_fold() {
         let b = body();
-        let p = pose(&b, SleepPose::AWAKE, 9);
-        assert_eq!(p.len(), b.len());
-        assert!(p.iter().all(|p| b[p.src].row == p.row && b[p.src].a == p.a));
-        // A breath alone does nothing to an animal that is not asleep.
-        let p = pose(
-            &b,
-            SleepPose {
-                blend: 0.0,
-                breath: 1.0,
-            },
-            9,
-        );
-        assert_eq!(p.len(), b.len());
+        let k = classify(&b);
+        assert_eq!(k.drop, 2);
+        for (l, c) in b.iter().zip(&k.class) {
+            match l.row {
+                0 => assert_eq!(*c, Some(Class::Leg2)),
+                1 => assert_eq!(*c, Some(Class::Leg1)),
+                _ => assert!(matches!(c, Some(Class::Torso | Class::Breathing))),
+            }
+        }
+        // Fully settled: the torso sits on the ground row and the legs are folded away.
+        let s = 10;
+        assert_eq!(span(Class::Torso, 2, 2.0, 0.0, s), (0, s));
+        assert_eq!(span(Class::Leg1, 1, 2.0, 0.0, s).1, s);
+        let (lo, hi) = span(Class::Leg1, 1, 2.0, 0.0, s);
+        assert_eq!(lo, hi, "a folded leg has no height left");
+        assert_eq!(span(Class::Leg2, 0, 2.0, 0.0, s), (0, 0));
+        // Halfway: the torso's bottom and the top leg's top meet.
+        assert_eq!(span(Class::Torso, 2, 0.5, 0.0, s).0, span(Class::Leg1, 1, 0.5, 0.0, s).1);
     }
 
     #[test]
-    fn an_asleep_body_is_lower_with_its_legs_tucked() {
+    fn only_the_middle_of_the_back_breathes() {
         let b = body();
-        let awake = pose(&b, SleepPose::AWAKE, 9);
-        let asleep = pose(
-            &b,
-            SleepPose {
-                blend: 1.0,
-                breath: 0.0,
-            },
-            9,
-        );
-        assert_ne!(rows(&b, &awake), rows(&b, &asleep));
-        let top = |p: &[Posed]| p.iter().map(|p| p.row).max().unwrap();
-        assert_eq!(top(&awake), 2);
-        assert_eq!(top(&asleep), 0, "the torso is on the ground");
-        // The legs, the two rows the torso came down through, are gone.
-        assert_eq!(asleep.len(), 18);
-    }
-
-    #[test]
-    fn a_body_already_on_the_ground_does_not_move_but_still_breathes() {
-        let crawler: Vec<Local> = (0..3)
+        let k = classify(&b);
+        for (l, c) in b.iter().zip(&k.class) {
+            if *c == Some(Class::Breathing) {
+                assert!(l.row == 2 && (1..=4).contains(&l.a));
+            }
+        }
+        assert!(k.class.contains(&Some(Class::Breathing)));
+        // A crawler already on the ground settles nowhere but still breathes.
+        let crawler: Vec<Local> = (0..5)
             .map(|a| Local {
                 a,
                 c: 0,
@@ -281,63 +329,62 @@ mod tests {
                 bump: true,
             })
             .collect();
-        let deep = SleepPose {
-            blend: 1.0,
-            breath: 1.0,
-        };
-        let p = pose(&crawler, deep, 3);
-        assert!(p.iter().filter(|p| p.row == 0).count() == 3);
-        assert!(p.iter().any(|p| p.row == 1), "the back swells");
+        let k = classify(&crawler);
+        assert_eq!(k.drop, 0);
+        assert!(k.class.contains(&Some(Class::Breathing)));
     }
 
-    /// The blend is continuous: the body's cells change by a few at a time as the blend
-    /// crosses 0..1, the lowered columns only ever grow, and the ends are the two poses.
+    /// Weight 0 is no offset at all: every class draws exactly its own voxel.
     #[test]
-    fn the_blend_is_continuous_and_reaches_both_poses() {
-        let b = body();
-        let seed = 42;
-        let at = |blend: f32| {
-            pose(
-                &b,
-                SleepPose {
-                    blend,
-                    breath: 0.0,
-                },
-                seed,
-            )
+    fn an_awake_weight_is_no_offset() {
+        let e = PoseEntry {
+            weight: 0.0,
+            rate: 0.0,
+            drop: 2.0,
+            phase: 0.5,
         };
-        let down = |p: &[Posed]| p.iter().filter(|p| p.row < b[p.src].row).count();
-        assert_eq!(rows(&b, &at(0.0)), rows(&b, &pose(&b, SleepPose::AWAKE, seed)));
-        let (mut last, mut biggest) = (down(&at(0.0)), 0usize);
-        let mut prev = at(0.0);
-        for i in 1..=100 {
-            let cur = at(i as f32 / 100.0);
-            let n = down(&cur);
-            assert!(n >= last, "a lowered cell came back up at {i}");
-            let (x, y): (std::collections::BTreeSet<_>, std::collections::BTreeSet<_>) =
-                (rows(&b, &cur).into_iter().collect(), rows(&b, &prev).into_iter().collect());
-            let changed = x.symmetric_difference(&y).count();
-            biggest = biggest.max(changed);
-            last = n;
-            prev = cur;
+        let h = header(1234, 1 << 20, 0.05);
+        for f in [0.0, 0.3, 0.9] {
+            let (d, b) = settle_and_breath(e, h, f);
+            assert_eq!((d, b), (0.0, 0.0));
+            for class in [Class::Torso, Class::Breathing, Class::Leg1, Class::Leg2] {
+                assert_eq!(span(class, 3, d, b, 7), (21, 28));
+            }
         }
-        // A whole body is 54 cells; no one hundredth of the blend moves more than a
-        // handful of them (a column of legs and torso is a few cells).
-        assert!(biggest <= 12, "a step moved {biggest} cells at once");
-        assert_eq!(
-            rows(&b, &at(1.0)),
-            rows(
-                &b,
-                &pose(
-                    &b,
-                    SleepPose {
-                        blend: 1.0,
-                        breath: 0.0
-                    },
-                    seed
-                )
-            )
-        );
+    }
+
+    #[test]
+    fn the_breath_has_a_four_second_period_and_dips_a_fifth_of_a_voxel() {
+        let e = PoseEntry {
+            weight: 1.0,
+            rate: 0.0,
+            drop: 0.0,
+            phase: 0.25,
+        };
+        let h = header(40, 1 << 20, 0.05);
+        let at = |ticks: f32| settle_and_breath(e, h, ticks).1;
+        let later = header(40 + 80, 1 << 20, 0.05);
+        assert!((at(0.0) - settle_and_breath(e, later, 0.0).1).abs() < 1e-5);
+        // Over one period, a staged tick at a time (a frame only extrapolates a few ticks).
+        let peak = (40..120u64)
+            .map(|t| settle_and_breath(e, header(t, 1 << 20, 0.05), 0.0).1)
+            .fold(0.0f32, f32::max);
+        assert!(peak <= BREATH_AMP_VOXELS + 1e-6 && peak > 0.9 * BREATH_AMP_VOXELS);
+        // A breathing cell never reaches above its own voxel.
+        let (_, top) = span(Class::Breathing, 2, 0.0, at(0.0), 10);
+        assert!(top <= 30);
+        // Across the staged tick the header carries the phase on: tick 41's frame 0 is tick
+        // 40's frame at +1.
+        let h2 = header(41, 1 << 20, 0.05);
+        assert!((settle_and_breath(e, h2, 0.0).1 - at(1.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn two_animals_breathe_out_of_step() {
+        let phases: std::collections::BTreeSet<u32> =
+            (0..32u64).map(|id| (phase(id) * 8.0) as u32).collect();
+        assert!(phases.len() > 4, "ids spread over the phases");
+        assert_ne!(phase(1), phase(2));
     }
 
     #[test]
@@ -357,33 +404,5 @@ mod tests {
             b = advance_blend(b, false, 0.05);
         }
         assert_eq!(b, 0.0);
-    }
-
-    #[test]
-    fn the_breath_has_a_four_second_period_and_swells_the_back_a_cell_at_a_time() {
-        for id in [0u64, 5, 99] {
-            let (a, b) = (breath(1.0, id), breath(1.0 + BREATH_PERIOD_S, id));
-            assert!((a - b).abs() < 1e-4);
-        }
-        let b = body();
-        let count = |breath: f32| {
-            pose(
-                &b,
-                SleepPose {
-                    blend: 1.0,
-                    breath,
-                },
-                1,
-            )
-            .len()
-        };
-        assert_eq!(count(0.0), 18);
-        let mut last = count(0.0);
-        for i in 1..=50 {
-            let n = count(i as f32 / 50.0);
-            assert!(n >= last && n - last <= 4, "the swell grows a few cells at a time");
-            last = n;
-        }
-        assert!(last > 18, "the back rose");
     }
 }

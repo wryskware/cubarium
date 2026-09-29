@@ -2,9 +2,13 @@
 //! pose (WX4): awake, falling asleep at dusk, breathing through the night, waking at dawn.
 //!
 //! ```text
-//! cargo run -p cubarium --release --example voxel_sleep_capture -- OUT_DIR [--glyphs] [--px N]
+//! cargo run -p cubarium --release --example voxel_sleep_capture -- OUT_DIR [--glyphs] [--lit] [--px N]
 //!     [--day-s SECONDS] [--lead-s SECONDS]
 //! ```
+//!
+//! `--bench [--lit]` instead times the slab walk on a wider world (256 x 48 x 32, 64
+//! browsers at `--px`, default 6) with every browser awake and then every one asleep, each
+//! over 300 redraws, and prints the GPU milliseconds a redraw.
 //!
 //! Writes `OUT_DIR/f-0000.png …` at 60 frames a second of the world's own time (the tick is
 //! 20 Hz, three frames a tick), from `--lead-s` (default 3) before the browser falls asleep
@@ -70,16 +74,23 @@ fn main() -> Result<()> {
     let mut px = 14u32;
     let mut day_s = 30.0f64;
     let mut lead_s = 3.0f64;
+    let mut bench = false;
+    let mut lit = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
+            "--bench" => bench = true,
+            "--lit" => lit = true,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--day-s" => day_s = args.next().context("--day-s S")?.parse()?,
             "--lead-s" => lead_s = args.next().context("--lead-s S")?.parse()?,
             _ if out.is_none() => out = Some(PathBuf::from(a)),
             _ => bail!("unexpected argument {a}"),
         }
+    }
+    if bench {
+        return run_bench(if px == 14 { 6 } else { px }, lit, glyphs);
     }
     let out = out.context("usage: voxel_sleep_capture OUT_DIR [--glyphs] [--px N]")?;
     std::fs::create_dir_all(&out)?;
@@ -144,7 +155,7 @@ fn main() -> Result<()> {
         world: world_cfg.clone(),
         raster_height: 0,
         px_per_voxel: px,
-        lighting: Lighting::Flat,
+        lighting: if lit { Lighting::Lit } else { Lighting::Flat },
         organisms: if glyphs {
             OrganismLook::Glyphs
         } else {
@@ -196,6 +207,101 @@ fn main() -> Result<()> {
          -c:v libx264 -preset slow -crf 12 -pix_fmt yuv444p OUT.mp4",
         out.display()
     );
+    Ok(())
+}
+
+/// The slab walk's GPU time a redraw, every browser awake and then every one asleep.
+fn run_bench(px: u32, lit: bool, glyphs: bool) -> Result<()> {
+    let cfg = Config {
+        width: 256,
+        height: 48,
+        depth: 32,
+        voxel_m: VOXEL_M,
+        ..Config::default()
+    };
+    let mut w = World::empty(cfg.clone());
+    for z in 0..cfg.depth {
+        for x in 0..i64::from(cfg.width) {
+            for y in 0..3 {
+                w.apply(VoxelCommand::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: if y == 0 { Material::Bedrock } else { Material::Soil },
+                });
+            }
+        }
+    }
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    for i in 0..64i64 {
+        fauna.apply(
+            &w,
+            FaunaCommand::IntroduceFounder {
+                x: 4 + (i % 16) * 16,
+                z: 3 + (i / 16) as u32 * 7,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: std::f64::consts::FRAC_PI_2,
+            },
+        );
+    }
+    let flora = Flora::new(FloraConfig::default());
+    let vcfg = VoxelConfig {
+        world: cfg.clone(),
+        raster_height: 0,
+        px_per_voxel: px,
+        lighting: if lit { Lighting::Lit } else { Lighting::Flat },
+        organisms: if glyphs { OrganismLook::Glyphs } else { OrganismLook::Models },
+        ..VoxelConfig::default()
+    };
+    let models = if glyphs {
+        None
+    } else {
+        Some(Arc::new(ModelLibrary::load(&vcfg.models_dir, VOXEL_M)?))
+    };
+    let proj = Projection::new(vcfg.tilt_degrees, px, 0, &cfg)?;
+    let fv = fauna.view();
+    for asleep in [false, true] {
+        let mut sink = VoxelGpuSink::new(
+            &vcfg,
+            proj,
+            VoxelGpuSinkOptions {
+                models: models.clone(),
+                ..Default::default()
+            },
+        )?;
+        let mut animals = fv.animals.to_vec();
+        if asleep {
+            for a in &mut animals {
+                a.state = State::Asleep;
+            }
+        }
+        let view = cubarium_voxel_fauna::FaunaView {
+            animals: &animals,
+            ..fv
+        };
+        let mut start = None;
+        for frame in 0..360u64 {
+            anyhow::ensure!(sink.stage_view(&w.view(), flora.view(), view), "no staging buffer");
+            sink.set_clock(frame / 3, (frame % 3) as f64 / 3.0);
+            sink.render()?;
+            let _ = sink.read_raster()?;
+            if frame == 59 {
+                start = Some(sink.gpu_stage_totals());
+            }
+        }
+        let (n0, t0) = start.expect("warm-up");
+        let (n1, t1) = sink.gpu_stage_totals();
+        let n = (n1 - n0).max(1) as f64;
+        println!(
+            "{} {} px {px}: walk {:.3} ms, upload {:.3} ms a redraw over {} redraws",
+            if lit { "lit" } else { "flat" },
+            if asleep { "asleep" } else { "awake " },
+            (t1[1] - t0[1]) / n,
+            (t1[0] - t0[0]) / n,
+            n1 - n0
+        );
+    }
     Ok(())
 }
 
