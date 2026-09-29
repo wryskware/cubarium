@@ -65,9 +65,13 @@ fn the_mean_nearest_neighbour_distance_wraps_the_ring() {
 fn the_brain_options_parse() {
     let dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
+    // Round 2's centre predates the mass-scaled references: it loads as a transfer.
     let file = brain_driver(
         Founder::Browser,
-        &dir.join("r2-frondgrazer-upd160.json").display().to_string(),
+        &format!(
+            "transfer:{}",
+            dir.join("r2-frondgrazer-upd160.json").display()
+        ),
     )
     .expect("a centre");
     assert!(matches!(file.kind(), EpisodeKind::Gru(_)));

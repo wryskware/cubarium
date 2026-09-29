@@ -303,20 +303,13 @@ pub struct FounderPhysiology {
     /// 0 full to 1 empty) is at or above this stays awake and forages. 0.5, a placeholder:
     /// there was no earlier threshold to reuse.
     pub wake_hunger: f64,
-    /// **What the `Self` channels' fixed references are multiplied by** when a body's
-    /// energy, reserve, structural loss and intake are encoded. `1` is the manifest's
-    /// contract: those references are absolute organic masses. The audit round's mass
-    /// test (`design/handoffs/voxel-audit-round-2026-09-28.md` §2) sets it to the
-    /// lineage's `mass_scale` in its opt-in arm B, so a heavier body still reads "a
-    /// fraction of an adult". The manifest digest does not record it; any other value
-    /// is a diagnostic, not a trained-policy contract.
-    #[serde(default = "one")]
-    pub self_reference_scale: f64,
-    /// **The org-unit mass scale this physiology was built at**: `1` shipped. The
-    /// ecology search's `founder.mass_scale` multiplies the nine absolute quantities of
-    /// [`FounderPhysiology::core`] and records the factor here, so a rule that must judge
-    /// a body as a x1 one can (the founding gate, `cubarium_voxel_sim::habitat`). Every
-    /// ordinary rule reads the scaled quantities and never this.
+    /// **The org-unit mass scale this physiology was built at** ([`FounderPhysiology::scale_mass`]
+    /// multiplies the nine absolute quantities of [`FounderPhysiology::core`] and records
+    /// the factor here). The senses read it: the `Self` references and taste's reference
+    /// are the manifest's times this (`manifest::SELF_REFERENCE_RULE`,
+    /// `TASTE_REFERENCE_RULE`), so a heavier body reads "a fraction of an adult" and a
+    /// "full" taste means the same share of its need. The founding gate judges a body as
+    /// a x1 one with it (`cubarium_voxel_sim::habitat`).
     #[serde(default = "one")]
     pub mass_scale: f64,
 }
@@ -326,6 +319,14 @@ fn one() -> f64 {
 }
 
 impl FounderPhysiology {
+    /// Make this lineage `k` times heavier in org-units: the nine absolute quantities of
+    /// its core ([`crate::SpeciesConfig::scale_mass`]) times `k`, and the recorded
+    /// [`FounderPhysiology::mass_scale`] with them. Per-unit rates, clocks and metres stay.
+    pub fn scale_mass(&mut self, k: f64) {
+        self.core.scale_mass(k);
+        self.mass_scale *= k;
+    }
+
     /// The frozen phase-one table, one entry per founder.
     ///
     /// The blind littershredder's digestive configuration is set **deliberately, once,
@@ -403,7 +404,6 @@ impl FounderPhysiology {
                 active: crate::Activity::Nocturnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
-                self_reference_scale: 1.0,
                 mass_scale: 1.0,
             },
             Founder::Browser => FounderPhysiology {
@@ -439,7 +439,6 @@ impl FounderPhysiology {
                 active: crate::Activity::Diurnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
-                self_reference_scale: 1.0,
                 mass_scale: 1.0,
             },
         }
@@ -1685,6 +1684,7 @@ impl TasteReading {
 ///
 /// The browser's taste moves the other way: a glowcap cap is no longer offered to its
 /// mouth at all, so it no longer tastes one.
+#[cfg(test)]
 pub(crate) fn taste_reading(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
@@ -1694,12 +1694,38 @@ pub(crate) fn taste_reading(
     body: &Body,
     founder: Founder,
 ) -> TasteReading {
+    taste_reading_at(
+        fv,
+        view,
+        pose,
+        standing_y,
+        manifest,
+        body,
+        founder,
+        manifest.mass_scale,
+    )
+}
+
+/// [`taste_reading`] for a body of `mass_scale`: the reference is `M_EMIT × mass_scale`
+/// (`manifest::TASTE_REFERENCE_RULE`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn taste_reading_at(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    pose: &crate::Pose,
+    standing_y: u32,
+    manifest: &Manifest,
+    body: &Body,
+    founder: Founder,
+    mass_scale: f64,
+) -> TasteReading {
     let sat = manifest.tunings.chem_saturation;
-    // The contact-material response: `amount / M_EMIT` cue units through the same curve
-    // the field's concentration reads through. The browser's foliage cue is still this —
-    // there is no foliage field to sample.
+    // The contact-material response: `amount / (M_EMIT × mass_scale)` cue units through
+    // the same curve the field's concentration reads through. The browser's foliage cue
+    // is still this — there is no foliage field to sample.
+    let reference = M_EMIT * mass_scale;
     let response = |amount: f64| {
-        let c = (amount / M_EMIT).min(1.0);
+        let c = (amount / reference).min(1.0);
         c / (c + sat)
     };
     let cols = mouth_columns(view, pose, body);
@@ -1776,7 +1802,7 @@ pub(crate) fn observation(
     // Self: real body state against the manifest's fixed references (times the
     // physiology's `self_reference_scale`, 1 under the contract).
     let fb = &a.founder_state.feedback;
-    let k = phys.self_reference_scale;
+    let k = phys.mass_scale;
     obs[0] = clamp01(a.energy / (manifest.adult_energy_reference * k));
     obs[1] = clamp01(a.reserve / (manifest.adult_reserve_reference * k));
     obs[2] = f64::from(birth_readiness(&fauna.config, a, fv));
@@ -1809,7 +1835,16 @@ pub(crate) fn observation(
     obs[cm.offset + 4] = valid;
     obs[wm.offset] = reading.wet;
     obs[wm.offset + 1] = valid;
-    let taste = taste_reading(fv, view, &a.pose, standing_y, manifest, &body, founder);
+    let taste = taste_reading_at(
+        fv,
+        view,
+        &a.pose,
+        standing_y,
+        manifest,
+        &body,
+        founder,
+        phys.mass_scale,
+    );
     obs[tm.offset] = taste.cue;
     obs[tm.offset + 1] = taste.resistance;
     obs[tm.offset + 2] = f64::from(taste.valid);

@@ -815,10 +815,6 @@ enum Command {
         threads: usize,
         #[arg(long, default_value = "runs/ecology-check")]
         out: PathBuf,
-        /// Read every founder's `Self` references at its mass scale (the audit round's
-        /// opt-in arm B), so a heavier body keeps reading "a fraction of an adult".
-        #[arg(long)]
-        mass_relative_self: bool,
         /// Found from this config file's `[world]` (a host's, e.g.
         /// config/desktop/terrarium.toml) instead of the still-water `small` preset.
         #[arg(long)]
@@ -1509,7 +1505,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_every,
             threads,
             out,
-            mass_relative_self,
             world,
         } => {
             let world_cfg =
@@ -1523,11 +1518,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     es::voxel::live::ecology::EcologyParams::defaults()
                 } else {
                     es::voxel::live::ecology::EcologyParams::load(std::path::Path::new(src))?
-                };
-                let params = if mass_relative_self {
-                    params.with_mass_relative_self()
-                } else {
-                    params
                 };
                 parsed.push((name.to_string(), params));
             }

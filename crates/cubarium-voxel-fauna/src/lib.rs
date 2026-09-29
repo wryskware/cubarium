@@ -1257,6 +1257,22 @@ impl SpeciesConfig {
         }
     }
 
+    /// Multiply the **nine absolute quantities** — `body_max`, `body_min`, `birth_body`,
+    /// `birth_cost`, the reproduction `surplus_floor` and `egg_organic`, `bite_per_s`,
+    /// `bite_half_stock` and `growth_max_per_s` — by `k` (audit §1.4): the animal is `k`
+    /// times heavier against the plants, and every per-unit rate, clock and metre stays.
+    pub fn scale_mass(&mut self, k: f64) {
+        self.body_max *= k;
+        self.body_min *= k;
+        self.birth_body *= k;
+        self.birth_cost *= k;
+        self.reproduction.surplus_floor *= k;
+        self.reproduction.egg_organic *= k;
+        self.bite_per_s *= k;
+        self.bite_half_stock *= k;
+        self.growth_max_per_s *= k;
+    }
+
     /// Whole ticks between steps, never zero.
     pub fn step_period_ticks(&self) -> u64 {
         let t = (self.step_period_s * f64::from(TICK_HZ)).round();
@@ -1416,16 +1432,12 @@ impl FaunaConfig {
                     ));
                 }
             }
-            for (name, value) in [
-                ("self_reference_scale", phys.self_reference_scale),
-                ("mass_scale", phys.mass_scale),
-            ] {
-                if !(value.is_finite() && value > 0.0) {
-                    return Err(format!(
-                        "{}.{name} must be finite and positive, not {value}",
-                        founder.name()
-                    ));
-                }
+            if !(phys.mass_scale.is_finite() && phys.mass_scale > 0.0) {
+                return Err(format!(
+                    "{}.mass_scale must be finite and positive, not {}",
+                    founder.name(),
+                    phys.mass_scale
+                ));
             }
             // The body is a physical object: every dimension positive, every anchor a
             // finite nonnegative fraction of one. A zero-height animal has no eye, no

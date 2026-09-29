@@ -331,13 +331,20 @@ fn a_centre_is_refused_at_another_mass() {
         assert_eq!(m.mass_scale, FaunaConfig::default().founder(f).mass_scale);
         let text = m.canonical_text();
         assert!(text.contains("|mass:"), "{text}");
-        assert!(text.contains("self_ref:") && text.contains("taste_ref:"), "{text}");
+        assert!(
+            text.contains("self_ref:") && text.contains("taste_ref:"),
+            "{text}"
+        );
         let mut other = m.clone();
         other.mass_scale *= 2.0;
         assert_ne!(other.digest(), m.digest(), "the mass is in the digest");
     }
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
-    let r2 = format!("transfer:{}", dir.join("r2-frondgrazer-upd160.json").display());
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
+    let r2 = format!(
+        "transfer:{}",
+        dir.join("r2-frondgrazer-upd160.json").display()
+    );
     let gru = brain_driver(Founder::Browser, &r2).expect("a transferred centre");
     let heur = brain_driver(Founder::Browser, "heuristic").expect("h");
     let shipped = EcologyParams::defaults();
@@ -351,16 +358,26 @@ fn a_centre_is_refused_at_another_mass() {
 /// (`transfer:<file>`, same vector length, restamped to this build's digest).
 #[test]
 fn round_two_centres_load_only_as_a_transfer() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
     for (file, f) in [
         ("r2-frondgrazer-upd160.json", Founder::Browser),
         ("r2-littershredder-upd512.json", Founder::Blind),
     ] {
         let path = dir.join(file);
-        assert!(brain_driver(f, &path.display().to_string()).is_err(), "{file}: strict load refused");
+        assert!(
+            brain_driver(f, &path.display().to_string()).is_err(),
+            "{file}: strict load refused"
+        );
         let d = brain_driver(f, &format!("transfer:{}", path.display())).expect("transfer");
         assert!(d.name().contains("gru"), "{file}");
-        assert!(brain_driver(Founder::ALL[1 - f.index()], &format!("transfer:{}", path.display())).is_err());
+        assert!(
+            brain_driver(
+                Founder::ALL[1 - f.index()],
+                &format!("transfer:{}", path.display())
+            )
+            .is_err()
+        );
     }
 }
 
@@ -372,7 +389,10 @@ fn the_check_reads_a_host_world_file() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../config/desktop/terrarium.toml");
     let c = super::search::check_world_config(Some(&path)).expect("the desktop terrarium");
-    assert_eq!((c.width, c.height, c.depth, c.voxel_m), (256, 128, 48, 0.125));
+    assert_eq!(
+        (c.width, c.height, c.depth, c.voxel_m),
+        (256, 128, 48, 0.125)
+    );
     assert!(matches!(c.landform, cubarium_voxel::Landform::Terrarium(_)));
     let small = super::search::check_world_config(None).expect("the default");
     assert_eq!(small, super::world::training_config());

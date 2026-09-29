@@ -263,7 +263,11 @@ fn taste_reads_the_offer_against_the_bodys_mass() {
     };
     let (one, stock, base) = read(1.0);
     let (heavy, _, _) = read(30.0);
-    assert!((one - response(stock / base)).abs() < 1e-3, "{one} vs {}", response(stock / base));
+    assert!(
+        (one - response(stock / base)).abs() < 1e-3,
+        "{one} vs {}",
+        response(stock / base)
+    );
     assert!(
         (heavy - response(stock / (30.0 * base))).abs() < 1e-3,
         "x30 tastes {heavy}, want {}",
