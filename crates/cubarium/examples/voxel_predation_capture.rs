@@ -39,6 +39,8 @@ struct Events {
     strike: Option<u64>,
     kill: Option<u64>,
     eat: Option<u64>,
+    /// The first tick after the eating that a lanternjaw lies down in its satiated rest.
+    rest: Option<u64>,
 }
 
 fn found(preset: &str, seed: u64, introduce: usize) -> Result<Sim> {
@@ -83,6 +85,14 @@ fn note(sim: &Sim, tick: u64, ev: &mut Events) {
     if ev.kill.is_some() && ev.eat.is_none() && l.eaten_carrion_by_founder[lj] > 0.0 {
         ev.eat = Some(tick);
     }
+    if ev.eat.is_some() && ev.rest.is_none() {
+        let satiated = sim.fauna().view().animals.iter().any(|a| {
+            a.founder == Some(Founder::Lanternjaw) && a.rest == Some(cubarium_voxel_fauna::Rest::Satiated)
+        });
+        if satiated {
+            ev.rest = Some(tick);
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -119,27 +129,30 @@ fn main() -> Result<()> {
         tick += 1;
         note(&sim, tick, &mut ev);
         if let Some(e) = ev.eat {
-            if tick >= e + tail {
+            if tick >= e + tail || ev.rest.is_some_and(|r| tick >= r + 5 * hz) {
                 break;
             }
         }
     }
     eprintln!(
-        "pass one, {:.1} min simulated: first strike {:?}, first kill {:?}, first carrion eaten {:?} (ticks)",
+        "pass one, {:.1} min simulated: first strike {:?}, first kill {:?}, first carrion eaten {:?}, first satiated rest after it {:?} (ticks)",
         tick as f64 / (60 * hz) as f64,
         ev.strike,
         ev.kill,
-        ev.eat
+        ev.eat,
+        ev.rest
     );
     let (first, last, what) = match (ev.strike, ev.kill, ev.eat) {
         (s, Some(k), e) => (
             s.unwrap_or(k).min(k).saturating_sub(lead),
-            e.unwrap_or(k) + tail,
+            ev.rest.map_or(e.unwrap_or(k) + tail, |r| r + 5 * hz),
             "strike, kill and carcass",
         ),
         (Some(s), None, _) => (s.saturating_sub(lead), s + tail, "a strike (no kill within the search)"),
         _ => (0, (60 * hz).min(limit), "waiting only (no strike within the search)"),
     };
+    // No clip longer than about a minute.
+    let last = last.min(first + 60 * hz);
     eprintln!("drawing ticks {first}..={last}: {what}");
 
     // Pass two: draw.
