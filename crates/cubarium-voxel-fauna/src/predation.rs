@@ -194,6 +194,22 @@ pub fn egg_hatches(
     footfall >= threshold && dusk && nearest_adult_m.is_none_or(|d| d > HATCH_SUPPRESS_M)
 }
 
+/// **Bet-hedging across dusks**: the chance an egg past its footfall threshold, with no
+/// adult near, hatches at a given dusk. A third, so a bank spreads over several nights,
+/// the way annual-killifish eggs do, instead of all hatching at the first dusk.
+pub const HATCH_CHANCE_PER_DUSK: f64 = 1.0 / 3.0;
+
+/// Stream key for the per-dusk hatch draw.
+const DOMAIN_HATCH: u64 = 0x4A7C4;
+
+/// **The per-dusk hatch draw**, beside [`egg_hatches`]'s gate: keyed by the world seed, the
+/// egg's own serial ([`Dormancy::serial`]) and the dusk's tick, so each egg draws once at
+/// each dusk and the same egg at the same dusk always draws the same.
+pub fn hatch_draw(seed: u64, egg_serial: u64, dusk_tick: u64) -> bool {
+    let mut rng = crate::step::Rng::keyed(DOMAIN_HATCH, seed, egg_serial, dusk_tick);
+    rng.unit() < HATCH_CHANCE_PER_DUSK
+}
+
 /// Apply one [`Hit`] event: the serial pass's act on the prey. The wound adds (armour was
 /// in the damage); the hit **wakes** the prey, ending any rest; at a wound of 1 the prey
 /// dies [`crate::Departure::Killed`], its whole body going to carrion on its face with a
@@ -240,6 +256,9 @@ pub struct Dormancy {
     /// `(prey id + 1, tick last heard)`, `0` an empty slot. The oldest is forgotten when
     /// it is full.
     pub heard: [(u64, u64); FOOTFALL_SLOTS],
+    /// The egg's own serial (laid or buried), no other egg's: what its hatch draw is keyed
+    /// by ([`hatch_draw`]).
+    pub serial: u64,
 }
 
 impl Dormancy {
@@ -256,6 +275,7 @@ impl Dormancy {
             threshold,
             viable_until_tick: tick.saturating_add(ticks),
             heard: [(0, 0); FOOTFALL_SLOTS],
+            serial,
         }
     }
 
@@ -283,5 +303,34 @@ impl Dormancy {
             .map(|(i, _)| i)
             .unwrap_or(0);
         self.heard[at] = (key, tick);
+    }
+}
+
+#[cfg(test)]
+mod hatch_tests {
+    use super::*;
+
+    /// Bet-hedging: over many seeded dusks, a third of a 300-egg bank that is past its
+    /// threshold with no adult near hatches at one dusk (1/3 ± 0.06); below the threshold
+    /// none does.
+    #[test]
+    fn a_third_of_a_bank_past_its_threshold_hatches_at_one_dusk() {
+        let (mut hatched, mut drawn) = (0u32, 0u32);
+        for seed in 1..=40u64 {
+            let dusk_tick = 1_000 + 97 * seed;
+            for serial in 0..300u64 {
+                assert!(egg_hatches(4, 6, true, None));
+                drawn += 1;
+                if hatch_draw(seed, serial, dusk_tick) {
+                    hatched += 1;
+                }
+                assert!(!egg_hatches(4, 3, true, None), "below its threshold, never");
+            }
+        }
+        let share = f64::from(hatched) / f64::from(drawn);
+        assert!(
+            (share - HATCH_CHANCE_PER_DUSK).abs() <= 0.06,
+            "{share} of the bank hatched at one dusk"
+        );
     }
 }

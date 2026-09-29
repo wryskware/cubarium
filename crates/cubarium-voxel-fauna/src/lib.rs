@@ -89,7 +89,8 @@ pub use controller::{
     FounderFactories, LanternjawAmbush, Response, Scripted, resolve_actions,
 };
 pub use predation::{
-    BodyKind, Dormancy, FOOTFALL_RADIUS_M, FOOTFALL_TREMOR_MIN, HATCH_SUPPRESS_M, Hit, Rest,
+    BodyKind, Dormancy, FOOTFALL_RADIUS_M, FOOTFALL_TREMOR_MIN, HATCH_CHANCE_PER_DUSK,
+    HATCH_SUPPRESS_M, Hit, Rest, hatch_draw,
     STILL_AFTER_S, STILL_SPEED_BL_PER_S, Strike, StrikePhase, TREMOR_RADIUS_M, apply_hit,
     dodge_chance, dodges, egg_hatches, is_prey_of, kind_of, moved_recently, still_after_ticks,
     tremor_of,
