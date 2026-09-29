@@ -225,7 +225,13 @@ fn main() {
         // own extents, cell size and water, the lake gate, the pre-roll with its opening
         // shower, the seeding and the acceptance check, redrawn on a refusal — through
         // `voxel::ambient_habitat`, which returns the world **already seeded**.
-        let world_cfg = preset.config();
+        // `still`: the live-training world's water (`live::world::still_water`): no
+        // river re-entry, spring seep or lake drain, no tier pools asked for.
+        let world_cfg = if args.iter().any(|a| a == "still") {
+            cubarium_search::es::voxel::live::world::still_water(preset.config())
+        } else {
+            preset.config()
+        };
         let founded = cubarium::voxel::ambient_habitat(
             &world_cfg,
             seed_base,

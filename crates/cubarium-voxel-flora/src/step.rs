@@ -205,6 +205,9 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
     // seed — then uses one clock reading, and a bin's age at the end of the tick it landed
     // in is zero rather than minus one.
     flora.tick += 1;
+    // The induced grazing defence relaxes at each species' half-life
+    // (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`, B).
+    decay_defences(flora);
     // This tick's delivery receipts start empty: they are **observation and not state**, they
     // describe only the tick that is about to run, and a caller that never reads them must not
     // accumulate them (Astra R10.3, `DeliveryReceipt`).
@@ -4246,6 +4249,19 @@ mod tests {
                         "{site:?}"
                     );
                 }
+            }
+        }
+    }
+}
+
+/// One tick of every stand's defence relaxing toward zero at its species' half-life.
+fn decay_defences(flora: &mut Flora) {
+    for stand in flora.stands.iter_mut().filter(|s| s.defence > 0.0) {
+        let half = flora.config.species(stand.species).defence_half_life_s;
+        if half > 0.0 {
+            stand.defence *= 0.5f64.powf(DT / half);
+            if stand.defence < 1e-12 {
+                stand.defence = 0.0;
             }
         }
     }

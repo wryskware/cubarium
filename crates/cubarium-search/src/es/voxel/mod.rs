@@ -70,14 +70,20 @@ pub mod commands;
 pub mod controller;
 pub mod counters;
 pub mod driver;
+#[cfg(test)]
+mod herding_tests;
 pub mod imitate;
 pub mod landscape;
+pub mod live;
 pub mod pin;
 pub mod remote;
 pub mod score;
 pub mod store;
 pub mod task;
 pub mod trainer;
+pub mod training_world;
+#[cfg(test)]
+mod training_world_tests;
 
 pub use controller::{
     CRUISE_FORWARD, Cruise, EpisodeDriver, EpisodeGru, EpisodeKind, GruBlind, GruBrowser,

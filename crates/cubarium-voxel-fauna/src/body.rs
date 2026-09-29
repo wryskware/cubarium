@@ -105,6 +105,11 @@ const MOUTH_REACH_LENGTH_FRACTION: f64 = 0.25;
 const WALL_CLIMB_COST_FACTOR: f64 = 2.0;
 /// [`FounderPhysiology::drown_after_s`], both lineages.
 const DROWN_AFTER_S: f64 = 60.0;
+/// [`FounderPhysiology::sleep_upkeep`], both lineages (WX4, Fable).
+const SLEEP_UPKEEP: f64 = 0.5;
+/// [`FounderPhysiology::wake_hunger`], both lineages: awake once the reserve is under half
+/// its cap.
+const WAKE_HUNGER: f64 = 0.5;
 
 /// What a shredder builds out of a unit of litter — and, by the decision, of carrion.
 const LITTER_YIELD: f64 = 0.5;
@@ -289,6 +294,35 @@ pub struct FounderPhysiology {
     /// raised paid structure when the founder was sized from a core budget; it came
     /// with no free reserve or energy.
     pub organ_structure_fraction: f64,
+    /// When this lineage is awake (WX4): the browser is diurnal, the shredder nocturnal.
+    /// Placeholders, `design/backlog.md` §1.
+    pub active: crate::Activity,
+    /// What upkeep costs while it sleeps, **× its basal upkeep** (0.5, Fable's call).
+    pub sleep_upkeep: f64,
+    /// Hunger overrides sleep: a body whose hunger (the reserve's shortfall from its cap,
+    /// 0 full to 1 empty) is at or above this stays awake and forages. 0.5, a placeholder:
+    /// there was no earlier threshold to reuse.
+    pub wake_hunger: f64,
+    /// **What the `Self` channels' fixed references are multiplied by** when a body's
+    /// energy, reserve, structural loss and intake are encoded. `1` is the manifest's
+    /// contract: those references are absolute organic masses. The audit round's mass
+    /// test (`design/handoffs/voxel-audit-round-2026-09-28.md` §2) sets it to the
+    /// lineage's `mass_scale` in its opt-in arm B, so a heavier body still reads "a
+    /// fraction of an adult". The manifest digest does not record it; any other value
+    /// is a diagnostic, not a trained-policy contract.
+    #[serde(default = "one")]
+    pub self_reference_scale: f64,
+    /// **The org-unit mass scale this physiology was built at**: `1` shipped. The
+    /// ecology search's `founder.mass_scale` multiplies the nine absolute quantities of
+    /// [`FounderPhysiology::core`] and records the factor here, so a rule that must judge
+    /// a body as a x1 one can (the founding gate, `cubarium_voxel_sim::habitat`). Every
+    /// ordinary rule reads the scaled quantities and never this.
+    #[serde(default = "one")]
+    pub mass_scale: f64,
+}
+
+fn one() -> f64 {
+    1.0
 }
 
 impl FounderPhysiology {
@@ -339,6 +373,7 @@ impl FounderPhysiology {
                     energy_density: 2.0,
                     // The littershredder lays a clutch on the litter it lives in.
                     reproduction: Reproduction::EGGS_PLACEHOLDER,
+                    lifespan_median_s: crate::LIFESPAN_MEDIAN_S,
                 },
                 motor_respiration_per_s: 0.001,
                 // Two thirds of its length both ways; everything taller is a wall.
@@ -365,6 +400,11 @@ impl FounderPhysiology {
                 // fungal foliage does.
                 yield_by_food: [LITTER_YIELD, FOLIAGE_YIELD, LITTER_YIELD, FOLIAGE_YIELD],
                 organ_structure_fraction: 0.05,
+                active: crate::Activity::Nocturnal,
+                sleep_upkeep: SLEEP_UPKEEP,
+                wake_hunger: WAKE_HUNGER,
+                self_reference_scale: 1.0,
+                mass_scale: 1.0,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -396,6 +436,11 @@ impl FounderPhysiology {
                 // same number so that a class it cannot reach is never a silent zero.
                 yield_by_food: [FOLIAGE_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
+                active: crate::Activity::Diurnal,
+                sleep_upkeep: SLEEP_UPKEEP,
+                wake_hunger: WAKE_HUNGER,
+                self_reference_scale: 1.0,
+                mass_scale: 1.0,
             },
         }
     }
@@ -1204,20 +1249,22 @@ pub(crate) enum Meal {
 /// brief allows as long as it is stated. Ties go in [`crate::Food::ALL`] order — litter,
 /// then cap tissue, then carrion — so the answer is a pure function of the state.
 ///
-/// The stock it reports is the same quantity the taste channel encodes and the same one
-/// the comparison is made on: a pool's whole stock at the site, or the stand's stock in
-/// the layers the band reaches (not its whole cap).
+/// It reports two amounts: the **stock** a bite diminishes on (a pool's whole stock at
+/// the site, or the stand's stock in the layers the band reaches, not its whole cap), and
+/// the **offer** the comparison is made on and the taste channel encodes — the stock, or
+/// for a stand `(1 − defence) ×` its stock (audit round §4: the defence is readable). A
+/// pool has no defence, so its offer is its stock.
 pub(crate) fn mouth_detritus(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
     body: &Body,
-) -> Option<(Meal, f64)> {
-    let mut best: Option<(Meal, f64)> = None;
-    let mut consider = |meal: Meal, stock: f64| {
-        if stock > 0.0 && best.is_none_or(|(_, b)| stock > b) {
-            best = Some((meal, stock));
+) -> Option<(Meal, f64, f64)> {
+    let mut best: Option<(Meal, f64, f64)> = None;
+    let mut consider = |meal: Meal, stock: f64, offer: f64| {
+        if stock > 0.0 && best.is_none_or(|(_, _, b)| offer > b) {
+            best = Some((meal, stock, offer));
         }
     };
     if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Litter) {
@@ -1227,12 +1274,13 @@ pub(crate) fn mouth_detritus(
                 food: crate::Food::Litter,
             },
             stock,
+            stock,
         );
     }
-    if let Some((root, stock)) =
-        mouth_foliage_stand(fv, view, cols, standing_y, body, crate::Diet::Fungal)
+    if let Some((root, stock, offer)) =
+        mouth_foliage_offer(fv, view, cols, standing_y, body, crate::Diet::Fungal)
     {
-        consider(Meal::Stand { root }, stock);
+        consider(Meal::Stand { root }, stock, offer);
     }
     if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Carrion) {
         consider(
@@ -1240,6 +1288,7 @@ pub(crate) fn mouth_detritus(
                 site,
                 food: crate::Food::Carrion,
             },
+            stock,
             stock,
         );
     }
@@ -1314,8 +1363,25 @@ pub(crate) fn mouth_foliage_stand(
     body: &Body,
     diet: crate::Diet,
 ) -> Option<(Site, f64)> {
+    mouth_foliage_offer(fv, view, cols, standing_y, body, diet).map(|(s, stock, _)| (s, stock))
+}
+
+/// [`mouth_foliage_stand`]'s rule with the **offer** it chose by: among the stands the
+/// mouth touches, the one with the most `(1 − defence) × reachable stock` — what a bite
+/// would actually get, since the plant layer takes `(1 − defence)` of the ask (audit
+/// round, `design/handoffs/voxel-audit-round-2026-09-28.md` §4). Returns the stand, its
+/// reachable stock (the `E` a bite diminishes on: the defence shrinks the bite once, at
+/// the withdrawal, and not again here) and its offer (what taste encodes).
+pub(crate) fn mouth_foliage_offer(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    cols: &[(i64, u32)],
+    standing_y: u32,
+    body: &Body,
+    diet: crate::Diet,
+) -> Option<(Site, f64, f64)> {
     let layers = mouth_crown_layers(standing_y, body, view.config.voxel_m);
-    let mut best: Option<(Site, f64)> = None;
+    let mut best: Option<(Site, f64, f64)> = None;
     let mut consider = |stand: &cubarium_voxel_flora::Stand| {
         if !(stand.foliage > 0.0 && diet.accepts(fv.config.species(stand.species).trophic)) {
             return;
@@ -1324,15 +1390,16 @@ pub(crate) fn mouth_foliage_stand(
         if !(reachable > 0.0) {
             return;
         }
+        let offer = (1.0 - stand.defence.clamp(0.0, 1.0)) * reachable;
         let better = match best {
             None => true,
-            Some((site, stock)) => reachable > stock || (reachable == stock && stand.site < site),
+            Some((site, _, o)) => offer > o || (offer == o && stand.site < site),
         };
         if better {
-            best = Some((stand.site, reachable));
+            best = Some((stand.site, reachable, offer));
         }
     };
-    // The most stock wins, ties to the smallest site: a total order, so visiting only
+    // The best offer wins, ties to the smallest site: a total order, so visiting only
     // the stands near the mouth picks what the scan of every stand picked.
     match stands_near_mouth(fv, view, cols) {
         Some(near) => near.iter().for_each(|&i| consider(&fv.stands[i as usize])),
@@ -1638,8 +1705,8 @@ pub(crate) fn taste_reading(
     let cols = mouth_columns(view, pose, body);
     match founder {
         Founder::Blind => match mouth_detritus(fv, view, &cols, standing_y, body) {
-            Some((_, stock)) => TasteReading {
-                cue: response(stock),
+            Some((_, _, offer)) => TasteReading {
+                cue: response(offer),
                 resistance: resistance_of(manifest, "litter"),
                 valid: true,
             },
@@ -1650,9 +1717,11 @@ pub(crate) fn taste_reading(
             },
         },
         Founder::Browser => {
-            match mouth_foliage_stand(fv, view, &cols, standing_y, body, crate::Diet::Vascular) {
-                Some((_, foliage)) => TasteReading {
-                    cue: response(foliage),
+            // What the stand would give, `(1 − defence) ×` its stock: a defended plant
+            // tastes thin (audit round §4; the digest names only the `foliage` cue).
+            match mouth_foliage_offer(fv, view, &cols, standing_y, body, crate::Diet::Vascular) {
+                Some((_, _, offer)) => TasteReading {
+                    cue: response(offer),
                     resistance: resistance_of(manifest, "foliage"),
                     valid: true,
                 },
@@ -1704,13 +1773,15 @@ pub(crate) fn observation(
     // reached (package mobility: "its senses read from where it is").
     let standing_y = a.sense_layer(view.config.voxel_m);
 
-    // Self: real body state against the manifest's fixed references.
+    // Self: real body state against the manifest's fixed references (times the
+    // physiology's `self_reference_scale`, 1 under the contract).
     let fb = &a.founder_state.feedback;
-    obs[0] = clamp01(a.energy / manifest.adult_energy_reference);
-    obs[1] = clamp01(a.reserve / manifest.adult_reserve_reference);
+    let k = phys.self_reference_scale;
+    obs[0] = clamp01(a.energy / (manifest.adult_energy_reference * k));
+    obs[1] = clamp01(a.reserve / (manifest.adult_reserve_reference * k));
     obs[2] = f64::from(birth_readiness(&fauna.config, a, fv));
-    obs[3] = clamp01(fb.structural_loss / manifest.structural_reference);
-    obs[4] = clamp01(fb.intake / manifest.body_reference);
+    obs[3] = clamp01(fb.structural_loss / (manifest.structural_reference * k));
+    obs[4] = clamp01(fb.intake / (manifest.body_reference * k));
     obs[5] = clamp01(fb.delivered_forward / manifest.forward_reference_m);
     obs[6] = clamp_sym(fb.delivered_turn / manifest.turn_reference_rad);
     obs[7] = if fb.attempted_equivalent > NONE_REQUESTED {
@@ -1828,7 +1899,7 @@ pub fn birth_readiness(
     let cost = rule.package_cost(&sc);
     let eligible =
         cost > 0.0 && animal.body >= sc.birth_body && animal.reserve >= rule.surplus_reserve(&sc);
-    if !eligible || state.surplus_ticks + 1 < rule.hold_ticks() {
+    if !eligible || state.surplus_ticks + 1 < rule.hold_required() {
         return false;
     }
     match rule.mode {

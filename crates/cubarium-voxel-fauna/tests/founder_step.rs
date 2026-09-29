@@ -22,6 +22,10 @@ fn terraced_world() -> World {
         height: 10,
         depth: 6,
         voxel_m: 0.25,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
         ..VoxelConfig::default()
     };
     let mut world = World::empty(config);

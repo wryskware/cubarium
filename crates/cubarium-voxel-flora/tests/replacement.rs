@@ -4,9 +4,8 @@
 //! conditioned state that steps identically.
 //!
 //! Short function tests of those three boundaries and nothing else. Nothing here is a study:
-//! there is no arm, no control and no coexistence claim in this file. The study itself is
-//! `examples/replacement.rs`, whose own `#[cfg(test)] mod tests` carries the harness-level
-//! cases (the cap arithmetic, the predeclared site list, the refusals).
+//! there is no arm, no control and no coexistence claim in this file. The study itself
+//! (`examples/replacement.rs`) is retired; version history keeps it.
 //!
 //! Conventions are `round5a.rs`/`round5b.rs`'s: `voxel_m` is 1 m, soil is wetted by adding
 //! free water to an air cell and converting it, and the **world is never stepped**, so a

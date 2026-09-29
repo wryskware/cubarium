@@ -40,11 +40,13 @@
 pub mod animal;
 pub mod appearance;
 pub mod chiplet;
+pub mod idle;
 pub mod colours;
 pub mod model;
 pub mod placement;
 pub mod present;
 pub mod project;
+pub mod sleep;
 pub mod stand;
 pub mod textures;
 pub mod vine;
@@ -1428,6 +1430,15 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             },
         )?,
     };
+
+    // Coarse water is a training-only mode (`World::set_water_every`): the ambient run
+    // refuses it rather than showing a world whose water steps once in several ticks.
+    anyhow::ensure!(
+        sim.world().water_every() == 1,
+        "the ambient run steps the water every tick; coarse water ({} ticks per step) is \
+         a training-only mode",
+        sim.world().water_every()
+    );
 
     // The world that was built is the world the config drew, unless a snapshot was
     // resumed that describes a different one — then the founding output is on the wrong

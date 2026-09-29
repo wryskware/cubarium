@@ -518,6 +518,7 @@ fn newborn(
         parcel: 0.0,
         layer_stock: [0.0; crate::MAX_FOLIAGE_LAYERS],
         profile_stage: 0,
+        defence: 0.0,
     };
     // A newborn's foliage goes into its seedling profile bottom-up, like any other tissue.
     born.bin_foliage(sc, config.voxel_m);

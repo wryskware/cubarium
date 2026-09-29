@@ -25,6 +25,10 @@ fn terrain(width: u32, depth: u32, height: u32, voxel_m: f64, top: impl Fn(i64) 
         height,
         depth,
         voxel_m,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
         ..VoxelConfig::default()
     });
     for z in 0..depth {
