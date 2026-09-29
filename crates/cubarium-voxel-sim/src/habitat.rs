@@ -2274,4 +2274,49 @@ mod tests {
         assert!(!lake_margin(&view, &lake, puddle_bank), "a puddle is not the lake");
         assert!(!lake_margin(&view, &lake, Site { x: 13, y: 6, z: 1 }), "dry ground");
     }
+
+    /// The audit round's mass scale: a lineage built `mass_scale` times heavier is
+    /// founded against a x1 body's upkeep, so the founders go to the same faces at every
+    /// scale and the run, not the founding gate, says whether regrowth feeds them. The
+    /// upkeep it really pays is still the heavy one.
+    #[test]
+    fn a_heavier_lineage_is_founded_against_a_x1_bodys_upkeep() {
+        let world = plain(24, 6);
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        plant(&mut flora, &world, 6, 3, Species::Bloomcrown, 0.85);
+        let light = *Fauna::new(Default::default())
+            .config()
+            .founder(Founder::Browser);
+        let mut config = cubarium_voxel_fauna::FaunaConfig::default();
+        {
+            let heavy = &mut config.founders[Founder::Browser.index()];
+            let c = &mut heavy.core;
+            for v in [
+                &mut c.body_max,
+                &mut c.body_min,
+                &mut c.birth_body,
+                &mut c.birth_cost,
+                &mut c.reproduction.surplus_floor,
+                &mut c.bite_per_s,
+                &mut c.bite_half_stock,
+                &mut c.growth_max_per_s,
+            ] {
+                *v *= 100.0;
+            }
+            heavy.mass_scale = 100.0;
+        }
+        config.validate().expect("a heavy config validates");
+        let heavy = config.founders[Founder::Browser.index()];
+        assert!((upkeep_per_hour(&heavy) - 100.0 * upkeep_per_hour(&light)).abs() < 1e-9);
+        assert!((founding_upkeep_per_hour(&heavy) - upkeep_per_hour(&light)).abs() < 1e-12);
+        assert_eq!(founding_upkeep_per_hour(&light), upkeep_per_hour(&light));
+
+        let mut fauna = Fauna::new(config);
+        introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
+        let at = accept(&world, &flora, &fauna, [0, 1]);
+        assert!(
+            at.lineages[Founder::Browser.index()].accepted,
+            "one heavy founder by a bloomcrown is founded as a light one would be: {at:?}"
+        );
+    }
 }

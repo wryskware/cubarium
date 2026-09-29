@@ -98,6 +98,8 @@ fn mass_scale_multiplies_the_nine_absolute_quantities_and_nothing_else() {
     assert_eq!(pb.adult_length_m, pb0.adult_length_m);
     assert_eq!(pb.adult_height_m, pb0.adult_height_m);
     assert_eq!(c.founder(s), base.founder(s), "the shredder is not moved");
+    assert_eq!(pb.mass_scale, 100.0, "the physiology records its scale");
+    assert_eq!(base.founder(b).mass_scale, 1.0);
 
     // Shared and per-lineage multiply; the shared key reaches the shredder's eggs too.
     let mut e = with("founder.mass_scale", 3.0);
