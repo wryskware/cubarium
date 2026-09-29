@@ -368,6 +368,47 @@ fn lake_rim(surface: &[i32], c: &Config, low: usize, level: i32) -> Option<(usiz
     None
 }
 
+/// The lake's floor as drain cells: the first void over every column the water at
+/// `lake.level_y` covers, flood-filled from the lowest column as [`lake_rim`] walks it.
+fn lake_floor(world: &World, surface: &[i32], lake: LakeDatum) -> Vec<(u32, u32, u32)> {
+    let c = &world.config;
+    let (w, d) = (c.width as usize, c.depth as usize);
+    let n = (w * d).min(surface.len());
+    let Some(low) = (0..n).min_by_key(|&i| surface[i]) else {
+        return Vec::new();
+    };
+    let mut seen = vec![false; n];
+    let mut queue = std::collections::VecDeque::from([low]);
+    seen[low] = true;
+    let mut cells = Vec::new();
+    while let Some(i) = queue.pop_front() {
+        let (x, z) = (i % w, i / w);
+        let y = surface[i] + 1;
+        if y >= 0
+            && (y as u32) < c.height
+            && !world.material[c.index(x as i64, y as u32, z as u32)].is_solid()
+        {
+            cells.push((x as u32, y as u32, z as u32));
+        }
+        let mut step = |nx: usize, nz: usize| {
+            let j = nz * w + nx;
+            if j < n && !seen[j] && surface[j] < lake.level_y {
+                seen[j] = true;
+                queue.push_back(j);
+            }
+        };
+        step((x + w - 1) % w, z);
+        step((x + 1) % w, z);
+        if z > 0 {
+            step(x, z - 1);
+        }
+        if z + 1 < d {
+            step(x, z + 1);
+        }
+    }
+    cells
+}
+
 /// Name the outlet at the lowest cell of the generated surface and the spring an eighth
 /// of the ring along from it, at mid-depth.
 fn outlet_and_spring(
@@ -513,6 +554,17 @@ fn staged(world: &mut World, r: &Recipe) {
     let (_, volume, report) = staged_terrain(&c, r);
     world.material = volume.material;
     outlet_and_spring(world, &volume.surface, w, d, h, Some(report.lake));
+    // **The river's loop closes underground** (WX1b), as the terrariums' does: when the
+    // recipe draws its stream from the aquifer and drains its lake, the drain is the
+    // lake's whole floor — the first void over every column the water covers — and the
+    // stream keeps the table at least a row over that floor. The outlet stays on its rim
+    // and exports only what stands over its weir. An atmosphere-fed stream ate every
+    // drop the sky gathered above its floor (1 L/s against ~0.04 m³/min of supply) and
+    // no ring ever rained.
+    if c.reentry_from_aquifer && c.lake_drain_m2_per_s > 0.0 {
+        world.lake_drain = lake_floor(world, &volume.surface, report.lake);
+        world.config.reentry_floor_head_m = f64::from(report.lake.floor_y + 1) * c.voxel_m;
+    }
     // The river comes back in at the top of the chain, so every fall below it runs.
     if let Some(top) = report.pools.iter().max_by_key(|p| p.tier)
         && top.tier > 0

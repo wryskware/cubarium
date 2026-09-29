@@ -319,7 +319,7 @@ fn run(
     );
     eprintln!(
         "world: {}x{}x{} voxel_m {} closed_budget {} rain_m_per_s {} evaporation_m_per_s {} \
-         shower_volume_m3 {} shower_interval_s {}..{} aquifer_head_m {:.3} outlet_m3_per_s {}",
+         climate {} dry_gap_s {}..{} aquifer_head_m {:.3} outlet_m3_per_s {}",
         world_cfg.width,
         world_cfg.height,
         world_cfg.depth,
@@ -327,9 +327,9 @@ fn run(
         world_cfg.closed_water_budget,
         world_cfg.rain_m_per_s,
         world_cfg.evaporation_m_per_s,
-        world_cfg.shower_volume_m3,
-        world_cfg.shower_interval_min_s,
-        world_cfg.shower_interval_max_s,
+        world_cfg.climate.preset.name(),
+        world_cfg.climate.dry_gap_min_s,
+        world_cfg.climate.dry_gap_max_s,
         world.aquifer_head_m(),
         world_cfg.outlet_m3_per_s,
     );
@@ -901,7 +901,7 @@ fn report_water(minute: u64, world: &World, flora: &Flora) {
         world.aquifer_head_m(),
         view.atmosphere_m3,
         view.total_water_m3(),
-        l.showers,
+        l.rain_events,
         view.total_residual(),
         l.rain_in,
         l.reentry_in,

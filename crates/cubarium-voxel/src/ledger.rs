@@ -34,7 +34,7 @@ pub struct Ledger {
     /// user's lever added. Stays zero under the open budget, where those flows simply
     /// leave the world.
     pub atmosphere_in: f64,
-    /// Cumulative water the showers drew back **out** of the atmosphere store and the
+    /// Cumulative water the rain drew back **out** of the atmosphere store and the
     /// sky cells accepted. Rain refused by a full world is refunded here, so this is
     /// what actually fell.
     pub atmosphere_out: f64,
@@ -44,8 +44,9 @@ pub struct Ledger {
     /// Atmosphere store at creation, so the atmosphere residual can be computed from a
     /// snapshot exactly as `initial_stored` does it for the in-world stores.
     pub initial_atmosphere: f64,
-    /// Showers **started** since the world began. A count, not a flux.
-    pub showers: u64,
+    /// Rain events of every mode **started** since the world began
+    /// (`crate::weather::WeatherCounts` has them per mode). A count, not a flux.
+    pub rain_events: u64,
     /// Water the closed cycle returned as a **stream at the spring cell**, cubic metres.
     ///
     /// The second return path of route B (`design/handoffs/voxel-water-cycle-2026-09-20.md`

@@ -558,6 +558,12 @@ impl Arena {
             depth: grid.depth(),
             voxel_m: grid.voxel_m(),
             seed: layout_seed,
+            // A trial arena has no night: WX4's sleep must not reach a trained or
+            // scripted body's episode.
+            day: cubarium_voxel::weather::DayClock {
+                mode: cubarium_voxel::weather::DayMode::Off,
+                ..Default::default()
+            },
             ..VoxelConfig::default()
         };
         let mut world = World::empty(config);
@@ -617,7 +623,11 @@ impl Arena {
             }
         }
 
-        let mut flora = Flora::new(FloraConfig::for_voxel_size(grid.voxel_m()).without_graze_refuge());
+        let mut flora = Flora::new(
+            FloraConfig::for_voxel_size(grid.voxel_m())
+                .without_graze_refuge()
+                .without_defence(),
+        );
 
         // Candidate support faces: soil ground, not the pond, and — unless this layout is
         // the seam layout — at least two columns off the wrapped seam, so a default layout

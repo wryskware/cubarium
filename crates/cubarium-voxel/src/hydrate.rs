@@ -267,6 +267,24 @@ fn open_to_sky(world: &World, b: &Basin) -> bool {
         })
 }
 
+/// How far under its founding water table a ring's aquifer-fed stream may draw it, when
+/// the table stands below the lake (WX1b).
+pub const RING_STREAM_FLOOR_M: f64 = 0.25;
+
+/// The relative humidity a closed world's sky is founded at (WX1b).
+pub const FOUNDING_RH: f64 = 0.6;
+
+/// The founding sky of a closed world whose ground holds `ground_m3`: [`FOUNDING_RH`] of
+/// what the air holds at the temperature the world starts at (its clock's hour at
+/// `tick`, no drift). The capacity is a share of the world's whole water, the sky
+/// included, so this solves `s = RH · share · e^{0.07 ΔT} · (ground + s)`.
+pub fn founding_sky_m3(c: &crate::Config, tick: u64, ground_m3: f64) -> f64 {
+    let t0 = crate::weather::Weather::fresh(c, tick, None).temperature_c();
+    // A sky that would hold most of the world is not a sky: cap the share at 0.9.
+    let x = (FOUNDING_RH * c.climate.capacity_m3(1.0, t0)).clamp(0.0, 0.9);
+    ground_m3 * x / (1.0 - x)
+}
+
 /// What [`hydrate`] put where, in cubic metres.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Hydrated {
@@ -294,7 +312,8 @@ pub struct Hydrated {
 }
 
 impl Hydrated {
-    /// Every store, which is the inventory.
+    /// Every store: the inventory for an open world; the ground poured plus the founding
+    /// sky for a closed one, whose inventory is a ceiling.
     pub fn total_m3(&self) -> f64 {
         self.pooled_m3 + self.pore_m3 + self.aquifer_m3 + self.atmosphere_m3
     }
@@ -322,12 +341,14 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     // world has no atmosphere store at all (`Config::closed_water_budget`, and
     // `World::validate_loaded` refuses one that pretends otherwise), so its share stays in
     // the ground and the inventory still adds up.
-    let atmosphere = if c.closed_water_budget {
+    // Under the closed budget the sky itself is founded at a humidity (below), so this
+    // share only sets how much of the inventory the ground may take.
+    let kept_off = if c.closed_water_budget {
         total * w.atmosphere_fraction.clamp(0.0, 1.0)
     } else {
         0.0
     };
-    let available = total - atmosphere;
+    let available = total - kept_off;
 
     // **The lake first.** A ring with no water anybody can see is not a habitat, whatever
     // its ledger says, and the panel proved that the deepest basin is not the one to fill:
@@ -416,48 +437,59 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
         .collect();
     let pooled = fill_basins(world, &others, after_lake - bed - charged - pore);
 
-    // **The surplus goes aloft, not underground.** Whatever the geometry would not take
-    // has to go somewhere, and the aquifer is the wrong somewhere: its head is what the
-    // lake stands on, so surplus buried there lifts the water table above the lake floor
-    // and the lake rises with it — on `small` at a 1.2 m inventory that flooded half the
-    // ring, a 30 m² lake standing nine voxels over its own datum. In the sky it is the
-    // cycle's own store, it rains back on schedule, and the table stays where the lake
-    // needs it. An open-budget world has no sky to put it in, so there it still sinks.
-    //
-    // A lake joined to the aquifer is sized by its level, not by its inventory: the
-    // inventory is a ceiling there, and what the level did not need is never poured.
-    let spare = if connected {
+    // **The surplus is not created** under the closed budget (WX1b): the inventory is a
+    // ceiling, as it always was for a lake joined to the aquifer, and what the geometry
+    // would not take is never poured. It used to go aloft, which founded `default`,
+    // `small` and `wide` with 58–67 % of their water in a sky that holds 3 % (RH 15–22)
+    // and forced downpours back to back. It must not go underground either: the
+    // aquifer's head is what the lake stands on. An open-budget world has no sky and no
+    // weather to answer to, so there it still sinks into the aquifer.
+    let spare = if connected || c.closed_water_budget {
         0.0
     } else {
         (after_lake - bed - charged - pore - pooled).max(0.0)
     };
-    let (to_aquifer, to_sky) = if c.closed_water_budget {
-        (0.0, spare)
-    } else {
-        (spare, 0.0)
-    };
-    // A level-sized world's sky is a share of the water it was actually given, not of the
-    // ceiling its inventory states: whatever stands aloft above the shower floor rains
-    // down in the first day and lifts the level by as much.
-    let (atmosphere, to_sky) = if connected && c.closed_water_budget {
-        let poured = lake_m3 + bed + pore + pooled + charged;
-        let f = w.atmosphere_fraction.clamp(0.0, 0.9);
-        (poured * f / (1.0 - f), 0.0)
-    } else {
-        (atmosphere, to_sky)
-    };
+    let to_aquifer = spare;
     world.aquifer_m3 += charged + to_aquifer;
-    world.atmosphere_m3 += atmosphere + to_sky;
+    // **A ring whose table cannot reach its lake** (WX1b). The terrariums raise the
+    // water table to the lake, so the lake is the table showing and the drain carries
+    // only the stream's return at a centimetre of head. A staged ring's lake stands 3–4 m
+    // up, and a table there would cost more than the inventory holds (`default`: ~270 m³
+    // against 265). So the table stays where the inventory put it, the stream keeps
+    // 0.25 m of it (its floor), and the drain becomes seepage sized at the real head
+    // difference: the lake leaks the stream's flow through its floor while the stream
+    // brings it back up. The terrarium rule stands wherever the table does reach the lake.
+    if connected && c.reentry_from_aquifer {
+        let table_m = c.aquifer_head_m(world.aquifer_m3);
+        if let Some(level) = level_y
+            && table_m + 1e-9 < lake_head_m
+        {
+            let surface_m = f64::from(level) * c.voxel_m;
+            world.config.reentry_floor_head_m = (table_m - RING_STREAM_FLOOR_M).max(0.0);
+            world.config.lake_drain_m2_per_s =
+                c.reentry_m3_per_s / (surface_m - table_m).max(c.voxel_m);
+        }
+    }
+    // **The founding sky holds RH 0.6 at the starting temperature** (WX1b), whatever the
+    // recipe's `atmosphere_fraction` (which still sets how much of the inventory is kept
+    // off the ground, so the ground a world founds with is unchanged). A store is raised
+    // to its target and never lowered.
+    let atmosphere = if c.closed_water_budget {
+        (founding_sky_m3(&c, world.tick, world.view().stored_m3()) - world.atmosphere_m3).max(0.0)
+    } else {
+        0.0
+    };
+    world.atmosphere_m3 += atmosphere;
     world.ledger.user_in += lake_m3 + bed + pore + pooled + charged + spare;
-    world.ledger.atmosphere_in += atmosphere + to_sky;
-    world.ledger.user_atmosphere_in += atmosphere + to_sky;
+    world.ledger.atmosphere_in += atmosphere;
+    world.ledger.user_atmosphere_in += atmosphere;
     world.rebuild_active_sets();
     let l = lake(world);
     Hydrated {
         pooled_m3: pooled + lake_m3,
         pore_m3: pore + bed,
         aquifer_m3: charged + to_aquifer,
-        atmosphere_m3: atmosphere + to_sky,
+        atmosphere_m3: atmosphere,
         basins: list.len(),
         basins_filled: list
             .iter()
@@ -1069,7 +1101,8 @@ mod tests {
     }
 
     /// A staged world runs the **closed** cycle its recipe asked for: the budget is on,
-    /// the atmosphere holds exactly its share of the inventory, the snapshot survives the
+    /// the sky is founded at RH 0.6 at the starting temperature (WX1b) with no spare
+    /// created beyond it, the snapshot survives the
     /// validator that refuses an open world holding water aloft, and the books balance
     /// after a minute of weather.
     #[test]
@@ -1094,25 +1127,29 @@ mod tests {
         );
 
         let footprint = c.width as f64 * c.depth as f64 * c.cell_area();
-        // Its share, **and** whatever the ground would not take: the surplus goes aloft
-        // rather than into the aquifer, where it would lift the table over the lake.
-        let want = recipe.water.inventory_m * footprint * recipe.water.atmosphere_fraction;
+        // The sky: RH 0.6 at the temperature the world starts at, not the recipe's share
+        // plus whatever the ground refused (which founded `default` at RH 15–22).
         assert!(
-            world.atmosphere_m3 >= want - 1e-9,
-            "the atmosphere holds at least its share: {} against {want}",
-            world.atmosphere_m3
+            (world.rh() - FOUNDING_RH).abs() < 1e-9,
+            "the founding sky stands at RH {}: {}",
+            FOUNDING_RH,
+            world.rh()
         );
-        assert!(
-            world.atmosphere_m3 <= recipe.water.inventory_m * footprint,
-            "and never more than the whole inventory"
-        );
-        // The books still add up with the surplus aloft: four stores, one inventory.
+        // The ground takes what it did, and the inventory is a ceiling: the spare the
+        // ground would not take is not created, aloft or in the aquifer.
         let total = recipe.water.inventory_m * footprint;
-        let stores = world.view().stored_m3() + world.atmosphere_m3;
+        let ground = world.view().stored_m3();
         assert!(
-            (stores - total).abs() <= 1e-9 * total,
-            "every store is the inventory: {stores} against {total}"
+            ground <= total * (1.0 - recipe.water.atmosphere_fraction) + 1e-9,
+            "the ground takes no more than its share: {ground} of {total}"
         );
+        assert!(ground + world.atmosphere_m3 < total, "the spare was never poured");
+        let mut again = World::empty(Config {
+            landform: crate::Landform::Ridge,
+            ..c.clone()
+        });
+        let out = hydrate(&mut again, &recipe.water);
+        assert_eq!(out.spare_m3, 0.0, "nothing spare goes underground either");
 
         let bytes = world.save();
         World::load(&bytes).expect("a closed staged world is a valid snapshot");
@@ -1244,92 +1281,6 @@ mod tests {
                 carved.0,
                 carved.1,
                 carved.2,
-            );
-        }
-    }
-
-    /// **Study, not a test.** The weather, on every preset: settle, open the outlet the
-    /// way the host does, then run an hour of simulated time and report every shower —
-    /// when it was due, when it fell, whether the store held it back, what it delivered
-    /// and how long it rained — plus what the store did and how fast it refills.
-    #[test]
-    #[ignore = "study: run by name"]
-    fn an_hour_of_weather_on_every_preset() {
-        const MINUTES: u64 = 60;
-        let ticks = MINUTES * 60 * u64::from(crate::TICK_HZ);
-        for p in crate::PRESETS {
-            let mut world = World::new(Config {
-                seed: 1,
-                ..p.config()
-            });
-            let settled = world.settle(600);
-            world.apply(crate::Command::SetOutlet { open: true });
-            let start_tick = world.tick();
-            let aloft0 = world.atmosphere_m3();
-            let in0 = world.view().ledger.atmosphere_in;
-
-            let (mut lo, mut hi) = (aloft0, aloft0);
-            let mut showers: Vec<(u64, u64, bool, f64, f64)> = Vec::new();
-            let (mut count, mut open_at, mut open_out, mut due_at) = (0u64, 0u64, 0.0, 0u64);
-            let mut held = false;
-            for _ in 0..ticks {
-                let due = world.next_shower_tick();
-                let overdue = world.tick() >= due && world.shower_left_m3() <= 0.0;
-                world.step();
-                let v = world.view();
-                lo = lo.min(world.atmosphere_m3());
-                hi = hi.max(world.atmosphere_m3());
-                if v.ledger.showers > count {
-                    count = v.ledger.showers;
-                    open_at = world.tick();
-                    open_out = v.ledger.atmosphere_out;
-                    due_at = due;
-                    held = false;
-                } else if overdue && world.shower_left_m3() <= 0.0 {
-                    held = true;
-                }
-                if open_at > 0 && world.shower_left_m3() <= 0.0 && world.tick() > open_at {
-                    let secs = (world.tick() - open_at) as f64 / f64::from(crate::TICK_HZ);
-                    showers.push((
-                        due_at,
-                        open_at,
-                        held,
-                        v.ledger.atmosphere_out - open_out,
-                        secs,
-                    ));
-                    open_at = 0;
-                }
-            }
-
-            let v = world.view();
-            let minutes = (world.tick() - start_tick) as f64 / f64::from(crate::TICK_HZ) / 60.0;
-            let gaps: Vec<f64> = showers
-                .windows(2)
-                .map(|w| (w[1].1 - w[0].1) as f64 / f64::from(crate::TICK_HZ) / 60.0)
-                .collect();
-            println!(
-                "=== {} seed 1 — settle {} ticks, converged {}",
-                p.name, settled.ticks, settled.converged
-            );
-            for (due, at, was_held, delivered, secs) in &showers {
-                println!(
-                    "  due {due}, fell {at} ({}), {delivered:.4} m³ over {secs:.0} s",
-                    if *was_held {
-                        "HELD by the floor"
-                    } else {
-                        "on time"
-                    }
-                );
-            }
-            println!(
-                "  {} showers in {minutes:.0} min; gaps {:.1}..{:.1} min; store {lo:.2}..{hi:.2} m³; \
-                 lift {:.4} m³/min; residual {:.2e} of {:.1} m³",
-                showers.len(),
-                gaps.iter().cloned().fold(f64::INFINITY, f64::min),
-                gaps.iter().cloned().fold(0.0, f64::max),
-                (v.ledger.atmosphere_in - in0) / minutes,
-                v.total_residual().abs() / v.total_water_m3().max(1.0),
-                v.total_water_m3(),
             );
         }
     }
@@ -1485,10 +1436,6 @@ mod tests {
                 closed_cycle: true,
                 rain_m_per_s: 3.5e-5,
                 evaporation_m_per_s: 3.0e-5,
-                shower_trigger_fraction: 0.01,
-                shower_volume_m3: 0.05,
-                shower_interval_min_s: 60.0,
-                shower_interval_max_s: 120.0,
                 lake_depth_m: 0.5,
                 min_lake_m2: 0.0,
                 reentry_m3_per_s: 0.0,
@@ -1527,10 +1474,17 @@ mod tests {
             evaporation_m_per_s: 0.0,
             closed_water_budget: true,
             initial_atmosphere_m3: 2.0,
-            shower_trigger_fraction: 0.01,
-            shower_volume_m3: 0.05,
-            shower_interval_min_s: 6000.0,
-            shower_interval_max_s: 6000.0,
+            // No rain: no hazards, and a sky of 2 m³ (almost all the world's water) at RH
+            // ~0.9, well clear of the forced limit and well above the stream's floor at
+            // RH 0.5.
+            climate: {
+                let mut c = crate::weather::Climate::tropical_jungle();
+                c.capacity_share = 1.2;
+                for m in [&mut c.drizzle, &mut c.shower, &mut c.downpour] {
+                    m.lambda_max_per_h = 0.0;
+                }
+                c
+            },
             reentry_m3_per_s: reentry,
             ..Config::default()
         };
@@ -1590,10 +1544,6 @@ mod tests {
                 closed_cycle: true,
                 rain_m_per_s: 3.5e-5,
                 evaporation_m_per_s: 0.0,
-                shower_trigger_fraction: 0.01,
-                shower_volume_m3: 0.05,
-                shower_interval_min_s: 6000.0,
-                shower_interval_max_s: 6000.0,
                 ..Water::DRY
             },
         );
@@ -1664,8 +1614,6 @@ mod tests {
                 inventory_m: 0.04,
                 atmosphere_fraction: 0.2,
                 closed_cycle: true,
-                shower_interval_min_s: 6000.0,
-                shower_interval_max_s: 6000.0,
                 ..Water::DRY
             },
         );
@@ -1768,7 +1716,7 @@ mod tests {
                         && world.free[i] > 0.0
                 })
                 .collect();
-            let showers0 = world.view().ledger.showers;
+            let showers0 = world.view().ledger.rain_events;
             let (mut lo, mut hi) = (world.atmosphere_m3(), world.atmosphere_m3());
             let mut wet = vec![0u32; falls.len()];
             for _ in 0..12_000 {
@@ -1787,7 +1735,7 @@ mod tests {
                  ticks; store {lo:.2}..{hi:.2} m³ ({:+.1} %); {} shower(s)",
                 falls.len(),
                 100.0 * (hi - lo) / lo.max(1e-9),
-                world.view().ledger.showers - showers0,
+                world.view().ledger.rain_events - showers0,
             );
         }
     }
@@ -1809,8 +1757,6 @@ mod tests {
                     inventory_m: 0.3,
                     atmosphere_fraction: 0.5,
                     closed_cycle: true,
-                    shower_interval_min_s: 6000.0,
-                    shower_interval_max_s: 6000.0,
                     ..Water::DRY
                 },
             );
@@ -2134,5 +2080,78 @@ mod tests {
         let out = hydrate(&mut world, &Water::DRY);
         assert_eq!(out, Hydrated::default());
         assert!(world.free.iter().all(|&f| f == 0.0));
+    }
+
+    /// WX1b: a ring whose water table cannot reach its lake. The table stays where the
+    /// inventory put it, the stream keeps 0.25 m of it, and the drain is seepage at the
+    /// real head difference — so with the stream running the lake and the aquifer both
+    /// hold.
+    #[test]
+    fn a_ring_lake_over_a_low_table_holds_with_the_stream_running() {
+        let c = Config {
+            width: 16,
+            height: 12,
+            depth: 2,
+            voxel_m: 0.25,
+            closed_water_budget: true,
+            rain_m_per_s: 3.5e-5,
+            evaporation_m_per_s: 0.0,
+            reentry_m3_per_s: 2.0e-4,
+            reentry_from_aquifer: true,
+            lake_drain_m2_per_s: 0.1,
+            climate: {
+                let mut c = crate::weather::Climate::tropical_jungle();
+                for m in [&mut c.drizzle, &mut c.shower, &mut c.downpour] {
+                    m.lambda_max_per_h = 0.0;
+                }
+                c
+            },
+            ..Config::default()
+        };
+        let mut w = World::empty(c.clone());
+        // Rock to y = 5; the lake a bowl in it, x 2..=5, floor at y = 3 (water in rows
+        // 4 and 5), with the outlet on its rim a row over the water.
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                for y in 1..=5 {
+                    w.material[c.index(x, y, z)] = Material::Rock;
+                }
+            }
+            for x in 2..=5i64 {
+                for y in 4..=5 {
+                    w.material[c.index(x, y, z)] = Material::Air;
+                }
+            }
+        }
+        w.rebuild_active_sets();
+        w.set_outlet_cell(Some((6, 6, 0)));
+        w.lake_drain = (2..=5u32).flat_map(|x| (0..2u32).map(move |z| (x, 4, z))).collect();
+        w.set_spring_cell(Some((3, 4, 0)));
+        hydrate(
+            &mut w,
+            &Water {
+                inventory_m: 0.3,
+                aquifer_head_m: 0.3,
+                closed_cycle: true,
+                ..Water::DRY
+            },
+        );
+        let table = w.config().aquifer_head_m(w.aquifer_m3);
+        assert!(table < 1.25, "the table is under the lake: {table}");
+        assert!((w.config().reentry_floor_head_m - (table - 0.25).max(0.0)).abs() < 1e-9);
+        let k = w.config().lake_drain_m2_per_s;
+        assert!((k - 2.0e-4 / (1.5 - table)).abs() < 1e-12, "seepage sized: {k}");
+
+        let (lake0, aq0) = (lake(&w).volume_m3, w.aquifer_m3);
+        assert!(lake0 > 0.1, "{lake0}");
+        for _ in 0..400 {
+            w.step();
+            assert!(w.weather().stream_m3_s() > 0.0, "the stream runs");
+        }
+        let (lake1, aq1) = (lake(&w).volume_m3, w.aquifer_m3);
+        assert!((lake1 / lake0 - 1.0).abs() < 0.03, "the lake holds: {lake0} -> {lake1}");
+        assert!((aq1 / aq0 - 1.0).abs() < 0.03, "the aquifer holds: {aq0} -> {aq1}");
+        let v = w.view();
+        assert!(v.total_residual().abs() <= 1e-9 * v.total_water_m3().max(1.0));
     }
 }

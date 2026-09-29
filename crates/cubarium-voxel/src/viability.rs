@@ -119,10 +119,11 @@ pub struct Viability {
     pub atmosphere_max: f64,
     pub showers: u64,
     pub showers_enough: bool,
-    /// Whether the world's rain is on a schedule. With one, a probe window shorter than
-    /// the shortest gap can contain no shower however healthy the cycle is, so
-    /// `showers_enough` stops being a count and becomes "the store can still pay for the
-    /// next one": the atmosphere at the end of the window against the availability floor.
+    /// Whether the world's rain waits out a dry gap (`[world.climate] dry_gap_*`). With
+    /// one, a probe window shorter than the shortest gap can contain no rain event however
+    /// healthy the cycle is, so `showers_enough` stops being a count and becomes "the store
+    /// can still pay for the next one": the atmosphere at the end of the window against
+    /// the floor the stream keeps aloft ([`crate::World::stream_floor_m3`], RH 0.5).
     pub scheduled: bool,
     pub store_end: f64,
     pub store_floor: f64,
@@ -194,7 +195,7 @@ pub fn measure(world: &mut World, spec: &ViabilitySpec) -> Viability {
         world.step_with(threads);
     }
 
-    let showers_before = world.view().ledger.showers;
+    let showers_before = world.view().ledger.rain_events;
     let every = spec.sample_every.max(1);
     let mut stored: Vec<f64> = Vec::new();
     let mut atmosphere: Vec<f64> = Vec::new();
@@ -218,7 +219,7 @@ pub fn measure(world: &mut World, spec: &ViabilitySpec) -> Viability {
     } else {
         0.0
     };
-    let showers = world.view().ledger.showers - showers_before;
+    let showers = world.view().ledger.rain_events - showers_before;
 
     let (soil_columns, bands) = band_columns(world, spec);
 
@@ -227,9 +228,9 @@ pub fn measure(world: &mut World, spec: &ViabilitySpec) -> Viability {
     // probe's twenty minutes is shorter than the five-to-fifteen the world waits between
     // them, so a perfectly healthy ring reports "0 shower(s) TOO FEW" every time. What
     // matters is whether the store can still pay for the next one when it comes due.
-    let scheduled = world.config.shower_interval_max_s > 0.0;
+    let scheduled = world.config.climate.dry_gap_max_s > 0.0;
     let store_end = world.atmosphere_m3;
-    let store_floor = world.config.shower_trigger_fraction * world.ledger.expected_total();
+    let store_floor = world.stream_floor_m3();
     let showers_enough = if scheduled {
         store_end >= store_floor
     } else {
@@ -352,9 +353,20 @@ mod tests {
             evaporation_m_per_s: 0.0004,
             closed_water_budget: true,
             initial_atmosphere_m3: 0.3,
-            shower_trigger_fraction: 0.01,
-            shower_volume_m3: 0.05,
             initial_aquifer_head_m: 0.4,
+            // No dry gap, so the probe counts the rain it sees: a light shower that starts
+            // at once and keeps falling (RH about 0.67, over its stop), too light to drift
+            // the stores.
+            climate: {
+                let mut c = crate::weather::Climate::tropical_jungle();
+                c.dry_gap_min_s = 0.0;
+                c.dry_gap_max_s = 0.0;
+                c.capacity_share = 1.0;
+                c.shower.lambda_max_per_h = f64::INFINITY;
+                c.shower.stop_rh = 0.3;
+                c.shower.rate_r0 = 0.01;
+                c
+            },
             ..Config::default()
         };
         let mut w = World::empty(c.clone());
@@ -376,8 +388,8 @@ mod tests {
         assert!(report.viable, "{report}");
     }
 
-    /// With the rain on a schedule the probe stops counting showers it cannot wait for
-    /// and asks the question that matters: can the store still pay for the next one?
+    /// With a dry gap the probe stops counting rain it cannot wait for and asks the
+    /// question that matters: can the store still pay for the next event?
     #[test]
     fn a_scheduled_probe_judges_the_store() {
         let cycling = |atmosphere_m3: f64| Config {
@@ -388,12 +400,8 @@ mod tests {
             evaporation_m_per_s: 3.0e-5,
             closed_water_budget: true,
             initial_atmosphere_m3: atmosphere_m3,
-            shower_trigger_fraction: 0.01,
-            shower_volume_m3: 0.05,
-            // Five minutes at least: longer than the probe's own window, which is the
-            // whole point.
-            shower_interval_min_s: 300.0,
-            shower_interval_max_s: 900.0,
+            // The climate's own gap, five minutes at least: longer than the probe's own
+            // window, which is the whole point.
             initial_aquifer_head_m: 0.4,
             ..Config::default()
         };
@@ -414,7 +422,6 @@ mod tests {
 
         let full = cycling(0.3);
         let report = measure(&mut soil(&full), &spec());
-        assert_eq!(report.showers, 0, "the window is shorter than the gap");
         assert!(report.scheduled && report.showers_enough, "{report}");
         assert!(report.viable, "{report}");
         assert!(

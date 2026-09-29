@@ -205,6 +205,11 @@ pub struct Voxel {
     /// is a solid voxel, as before textures, and the latticevine is plain voxel cells.
     #[arg(long, default_value_t = false)]
     pub textures: bool,
+    /// Development: start a rain event of this mode (`drizzle`, `shower`, `downpour`) the
+    /// moment the run starts, whatever the weather would do, for captures. It stops by
+    /// the weather's ordinary rules (`cubarium_voxel::World::force_rain`).
+    #[arg(long, value_name = "MODE")]
+    pub weather_force: Option<String>,
 }
 
 impl Voxel {

@@ -98,6 +98,174 @@ pub const PART_LOG: u8 = 6;
 /// Floor marks: leaf litter or carrion remnants.
 pub const PART_FLOOR_MARK: u8 = 7;
 
+/// One breath of the pose table: its phase at the staged tick (0..1, so the frame clock's
+/// wrap never shows), its period in ticks and its dip in voxels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Breath {
+    pub base: f32,
+    pub period: f32,
+    pub amp: f32,
+}
+
+impl Breath {
+    pub const ZERO: Breath = Breath {
+        base: 0.0,
+        period: 0.0,
+        amp: 0.0,
+    };
+
+    /// The dip `ticks` after the staged tick at an entry's own phase offset: a cosine, full
+    /// at a breath's bottom.
+    fn dip(self, phase: f32, ticks: f32) -> f32 {
+        let period = if self.period > 0.0 { self.period } else { 1.0 };
+        let t = self.base + ticks / period + phase;
+        self.amp * (0.5 + 0.5 * (std::f32::consts::TAU * t).cos())
+    }
+}
+
+/// One head move of an idle body (`cubarium::voxel::idle`): a dip out and back once, eased
+/// in and out, starting `start` ticks after the staged tick (negative when under way) and
+/// lasting `ticks`, bringing the head cells `dip` voxels down at its furthest. A zero dip is
+/// no move (a body entry).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HeadMove {
+    pub start: f32,
+    pub ticks: f32,
+    pub dip: f32,
+}
+
+impl HeadMove {
+    pub const NONE: HeadMove = HeadMove {
+        start: 0.0,
+        ticks: 0.0,
+        dip: 0.0,
+    };
+
+    /// How far out the move is `ticks` after the staged tick, 0 to 1 and back to 0:
+    /// `sin²(π u)` over the move's own time `u`, so it leaves and returns with no speed.
+    pub fn out(self, ticks: f32) -> f32 {
+        if self.ticks <= 0.0 {
+            return 0.0;
+        }
+        let u = (ticks - self.start) / self.ticks;
+        if u <= 0.0 || u >= 1.0 {
+            return 0.0;
+        }
+        let s = (std::f32::consts::PI * u).sin();
+        s * s
+    }
+}
+
+/// One entry of the pose table (WX4): a posing body, or its head while it moves.
+///
+/// - `sleep` is the sleep weight at the staged tick, `sleep_rate` its change per tick,
+///   `drop` the rows the body settles when fully asleep, `sleep_phase` its breath's offset.
+/// - `idle` is the idle weight (an awake body standing still) at the staged tick,
+///   `idle_rate` its change per tick, `idle_phase` its breath's offset.
+/// - `head` is a head move under way or due: the head cells of a body in a move take an
+///   entry of their own with it, the rest of the body one with [`HeadMove::NONE`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PoseEntry {
+    pub sleep: f32,
+    pub sleep_rate: f32,
+    pub drop: f32,
+    pub sleep_phase: f32,
+    pub idle: f32,
+    pub idle_rate: f32,
+    pub idle_phase: f32,
+    pub head: HeadMove,
+}
+
+impl PoseEntry {
+    pub const ZERO: PoseEntry = PoseEntry {
+        sleep: 0.0,
+        sleep_rate: 0.0,
+        drop: 0.0,
+        sleep_phase: 0.0,
+        idle: 0.0,
+        idle_rate: 0.0,
+        idle_phase: 0.0,
+        head: HeadMove::NONE,
+    };
+}
+
+/// A pack's pose table (`poseK` in `voxel.frag`, WX4): the staged tick (wrapped as
+/// [`FrameClock::time`] wraps it), the sleep and idle breaths, and the entries. Entry 0 is
+/// never used by a cell (a posing animal cell's `b` byte is its class in the top two bits
+/// and its entry, 1 to 63, below; `b = 0` is a body not posing, drawn as it always was).
+/// An animal texel of glyph 0 is faceless: an empty voxel a posing body can move into,
+/// which only sends the walk looking for it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PoseTable {
+    pub tick: f32,
+    pub sleep: Breath,
+    pub idle: Breath,
+    pub entries: [PoseEntry; POSE_ENTRIES],
+}
+
+impl PoseTable {
+    pub const EMPTY: PoseTable = PoseTable {
+        tick: 0.0,
+        sleep: Breath::ZERO,
+        idle: Breath::ZERO,
+        entries: [PoseEntry::ZERO; POSE_ENTRIES],
+    };
+
+    /// Whether any body poses in this pack.
+    pub fn posing(&self) -> bool {
+        self.entries[1..].iter().any(|e| *e != PoseEntry::ZERO)
+    }
+}
+
+/// Where one entry's cells are drawn `ticks` after the staged tick, in voxels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PoseAt {
+    /// Down: the sleep's settle, plus a head's dip.
+    pub settle: f32,
+    /// The breath's dip of the top of the back: the sleep's and the idle's.
+    pub breath: f32,
+}
+
+/// One entry, `ticks` after the staged tick: each weight runs on from the staged one at its
+/// rate (clamped to `0..=1`) and is eased by a smoothstep; the settle is the drop at the
+/// sleep weight; each breath dips at its own weight; a head move goes out and back at the
+/// idle weight.
+pub fn pose_at(table: &PoseTable, entry: &PoseEntry, ticks: f32) -> PoseAt {
+    let ticks = ticks.clamp(0.0, 8.0);
+    let smooth = |w: f32, r: f32| {
+        let w = (w + r * ticks).clamp(0.0, 1.0);
+        w * w * (3.0 - 2.0 * w)
+    };
+    let ws = smooth(entry.sleep, entry.sleep_rate);
+    let wi = smooth(entry.idle, entry.idle_rate);
+    let head = entry.head.out(ticks) * wi;
+    PoseAt {
+        settle: entry.drop * ws + entry.head.dip * head,
+        breath: ws * table.sleep.dip(entry.sleep_phase, ticks)
+            + wi * table.idle.dip(entry.idle_phase, ticks),
+    }
+}
+
+/// The pose table as the walk reads it this frame, at frame clock `time` (ticks, as
+/// [`FrameClock::time`]) and `s` pixels a voxel: entry `k`'s settle and breath dip in whole
+/// pixel rows, the settle at most two voxels (as far as the walk looks). Unused entries stay
+/// zero.
+pub fn pose_rows(table: &PoseTable, time: f32, s: u32) -> [[f32; 4]; POSE_ENTRIES] {
+    let mut out = [[0.0; 4]; POSE_ENTRIES];
+    let s = s as f32;
+    let px = |v: f32| (v * s + 0.5).floor();
+    for (o, e) in out.iter_mut().zip(&table.entries).skip(1) {
+        if *e != PoseEntry::ZERO {
+            let p = pose_at(table, e, time - table.tick);
+            *o = [px(p.settle).min(2.0 * s), px(p.breath), 0.0, 0.0];
+        }
+    }
+    out
+}
+
+/// Entries in the frame's pose table ([`PoseTable`]): the texel's six entry bits.
+pub const POSE_ENTRIES: usize = 64;
+
 // --- face textures -------------------------------------------------------------------
 
 /// Which face of a voxel a texture is drawn on. The elevated camera never shows an
@@ -868,6 +1036,7 @@ impl VoxelParams {
                 Some(s) => [(s.seed & 0xFFFF) as f32, ((s.seed >> 16) & 0xFFFF) as f32, 0.0, 0.0],
                 None => [0.0; 4],
             },
+            poses: [[0.0; 4]; POSE_ENTRIES],
         }
     }
 }
@@ -995,6 +1164,8 @@ struct VoxelUniforms {
     flash_c: [f32; 4],
     strike_k: [f32; 4],
     strike_l: [f32; 4],
+    /// The pose table of the pack this frame draws, evaluated on its clock ([`pose_rows`]).
+    poses: [[f32; 4]; POSE_ENTRIES],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -1024,6 +1195,9 @@ pub struct VoxelStaging<'a> {
     /// [`VoxelParams::glow_extent`], in units of full ambient light. A slow plane
     /// ([`PLANE_GLOW`]): written only when its key moves. Empty in the flat tier.
     pub glow: &'a mut [u8],
+    /// The pose table ([`PoseTable`]), [`PoseTable::EMPTY`] when handed over: a pack with no
+    /// animal posing leaves it so.
+    pub poses: &'a mut PoseTable,
     /// Whether this pack must write [`VoxelStaging::roof`], [`VoxelStaging::glyphs`],
     /// [`VoxelStaging::sky`] and [`VoxelStaging::glow`] (indexed [`PLANE_ROOF`],
     /// [`PLANE_GLYPHS`], [`PLANE_SKY`], [`PLANE_GLOW`]). A
@@ -1326,6 +1500,13 @@ pub struct VoxelRenderer {
     uniforms: HostBuffer,
     /// Bytes between those blocks — `minUniformBufferOffsetAlignment`, measured.
     uniform_stride: u64,
+    /// Each staging buffer's pose table, written by its pack; and the one the images hold,
+    /// which every frame's uniform block carries.
+    pose_tables: Vec<PoseTable>,
+    drawn_poses: PoseTable,
+    /// Whether any animal poses in the drawn pack: the lit tier then redraws every frame,
+    /// because the settle and the breath move on the frame clock.
+    posing: bool,
     /// The slot of the last frame that retired, i.e. the one whose timestamps are the
     /// newest complete set. `None` before the first frame finishes.
     last_done: Option<usize>,
@@ -1338,6 +1519,10 @@ pub struct VoxelRenderer {
     /// The lit walk that also writes its end depth for the weather pass (null in the flat
     /// tier): bound instead of `pipeline` on frames that draw weather.
     depth_pipeline: vk::Pipeline,
+    /// `pipeline` and `depth_pipeline` with the sleep pose (`POSE`): bound only while the
+    /// drawn pack has an animal posing.
+    pose_pipeline: vk::Pipeline,
+    depth_pose_pipeline: vk::Pipeline,
     present: PresentPass,
     pub command_pool: vk::CommandPool,
     queries: vk::QueryPool,
@@ -1811,41 +1996,36 @@ impl VoxelRenderer {
         // GPU runs the flat shader code alone. The lit effects' switches follow it
         // (`crate::sunvis::Effects::spec_constants`), all off in the flat tier.
         let constants = params.effects.spec_constants(params.lit);
-        let entries: Vec<_> = (0..crate::sunvis::SPEC_CONSTANTS)
-            .map(|i| {
-                vk::SpecializationMapEntry::default()
-                    .constant_id(i)
-                    .offset(i * 4)
-                    .size(4)
-            })
-            .collect();
-        let spec = vk::SpecializationInfo::default()
-            .map_entries(&entries)
-            .data(bytemuck::cast_slice(&constants));
-        let pipeline = crate::render::fullscreen_pipeline_n(
-            d,
-            raster_pass,
-            pipeline_layout,
-            vs,
-            fs,
-            false,
-            Some(&spec),
-            if params.lit { 2 } else { 1 },
-        )?;
-        // The lit walk again, writing its end depth for the weather pass (`WEATHER_DEPTH`,
-        // constant_id 8): used only on frames that draw weather.
-        let depth_pipeline = if params.lit {
+        // The walk's variants: the lit walk again writing its end depth for the weather
+        // pass (`WEATHER_DEPTH`, constant_id 8), used only on frames that draw weather; and
+        // each of them with the sleep pose (`POSE`, constant_id 9), used only on frames whose
+        // pack has an animal posing.
+        let walk = |depth: bool, pose: bool| -> Result<vk::Pipeline> {
             let mut flags: Vec<u32> = constants.to_vec();
-            flags.extend([0, 0, 1]);
+            flags.extend([0, 0, u32::from(depth), u32::from(pose)]);
             let entries: Vec<_> = (0..flags.len() as u32)
                 .map(|i| vk::SpecializationMapEntry::default().constant_id(i).offset(i * 4).size(4))
                 .collect();
             let spec = vk::SpecializationInfo::default()
                 .map_entries(&entries)
                 .data(bytemuck::cast_slice(&flags));
-            crate::render::fullscreen_pipeline_n(d, raster_pass, pipeline_layout, vs, fs, false, Some(&spec), 2)?
+            crate::render::fullscreen_pipeline_n(
+                d,
+                raster_pass,
+                pipeline_layout,
+                vs,
+                fs,
+                false,
+                Some(&spec),
+                if params.lit { 2 } else { 1 },
+            )
+        };
+        let pipeline = walk(false, false)?;
+        let pose_pipeline = walk(false, true)?;
+        let (depth_pipeline, depth_pose_pipeline) = if params.lit {
+            (walk(true, false)?, walk(true, true)?)
         } else {
-            vk::Pipeline::null()
+            (vk::Pipeline::null(), vk::Pipeline::null())
         };
         let backdrop = if params.lit {
             backdrop.with_pipeline(gpu, pipeline_layout, vs, fs)?
@@ -1906,6 +2086,9 @@ impl VoxelRenderer {
             fog_floor: params.height as f32 * 0.25,
             staging,
             uniform_stride,
+            pose_tables: vec![PoseTable::EMPTY; STAGING_RING],
+            drawn_poses: PoseTable::EMPTY,
+            posing: false,
             last_done: None,
             ring: StagingRing::new(STAGING_RING),
             slow: SlowPlanes::new(STAGING_RING),
@@ -1929,6 +2112,8 @@ impl VoxelRenderer {
             pipeline_layout,
             pipeline,
             depth_pipeline,
+            pose_pipeline,
+            depth_pose_pipeline,
             present: PresentPass::new(gpu, raster_view, nearest)?,
             command_pool,
             queries,
@@ -1992,8 +2177,12 @@ impl VoxelRenderer {
         let moved = clock.step != self.clock.step;
         let new_tick = clock.time.floor() != self.clock.time.floor();
         let first = self.weather_ease.current().is_none();
+        let ticked = clock.time != self.clock.time;
         self.clock = clock;
         let mut redraw = moved && self.params.lit && self.water_visible;
+        // A posing animal moves every frame in the lit tier; the flat tier keeps its tick
+        // rate and draws the pose at the clock of the frame that redraws.
+        redraw |= self.posing && self.params.lit && ticked;
         if self.params.lit || new_tick || first {
             let dt = (clock.seconds - self.weather_at) as f32;
             self.weather_at = clock.seconds;
@@ -2127,6 +2316,8 @@ impl VoxelRenderer {
             )
         };
         styles.fill(VoxelStyle::default());
+        let poses = &mut self.pose_tables[into];
+        *poses = PoseTable::EMPTY;
         fill(VoxelStaging {
             voxels,
             roof,
@@ -2135,6 +2326,7 @@ impl VoxelRenderer {
             sky,
             canopy,
             glow,
+            poses,
             write,
         });
         self.ring.packed(into);
@@ -2233,7 +2425,14 @@ impl VoxelRenderer {
         self.redrew = redraw;
         // This frame's own uniform block, written now and read by the GPU when it runs:
         // `set_params` and `update_weather` only moved `self.params`.
+        if upload && let Some(i) = frame.staging {
+            self.drawn_poses = self.pose_tables[i];
+            self.posing = self.drawn_poses.posing();
+        }
         let mut block = self.params.uniforms(self.tex_mask, self.vine_on, self.clock, &self.look);
+        if self.posing {
+            block.poses = pose_rows(&self.drawn_poses, self.clock.time, self.params.s);
+        }
         block.vol[3] = self.sunvis.fade();
         block.fog_k[1] = self.fog_floor;
         self.uniforms.write_bytes_at(self.uniform_stride * frame.slot as u64, &[block]);
@@ -2383,7 +2582,12 @@ impl VoxelRenderer {
                     &[(self.uniform_stride * frame.slot as u64) as u32],
                 );
                 let weather = self.weather_pass.is_some() && weather_drawn(&self.look, &self.params);
-                let walk = if weather { self.depth_pipeline } else { self.pipeline };
+                let walk = match (weather, self.posing) {
+                    (false, false) => self.pipeline,
+                    (false, true) => self.pose_pipeline,
+                    (true, false) => self.depth_pipeline,
+                    (true, true) => self.depth_pose_pipeline,
+                };
                 d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, walk);
                 d.cmd_draw(cb, 3, 1, 0, 0);
                 d.cmd_end_render_pass(cb);
@@ -2509,8 +2713,11 @@ impl VoxelRenderer {
         let d = &gpu.device;
         unsafe {
             d.destroy_pipeline(self.pipeline, None);
-            if self.depth_pipeline != vk::Pipeline::null() {
-                d.destroy_pipeline(self.depth_pipeline, None);
+            d.destroy_pipeline(self.pose_pipeline, None);
+            for p in [self.depth_pipeline, self.depth_pose_pipeline] {
+                if p != vk::Pipeline::null() {
+                    d.destroy_pipeline(p, None);
+                }
             }
             self.backdrop.destroy(d);
             if let Some(w) = &mut self.weather_pass {

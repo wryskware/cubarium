@@ -524,6 +524,10 @@ fn anchors(founder: Founder) -> Anchors {
 impl Manifest {
     /// The blind littershredder: 23 inputs, no eyes. The ladder's 0.375 m body (package
     /// L), cruising at one body length per second.
+    // WX4: the manifests carry no phase input. An asleep body skips its controller, so a
+    // heuristic or trained brain never sees a night it cannot act in; a phase channel
+    // (the day's place, `World::day_phase`) is the next training round's addition, and it
+    // is a new contract when it lands.
     pub fn blind() -> Manifest {
         let a = anchors(Founder::Blind);
         Manifest {

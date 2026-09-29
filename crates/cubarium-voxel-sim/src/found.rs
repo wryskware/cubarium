@@ -465,9 +465,7 @@ mod tests {
         let mut recipe = cubarium_voxel::Recipe::DEFAULT;
         recipe.water.min_lake_m2 = 0.0;
         recipe.water.min_tier_pools = 0;
-        // A shower of a few seconds, so two pre-rolls stay short.
-        recipe.water.shower_volume_m3 = 0.005;
-        let cfg = cubarium_voxel::Config {
+        let mut cfg = cubarium_voxel::Config {
             width: 32,
             height: 24,
             depth: 4,
@@ -475,6 +473,8 @@ mod tests {
             landform: Landform::Staged(recipe),
             ..cubarium_voxel::Config::default()
         };
+        // A shower of a second, so two pre-rolls stay short.
+        cfg.climate.opening_min_s = 1.0;
         let seeds = |list: Vec<u64>| {
             let mut it = list.into_iter();
             move || {

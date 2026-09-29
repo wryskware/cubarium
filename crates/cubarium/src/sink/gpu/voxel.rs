@@ -37,7 +37,7 @@ use anyhow::{Context, Result, bail};
 
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
-    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
+    MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, POSE_ENTRIES, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
     PLANE_SKY, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, VoxelView, World};
@@ -47,6 +47,7 @@ use crate::present::srgb_linear;
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::{Lighting, VoxelConfig};
 use crate::voxel::animal::{AnimalPart, Animals};
+use crate::voxel::sleep;
 use crate::voxel::{appearance, colours};
 use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
@@ -59,6 +60,9 @@ use cubarium_voxel_fauna::{Fauna, FaunaView};
 use super::light::{Canopy, Glow, SkyWorker};
 use super::sunvis::{Snapshot, SunVisDriver};
 use super::target::{GpuTarget, GpuTargetKind};
+
+// The texel's six entry bits, the renderer's uniform array and the pose's own table agree.
+const _: () = assert!(sleep::POSE_ENTRIES == POSE_ENTRIES && POSE_ENTRIES <= 64);
 
 /// The knobs `cubarium voxel --sink gpu` takes.
 #[derive(Clone, Debug)]
@@ -1000,6 +1004,17 @@ impl Packer {
                 )
             } else {
                 let p = stands.at(xi, i64::from(y), z);
+                // Under a settling torso (WX4): a faceless leg cell, over whatever plant is
+                // there, so the walk looks for the torso from here. Under a dipping head: a
+                // faceless torso cell, where no plant is (`sleep::is_soft_mark`).
+                let under = if beasts { animals.pose_at(xi, i64::from(y), z) } else { 0 };
+                if under != 0
+                    && (!sleep::is_soft_mark(under) || appearance::plant_class(p) == PART_NONE)
+                {
+                    out.voxels[i] = texel_of(m, view.free[src], view.pore[src], PART_ANIMAL_INTERIM, 0, 0);
+                    out.voxels[i].0[2] = under;
+                    continue;
+                }
                 match appearance::plant_class(p) {
                     PART_NONE => continue,
                     class => {
@@ -1027,6 +1042,10 @@ impl Packer {
                 }
             };
             out.voxels[i] = texel_of(m, view.free[src], view.pore[src], part, glyph, slot);
+            if part == PART_ANIMAL_INTERIM {
+                // The sleep pose's class and entry (0: not posing; `voxel::sleep`).
+                out.voxels[i].0[2] = animals.pose_at(xi, i64::from(y), z);
+            }
             if let (Some(p), Some(l)) = (plant, &self.light) {
                 let crown = matches!(p, Part::Crown { .. });
                 out.voxels[i].0[2] = l.canopy.plant_byte(stands.owner(xi, y, z), crown, x, y, z);
@@ -1037,10 +1056,18 @@ impl Packer {
         for c in self.vines.iter().filter(|c| c.kind.tiled()) {
             let i = VoxelStaging::index(w, h, c.x, c.y, c.z);
             let t = out.voxels[i];
-            if t.material() == 0 && t.part() == PART_NONE {
+            // A head's faceless cell gives way to a vine as it does to a plant.
+            let soft = t.part() == PART_ANIMAL_INTERIM && t.glyph() == 0 && sleep::is_soft_mark(t.0[2]);
+            if t.material() == 0 && (t.part() == PART_NONE || soft) {
                 let (glyph, b, a) = c.texel_bytes();
                 out.voxels[i] = t.with_vine(glyph, b, a);
             }
+        }
+        // The pose table: the staged tick and its breaths, then this pack's poses.
+        let entries = animals.pose_entries();
+        if entries.len() > 1 {
+            *out.poses = sleep::table(view.tick, FrameClock::TICK_WRAP, cubarium_voxel_fauna::DT);
+            out.poses.entries[1..entries.len()].copy_from_slice(&entries[1..]);
         }
         for (slot, (style, role, faces, emit)) in self.styles.iter().enumerate() {
             out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart)
@@ -1461,7 +1488,14 @@ mod tests {
                         )
                     } else {
                         let p = stands.at(xi, i64::from(y), z);
+                        let under = animals.pose_at(xi, i64::from(y), z);
                         match appearance::plant_class(p) {
+                            _ if under != 0
+                                && (!sleep::is_soft_mark(under)
+                                    || appearance::plant_class(p) == PART_NONE) =>
+                            {
+                                (PART_ANIMAL_INTERIM, 0, 0)
+                            }
                             PART_NONE => (PART_NONE, 0, 0),
                             class => {
                                 let s = slot_for(
@@ -1487,7 +1521,7 @@ mod tests {
                     } else {
                         0.0
                     };
-                    out.voxels[VoxelStaging::index(w, h, x, y, z)] = VoxelTexel::pack_glyph(
+                    let mut t = VoxelTexel::pack_glyph(
                         m as u8,
                         part,
                         glyph,
@@ -1496,6 +1530,10 @@ mod tests {
                         pore,
                         slot,
                     );
+                    if part == PART_ANIMAL_INTERIM {
+                        t.0[2] = animals.pose_at(xi, i64::from(y), z);
+                    }
+                    out.voxels[VoxelStaging::index(w, h, x, y, z)] = t;
                 }
             }
         }
@@ -1516,6 +1554,7 @@ mod tests {
         roof: Vec<u8>,
         styles: Vec<VoxelStyle>,
         glyphs: Vec<u8>,
+        poses: cubarium_gpu::voxel::PoseTable,
     }
 
     impl Planes {
@@ -1526,6 +1565,7 @@ mod tests {
                 roof: vec![0xAB; p.voxel_count()],
                 styles: vec![VoxelStyle::new([0.5; 3], [0.5; 3], [0.5; 3]); MAX_STYLES],
                 glyphs: vec![0xAB; p.glyph_bytes()],
+                poses: cubarium_gpu::voxel::PoseTable::EMPTY,
             }
         }
 
@@ -1541,6 +1581,7 @@ mod tests {
                 sky: &mut [],
                 canopy: &mut [],
                 glow: &mut [],
+                poses: &mut self.poses,
                 write,
             }
         }

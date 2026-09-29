@@ -487,6 +487,49 @@ pub enum State {
     Resting,
     /// On a terrain face, going up or down it ([`Mobility::climb`]).
     Climbing,
+    /// The rest state (WX4): its phase is not now and it is not hungry, so it stands where
+    /// it is, its controller is not consulted, it does not move or feed, and it pays
+    /// [`FounderPhysiology::sleep_upkeep`] × its basal upkeep. Kept general, a rest with an
+    /// upkeep factor and not a thing tied to night: a predator's long rest is the same state.
+    Asleep,
+}
+
+/// When a lineage is awake (WX4), read against the world's `life_daylight`. With the day
+/// clock off everyone is awake, so the clock's own switch reaches here as `clock_on`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Activity {
+    /// Awake whatever the hour.
+    Always,
+    /// Awake by day: daylight above [`Activity::DAY_LINE`].
+    Diurnal,
+    /// Awake by night: daylight below [`Activity::DAY_LINE`].
+    Nocturnal,
+    /// Awake in the twilight of either end of the day: daylight strictly inside
+    /// [`Activity::TWILIGHT`].
+    Crepuscular,
+}
+
+impl Activity {
+    /// The daylight a diurnal animal wakes above and a nocturnal one sleeps above.
+    pub const DAY_LINE: f64 = 0.3;
+    /// The daylight band that counts as twilight, for a crepuscular animal.
+    pub const TWILIGHT: (f64, f64) = (0.05, 0.95);
+
+    /// Whether this rhythm is awake at `daylight` (0 night, 1 full day). With the clock
+    /// off (`clock_on` false) every rhythm is awake.
+    pub fn awake(self, clock_on: bool, daylight: f64) -> bool {
+        if !clock_on {
+            return true;
+        }
+        match self {
+            Activity::Always => true,
+            Activity::Diurnal => daylight > Activity::DAY_LINE,
+            Activity::Nocturnal => daylight < Activity::DAY_LINE,
+            Activity::Crepuscular => {
+                daylight > Activity::TWILIGHT.0 && daylight < Activity::TWILIGHT.1
+            }
+        }
+    }
 }
 
 /// A body's movement state that outlives a tick (package mobility,
@@ -594,6 +637,10 @@ pub struct Animal {
     /// ticks where `age_ticks` is a multiple of its species' step period, so two animals
     /// born on different ticks do not step in lockstep.
     pub age_ticks: u64,
+    /// The age, in ticks, at which this body departs [`Departure::Aged`]: drawn once, at
+    /// birth or introduction ([`draw_lifespan_ticks`]). Zero is no lifespan.
+    #[serde(default)]
+    pub lifespan_ticks: u64,
     pub state: State,
     /// On a wall, and how long under water (package mobility).
     pub mobility: Mobility,
@@ -1039,6 +1086,16 @@ pub struct SpeciesConfig {
     /// question. A body with no lineage therefore reproduces by its species' table, and
     /// the browser founder — which *is* the frondgrazer — shares that table with it.
     pub reproduction: Reproduction,
+    /// **Median lifespan**, seconds of simulated time: every body of this kind draws its
+    /// own lifespan around it at birth ([`draw_lifespan_ticks`]) and departs
+    /// [`Departure::Aged`] when its age reaches it. Zero is no lifespan.
+    ///
+    /// Four simulated hours for both current lineages
+    /// (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`): long against a shredder
+    /// hatchling's hour to its first clutch and a browser's first birth, short against the
+    /// 6 h a census runs, so a world turns over within one run.
+    #[serde(default)]
+    pub lifespan_median_s: f64,
 }
 
 impl SpeciesConfig {
@@ -1085,6 +1142,7 @@ impl SpeciesConfig {
             sense_radius: 8,
             energy_density: 2.0,
             reproduction: Reproduction::LIVE_BIRTH_PLACEHOLDER,
+            lifespan_median_s: LIFESPAN_MEDIAN_S,
         }
     }
 
@@ -1236,6 +1294,17 @@ impl FaunaConfig {
                     phys.organ_structure_fraction
                 ));
             }
+            for (name, value) in [
+                ("sleep_upkeep", phys.sleep_upkeep),
+                ("wake_hunger", phys.wake_hunger),
+            ] {
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err(format!(
+                        "{}.{name} must be finite, within 0..=1, not {value}",
+                        founder.name()
+                    ));
+                }
+            }
             // The body is a physical object: every dimension positive, every anchor a
             // finite nonnegative fraction of one. A zero-height animal has no eye, no
             // mouth band and no clearance, so it is refused rather than clamped.
@@ -1287,6 +1356,9 @@ pub enum Departure {
     /// Standing water deeper than the effective `drown_depth_m` on its own face. A
     /// corpse.
     Drowned,
+    /// Old age: the body reached its own drawn lifespan ([`Animal::lifespan_ticks`],
+    /// `design/handoffs/voxel-lifespan-defence-2026-09-25.md`). A corpse.
+    Aged,
     /// No corpse: a [`Command::Remove`], or a body whose support face stopped being one
     /// ([`step`]'s step 1). Booked `removed_*_out` and **not** counted in
     /// [`FaunaLedger::deaths`].
@@ -1294,7 +1366,12 @@ pub enum Departure {
 }
 
 impl Departure {
-    pub const ALL: [Departure; 3] = [Departure::Starved, Departure::Drowned, Departure::Removed];
+    pub const ALL: [Departure; 4] = [
+        Departure::Starved,
+        Departure::Drowned,
+        Departure::Aged,
+        Departure::Removed,
+    ];
     pub const COUNT: usize = Departure::ALL.len();
 
     /// Index into a per-cause array, in [`Departure::ALL`] order.
@@ -1302,7 +1379,8 @@ impl Departure {
         match self {
             Departure::Starved => 0,
             Departure::Drowned => 1,
-            Departure::Removed => 2,
+            Departure::Aged => 2,
+            Departure::Removed => 3,
         }
     }
 
@@ -1315,9 +1393,46 @@ impl Departure {
         match self {
             Departure::Starved => "starved",
             Departure::Drowned => "drowned",
+            Departure::Aged => "aged",
             Departure::Removed => "removed",
         }
     }
+}
+
+/// The shipped median lifespan of every body kind: four simulated hours.
+pub const LIFESPAN_MEDIAN_S: f64 = 4.0 * 3600.0;
+
+/// A body's lifespan in ticks, from its kind's median (seconds): **uniform on
+/// `[0.8, 1.2] × median`** for a newborn — bounded, so no body is immortal or dies in
+/// infancy, and ±20 % around the median as the brief asks. An **arriving** body (an
+/// introduced founder) has already lived part of its life: its remaining span is a
+/// uniform `[0.5, 1.0)` share of such a draw, so a founding cohort ages out over half a
+/// lifespan rather than all at once. Deterministic in `(id, salt)`. Zero median: zero,
+/// no lifespan.
+pub fn draw_lifespan_ticks(median_s: f64, id: u64, salt: u64, arriving: bool) -> u64 {
+    if !(median_s.is_finite() && median_s > 0.0) {
+        return 0;
+    }
+    let unit = |k: u64| {
+        let mut z = id.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ salt.rotate_left(29)
+            ^ k.wrapping_mul(0xD1B5_4A32_D192_ED03)
+            ^ 0x11FE_5BA2_A6ED_0001;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        (z >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let mut span = median_s * (0.8 + 0.4 * unit(1));
+    if arriving {
+        span *= 0.5 + 0.5 * unit(2);
+    }
+    ((span / DT).round() as u64).max(1)
+}
+
+/// The per-body salt a lifespan draw mixes with the id: where and when the body appeared.
+pub(crate) fn lifespan_salt(site: Site, tick: u64) -> u64 {
+    (u64::from(site.x) << 40) ^ (u64::from(site.z) << 20) ^ u64::from(site.y) ^ tick.rotate_left(13)
 }
 
 /// Which **food class** a bite came out of (decisions §3,
@@ -1571,10 +1686,14 @@ impl FaunaLedger {
         self.deaths_by_founder_cause[founder.index()][cause.index()]
     }
 
-    /// The two death causes, summed: equal to [`FaunaLedger::deaths`] for any ledger this
+    /// The death causes, summed: equal to [`FaunaLedger::deaths`] for any ledger this
     /// layer produced, which is the instrumentation's own invariant.
     pub fn deaths_accounted(&self) -> u64 {
-        self.departed(Departure::Starved) + self.departed(Departure::Drowned)
+        Departure::ALL
+            .iter()
+            .filter(|d| d.is_death())
+            .map(|d| self.departed(*d))
+            .sum()
     }
 
     pub fn expected_organic(&self) -> f64 {
@@ -2171,6 +2290,14 @@ impl Fauna {
             mineral: sc.n_tissue * organic,
             energy: sc.energy_density * organic,
             age_ticks: 0,
+            // An introduced body arrives part way through a life, so a founding cohort
+            // does not age out together.
+            lifespan_ticks: draw_lifespan_ticks(
+                sc.lifespan_median_s,
+                self.ledger.births,
+                lifespan_salt(site, self.tick),
+                true,
+            ),
             gut: Taken::default(),
             state: State::Resting,
             mobility: crate::Mobility::default(),

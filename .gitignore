@@ -31,3 +31,6 @@ __pycache__/
 /.claude/worktrees/
 /opencode.json
 /.agents/mcp_config.json
+
+# Midjourney downloads: local reference images, not project source.
+/art/gen/midjourney/

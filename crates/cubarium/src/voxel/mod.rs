@@ -40,11 +40,13 @@
 pub mod animal;
 pub mod appearance;
 pub mod chiplet;
+pub mod idle;
 pub mod colours;
 pub mod model;
 pub mod placement;
 pub mod present;
 pub mod project;
+pub mod sleep;
 pub mod stand;
 pub mod textures;
 pub mod vine;
@@ -1316,21 +1318,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                             "closed cycle, {:.2} m³ aloft, {}, {:.0} mm/h rain, \
                              {:.0} mm/h evaporation",
                             world.atmosphere_m3(),
-                            if wc.shower_interval_max_s > 0.0 {
-                                // Scheduled: the calendar says when, and the fraction is
-                                // only the floor the store has to clear to pay for it.
-                                format!(
-                                    "showers every {:.0}-{:.0} min above a {:.0} % floor",
-                                    wc.shower_interval_min_s / 60.0,
-                                    wc.shower_interval_max_s / 60.0,
-                                    wc.shower_trigger_fraction * 100.0,
-                                )
-                            } else {
-                                format!(
-                                    "showers at {:.0} % of total",
-                                    wc.shower_trigger_fraction * 100.0
-                                )
-                            },
+                            format!(
+                                "climate {}, RH {:.2}, dry gap {:.0}-{:.0} min",
+                                wc.climate.preset.name(),
+                                world.rh(),
+                                wc.climate.dry_gap_min_s / 60.0,
+                                wc.climate.dry_gap_max_s / 60.0,
+                            ),
                             wc.rain_m_per_s * 3600.0 * 1000.0,
                             wc.evaporation_m_per_s * 3600.0 * 1000.0,
                         )
@@ -1379,10 +1373,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                     pr.ticks,
                     if pr.opening_shower {
                         format!(
-                            "opened with a {}-tick shower, drained in {} ticks ({})",
+                            "opened with a {}-tick shower, drained in {} ticks ({}), lake \
+                             at rest after {} more",
                             pr.shower_ticks,
                             pr.drain.ticks,
                             if pr.drain.converged { "converged" } else { "at the cap" },
+                            pr.lake_rest_ticks,
                         )
                     } else {
                         "no opening shower".to_string()
@@ -1434,6 +1430,15 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             },
         )?,
     };
+
+    // Coarse water is a training-only mode (`World::set_water_every`): the ambient run
+    // refuses it rather than showing a world whose water steps once in several ticks.
+    anyhow::ensure!(
+        sim.world().water_every() == 1,
+        "the ambient run steps the water every tick; coarse water ({} ticks per step) is \
+         a training-only mode",
+        sim.world().water_every()
+    );
 
     // The world that was built is the world the config drew, unless a snapshot was
     // resumed that describes a different one — then the founding output is on the wrong
@@ -1497,6 +1502,19 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             "cubarium voxel: closed water budget — the outlet is open as the return flow \
              into the atmosphere, not an export"
         );
+    }
+    // `--weather-force MODE`: a development capture's rain, starting now.
+    if let Some(mode) = &args.weather_force {
+        use cubarium_voxel::weather::RainMode;
+        let mode = match mode.as_str() {
+            "drizzle" => RainMode::Drizzle,
+            "shower" => RainMode::Shower,
+            "downpour" => RainMode::Downpour,
+            "clear" => RainMode::Clear,
+            other => bail!("--weather-force is drizzle, shower, downpour or clear, not {other:?}"),
+        };
+        let started = sim.world_mut().force_rain(mode);
+        eprintln!("cubarium voxel: --weather-force {mode:?} ({})", if started { "started" } else { "nothing to rain" });
     }
     // Off the loop: the run starts now, and this line arrives when it arrives.
     let _probe = report_water_cycle(sim.world(), sim.flora(), sim.config().threads);
@@ -3693,6 +3711,7 @@ mod tests {
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,
+            weather_force: None,
         };
         // A snapshot of a schema this build does not speak: postcard's varint for the tag.
         let stale = |n: u8| vec![n, 0, 0, 0, 0, 0, 0, 0];
@@ -4480,6 +4499,7 @@ mod tests {
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,
+            weather_force: None,
         };
 
         // Explicit seed is respected
@@ -4532,6 +4552,7 @@ mod tests {
             gpu_web_rate: 0.0,
             gpu_roof_walk: false,
             textures: false,
+            weather_force: None,
         };
 
         // 1. Initial run into empty state dir creates a fresh world

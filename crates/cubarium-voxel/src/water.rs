@@ -555,7 +555,13 @@ fn ensure_sets(world: &mut World) {
 /// order and this stays as the three-call sequence's water leg for tests and warm-ups.
 /// `threads` sizes the pool the phases split their columns across ([`exchange`]); `1`
 /// runs them all on the calling thread.
+///
+/// A training world's coarse water ([`World::set_water_every`]) runs the vertical phases —
+/// rain, evaporation, infiltration and fall — every tick as always, and the lateral and
+/// groundwater phases — the exchange, drainage, the water table, the spring and the
+/// outlet — on one tick in `every`, at `every` ticks' worth of their rates.
 pub fn step(world: &mut World, threads: usize) {
+    let due = world.water_due();
     begin(world);
     crate::voxel_phase!(WorldStep, {
         rain(world);
@@ -569,43 +575,44 @@ pub fn step(world: &mut World, threads: usize) {
                 // the module doc on why runoff is what infiltration refuses.
                 infiltrate(world, sub_dt, threads);
                 fall(world, threads);
-                exchange(world, threads);
+                if due {
+                    exchange(world, threads);
+                }
             }
         });
-        drain(world, threads);
-        water_table(world, threads);
-        spring(world);
-        outlet(world);
+        if due {
+            drain(world, threads);
+            water_table(world, threads);
+            spring(world);
+            outlet(world);
+        }
     });
 }
 
-/// The tick's rain. Under the open budget it is the prescribed rate falling on every
-/// sky-exposed column from nowhere; under the closed one it is [`shower`], which falls
-/// only while a shower is running and only out of the atmosphere store.
+/// The tick's weather and rain ([`crate::weather`]): the clock and the temperature
+/// always; under the open budget the prescribed rate falling on every sky-exposed column
+/// from nowhere, and under the closed one the running event's rain, drawn only out of the
+/// atmosphere store.
 pub fn rain(w: &mut World) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Rain);
-    if w.config.closed_water_budget {
-        shower(w);
-    } else {
-        prescribed_rain(w);
-    }
+    crate::voxel_phase!(Rain, {
+        crate::weather::step(w);
+    });
     #[cfg(feature = "profile")]
     crate::profile::census::after(w, census);
 }
 
-fn prescribed_rain(w: &mut World) {
-    crate::voxel_phase!(Rain, {
-        let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
-        if per_column <= 0.0 {
-            return;
-        }
-        let mut credited = 0.0;
-        for i in sky_cells(w) {
-            credited += add_free(w, i, per_column);
-        }
-        w.ledger.rain_in += credited;
-    });
+pub(crate) fn prescribed_rain(w: &mut World) {
+    let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
+    if per_column <= 0.0 {
+        return;
+    }
+    let mut credited = 0.0;
+    for i in sky_cells(w) {
+        credited += add_free(w, i, per_column);
+    }
+    w.ledger.rain_in += credited;
 }
 
 pub fn evaporate(w: &mut World) {
@@ -614,7 +621,15 @@ pub fn evaporate(w: &mut World) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Evaporate);
     crate::voxel_phase!(Evaporate, {
-        let per_column = w.config.evaporation_m_per_s * DT * w.config.cell_area();
+        // The closed budget's air has a humidity: evaporation falls to nothing as it
+        // saturates and follows what the warmer or cooler air can take
+        // (`crate::weather::evaporation_scale`). The open budget has no air to fill.
+        let scale = if w.config.closed_water_budget {
+            crate::weather::evaporation_scale(&w.config.climate, w.rh(), w.weather.temp_c)
+        } else {
+            1.0
+        };
+        let per_column = w.config.evaporation_m_per_s * DT * w.config.cell_area() * scale;
         if per_column <= 0.0 {
             return;
         }
@@ -632,109 +647,31 @@ pub fn evaporate(w: &mut World) {
     crate::profile::census::after(w, census);
 }
 
-/// The weather stream: splitmix64 over the world seed, a fixed token and the shower
-/// count, so the same world draws the same weather however it is stepped and no clock
-/// reaches it. The generator's own idiom (`generate.rs`, `noise.rs`).
-const WEATHER_STREAM: u64 = 0x_5745_4154_4845_525F;
-
-/// The tick the next shower is due: `from` plus a draw from the configured interval.
+/// One tick of the closed budget's rain at `rate_m_per_s`, out of the atmosphere store:
+/// reserve, spread evenly over every sky-exposed cell, refund what the world refused.
+/// Returns what actually fell, cubic metres; zero when there is no sky, no store, or no
+/// room (a brim-full world), which ends the event.
 ///
-/// Zero — never due — when no schedule is configured, which is what every fixture and
-/// every trigger-only world has. The draw is inclusive of both ends and uses the shower
-/// count as its sequence index, so a world that has rained `n` times always draws its
-/// `n + 1`th gap the same way.
-pub(crate) fn next_shower_tick(c: &Config, from: u64, showers: u64) -> u64 {
-    if !(c.shower_interval_max_s > 0.0) {
-        return 0;
-    }
-    let hz = f64::from(crate::TICK_HZ);
-    let lo = (c.shower_interval_min_s * hz).round().max(0.0) as u64;
-    let hi = ((c.shower_interval_max_s * hz).round().max(0.0) as u64).max(lo);
-    let mut z = WEATHER_STREAM
-        ^ c.seed.wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ showers.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^= z >> 31;
-    from + lo + if hi > lo { z % (hi - lo + 1) } else { 0 }
-}
-
-/// The closed budget's rain: showers drawn out of the lumped atmosphere store.
-///
-/// **When** it rains is either the store's business or the calendar's. With no schedule
-/// ([`crate::Config::shower_interval_max_s`] zero) a shower starts the moment the store
-/// crosses [`crate::Config::shower_trigger_fraction`] of the world's total water, which
-/// makes the period a function of the return flux and the intervals regular. With a
-/// schedule the due tick is drawn from the world's seed and that same fraction becomes an
-/// **availability floor**: a due shower falls if the store can pay for it, and waits for
-/// the first later tick it can if it cannot. Either way an empty sky never rains.
-///
-/// A shower is allowed
-/// [`crate::Config::shower_volume_m3`] (or the whole store, if that is less). While it
-/// runs, every tick reserves the volume the rate asks for *before* distributing it —
-/// withdrawn from the store, then spread over the sky-exposed cells, with whatever a full
-/// cell refuses refunded to the store in the same call
+/// The volume is reserved *before* it is distributed — withdrawn from the store, then
+/// spread, with whatever a full cell refuses refunded in the same call
 /// (`design/terrain-and-ecosystem-proposal-2026-09-16.md`, "reserve water before
-/// distributing a rain event"). Between showers no rain falls at all.
-///
-/// The allowance is drawn down by what actually **fell**, not by what was reserved, and a
-/// tick that can place nothing at all ends the shower: a brim-full world stops raining
-/// rather than spinning against a closed sky forever.
-///
-/// Spatially uniform, like the prescribed rain it replaces. Choosing *where* a shower
-/// falls is route C's job, not this store's.
-pub fn shower(w: &mut World) {
-    crate::voxel_phase!(Rain, {
-        let scheduled = w.config.shower_interval_max_s > 0.0;
-        if w.shower_left_m3 <= 0.0 {
-            // Not due yet: the calendar, not the store, is what is holding the rain.
-            if scheduled && w.tick < w.next_shower_tick {
-                return;
-            }
-            let floor = w.config.shower_trigger_fraction * w.ledger.expected_total();
-            if !(w.atmosphere_m3 >= floor) || w.atmosphere_m3 <= 0.0 {
-                return;
-            }
-            // The allowance decides whether a shower starts at all: a zero shower volume
-            // is no weather, not a shower counted afresh on every tick forever.
-            let allowance = w.config.shower_volume_m3.min(w.atmosphere_m3);
-            if allowance <= 0.0 {
-                return;
-            }
-            w.shower_left_m3 = allowance;
-            w.ledger.showers += 1;
-        }
-        deliver(w);
-        // A shower that has just run out books the next one. Drawn from where this one
-        // ended, so the gap is a gap between showers and not between their starts.
-        if scheduled && w.shower_left_m3 <= 0.0 {
-            w.next_shower_tick = next_shower_tick(&w.config, w.tick, w.ledger.showers);
-        }
-    });
-}
-
-/// One tick of a shower already in progress: reserve, spread, refund what the world
-/// refused, and draw the allowance down by what actually fell.
-fn deliver(w: &mut World) {
+/// distributing a rain event"). Spatially uniform; choosing *where* it rains is route
+/// C's job, not this store's.
+pub(crate) fn deliver(w: &mut World, rate_m_per_s: f64) -> f64 {
     {
-        let per_column = w.config.rain_m_per_s * DT * w.config.cell_area();
-        if per_column <= 0.0 {
-            return;
+        let per_column = rate_m_per_s * DT * w.config.cell_area();
+        if !(per_column > 0.0) {
+            return 0.0;
         }
         let targets = sky_cells(w);
         if targets.is_empty() {
-            // No sky at all: this shower can never fall, so do not hold the store hostage.
-            w.shower_left_m3 = 0.0;
-            return;
+            return 0.0;
         }
 
         // Reserve first: the volume leaves the store before a drop of it is placed.
-        let reserved = (per_column * targets.len() as f64)
-            .min(w.shower_left_m3)
-            .min(w.atmosphere_m3);
+        let reserved = (per_column * targets.len() as f64).min(w.atmosphere_m3);
         if reserved <= 0.0 {
-            w.shower_left_m3 = 0.0;
-            return;
+            return 0.0;
         }
         w.atmosphere_m3 -= reserved;
         w.ledger.atmosphere_out += reserved;
@@ -763,16 +700,25 @@ fn deliver(w: &mut World) {
             w.atmosphere_m3 += refund;
             w.ledger.atmosphere_out -= refund;
         }
-
-        if credited <= 0.0 {
-            w.shower_left_m3 = 0.0;
-        } else {
-            w.shower_left_m3 = (w.shower_left_m3 - credited).max(0.0);
-        }
-        if w.atmosphere_m3 <= 0.0 {
-            w.shower_left_m3 = 0.0;
-        }
+        credited
     }
+}
+
+/// The column a lightning strike hits: of [`crate::weather::STRIKE_COLUMNS`] sky-open
+/// columns picked by `picks` (uniform draws), the one whose sky cell stands highest —
+/// so tall things get hit. `(x, z)`, or `None` with no sky at all.
+pub(crate) fn strike_column(w: &mut World, picks: &[f64]) -> Option<(u32, u32)> {
+    let cells = sky_cells(w);
+    if cells.is_empty() {
+        return None;
+    }
+    let plane = w.config.width as usize * w.config.depth as usize;
+    let i = picks
+        .iter()
+        .map(|&u| cells[((u * cells.len() as f64) as usize).min(cells.len() - 1)])
+        .max_by_key(|&i| i / plane)?;
+    let (x, _, z) = w.config.coords(i);
+    Some((x, z))
 }
 
 /// Every void cell hands what it can to the void cell below. Purely vertical, so no
@@ -790,7 +736,8 @@ pub fn fall(w: &mut World, threads: usize) {
     #[cfg(feature = "profile")]
     let census = crate::profile::census::before(w, crate::profile::census::Tag::Fall);
     crate::voxel_phase!(Fall, {
-        column_phase(w, threads, ColumnPhase::Fall, DT);
+        let dt = DT;
+        column_phase(w, threads, ColumnPhase::Fall, dt);
     });
     #[cfg(feature = "profile")]
     crate::profile::census::after(w, census);
@@ -1077,7 +1024,8 @@ pub fn water_table(w: &mut World, threads: usize) {
                 * Table::new(table, w.config.voxel_m, w.config.height as usize).band as u64,
         );
         let charged = w.aquifer_m3;
-        let taken = column_phase(w, threads, ColumnPhase::WaterTable, DT);
+        let dt = w.water_dt();
+        let taken = column_phase(w, threads, ColumnPhase::WaterTable, dt);
         w.aquifer_m3 = (charged - taken).max(0.0);
     });
     #[cfg(feature = "profile")]
@@ -2067,7 +2015,8 @@ pub fn drain(w: &mut World, threads: usize) {
     crate::voxel_phase!(Drain, {
         #[cfg(feature = "profile")]
         crate::profile::add(crate::profile::Count::DrainCells, w.drainable.len() as u64);
-        let gained = column_phase(w, threads, ColumnPhase::Drain, DT);
+        let dt = w.water_dt();
+        let gained = column_phase(w, threads, ColumnPhase::Drain, dt);
         w.aquifer_m3 += gained;
     });
     #[cfg(feature = "profile")]
@@ -2108,7 +2057,7 @@ fn aquifer_seep(w: &mut World) {
     if drive <= 0.0 {
         return;
     }
-    let want = (w.config.spring_k_m2_per_s * drive * DT).min(w.aquifer_m3);
+    let want = (w.config.spring_k_m2_per_s * drive * w.water_dt()).min(w.aquifer_m3);
     let got = emerge(w, (x, y, z), want);
     w.aquifer_m3 -= got;
 }
@@ -2145,13 +2094,14 @@ fn emerge(w: &mut World, (x, y, z): (u32, u32, u32), want: f64) -> f64 {
 /// wider world: the river that leaves at the bottom lake re-enters at the top.
 ///
 /// It draws [`crate::Config::reentry_m3_per_s`] per second while the store stands **above
-/// the shower floor**, and never below it, so the stream can never eat the rain: the
-/// drought lock stays exactly where [`shower`] put it. Booked as
+/// RH [`crate::weather::STREAM_FLOOR_RH`]** ([`World::stream_floor_m3`]), and never below it,
+/// so the stream can never take the whole sky. Booked as
 /// [`crate::Ledger::reentry_in`] and `atmosphere_out`, so the conservation identity holds
 /// term for term. The aquifer-driven [`spring`] is untouched and adds to it. Nothing here
 /// is rain, so `is_raining` does not see it. The open budget has no store and is ignored.
 pub fn reentry(w: &mut World) {
     {
+        w.weather.stream_m3_s = 0.0;
         if w.config.reentry_m3_per_s <= 0.0 {
             return;
         }
@@ -2171,27 +2121,35 @@ pub fn reentry(w: &mut World) {
             if spare <= 0.0 {
                 return;
             }
-            let want = (w.config.reentry_m3_per_s * DT).min(spare);
+            let want = (stream_m3_per_s(w) * w.water_dt()).min(spare);
             let got = emerge(w, (x, y, z), want);
             w.aquifer_m3 -= got;
+            w.weather.stream_m3_s = got / w.water_dt();
             return;
         }
         if !w.config.closed_water_budget {
             return;
         }
-        let floor = w.config.shower_trigger_fraction * w.ledger.expected_total();
+        let floor = w.stream_floor_m3();
         let spare = w.atmosphere_m3 - floor;
         if spare <= 0.0 {
             return;
         }
-        let want = (w.config.reentry_m3_per_s * DT).min(spare);
+        let want = (stream_m3_per_s(w) * w.water_dt()).min(spare);
         let got = emerge(w, (x, y, z), want);
+        w.weather.stream_m3_s = got / w.water_dt();
         if got > 0.0 {
             w.atmosphere_m3 -= got;
             w.ledger.atmosphere_out += got;
             w.ledger.reentry_in += got;
         }
     }
+}
+
+/// The stream's asked-for flow: [`crate::Config::reentry_m3_per_s`] swollen by the storm
+/// (`crate::weather`, the stream swell).
+fn stream_m3_per_s(w: &World) -> f64 {
+    w.config.reentry_m3_per_s * (1.0 + w.weather.swell.max(0.0))
 }
 
 /// Fraction of a brim-full sill cell a weir passes in one tick, falling off as the head
@@ -2234,7 +2192,7 @@ fn lake_drain(w: &mut World) {
             top += 1;
         }
         let surface_m = (top as f64 + w.free[at(w, top)].clamp(0.0, 1.0)) * vm;
-        let flow = share * (surface_m - table_m) * DT;
+        let flow = share * (surface_m - table_m) * w.water_dt();
         if flow > 0.0 {
             // Down: taken off the top of the column.
             let mut left = flow;
@@ -2283,7 +2241,7 @@ pub fn outlet(w: &mut World) {
             return;
         }
         let i = w.config.index(x as i64, y, z);
-        let want = w.config.outlet_m3_per_s * DT;
+        let want = w.config.outlet_m3_per_s * w.water_dt();
         if outlet_trace() && w.free[i] > 0.0 {
             let c = &w.config;
             let plane = c.width as usize * c.depth as usize;
@@ -2318,7 +2276,12 @@ pub fn outlet(w: &mut World) {
         // faster than it was. A sill the water does not reach still exports nothing,
         // which is the whole contract.
         let head = w.free[i].clamp(0.0, 1.0);
-        let weir = OUTLET_WEIR * head * head.sqrt() * w.config.voxel_volume();
+        // Per tick, so a coarse training step passes `water_every` ticks' worth.
+        let weir = OUTLET_WEIR
+            * head
+            * head.sqrt()
+            * w.config.voxel_volume()
+            * f64::from(w.water_every());
         let lost = take_free(w, i, want.min(weir));
         w.ledger.outlet_out += lost;
         release(w, lost);
@@ -4223,7 +4186,7 @@ mod sky_tests {
         }
     }
 
-    /// A due shower on the shipped `small` ring: it starts, it rains, the cached sky is the
+    /// A shower on the shipped `small` ring: it starts, it rains, the cached sky is the
     /// walk on the real landform every tick, and the ledger closes.
     #[test]
     fn a_shower_on_the_small_ring_conserves_water() {
@@ -4233,9 +4196,9 @@ mod sky_tests {
             ..preset.config()
         });
         assert!(w.config.closed_water_budget);
-        let showers = w.ledger.showers;
+        let events = w.ledger.rain_events;
         let rain_before = w.ledger.rain_in;
-        w.next_shower_tick = w.tick;
+        assert!(w.open_with_rain(), "a closed world with water aloft can rain");
         for tick in 0..40 {
             if tick % 10 == 0 {
                 assert_matches_the_walk(&mut w, &format!("at shower tick {tick}"));
@@ -4248,15 +4211,14 @@ mod sky_tests {
                 "residual {residual:e} m3 at shower tick {tick}"
             );
         }
-        assert_eq!(
-            w.ledger.showers,
-            showers + 1,
-            "the due shower did not start"
-        );
+        // The shipped ring starts with more aloft than its air holds, so the shower may
+        // turn into a forced downpour at once; either way it rains throughout.
+        assert!(w.ledger.rain_events > events, "the shower did not start");
         assert!(w.ledger.rain_in > rain_before, "the shower placed no rain");
-        assert!(
-            w.shower_left_m3 > 0.0,
-            "a minute's shower ended in two seconds"
+        assert_ne!(
+            w.weather.mode,
+            crate::weather::RainMode::Clear,
+            "an opening shower ended in two seconds"
         );
     }
 }
@@ -4282,10 +4244,23 @@ mod closed_budget_tests {
             outlet_m3_per_s: 0.001,
             closed_water_budget: closed,
             initial_atmosphere_m3: if closed { 0.2 } else { 0.0 },
-            shower_trigger_fraction: 0.02,
-            shower_volume_m3: 0.05,
+            // A sky that holds twice the world's water: RH under 0.4, so the puddle
+            // evaporates and nothing is forced.
+            climate: crate::weather::Climate {
+                capacity_share: 2.0,
+                ..crate::weather::Climate::tropical_jungle()
+            },
             ..Config::default()
         }
+    }
+
+    /// A climate with every hazard at zero: the only rain is a forced downpour.
+    fn no_natural_rain() -> crate::weather::Climate {
+        let mut c = crate::weather::Climate::tropical_jungle();
+        for m in [&mut c.drizzle, &mut c.shower, &mut c.downpour] {
+            m.lambda_max_per_h = 0.0;
+        }
+        c
     }
 
     /// Bedrock floor, one soil row on it, a puddle above that, and the outlet at the
@@ -4389,9 +4364,10 @@ mod closed_budget_tests {
     #[test]
     fn rain_only_ever_comes_out_of_the_store() {
         let mut w = fixture(true);
+        assert!(w.open_with_rain());
         run(&mut w, TICKS);
         let l = w.view().ledger.clone();
-        assert!(l.showers > 0, "the store never reached the trigger");
+        assert!(l.rain_events > 0, "the shower never started");
         assert!(
             l.rain_in > 0.0 && (l.rain_in - l.atmosphere_out).abs() < 1e-9,
             "rain {} is not what the store paid out {}",
@@ -4419,12 +4395,12 @@ mod closed_budget_tests {
             evaporation_m_per_s: 0.0,
             closed_water_budget: true,
             initial_atmosphere_m3: atmosphere_m3,
-            shower_trigger_fraction: 0.01,
-            shower_volume_m3: 0.05,
-            // No schedule and a floor the store starts over would rain at once and muddy
-            // the arithmetic; the interval parks the shower far outside these windows.
-            shower_interval_min_s: 600.0,
-            shower_interval_max_s: 600.0,
+            // Rain would muddy the arithmetic: no hazards, and a sky big enough that the
+            // store stands at RH 0.5, far from a forced downpour.
+            climate: crate::weather::Climate {
+                capacity_share: 2.0,
+                ..no_natural_rain()
+            },
             reentry_m3_per_s: rate,
             ..Config::default()
         };
@@ -4454,7 +4430,7 @@ mod closed_budget_tests {
     }
 
     /// The stream moves water out of the sky and into the world, and the books hold it
-    /// term for term. It stops at the shower floor — it may never eat the rain — and a
+    /// term for term. It stops at its floor — it may never take the whole sky — and a
     /// rate of zero is no stream at all.
     #[test]
     fn reentry_moves_store_to_spring_and_conserves() {
@@ -4485,9 +4461,9 @@ mod closed_budget_tests {
             v.ledger
         );
         assert!(v.total_residual().abs() < 1e-9, "{}", v.total_residual());
-        assert_eq!(v.ledger.showers, 0, "no shower muddied this window");
+        assert_eq!(v.ledger.rain_events, 0, "no rain muddied this window");
 
-        // At the floor the stream stops: the drought lock is where `shower` put it.
+        // At the floor the stream stops.
         let mut starved = stream_slab(0.0, rate, false);
         run(&mut starved, 100);
         assert_eq!(starved.view().ledger.reentry_in, 0.0);
@@ -4524,240 +4500,60 @@ mod closed_budget_tests {
         assert_eq!(w.atmosphere_m3(), 0.0);
     }
 
-    // ---- the shower schedule ---------------------------------------------------------
-    /// **Rain is a shower falling, not a rate in the config.** Under the closed cycle
-    /// `rain_m_per_s` is the rate a shower falls *at* and is always positive, so reading
-    /// it as "is it raining" drew streaks on the panel every tick of a world that rained
-    /// one minute in ten (Wrysk, 2026-09-21).
+    // ---- rain is an event ----------------------------------------------------------------
+    /// **Rain is an event falling, not a rate in the config.** Under the closed cycle
+    /// `rain_m_per_s` is R₀, the rate a shower falls *at*, and is always positive, so
+    /// reading it as "is it raining" drew streaks on the panel every tick of a world that
+    /// rained one minute in ten (Wrysk, 2026-09-21).
     #[test]
-    fn closed_cycle_rain_is_only_the_shower() {
-        let mut w = slab(0.0, 0.5, (0.0, 0.0));
-        assert!(w.config().rain_m_per_s > 0.0);
-        assert!(
-            !w.view().is_raining(),
-            "a closed world with a store under the floor is not raining"
-        );
-
-        let floor = 0.5 * w.view().ledger.expected_total();
-        w.apply(Command::AddAtmosphere {
-            volume_m3: floor * 2.0,
+    fn closed_cycle_rain_is_only_an_event() {
+        let mut w = World::empty(Config {
+            climate: crate::weather::Climate {
+                capacity_share: 2.0,
+                ..no_natural_rain()
+            },
+            ..config(true)
         });
+        assert!(w.config().rain_m_per_s > 0.0);
         w.step();
-        assert!(
-            w.shower_left_m3() > 0.0 && w.view().is_raining(),
-            "the shower fell"
-        );
-        for _ in 0..400 {
+        assert!(!w.view().is_raining(), "a clear sky is not raining");
+        assert!(w.open_with_rain());
+        w.step();
+        assert!(w.view().is_raining(), "the shower fell");
+        assert!(w.view().weather.rain_m_per_s > 0.0);
+        // An opening shower rains a minute before its stop humidity may end it.
+        for _ in 0..1300 {
             w.step();
-            if w.shower_left_m3() <= 0.0 {
+            if !w.view().is_raining() {
                 break;
             }
         }
-        assert_eq!(
-            w.shower_left_m3(),
-            0.0,
-            "the shower ran out inside 400 ticks"
-        );
-        assert!(!w.view().is_raining(), "and the sky is shut again");
+        assert!(!w.view().is_raining(), "and it stopped at its stop humidity");
+        assert_eq!(w.view().weather.rain_m_per_s, 0.0);
 
         // The open budget is unchanged: its rain really is prescribed, every tick.
-        let open = World::empty(Config {
+        let mut open = World::empty(Config {
             rain_m_per_s: 0.002,
             ..Config::default()
         });
+        open.step();
         assert!(open.view().is_raining());
     }
 
-    /// A dry soil slab with a wet aquifer under it: the fixture the viability test uses,
-    /// with the schedule's own numbers on top.
-    fn slab(atmosphere_m3: f64, floor: f64, interval_s: (f64, f64)) -> World {
-        let c = Config {
-            width: 8,
-            height: 8,
-            depth: 2,
-            rain_m_per_s: 0.002,
-            evaporation_m_per_s: 0.0,
-            closed_water_budget: true,
-            initial_atmosphere_m3: atmosphere_m3,
-            shower_trigger_fraction: floor,
-            shower_volume_m3: 0.0005,
-            initial_aquifer_head_m: 0.4,
-            shower_interval_min_s: interval_s.0,
-            shower_interval_max_s: interval_s.1,
-            ..Config::default()
-        };
-        let mut w = World::empty(c.clone());
-        for x in 0..c.width as i64 {
-            for z in 0..c.depth {
-                w.apply(Command::SetMaterial {
-                    x,
-                    y: 1,
-                    z,
-                    material: Material::Soil,
-                });
-            }
-        }
-        w
-    }
-
-    /// The first gap is drawn from the world's own seed, inside the interval it was
-    /// given, and it is the same draw every time that seed is used.
+    /// An empty sky never rains, however high its hazards.
     #[test]
-    fn the_first_due_tick_is_drawn_inside_the_interval() {
-        let at = |seed: u64| {
-            World::empty(Config {
-                seed,
-                closed_water_budget: true,
-                initial_atmosphere_m3: 0.1,
-                shower_interval_min_s: 300.0,
-                shower_interval_max_s: 900.0,
-                ..Config::default()
-            })
-            .next_shower_tick()
-        };
-        let drawn: Vec<u64> = (1..=4).map(at).collect();
-        for (seed, t) in drawn.iter().enumerate() {
-            assert!(
-                (6000..=18000).contains(t),
-                "seed {} drew {t}, outside 5 to 15 minutes",
-                seed + 1
-            );
-        }
-        assert!(
-            drawn
-                .iter()
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
-                >= 2,
-            "four seeds drew the same gap every time: {drawn:?}"
-        );
-        assert_eq!(at(1), drawn[0], "the same seed draws the same weather");
-    }
-
-    /// The calendar decides when. Nothing falls before the due tick; the shower starts on
-    /// it; and the gap that follows is measured from where that shower **ended**.
-    #[test]
-    fn a_due_shower_starts_on_its_tick_and_not_before() {
-        // Two seconds either way, so the draw is exactly 40 ticks and the arithmetic is
-        // readable. The floor is zero: this test is about the calendar alone.
-        let mut w = slab(0.3, 0.0, (2.0, 2.0));
-        assert_eq!(w.next_shower_tick(), 40);
-
-        // `shower` runs before the tick counter moves, so the step that sees `tick == 39`
-        // is the 40th, and the due shower falls on the 41st.
-        for _ in 0..40 {
-            w.step();
-        }
-        assert_eq!(w.tick(), 40);
-        assert_eq!(
-            w.view().ledger.showers,
-            0,
-            "no rain through tick 39: the water phase of step n sees tick n - 1"
-        );
-        w.step();
-        assert_eq!(
-            w.view().ledger.showers,
-            1,
-            "the due shower falls on the step whose water phase sees tick 40"
-        );
-
-        // It ends, and the next one is booked at least a whole interval after that.
-        let mut ended_at = None;
-        for _ in 0..200 {
-            w.step();
-            if w.shower_left_m3() <= 0.0 && ended_at.is_none() {
-                ended_at = Some(w.tick());
-                break;
-            }
-        }
-        let ended_at = ended_at.expect("a 0.0005 m³ shower ends inside 200 ticks");
-        // Same convention as the start: the water phase of the step that drained the
-        // allowance saw `ended_at - 1`, and the gap is drawn from there.
-        let next = w.next_shower_tick();
-        assert_eq!(
-            next,
-            ended_at - 1 + 40,
-            "the gap runs from the last tick it rained on, not from the start"
-        );
-        while w.tick() < next {
-            w.step();
-        }
-        assert_eq!(
-            w.view().ledger.showers,
-            1,
-            "still the one shower right up to the tick the next is due"
-        );
-        w.step();
-        assert_eq!(
-            w.view().ledger.showers,
-            2,
-            "and the next one falls on its own due tick"
-        );
-    }
-
-    /// The store decides whether. A due shower with nothing to pay for it does not fall,
-    /// does not count, and does not lose its turn: it falls on the first tick the floor
-    /// holds.
-    #[test]
-    fn a_starved_sky_holds_the_shower_until_the_floor() {
-        let mut w = slab(0.0, 0.01, (2.0, 2.0));
-        for _ in 0..141 {
-            w.step();
-        }
-        assert!(w.tick() > w.next_shower_tick(), "the shower is overdue");
-        assert_eq!(
-            w.view().ledger.showers,
-            0,
-            "an empty sky does not rain, however overdue"
-        );
-
-        let floor = 0.01 * w.view().ledger.expected_total();
-        assert!(
-            w.apply(Command::AddAtmosphere {
-                volume_m3: floor * 4.0
-            }) > 0.0
-        );
-        w.step();
-        assert_eq!(
-            w.view().ledger.showers,
-            1,
-            "the held shower falls on the first tick it can be paid for"
-        );
-        assert!(w.view().total_residual().abs() < 1e-9);
-    }
-
-    /// No interval is the trigger alone: the behaviour every fixture and every existing
-    /// closed-budget test has, which those tests check unmodified.
-    #[test]
-    fn no_interval_means_the_trigger_alone() {
+    fn an_empty_sky_never_rains() {
         let mut w = World::empty(Config {
             initial_atmosphere_m3: 0.0,
-            shower_trigger_fraction: 1.0,
-            shower_interval_min_s: 0.0,
-            shower_interval_max_s: 0.0,
-            ..config(true)
-        });
-        assert_eq!(w.next_shower_tick(), 0, "no schedule is drawn at all");
-        w.apply(Command::AddWater {
-            x: 0,
-            y: 2,
-            z: 0,
-            volume_m3: 0.004,
-        });
-        run(&mut w, TICKS);
-        let v = w.view();
-        assert_eq!(v.ledger.showers, 0, "no shower may start under the trigger");
-        assert_eq!(v.ledger.rain_in, 0.0, "and no rain may fall");
-        assert!(v.total_residual().abs() < 1e-9);
-    }
-
-    /// Between showers the sky is shut: a closed world whose store cannot reach the
-    /// trigger books no rain at all, however long it runs.
-    #[test]
-    fn a_store_under_the_trigger_never_rains() {
-        let mut w = World::empty(Config {
-            initial_atmosphere_m3: 0.0,
-            shower_trigger_fraction: 1.0,
+            climate: {
+                let mut c = crate::weather::Climate::tropical_jungle();
+                c.dry_gap_min_s = 0.0;
+                c.dry_gap_max_s = 0.0;
+                for m in [&mut c.drizzle, &mut c.shower, &mut c.downpour] {
+                    m.lambda_max_per_h = f64::INFINITY;
+                }
+                c
+            },
             ..config(true)
         });
         w.apply(Command::AddWater {
@@ -4768,9 +4564,10 @@ mod closed_budget_tests {
         });
         run(&mut w, TICKS);
         let v = w.view();
-        assert_eq!(v.ledger.showers, 0, "no shower may start under the trigger");
-        assert_eq!(v.ledger.rain_in, 0.0, "and no rain may fall");
+        assert!(v.ledger.evaporation_out > 0.0, "the puddle lifts");
         assert!(v.total_residual().abs() < 1e-9);
+        // What rose, and only that, may come back down.
+        assert!(v.ledger.rain_in <= v.ledger.evaporation_out + 1e-12);
     }
 
     /// The open budget is untouched: water still leaves, the store stays empty, and the
@@ -4784,7 +4581,7 @@ mod closed_budget_tests {
         assert_eq!(v.atmosphere_m3, 0.0, "an open world holds nothing aloft");
         assert_eq!(v.ledger.atmosphere_in, 0.0);
         assert_eq!(v.ledger.atmosphere_out, 0.0);
-        assert_eq!(v.ledger.showers, 0);
+        assert_eq!(v.ledger.rain_events, 0);
         assert!(v.ledger.evaporation_out > 0.0 && v.ledger.outlet_out > 0.0);
         assert!(v.ledger.rain_in > 0.0, "the prescribed rain must fall");
         assert!(v.water_residual().abs() < 1e-9);
@@ -4798,22 +4595,6 @@ mod closed_budget_tests {
             "an open world's water is {before} plus the through-flow {flowed}, not {}",
             v.total_water_m3()
         );
-    }
-
-    /// A zero shower volume is no weather at all: no shower starts and the count stays
-    /// put, rather than a fresh shower being booked on every tick forever.
-    #[test]
-    fn a_zero_shower_volume_starts_no_shower() {
-        let mut w = World::empty(Config {
-            shower_volume_m3: 0.0,
-            ..config(true)
-        });
-        w.apply(Command::AddAtmosphere { volume_m3: 1.0 });
-        run(&mut w, TICKS);
-        let v = w.view();
-        assert_eq!(v.ledger.showers, 0);
-        assert_eq!(v.ledger.rain_in, 0.0);
-        assert!(v.total_residual().abs() < 1e-9);
     }
 
     /// The user's lever: water aloft, the store's residual still zero, and the world's
@@ -4855,16 +4636,9 @@ mod closed_budget_tests {
         run(&mut w, TICKS / 2);
         let back = World::load(&w.save()).expect("a closed world round-trips");
         assert_eq!(back.atmosphere_m3(), w.atmosphere_m3());
-        assert_eq!(back.shower_left_m3(), w.shower_left_m3());
         assert_eq!(back.view().ledger, w.view().ledger);
-
-        // The calendar is state too: a world resumed from a snapshot owes its next shower
-        // at the tick the saved one did, not a freshly drawn one.
-        let mut scheduled = slab(0.3, 0.0, (2.0, 2.0));
-        run(&mut scheduled, 50);
-        let back = World::load(&scheduled.save()).expect("a scheduled world round-trips");
-        assert_eq!(back.next_shower_tick(), scheduled.next_shower_tick());
-        assert!(back.next_shower_tick() > 0);
+        // The weather is state too: the event, the gap, the temperature, the counts.
+        assert_eq!(back.weather(), w.weather());
 
         // And the stream's own books: `reentry_in` is an inflow like any other, so a
         // resumed world's conservation identity has to carry it.
@@ -4979,14 +4753,14 @@ mod pool_tests {
     use super::drains;
     use crate::{Command, Config, Material, Preset, World};
 
-    /// The shipped `small` ring with its first shower due now.
+    /// The shipped `small` ring with a shower starting now.
     fn showering(seed: u64) -> World {
         let preset = Preset::find("small").expect("small is a shipped preset");
         let mut w = World::new(Config {
             seed,
             ..preset.config()
         });
-        w.next_shower_tick = w.tick;
+        w.open_with_rain();
         w
     }
 
