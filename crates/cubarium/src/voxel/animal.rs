@@ -506,7 +506,7 @@ pub struct Animals {
     /// This rebuild's pose entries, index 0 unused (a cell's entry 0 is no pose); and each
     /// entry's index by its bits, so animals in the same pose share one.
     entries: Vec<PoseEntry>,
-    entry_of: FxHashMap<[u32; 11], u8>,
+    entry_of: FxHashMap<[u32; 10], u8>,
     /// Each animal's sleep weight (0 awake to 1 asleep) and whether it was asleep, by id, at
     /// the last rebuild: presentation memory, so a body that falls asleep or wakes takes
     /// [`sleep::BLEND_S`] over it. Every founder in the last rebuild has an entry, so an
@@ -663,7 +663,6 @@ impl Animals {
             e.head.start,
             e.head.ticks,
             e.head.dip,
-            e.head.glance,
         ]
         .map(f32::to_bits);
         if let Some(&i) = self.entry_of.get(&key) {
@@ -690,7 +689,7 @@ impl Animals {
                 + (e.idle - b.idle).abs()
                 + 20.0 * (e.idle_rate - b.idle_rate).abs()
                 + cyc(e.idle_phase, b.idle_phase)
-                + 4.0 * ((e.head.dip - b.head.dip).abs() + (e.head.glance - b.head.glance).abs())
+                + 4.0 * (e.head.dip - b.head.dip).abs()
                 + 0.1 * (e.head.start - b.head.start).abs()
         };
         (1..self.entries.len())
@@ -706,17 +705,19 @@ impl Animals {
 
     /// One posing body's pose ([`BodyPose`]) from its cells in its own frame and which of
     /// them are its head: its classes ([`sleep::classify`]), one entry for the body and,
-    /// while its head moves ([`idle::move_near`]), one for the head. A body only idling has
-    /// its legs where they stand (its settle is 0), so the classes are the sleep's.
+    /// while its head moves ([`idle::move_near`], for a founder that moves its head,
+    /// [`idle::moves_head`]), one for the head. A body only idling has its legs where they
+    /// stand (its settle is 0), so the classes are the sleep's.
     fn pose_body(
         &mut self,
-        id: u64,
+        animal: &Animal,
         tick: u64,
         local: &[sleep::Local],
         head: &[bool],
         asleep: Option<(f32, f32)>,
         idling: Option<(f32, f32)>,
     ) -> BodyPose {
+        let id = animal.id;
         let k = sleep::classify(local);
         let (sw, sr) = asleep.unwrap_or((0.0, 0.0));
         let (iw, ir) = idling.unwrap_or((0.0, 0.0));
@@ -732,6 +733,7 @@ impl Animals {
         };
         let entry = self.intern(body);
         let head_move = idling
+            .filter(|_| animal.founder.is_some_and(idle::moves_head))
             .and_then(|_| idle::move_near(id, tick, DT))
             .map(|m| m.relative_to(tick));
         let head_entry = head_move.map(|m| (self.intern(PoseEntry { head: m, ..body }), m));
@@ -754,7 +756,7 @@ impl Animals {
     }
 
     /// The empty voxels a posing body moves into: under a settling torso (the sleep's
-    /// belly, [`Animals::mark`]), and under or beside a moving head. A head's are faceless
+    /// belly, [`Animals::mark`]), and under a dipping head. A head's are faceless
     /// torso-class cells (soft marks): the sink draws a plant or a vine over them, and the
     /// walk counts them as air for everything but finding the head.
     fn mark_pose(&mut self, view: &VoxelView<'_>, torso: &[Cell], head: &[Cell], p: &BodyPose) {
@@ -763,19 +765,13 @@ impl Animals {
             return;
         };
         let soft = sleep::Class::Torso.byte(e);
+        if m.dip <= 0.0 {
+            return;
+        }
         for c in head {
-            let y = i64::from(c.y);
-            if m.dip > 0.0 {
-                // Down by the dip and the settle, two rows at most (as far as the walk looks).
-                for dy in 1..=(1 + p.drop).min(2) {
-                    self.put_mark(view, c.x, y - i64::from(dy), c.z, soft);
-                }
-            }
-            if m.glance != 0.0 {
-                let dx = if m.glance > 0.0 { 1 } else { -1 };
-                for dy in 0..=p.drop.min(2) {
-                    self.put_mark(view, c.x + dx, y - i64::from(dy), c.z, soft);
-                }
+            // Down by the dip and the settle, two rows at most (as far as the walk looks).
+            for dy in 1..=(1 + p.drop).min(2) {
+                self.put_mark(view, c.x, i64::from(c.y) - i64::from(dy), c.z, soft);
             }
         }
     }
@@ -882,7 +878,7 @@ impl Animals {
                             .map(|(_, part, _)| matches!(part, AnimalPart::Head { .. }))
                             .collect();
                         let pose =
-                            self.pose_body(animal.id, view.tick, &local, &head, weight, idling);
+                            self.pose_body(animal, view.tick, &local, &head, weight, idling);
                         let (mut torso, mut heads) = (Vec::new(), Vec::new());
                         for (((cell, part, l), byte), is_head) in
                             cells.into_iter().zip(&pose.bytes).zip(head)
@@ -971,7 +967,7 @@ impl Animals {
                 .collect();
             let torso_row = sleep::classify(&local).torso;
             let head = idle::head_of_model(&local, torso_row);
-            let p = self.pose_body(animal.id, view.tick, &local, &head, weight, idling);
+            let p = self.pose_body(animal, view.tick, &local, &head, weight, idling);
             for ((m, &byte), &is_head) in cells.iter().zip(&p.bytes).zip(&head) {
                 if byte != 0 {
                     class_of.insert(m.offset, byte);
@@ -1553,6 +1549,33 @@ mod tests {
         let e = grid.pose_entries()[1];
         assert_eq!((e.idle, e.sleep, e.drop), (1.0, 0.0, 0.0), "idle, not asleep: no settle");
         assert_eq!(e.idle_phase, idle::phase(a.id));
+    }
+
+    /// A littershredder idles (it breathes) but never moves its head.
+    #[test]
+    fn an_idle_littershredder_breathes_and_moves_no_head() {
+        let (w, _) = standing_browser();
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        assert!(fauna.apply(
+            &w,
+            Command::IntroduceFounder {
+                x: 6,
+                z: 4,
+                founder: Founder::Blind,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
+            }
+        ));
+        let mut a = fauna.view().animals[0];
+        a.state = State::Resting;
+        let c = w.config().clone();
+        let mut grid = Animals::empty(c.width, c.height, c.depth);
+        // Longer than two head-move slots, so a browser would have moved its head.
+        for tick in 100..(100 + (3.0 * idle::MOVE_EVERY_S / DT) as u64) {
+            stamp_at(&mut grid, &w, &fauna, &a, tick);
+            assert!(grid.pose_entries().iter().all(|e| e.head == HeadMove::NONE));
+        }
+        assert_eq!(grid.pose_entries()[1].idle, 1.0, "it idles");
     }
 
     /// The idle weight the GPU draws every frame is continuous at 60 frames a second as a

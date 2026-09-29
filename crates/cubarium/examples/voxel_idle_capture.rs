@@ -10,9 +10,9 @@
 //! a 20 Hz tick): the flat and lit tiers, each with the baked model and the glyph, at 2x, over
 //! a lit 4x close-up of the model. The browser is scripted (the presenter reads only its pose
 //! and state): it walks in, stands `--idle-s` seconds (default 12) at a stop chosen so its own
-//! head-move schedule holds a dip and a glance, and walks off. Also writes
-//! `OUT_DIR/strip.png`, the lit close-ups (model over glyph) walking, idling, at the peak of a
-//! dip and of a glance, and walking off, and prints the ffmpeg line. No window is opened.
+//! head-move schedule holds two head dips, and walks off. Also writes `OUT_DIR/strip.png`,
+//! the lit close-ups (model over glyph) walking, idling, at the peak of each dip, and walking
+//! off, and prints the ffmpeg line. No window is opened.
 //!
 //! `--bench` instead times the slab walk on a wider world (256 x 48 x 32, 64 browsers at
 //! `--px`, default 6): every browser walking in place (no pose), every one idle, every one
@@ -26,7 +26,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 
 use cubarium::sink::gpu::{VoxelGpuSink, VoxelGpuSinkOptions};
-use cubarium::voxel::idle::{self, Kind};
+use cubarium::voxel::idle;
 use cubarium::voxel::model::ModelLibrary;
 use cubarium::voxel::project::Projection;
 use cubarium::voxel::{Lighting, OrganismLook, VoxelConfig};
@@ -155,16 +155,15 @@ fn main() -> Result<()> {
 
     // The script, in ticks: walk in, stand, walk off. The stop is the first after 2 s whose
     // idle (from a second after stopping, once the hold and the fade are through) holds a
-    // dip and a glance.
+    // two dips.
     let hz = 1.0 / DT;
     let idle_ticks = (idle_s * hz) as u64;
     let stop = (40..2000u64)
         .find(|&s| {
             let m = idle::moves_between(id, s + hz as u64, s + idle_ticks - 10, DT);
-            m.iter().any(|m| matches!(m.kind, Kind::Dip(_)))
-                && m.iter().any(|m| matches!(m.kind, Kind::Glance(_)))
+            m.len() >= 2
         })
-        .context("no stop with a dip and a glance")?;
+        .context("no stop with two dips")?;
     let walk_in = (2.0 * hz) as u64;
     let first = stop - walk_in;
     let go = stop + idle_ticks;
@@ -239,18 +238,13 @@ fn main() -> Result<()> {
     let oh = 4 * rh + 4 * ch;
     eprintln!("panels {rw}x{rh} at 2x, close-up {cw}x{ch} at 4x: {ow}x{oh}");
 
-    // The strip's moments: walking, idling, a dip's and a glance's peak, walking off.
-    let peak = |want: fn(&Kind) -> bool| {
-        moves
-            .iter()
-            .find(|m| want(&m.kind))
-            .map(|m| (m.start_tick + m.ticks / 2) as u64)
-    };
+    // The strip's moments: walking, idling, the peak of two dips, walking off.
+    let peak = |n: usize| moves.get(n).map(|m| (m.start_tick + m.ticks / 2) as u64);
     let moments = [
         first + walk_in / 2,
         stop + (1.5 * hz) as u64,
-        peak(|k| matches!(k, Kind::Dip(_))).context("a dip")?,
-        peak(|k| matches!(k, Kind::Glance(_))).context("a glance")?,
+        peak(0).context("a dip")?,
+        peak(1).context("a second dip")?,
         go + (1.5 * hz) as u64,
     ];
     let mut strip: Vec<Vec<u8>> = Vec::new();
@@ -378,7 +372,7 @@ fn run_bench(px: u32, lit: bool, glyphs: bool) -> Result<()> {
             ..fv
         };
         let mut start = None;
-        let mut glancing = 0u32;
+        let mut dipping = 0u32;
         for frame in 0..420u64 {
             let tick = frame / 3;
             if frame % 3 == 0 {
@@ -386,12 +380,9 @@ fn run_bench(px: u32, lit: bool, glyphs: bool) -> Result<()> {
                 v.tick = tick;
                 anyhow::ensure!(sink.stage_view(&v, flora.view(), view), "no staging buffer");
                 if frame >= 120 {
-                    glancing += animals
+                    dipping += animals
                         .iter()
-                        .filter(|a| {
-                            idle::move_near(a.id, tick, DT)
-                                .is_some_and(|m| matches!(m.kind, Kind::Glance(_)))
-                        })
+                        .filter(|a| idle::move_near(a.id, tick, DT).is_some())
                         .count() as u32;
                 }
             }
@@ -414,7 +405,7 @@ fn run_bench(px: u32, lit: bool, glyphs: bool) -> Result<()> {
             (t1[0] - t0[0]) / n,
             n1 - n0,
             if state == State::Resting {
-                format!(", {:.1} bodies glancing a tick", f64::from(glancing) / 100.0)
+                format!(", {:.1} bodies dipping a tick", f64::from(dipping) / 100.0)
             } else {
                 String::new()
             }

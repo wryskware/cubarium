@@ -73,7 +73,7 @@ impl Class {
 }
 
 /// Whether the pose byte of a **faceless** cell (an empty voxel a posing body moves into) is
-/// a soft mark: class torso, the voxels under and beside an idle body's moving head
+/// a soft mark: class torso, the voxels under an idle body's dipping head
 /// ([`super::idle`]). A soft mark gives way to a plant or a vine in its voxel (the head is
 /// then hidden there) and is air to the walk's creases and shadows (`voxel.frag`,
 /// `softMark`). The sleep's belly cells are class leg and settle over what is there.

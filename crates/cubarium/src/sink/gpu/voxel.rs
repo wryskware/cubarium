@@ -1005,8 +1005,8 @@ impl Packer {
             } else {
                 let p = stands.at(xi, i64::from(y), z);
                 // Under a settling torso (WX4): a faceless leg cell, over whatever plant is
-                // there, so the walk looks for the torso from here. Under or beside a moving
-                // head: a faceless torso cell, where no plant is (`sleep::is_soft_mark`).
+                // there, so the walk looks for the torso from here. Under a dipping head: a
+                // faceless torso cell, where no plant is (`sleep::is_soft_mark`).
                 let under = if beasts { animals.pose_at(xi, i64::from(y), z) } else { 0 };
                 if under != 0
                     && (!sleep::is_soft_mark(under) || appearance::plant_class(p) == PART_NONE)

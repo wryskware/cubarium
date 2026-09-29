@@ -6,8 +6,9 @@
 //!
 //! * its back **breathes** as a sleeper's does ([`super::sleep`]), [`BREATH_AMP_VOXELS`]
 //!   deep on a [`BREATH_PERIOD_S`] cycle at its own phase;
-//! * every 4–10 s its **head moves** once, out and back over [`MOVE_S`]: a **dip** (the head
-//!   cells come down) or a **glance** (they shift along screen x), [`MOVE_VOXELS`] far.
+//! * every 4–10 s its **head dips** once, out and back over [`MOVE_S`]: the head cells come
+//!   down [`MOVE_VOXELS`] and rise again. Only a founder [`moves_head`] says so does this (a
+//!   head turn waits for rigged models).
 //!
 //! The head is the facing end of the body: the glyph path's head cells, and a baked
 //! model's front quarter at or over its torso row ([`head_of_model`]). The head move's
@@ -15,11 +16,12 @@
 //! drawn from either of two packs sees the same head, and nothing is kept for it.
 //!
 //! The motion is the sleep pose's: cells stamped where they stand, displaced on the GPU by
-//! whole pixel rows (and, for a glance, pixels) recomputed from the frame's clock
+//! whole pixel rows recomputed from the frame's clock
 //! (`cubarium_gpu::voxel::pose_rows`). An asleep body does not idle; a body that has just
 //! woken idles once its sleep weight is back at 0.
 
 use cubarium_gpu::voxel::{Breath, HeadMove};
+use cubarium_voxel_fauna::Founder;
 
 use super::sleep::{self, splitmix};
 
@@ -38,41 +40,36 @@ pub const MOVE_EVERY_S: f64 = 7.0;
 pub const MOVE_JITTER_S: f64 = 1.5;
 /// Seconds a head move lasts, out and back.
 pub const MOVE_S: f64 = 0.5;
-/// How far a head moves at its furthest, in voxels.
+/// How far a head dips at its furthest, in voxels.
 pub const MOVE_VOXELS: (f32, f32) = (0.3, 0.5);
 /// The furthest past its staged tick a pack's pose is drawn (`cubarium_gpu::voxel::pose_at`
 /// clamps there): a move due that soon is in the pack.
 const LOOKAHEAD_TICKS: i64 = 8;
 
-/// What one head move does.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Kind {
-    /// The head comes down this far (voxels).
-    Dip(f32),
-    /// The head shifts this far along screen x (voxels, signed).
-    Glance(f32),
+/// Whether a founder's idle body moves its head. The littershredder (blind, about three
+/// voxels long) does not: it only breathes.
+pub fn moves_head(founder: Founder) -> bool {
+    match founder {
+        Founder::Browser => true,
+        Founder::Blind => false,
+    }
 }
 
-/// One head move of one animal.
+/// One head move of one animal: a dip of `dip` voxels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Move {
     pub start_tick: i64,
     pub ticks: i64,
-    pub kind: Kind,
+    pub dip: f32,
 }
 
 impl Move {
     /// The move as a pose entry carries it, relative to the staged `tick`.
     pub fn relative_to(self, tick: u64) -> HeadMove {
-        let (dip, glance) = match self.kind {
-            Kind::Dip(v) => (v, 0.0),
-            Kind::Glance(v) => (0.0, v),
-        };
         HeadMove {
             start: (self.start_tick - tick as i64) as f32,
             ticks: self.ticks as f32,
-            dip,
-            glance,
+            dip: self.dip,
         }
     }
 }
@@ -89,16 +86,11 @@ pub fn move_k(id: u64, k: i64, dt_s: f64) -> Move {
     let offset = (splitmix(id ^ 0x1D1E_0FF5_E700_0001) % every as u64) as i64;
     let h = splitmix(id ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0x1D1E_4EAD_0000_0002);
     let j = (h % (2 * jitter as u64 + 1)) as i64 - jitter;
-    let far = MOVE_VOXELS.0 + (MOVE_VOXELS.1 - MOVE_VOXELS.0) * ((h >> 20) & 0xFF) as f32 / 255.0;
-    let kind = match (h >> 40) & 3 {
-        0 | 1 => Kind::Dip(far),
-        2 => Kind::Glance(far),
-        _ => Kind::Glance(-far),
-    };
+    let dip = MOVE_VOXELS.0 + (MOVE_VOXELS.1 - MOVE_VOXELS.0) * ((h >> 20) & 0xFF) as f32 / 255.0;
     Move {
         start_tick: k * every + offset + j,
         ticks: ticks(MOVE_S, dt_s).max(1),
-        kind,
+        dip,
     }
 }
 
@@ -190,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn head_moves_come_every_four_to_ten_seconds_and_mix_dips_and_glances() {
+    fn head_dips_come_every_four_to_ten_seconds() {
         for id in 0..16u64 {
             let moves = moves_between(id, 0, 20 * 600, DT);
             assert!(moves.len() >= 55, "about one in 7 s: {}", moves.len());
@@ -198,8 +190,7 @@ mod tests {
                 let gap = (w[1].start_tick - w[0].start_tick) as f64 * DT;
                 assert!((4.0..=10.0).contains(&gap), "gap {gap}");
             }
-            assert!(moves.iter().any(|m| matches!(m.kind, Kind::Dip(_))));
-            assert!(moves.iter().any(|m| matches!(m.kind, Kind::Glance(_))));
+            assert!(moves.iter().all(|m| (MOVE_VOXELS.0..=MOVE_VOXELS.1).contains(&m.dip)));
         }
     }
 
@@ -217,8 +208,7 @@ mod tests {
                 head,
                 ..PoseEntry::ZERO
             };
-            let p = pose_at(&table(tick), &e, frac);
-            p.settle.max(p.glance.abs())
+            pose_at(&table(tick), &e, frac).settle
         };
         let mut peak = 0.0f32;
         let mut last = 0.0f32;
@@ -244,6 +234,12 @@ mod tests {
     fn two_animals_idle_out_of_step() {
         assert_ne!(phase(1), phase(2));
         assert_ne!(move_k(1, 3, DT).start_tick, move_k(2, 3, DT).start_tick);
+    }
+
+    #[test]
+    fn the_littershredder_moves_no_head_and_the_browser_does() {
+        assert!(!moves_head(Founder::Blind));
+        assert!(moves_head(Founder::Browser));
     }
 
     #[test]

@@ -123,16 +123,15 @@ impl Breath {
     }
 }
 
-/// One head move of an idle body (`cubarium::voxel::idle`): out and back once, eased in
-/// and out, starting `start` ticks after the staged tick (negative when under way) and
-/// lasting `ticks`. `dip` brings the head cells down (voxels); `glance` shifts them along
-/// screen x (voxels, signed). Both zero: no move (a body entry).
+/// One head move of an idle body (`cubarium::voxel::idle`): a dip out and back once, eased
+/// in and out, starting `start` ticks after the staged tick (negative when under way) and
+/// lasting `ticks`, bringing the head cells `dip` voxels down at its furthest. A zero dip is
+/// no move (a body entry).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct HeadMove {
     pub start: f32,
     pub ticks: f32,
     pub dip: f32,
-    pub glance: f32,
 }
 
 impl HeadMove {
@@ -140,7 +139,6 @@ impl HeadMove {
         start: 0.0,
         ticks: 0.0,
         dip: 0.0,
-        glance: 0.0,
     };
 
     /// How far out the move is `ticks` after the staged tick, 0 to 1 and back to 0:
@@ -226,8 +224,6 @@ pub struct PoseAt {
     pub settle: f32,
     /// The breath's dip of the top of the back: the sleep's and the idle's.
     pub breath: f32,
-    /// Along screen x: a head's glance.
-    pub glance: f32,
 }
 
 /// One entry, `ticks` after the staged tick: each weight runs on from the staged one at its
@@ -247,29 +243,23 @@ pub fn pose_at(table: &PoseTable, entry: &PoseEntry, ticks: f32) -> PoseAt {
         settle: entry.drop * ws + entry.head.dip * head,
         breath: ws * table.sleep.dip(entry.sleep_phase, ticks)
             + wi * table.idle.dip(entry.idle_phase, ticks),
-        glance: entry.head.glance * head,
     }
 }
 
 /// The pose table as the walk reads it this frame, at frame clock `time` (ticks, as
 /// [`FrameClock::time`]) and `s` pixels a voxel: entry `k`'s settle and breath dip in whole
-/// pixel rows (the settle at most two voxels, as far as the walk looks) and its glance in
-/// whole pixels. Entry 0 says whether any entry glances this frame (the walk only looks
-/// beside a cell then). Unused entries stay zero.
+/// pixel rows, the settle at most two voxels (as far as the walk looks). Unused entries stay
+/// zero.
 pub fn pose_rows(table: &PoseTable, time: f32, s: u32) -> [[f32; 4]; POSE_ENTRIES] {
     let mut out = [[0.0; 4]; POSE_ENTRIES];
     let s = s as f32;
     let px = |v: f32| (v * s + 0.5).floor();
-    let mut glancing = false;
     for (o, e) in out.iter_mut().zip(&table.entries).skip(1) {
         if *e != PoseEntry::ZERO {
             let p = pose_at(table, e, time - table.tick);
-            let glance = (p.glance * s).round().clamp(1.0 - s, s - 1.0);
-            glancing |= glance != 0.0;
-            *o = [px(p.settle).min(2.0 * s), px(p.breath), glance, 0.0];
+            *o = [px(p.settle).min(2.0 * s), px(p.breath), 0.0, 0.0];
         }
     }
-    out[0][0] = f32::from(u8::from(glancing));
     out
 }
 
