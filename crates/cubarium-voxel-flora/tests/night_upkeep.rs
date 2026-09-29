@@ -1,5 +1,4 @@
-//! WX3 round 2: plant upkeep follows the air's temperature by a Q10, and every species
-//! holds a bigger reserve. `Q10^((T - T_mean) / 10)`, Q10 = 2, on maintenance only.
+//! WX3 round 2: plant upkeep follows the air's temperature by a Q10. `Q10^((T - T_mean) / 10)`, Q10 = 2, on maintenance only.
 
 use cubarium_voxel::weather::{DayClock, DayMode};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
@@ -16,13 +15,6 @@ fn the_factor_is_one_at_the_mean_half_ten_below_double_ten_above() {
     assert!((upkeep_factor(31.0, 26.0) - 2f64.sqrt()).abs() < 1e-12);
 }
 
-#[test]
-fn every_species_holds_one_and_a_half_times_its_wood_in_reserve() {
-    let c = FloraConfig::default();
-    for &s in Species::ALL.iter() {
-        assert_eq!(c.species(s).reserve_cap, 1.5, "{s:?}");
-    }
-}
 
 fn world(day: DayClock, diurnal_c: f64) -> World {
     let mut config = VoxelConfig {

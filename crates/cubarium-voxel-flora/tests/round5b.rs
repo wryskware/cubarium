@@ -1113,8 +1113,6 @@ fn budget_config() -> FloraConfig {
     config.decomposition = 0.0;
     config.wood_decomposition = 0.0;
     config.glowcap.propagule_rate = 0.0;
-    // The fixture's arithmetic reads the old placeholder reserve (0.5 of wood).
-    config.glowcap.reserve_cap = 0.5;
     config
 }
 

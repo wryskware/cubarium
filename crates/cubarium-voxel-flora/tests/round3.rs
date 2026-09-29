@@ -787,8 +787,6 @@ fn a_stressed_donor_asks_every_tick_and_its_parcel_never_grows() {
 fn a_parcel_dies_with_its_donor_and_reaches_the_litter() {
     let mut config = FloraConfig::default();
     config.bloomcrown.maintenance = 0.4;
-    // The old placeholder reserve: the donor spends it inside the window.
-    config.bloomcrown.reserve_cap = 0.5;
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.senescence = 0.0;
     config.bloomcrown.propagule_rate = 0.06;
@@ -1787,7 +1785,6 @@ fn a_descendant_born_and_dead_inside_the_window_is_still_a_birth() {
     config.bloomcrown.hop = 1;
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.maintenance = 0.4;
-    config.bloomcrown.reserve_cap = 0.5; // the old placeholder, so the founder spends it
     // 0.75 (placeholder 0.5): the founder's starting reserve funds exactly **one** package.
     // A second one would be a whole seed that waits in the bank (package S) and recruits
     // into the gap the first descendant leaves, which is a second lineage in the window.

@@ -1263,8 +1263,6 @@ fn a_bank_waits_under_a_living_stand_and_germinates_when_it_dies() {
     config.bloomcrown.hop = 1;
     config.umbrellafrond.assimilation = 0.0;
     config.umbrellafrond.maintenance = 0.4;
-    // The old placeholder reserve, so the victim spends it inside the forty ticks.
-    config.umbrellafrond.reserve_cap = 0.5;
     let mut world = plain(5, 8, 0.6);
     let mut flora = Flora::new(config);
     assert!(flora.apply(

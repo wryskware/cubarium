@@ -1159,7 +1159,7 @@ impl SpeciesConfig {
             substrate_reach_up_down: 1,
             alpha: 2.0,
             wood_max: 0.6,
-            reserve_cap: 1.5,
+            reserve_cap: 0.5,
             maintenance: 0.0002,
             senescence: 0.001,
             foliage_rate: 0.002,
