@@ -438,6 +438,22 @@ fn box_penalty(x: &[f64]) -> f64 {
         * 10.0
 }
 
+/// One lineage's brain for a check arm: `heuristic` (the fauna's own observation-only
+/// forager), or a centre file validated against this build and the lineage.
+pub fn brain_driver(founder: Founder, spec: &str) -> Result<EpisodeDriver, String> {
+    use crate::es::voxel::controller::VoxelControl;
+    match spec {
+        "heuristic" => Ok(EpisodeDriver::control(VoxelControl::Heuristic, founder)),
+        path => {
+            let file = VoxelPolicyFile::load(std::path::Path::new(path))?;
+            if file.founder()? != founder {
+                return Err(format!("{path} is not a {} centre", founder.name()));
+            }
+            file.driver()
+        }
+    }
+}
+
 fn load_centres(centres: &[(Founder, PathBuf)]) -> Result<Vec<(Founder, VoxelPolicyFile)>, String> {
     let mut out = Vec::new();
     for (f, path) in centres {
@@ -690,11 +706,10 @@ pub fn check(
     out: &std::path::Path,
 ) -> Result<(), String> {
     std::fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
-    let files = load_centres(centres)?;
-    let drivers: Vec<(Founder, EpisodeDriver)> = files
+    let drivers: Vec<(Founder, EpisodeDriver)> = centres
         .iter()
-        .map(|(f, file)| (*f, file.driver().expect("validated")))
-        .collect();
+        .map(|(f, p)| Ok((*f, brain_driver(*f, &p.display().to_string())?)))
+        .collect::<Result<_, String>>()?;
     let jobs: Vec<(usize, u64)> = (0..arms.len())
         .flat_map(|a| seeds.iter().map(move |&s| (a, s)))
         .collect();
@@ -723,6 +738,9 @@ pub fn check(
             }
             header.push(format!("{}.moving_share", l.name()));
             header.push(format!("{}.pace_bl_per_s", l.name()));
+            for c in ["intake_per_body_h", "walked_m_per_body_h", "nn_m"] {
+                header.push(format!("{}.{c}", l.name()));
+            }
         }
         for s in Species::ALL {
             header.push(format!("stands.{}", s.name()));
@@ -780,6 +798,9 @@ pub fn check(
                     "{:.4}",
                     get(&format!("{}.pace_bl_per_s", l.name()))
                 ));
+                for c in ["intake_per_body_h", "walked_m_per_body_h", "nn_m"] {
+                    row.push(format!("{:.6}", get(&format!("{}.{c}", l.name()))));
+                }
             }
             let scan = Scan::of(&sim);
             for s in Species::ALL {

@@ -42,6 +42,14 @@ pub struct LineageStats {
     /// Scored bodies this window and their mean score (the ES reads the per-body list).
     pub scored: u64,
     pub mean_score: f64,
+    /// Settled assimilated intake over the window, summed over bodies (organic units).
+    pub intake: f64,
+    /// Metres walked (delivered forward), summed over bodies.
+    pub walked_m: f64,
+    /// Mean nearest same-lineage neighbour distance, metres, summed over the minute
+    /// samples that had two bodies or more, and how many there were.
+    pub nn_sum_m: f64,
+    pub nn_samples: u64,
 }
 
 /// One world at the end of a window, and what the window counted.
@@ -217,6 +225,22 @@ pub const LINEAGE_FACTORS: &[LineageFactor] = &[
     }),
     ("mean_score", Pool::Mean, |c, f| {
         c.lineages[f.index()].mean_score
+    }),
+    ("intake_per_body_h", Pool::Mean, |c, f| {
+        let l = &c.lineages[f.index()];
+        share(l.intake, l.body_ticks as f64 / (TICKS_PER_MIN * 60.0))
+    }),
+    ("walked_m_per_body_h", Pool::Mean, |c, f| {
+        let l = &c.lineages[f.index()];
+        share(l.walked_m, l.body_ticks as f64 / (TICKS_PER_MIN * 60.0))
+    }),
+    ("nn_m", Pool::Mean, |c, f| {
+        let l = &c.lineages[f.index()];
+        if l.nn_samples > 0 {
+            l.nn_sum_m / l.nn_samples as f64
+        } else {
+            f64::NAN
+        }
     }),
 ];
 
