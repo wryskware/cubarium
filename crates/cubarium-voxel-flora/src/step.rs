@@ -242,13 +242,16 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
             world.life_temperature_c(),
             world.config().climate.temperature_c,
         );
+        // WX3 round 4: the plant night rule — maintenance and leaf loss at
+        // `plant_night_factor` of their daytime rate while it is dark.
+        let night = world.plant_night_scale();
         let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
         let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
         let world = target.world();
         let substrate =
             cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads) });
         cubarium_voxel::voxel_phase!(Grow, {
-            grow(flora, world, &light, life_daylight, upkeep, &moisture, &substrate, threads)
+            grow(flora, world, &light, life_daylight, upkeep, night, &moisture, &substrate, threads)
         });
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world) });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
@@ -2192,6 +2195,7 @@ fn grow(
     light: &[f64],
     daylight: f64,
     upkeep: f64,
+    night: f64,
     drink: &[Drink],
     substrate: &[Substrate],
     threads: usize,
@@ -2274,6 +2278,7 @@ fn grow(
                     light[si],
                     daylight,
                     upkeep,
+                    night,
                     drink[si],
                     substrate[si],
                     &mut books[k],
@@ -2398,6 +2403,7 @@ fn grow_stand(
     light: f64,
     daylight: f64,
     upkeep: f64,
+    night: f64,
     drink: Drink,
     substrate: Substrate,
     book: &mut Booked,
@@ -2458,8 +2464,14 @@ fn grow_stand(
     };
     let p_cap = sc.alpha * w0;
     let q_max = sc.reserve_cap * w0;
-    // Maintenance alone follows the temperature; growth respiration does not.
-    let m = sc.maintenance * upkeep * w0 * DT;
+    // Maintenance alone follows the temperature; growth respiration does not. A
+    // photosynthetic stand's maintenance and senescence also follow the night rule
+    // (`World::plant_night_scale`); a saprotroph's do not.
+    let night = match sc.trophic {
+        Trophic::Photo => night,
+        Trophic::Saprotroph => 1.0,
+    };
+    let m = sc.maintenance * upkeep * night * w0 * DT;
     let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * DT);
     let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * DT);
     let d_q = (q_max - q0).max(0.0);
@@ -2633,7 +2645,7 @@ fn grow_stand(
     }
 
     // ---- 4.5 senescence
-    let shed = (sc.senescence * stand.foliage * DT).min(stand.foliage);
+    let shed = (sc.senescence * night * stand.foliage * DT).min(stand.foliage);
     let organic_before = stand.material();
     stand.foliage -= shed;
     // Senescence loses from the **top** foliage layer first: a plant drops its
@@ -4056,8 +4068,8 @@ mod tests {
                 .collect();
             let substrate = feed(&mut flora, &world, &drink, 1);
             let (mut one, mut split) = (flora.clone(), flora.clone());
-            grow(&mut one, &world, &light, 1.0, 1.0, &drink, &substrate, 1);
-            grow(&mut split, &world, &light, 1.0, 1.0, &drink, &substrate, threads);
+            grow(&mut one, &world, &light, 1.0, 1.0, 1.0, &drink, &substrate, 1);
+            grow(&mut split, &world, &light, 1.0, 1.0, 1.0, &drink, &substrate, threads);
             assert!(one.stands.len() < n, "some stands died");
             assert_eq!(one.stands.len(), split.stands.len());
             for (a, b) in one.stands.iter().zip(&split.stands) {

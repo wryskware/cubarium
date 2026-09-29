@@ -140,11 +140,13 @@ fn at_factor_zero_a_plant_neither_respires_nor_sheds_at_midnight() {
 }
 
 #[test]
+// The differences are read off stocks ~10^5 times larger, so the ratio holds to float
+// cancellation, not to the last ulp.
 fn a_quarter_factor_is_a_quarter_of_both() {
     let (q1, p1) = midnight_losses(1.0, Species::Bloomcrown);
     let (q, p) = midnight_losses(0.25, Species::Bloomcrown);
-    assert!((q - 0.25 * q1).abs() <= 1e-12 * q1, "upkeep {q} against {q1}");
-    assert!((p - 0.25 * p1).abs() <= 1e-12 * p1, "shed {p} against {p1}");
+    assert!((q - 0.25 * q1).abs() <= 1e-9 * q1, "upkeep {q} against {q1}");
+    assert!((p - 0.25 * p1).abs() <= 1e-9 * p1, "shed {p} against {p1}");
 }
 
 #[test]

@@ -1662,7 +1662,8 @@ impl World {
     /// plant_night_factor` with `d` = [`World::life_daylight`] — 1 by day and with the
     /// clock off, `plant_night_factor` at full night, continuous through twilight.
     pub fn plant_night_scale(&self) -> f64 {
-        1.0
+        let d = self.life_daylight();
+        d + (1.0 - d) * self.config.day.plant_night_factor
     }
 
     /// The temperature plants and animals live by, °C. The climate's mean with the day
