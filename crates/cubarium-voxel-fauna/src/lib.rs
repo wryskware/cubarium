@@ -1416,12 +1416,16 @@ impl FaunaConfig {
                     ));
                 }
             }
-            if !(phys.self_reference_scale.is_finite() && phys.self_reference_scale > 0.0) {
-                return Err(format!(
-                    "{}.self_reference_scale must be finite and positive, not {}",
-                    founder.name(),
-                    phys.self_reference_scale
-                ));
+            for (name, value) in [
+                ("self_reference_scale", phys.self_reference_scale),
+                ("mass_scale", phys.mass_scale),
+            ] {
+                if !(value.is_finite() && value > 0.0) {
+                    return Err(format!(
+                        "{}.{name} must be finite and positive, not {value}",
+                        founder.name()
+                    ));
+                }
             }
             // The body is a physical object: every dimension positive, every anchor a
             // finite nonnegative fraction of one. A zero-height animal has no eye, no

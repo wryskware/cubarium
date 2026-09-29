@@ -450,6 +450,7 @@ impl EcologyParams {
             phys.core.lifespan_median_s *= life * own[2];
             let k = mass * own[4];
             scale_mass(&mut phys.core, k);
+            phys.mass_scale = k;
             if self.mass_relative_self {
                 phys.self_reference_scale = k;
             }

@@ -312,6 +312,13 @@ pub struct FounderPhysiology {
     /// is a diagnostic, not a trained-policy contract.
     #[serde(default = "one")]
     pub self_reference_scale: f64,
+    /// **The org-unit mass scale this physiology was built at**: `1` shipped. The
+    /// ecology search's `founder.mass_scale` multiplies the nine absolute quantities of
+    /// [`FounderPhysiology::core`] and records the factor here, so a rule that must judge
+    /// a body as a x1 one can (the founding gate, `cubarium_voxel_sim::habitat`). Every
+    /// ordinary rule reads the scaled quantities and never this.
+    #[serde(default = "one")]
+    pub mass_scale: f64,
 }
 
 fn one() -> f64 {
@@ -397,6 +404,7 @@ impl FounderPhysiology {
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
                 self_reference_scale: 1.0,
+                mass_scale: 1.0,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -432,6 +440,7 @@ impl FounderPhysiology {
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
                 self_reference_scale: 1.0,
+                mass_scale: 1.0,
             },
         }
     }
