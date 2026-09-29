@@ -819,6 +819,10 @@ enum Command {
         /// opt-in arm B), so a heavier body keeps reading "a fraction of an adult".
         #[arg(long)]
         mass_relative_self: bool,
+        /// Found from this config file's `[world]` (a host's, e.g.
+        /// config/desktop/terrarium.toml) instead of the still-water `small` preset.
+        #[arg(long)]
+        world: Option<PathBuf>,
     },
     /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
     /// every body of every lineage given a centre runs its own antithetic variant inside
@@ -1506,7 +1510,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             threads,
             out,
             mass_relative_self,
+            world,
         } => {
+            let world_cfg =
+                es::voxel::live::search::check_world_config(world.as_deref())?;
             let mut parsed = Vec::new();
             for a in &arms {
                 let (name, src) = a
@@ -1529,6 +1536,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|s| s.trim().parse::<u64>().map_err(|e| format!("seed {s}: {e}")))
                 .collect::<Result<_, _>>()?;
             es::voxel::live::search::check(
+                &world_cfg,
                 &parsed,
                 &seeds,
                 hours,

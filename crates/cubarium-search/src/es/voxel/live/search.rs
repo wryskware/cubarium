@@ -723,7 +723,18 @@ fn summary(r: &SearchRecord, best: Option<f64>) -> String {
 /// The held-out check: `arms` (a name and a vector each) × `seeds`, `hours` of the
 /// training world with the given water cadence, one CSV per world under `out` with one
 /// row per window.
+/// The world a check founds: the `[world]` of a host's config file, read as the app reads
+/// it (its own water, not stilled), or the training preset.
+pub fn check_world_config(world: Option<&std::path::Path>) -> Result<cubarium_voxel::Config, String> {
+    match world {
+        Some(path) => cubarium_voxel::world_config_from_file(path),
+        None => Ok(world::training_config()),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn check(
+    world_cfg: &cubarium_voxel::Config,
     arms: &[(String, EcologyParams)],
     seeds: &[u64],
     hours: f64,
@@ -745,7 +756,7 @@ pub fn check(
     let window_ticks = (window_min * TICKS_PER_MIN as f64).round() as u64;
     let results: Vec<Result<(), String>> = parallel(jobs, threads, |(a, seed)| {
         let (name, params) = &arms[a];
-        let cfg = world::training_config();
+        let cfg = world_cfg.clone();
         let (mut sim, info) = world::found_world(
             &cfg,
             seed,

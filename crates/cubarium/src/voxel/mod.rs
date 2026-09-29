@@ -595,95 +595,10 @@ fn ambient_world_config<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    let mut table = toml::Table::deserialize(deserializer)?;
-    let cell = toml::Value::Float(
-        cubarium_voxel::Preset::find("default")
-            .expect("the shipped presets include `default`")
-            .voxel_m,
-    );
-    table.entry("voxel_m").or_insert(cell);
-    expand_landform_preset(&mut table).map_err(serde::de::Error::custom)?;
-    toml::Value::Table(table)
-        .try_into()
-        .map_err(serde::de::Error::custom)
-}
-
-/// Let `[world.landform]` name one of the shipped landscapes:
-///
-/// ```toml
-/// [world.landform]
-/// preset = "wide"     # small | default | wide
-/// relief_m = 3.0      # any recipe field, overriding the preset
-/// ```
-///
-/// The preset is expanded here, into the plain `landform = { staged = { .. } }` the
-/// core's serde already reads, so `cubarium_voxel::Recipe` stays an ordinary struct that
-/// postcard can read straight back out of a world snapshot. The extents stay `[world]`'s
-/// business: a preset names a landscape, not a ring size.
-///
-/// Anything else — no `landform` key, `landform = "ridge"`, or a `[world.landform.staged]`
-/// table written out in full — passes through untouched.
-fn expand_landform_preset(world: &mut toml::Table) -> std::result::Result<(), String> {
-    let Some(toml::Value::Table(landform)) = world.get("landform") else {
-        return Ok(());
-    };
-    if !landform.contains_key("preset") {
-        return Ok(());
-    }
-    let mut landform = landform.clone();
-    let name = match landform.remove("preset") {
-        Some(toml::Value::String(name)) => name,
-        Some(other) => {
-            return Err(format!(
-                "[world.landform] preset must be a name, not {other}"
-            ));
-        }
-        None => unreachable!("the key is there"),
-    };
-    // A terrarium preset names the other generator: `landform = { terrarium = { .. } }`.
-    if let Some(terrarium) = cubarium_voxel::Terrarium::preset(&name) {
-        let mut table = match toml::Value::try_from(terrarium) {
-            Ok(toml::Value::Table(t)) => t,
-            _ => return Err("a terrarium is a table".into()),
-        };
-        merge_over(&mut table, landform);
-        let mut wrapped = toml::Table::new();
-        wrapped.insert("terrarium".into(), toml::Value::Table(table));
-        world.insert("landform".into(), toml::Value::Table(wrapped));
-        return Ok(());
-    }
-    let preset = cubarium_voxel::Preset::find(&name).ok_or_else(|| {
-        let known: Vec<&str> = cubarium_voxel::PRESETS
-            .iter()
-            .map(|p| p.name)
-            .chain(cubarium_voxel::Terrarium::PRESETS.iter().map(|(n, _)| *n))
-            .collect();
-        format!("no landform preset is called {name:?}; the shipped ones are {known:?}")
-    })?;
-    let mut staged = match toml::Value::try_from(preset.recipe) {
-        Ok(toml::Value::Table(t)) => t,
-        _ => return Err("a recipe is a table".into()),
-    };
-    // Whatever else the table said overrides the preset, field by field.
-    merge_over(&mut staged, landform);
-    let mut wrapped = toml::Table::new();
-    wrapped.insert("staged".into(), toml::Value::Table(staged));
-    world.insert("landform".into(), toml::Value::Table(wrapped));
-    Ok(())
-}
-
-/// Lay `over` onto `base` field by field, into nested tables too: a config that says
-/// `[world.landform.water] inventory_m = 2.0` changes that one field of the preset's
-/// water and keeps the rest, rather than replacing the whole table with a dry default.
-fn merge_over(base: &mut toml::Table, over: toml::Table) {
-    for (key, value) in over {
-        match (base.get_mut(&key), value) {
-            (Some(toml::Value::Table(inner)), toml::Value::Table(value)) => merge_over(inner, value),
-            (_, value) => {
-                base.insert(key, value);
-            }
-        }
-    }
+    let table = toml::Table::deserialize(deserializer)?;
+    // The cell-size default and the landform-preset expansion live in the core now
+    // (`cubarium_voxel::world_table`), shared with the training harness.
+    cubarium_voxel::world_config_from_table(table).map_err(serde::de::Error::custom)
 }
 
 /// `[world]`: [`cubarium_voxel::Config`] with every field optional.
