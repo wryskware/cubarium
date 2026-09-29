@@ -192,7 +192,8 @@ fn a_sleeping_adult_grazer_is_hit_for_037_and_the_third_hit_kills() {
             let g = animal(&fauna, grazer);
             let want = (k as f64 + 1.0) * per_hit;
             assert!(
-                (g.wound - want).abs() < 1e-4,
+                // 1e-3: the ~0.5 s between strikes heals ~1.4e-4 at the note's 0.5 per 30 min.
+                (g.wound - want).abs() < 1e-3,
                 "after {} hits the wound is {}, not {want}",
                 k + 1,
                 g.wound
