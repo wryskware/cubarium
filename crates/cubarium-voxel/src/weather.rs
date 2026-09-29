@@ -238,7 +238,8 @@ pub struct DayClock {
     /// the biological one (~3,000×), where one night is months of a plant's upkeep
     /// (`design/7_Research/ecology-parameter-audit-2026-09-28.md` §2). The applied rate is
     /// `rate × (d + (1 − d) · plant_night_factor)` with `d` = `World::life_daylight`, so
-    /// twilight is continuous. 1 is no rule (the default until Wrysk picks a value).
+    /// twilight is continuous. Default 0.05 (Wrysk, 2026-09-29, from the round-4 arms:
+    /// no plant dies in the dark; stands 72–88 % of the pre-night reference); 1 is no rule.
     /// Saprotrophs do not read it.
     pub plant_night_factor: f64,
 }
@@ -253,7 +254,7 @@ impl Default for DayClock {
             latitude: None,
             longitude: None,
             look: Look::Day,
-            plant_night_factor: 1.0,
+            plant_night_factor: 0.05,
         }
     }
 }
