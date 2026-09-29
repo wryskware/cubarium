@@ -3034,13 +3034,24 @@ fn decompose_pool(
 /// cohort has no way to carry. It is the half of correction 2 that makes saturation cost
 /// something on the way in: the intolerant species is shut out of the basin instead of
 /// merely doing badly there, which is what Chesson's test needs to have anywhere to bite.
+///
+/// It is also the one gate for every **birth a tick makes** — the bank's lottery and a
+/// runner's daughter — and so it reads the clock as well (WX3 round 4): a photosynthetic
+/// newborn waits for `daylight` above zero, because one that comes up in the dark has no
+/// income until dawn and a reserve sized for minutes. The public habitat predicates below
+/// ([`can_establish`] and the gates) stay about the site, not the hour: a host founding a
+/// world at night on a local clock still finds its habitat.
 pub(crate) fn establishes(
     view: &VoxelView<'_>,
     sky: &mut Vec<(Site, f64)>,
     ground: &[Ground],
     site: Site,
     sc: &SpeciesConfig,
+    daylight: f64,
 ) -> bool {
+    if sc.trophic == Trophic::Photo && daylight <= 0.0 {
+        return false;
+    }
     let visibility = sky_at(sky, view, site);
     let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
     gates(view, site, sc, visibility, dead_wood, litter).passes()

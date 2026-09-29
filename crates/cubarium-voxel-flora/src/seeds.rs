@@ -308,6 +308,7 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
     let world_seed = view.config.seed;
     let period = check_period(config);
     let slot = (tick % period) as usize;
+    let daylight = world.life_daylight();
 
     // The due sites, as ground indices in site order. A site whose bank has gone leaves
     // the wheel here.
@@ -328,11 +329,11 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
             .filter(|&gi| !ground[gi].seeds.is_empty())
             .collect();
         germinate(
-            config, tick, world_seed, &view, stands, ground, ledger, sky, &every,
+            config, tick, world_seed, &view, stands, ground, ledger, sky, &every, daylight,
         );
     } else {
         germinate(
-            config, tick, world_seed, &view, stands, ground, ledger, sky, &due,
+            config, tick, world_seed, &view, stands, ground, ledger, sky, &due, daylight,
         );
     }
     for &gi in &due {
@@ -378,6 +379,7 @@ fn germinate(
     ledger: &mut FloraLedger,
     sky: &mut Vec<(Site, f64)>,
     tested: &[usize],
+    daylight: f64,
 ) {
     // (site, winner, whether it comes up through a ground cover)
     let mut winners: Vec<(Site, Species, bool)> = Vec::new();
@@ -406,7 +408,7 @@ fn germinate(
             if n == 0 || (under_cover && !(sc.overtop_per_check > 0.0)) {
                 continue;
             }
-            if !establishes(view, sky, ground, site, sc) {
+            if !establishes(view, sky, ground, site, sc, daylight) {
                 continue;
             }
             candidates.push((species, lottery_weight(n, sc)));
@@ -633,6 +635,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
     let view = world.view();
     let world_seed = view.config.seed;
     let period = check_period(config);
+    let daylight = world.life_daylight();
     let mut daughters: Vec<Daughter> = Vec::new();
 
     for si in 0..stands.len() {
@@ -676,7 +679,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
         if sc.clonal_share > 0.0
             && Rng::keyed(DOMAIN_CLONAL, world_seed, home_index, tick).unit() < sc.clonal_share
             && let Some(site) = runner_target(
-                &view, sky, ground, stands, &daughters, home, sc, world_seed, tick,
+                &view, sky, ground, stands, &daughters, home, sc, world_seed, tick, daylight,
             )
         {
             let before = stands[si].material();
@@ -792,6 +795,7 @@ fn runner_target(
     sc: &SpeciesConfig,
     world_seed: u64,
     tick: u64,
+    daylight: f64,
 ) -> Option<Site> {
     let c = view.config;
     let mut free: Vec<Site> = Vec::new();
@@ -812,7 +816,7 @@ fn runner_target(
                 || free.contains(&site)
                 || stands.binary_search_by_key(&site, |s| s.site).is_ok()
                 || claimed.iter().any(|d| d.site == site)
-                || !establishes(view, sky, ground, site, sc)
+                || !establishes(view, sky, ground, site, sc, daylight)
             {
                 continue;
             }
