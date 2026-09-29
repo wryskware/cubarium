@@ -37,6 +37,10 @@ pub mod window;
 pub mod world;
 
 #[cfg(test)]
+mod lineage_params_tests;
+#[cfg(test)]
+mod movement_tests;
+#[cfg(test)]
 mod search_tests;
 #[cfg(test)]
 mod tests;

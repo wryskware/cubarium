@@ -292,6 +292,10 @@ impl Window {
                 if len > 0.0 {
                     b.minute_bl += d[2] / len;
                 }
+                {
+                    let s = &mut self.stats[f.index()];
+                    s.walked_m += d[2];
+                }
                 b.minute_ticks += 1;
                 b.alive_ticks += 1;
                 b.x_m = a.pose.x;
@@ -340,6 +344,25 @@ impl Window {
                 minute_ticks: 0,
             });
         }
+        if stamp.is_multiple_of(TICKS_PER_MIN) {
+            // How clumped each lineage is: its bodies' mean nearest-neighbour distance.
+            let ring_m = self.ring_m;
+            for f in Founder::ALL {
+                let points: Vec<(f64, f64)> = sim
+                    .fauna()
+                    .view()
+                    .animals
+                    .iter()
+                    .filter(|a| a.founder == Some(f))
+                    .map(|a| (a.pose.x, a.pose.z))
+                    .collect();
+                if let Some(nn) = mean_nearest_neighbour(&points, ring_m) {
+                    let s = &mut self.stats[f.index()];
+                    s.nn_sum_m += nn;
+                    s.nn_samples += 1;
+                }
+            }
+        }
         if stamp.is_multiple_of(TICKS_PER_MIN) || stamp == self.ticks {
             for b in self.tracked.iter_mut() {
                 let s = &mut self.stats[b.founder.index()];
@@ -372,6 +395,7 @@ impl Window {
             let s = &mut self.stats[b.founder.index()];
             s.body_ticks += b.alive_ticks;
             s.unique_m2 += b.visited.len() as f64 * self.cell_area;
+            s.intake += b.intake;
             s.walked_bl += b.minute_bl;
             let (Some(c), true) = (b.candidate, b.possible > 0) else {
                 continue;
@@ -434,6 +458,31 @@ pub fn run_window(
     }
     world.windows += 1;
     w.finish(&world.sim, world.id)
+}
+
+/// Mean distance from each point to its nearest other point, metres, with `x` wrapping
+/// on a ring of `ring_m` (the strip's `z` does not wrap). `None` with fewer than two.
+pub fn mean_nearest_neighbour(points: &[(f64, f64)], ring_m: f64) -> Option<f64> {
+    if points.len() < 2 {
+        return None;
+    }
+    let sum: f64 = points
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, z))| {
+            points
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(_, &(x2, z2))| {
+                    let dx = (x - x2).rem_euclid(ring_m);
+                    let dx = dx.min(ring_m - dx);
+                    (dx * dx + (z - z2) * (z - z2)).sqrt()
+                })
+                .fold(f64::INFINITY, f64::min)
+        })
+        .sum();
+    Some(sum / points.len() as f64)
 }
 
 /// How many bodies of each lineage `sim` holds now.
