@@ -138,7 +138,7 @@ pub struct Voxel {
     #[arg(long, value_name = "FOUNDER|all", conflicts_with = "arena")]
     pub founder_heuristic: Vec<String>,
     /// Development control (`design/predation-and-flight-2026-09-28.md` §2.9): put `N`
-    /// adult lanternjaws with full stores into the **ambient** run's world, on faces
+    /// adult lanternjaws, hungry (reserve at their wake line), into the **ambient** run's world, on faces
     /// where their prey live: `--introduce lanternjaw:4`. Repeatable. Refused, with the
     /// reason, when no prey component exists.
     #[arg(long, value_name = "LINEAGE:N", conflicts_with = "arena")]

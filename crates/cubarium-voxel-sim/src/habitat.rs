@@ -1062,8 +1062,10 @@ fn prey_components(
 }
 
 /// **The introduction control** (`design/predation-and-flight-2026-09-28.md` §2.9, the
-/// `--introduce lanternjaw:N` flag and its viewer twin): `n` adult lanternjaws with full
-/// stores, each on a standable face of a **prey component**, spread over those faces,
+/// `--introduce lanternjaw:N` flag and its viewer twin): `n` adult lanternjaws, each on a
+/// standable face of a **prey component**, spread over those faces, arriving **hungry**
+/// — full structure, the reserve at the wake line (`wake_at`, 0.5 of the cap), awake — so
+/// a development introduction shows hunting at once rather than a satiated rest,
 /// with the lineage's controller installed when a factory is registered. The ids placed,
 /// or why none could be: nothing is placed where no prey lives.
 pub fn introduce_lanternjaws(
@@ -1087,6 +1089,15 @@ pub fn introduce_lanternjaws(
         .filter(|(_, c)| prey.contains_key(c))
         .map(|(f, _)| *f)
         .collect();
+    let wake_at = fauna
+        .config()
+        .founder(Founder::Lanternjaw)
+        .hunter
+        .map_or(0.5, |h| h.wake_at);
+    let stores = StartingStores {
+        body: 1.0,
+        reserve: wake_at,
+    };
     let mut ids = Vec::new();
     for (k, site) in strided(&faces, n).into_iter().enumerate() {
         if fauna.apply(
@@ -1094,7 +1105,7 @@ pub fn introduce_lanternjaws(
             FaunaCommand::IntroduceFounderOnFace {
                 site,
                 founder: Founder::Lanternjaw,
-                stores: StartingStores::FULL,
+                stores,
                 heading_rad: spread_heading(k, n),
             },
         ) {
