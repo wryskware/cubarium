@@ -33,13 +33,15 @@
 //! is submerged under the water's blend.
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_fauna::{Animal, FaunaConfig, FaunaView, Founder, Species, State};
+use cubarium_voxel_fauna::{Animal, DT, FaunaConfig, FaunaView, Founder, Species, State};
+use rustc_hash::FxHashMap;
 
 use crate::present::srgb_linear;
 
 use super::appearance::{self, GlyphId};
 use super::colours;
 use super::model::{self, ModelCell, ModelLibrary, Tag};
+use super::sleep;
 use super::stand::{Cell, Style, wilted};
 
 /// The cells of `animal`'s founder model at its body's length, if the library has one.
@@ -266,6 +268,18 @@ pub fn cells_of(
     style: u16,
     voxel_m: f64,
 ) -> Vec<(Cell, AnimalPart)> {
+    cells_of_posed(animal, config, style, voxel_m, sleep::SleepPose::AWAKE)
+}
+
+/// [`cells_of`] with the body under a sleep pose ([`sleep`]): lowered onto the ground with
+/// its legs tucked, and its back breathing, as far as `pose` says.
+pub fn cells_of_posed(
+    animal: &Animal,
+    config: &FaunaConfig,
+    style: u16,
+    voxel_m: f64,
+    pose: sleep::SleepPose,
+) -> Vec<(Cell, AnimalPart)> {
     let site = animal.site;
     let sx = i64::from(site.x);
 
@@ -349,14 +363,10 @@ pub fn cells_of(
         Founder::Blind => {
             // Low, tapered, segmented crawler.  Its head is the first shell cell in the
             // real forward mouth direction, never a decorative cell beyond the probe.
+            let mut local = Vec::new();
             for along in 0..length {
                 for across in 0..width {
                     let lateral = across - width / 2;
-                    let cell = Cell {
-                        x: anchor_x + along * step_x + lateral * side_x,
-                        y: site.y + 1,
-                        z: (anchor_z + along * step_z + lateral * side_z) as u32,
-                    };
                     let part = if along + 1 == length {
                         AnimalPart::Head {
                             style,
@@ -369,25 +379,40 @@ pub fn cells_of(
                             facing_right,
                         }
                     };
-                    out.push((cell, part));
+                    local.push((
+                        sleep::Local {
+                            a: along as i32,
+                            c: lateral as i32,
+                            row: 0,
+                            bump: along + 1 != length,
+                        },
+                        part,
+                    ));
                 }
             }
+            place_local(&mut out, &local, animal, pose, |a, c, row| Cell {
+                x: anchor_x + i64::from(a) * step_x + i64::from(c) * side_x,
+                y: site.y + 1 + row as u32,
+                z: (anchor_z + i64::from(a) * step_z + i64::from(c) * side_z) as u32,
+            });
         }
         Founder::Browser => {
             // Broad browser: a raised two-layer torso with only end legs below it leaves
             // a real projected gap under the belly.  The head remains on the mouth's own
             // reachable crown layer rather than climbing above its model contact.
+            let mut local = Vec::new();
             for along in 0..length {
                 for across in 0..width {
                     let lateral = across - width / 2;
-                    let x = anchor_x + (along - length / 2) * step_x + lateral * side_x;
-                    let z = (anchor_z + (along - length / 2) * step_z + lateral * side_z) as u32;
+                    let a = (along - length / 2) as i32;
+                    let c = lateral as i32;
                     let front = along + 1 == length;
-                    out.push((
-                        Cell {
-                            x,
-                            y: site.y + height,
-                            z,
+                    local.push((
+                        sleep::Local {
+                            a,
+                            c,
+                            row: height as i32 - 1,
+                            bump: !front,
                         },
                         if front {
                             AnimalPart::Head {
@@ -408,11 +433,12 @@ pub fn cells_of(
                     // 0.125 m, and a one-cell leg left its torso floating.
                     if height > 1 && (along == 0 || along + 1 == length) {
                         for leg_y in 1..height {
-                            out.push((
-                                Cell {
-                                    x,
-                                    y: site.y + leg_y,
-                                    z,
+                            local.push((
+                                sleep::Local {
+                                    a,
+                                    c,
+                                    row: leg_y as i32 - 1,
+                                    bump: false,
                                 },
                                 AnimalPart::Body {
                                     style,
@@ -424,9 +450,28 @@ pub fn cells_of(
                     }
                 }
             }
+            place_local(&mut out, &local, animal, pose, |a, c, row| Cell {
+                x: anchor_x + i64::from(a) * step_x + i64::from(c) * side_x,
+                y: site.y + 1 + row as u32,
+                z: (anchor_z + i64::from(a) * step_z + i64::from(c) * side_z) as u32,
+            });
         }
     }
     out
+}
+
+/// Pose a glyph body's local cells and put them in the world through `cell_at`.
+fn place_local(
+    out: &mut Vec<(Cell, AnimalPart)>,
+    local: &[(sleep::Local, AnimalPart)],
+    animal: &Animal,
+    pose: sleep::SleepPose,
+    cell_at: impl Fn(i32, i32, i32) -> Cell,
+) {
+    let cells: Vec<sleep::Local> = local.iter().map(|(l, _)| *l).collect();
+    for p in sleep::pose(&cells, pose, animal.id) {
+        out.push((cell_at(p.a, p.c, p.row), local[p.src].1));
+    }
 }
 
 /// Every animal of a frame, as voxels plus the styles they paint with.
@@ -451,6 +496,12 @@ pub struct Animals {
     /// Each style's emissive colour in linear light, beside `styles`; shorter than it, or
     /// `None`, for a style that does not emit ([`colours::animal_emission`]).
     emits: Vec<Option<[f32; 3]>>,
+    /// Each animal's sleep blend (0 awake to 1 asleep), by id: presentation memory, so a
+    /// body that falls asleep or wakes takes [`sleep::BLEND_S`] over it instead of popping.
+    /// Every founder in the last rebuild has an entry, so an animal not in it is new.
+    sleep_blend: FxHashMap<u64, f32>,
+    /// The tick of the last rebuild, which is what the blend's elapsed time is read from.
+    last_tick: Option<u64>,
 }
 
 /// How far a starving animal's body falls toward grey and dark: the wilt tint at half
@@ -470,6 +521,44 @@ impl Animals {
             model_styles: vec![u16::MAX; AnimalKey::COUNT],
             emission: false,
             emits: Vec::new(),
+            sleep_blend: FxHashMap::default(),
+            last_tick: None,
+        }
+    }
+
+    /// This rebuild's sleep pose for every animal, moved on from the last one by the time
+    /// between them. A body seen for the first time is drawn as it is: one that is asleep
+    /// when the world loads is not lowered by a blend nobody watched.
+    fn advance_sleep(&mut self, tick: u64, animals: &[Animal]) {
+        let dt = self
+            .last_tick
+            .map_or(0.0, |t| tick.saturating_sub(t) as f64 * DT);
+        self.last_tick = Some(tick);
+        let mut seen: FxHashMap<u64, f32> = FxHashMap::default();
+        for a in animals {
+            if a.founder.is_none() {
+                continue;
+            }
+            let asleep = a.state == State::Asleep;
+            let blend = match self.sleep_blend.get(&a.id) {
+                Some(&b) => sleep::advance_blend(b, asleep, dt),
+                None if asleep => 1.0,
+                None => 0.0,
+            };
+            seen.insert(a.id, blend);
+        }
+        self.sleep_blend = seen;
+    }
+
+    /// One animal's pose this rebuild: the blend from [`Animals::advance_sleep`] and the
+    /// breath at the world's own time.
+    fn sleep_pose(&self, animal: &Animal, tick: u64) -> sleep::SleepPose {
+        match self.sleep_blend.get(&animal.id) {
+            Some(&blend) if animal.mobility.climb.is_none() => sleep::SleepPose {
+                blend,
+                breath: sleep::breath(tick as f64 * DT, animal.id),
+            },
+            _ => sleep::SleepPose::AWAKE,
         }
     }
 
@@ -527,14 +616,19 @@ impl Animals {
             self.emits.clear();
         }
         self.model_styles.fill(u16::MAX);
-        let Some(fauna) = fauna else { return };
+        let Some(fauna) = fauna else {
+            self.sleep_blend.clear();
+            return;
+        };
+        self.advance_sleep(view.tick, fauna.animals);
         // Animals arrive in id order, which is the order the styles are pushed in, so the
         // grid is a pure function of the view and not of any iteration accident. Two
         // animals on one face paint the same cells and the later id wins; which of two
         // identical interim blocks won is not a visible fact.
         for animal in fauna.animals {
+            let pose = self.sleep_pose(animal, view.tick);
             if let Some(cells) = lib.and_then(|lib| model_cells(lib, fauna.config, animal)) {
-                if !self.stamp_model(view, animal, c.voxel_m, cells) {
+                if !self.stamp_model(view, animal, c.voxel_m, cells, pose) {
                     break;
                 }
                 continue;
@@ -544,7 +638,7 @@ impl Animals {
                 break; // more than 65 535 animals in one strip: refuse to alias styles.
             }
             self.styles.push(animal_style(animal));
-            for (cell, part) in cells_of(animal, fauna.config, style, c.voxel_m) {
+            for (cell, part) in cells_of_posed(animal, fauna.config, style, c.voxel_m, pose) {
                 self.place(view, cell, part);
             }
         }
@@ -557,10 +651,35 @@ impl Animals {
         animal: &Animal,
         voxel_m: f64,
         cells: &[ModelCell],
+        pose: sleep::SleepPose,
     ) -> bool {
         if !(voxel_m > 0.0) || !animal.pose.is_finite() {
             return true;
         }
+        // Asleep (or waking): the model lowered onto the ground, legs tucked, back
+        // breathing ([`sleep`]). An awake body stamps the baked cells as they are.
+        let posed;
+        let cells = if pose.is_awake() {
+            cells
+        } else {
+            let local: Vec<sleep::Local> = cells
+                .iter()
+                .map(|m| sleep::Local {
+                    a: m.offset[0],
+                    c: m.offset[2],
+                    row: m.offset[1],
+                    bump: m.tag != Tag::Accent,
+                })
+                .collect();
+            posed = sleep::pose(&local, pose, animal.id)
+                .into_iter()
+                .map(|p| ModelCell {
+                    offset: [p.a, p.row, p.c],
+                    ..cells[p.src]
+                })
+                .collect::<Vec<_>>();
+            &posed[..]
+        };
         // A body on a wall is drawn at the layer its feet have reached (package mobility).
         let anchor = Cell {
             x: (animal.pose.x / voxel_m).floor() as i64,
@@ -894,6 +1013,130 @@ mod tests {
                 .any(|(c, _)| (4..=7).contains(&c.x) && c.y < 3),
             "the torso leaves a visible belly gap between its legs"
         );
+    }
+
+    /// WX4: an asleep browser's cells differ from its awake ones (its torso is lowered
+    /// two rows onto the ground and its legs are tucked), an awake pose is exactly
+    /// [`cells_of`], and the blend between the two changes a few cells at a time.
+    #[test]
+    fn an_asleep_browser_is_lowered_and_the_blend_between_is_continuous() {
+        let c = VoxelConfig {
+            voxel_m: 0.125,
+            ..VoxelConfig::default()
+        };
+        let mut w = World::empty(c.clone());
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                w.apply(WorldCommand::SetMaterial {
+                    x,
+                    y: 0,
+                    z,
+                    material: Material::Soil,
+                });
+            }
+        }
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        assert!(fauna.apply(
+            &w,
+            Command::IntroduceFounder {
+                x: 6,
+                z: 4,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: std::f64::consts::FRAC_PI_2,
+            }
+        ));
+        let av = fauna.view();
+        let a = av.animals[0];
+        let at = |blend: f32, breath: f32| {
+            let mut v: Vec<_> = cells_of_posed(
+                &a,
+                av.config,
+                0,
+                c.voxel_m,
+                sleep::SleepPose { blend, breath },
+            )
+            .into_iter()
+            .map(|(c, _)| (c.x, c.y, c.z))
+            .collect();
+            v.sort();
+            v
+        };
+        let mut awake: Vec<_> = cells_of(&a, av.config, 0, c.voxel_m)
+            .into_iter()
+            .map(|(c, _)| (c.x, c.y, c.z))
+            .collect();
+        awake.sort();
+        assert_eq!(at(0.0, 0.0), awake, "awake is the ordinary body");
+        let asleep = at(1.0, 0.0);
+        assert_ne!(asleep, awake);
+        assert!(
+            asleep.iter().map(|c| c.1).max() < awake.iter().map(|c| c.1).max(),
+            "the body is lower"
+        );
+        assert!(asleep.len() < awake.len(), "the legs are tucked away");
+        assert!(at(1.0, 1.0).len() > asleep.len(), "the back swells");
+        let mut prev = awake;
+        for i in 1..=100 {
+            let cur = at(i as f32 / 100.0, 0.0);
+            let moved = cur.iter().filter(|c| !prev.contains(c)).count()
+                + prev.iter().filter(|c| !cur.contains(c)).count();
+            assert!(moved <= 14, "a hundredth of the blend moved {moved} cells");
+            prev = cur;
+        }
+        assert_eq!(prev, asleep);
+    }
+
+    /// The presenter's blend memory: a body that falls asleep takes about a second, one
+    /// that is asleep when first seen is not blended, and a gone body is forgotten.
+    #[test]
+    fn the_blend_memory_takes_a_second_and_does_not_blend_a_first_sighting() {
+        let c = VoxelConfig::default();
+        let w = World::empty(c.clone());
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut soil = w;
+        for x in 0..i64::from(c.width) {
+            soil.apply(WorldCommand::SetMaterial {
+                x,
+                y: 0,
+                z: 0,
+                material: Material::Soil,
+            });
+        }
+        assert!(fauna.apply(
+            &soil,
+            Command::IntroduceFounder {
+                x: 3,
+                z: 0,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
+            }
+        ));
+        let mut a = fauna.view().animals[0];
+        let mut grid = Animals::empty(0, 0, 0);
+        grid.advance_sleep(100, &[a]);
+        assert_eq!(grid.sleep_blend[&a.id], 0.0);
+        a.state = State::Asleep;
+        let mut seen = vec![];
+        for tick in 101..=125 {
+            grid.advance_sleep(tick, &[a]);
+            seen.push(grid.sleep_blend[&a.id]);
+        }
+        assert!(seen.windows(2).all(|w| w[1] >= w[0] && w[1] - w[0] < 0.06));
+        assert!((seen[19] - 1.0).abs() < 1e-5, "a full second is 20 ticks");
+        // Woken, it blends back the same way.
+        a.state = State::Resting;
+        grid.advance_sleep(126, &[a]);
+        assert!(grid.sleep_blend[&a.id] < 1.0);
+        // First seen asleep: already lowered.
+        let mut fresh = Animals::empty(0, 0, 0);
+        a.state = State::Asleep;
+        fresh.advance_sleep(500, &[a]);
+        assert_eq!(fresh.sleep_blend[&a.id], 1.0);
+        // Gone: forgotten.
+        fresh.advance_sleep(501, &[]);
+        assert!(fresh.sleep_blend.is_empty());
     }
 
     /// No animal layer is an empty grid and no lookup: the presenter's existing behaviour
