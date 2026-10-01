@@ -109,12 +109,19 @@ def main() -> int:
     for s in a.sets:
         apply_set(wf, s)
     if a.ref or any(n.get("class_type") == "LoadImage" for n in wf.values()):
-        wire_refs(wf, a.ref, a.host)
+        if any(n.get("class_type") == "TextEncodeQwenImage21" for n in wf.values()):
+            wire_refs(wf, a.ref, a.host)
+        else:  # edit workflows: upload whatever file each LoadImage names (a path on disk)
+            for n in wf.values():
+                if n.get("class_type") == "LoadImage" and pathlib.Path(n["inputs"]["image"]).is_file():
+                    n["inputs"]["image"] = _upload(a.host, pathlib.Path(n["inputs"]["image"]))
 
     if a.batch:
         for n in wf.values():
             if n.get("class_type") in ("EmptyLatentImage", "EmptySD3LatentImage"):
                 n["inputs"]["batch_size"] = a.batch
+            elif n.get("class_type") == "RepeatLatentBatch":
+                n["inputs"]["amount"] = a.batch
     t0 = time.time()
     resp = _post(a.host, "/prompt", {"prompt": wf})
     pid = resp["prompt_id"]
