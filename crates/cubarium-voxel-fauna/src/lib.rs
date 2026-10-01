@@ -1161,20 +1161,17 @@ pub struct SpeciesConfig {
     /// in the mouth band, or a detritus pool's stock — is `want · E / (E + K)`. A stripped
     /// plant gives crumbs, so moving on pays.
     pub bite_half_stock: f64,
-    /// The fraction of a bite that becomes tissue. The rest is respired, with the energy
-    /// that was in it leaving as heat and the mineral staying behind.
-    pub yield_fraction: f64,
     /// Mineral per unit of tissue built — the density of what it builds, and therefore the
     /// **budget** its growth fits inside: a bite can build at most `mineral / n_tissue` of
-    /// tissue, whatever `yield_fraction` would otherwise have assimilated, and the
-    /// unfunded organic matter is respired with its energy (Astra R9.1). Mineral a bite
+    /// tissue, whatever its food's yield would otherwise have assimilated, and the
+    /// unfunded organic matter is respired with its energy. Mineral a bite
     /// carries in excess of what was built is excreted as a litter deposit.
     ///
     /// There is **no mineral reserve**: [`Animal::mineral`] is an inventory of the tissue's
     /// own content and growth never draws on it, so a mineral-free bite builds nothing
     /// however much mineral the animal is carrying. At the placeholders the budget binds
     /// on every bite — a plant's foliage holds 0.02 against this 0.05 — so a frondgrazer
-    /// turns 40 % of what it eats into tissue and not the 50 % `yield_fraction` names.
+    /// turns 40 % of what it eats into tissue and not the 50 % its yield names.
     pub n_tissue: f64,
     /// Structure it grows to and no further.
     pub body_max: f64,
@@ -1208,24 +1205,8 @@ pub struct SpeciesConfig {
     /// spends it exactly as it spends any other reserve, so the excess is transient and
     /// never grows.
     pub reserve_cap: f64,
-    /// How far it can get at food from the face it stands on.
-    pub reach: Reach,
-    /// The largest height difference, in voxels, between the face it stands on and a face
-    /// it can step onto.
-    pub climb: u32,
-    /// The deepest standing water, in metres, it will step into.
-    pub wade_depth_m: f64,
     /// The depth of standing water on its own face that kills it.
     pub drown_depth_m: f64,
-    /// Seconds between steps. Quantised to whole ticks, never below one.
-    pub step_period_s: f64,
-    /// How far, in voxels of wrapped `x` and of `z` each measured on its own, a **face it
-    /// could stand on** may be and still be a candidate for the walk. The domain is the
-    /// candidate face's and not the food's (Astra R9.5): a crown is found by scoring the
-    /// faces in this box with [`cubarium_voxel_flora::FloraView::reachable_foliage`], so a
-    /// stand outside the box whose feeding face is inside it *is* found, and a stand inside
-    /// it whose only feeding face is outside is not.
-    pub sense_radius: u32,
     /// Energy per unit of organic matter an **introduced** animal arrives with. Used for
     /// nothing else: every other unit of energy in this layer came in with a bite at the
     /// food's own density, and a newborn takes its parent's pro rata.
@@ -1274,7 +1255,6 @@ impl SpeciesConfig {
             // half. Measured on the default preset, seed 2: 4 of 8 founders alive at
             // 60 min at K = 0.02, 6 at 0.005, with offtake under 10 % either way.
             bite_half_stock: 0.005,
-            yield_fraction: 0.5,
             n_tissue: 0.05,
             body_max: 0.05,
             // From body_min to birth_body (0.025) in ≥ 2,632 s, so that with the 900 s hold
@@ -1285,15 +1265,7 @@ impl SpeciesConfig {
             birth_body: 0.03,
             birth_cost: 0.01,
             reserve_cap: 0.5,
-            reach: Reach {
-                horizontal: 1,
-                up: 1,
-            },
-            climb: 1,
-            wade_depth_m: 0.05,
             drown_depth_m: 0.2,
-            step_period_s: 1.0,
-            sense_radius: 8,
             energy_density: 2.0,
             reproduction: Reproduction::LIVE_BIRTH_PLACEHOLDER,
             lifespan_median_s: LIFESPAN_MEDIAN_S,
@@ -1316,16 +1288,6 @@ impl SpeciesConfig {
         self.growth_max_per_s *= k;
     }
 
-    /// Whole ticks between steps, never zero.
-    pub fn step_period_ticks(&self) -> u64 {
-        let t = (self.step_period_s * f64::from(TICK_HZ)).round();
-        if !t.is_finite() || t < 1.0 {
-            1
-        } else {
-            t as u64
-        }
-    }
-
     /// The reserve intake into a body of this size stops at: `reserve_cap · body`. A
     /// ceiling on new intake and not a storage bound — a newborn's paid endowment starts
     /// above it (see [`SpeciesConfig::reserve_cap`]) — so a caller must not read this as
@@ -1340,19 +1302,17 @@ impl SpeciesConfig {
     /// the values known to be arbitrary, and refusing them here would be tuning in a
     /// validator's clothes.
     pub fn validate(&self, name: &str) -> Result<(), String> {
-        let fields: [(&str, f64); 14] = [
+        let fields: [(&str, f64); 12] = [
             ("maintenance_per_s", self.maintenance_per_s),
             ("bite_per_s", self.bite_per_s),
             ("bite_half_stock", self.bite_half_stock),
             ("growth_max_per_s", self.growth_max_per_s),
-            ("yield_fraction", self.yield_fraction),
             ("n_tissue", self.n_tissue),
             ("body_max", self.body_max),
             ("body_min", self.body_min),
             ("birth_body", self.birth_body),
             ("birth_cost", self.birth_cost),
             ("reserve_cap", self.reserve_cap),
-            ("wade_depth_m", self.wade_depth_m),
             ("drown_depth_m", self.drown_depth_m),
             ("energy_density", self.energy_density),
         ];
@@ -1362,18 +1322,6 @@ impl SpeciesConfig {
                     "{name}.{field} must be finite and nonnegative, not {v}"
                 ));
             }
-        }
-        if !(self.yield_fraction <= 1.0) {
-            return Err(format!(
-                "{name}.yield_fraction must be at most 1, not {}",
-                self.yield_fraction
-            ));
-        }
-        if !(self.step_period_s.is_finite() && self.step_period_s > 0.0) {
-            return Err(format!(
-                "{name}.step_period_s must be positive, not {}",
-                self.step_period_s
-            ));
         }
         if !(self.body_min > 0.0) {
             return Err(format!(

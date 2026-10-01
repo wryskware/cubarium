@@ -81,7 +81,6 @@ fn mass_scale_multiplies_the_nine_absolute_quantities_and_nothing_else() {
             );
         }
         assert_eq!(sc.maintenance_per_s, sb.maintenance_per_s);
-        assert_eq!(sc.yield_fraction, sb.yield_fraction);
         assert_eq!(sc.n_tissue, sb.n_tissue);
         assert_eq!(sc.reserve_cap, sb.reserve_cap);
         assert_eq!(sc.energy_density, sb.energy_density);

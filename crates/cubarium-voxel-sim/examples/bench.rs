@@ -34,19 +34,17 @@
 //!    cells holding free water, cells whose pore water is over their material's own field
 //!    capacity, sites with a `Ground`, stands, animals — sampled every `SAMPLE_EVERY`
 //!    ticks so the sampling is not in the numbers it explains.
-//! 3. What the **harness observers** cost, which is not simulation at all: the
-//!    eligible-set scan retired `two_producers`/`replacement` run at observation (every skyline
-//!    column against every species' germination predicate) and the identity tracking
-//!    retired `grazed` ran every tick (a `reachable_foliage` query per animal plus a foliage
-//!    snapshot of every stand in reach). Both are timed here and reported per tick so that
-//!    a "the sim is slow" reading cannot be a harness reading.
+//! 3. What a **harness observer** costs, which is not simulation at all: the eligible-set
+//!    scan (every skyline column against every species' germination predicate), timed
+//!    and reported per tick so that a "the sim is slow" reading cannot be a harness
+//!    reading.
 
 use std::time::Instant;
 
 use cubarium_voxel::profile::{self, Count, Phase};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_fauna::{
-    Command as FaunaCommand, DT, Fauna, FaunaConfig, Founder, Species as Beast, StartingStores,
+    Command as FaunaCommand, DT, Fauna, FaunaConfig, Founder, StartingStores,
     TICK_HZ,
 };
 use cubarium_voxel_flora::{
@@ -140,7 +138,7 @@ fn main() {
         if sample_every > 0 && tick % sample_every == 0 {
             let (world, flora, fauna) = sim.layers();
             sets.push(measure_sets(world, flora, fauna));
-            observers.measure(world, flora, fauna);
+            observers.measure(world, flora);
         }
     }
     report(ticks, wall, &sets, &observers, &c, sample_every, threads);
@@ -263,7 +261,7 @@ fn plant_founders(flora: &mut Flora, world: &World) -> usize {
     planted
 }
 
-/// the retired `grazed.rs`'s grazer rule: gate-passing open soil, strided.
+/// Browser founders on gate-passing open soil, strided.
 fn introduce(fauna: &mut Fauna, flora: &Flora, world: &World, n: usize) -> usize {
     let pool: Vec<Site> = skyline_of(world)
         .into_iter()
@@ -358,14 +356,10 @@ struct Observers {
     /// One terrain sky cache for the whole run: the observer re-reads the gates but not the
     /// geometry while the terrain is unchanged.
     sky: SkyCache,
-    /// retired `grazed`: one `reachable_foliage` per animal plus the foliage of every stand in
-    /// reach, which is what the receipts table needs.
-    identity_ns: u64,
-    identity_calls: u64,
 }
 
 impl Observers {
-    fn measure(&mut self, world: &World, flora: &Flora, fauna: &Fauna) {
+    fn measure(&mut self, world: &World, flora: &Flora) {
         let skyline = skyline_of(world);
         let view = world.view();
         let at = Instant::now();
@@ -384,18 +378,6 @@ impl Observers {
         self.eligible_calls += 1;
         self.eligible_columns = skyline.len() as u64;
         std::hint::black_box(passing);
-
-        let reach = fauna.config().species(Beast::Frondgrazer).reach;
-        let at = Instant::now();
-        let mut held = 0.0f64;
-        for a in fauna.view().animals {
-            for (site, _) in flora.view().reachable_foliage(&world.view(), a.site, reach) {
-                held += flora.view().stand_at(site).map_or(0.0, |s| s.foliage);
-            }
-        }
-        self.identity_ns += at.elapsed().as_nanos() as u64;
-        self.identity_calls += 1;
-        std::hint::black_box(held);
     }
 }
 
@@ -524,11 +506,6 @@ fn report(
             "eligible-set scan (6 species x skyline columns)",
             observers.eligible_ns,
             observers.eligible_calls,
-        ),
-        (
-            "identity tracking (per animal reach + stand foliage)",
-            observers.identity_ns,
-            observers.identity_calls,
         ),
     ] {
         println!(

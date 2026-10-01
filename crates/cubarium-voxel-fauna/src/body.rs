@@ -66,7 +66,7 @@
 //! the observation: this module fabricates nothing it does not measure.
 
 use cubarium_voxel::{DT, VoxelView};
-use cubarium_voxel_flora::{FloraView, Reach, Site};
+use cubarium_voxel_flora::{FloraView, Site};
 use serde::{Deserialize, Serialize};
 
 use crate::controller::Actions;
@@ -275,14 +275,9 @@ pub struct FounderPhysiology {
     /// **Assimilation yield per [`crate::Food`] class**, in [`crate::Food::ALL`] order
     /// (decisions §3; placeholders, `design/backlog.md` §1).
     ///
-    /// The assimilation rule itself is unchanged — `min(yield · organic, mineral /
-    /// n_tissue)` — and this is the `yield` it reads, chosen by what was eaten rather
-    /// than by who ate it, because a detritivore with three foods has no single one.
-    /// The authored placeholders keep litter at the shredder's current
-    /// [`SpeciesConfig::yield_fraction`], give cap tissue the foliage yield, and give
-    /// carrion the litter yield until told otherwise. At today's table all of them are
-    /// 0.5, so naming them changes no number; what it changes is that a later decision
-    /// can move one without moving the others.
+    /// The assimilation rule is `min(yield · organic, mineral / n_tissue)`, and this is
+    /// the `yield` it reads, chosen by what was eaten rather than by who ate it, because a
+    /// detritivore with three foods has no single one.
     ///
     /// Every lineage fills all four honestly, including classes its diet never reaches:
     /// a zero there would be a trap for whoever adds a food later.
@@ -420,7 +415,7 @@ impl FounderPhysiology {
     /// [`take_litter`](cubarium_voxel_flora::Flora::take_litter) returns mineral pro rata
     /// at that fraction with the litter's own retained energy density of 2.0. A tissue
     /// mineral content of 0.02 therefore never binds the mineral budget — the feeder
-    /// converts its whole `yield_fraction` share of what it takes — and nothing was
+    /// converts its whole yield share of what it takes — and nothing was
     /// added to the litter and nothing was converted from the carrion or wood pools to
     /// make that so. The bite rate keeps the frondgrazer's placeholder ratio of 0.04
     /// body per second at the founder's smaller body.
@@ -443,7 +438,6 @@ impl FounderPhysiology {
                     // litter cue's reference stock `M_EMIT`, so a litter film gives crumbs
                     // and a real pile nearly a whole bite.
                     bite_half_stock: 0.00125,
-                    yield_fraction: 0.5,
                     n_tissue: 0.02,
                     body_max: 0.0125,
                     // From body_min to birth_body (0.009375) in ≥ 2,757 s, so that with the
@@ -456,15 +450,7 @@ impl FounderPhysiology {
                     // Unused by the founder path: feeding is local and there is no
                     // target search. Recorded at the frondgrazer's placeholders so a
                     // founder body is a complete animal under the same validators.
-                    reach: Reach {
-                        horizontal: 1,
-                        up: 1,
-                    },
-                    climb: 0,
-                    wade_depth_m: 0.05,
                     drown_depth_m: 0.2,
-                    step_period_s: 1.0,
-                    sense_radius: 8,
                     energy_density: 2.0,
                     // The littershredder lays a clutch on the litter it lives in.
                     reproduction: Reproduction::EGGS_PLACEHOLDER,
@@ -556,7 +542,6 @@ impl FounderPhysiology {
                     bite_per_s: 0.0014,
                     // The browser's K scaled by body (0.005 × 0.035 / 0.05).
                     bite_half_stock: 0.0035,
-                    yield_fraction: 0.5,
                     // Set from carrion's own composition, as the shredder's is from
                     // litter's: a corpse carries its dead body's tissue mineral (0.02 to
                     // 0.05), so 0.02 never binds the budget.
@@ -573,15 +558,7 @@ impl FounderPhysiology {
                     birth_cost: 0.005,
                     // §2.6: an adult grazer carcass fills it.
                     reserve_cap: 1.0,
-                    reach: Reach {
-                        horizontal: 1,
-                        up: 1,
-                    },
-                    climb: 0,
-                    wade_depth_m: 0.05,
                     drown_depth_m: 0.2,
-                    step_period_s: 1.0,
-                    sense_radius: 8,
                     energy_density: 2.0,
                     reproduction: Reproduction::DORMANT_EGGS_PLACEHOLDER,
                     // §2.12: three times the grazers' if lifespan lands (it has).

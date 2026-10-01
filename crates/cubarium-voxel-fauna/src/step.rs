@@ -1787,30 +1787,28 @@ fn founder_feed(
     true
 }
 
-/// A bite becoming tissue: the food class's own `yield_fraction` of it is built **as far as the bite's own
-/// mineral pays for**, the undigested `(1 − yield)` share is egested, the unfunded rest is
-/// respired, the energy follows the organic matter at the
-/// bite's own density, and the undigested share and the mineral that came with more
-/// tissue than was built go to the gut, voided later as dung ([`void_guts`]).
+/// A bite becoming tissue: the food class's own yield of it is stored **as far as the
+/// bite's own mineral pays for**, the undigested `(1 − yield)` share is egested, the
+/// unfunded rest is respired, the energy follows the organic matter at the bite's own
+/// density, and the undigested share and the mineral that came with more tissue than was
+/// built go to the gut, voided later as dung ([`void_guts`]).
 ///
-/// **The mineral budget comes before the tissue (Astra R9.1).** `n_tissue` is mineral per
+/// **The mineral budget comes before the tissue.** `n_tissue` is mineral per
 /// unit of tissue *built*, so a bite can only build `t.mineral / n_tissue` of it. At the
 /// placeholders that binds on every bite: a plant's foliage carries `n_tissue` 0.02 and
 /// this animal's tissue wants 0.05, so a `1e-4` bite brings `2e-6` of mineral and funds
-/// `4e-5` of the `5e-5` its `yield_fraction` would otherwise have built. The unfunded
+/// `4e-5` of the `5e-5` a yield of 0.5 would otherwise have built. The unfunded
 /// organic matter is **respired with its energy as heat**, exactly like the fraction a
 /// full body and a full reserve cannot hold.
 ///
-/// **The yield is the food's, not the eater's** (decisions §3). The rule is unchanged;
-/// the caller hands in [`crate::FounderPhysiology::yield_for`] for what was actually
-/// eaten, because a detritivore with three foods has no single yield. Every placeholder
-/// is 0.5 today, so this moves no number.
+/// **The yield is the food's, not the eater's**: the caller hands in
+/// [`crate::FounderPhysiology::yield_for`] for what was actually eaten, because a
+/// detritivore with three foods has no single yield.
 ///
-/// **No internal mineral reserve is adopted.** [`Animal::mineral`] is an inventory of what
-/// is already in the tissue and not a stock growth may draw on — the plant layer's
-/// `Stand::mineral` is the same and says so (Astra R4.3) — so an animal holding mineral
-/// still builds nothing out of a mineral-free bite. Storing mineral for later, and
-/// spending it, is a rule decision and not a repair.
+/// **No internal mineral reserve.** [`Animal::mineral`] is an inventory of what is already
+/// in the tissue and not a stock growth may draw on — the plant layer's `Stand::mineral`
+/// is the same — so an animal holding mineral still builds nothing out of a mineral-free
+/// bite.
 /// Returns the organic matter actually **placed** — into the reserve — which is
 /// what a founder's prior-interval intake feedback records, and not the bite's whole
 /// organic matter.

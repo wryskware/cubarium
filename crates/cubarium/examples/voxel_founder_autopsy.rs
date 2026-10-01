@@ -79,7 +79,7 @@ use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium_voxel::{Command as WorldCommand, VoxelView, World};
 use cubarium_voxel_fauna::{
     Animal, ConeCensus, ConeHit, Departure, Fauna, FaunaConfig, Food, Founder, Senses, TICK_HZ,
-    browser_cone_census, browser_cone_readings, browser_mouth_candidates, effective_config,
+    browser_cone_census, browser_cone_readings, browser_mouth_candidates,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, FloraView, Site, Species as Plant};
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -152,7 +152,7 @@ struct Seen {
     state: cubarium_voxel_fauna::State,
     /// How many of the four neighbouring columns it could legally step onto from where
     /// it stands: a support face at its **own** standing layer, with no more than its
-    /// `wade_depth_m` of water. Zero is a body that cannot leave its column at all.
+    /// lineage's wade depth of water. Zero is a body that cannot leave its column at all.
     exits: usize,
     /// Why the column one voxel **straight ahead** would refuse a step, read off the
     /// three clauses `body::advance_candidate` applies: `wall` (solid at the body layer,
@@ -1004,7 +1004,11 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
         .animals
         .iter()
         .map(|a| {
-            let sc = effective_config(fauna.config(), a);
+            // The depth the body's own step rule wades: its lineage's height fraction.
+            let wade_m = a.founder.map_or(0.0, |f| {
+                let phys = fauna.config().founder(f);
+                phys.wade_depth_m(&phys.body_at(a.body))
+            });
             let food = food_probe(&view, &fv, fauna.config(), a);
             (
                 a.id,
@@ -1026,9 +1030,9 @@ fn snapshot(sim: &Sim, prev: &[(u64, Seen)]) -> Vec<(u64, Seen)> {
                     held_turn: a.founder_state.held.turn,
                     held_feed: a.founder_state.held.feed,
                     state: a.state,
-                    exits: exits(&view, a, &sc),
+                    exits: exits(&view, a, wade_m),
                     site: a.site,
-                    ahead: ahead(&view, a, &sc),
+                    ahead: ahead(&view, a, wade_m),
                 },
             )
         })
@@ -1165,11 +1169,7 @@ fn travelled(prev: &[(u64, Seen)], a: &Animal) -> f64 {
 /// Why the column one voxel along the heading refuses a step, in `advance_candidate`'s
 /// own order. Naming it is the difference between "the terrain stops it" and "the
 /// terrain stops it with something it cannot feel".
-fn ahead(
-    view: &VoxelView<'_>,
-    a: &Animal,
-    sc: &cubarium_voxel_fauna::SpeciesConfig,
-) -> &'static str {
+fn ahead(view: &VoxelView<'_>, a: &Animal, wade_m: f64) -> &'static str {
     let c = view.config;
     let (fx, fz) = a.pose.forward();
     let nx = (a.pose.x + fx * c.voxel_m).rem_euclid(f64::from(c.width) * c.voxel_m);
@@ -1184,7 +1184,7 @@ fn ahead(
         "wall"
     } else if !view.is_support(cx, y, cz) {
         "drop"
-    } else if view.water_depth_m(cx, y, cz) > sc.wade_depth_m {
+    } else if view.water_depth_m(cx, y, cz) > wade_m {
         "wet"
     } else {
         "open"
@@ -1194,7 +1194,7 @@ fn ahead(
 /// The four-neighbour exits from the column a body stands in: a support face at its own
 /// standing layer with water no deeper than it will wade. This is the geometry
 /// `body::advance_candidate` enforces on every sub-step, read here and not changed.
-fn exits(view: &VoxelView<'_>, a: &Animal, sc: &cubarium_voxel_fauna::SpeciesConfig) -> usize {
+fn exits(view: &VoxelView<'_>, a: &Animal, wade_m: f64) -> usize {
     let (w, d) = (i64::from(view.config.width), view.config.depth);
     let (x, y, z) = (i64::from(a.site.x), a.site.y, a.site.z);
     [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)]
@@ -1205,7 +1205,7 @@ fn exits(view: &VoxelView<'_>, a: &Animal, sc: &cubarium_voxel_fauna::SpeciesCon
             nz >= 0
                 && (nz as u32) < d
                 && view.is_support(nx, y, nz as u32)
-                && view.water_depth_m(nx, y, nz as u32) <= sc.wade_depth_m
+                && view.water_depth_m(nx, y, nz as u32) <= wade_m
         })
         .count()
 }

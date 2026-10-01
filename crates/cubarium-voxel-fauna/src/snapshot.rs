@@ -2,114 +2,21 @@
 //! [`cubarium_voxel::snapshot`] does it. A different tag is refused; there is no
 //! migration, ever.
 //!
-//! This is the standing rule and not a choice of this round: `always-fresh-never-migrate`
-//! says a new schema refuses old worlds and nothing is synthesized or re-anchored. A saved
-//! animal layer whose [`crate::FaunaConfig`] no animal can live under is refused too, for
-//! the reason [`crate::Fauna::new`] panics on one: it is not a runtime condition.
-//!
-//! **What this does not do yet, and why.** The round's brief asks for the fauna to be
-//! serialized *beside the flora*, and there is nothing to sit beside: the plant layer has
-//! no snapshot at all. `cubarium_voxel_flora::Flora` does not implement `Serialize`, and
-//! the host's `w`/`l` stdin commands write and read `World::save()` alone
-//! (`crates/cubarium/src/voxel/mod.rs`), so a host-side envelope carrying the world, the
-//! plants and the animals cannot be written without adding the derive to the flora crate —
-//! which is another package's file this round. This module is therefore the animal layer's
-//! own always-fresh snapshot, ready for that envelope, and the host wiring is reported as
-//! owed.
+//! `always-fresh-never-migrate`: a new schema refuses old worlds and nothing is
+//! synthesized or re-anchored. A saved animal layer whose [`crate::FaunaConfig`] no animal
+//! can live under is refused too, for the reason [`crate::Fauna::new`] panics on one: it is
+//! not a runtime condition.
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::Fauna;
 
-/// Schema 3: schema 2 added the per-plant ledger arrays (round 5b/5c merge). Schema 3
-/// added the phase-one body contract to [`crate::Animal`] — a continuous [`crate::Pose`]
-/// and the optional [`crate::Founder`] lineage marker — and the [`crate::Fauna`] birth
-/// switch. Schema 4 added the P1-B founder state to [`crate::Animal`] — the held
-/// controller actions and the prior-interval feedback — and the founders' own
-/// physiology table to [`crate::FaunaConfig`]. Schema 5 added the respiration split to
-/// the ledger and the per-interval motor-respiration counter to the feedback (P1-C).
-/// Schema 6 brought the founders into the **live** world: the per-lineage bite and
-/// assimilated-intake counters on the ledger, and [`crate::Fauna::policy_driven`] — the
-/// record of which lineages were driven by a saved policy, which is the one thing about
-/// a founder's controller that a loader cannot re-derive and must not guess.
-/// Schema 7 added the ledger's **departure-cause** counters — `deaths_by_cause` and
-/// `deaths_by_founder_cause` ([`crate::Departure`]) — which the 2026-09-20 founder
-/// autopsy needs to tell a starvation from a drowning. Pure instrumentation, and still a
-/// schema bump: the serialized ledger grew two arrays and a world saved under schema 6
-/// has no honest value for them.
-/// Schema 8 added [`crate::Fauna::policy_digest`] beside `policy_driven`: the
-/// `weights_fnv1a` of the centre each lineage is recorded as running, or `0` for a
-/// heuristic. `policy_driven` alone could tell a trained lineage from a heuristic one,
-/// but not one trained centre from another, so `install_founder_controllers` could not
-/// refuse a policy-driven world handed a *different* centre for the same lineage — only
-/// a bare demotion. A world saved under schema 7 has no honest digest to fill it with.
-/// Schema 9 is **reproduction** (`design/handoffs/voxel-reproduction-2026-09-21.md`):
-/// [`crate::ReproductionState`] on every animal — the surplus hold, the refractory and
-/// the gestation [`crate::Escrow`] — the [`crate::Clutch`] records standing in the
-/// world, and the ledger's egg, hatch and gestation counters with the fourth
-/// respiration split. A world saved under schema 8 has no honest value for any of them:
-/// its bodies were breeding under the placeholder rule that this one replaces, so there
-/// is nothing to carry across and nothing to synthesize.
-/// Schema 10 is the **founder step rule**
-/// (`design/handoffs/voxel-founder-step-2026-09-22.md`):
-/// [`crate::FounderPhysiology`] gained `climb_m`, which is serialised inside the
-/// config, and `Animal::site.y` stopped being an invariant of a founder's life — a
-/// body now changes its standing layer, so the same `site` in a schema-9 world means
-/// something a schema-10 loader cannot assume about how it got there. There is nothing
-/// to synthesize either way.
-/// Schema 11 is **bodies in metres**
-/// (`design/handoffs/voxel-body-anchors-2026-09-22.md`):
-/// [`crate::FounderPhysiology`] gained the adult dimensions and the four anchor
-/// fractions, seven more serialised fields inside the config. A schema-10 world's
-/// animals were the wrong size, ate out of a whole-voxel layer range and looked out of
-/// an eye anchored in cells; there is no honest value to carry across, and none is
-/// synthesized.
-/// Schema 12 is **the diets decisions §3 chose**
-/// (`design/handoffs/voxel-diets-2026-09-22.md`):
-/// [`crate::FounderPhysiology`] gained `yield_by_food` inside the config, and
-/// [`crate::FaunaLedger`] gained the two per-[`crate::Food`] arrays. A schema-11
-/// world's ledger has no split to carry across — its shredders ate litter only, so
-/// every bite it booked would have to be *assumed* to be litter — and assuming it is
-/// exactly the synthesis the always-fresh rule refuses.
-/// Schema 13 is **package L's size ladder**
-/// (`design/handoffs/voxel-ladder-growth-2026-09-23.md` §3): the founders' adult bodies
-/// doubled (frondgrazer 0.75 × 0.375 × 0.375 m, littershredder 0.375 × 0.125 × 0.125 m).
-/// The format did not change, but a schema-12 world's bodies stand on faces chosen for
-/// the old headroom and its stands grew under the old crowns: refused, not re-anchored.
-/// Schema 14 is **package N** (`design/handoffs/voxel-new-plants-2026-09-23.md`): the
-/// plant layer gained three species, so [`crate::FaunaLedger`]'s per-plant bite arrays
-/// grew from six slots to nine.
-/// Schema 15 is **package G** (`design/handoffs/voxel-plant-viability-2026-09-23.md` §G):
-/// [`crate::SpeciesConfig`] gained `bite_half_stock` and `growth_max_per_s`, and a body's
-/// structure is now built out of its reserve at a capped rate, so a schema-14 juvenile grew
-/// under a rule this build does not run: refused, not re-anchored.
-/// Schema 16 is **package mobility** (`design/handoffs/voxel-mobility-2026-09-23.md`):
-/// an [`crate::Animal`] carries its [`crate::Mobility`] (the wall it is on, its time under
-/// water), the [`crate::FounderPhysiology`] its step up/down, wall climbing and water
-/// fractions, and the ledger six movement counters: refused, not migrated.
-/// Schema 17 is **dung**: an [`crate::Animal`] carries its `gut` (the undigested share of
-/// its bites and the mineral it sheds), voided as litter every 30 s: refused, not migrated.
-/// Postcard is not self-describing, so older worlds are **refused**, not migrated
+/// The animal layer's snapshot format. Bumped whenever a serialized field, the config
+/// inside the snapshot, or what a saved field means changes. Postcard is not
+/// self-describing, so an older world is **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-/// Schema 18: bodies carry a drawn lifespan (`Animal::lifespan_ticks`), species a median
-/// (`SpeciesConfig::lifespan_median_s`), and the departure arrays grew `Aged`
-/// (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`). Refused, not migrated.
-/// Schema 19 is **circadian rhythms** (WX4): [`crate::State`] gained `Asleep` and
-/// [`crate::FounderPhysiology`] its `active`, `sleep_upkeep` and `wake_hunger`: refused,
-/// not migrated.
-/// Schema 20: breeding eligibility is a share of the last hold — `ReproductionState`
-/// carries its `SurplusWindow` and `eligible_now`, `Reproduction` its `surplus_share`
-/// (`design/handoffs/voxel-audit-round-2026-09-28.md` §3). Refused, not migrated.
-/// Schema 21 is **predation** (P1, `design/predation-and-flight-2026-09-28.md` §2): a
-/// third lineage (the lanternjaw), wounds, strikes, rests with a reason, stillness and
-/// speed on every [`crate::Animal`], dormant eggs on [`crate::Clutch`], the hunter,
-/// armour and agility in the config, the ledger's predation and egg counters and the
-/// `Killed` departures, and the layer's last daylight: refused, not migrated.
-/// Schema 22 is **parasite hatchlings** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`):
-/// an [`crate::Animal`] carries the host it rides (`attached`), the config the four
-/// `parasite_*` knobs, and the ledger its rider counters: refused, not migrated.
-pub const SCHEMA: u32 = 22;
+pub const SCHEMA: u32 = 23;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
