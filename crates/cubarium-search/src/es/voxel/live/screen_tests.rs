@@ -147,3 +147,63 @@ fn the_shipped_start_passes_the_screen_where_the_defaults_fail() {
     bad.genes[0].name = "no_such_gene".into();
     assert!(super::search::start_from(&search, &bad).is_err());
 }
+
+/// The soft margin: inside the bands a candidate runs and pays no soft term; within
+/// `run_margin` of them it runs and pays `k_soft × (log-distance)`, growing with the
+/// distance; beyond the margin it is refused, as before.
+#[test]
+fn the_soft_margin_runs_near_misses_and_refuses_the_rest() {
+    use super::screen::Verdict;
+    let spec = ScreenSpec::default();
+    assert_eq!((spec.run_margin, spec.k_soft), (2.0, 5.0), "the defaults");
+    let mut s = rsf(
+        &FloraConfig::for_voxel_size(VOXEL_M),
+        &FaunaConfig::default(),
+        VOXEL_M,
+        &spec,
+    );
+    (s.r, s.s, s.f) = (0.1, 0.1, 20.0);
+    assert_eq!(spec.verdict(&s), Verdict::Inside);
+    assert_eq!(spec.soft(&s), 0.0, "inside pays no soft term");
+    // Just outside on each side of each band, within the margin: runs.
+    for (r, sv, f) in [
+        (0.31, 0.1, 20.0),
+        (0.011, 0.1, 20.0),
+        (0.1, 0.21, 20.0),
+        (0.1, 0.011, 20.0),
+        (0.1, 0.1, 5.5),
+        (0.59, 0.39, 5.1),
+    ] {
+        (s.r, s.s, s.f) = (r, sv, f);
+        assert_eq!(spec.verdict(&s), Verdict::Margin, "({r}, {sv}, {f})");
+        assert!(spec.soft(&s) > 0.0);
+    }
+    // Beyond the margin on any one of them: refused.
+    for (r, sv, f) in [
+        (0.61, 0.1, 20.0),
+        (0.009, 0.1, 20.0),
+        (0.1, 0.41, 20.0),
+        (0.1, 0.009, 20.0),
+        (0.1, 0.1, 4.9),
+    ] {
+        (s.r, s.s, s.f) = (r, sv, f);
+        assert_eq!(spec.verdict(&s), Verdict::Refused, "({r}, {sv}, {f})");
+    }
+    // Monotonic in the distance outside, on each side.
+    (s.r, s.s, s.f) = (0.1, 0.1, 20.0);
+    let mut last = 0.0;
+    for r in [0.31, 0.35, 0.45, 0.59] {
+        s.r = r;
+        let v = spec.soft(&s);
+        assert!(v > last, "R {r}: {v} after {last}");
+        last = v;
+    }
+    s.r = 0.1;
+    let mut last = 0.0;
+    for f in [9.0, 8.0, 6.0, 5.0] {
+        s.f = f;
+        let v = spec.soft(&s);
+        assert!(v > last, "F {f}: {v} after {last}");
+        last = v;
+    }
+}
