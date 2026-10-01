@@ -91,6 +91,7 @@ enum Respiration {
 }
 
 pub(crate) use cubarium_voxel::KeyedRng as Rng;
+use cubarium_voxel::organism::{Budget, build_from, settle_mineral, tissue_funded};
 use cubarium_voxel::pro_rata;
 
 pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
@@ -242,13 +243,14 @@ fn withdraw(a: &mut Animal, want: f64) -> (Taken, f64) {
         return (Taken::default(), 0.0);
     }
     let before = a.organic();
-    let from_reserve = want.min(a.reserve);
-    let from_body = (want - from_reserve).min(a.body);
-    let paid = from_reserve + from_body;
+    // The organism budget's upkeep with no income at this point of the tick: the reserve
+    // first, and what it cannot pay is the body's dieback, respired out of the structure.
+    let up = Budget::default().upkeep(&mut a.reserve, want);
+    let from_body = up.unpaid.min(a.body);
+    let paid = up.from_reserve + from_body;
     if !(paid > 0.0) {
         return (Taken::default(), 0.0);
     }
-    a.reserve -= from_reserve;
     a.body -= from_body;
     let share = |stock: f64| {
         if paid >= before {
@@ -561,13 +563,13 @@ fn grow(fauna: &mut Fauna) {
         } else {
             1.0
         };
-        let built = (sc.growth_max_per_s * DT * fullness)
-            .min(room)
-            .min(a.reserve);
-        if built > 0.0 {
-            a.reserve -= built;
-            a.body += built;
-        }
+        // The organism budget's build out of a held reserve, at par: a body's structure
+        // costs no construction respiration and its mineral is already in it.
+        a.body += build_from(
+            &mut a.reserve,
+            (sc.growth_max_per_s * DT * fullness).min(room),
+            1.0,
+        );
     }
 }
 
@@ -1824,29 +1826,25 @@ fn assimilate(
     yield_fraction: f64,
 ) -> f64 {
     let a = &mut fauna.animals[i];
-    // What the yield would build, and what this bite's mineral can actually pay for.
-    let funded = if sc.n_tissue > 0.0 {
-        (t.mineral / sc.n_tissue).max(0.0)
-    } else {
-        f64::INFINITY
-    };
+    // The feeding income function: the food's yield of the bite, as far as this bite's
+    // mineral can pay for the tissue.
+    let funded = tissue_funded(t.mineral, sc.n_tissue);
     let assimilated = (yield_fraction * t.organic).min(funded);
     // Egested: the share the yield never absorbs goes to the gut, not to heat. Only the
     // absorbed matter the bite's mineral cannot fund (and the reserve backstop) is
     // respired.
     let egested = ((1.0 - yield_fraction) * t.organic).clamp(0.0, t.organic - assimilated);
-    let mut respired = (t.organic - assimilated - egested).max(0.0);
+    let unfunded = (t.organic - assimilated - egested).max(0.0);
 
-    // Store: into the reserve, up to `reserve_cap · body`. Structure is built out of the
-    // reserve at the growth rate ([`grow`]), never straight from a bite. What the reserve
-    // cannot hold is respired, but the sated bite ([`sated_bite`]) never takes more than
-    // the room after yield, so this is the conservation backstop and not a rule that
-    // fires (package G: an animal never takes food it cannot store).
-    let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
-    let to_reserve = assimilated.min(room);
-    a.reserve += to_reserve;
-    respired += assimilated - to_reserve;
-    let placed = to_reserve;
+    // The organism budget: the income stored into the reserve, up to `reserve_cap · body`.
+    // Structure is built out of the reserve at the growth rate ([`grow`]), never straight
+    // from a bite. What the reserve cannot hold is respired at the close, but the sated
+    // bite ([`sated_bite`]) never takes more than the room after yield, so that is the
+    // conservation backstop and not a rule that fires.
+    let mut budget = Budget::new(assimilated, funded);
+    let placed = budget.store((sc.reserve_of(a.body) - a.reserve).max(0.0));
+    a.reserve += placed;
+    let respired = unfunded + budget.close();
 
     // Energy: the density of what was eaten, so nothing is created for any food.
     let kept_energy = pro_rata(t.energy, placed, t.organic);
@@ -1859,11 +1857,12 @@ fn assimilate(
     let heat = t.energy - kept_energy - egested_energy;
 
     // Mineral: what the new tissue needs is kept and the excess joins the gut, voided
-    // with the undigested matter as dung. Mineral is never respired and never created.
-    let keep_mineral = t.mineral.min(sc.n_tissue * placed);
-    a.mineral += keep_mineral;
+    // with the undigested matter as dung. An animal draws mineral from nothing but its
+    // food, so there is no pool to draw a shortfall from.
+    let settled = settle_mineral(t.mineral, sc.n_tissue * placed, 0.0);
+    a.mineral += t.mineral - settled.released;
     a.gut.organic += egested;
-    a.gut.mineral += t.mineral - keep_mineral;
+    a.gut.mineral += settled.released;
     a.gut.energy += egested_energy;
 
     book_respired(fauna, respired, Respiration::Digestion);
