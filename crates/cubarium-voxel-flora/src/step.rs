@@ -111,10 +111,10 @@
 //!
 //! Every clamp is a `min` against the stock it reads, so nothing here can go negative.
 
+use cubarium_voxel::organism::{Budget, settle_mineral, tissue_funded};
 use cubarium_voxel::{Command as WorldCommand, DT, Material, Materials, VoxelView, World};
 
 use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic};
-use cubarium_voxel::organism::{Budget, settle_mineral, tissue_funded};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
 /// draws; the seed bank's and dispersal's are drawn in `seeds.rs`.
@@ -2494,11 +2494,17 @@ fn grow_stand(
             // Capped by the pool's draw rate, by the tissue the pool can pay `n_tissue`
             // for, and by what the stand can spend: light not captured is never fixed,
             // so there is nothing to respire.
-            let a = photosynthesis(sc.assimilation, l_eff * p0, daylight, mu, (1.0 - stress) * monod)
-                .min(sc.nutrient_draw_max * n0 * DT)
-                .min(tissue_funded(n0, sc.n_tissue))
-                .max(0.0)
-                .min(m + (1.0 + sc.build) * (d_p + d_w) + d_q);
+            let a = photosynthesis(
+                sc.assimilation,
+                l_eff * p0,
+                daylight,
+                mu,
+                (1.0 - stress) * monod,
+            )
+            .min(sc.nutrient_draw_max * n0 * DT)
+            .min(tissue_funded(n0, sc.n_tissue))
+            .max(0.0)
+            .min(m + (1.0 + sc.build) * (d_p + d_w) + d_q);
             book.fixed = a;
             book.light = e_v * a;
             (a, 0.0)

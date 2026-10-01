@@ -95,7 +95,10 @@ impl Budget {
     /// within the mineral budget. The `c_g` share is respired.
     pub fn build(&mut self, demand: f64, c_g: f64) -> f64 {
         let cost = 1.0 + c_g;
-        let x = (self.income / cost).min(demand).min(self.tissue_left).max(0.0);
+        let x = (self.income / cost)
+            .min(demand)
+            .min(self.tissue_left)
+            .max(0.0);
         self.income -= cost * x;
         self.tissue_left -= x;
         self.respired += c_g * x;
@@ -169,7 +172,10 @@ mod tests {
         let mut reserve = 1.0;
         let mut b = Budget::new(2.0, f64::INFINITY);
         let up = b.upkeep(&mut reserve, 0.5);
-        assert_eq!((up.paid(), up.unpaid, reserve, b.income), (0.5, 0.0, 1.0, 1.5));
+        assert_eq!(
+            (up.paid(), up.unpaid, reserve, b.income),
+            (0.5, 0.0, 1.0, 1.5)
+        );
     }
 
     #[test]

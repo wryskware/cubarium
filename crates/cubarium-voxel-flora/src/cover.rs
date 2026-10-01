@@ -59,8 +59,9 @@ use serde::{Deserialize, Serialize};
 
 use cubarium_voxel::{Config as WorldConfig, DT, Material, VoxelView, World};
 
-use crate::step::{self, Rng};
 use cubarium_voxel::organism::{Budget, build_from};
+
+use crate::step::{self, Rng};
 use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, Taken};
 
 /// A vine's identity: unique for the life of the layer, never reused.
