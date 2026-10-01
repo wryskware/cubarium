@@ -39,7 +39,9 @@ fn slab(width: u32, depth: u32, pore: f64) -> World {
     for z in 0..depth {
         for x in 0..i64::from(width) {
             for y in 1..=2u32 {
-                let want = pore * Material::Soil.pore_capacity() * w.config().voxel_volume();
+                let want = pore
+                    * cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+                    * w.config().voxel_volume();
                 let got = w.apply(WorldCommand::AddWater {
                     x,
                     y,
@@ -192,8 +194,11 @@ fn drain_hook(mut w: ResMut<VoxelWorld>, mut d: ResMut<Drain>) {
                 if m != Material::Soil {
                     continue;
                 }
-                let drinkable =
-                    (v.pore_at(x, y, z) - m.wilting_point()).max(0.0) * m.pore_capacity() * volume;
+                let drinkable = (v.pore_at(x, y, z)
+                    - cubarium_voxel::Materials::DEFAULT.wilting_point(m))
+                .max(0.0)
+                    * cubarium_voxel::Materials::DEFAULT.pore_capacity(m)
+                    * volume;
                 let take = drinkable - d.left_m3;
                 if take > 0.0 {
                     d.taken_m3 -= w.0.apply(WorldCommand::WithdrawPore {

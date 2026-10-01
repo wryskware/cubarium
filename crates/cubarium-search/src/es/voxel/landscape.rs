@@ -235,7 +235,8 @@ impl Landscape {
                 .collect(),
             _ => self.start_faces[founder.index()].clone(),
         };
-        let mut senses = Senses::new();
+        // The field runs on the cue numbers of the fauna the episodes populate.
+        let mut senses = Senses::with_cue(super::training_world::training_fauna_config().cue);
         senses.settle(&world.view(), &self.flora.view());
         // The terrain is frozen for every episode of the fixture: read every face's sky
         // once here, and each episode's clone of the field starts with all of it.

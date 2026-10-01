@@ -8,7 +8,7 @@
 //! capacity is asserted anywhere in this file, because the model says nothing about them.
 //!
 //! Conventions are `life_cycle.rs`'s and `small_plant_births.rs`'s, so a fixture here reads the same way:
-//! `voxel_m` is 1 m, so a soil voxel holds `Material::Soil.pore_capacity()` = 0.35 m³ of
+//! `voxel_m` is 1 m, so a soil voxel holds `cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)` = 0.35 m³ of
 //! pore water; soil is wetted by adding free water to an air cell and turning the cell to
 //! soil; and the world is **never stepped**, so the only thing that moves water is the
 //! plant layer's own bounded withdrawal and a fixture's pore fraction is the condition it
@@ -37,7 +37,9 @@ use cubarium_voxel_flora::{
 /// Turn one air voxel into `material` holding exactly `pore` of that material's own pore
 /// capacity, by adding the water first and converting after. `life_cycle.rs`'s `fill`.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
-    let want = pore * material.pore_capacity() * w.config().voxel_volume();
+    let want = pore
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(material)
+        * w.config().voxel_volume();
     if want > 0.0 {
         let got = w.apply(WorldCommand::AddWater {
             x,

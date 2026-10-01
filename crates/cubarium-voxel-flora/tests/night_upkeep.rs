@@ -28,14 +28,15 @@ fn world(day: DayClock, diurnal_c: f64) -> World {
     };
     config.climate.diurnal_c = diurnal_c;
     let mut w = World::empty(config);
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     for x in 0..6i64 {
         for y in 1..=2u32 {
             w.apply(WorldCommand::AddWater {
                 x,
                 y,
                 z: 0,
-                volume_m3: Material::Soil.field_capacity() * cap,
+                volume_m3: cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil) * cap,
             });
             w.apply(WorldCommand::SetMaterial {
                 x,

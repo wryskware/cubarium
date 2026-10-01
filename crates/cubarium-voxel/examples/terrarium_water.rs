@@ -95,7 +95,7 @@ fn main() {
             .material
             .iter()
             .zip(v.pore)
-            .map(|(m, p)| m.pore_capacity() * p)
+            .map(|(m, p)| v.config.materials.pore_capacity(*m) * p)
             .sum::<f64>()
             * cell;
         println!(

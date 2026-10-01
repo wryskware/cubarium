@@ -35,13 +35,18 @@ use cubarium_voxel::{Command, Config, DT, Material, World, water};
 /// below compares against this and not against the new accessor, so the two are
 /// independent statements.
 fn old_rate_m3(m: Material, c: &Config, dt: f64) -> f64 {
-    m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume()
+    cubarium_voxel::Materials::DEFAULT.permeability_per_s(m)
+        * dt
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(m)
+        * c.voxel_volume()
 }
 
 /// The rule's conductivity in metres per second, written out from the brief:
 /// `permeability · pore_capacity · 0.25`. Independent of the implementation.
 fn rule_k_m_per_s(m: Material) -> f64 {
-    m.permeability_per_s() * m.pore_capacity() * 0.25
+    cubarium_voxel::Materials::DEFAULT.permeability_per_s(m)
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(m)
+        * 0.25
 }
 
 /// A single column: nothing spreads sideways, so a phase's effect on one cell is
@@ -64,7 +69,8 @@ fn column(height: u32, voxel_m: f64, porosity: f64, head_m: f64) -> World {
 /// One voxel of soil holding exactly `pore` of its capacity: the water goes into
 /// the air cell first and the material change keeps it (`tests/boundary.rs`).
 fn wet_soil(w: &mut World, y: u32, pore: f64) {
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     if pore > 0.0 {
         w.apply(Command::AddWater {
             x: 0,
@@ -288,7 +294,9 @@ fn slab_drained_m_per_m2(voxel_m: f64, ticks: u32) -> (f64, f64) {
 fn a_metre_of_soil_drains_the_same_depth_on_both_grids() {
     const TICKS: u32 = 100;
     let soil = Material::Soil;
-    let tol = (1.0 - soil.field_capacity()) * soil.pore_capacity() * 0.25;
+    let tol = (1.0 - cubarium_voxel::Materials::DEFAULT.field_capacity(soil))
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(soil)
+        * 0.25;
 
     let (coarse, coarse_residual) = slab_drained_m_per_m2(0.25, TICKS);
     let (fine, fine_residual) = slab_drained_m_per_m2(0.125, TICKS);
@@ -399,7 +407,9 @@ fn saturated_soil_drains_to_its_field_capacity_and_keeps_it() {
         for _ in 0..800 {
             w.step();
         }
-        let want = soil.field_capacity() * soil.pore_capacity() * w.config().voxel_volume();
+        let want = cubarium_voxel::Materials::DEFAULT.field_capacity(soil)
+            * cubarium_voxel::Materials::DEFAULT.pore_capacity(soil)
+            * w.config().voxel_volume();
         for y in 1..=cells {
             let held = pore_m3(&w, y);
             assert!(

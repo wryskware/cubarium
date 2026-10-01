@@ -1949,7 +1949,14 @@ pub fn start_probe(founder: String, horizons: String, workers: usize) -> Result<
             .faces
             .iter()
             .filter_map(|f| {
-                let s = cubarium_voxel_sim::edible_stock(founder, land.flora(), voxel_m, f.y, *f);
+                let s = cubarium_voxel_sim::edible_stock(
+                    founder,
+                    &phys,
+                    land.flora(),
+                    voxel_m,
+                    f.y,
+                    *f,
+                );
                 (s > 0.0).then(|| {
                     let litter = fv.ground_at(*f).is_some_and(|g| g.litter > 0.0);
                     (

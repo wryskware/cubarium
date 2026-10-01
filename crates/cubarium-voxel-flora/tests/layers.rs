@@ -40,7 +40,8 @@ fn plain(voxel_m: f64, width: u32, height: u32, support: u32, pore: f64) -> Worl
         seed: 23,
         ..VoxelConfig::default()
     });
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     for x in 0..width as i64 {
         for y in 1..=support {
             if pore > 0.0 {

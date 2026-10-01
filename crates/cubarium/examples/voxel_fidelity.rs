@@ -855,7 +855,8 @@ fn rules(
                         out[7].voxels += 1;
                         p.worst_over((fc, tr, proj.s, proj.rise), &mut out[7]);
                     }
-                    if m.pore_capacity() > 0.0 && view.pore_at(x, y, z) > 0.01 {
+                    if view.config.materials.pore_capacity(m) > 0.0 && view.pore_at(x, y, z) > 0.01
+                    {
                         out[8].voxels += 1;
                         p.worst_over((fc, fr, proj.s, proj.s), &mut out[8]);
                     }

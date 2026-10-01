@@ -215,7 +215,7 @@ fn voxel(w: &World) -> f64 {
 ///
 /// **The rule.** A flux between two cells is a conductivity in metres per second times
 /// the shared face area in m² times the timestep, `K · A · dt`, with `K =
-/// Material::conductivity_m_per_s()`. What stood here before was `permeability_per_s ·
+/// Materials::conductivity_m_per_s(m)`. What stood here before was `permeability_per_s ·
 /// dt · pore_capacity · voxel_volume` — a *fraction of a cell* per tick, so the physical
 /// flux was `permeability · pore_capacity · voxel_m` metres per second and halved with
 /// the cell: on the panel's 0.125 m ring the ground drained at half the speed the 0.25 m

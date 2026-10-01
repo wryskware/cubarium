@@ -40,7 +40,7 @@ use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, POSE_ENTRIES, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
     PLANE_SKY, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
-use cubarium_voxel::{Material, VoxelView, World};
+use cubarium_voxel::{Material, Materials, VoxelView, World};
 use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
 
 use crate::present::srgb_linear;
@@ -956,7 +956,15 @@ impl Packer {
                 let free = &view.free[src..src + wu];
                 let pore = &view.pore[src..src + wu];
                 for (x, texel) in out.voxels[dst..dst + wu].iter_mut().enumerate() {
-                    *texel = texel_of(material[x], free[x], pore[x], PART_NONE, 0, 0);
+                    *texel = texel_of(
+                        &view.config.materials,
+                        material[x],
+                        free[x],
+                        pore[x],
+                        PART_NONE,
+                        0,
+                        0,
+                    );
                     wet |= texel.0[1];
                 }
             }
@@ -1022,7 +1030,15 @@ impl Packer {
                 if under != 0
                     && (!sleep::is_soft_mark(under) || appearance::plant_class(p) == PART_NONE)
                 {
-                    out.voxels[i] = texel_of(m, view.free[src], view.pore[src], PART_ANIMAL_INTERIM, 0, 0);
+                    out.voxels[i] = texel_of(
+                        &view.config.materials,
+                        m,
+                        view.free[src],
+                        view.pore[src],
+                        PART_ANIMAL_INTERIM,
+                        0,
+                        0,
+                    );
                     out.voxels[i].0[2] = under;
                     continue;
                 }
@@ -1052,7 +1068,15 @@ impl Packer {
                     }
                 }
             };
-            out.voxels[i] = texel_of(m, view.free[src], view.pore[src], part, glyph, slot);
+            out.voxels[i] = texel_of(
+                &view.config.materials,
+                m,
+                view.free[src],
+                view.pore[src],
+                part,
+                glyph,
+                slot,
+            );
             if part == PART_ANIMAL_INTERIM {
                 // The sleep pose's class and entry (0: not posing; `voxel::sleep`).
                 out.voxels[i].0[2] = animals.pose_at(xi, i64::from(y), z);
@@ -1105,11 +1129,21 @@ impl Packer {
     }
 }
 
-/// One voxel's texel: its material and water, and whatever part stands in it.
+/// One voxel's texel: its material and water, and whatever part stands in it. `mats` is
+/// the world's own `config.materials`: a material it gives no pore space shows no pore
+/// water.
 #[inline]
-fn texel_of(m: Material, free: f64, pore: f64, part: u8, glyph: u8, slot: u8) -> VoxelTexel {
+fn texel_of(
+    mats: &Materials,
+    m: Material,
+    free: f64,
+    pore: f64,
+    part: u8,
+    glyph: u8,
+    slot: u8,
+) -> VoxelTexel {
     let free = free as f32;
-    let pore = if m.pore_capacity() > 0.0 {
+    let pore = if mats.pore_capacity(m) > 0.0 {
         pore.clamp(0.0, 1.0) as f32
     } else {
         0.0
@@ -1527,7 +1561,7 @@ mod tests {
                         }
                     };
                     let free = view.free_at(xi, y, z) as f32;
-                    let pore = if m.pore_capacity() > 0.0 {
+                    let pore = if view.config.materials.pore_capacity(m) > 0.0 {
                         view.pore_at(xi, y, z).clamp(0.0, 1.0) as f32
                     } else {
                         0.0

@@ -115,12 +115,6 @@ pub enum Command {
     SetOutlet { open: bool },
 }
 
-/// The default of [`Config::standing_support_fill`], kept for `cubarium-voxel-flora`'s
-/// `cover.rs`, which still reads it as a const instead of from the world's config (a
-/// cross-crate change R2-flora owes). Nothing in this crate reads it but the config's
-/// default.
-pub const STANDING_SUPPORT_FILL: f64 = 0.5;
-
 /// Read-only access to the world for drawing and inspection. Borrowed from a `World`;
 /// never owned by a renderer.
 #[derive(Clone, Copy, Debug)]
@@ -1468,7 +1462,7 @@ impl World {
     /// What a loaded world has to satisfy before it may replace a running one: a valid
     /// config, one entry per cell in each array, every fraction a real number in
     /// `0..=1` **and one its own material can actually hold** — no free water in a
-    /// solid, no pore water where [`Material::pore_capacity`] is zero — a finite
+    /// solid, no pore water where [`crate::Materials::pore_capacity`] is zero — a finite
     /// non-negative aquifer and finite ledger terms, and outlet and spring cells inside
     /// the world.
     ///

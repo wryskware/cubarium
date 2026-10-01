@@ -44,7 +44,8 @@ fn plain(width: u32, height: u32, pore: f64) -> World {
 }
 
 fn wet_soil(w: &mut World, x: i64, y: u32, pore: f64) {
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     if pore > 0.0 {
         let got = w.apply(WorldCommand::AddWater {
             x,
@@ -382,8 +383,8 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
     // Wet enough that bloomcrown is at full moisture and umbrellafrond, a wetland plant,
     // is part way up its ramp: available water 1.3 on package F's scale.
     let a = 1.3;
-    let wp = Material::Soil.wilting_point();
-    let pore = wp + a * (Material::Soil.field_capacity() - wp);
+    let wp = cubarium_voxel::Materials::DEFAULT.wilting_point(Material::Soil);
+    let pore = wp + a * (cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil) - wp);
     let mut world = one_shared_voxel(pore);
     let mut flora = Flora::new(config);
     assert!(flora.apply(
@@ -407,8 +408,12 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
 
     // One voxel's stock, and the whole strip's: four two-voxel columns and one of one.
     // What a root may drink of it is the water above the wilting point.
-    let held = pore * Material::Soil.pore_capacity() * world.config().voxel_volume();
-    let per_voxel = (pore - wp) * Material::Soil.pore_capacity() * world.config().voxel_volume();
+    let held = pore
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * world.config().voxel_volume();
+    let per_voxel = (pore - wp)
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * world.config().voxel_volume();
     let stock0 = pore_stock(&world);
     assert!(
         (stock0 - 9.0 * held).abs() < 1e-12,
@@ -477,7 +482,10 @@ fn one_voxel_shared_by_two_species_splits_exactly_by_demand() {
         flora.view().ledger.transpired_m3
     );
     // Every root voxel is drawn down to its wilting point and no further.
-    let floor = 9.0 * wp * Material::Soil.pore_capacity() * world.config().voxel_volume();
+    let floor = 9.0
+        * wp
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * world.config().voxel_volume();
     assert!(
         (pore_stock(&world) - floor).abs() < 1e-12,
         "every root voxel should be at the wilting point: {} against {floor}",

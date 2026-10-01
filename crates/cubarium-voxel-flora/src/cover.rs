@@ -8,8 +8,9 @@
 //!   sides and down (an overhang's underside). Up is the ordinary stand world and is never a
 //!   face here. A face is **eligible** when its voxel is solid terrain (any material) and the
 //!   voxel beyond it is **inside the world**, **air**, and not flooded — its free water under
-//!   [`STANDING_SUPPORT_FILL`], so a shower's film running past a wall foot does not strip
-//!   the root face while a pool rising over it does ([`face_eligible`]).
+//!   the world's [`cubarium_voxel::Config::standing_support_fill`], so a shower's film
+//!   running past a wall foot does not strip the root face while a pool rising over it
+//!   does ([`face_eligible`]).
 //! - A **vine** ([`Vine`]) is rooted on a support face ([`Site`]) and owns **covered faces**
 //!   ([`CoveredFace`]). Sisters share a `lineage`; nothing else.
 //! - **Cover adjacency** (what "spread onto an adjacent face" and "path distance along
@@ -56,7 +57,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
-use cubarium_voxel::world::STANDING_SUPPORT_FILL;
 use cubarium_voxel::{Config as WorldConfig, DT, Material, VoxelView, World};
 
 use crate::step::{self, Rng};
@@ -208,7 +208,8 @@ fn front_in(c: &WorldConfig, f: Face) -> Option<(u32, u32, u32)> {
 }
 
 /// Whether `face` can carry cover: its voxel is solid terrain and the voxel in front of it
-/// is inside the world, air, and not flooded (free water under [`STANDING_SUPPORT_FILL`]).
+/// is inside the world, air, and not flooded (free water under the world's
+/// [`cubarium_voxel::Config::standing_support_fill`]).
 /// Any solid material qualifies.
 pub fn face_eligible(view: &VoxelView<'_>, face: Face) -> bool {
     let c = view.config;
@@ -222,7 +223,7 @@ pub fn face_eligible(view: &VoxelView<'_>, face: Face) -> bool {
         return false;
     };
     let i = c.index(fx as i64, fy, fz);
-    view.material[i] == Material::Air && view.free[i] < STANDING_SUPPORT_FILL
+    view.material[i] == Material::Air && view.free[i] < c.standing_support_fill
 }
 
 /// **The one light rule the step uses** for a face: `sky` — the sky visibility of the air
@@ -993,7 +994,7 @@ pub(crate) fn prep(flora: &mut Flora, world: &World) {
             && x.front < UNRESOLVED - 1
             && view.material[x.voxel as usize].is_solid()
             && view.material[x.front as usize] == Material::Air
-            && view.free[x.front as usize] < STANDING_SUPPORT_FILL;
+            && view.free[x.front as usize] < view.config.standing_support_fill;
         if !ok {
             let cf = cover.remove_slot(s);
             book_removed(ledger, e, cf.organic(vc));
@@ -1085,6 +1086,7 @@ pub(crate) fn drink_wants(
     let Flora { config, cover, .. } = flora;
     let vc = &config.latticevine;
     let volume = view.config.voxel_volume();
+    let mats = &view.config.materials;
     for vi in 0..cover.vines.len() {
         let root = cover.vines[vi].root;
         step::root_box_dims_into(view, root, vc.rooting_depth, vc.rooting_radius, box_);
@@ -1093,10 +1095,12 @@ pub(crate) fn drink_wants(
         for &i in box_.iter() {
             let m = view.material[i];
             let pore = view.pore[i];
-            let w = (m.field_capacity() - m.wilting_point()).max(0.0) * m.pore_capacity();
-            water += step::available_water(m, pore) * w;
+            let w =
+                (mats.field_capacity(m) - mats.wilting_point(m)).max(0.0) * mats.pore_capacity(m);
+            water += step::available_water(mats, m, pore) * w;
             band += w;
-            drinkable.push((pore - m.wilting_point()).max(0.0) * m.pore_capacity() * volume);
+            drinkable
+                .push((pore - mats.wilting_point(m)).max(0.0) * mats.pore_capacity(m) * volume);
         }
         let avail = if band > 0.0 { water / band } else { 0.0 };
         let mu = step::ramp(avail, vc.wilt_water, vc.full_water);

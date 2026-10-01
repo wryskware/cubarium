@@ -10,7 +10,10 @@ use cubarium_voxel_flora::{Command, Flora, FloraConfig, Species};
 fn dry_pore() -> f64 {
     let sc = FloraConfig::default().species(Species::Velvetpad).clone();
     let a = sc.wilt_water + 0.002 * (sc.full_water - sc.wilt_water);
-    let (wp, fc) = (Material::Soil.wilting_point(), Material::Soil.field_capacity());
+    let (wp, fc) = (
+        cubarium_voxel::Materials::DEFAULT.wilting_point(Material::Soil),
+        cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
+    );
     wp + a * (fc - wp)
 }
 
@@ -25,7 +28,8 @@ fn world_on(day: DayClock) -> World {
         day,
         ..VoxelConfig::default()
     });
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     for x in 0..6i64 {
         for y in 1..=2u32 {
             w.apply(WorldCommand::AddWater {

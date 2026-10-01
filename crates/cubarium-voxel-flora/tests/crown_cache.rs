@@ -66,7 +66,9 @@ fn plain(voxel_m: f64) -> World {
         seed: 31,
         ..VoxelConfig::default()
     });
-    let pore = Material::Soil.pore_capacity() * w.config().voxel_volume() * 0.35;
+    let pore = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume()
+        * 0.35;
     for z in 0..depth {
         for x in 0..i64::from(width) {
             for y in 1..=SUPPORT {

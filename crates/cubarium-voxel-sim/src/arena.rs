@@ -286,19 +286,18 @@ pub fn populate(
 /// Edible stock at `site` for `founder`'s mouth band standing at `standing_y` with the
 /// **adult** body: the shredder's litter and carrion pools there and a glowcap's cap
 /// layers in the band; the browser's vascular foliage layers in the band. An upper crown
-/// above the band is not stock — it cannot be eaten from the ground.
+/// above the band is not stock — it cannot be eaten from the ground. `phys` is the
+/// founder's physiology in the fauna config in force (`config.founder(founder)`).
 pub fn edible_stock(
     founder: Founder,
+    phys: &cubarium_voxel_fauna::FounderPhysiology,
     flora: &Flora,
     voxel_m: f64,
     standing_y: u32,
     site: Site,
 ) -> f64 {
     let fv = flora.view();
-    let band = FaunaConfig::default()
-        .founder(founder)
-        .adult_body()
-        .mouth_layers(standing_y, voxel_m);
+    let band = phys.adult_body().mouth_layers(standing_y, voxel_m);
     let pools = match founder {
         Founder::Blind => fv.ground_at(site).map_or(0.0, |g| g.litter + g.carrion),
         Founder::Browser => 0.0,
@@ -976,6 +975,7 @@ impl Arena {
     pub fn patch_stock(&self, site: Site) -> f64 {
         edible_stock(
             self.founder,
+            self.fauna.config().founder(self.founder),
             &self.flora,
             self.grid.voxel_m(),
             self.grid.ground_y(),
@@ -995,7 +995,9 @@ impl Arena {
     /// carrion, then cap tissue in the band for the shredder; foliage in the band for the
     /// browser. `None` when the site holds nothing edible.
     pub fn take(&mut self, site: Site, want: f64) -> Option<Taken> {
-        let band = FaunaConfig::default()
+        let band = self
+            .fauna
+            .config()
             .founder(self.founder)
             .adult_body()
             .mouth_layers(self.grid.ground_y(), self.grid.voxel_m());
@@ -1039,7 +1041,7 @@ impl Arena {
     /// The `Light` memo is held and warmed here too: the arena's terrain is frozen, so
     /// every episode's clone starts with every face's sky read.
     pub fn prepare_senses(&self) -> Senses {
-        let mut senses = Senses::new();
+        let mut senses = Senses::with_cue(self.fauna.config().cue);
         senses.settle(&self.world.view(), &self.flora.view());
         senses.hold_light();
         senses.warm_light(&self.world.view());
@@ -1556,7 +1558,16 @@ mod tests {
         let grid = ArenaGrid::Standard;
         resources
             .iter()
-            .map(|&r| edible_stock(founder, flora, grid.voxel_m(), grid.ground_y(), r))
+            .map(|&r| {
+                edible_stock(
+                    founder,
+                    FaunaConfig::default().founder(founder),
+                    flora,
+                    grid.voxel_m(),
+                    grid.ground_y(),
+                    r,
+                )
+            })
             .sum()
     }
 

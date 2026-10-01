@@ -55,7 +55,7 @@ use std::time::Instant;
 
 use cubarium_voxel_fauna::{
     Animal, BlindForager, BrowserForager, Controller, Departure, Food, Founder, FounderPhysiology,
-    Pose, Response, StartingStores,
+    Pose, Response, StartingStores, TeacherConfig,
 };
 use cubarium_voxel_sim::{ArenaGrid, Placement, Sim, SimConfig, Site, edible_stock, populate};
 use serde::{Deserialize, Serialize};
@@ -521,12 +521,14 @@ impl Controller for Counted {
     }
 }
 
-/// A bystander's own observation-only heuristic.
-fn heuristic(founder: Founder) -> Box<dyn Controller> {
+/// A bystander's own observation-only heuristic, on the episode world's `teachers`.
+fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controller> {
     match founder {
-        Founder::Blind => Box::new(BlindForager::new()),
-        Founder::Browser => Box::new(BrowserForager::new()),
-        Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
+        Founder::Blind => Box::new(BlindForager::with_config(teachers)),
+        Founder::Browser => Box::new(BrowserForager::with_config(teachers)),
+        Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::with_config(
+            teachers,
+        )),
     }
 }
 
@@ -702,7 +704,15 @@ struct StageB {
 /// Edible stock on an arena site in a running sim: [`cubarium_voxel_sim::edible_stock`],
 /// the arena's own reading.
 fn patch_stock(founder: Founder, sim: &Sim, grid: ArenaGrid, site: Site) -> f64 {
-    edible_stock(founder, sim.flora(), grid.voxel_m(), grid.ground_y(), site)
+    let phys = sim.fauna().config().founder(founder);
+    edible_stock(
+        founder,
+        phys,
+        sim.flora(),
+        grid.voxel_m(),
+        grid.ground_y(),
+        site,
+    )
 }
 
 /// One acting body, followed over the episode.
@@ -877,6 +887,8 @@ fn drive(
     let manifest = founder.manifest();
     let cadence = manifest.cadence_ticks().max(1);
     let phys = *super::training_world::training_fauna_config().founder(founder);
+    // The reflexes run on the episode world's own numbers.
+    let teachers = sim.fauna().config().teachers;
 
     let mut tracked: Vec<Tracked> = Vec::with_capacity(acting.len());
     for &id in acting {
@@ -884,7 +896,7 @@ fn drive(
         // Fresh memory by construction, `reset()` by contract. The fauna table clones
         // empty, so this is the only mind the body gets.
         let controller = Counted {
-            inner: driver.fresh(),
+            inner: driver.fresh(teachers),
             count: Arc::clone(&samples),
         };
         if !sim.fauna_mut().set_controller(id, Box::new(controller)) {
@@ -921,7 +933,9 @@ fn drive(
     }
     for &(id, other) in bystanders {
         // A bystander the layer lost is no error: it was never the candidate.
-        let _ = sim.fauna_mut().set_controller(id, heuristic(other));
+        let _ = sim
+            .fauna_mut()
+            .set_controller(id, heuristic(other, teachers));
     }
 
     // The acting lineage's food classes (decisions §3).

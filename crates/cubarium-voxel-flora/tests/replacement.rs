@@ -22,7 +22,9 @@ use cubarium_voxel_flora::{
 /// `glowcap.rs`'s `fill`: turn one air voxel into `material` holding exactly `pore` of that
 /// material's own pore capacity, by adding the water first and converting after.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
-    let want = pore * material.pore_capacity() * w.config().voxel_volume();
+    let want = pore
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(material)
+        * w.config().voxel_volume();
     if want > 0.0 {
         let got = w.apply(WorldCommand::AddWater {
             x,

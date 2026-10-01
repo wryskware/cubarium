@@ -427,7 +427,7 @@ fn run(
     // `examples/voxel_founder_autopsy.rs` do it.
     let mut engine = if coupled {
         install_default_founders(&mut fauna).expect("the built-in centres validate");
-        let mut senses = Senses::new();
+        let mut senses = Senses::with_cue(fauna.config().cue);
         senses.settle(&world.view(), &flora.view());
         let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
         if sim.world().config().closed_water_budget && !sim.world().outlet_open() {

@@ -27,14 +27,15 @@ fn plain(width: u32, height: u32) -> World {
     });
     for x in 0..width as i64 {
         for y in 1..=2 {
-            let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+            let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+                * w.config().voxel_volume();
             w.apply(WorldCommand::AddWater {
                 x,
                 y,
                 z: 0,
                 // Drained soil (package F's available water 1): every species' water
                 // gate but the wetland pair's is open on any soil numbers.
-                volume_m3: Material::Soil.field_capacity() * cap,
+                volume_m3: cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil) * cap,
             });
             w.apply(WorldCommand::SetMaterial {
                 x,

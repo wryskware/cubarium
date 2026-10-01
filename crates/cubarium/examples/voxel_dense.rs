@@ -81,7 +81,7 @@ fn found(config: &Path, seed: u64, threads: usize) -> (Sim, u64) {
 
 fn assemble(mut world: World, flora: Flora, mut fauna: Fauna, threads: usize) -> Sim {
     install_default_founders(&mut fauna).expect("the built-in centres validate");
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
     if world.config().closed_water_budget && !world.outlet_open() {
         world.apply(cubarium_voxel::Command::SetOutlet { open: true });

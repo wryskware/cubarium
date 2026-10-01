@@ -332,7 +332,7 @@ fn measure_sets(world: &World, flora: &Flora, fauna: &Fauna) -> Sets {
                 }
                 if v.pore[i] > 0.0 {
                     s.pore_any += 1;
-                    if v.pore[i] > m.field_capacity() {
+                    if v.pore[i] > c.materials.field_capacity(m) {
                         s.pore_over_field += 1;
                     }
                 }

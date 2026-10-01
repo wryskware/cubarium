@@ -37,6 +37,8 @@ pub mod window;
 pub mod world;
 
 #[cfg(test)]
+mod knob_wiring_tests;
+#[cfg(test)]
 mod lineage_params_tests;
 #[cfg(test)]
 mod mass_tests;
@@ -52,11 +54,13 @@ mod tests;
 /// Install one centre per lineage on a whole layer, as the ambient host does: the birth
 /// factory and every standing body of that lineage.
 pub fn install_centres(fauna: &mut Fauna, drivers: &[(Founder, EpisodeDriver)]) {
+    // The reflexes a centre falls back on run on the layer's own numbers.
+    let teachers = fauna.config().teachers;
     for (founder, driver) in drivers {
         let driver = driver.clone();
         fauna.set_founder_factory(
             *founder,
-            std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh() }),
+            std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh(teachers) }),
         );
         fauna.set_policy_driven(*founder, true);
     }

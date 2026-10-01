@@ -2,7 +2,7 @@
 //! does to a log. Short function tests; no population claim.
 //!
 //! Conventions are `round5a.rs`'s, so a fixture here reads the same way: `voxel_m` is 1 m,
-//! so a soil voxel holds `Material::Soil.pore_capacity()` = 0.35 m³ of pore water; soil is
+//! so a soil voxel holds `cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)` = 0.35 m³ of pore water; soil is
 //! wetted by adding free water to an air cell and turning the cell to soil; and the world
 //! is **never stepped**, so the only thing that moves water is the plant layer's own
 //! bounded withdrawal and a fixture's pore fraction is the condition it says it is.
@@ -22,7 +22,9 @@ use cubarium_voxel_flora::{
 /// `round5a.rs`'s `fill`: turn one air voxel into `material` holding exactly `pore` of that
 /// material's own pore capacity, by adding the water first and converting after.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
-    let want = pore * material.pore_capacity() * w.config().voxel_volume();
+    let want = pore
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(material)
+        * w.config().voxel_volume();
     if want > 0.0 {
         let got = w.apply(WorldCommand::AddWater {
             x,
@@ -1119,7 +1121,11 @@ fn budget_config() -> FloraConfig {
 /// of: that is the standing R4.3 limitation, and this fixture is where it bites.
 #[test]
 fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
-    let mut world = pillars(4, &[1], Material::Soil.field_capacity());
+    let mut world = pillars(
+        4,
+        &[1],
+        cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
+    );
     let mut flora = Flora::new(budget_config());
     let site = plant_glowcap(&mut flora, &world, 1);
     let (organic, _, energy) = log_with(&mut flora, site, 1.0, 0.0);
@@ -1195,7 +1201,11 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
     /// One tick on a log of `organic` holding `mineral`: the wood built, and the site's
     /// mineral pool and the log's own mineral afterwards.
     fn one_tick(mineral: f64) -> (f64, f64, f64) {
-        let mut world = pillars(4, &[1], Material::Soil.field_capacity());
+        let mut world = pillars(
+            4,
+            &[1],
+            cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
+        );
         let mut flora = Flora::new(budget_config());
         let site = plant_glowcap(&mut flora, &world, 1);
         log_with(&mut flora, site, 1.0, mineral);
@@ -1491,7 +1501,11 @@ fn a_glowcap_on_litter_alone_gains_tissue_and_the_pool_falls_by_what_it_took() {
 /// below both pools, so nothing but the split is being measured.
 #[test]
 fn the_draw_splits_pro_rata_between_the_two_pools_and_sums_to_the_rate_bound() {
-    let mut world = pillars(4, &[1], Material::Soil.field_capacity());
+    let mut world = pillars(
+        4,
+        &[1],
+        cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
+    );
     let mut flora = Flora::new(isolating());
     let site = plant_glowcap(&mut flora, &world, 1);
     let sc = flora.config().species(Species::Glowcap).clone();

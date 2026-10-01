@@ -655,7 +655,7 @@ impl VoxelPresenter {
     ) {
         let p = self.proj;
         let haze = self.haze_at(z as f32);
-        let wet = if m.pore_capacity() > 0.0 {
+        let wet = if view.config.materials.pore_capacity(m) > 0.0 {
             view.pore_at(x, y, z).clamp(0.0, 1.0) as f32
         } else {
             0.0

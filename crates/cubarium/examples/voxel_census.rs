@@ -283,7 +283,7 @@ fn main() {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
         introduce_into(&world, &flora, &mut fauna);
-        let mut senses = Senses::new();
+        let mut senses = Senses::with_cue(fauna.config().cue);
         senses.settle(&world.view(), &flora.view());
         if world.config().closed_water_budget && !world.outlet_open() {
             world.apply(WorldCommand::SetOutlet { open: true });
@@ -382,7 +382,7 @@ fn main() {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
         introduce_into(&world, &flora, &mut fauna);
-        let mut senses = Senses::new();
+        let mut senses = Senses::with_cue(fauna.config().cue);
         senses.settle(&world.view(), &flora.view());
         let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
         // The host opens a closed world's outlet after the layers are built and before
@@ -452,7 +452,7 @@ fn main() {
 
     // The live founders sense a settled litter field; the ambient run settles it the
     // same way before the first tick.
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
 
@@ -713,7 +713,7 @@ fn load_run(
     } else {
         install_founders_with(&mut fauna, policies).expect("the founder centres validate");
     }
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
     if world.config().closed_water_budget && !world.outlet_open() {
         world.apply(WorldCommand::SetOutlet { open: true });

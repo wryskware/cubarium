@@ -29,7 +29,9 @@ fn plain(width: u32) -> World {
     });
     for x in 0..width as i64 {
         for y in 1..=2 {
-            let want = 0.3 * Material::Soil.pore_capacity() * w.config().voxel_volume();
+            let want = 0.3
+                * w.config().materials.pore_capacity(Material::Soil)
+                * w.config().voxel_volume();
             w.apply(WorldCommand::AddWater {
                 x,
                 y,

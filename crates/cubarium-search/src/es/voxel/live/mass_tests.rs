@@ -219,8 +219,12 @@ fn act(c: &mut Box<dyn Controller>, o: &[f64]) -> Actions {
 fn the_parker_stands_on_food_and_walks_like_the_heuristic_off_it() {
     // The two grazing foragers; the lanternjaw's ambush does not eat on the move.
     for f in [Founder::Blind, Founder::Browser] {
-        let mut parker = brain_driver(f, "parker").expect("a parker").fresh();
-        let mut walker = brain_driver(f, "heuristic").expect("a walker").fresh();
+        let mut parker = brain_driver(f, "parker")
+            .expect("a parker")
+            .fresh(cubarium_voxel_fauna::TeacherConfig::default());
+        let mut walker = brain_driver(f, "heuristic")
+            .expect("a walker")
+            .fresh(cubarium_voxel_fauna::TeacherConfig::default());
         let on = tasting(f, 0.45);
         let (p, w) = (act(&mut parker, &on), act(&mut walker, &on));
         assert_eq!(p.feed, 1.0, "{f:?}: the parker feeds on food");
@@ -228,8 +232,12 @@ fn the_parker_stands_on_food_and_walks_like_the_heuristic_off_it() {
         assert!(w.forward > 0.5, "{f:?}: the walker eats on the move");
         assert_eq!((p.forward, p.turn), (0.0, 0.0), "{f:?}: the parker stands");
 
-        let mut parker = brain_driver(f, "parker").expect("a parker").fresh();
-        let mut walker = brain_driver(f, "heuristic").expect("a walker").fresh();
+        let mut parker = brain_driver(f, "parker")
+            .expect("a parker")
+            .fresh(cubarium_voxel_fauna::TeacherConfig::default());
+        let mut walker = brain_driver(f, "heuristic")
+            .expect("a walker")
+            .fresh(cubarium_voxel_fauna::TeacherConfig::default());
         let off = tasting(f, 0.0);
         for k in 0..20 {
             let (p, w) = (act(&mut parker, &off), act(&mut walker, &off));

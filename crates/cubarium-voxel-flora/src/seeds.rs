@@ -1093,7 +1093,8 @@ mod tests {
     /// One air voxel turned to soil holding `pore` of its capacity: water in first, then
     /// the conversion, so nothing is displaced.
     fn soil(w: &mut World, x: i64, y: u32, z: u32, pore: f64) {
-        let want = pore * Material::Soil.pore_capacity() * w.config().voxel_volume();
+        let want =
+            pore * w.config().materials.pore_capacity(Material::Soil) * w.config().voxel_volume();
         if want > 0.0 {
             w.apply(WorldCommand::AddWater {
                 x,
@@ -1114,7 +1115,7 @@ mod tests {
     /// turned to air (its pore water becomes free water in the cell), topped up, and
     /// turned back.
     fn wet(w: &mut World, x: i64, z: u32, pore: f64) {
-        let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+        let cap = w.config().materials.pore_capacity(Material::Soil) * w.config().voxel_volume();
         for y in 1..=2u32 {
             let add = (pore - w.view().pore_at(x, y, z)) * cap;
             assert!(add >= 0.0, "wet only raises the water");

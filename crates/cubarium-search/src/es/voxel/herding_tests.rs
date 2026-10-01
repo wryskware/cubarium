@@ -2,7 +2,7 @@
 //! heuristic browser plus cohesion toward the bodies its cone already sees, and a little
 //! separation. Observation-only, no sense or contract change.
 
-use cubarium_voxel_fauna::{BrowserForager, Controller, Founder, Response};
+use cubarium_voxel_fauna::{BrowserForager, Controller, Founder, Response, TeacherConfig};
 
 use super::controller::{EpisodeKind, HerdingBrowser, VoxelControl};
 use super::live::search::brain_driver;
@@ -50,13 +50,13 @@ fn turn(r: Response) -> (f64, f64) {
 /// is left, a negative turn; sector 2 right, positive).
 #[test]
 fn cohesion_turns_toward_a_body_seen_far_off() {
-    let mut h = HerdingBrowser::new();
+    let mut h = HerdingBrowser::new(TeacherConfig::default());
     let (f, t) = turn(h.drive(&with_body(open_ground(), 2, 0.2)));
     assert!(
         f > 0.9 && t > 0.5,
         "toward the right: forward {f}, turn {t}"
     );
-    let mut h = HerdingBrowser::new();
+    let mut h = HerdingBrowser::new(TeacherConfig::default());
     let (_, t) = turn(h.drive(&with_body(open_ground(), 0, 0.2)));
     assert!(t < -0.5, "toward the left: {t}");
 }
@@ -64,7 +64,7 @@ fn cohesion_turns_toward_a_body_seen_far_off() {
 /// A body very close turns the herder away: separation.
 #[test]
 fn separation_turns_away_from_a_body_too_close() {
-    let mut h = HerdingBrowser::new();
+    let mut h = HerdingBrowser::new(TeacherConfig::default());
     let (_, t) = turn(h.drive(&with_body(open_ground(), 2, 0.9)));
     assert!(t < -0.5, "away from the right: {t}");
 }
@@ -77,7 +77,10 @@ fn food_in_view_is_the_plain_foragers_answer() {
     let mut o = with_body(open_ground(), 2, 0.2);
     o[c + 2] = 0.5; // foliage in sector 0
     o[c + 3] = 0.5;
-    let (mut h, mut p) = (HerdingBrowser::new(), BrowserForager::new());
+    let (mut h, mut p) = (
+        HerdingBrowser::new(TeacherConfig::default()),
+        BrowserForager::new(),
+    );
     let (a, b) = (turn(h.drive(&o)), turn(p.drive(&o)));
     assert_eq!(a, b);
 }
@@ -85,7 +88,10 @@ fn food_in_view_is_the_plain_foragers_answer() {
 /// With nothing seen at all, the herder is the plain forager.
 #[test]
 fn nothing_seen_is_the_plain_foragers_answer() {
-    let (mut h, mut p) = (HerdingBrowser::new(), BrowserForager::new());
+    let (mut h, mut p) = (
+        HerdingBrowser::new(TeacherConfig::default()),
+        BrowserForager::new(),
+    );
     for _ in 0..6 {
         assert_eq!(turn(h.drive(&open_ground())), turn(p.drive(&open_ground())));
     }

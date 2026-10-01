@@ -61,7 +61,7 @@ fn main() {
         if founded.accepted { "accepted" } else { "NOT accepted" }
     );
     install_default_founders(&mut fauna).expect("the built-in centres validate");
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses));
     if sim.world().config().closed_water_budget && !sim.world().outlet_open() {

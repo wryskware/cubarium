@@ -124,7 +124,8 @@ fn plain(voxel_m: f64, width: u32, depth: u32) -> World {
 /// Turn one **air** voxel into soil holding exactly `pore` of its capacity
 /// (`tests/flora.rs`'s fixture).
 fn wet_soil(w: &mut World, x: i64, y: u32, z: u32, pore: f64) {
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     let got = w.apply(WorldCommand::AddWater {
         x,
         y,

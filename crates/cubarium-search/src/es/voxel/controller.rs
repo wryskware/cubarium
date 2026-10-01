@@ -36,7 +36,8 @@ use std::sync::{Arc, Mutex};
 use cubarium_core::neural::ShapePolicy;
 use cubarium_core::neural::gru::HIDDEN;
 use cubarium_voxel_fauna::{
-    Actions, BlindForager, BrowserForager, Controller, Founder, Response, resolve_actions,
+    Actions, BlindForager, BrowserForager, Controller, Founder, Response, TeacherConfig,
+    resolve_actions,
 };
 
 use super::super::tensor;
@@ -280,13 +281,17 @@ pub struct Parker {
 }
 
 impl Parker {
-    pub fn new(founder: Founder) -> Parker {
+    /// The parker for `founder`, its forager on `teachers` (the world's
+    /// [`cubarium_voxel_fauna::FaunaConfig::teachers`]).
+    pub fn new(founder: Founder, teachers: TeacherConfig) -> Parker {
         Parker {
             inner: match founder {
-                Founder::Blind => Box::new(BlindForager::new()),
-                Founder::Browser => Box::new(BrowserForager::new()),
+                Founder::Blind => Box::new(BlindForager::with_config(teachers)),
+                Founder::Browser => Box::new(BrowserForager::with_config(teachers)),
                 // The lanternjaw's own heuristic is its ambush, as in the Heuristic arm.
-                Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
+                Founder::Lanternjaw => Box::new(
+                    cubarium_voxel_fauna::LanternjawAmbush::with_config(teachers),
+                ),
             },
         }
     }
@@ -337,7 +342,9 @@ pub const HERD_SEEN: f64 = 0.02;
 pub const HERD_TURN: f64 = 0.8;
 
 impl HerdingBrowser {
-    pub fn new() -> HerdingBrowser {
+    /// The herder, its forager on `teachers` (the world's
+    /// [`cubarium_voxel_fauna::FaunaConfig::teachers`]).
+    pub fn new(teachers: TeacherConfig) -> HerdingBrowser {
         let cone = Founder::Browser
             .manifest()
             .modules
@@ -346,7 +353,7 @@ impl HerdingBrowser {
             .expect("the browser manifest has its cone")
             .offset;
         HerdingBrowser {
-            inner: BrowserForager::new(),
+            inner: BrowserForager::with_config(teachers),
             cone,
         }
     }
@@ -519,7 +526,11 @@ impl EpisodeDriver {
     /// A fresh controller for one episode: new memory by construction, then an explicit
     /// `reset()` — the fauna's fresh-episode contract names `Controller::reset`, and
     /// doing both is the point of the check.
-    pub fn fresh(&self) -> Box<dyn Controller> {
+    ///
+    /// `teachers` is the reflexes' numbers of the world the controller will drive in (its
+    /// [`cubarium_voxel_fauna::FaunaConfig::teachers`]); a GRU or a diagnostic control that
+    /// runs no reflex ignores it.
+    pub fn fresh(&self, teachers: TeacherConfig) -> Box<dyn Controller> {
         let mut controller: Box<dyn Controller> = match &self.kind {
             EpisodeKind::Gru(EpisodeGru::Blind(policy)) => Box::new(GruPolicy::<23> {
                 policy: (**policy).clone(),
@@ -537,16 +548,22 @@ impl EpisodeDriver {
             // The heuristic slot is the fauna's own observation-only heuristics: the
             // body the driver runs decides which one fits its founder.
             EpisodeKind::Control(VoxelControl::Heuristic) => match self.founder {
-                Founder::Blind => Box::new(BlindForager::new()),
-                Founder::Browser => Box::new(BrowserForager::new()),
-                Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
+                Founder::Blind => Box::new(BlindForager::with_config(teachers)),
+                Founder::Browser => Box::new(BrowserForager::with_config(teachers)),
+                Founder::Lanternjaw => Box::new(
+                    cubarium_voxel_fauna::LanternjawAmbush::with_config(teachers),
+                ),
             },
             EpisodeKind::Control(VoxelControl::Herding) => match self.founder {
-                Founder::Browser => Box::new(HerdingBrowser::new()),
-                Founder::Blind => Box::new(BlindForager::new()),
-                Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
+                Founder::Browser => Box::new(HerdingBrowser::new(teachers)),
+                Founder::Blind => Box::new(BlindForager::with_config(teachers)),
+                Founder::Lanternjaw => Box::new(
+                    cubarium_voxel_fauna::LanternjawAmbush::with_config(teachers),
+                ),
             },
-            EpisodeKind::Control(VoxelControl::Parker) => Box::new(Parker::new(self.founder)),
+            EpisodeKind::Control(VoxelControl::Parker) => {
+                Box::new(Parker::new(self.founder, teachers))
+            }
         };
         if let Some(sink) = &self.record {
             controller = Box::new(RecordingController::new(
@@ -752,8 +769,8 @@ mod tests {
 
         let mut obs = [0.2; 23];
         obs[SELF_CHANNELS..].fill(0.95);
-        let mut a = plain.fresh();
-        let mut b = ablated.fresh();
+        let mut a = plain.fresh(TeacherConfig::default());
+        let mut b = ablated.fresh(TeacherConfig::default());
         assert_ne!(a.drive(&obs), b.drive(&obs), "fresh() carries the ablation");
 
         let control =
@@ -771,14 +788,14 @@ mod tests {
     fn fresh_hands_out_fresh_memory_per_episode() {
         let driver = EpisodeDriver::gru(&tensor::initial_center_shape::<23, 3>(13), Founder::Blind)
             .expect("policy");
-        let mut a = driver.fresh();
-        let mut b = driver.fresh();
+        let mut a = driver.fresh(TeacherConfig::default());
+        let mut b = driver.fresh(TeacherConfig::default());
         let obs = [0.1; 23];
         // Evolve `a` far from fresh.
         for _ in 0..9 {
             let _ = a.drive(&obs);
         }
-        let mut a = driver.fresh();
+        let mut a = driver.fresh(TeacherConfig::default());
         assert_eq!(a.drive(&obs), b.drive(&obs), "fresh is fresh, twice");
     }
 

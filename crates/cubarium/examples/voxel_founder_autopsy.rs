@@ -359,7 +359,7 @@ fn main() {
         );
     }
 
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
     // `overlap=0`: the chained tick instead of the overlapped one, for a before/after.

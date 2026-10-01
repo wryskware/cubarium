@@ -1158,11 +1158,19 @@ impl SpeciesConfig {
         crate::step::ramp(available, self.wilt_water, self.full_water)
     }
 
-    /// `establish_water_min` as a pore fraction of `material`: `wp + a · (fc − wp)`. For a
-    /// caller that thinks in pore fractions — the host's water-cycle report bands soil
-    /// columns by it — and not for the gate itself, which reads available water.
-    pub fn establish_pore_min_on(&self, material: Material) -> f64 {
-        let (wp, fc) = (material.wilting_point(), material.field_capacity());
+    /// `establish_water_min` as a pore fraction of `material` under the world's
+    /// `materials`: `wp + a · (fc − wp)`. For a caller that thinks in pore fractions — the
+    /// host's water-cycle report bands soil columns by it — and not for the gate itself,
+    /// which reads available water.
+    pub fn establish_pore_min_on(
+        &self,
+        materials: &cubarium_voxel::Materials,
+        material: Material,
+    ) -> f64 {
+        let (wp, fc) = (
+            materials.wilting_point(material),
+            materials.field_capacity(material),
+        );
         wp + self.establish_water_min * (fc - wp)
     }
 }

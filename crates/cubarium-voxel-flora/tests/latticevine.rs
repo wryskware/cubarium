@@ -86,11 +86,12 @@ impl Plan {
             ..VoxelConfig::default()
         });
         let (wp, fc) = (
-            Material::Soil.wilting_point(),
-            Material::Soil.field_capacity(),
+            cubarium_voxel::Materials::DEFAULT.wilting_point(Material::Soil),
+            cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
         );
         let pore = wp + avail * (fc - wp);
-        let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+        let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+            * w.config().voxel_volume();
         for (&(x, y, z), &m) in &self.cells {
             if m == Material::Soil && pore > 0.0 {
                 let got = w.apply(WorldCommand::AddWater {

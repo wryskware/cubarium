@@ -4,7 +4,7 @@
 //! **validity** of every preset's own numbers.
 //!
 //! Conventions, the same ones `life_cycle.rs` uses so a fixture here reads the same way:
-//! `voxel_m` is 1 m, so a soil voxel holds `Material::Soil.pore_capacity()` = 0.35 m³ of
+//! `voxel_m` is 1 m, so a soil voxel holds `cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)` = 0.35 m³ of
 //! pore water and a metre of free water over a face is a metre deep. Soil is wetted by
 //! adding free water to an air cell and then turning the cell to soil. The world is never
 //! stepped in these fixtures: the only thing that moves water is the plant layer's own
@@ -35,7 +35,9 @@ use cubarium_voxel_flora::{
 /// Turn one air voxel into `material` holding exactly `pore` of that material's own pore
 /// capacity, by adding the water first and converting after. `life_cycle.rs`'s `fill`.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
-    let want = pore * material.pore_capacity() * w.config().voxel_volume();
+    let want = pore
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(material)
+        * w.config().voxel_volume();
     if want > 0.0 {
         let got = w.apply(WorldCommand::AddWater {
             x,
@@ -233,8 +235,8 @@ fn at(x: u32) -> Site {
 /// The soil pore fraction at which the available water (package F's scale: 0 at the
 /// wilting point, 1 at field capacity) is `a`, on whatever numbers the soil carries.
 fn soil_pore_at(a: f64) -> f64 {
-    let wp = Material::Soil.wilting_point();
-    wp + a * (Material::Soil.field_capacity() - wp)
+    let wp = cubarium_voxel::Materials::DEFAULT.wilting_point(Material::Soil);
+    wp + a * (cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil) - wp)
 }
 
 fn run(flora: &mut Flora, world: &mut World, ticks: u32) {

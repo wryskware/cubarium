@@ -91,7 +91,7 @@ fn main() {
     );
     let (world, flora, mut fauna) = (founded.world, founded.flora, founded.fauna);
     install_default_founders(&mut fauna).expect("the built-in centres validate");
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
     let threads = cubarium_voxel::default_threads();
     let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses));

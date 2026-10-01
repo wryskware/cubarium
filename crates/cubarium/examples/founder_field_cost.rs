@@ -59,7 +59,7 @@ fn habitat() -> (cubarium_voxel::World, Flora, Fauna) {
 fn arm(threads: usize, with_field: bool) -> (f64, String) {
     let (world, flora, fauna) = habitat();
     let senses = with_field.then(|| {
-        let mut s = Senses::new();
+        let mut s = Senses::with_cue(fauna.config().cue);
         s.settle(&world.view(), &flora.view());
         s
     });
@@ -93,7 +93,7 @@ fn arm(threads: usize, with_field: bool) -> (f64, String) {
 /// Microseconds of one field update, measured directly against a settled field.
 fn field_update_us(threads: usize) -> f64 {
     let (world, flora, fauna) = habitat();
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     let (updates, converged) = senses.settle(&world.view(), &flora.view());
     eprintln!("settle: {updates} updates, converged {converged}");
     // Run the habitat for a while so the field's sources are the live ones — litterfall

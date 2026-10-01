@@ -79,13 +79,14 @@ fn main() {
         .collect();
     {
         let fauna = sim.fauna_mut();
+        let teachers = fauna.config().teachers;
         for (founder, driver) in &drivers {
             let (driver, tally) = (driver.clone(), Arc::clone(&tally));
             fauna.set_founder_factory(
                 *founder,
                 Arc::new(move || -> Box<dyn Controller> {
                     Box::new(WetTap {
-                        inner: driver.fresh(),
+                        inner: driver.fresh(teachers),
                         tally: Arc::clone(&tally),
                     })
                 }),

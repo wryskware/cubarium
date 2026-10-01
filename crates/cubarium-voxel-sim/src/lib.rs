@@ -497,7 +497,7 @@ impl Sim {
         sim.mode = ScheduleMode::Static;
         // Settle against the layers as they stand, then hold the field as a resource.
         let (w, f) = (sim.world(), sim.flora());
-        let mut senses = Senses::new();
+        let mut senses = Senses::with_cue(sim.fauna().config().cue);
         senses.settle(&w.view(), &f.view());
         // Terrain, water and growth are frozen here: the cone occupancy is held across
         // controller stages and patched from bites and deaths (cone-speed item 4), and

@@ -111,7 +111,7 @@
 //!
 //! Every clamp is a `min` against the stock it reads, so nothing here can go negative.
 
-use cubarium_voxel::{Command as WorldCommand, DT, Material, VoxelView, World};
+use cubarium_voxel::{Command as WorldCommand, DT, Material, Materials, VoxelView, World};
 
 use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic};
 
@@ -1121,8 +1121,9 @@ fn read_root_box(
     // A root box holds soil cells only, so every cell's material constants are soil's:
     // the same numbers the per-cell reads took, looked up once.
     let m = Material::Soil;
-    let (wp, cap) = (m.wilting_point(), m.pore_capacity());
-    let w = (m.field_capacity() - wp).max(0.0) * cap;
+    let mats = &c.materials;
+    let (wp, cap) = (mats.wilting_point(m), mats.pore_capacity(m));
+    let w = (mats.field_capacity(m) - wp).max(0.0) * cap;
     let volume = c.voxel_volume();
     // [`root_box_dims_into`]'s walk, reading each soil cell as it is found: the same
     // cells in the same order, one pass instead of two.
@@ -1143,7 +1144,7 @@ fn read_root_box(
                 let i = row + x;
                 if view.material[i] == Material::Soil {
                     let pore = view.pore[i];
-                    water += available_water(m, pore) * w;
+                    water += available_water(mats, m, pore) * w;
                     band += w;
                     if pore >= sc.saturated_pore {
                         saturated += 1;
@@ -1594,9 +1595,12 @@ pub(crate) fn root_box_dims_into(
 ///
 /// `a` is 0 at the wilting point, 1 at field capacity — what drained ground holds — and
 /// `(1 − wp)/(fc − wp)` at saturation. A material with no band between the two (air,
-/// bedrock) offers nothing.
-pub fn available_water(material: Material, pore: f64) -> f64 {
-    let (wp, fc) = (material.wilting_point(), material.field_capacity());
+/// bedrock) offers nothing. `materials` is the world's own (`config.materials`).
+pub fn available_water(materials: &Materials, material: Material, pore: f64) -> f64 {
+    let (wp, fc) = (
+        materials.wilting_point(material),
+        materials.field_capacity(material),
+    );
     if fc <= wp {
         return 0.0;
     }
@@ -1605,8 +1609,10 @@ pub fn available_water(material: Material, pore: f64) -> f64 {
 
 /// Cubic metres of cell `i`'s pore water above its wilting point: what a root may drink.
 fn drinkable_m3(view: &VoxelView<'_>, i: usize) -> f64 {
-    let m = view.material[i];
-    (view.pore[i] - m.wilting_point()).max(0.0) * m.pore_capacity() * view.config.voxel_volume()
+    let (m, mats) = (view.material[i], &view.config.materials);
+    (view.pore[i] - mats.wilting_point(m)).max(0.0)
+        * mats.pore_capacity(m)
+        * view.config.voxel_volume()
 }
 
 /// The mean [`available_water`] of a root box, `None` for a box with no plant-available
@@ -1617,10 +1623,11 @@ fn drinkable_m3(view: &VoxelView<'_>, i: usize) -> f64 {
 fn mean_available(view: &VoxelView<'_>, box_: &[usize]) -> Option<f64> {
     let mut water = 0.0;
     let mut band = 0.0;
+    let mats = &view.config.materials;
     for &i in box_ {
         let m = view.material[i];
-        let w = (m.field_capacity() - m.wilting_point()).max(0.0) * m.pore_capacity();
-        water += available_water(m, view.pore[i]) * w;
+        let w = (mats.field_capacity(m) - mats.wilting_point(m)).max(0.0) * mats.pore_capacity(m);
+        water += available_water(mats, m, view.pore[i]) * w;
         band += w;
     }
     if band <= 0.0 {
@@ -3277,7 +3284,9 @@ mod tests {
         let mut w = World::empty(config);
         for x in 0..width as i64 {
             for y in 1..=2u32 {
-                let want = pore * Material::Soil.pore_capacity() * w.config().voxel_volume();
+                let want = pore
+                    * w.config().materials.pore_capacity(Material::Soil)
+                    * w.config().voxel_volume();
                 let got = w.apply(WorldCommand::AddWater {
                     x,
                     y,
@@ -3316,7 +3325,7 @@ mod tests {
         assert_eq!(g.saturated_fraction, 0.0);
         assert_eq!(g.water_depth_m, 0.0);
         assert_eq!(g.sky_visibility, 1.0, "open sky");
-        let a = available_water(Material::Soil, 0.6);
+        let a = available_water(&Materials::DEFAULT, Material::Soil, 0.6);
         assert!((g.mean_water.expect("soil") - a).abs() < 1e-12);
         drop(view);
 
@@ -3614,7 +3623,8 @@ mod tests {
                 let top = base + rng.below(4) as u32;
                 for y in 1..=top {
                     let pore = 0.05 + 0.9 * rng.unit();
-                    let cap = Material::Soil.pore_capacity() * world.config().voxel_volume();
+                    let cap = world.config().materials.pore_capacity(Material::Soil)
+                        * world.config().voxel_volume();
                     world.apply(WorldCommand::AddWater {
                         x,
                         y,

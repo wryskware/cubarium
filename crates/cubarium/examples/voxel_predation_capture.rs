@@ -57,7 +57,7 @@ fn found(preset: &str, seed: u64, introduce: usize) -> Result<Sim> {
         Ok(ids) => eprintln!("introduced {} adult lanternjaws", ids.len()),
         Err(why) => bail!("introduce refused: {why}"),
     }
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
     if sim.world().config().closed_water_budget && !sim.world().outlet_open() {

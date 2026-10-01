@@ -37,7 +37,8 @@ fn plain(width: u32, height: u32, pore: f64) -> World {
 
 /// Turn one air voxel into soil holding exactly `pore` of its capacity.
 fn wet_soil(w: &mut World, x: i64, y: u32, pore: f64) {
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     if pore > 0.0 {
         let got = w.apply(WorldCommand::AddWater {
             x,
@@ -434,8 +435,8 @@ fn shared_root_world(pore: f64) -> World {
 /// The soil pore fraction at which the available water (package F's scale: 0 at the
 /// wilting point, 1 at field capacity) is `a`, on whatever numbers the soil carries.
 fn soil_pore_at(a: f64) -> f64 {
-    let wp = Material::Soil.wilting_point();
-    wp + a * (Material::Soil.field_capacity() - wp)
+    let wp = cubarium_voxel::Materials::DEFAULT.wilting_point(Material::Soil);
+    wp + a * (cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil) - wp)
 }
 
 #[test]
@@ -512,7 +513,9 @@ fn two_stands_sharing_a_root_box_take_their_demand_and_the_core_books_the_sum() 
 #[test]
 fn a_starved_shared_root_box_is_emptied_once_and_split_by_demand() {
     let mut world = shared_root_world(soil_pore_at(0.8));
-    let floor = pore_stock(&shared_root_world(Material::Soil.wilting_point()));
+    let floor = pore_stock(&shared_root_world(
+        cubarium_voxel::Materials::DEFAULT.wilting_point(Material::Soil),
+    ));
     let mut config = FloraConfig::default();
     config.bloomcrown.transpiration_m3_per_s = 500.0;
     let mut flora = Flora::new(config);
@@ -1831,7 +1834,8 @@ fn the_three_residuals_stay_at_noise_over_two_hundred_ticks_with_rain() {
     for z in 0..config.depth {
         for x in 0..config.width as i64 {
             for y in 1..=2 {
-                let cap = Material::Soil.pore_capacity() * world.config().voxel_volume();
+                let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+                    * world.config().voxel_volume();
                 world.apply(WorldCommand::AddWater {
                     x,
                     y,

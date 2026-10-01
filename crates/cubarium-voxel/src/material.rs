@@ -18,7 +18,7 @@ pub enum Material {
 ///
 /// `permeability_per_s` is a fraction of a cell per second, so reading it as a
 /// physical speed only ever made sense at one cell size; this is that size, and it
-/// appears exactly once, in [`Material::conductivity_m_per_s`], as the factor that
+/// appears exactly once, in [`Materials::conductivity_m_per_s`], as the factor that
 /// turns the authored fraction into metres per second. It is **not** a tuning knob
 /// and not a world parameter: changing it would rescale every material's
 /// conductivity, which is what `permeability_per_s` is for.
@@ -173,35 +173,6 @@ impl Material {
     pub fn is_solid(self) -> bool {
         !matches!(self, Material::Air)
     }
-
-    // The four accessors below read the **default** [`Materials`]: for a caller that has
-    // no world's config (a test fixture, a presenter). Anything running a world reads
-    // `config.materials`, so a changed `[world.materials]` is honoured.
-
-    /// Fraction of the voxel's volume that can hold pore water, by default.
-    pub fn pore_capacity(self) -> f64 {
-        Materials::DEFAULT.pore_capacity(self)
-    }
-
-    /// [`MaterialProps::permeability_per_s`], by default.
-    pub fn permeability_per_s(self) -> f64 {
-        Materials::DEFAULT.permeability_per_s(self)
-    }
-
-    /// Hydraulic conductivity in metres per second, by default ([`Materials::conductivity_m_per_s`]).
-    pub fn conductivity_m_per_s(self) -> f64 {
-        Materials::DEFAULT.conductivity_m_per_s(self)
-    }
-
-    /// [`MaterialProps::field_capacity`], by default.
-    pub fn field_capacity(self) -> f64 {
-        Materials::DEFAULT.field_capacity(self)
-    }
-
-    /// [`MaterialProps::wilting_point`], by default.
-    pub fn wilting_point(self) -> f64 {
-        Materials::DEFAULT.wilting_point(self)
-    }
 }
 
 #[cfg(test)]
@@ -219,8 +190,14 @@ mod tests {
     /// draw some of what it holds: `0 < wilting_point < field_capacity < 1`.
     #[test]
     fn every_porous_material_orders_its_wilting_point_under_its_field_capacity() {
-        for m in ALL.into_iter().filter(|m| m.pore_capacity() > 0.0) {
-            let (wp, fc) = (m.wilting_point(), m.field_capacity());
+        for m in ALL
+            .into_iter()
+            .filter(|m| Materials::DEFAULT.pore_capacity(*m) > 0.0)
+        {
+            let (wp, fc) = (
+                Materials::DEFAULT.wilting_point(m),
+                Materials::DEFAULT.field_capacity(m),
+            );
             assert!(
                 0.0 < wp && wp < fc && fc < 1.0,
                 "{m:?}: wilting point {wp}, field capacity {fc}"
@@ -234,8 +211,8 @@ mod tests {
     #[test]
     fn drained_soil_holds_a_loam_share_of_its_volume() {
         let s = Material::Soil;
-        let retained = s.field_capacity() * s.pore_capacity();
-        let locked = s.wilting_point() * s.pore_capacity();
+        let retained = Materials::DEFAULT.field_capacity(s) * Materials::DEFAULT.pore_capacity(s);
+        let locked = Materials::DEFAULT.wilting_point(s) * Materials::DEFAULT.pore_capacity(s);
         assert!(
             (0.20..=0.25).contains(&retained),
             "drained soil holds {retained} of its volume"

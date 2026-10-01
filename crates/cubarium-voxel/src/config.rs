@@ -146,7 +146,7 @@ impl Default for Config {
             reentry_floor_head_m: 0.0,
             lake_drain_m2_per_s: 0.0,
             free_transfer_cap: 0.0,
-            standing_support_fill: crate::world::STANDING_SUPPORT_FILL,
+            standing_support_fill: 0.5,
             outlet_weir_per_tick: 0.05,
             ridge: crate::recipe::RidgeShape::default(),
             spring_offset_fraction: 0.125,

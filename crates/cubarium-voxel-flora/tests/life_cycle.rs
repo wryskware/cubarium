@@ -3,7 +3,7 @@
 //! bins and expiry, and how the aeration stress follows the root box's saturated fraction.
 //!
 //! Conventions, the same ones `flora.rs` uses so a fixture here reads the same way:
-//! `voxel_m` is 1 m, so a soil voxel holds `Material::Soil.pore_capacity()` = 0.35 m³ of
+//! `voxel_m` is 1 m, so a soil voxel holds `cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)` = 0.35 m³ of
 //! pore water and a metre of free water over a face is a metre deep. Soil is wetted by
 //! adding free water to an air cell and then turning the cell to soil, which converts the
 //! water to pore water and displaces nothing while it fits.
@@ -24,8 +24,8 @@ use cubarium_voxel_flora::{Command, Flora, FloraConfig, Ground, Site, Species, S
 /// moisture and can germinate, the upland bloomcrown is too, and no voxel reaches
 /// `saturated_pore` on any soil in the soil-retention window.
 fn wet() -> f64 {
-    let wp = Material::Soil.wilting_point();
-    wp + 1.5 * (Material::Soil.field_capacity() - wp)
+    let wp = cubarium_voxel::Materials::DEFAULT.wilting_point(Material::Soil);
+    wp + 1.5 * (cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil) - wp)
 }
 
 fn strip(width: u32, depth: u32, pore: f64) -> World {
@@ -88,7 +88,9 @@ fn strip_gap(pore: f64) -> World {
 /// Turn one air voxel into `material` holding exactly `pore` of that material's own pore
 /// capacity, by adding the water first and converting after.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
-    let want = pore * material.pore_capacity() * w.config().voxel_volume();
+    let want = pore
+        * cubarium_voxel::Materials::DEFAULT.pore_capacity(material)
+        * w.config().voxel_volume();
     if want > 0.0 {
         let got = w.apply(WorldCommand::AddWater {
             x,
@@ -114,7 +116,8 @@ fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
 /// Take pore water out of one voxel down to `target`, through the core's own bounded
 /// withdrawal — the only way to *dry* a voxel without rebuilding it.
 fn drain_to(w: &mut World, x: i64, y: u32, z: u32, target: f64) {
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     let want = (w.view().pore_at(x, y, z) - target) * cap;
     assert!(want > 0.0, "already at or below {target}");
     let took = -w.apply(WorldCommand::WithdrawPore {
@@ -2615,7 +2618,7 @@ fn the_saturation_ceiling_is_non_strict_and_umbrellafrond_s_is_inert() {
 #[test]
 fn the_root_box_sees_soil_only_so_saturated_rock_is_neither_wet_nor_waterlogged() {
     assert!(
-        Material::Rock.pore_capacity() > 0.0,
+        cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Rock) > 0.0,
         "the premise: rock does hold pore water"
     );
     let config = VoxelConfig {

@@ -1185,7 +1185,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             let animal_id = arena
                 .animal_id
                 .ok_or_else(|| anyhow::anyhow!("sensing arena did not place its founder"))?;
-            let controller = driver.fresh();
+            let controller = driver.fresh(arena.fauna.config().teachers);
             let controller: Box<dyn Controller> = if args.arena_diagnostics {
                 Box::new(DiagnosticController::new(founder, controller))
             } else {
@@ -1403,7 +1403,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             // this flora actually drops and has eaten, at the field's own cadence. An
             // `--empty` world has no litter, so the field is empty and its update is a
             // walk over nothing.
-            let mut senses = Senses::new();
+            let mut senses = Senses::with_cue(fauna.config().cue);
             senses.settle(&world.view(), &flora.view());
             Ok((
                 Sim::new(world, flora, fauna, sim_config, Some(senses)),
@@ -1992,12 +1992,14 @@ fn install_founder_controllers(
             );
         }
     }
+    // The reflexes a centre falls back on run on the layer's own numbers.
+    let teachers = fauna.config().teachers;
     for (founder, driver) in drivers {
         let digest = driver.digest();
         let driver = driver.clone();
         fauna.set_founder_factory(
             *founder,
-            std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh() }),
+            std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh(teachers) }),
         );
         fauna.set_policy_driven(*founder, true);
         fauna.set_policy_digest(*founder, digest);
@@ -2617,7 +2619,7 @@ fn report_water_cycle(world: &World, flora: &Flora, threads: usize) -> Option<Jo
             let floor = flora
                 .config()
                 .species(s)
-                .establish_pore_min_on(cubarium_voxel::Material::Soil);
+                .establish_pore_min_on(&world.config().materials, cubarium_voxel::Material::Soil);
             PoreBand::new(s.name(), floor, 1.0)
         })
         .collect();

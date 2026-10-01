@@ -33,7 +33,8 @@ fn column_world(height: u32, porosity: f64, head_m: f64) -> World {
 /// One voxel of soil holding exactly `pore` of its capacity, by the brief's trick: the
 /// water goes into the air cell first and the material change keeps it.
 fn wet_soil(w: &mut World, x: i64, y: u32, z: u32, pore: f64) {
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = cubarium_voxel::Materials::DEFAULT.pore_capacity(Material::Soil)
+        * w.config().voxel_volume();
     if pore > 0.0 {
         let got = w.apply(Command::AddWater {
             x,
@@ -100,7 +101,11 @@ fn table_column(pore1: f64, pore2: f64, head_m: f64) -> World {
 #[test]
 fn a_permeable_voxel_just_above_the_head_is_not_saturated() {
     // Head 1.9 m: `y = 1`'s centre (1.5) is under it, `y = 2`'s (2.5) is not.
-    let mut w = table_column(0.0, Material::Soil.field_capacity(), 1.9);
+    let mut w = table_column(
+        0.0,
+        cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
+        1.9,
+    );
     assert!(
         (w.aquifer_head_m() - 1.9).abs() < 1e-12,
         "head {}",
@@ -121,7 +126,7 @@ fn a_permeable_voxel_just_above_the_head_is_not_saturated() {
     );
     assert_eq!(
         v.pore_at(0, 2, 0),
-        Material::Soil.field_capacity(),
+        cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
         "the voxel above the head took water from the table"
     );
     // And the head is still where it was put, to a millimetre: the fixture's premise.
@@ -175,7 +180,9 @@ fn seepage_stops_exactly_at_the_head() {
 
     // One transfer of the seeping material, expressed as metres of head.
     let soil = Material::Soil;
-    let one_transfer_m = soil.conductivity_m_per_s() * w.config().cell_area() * cubarium_voxel::DT
+    let one_transfer_m = cubarium_voxel::Materials::DEFAULT.conductivity_m_per_s(soil)
+        * w.config().cell_area()
+        * cubarium_voxel::DT
         / (w.config().width as f64 * w.config().depth as f64 * w.config().cell_area() * 1000.0);
     let level = w.aquifer_head_m() - 2.0;
     let free = w.view().free_at(0, 2, 0);
@@ -263,7 +270,7 @@ fn drain_resumes_for_a_voxel_the_head_has_fallen_below() {
     );
     run(&mut w, 600);
 
-    let fc = Material::Soil.field_capacity();
+    let fc = cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil);
     for y in [1u32, 2] {
         let pore = w.view().pore_at(0, y, 0);
         assert!(

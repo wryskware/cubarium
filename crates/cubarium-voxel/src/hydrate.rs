@@ -786,7 +786,7 @@ fn fill_basins(world: &mut World, list: &[Basin], budget: f64) -> f64 {
 /// Wet the ground: every porous voxel to its material's **field capacity**, and every one
 /// under the water table to saturation. Returns the volume it took.
 ///
-/// The retention rule is the material's own ([`crate::Material::field_capacity`], the same
+/// The retention rule is the material's own ([`crate::Materials::field_capacity`], the same
 /// number the solver's drainage stops at), so this is the state a soil that has been
 /// rained on and has drained is already in — not a moisture model of this module's own
 /// invention. When the inventory cannot pay for all of it the whole field is scaled down

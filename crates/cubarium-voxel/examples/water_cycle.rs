@@ -180,7 +180,7 @@ fn row(world: &World) {
         if !m.is_solid() {
             free += v.free[i] * vol;
         }
-        pore += v.pore[i] * vol * m.pore_capacity();
+        pore += v.pore[i] * vol * v.config.materials.pore_capacity(*m);
     }
     println!(
         "{},{:.4},{:.4},{:.4},{:.4},{:.5},{:.3},{:?},{},{:.4},{:.4},{:.4},{:.3e}",

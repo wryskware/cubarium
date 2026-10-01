@@ -1851,7 +1851,7 @@ fn the_water_table_saturates_the_basin_and_leaves_the_ridge_to_drain() {
     for x in [0, 1, 6, 7] {
         let pore = v.pore_at(x, 6, 0);
         assert!(
-            pore <= Material::Soil.field_capacity() + 1e-9,
+            pore <= cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil) + 1e-9,
             "the ridge cap at x {x} held {pore}, above field capacity"
         );
     }
@@ -1886,7 +1886,10 @@ fn a_table_at_zero_changes_nothing() {
     let v = w.view();
     for x in 0..8i64 {
         let top = if x < 2 { 1 } else { x as u32 };
-        let (pore, fc) = (v.pore_at(x, top, 0), Material::Soil.field_capacity());
+        let (pore, fc) = (
+            v.pore_at(x, top, 0),
+            cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
+        );
         assert!(
             (pore - fc).abs() < 1e-12,
             "x {x} moved: {pore} against {fc}"
@@ -1904,7 +1907,10 @@ fn a_table_at_zero_changes_nothing() {
     // The aquifer took the rest, and its head stayed under the soil it would saturate.
     let soil = Material::Soil;
     let rained = w.config().rain_m_per_s * DT * f64::from(TICKS);
-    let rest = 8.0 * (rained - soil.field_capacity() * soil.pore_capacity());
+    let rest = 8.0
+        * (rained
+            - cubarium_voxel::Materials::DEFAULT.field_capacity(soil)
+                * cubarium_voxel::Materials::DEFAULT.pore_capacity(soil));
     assert!(
         (v.aquifer_m3 - rest).abs() < 1e-9,
         "{} against {rest}",

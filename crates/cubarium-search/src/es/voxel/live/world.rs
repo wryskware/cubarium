@@ -108,7 +108,7 @@ pub fn found_world(
         founder_counts,
         |s| s.acceptance.accepted,
     );
-    let mut senses = Senses::new();
+    let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(
         world,

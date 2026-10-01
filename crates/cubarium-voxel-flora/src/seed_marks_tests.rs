@@ -20,7 +20,7 @@ fn slab(pore: f64) -> World {
         seed: 11,
         ..VoxelConfig::default()
     });
-    let cap = Material::Soil.pore_capacity() * w.config().voxel_volume();
+    let cap = w.config().materials.pore_capacity(Material::Soil) * w.config().voxel_volume();
     for x in 0..3i64 {
         for y in 1..=2u32 {
             if pore > 0.0 {
@@ -132,7 +132,7 @@ fn a_landing_marks_its_site_for_two_minutes_and_then_the_waiting_bank_shows_noth
 /// will sprout — and the seed germinates at the **next** check, not the one that armed it.
 #[test]
 fn passing_gates_arm_the_site_at_one_check_and_it_sprouts_at_the_next() {
-    let mut world = slab(Material::Soil.field_capacity());
+    let mut world = slab(cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil));
     let mut flora = Flora::new(config());
     land(&mut flora);
     // An hour later the landing is long past recent: only the flag can mark it now.
@@ -170,7 +170,7 @@ fn passing_gates_arm_the_site_at_one_check_and_it_sprouts_at_the_next() {
 /// and mark go.
 #[test]
 fn an_armed_site_whose_gates_shut_before_the_next_check_does_not_sprout() {
-    let mut world = slab(Material::Soil.field_capacity());
+    let mut world = slab(cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil));
     let mut flora = Flora::new(config());
     land(&mut flora);
     flora.tick += 3600 * u64::from(TICK_HZ);
@@ -179,7 +179,8 @@ fn an_armed_site_whose_gates_shut_before_the_next_check_does_not_sprout() {
     assert_eq!(mark(&flora), Some(Species::Bloomcrown), "armed");
 
     // Dry the root box to the wilting point and below.
-    let cap = Material::Soil.pore_capacity() * world.config().voxel_volume();
+    let cap =
+        world.config().materials.pore_capacity(Material::Soil) * world.config().voxel_volume();
     for x in 0..3i64 {
         for y in 1..=2u32 {
             world.apply(WorldCommand::WithdrawPore {
