@@ -18,12 +18,12 @@
 //! Every [`UPDATE_TICKS`] ticks (0.5 s at 20 Hz), in this fixed order — the same order in
 //! settling and live updates:
 //!
-//! 1. **Emission**: each node whose site holds detritus gains `min(detritus / M_EMIT, 1) ·
+//! 1. **Emission**: each node whose site holds detritus gains `min(detritus / emit_reference, 1) ·
 //!    UPDATE_S` cue units.
-//! 2. **Decay**: every worked node decays with half-life [`HALF_LIFE_S`].
-//! 3. **Diffusion**: a convex nearest-neighbour mix of [`DIFFUSE_FRACTION`]; a missing or
+//! 2. **Decay**: every worked node decays with half-life [`CueConfig::half_life_s`].
+//! 3. **Diffusion**: a convex nearest-neighbour mix of [`CueConfig::diffuse_fraction`]; a missing or
 //!    blocked neighbour reflects the local value.
-//! 4. **Discard**: values below [`THRESHOLD`] are dropped.
+//! 4. **Discard**: values below [`CueConfig::threshold`] are dropped.
 //!
 //! Only the active set (nodes holding a value or a source) plus their immediate neighbours
 //! is processed — never a per-animal emitter scan. Terrain connectivity is cached and
@@ -45,7 +45,7 @@
 //! Terrain stops a ray. **Free water stops it only below its surface**: a cell holding
 //! fill `f` is water from its floor up to `f × cell height`, and air above that — no new
 //! constant. **A ground pool stops it only below its physical height**, `organic / (cell
-//! area × `[`POOL_BULK_DENSITY`]`)` over the face, which may be less than a cell or span
+//! area × `[`CueConfig::pool_bulk_density`]`)` over the face, which may be less than a cell or span
 //! several. **The strip's `z` edge is solid**: a ray leaving the `z` range is a hit, not
 //! a miss, because a body cannot go there. A ray leaving the top of the world is open sky.
 //! The same clauses are [`crate::manifest::OCCLUSION_RULE`], in the digest.
@@ -69,19 +69,13 @@ use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FloraView, Ground, Site, StandLayer};
 
 use crate::Pose;
-use crate::body::M_EMIT;
+use crate::CueConfig;
 use crate::manifest::Manifest;
 
 /// Field updates run every this many ticks (0.5 s at 20 Hz).
 pub const UPDATE_TICKS: u64 = 10;
 /// Seconds of emission and decay each update covers.
 pub const UPDATE_S: f64 = 0.5;
-/// Cue half-life, seconds.
-pub const HALF_LIFE_S: f64 = 2.0;
-/// Convex nearest-neighbour diffusion mix.
-pub const DIFFUSE_FRACTION: f64 = 0.4;
-/// Discard: values below this are dropped after an update.
-pub const THRESHOLD: f64 = 1e-5;
 /// Settling budget: at most this many field updates.
 pub const SETTLE_MAX_UPDATES: usize = 120;
 /// Settling convergence: stop when the max per-node change stays below this for
@@ -89,15 +83,8 @@ pub const SETTLE_MAX_UPDATES: usize = 120;
 const SETTLE_EPS: f64 = 1e-4;
 const SETTLE_STABLE: u32 = 8;
 
-/// The bulk density of a ground pool of litter, carrion and dead wood, in organic units
-/// per cubic metre (D3): a pool of organic `m` on a face of area `A` stands `m / (A ·
-/// density)` tall. **An authored placeholder** (`design/backlog.md` §1): at 80 a
-/// reference litter tile (`M_EMIT` = 0.05) is a centimetre deep on a 0.25 m face and four
-/// on a 0.125 m one, so a ground pool is a film to an eye, not a wall (decisions §6).
-pub const POOL_BULK_DENSITY: f64 = 80.0;
-
-fn decay_factor() -> f64 {
-    (-(std::f64::consts::LN_2 * UPDATE_S / HALF_LIFE_S)).exp()
+fn decay_factor(cue: &CueConfig) -> f64 {
+    (-(std::f64::consts::LN_2 * UPDATE_S / cue.half_life_s)).exp()
 }
 
 /// The support-layer adjacency graph for one terrain geometry.
@@ -255,7 +242,7 @@ impl Connectivity {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DetritusField {
     /// Cue units per node; zero where the node holds nothing (every held value is at
-    /// least [`THRESHOLD`]).
+    /// least [`CueConfig::threshold`]).
     value: Vec<f64>,
     /// The nodes holding a value.
     active: Vec<u32>,
@@ -267,6 +254,9 @@ pub(crate) struct DetritusField {
     prime: Vec<f64>,
     epoch: u32,
     work: Vec<u32>,
+    /// The field's own numbers ([`CueConfig`]): half-life, diffusion, discard threshold
+    /// and the emission reference.
+    cue: CueConfig,
 }
 
 /// The detritus stock at one support face — its litter plus its carrion — and
@@ -423,7 +413,7 @@ impl DetritusField {
             };
             let n = n as usize;
             // Ground is one entry per site, so a face is a source once.
-            self.emit[n] = (detritus_of(g) / M_EMIT).min(1.0) * UPDATE_S;
+            self.emit[n] = (detritus_of(g) / self.cue.emit_reference).min(1.0) * UPDATE_S;
             self.seen[n] = epoch;
             self.work.push(n as u32);
         }
@@ -450,7 +440,7 @@ impl DetritusField {
         }
 
         // Order 1+2: emission then decay.
-        let decay = decay_factor();
+        let decay = decay_factor(&self.cue);
         for &n in &self.work {
             let n = n as usize;
             self.prime[n] = (self.value[n] + self.emit[n]) * decay;
@@ -481,11 +471,11 @@ impl DetritusField {
                 total += nb_value;
             }
             let mean = total / 4.0;
-            let updated = (1.0 - DIFFUSE_FRACTION) * p + DIFFUSE_FRACTION * mean;
+            let updated = (1.0 - self.cue.diffuse_fraction) * p + self.cue.diffuse_fraction * mean;
             let old = self.value[n];
             max_change = max_change.max((updated - old).abs());
             // Order 4: discard below the threshold.
-            if updated >= THRESHOLD {
+            if updated >= self.cue.threshold {
                 self.value[n] = updated;
                 self.active.push(n as u32);
             } else {
@@ -520,6 +510,15 @@ impl Senses {
     /// An empty, unsettled senses handle.
     pub fn new() -> Senses {
         Senses::default()
+    }
+
+    /// An empty, unsettled senses handle whose field runs on `cue`'s numbers (a world
+    /// whose [`crate::FaunaConfig::cue`] is not the default builds its handle here).
+    pub fn with_cue(cue: CueConfig) -> Senses {
+        Senses {
+            field: DetritusField { cue, ..DetritusField::default() },
+            ..Senses::default()
+        }
     }
 
     /// Empty the per-body trend stores. They are **episode-private** state (a trend
@@ -906,10 +905,11 @@ impl ConeOccupancy {
         view: &VoxelView<'_>,
         ground: impl IntoIterator<Item = &'g Ground>,
         window: Option<&[bool]>,
+        density: f64,
     ) {
         let c = view.config;
         for g in ground {
-            let Some(top) = pool_top_m(g, c.voxel_m) else {
+            let Some(top) = pool_top_m(g, c.voxel_m, density) else {
                 continue;
             };
             if !column_seen(c, window, i64::from(g.site.x)) {
@@ -1024,10 +1024,10 @@ fn layer_class(layer: &StandLayer) -> Fine {
 }
 
 /// A ground entry's pool top in metres, or `None` when it holds no organic matter.
-fn pool_top_m(g: &Ground, voxel_m: f64) -> Option<f64> {
+fn pool_top_m(g: &Ground, voxel_m: f64, density: f64) -> Option<f64> {
     let organic = g.litter + g.carrion + g.dead_wood;
     (organic > 0.0).then(|| {
-        crate::surface_m(g.site.y, voxel_m) + organic / (voxel_m * voxel_m * POOL_BULK_DENSITY)
+        crate::surface_m(g.site.y, voxel_m) + organic / (voxel_m * voxel_m * density)
     })
 }
 
@@ -1151,7 +1151,7 @@ fn build_occupancy_as(
     let mut occ = ConeOccupancy::empty(view.config.cells());
     occ.lay_stands(view, fv, window, |_, _, _| {});
     if pools_occlude {
-        occ.lay_pools(view, fv.ground.iter(), window);
+        occ.lay_pools(view, fv.ground.iter(), window, fauna.config.cue.pool_bulk_density);
         occ.pools.sort_unstable_by_key(|&(cell, _)| cell);
     }
     occ.lay_bodies_as(view, fauna, window, volume);
@@ -1430,7 +1430,7 @@ impl HeldCone {
             }
             dirty.sort_unstable();
             dirty.dedup();
-            self.relay_pools(view, fv, &dirty);
+            self.relay_pools(view, fv, &dirty, fauna.config.cue.pool_bulk_density);
             self.ground = ground;
         }
         self.occ.clear_bodies();
@@ -1454,7 +1454,7 @@ impl HeldCone {
         occ.lay_stands(view, fv, None, |cell, si, li| {
             claims[cell] = claim_code(si, li);
         });
-        occ.lay_pools(view, fv.ground.iter(), None);
+        occ.lay_pools(view, fv.ground.iter(), None, fauna.config.cue.pool_bulk_density);
         occ.pools.sort_unstable_by_key(|&(cell, _)| cell);
         occ.lay_bodies(view, fauna, None);
         *self = HeldCone {
@@ -1474,7 +1474,13 @@ impl HeldCone {
     /// Clear and re-lay the pool cells of the `(x, z)` columns in `dirty` (sorted), from
     /// every ground entry in those columns in site order — only an entry in a column can
     /// reach a cell of it, so this is exactly what a fresh build lays there.
-    fn relay_pools(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>, dirty: &[(u32, u32)]) {
+    fn relay_pools(
+        &mut self,
+        view: &VoxelView<'_>,
+        fv: &FloraView<'_>,
+        dirty: &[(u32, u32)],
+        density: f64,
+    ) {
         if dirty.is_empty() {
             return;
         }
@@ -1494,7 +1500,7 @@ impl HeldCone {
                 .iter()
                 .take_while(|g| g.site.x == x)
                 .filter(|g| g.site.z == z);
-            self.occ.lay_pools(view, column, None);
+            self.occ.lay_pools(view, column, None, density);
         }
         self.occ.pools.sort_unstable_by_key(|&(cell, _)| cell);
     }

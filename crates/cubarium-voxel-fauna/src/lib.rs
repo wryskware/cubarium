@@ -25,6 +25,7 @@
 mod body;
 mod controller;
 mod encounter;
+mod knobs;
 mod manifest;
 mod pose;
 mod predation;
@@ -48,15 +49,12 @@ pub use body::{
     effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
-    Actions, BlindForager, BrowserForager, FEED_GATE, Controller, ControllerFactory, FounderControllers,
+    Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, LanternjawAmbush, Response, Scripted, resolve_actions,
 };
 pub use predation::{
-    BodyKind, Dormancy, FOOTFALL_RADIUS_M, FOOTFALL_TREMOR_MIN, HATCH_CHANCE_PER_DUSK,
-    HATCH_SUPPRESS_M, Hit, Rest, hatch_draw,
-    STILL_AFTER_S, STILL_SPEED_BL_PER_S, Strike, StrikePhase, TREMOR_RADIUS_M, apply_hit,
-    dodge_chance, dodges, egg_hatches, is_prey_of, kind_of, moved_recently, still_after_ticks,
-    tremor_of,
+    BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
+    egg_hatches, hatch_draw, is_prey_of, kind_of, moved_recently, tremor_of,
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use encounter::{
@@ -68,11 +66,12 @@ pub use encounter::{
 pub use manifest::{
     ACTION_DEADBAND, Action, BIRTH_READINESS_RULE, BROWSER_RAY_PITCH_OFFSETS_DEG,
     BROWSER_RAY_YAW_OFFSETS_DEG, BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES,
-    CRUISE_BODY_LENGTHS_PER_S, Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
+    Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
     Transfer, Tunings, gru32_parameter_count,
 };
+pub use knobs::{CueConfig, FoundingConfig, LifeConfig, PredationConfig, TeacherConfig};
 pub use pose::Pose;
-pub use senses::{POOL_BULK_DENSITY, Senses, UPDATE_TICKS};
+pub use senses::{Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
 
 /// The browser's three cone sectors as `(foliage_fraction, foliage_proximity)` pairs.
@@ -470,34 +469,27 @@ pub enum State {
 pub enum Activity {
     /// Awake whatever the hour.
     Always,
-    /// Awake by day: daylight above [`Activity::DAY_LINE`].
+    /// Awake by day: daylight above [`LifeConfig::day_line`].
     Diurnal,
-    /// Awake by night: daylight below [`Activity::DAY_LINE`].
+    /// Awake by night: daylight below [`LifeConfig::day_line`].
     Nocturnal,
     /// Awake in the twilight of either end of the day: daylight strictly inside
-    /// [`Activity::TWILIGHT`].
+    /// [`LifeConfig::twilight_lo`]..[`LifeConfig::twilight_hi`].
     Crepuscular,
 }
 
 impl Activity {
-    /// The daylight a diurnal animal wakes above and a nocturnal one sleeps above.
-    pub const DAY_LINE: f64 = 0.3;
-    /// The daylight band that counts as twilight, for a crepuscular animal.
-    pub const TWILIGHT: (f64, f64) = (0.05, 0.95);
-
-    /// Whether this rhythm is awake at `daylight` (0 night, 1 full day). With the clock
-    /// off (`clock_on` false) every rhythm is awake.
-    pub fn awake(self, clock_on: bool, daylight: f64) -> bool {
+    /// Whether this rhythm is awake at `daylight` (0 night, 1 full day), the day's lines
+    /// being `life`'s. With the clock off (`clock_on` false) every rhythm is awake.
+    pub fn awake(self, clock_on: bool, daylight: f64, life: &LifeConfig) -> bool {
         if !clock_on {
             return true;
         }
         match self {
             Activity::Always => true,
-            Activity::Diurnal => daylight > Activity::DAY_LINE,
-            Activity::Nocturnal => daylight < Activity::DAY_LINE,
-            Activity::Crepuscular => {
-                daylight > Activity::TWILIGHT.0 && daylight < Activity::TWILIGHT.1
-            }
+            Activity::Diurnal => daylight > life.day_line,
+            Activity::Nocturnal => daylight < life.day_line,
+            Activity::Crepuscular => daylight > life.twilight_lo && daylight < life.twilight_hi,
         }
     }
 }
@@ -605,8 +597,8 @@ pub struct Animal {
     pub mobility: Mobility,
     /// **The wound stock** in `[0, 1)` (`design/predation-and-flight-2026-09-28.md`
     /// §2.4): each hit adds to it, at 1 the body dies [`Departure::Killed`]. It slows the
-    /// body (speed cap × `1 − 0.5 · wound`) and heals at [`WOUND_HEAL_PER_S`], paying
-    /// [`HEAL_COST`] out of the reserve; a starving body does not heal.
+    /// body (speed cap × `1 − wound_slow · wound`) and heals at [`PredationConfig::wound_heal_per_s`], paying
+    /// [`PredationConfig::heal_cost`] out of the reserve; a starving body does not heal.
     pub wound: f64,
     /// A strike in progress: a carnivore only (§2.3).
     pub strike: Option<Strike>,
@@ -617,7 +609,7 @@ pub struct Animal {
     pub still_ticks: u64,
     /// Its ground speed on the last tick, metres a second: what tremor reads (§2.2).
     pub speed_m_s: f64,
-    /// Ticks it is kept awake after a hit woke it ([`ALERT_S`]).
+    /// Ticks it is kept awake after a hit woke it ([`PredationConfig::alert_s`]).
     pub alert_ticks: u32,
     /// **Riding a host** (parasite hatchlings,
     /// `design/handoffs/voxel-predation-parasite-2026-10-01.md`): `Some` while this
@@ -643,28 +635,6 @@ pub(crate) fn release(rider: &mut Animal, host: &Animal) {
     rider.founder_state.held = controller::Actions::REST;
     rider.founder_state.feedback = IntervalFeedback::default();
 }
-
-/// The rate a wound heals, wound units a second (§2.4: 0.5 per 30 min).
-pub const WOUND_HEAL_PER_S: f64 = 0.5 / 1800.0;
-
-/// **Organic matter a unit of wound costs to heal, per unit of body** (§2.4 names
-/// `heal_cost` and pins no value). 1.0: healing at the note's rate then burns
-/// `2.8e-4 × body` a second, about a quarter again a grazer's or a shredder's basal upkeep
-/// — a wound is dear but not ruinous — and an adult grazer's three-hit wound costs it a
-/// twentieth of its own body to mend.
-pub const HEAL_COST: f64 = 1.0;
-
-/// **What a dormant egg respires, per unit of its own organic matter per second** (§2.13:
-/// "a tiny upkeep"; no value pinned). 5e-6 /s: an e-fold of 55 h, a tenth of a resting
-/// lanternjaw's torpor rate per unit, so over its 12 h median viability an egg spends a
-/// fifth of itself; an egg that falls below its lineage's `body_min` can build no
-/// hatchling and dies to the litter.
-pub const EGG_UPKEEP_PER_S: f64 = 5.0e-6;
-
-/// How long a hit keeps its prey awake, seconds: long enough that a struck sleeper does
-/// not lie straight back down (the brief's "a hit wakes the prey"; the note pins no
-/// duration).
-pub const ALERT_S: f64 = 60.0;
 
 impl Animal {
     /// The feet's height over the standing surface of `site`, metres: zero on the ground,
@@ -780,7 +750,7 @@ pub struct Clutch {
     pub lineage: Founder,
     /// `Some` for a **dormant** egg (§2.13): a lanternjaw's clutch is laid or buried as
     /// one `Clutch` per egg, each with its own footfall threshold and viability; it
-    /// hatches by [`egg_hatches`], not by incubation, pays [`EGG_UPKEEP_PER_S`], and dies
+    /// hatches by [`egg_hatches`], not by incubation, pays [`PredationConfig::egg_upkeep_per_s`], and dies
     /// to the litter when its viability runs out.
     pub dormancy: Option<Dormancy>,
 }
@@ -848,6 +818,10 @@ pub struct Reproduction {
     /// unbroken hold.
     #[serde(default = "default_surplus_share")]
     pub surplus_share: f64,
+    /// An egg-layer that lays in litter (not [`Reproduction::dormant`]) needs the litter on
+    /// its face to exceed this, organic units: 0, "any litter at all".
+    #[serde(default)]
+    pub litter_min: f64,
 }
 
 fn default_surplus_share() -> f64 {
@@ -960,6 +934,7 @@ impl Reproduction {
         incubation_s: 0.0,
         dormant: false,
         surplus_share: SURPLUS_SHARE,
+        litter_min: 0.0,
     };
 
     /// The littershredder's egg placeholders.
@@ -989,6 +964,7 @@ impl Reproduction {
         incubation_s: 300.0,
         dormant: false,
         surplus_share: SURPLUS_SHARE,
+        litter_min: 0.0,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13): a clutch of 3 buried eggs laid
@@ -1009,6 +985,7 @@ impl Reproduction {
         incubation_s: 0.0,
         dormant: true,
         surplus_share: SURPLUS_SHARE,
+        litter_min: 0.0,
     };
 
     /// What one offspring package costs the parent's reserve: a gestation's `birth_cost`
@@ -1265,7 +1242,7 @@ pub struct FaunaConfig {
     /// species'; [`effective_config`] is the one lookup every rule uses.
     pub founders: [FounderPhysiology; Founder::COUNT],
     /// The chance a dormant egg past its footfall gate hatches at one dusk
-    /// ([`hatch_draw`]; default [`HATCH_CHANCE_PER_DUSK`], a third: the bank bet-hedges
+    /// ([`hatch_draw`]; default a third: the bank bet-hedges
     /// across nights).
     pub hatch_chance_per_dusk: f64,
     /// **Parasite hatchlings** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`):
@@ -1285,6 +1262,16 @@ pub struct FaunaConfig {
     /// A rider drops off when its body reaches this fraction of its lineage's adult
     /// `body_max`, dimensionless within `(0, 1]`. Default 0.24.
     pub parasite_detach_body_fraction: f64,
+    /// Predation, threat perception, wounds and the egg bank ([`PredationConfig`]).
+    pub predation: PredationConfig,
+    /// The day's lines, the lifespan draw, the gut and the wall climb ([`LifeConfig`]).
+    pub life: LifeConfig,
+    /// The detritus cue field and the references the senses read through ([`CueConfig`]).
+    pub cue: CueConfig,
+    /// The heuristic controllers' reflexes ([`TeacherConfig`]).
+    pub teachers: TeacherConfig,
+    /// How a fresh world is founded ([`FoundingConfig`]).
+    pub founding: FoundingConfig,
 }
 
 /// **The shipped org-unit mass scale** (Wrysk, 2026-09-29; audit
@@ -1306,12 +1293,17 @@ impl Default for FaunaConfig {
                 FounderPhysiology::frozen(Founder::Browser),
                 FounderPhysiology::frozen(Founder::Lanternjaw),
             ],
-            hatch_chance_per_dusk: HATCH_CHANCE_PER_DUSK,
+            hatch_chance_per_dusk: 1.0 / 3.0,
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
             parasite_max_per_host: 1,
             parasite_drain_of_host_basal: 0.05,
             parasite_detach_body_fraction: 0.24,
+            predation: PredationConfig::default(),
+            life: LifeConfig::default(),
+            cue: CueConfig::default(),
+            teachers: TeacherConfig::default(),
+            founding: FoundingConfig::default(),
         }
     }
 }
@@ -1347,6 +1339,20 @@ impl FaunaConfig {
     /// One founder's physiology, by lineage.
     pub fn founder(&self, founder: Founder) -> &FounderPhysiology {
         &self.founders[founder.index()]
+    }
+
+    /// **The manifest the live body runs**: the founder's fixed [`Manifest`] with the
+    /// motor numbers of its physiology in the config — cruise (`cruise_body_lengths_per_s`
+    /// × the adult length), the yaw cap, and the forward reference that follows cruise.
+    /// The sensor layout, references and tunings stay the contract's, so a default config
+    /// returns exactly [`Founder::manifest`] and a moved pace changes the digest.
+    pub fn manifest(&self, founder: Founder) -> Manifest {
+        let mut m = founder.manifest();
+        let p = self.founder(founder);
+        m.cruise_m_per_s = p.cruise_body_lengths_per_s * p.adult_length_m;
+        m.yaw_cap_rad_per_s = p.yaw_cap_rad_per_s;
+        m.forward_reference_m = m.cruise_m_per_s * m.controller_period_s;
+        m
     }
 
     /// Every number inside its row's range in the parameter registry ([`registry`]),
@@ -1440,13 +1446,20 @@ impl Departure {
 pub const LIFESPAN_MEDIAN_S: f64 = 4.0 * 3600.0;
 
 /// A body's lifespan in ticks, from its kind's median (seconds): **uniform on
-/// `[0.8, 1.2] × median`** for a newborn — bounded, so no body is immortal or dies in
-/// infancy, and ±20 % around the median as the brief asks. An **arriving** body (an
-/// introduced founder) has already lived part of its life: its remaining span is a
-/// uniform `[0.5, 1.0)` share of such a draw, so a founding cohort ages out over half a
+/// `[0.8, 1.2] × median`** for a newborn (`life.lifespan_draw_min` and `_span`) — bounded,
+/// so no body is immortal or dies in infancy, and ±20 % around the median as the brief
+/// asks. An **arriving** body (an introduced founder) has already lived part of its
+/// life: its remaining span is a uniform `[0.5, 1.0)` share (`life.arriving_share_min`)
+/// of such a draw, so a founding cohort ages out over half a
 /// lifespan rather than all at once. Deterministic in `(id, salt)`. Zero median: zero,
 /// no lifespan.
-pub fn draw_lifespan_ticks(median_s: f64, id: u64, salt: u64, arriving: bool) -> u64 {
+pub fn draw_lifespan_ticks(
+    life: &LifeConfig,
+    median_s: f64,
+    id: u64,
+    salt: u64,
+    arriving: bool,
+) -> u64 {
     if !(median_s.is_finite() && median_s > 0.0) {
         return 0;
     }
@@ -1457,9 +1470,9 @@ pub fn draw_lifespan_ticks(median_s: f64, id: u64, salt: u64, arriving: bool) ->
             ^ 0x11FE_5BA2_A6ED_0001;
         cubarium_voxel::unit_from_bits(cubarium_voxel::mix(z))
     };
-    let mut span = median_s * (0.8 + 0.4 * unit(1));
+    let mut span = median_s * (life.lifespan_draw_min + life.lifespan_draw_span * unit(1));
     if arriving {
-        span *= 0.5 + 0.5 * unit(2);
+        span *= life.arriving_share_min + (1.0 - life.arriving_share_min) * unit(2);
     }
     cubarium_voxel::ticks_at_least_one(span)
 }
@@ -1854,11 +1867,12 @@ impl<'a> FaunaView<'a> {
         self.clutches.iter().filter(move |c| c.site == site)
     }
 
-    /// **Tremor** at `observer` (§2.2): the sum over the other bodies within 1.5 m of
+    /// **Tremor** at `observer` (§2.2): the sum over the other bodies within the tremor radius of
     /// `mass × speed / distance²`, split into its left and right halves by the observer's
     /// heading — `[left, right]`. A still body makes none. Zero for an observer that is
     /// not alive.
     pub fn tremor(&self, view: &VoxelView<'_>, observer: u64) -> [f64; 2] {
+        let cfg = &self.config.predation;
         let Some(o) = self.animal(observer) else {
             return [0.0, 0.0];
         };
@@ -1872,10 +1886,10 @@ impl<'a> FaunaView<'a> {
             }
             let (dx, dz) = pose::wrapped_delta(o.pose.x, o.pose.z, a.pose.x, a.pose.z, ring);
             let d = (dx * dx + dz * dz).sqrt();
-            if d > TREMOR_RADIUS_M {
+            if d > cfg.tremor_radius_m {
                 continue;
             }
-            let t = tremor_of(a, d);
+            let t = tremor_of(a, d, cfg.tremor_near_m);
             let side = dx * rx + dz * rz;
             if side > 0.0 {
                 out[1] += t;
@@ -2040,7 +2054,7 @@ pub struct Fauna {
     /// the identity a loader compares against.
     policy_digest: [u64; Founder::COUNT],
     /// The world's `life_daylight` on the last tick stepped, so a tick can tell **dusk**
-    /// — daylight falling below [`Activity::DAY_LINE`] — for the egg bank's trigger
+    /// — daylight falling below [`LifeConfig::day_line`] — for the egg bank's trigger
     /// (§2.13). `None` before the first tick.
     last_daylight: Option<f64>,
 }
@@ -2342,7 +2356,7 @@ impl Fauna {
                 energy,
                 laid_tick: self.tick,
                 lineage,
-                dormancy: Some(Dormancy::draw(c.seed, serial, self.tick)),
+                dormancy: Some(Dormancy::draw(&self.config.predation, c.seed, serial, self.tick)),
             });
             self.ledger.eggs_buried += 1;
             self.ledger.introduced_organic_in += organic;
@@ -2404,6 +2418,7 @@ impl Fauna {
             // An introduced body arrives part way through a life, so a founding cohort
             // does not age out together.
             lifespan_ticks: draw_lifespan_ticks(
+                &self.config.life,
                 sc.lifespan_median_s,
                 self.ledger.births,
                 lifespan_salt(site, self.tick),
@@ -2416,7 +2431,7 @@ impl Fauna {
             strike: None,
             rest: None,
             // It arrives still: it has not moved.
-            still_ticks: still_after_ticks(),
+            still_ticks: self.config.predation.still_after_ticks(),
             speed_m_s: 0.0,
             alert_ticks: 0,
             attached: None,

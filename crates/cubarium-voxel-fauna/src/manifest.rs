@@ -57,10 +57,6 @@ pub const HIDDEN: usize = 32;
 /// meaning of an existing slot bumps this and invalidates old digests.
 pub const SCHEMA_VERSION: u32 = 2;
 
-/// Cruise speed in body lengths per second (D2, the standing rule "pace in body
-/// lengths"): the manifest's `cruise_m_per_s` is this times the adult length.
-pub const CRUISE_BODY_LENGTHS_PER_S: f64 = 1.0;
-
 /// The occlusion rule a cone ray and a contact probe are marched under, as the canonical
 /// text records it (D3, D4): terrain stops a ray; free water only below its surface
 /// (`fill × cell height`); a ground pool only below its physical height
@@ -253,7 +249,7 @@ pub struct Manifest {
     pub adult_energy_reference: f64,
     pub adult_reserve_reference: f64,
     pub structural_reference: f64,
-    /// Cruise speed in metres per second: [`CRUISE_BODY_LENGTHS_PER_S`] × the adult
+    /// Cruise speed in metres per second: [`cruise_body_lengths_per_s`] × the adult
     /// length (D2).
     pub cruise_m_per_s: f64,
     /// Yaw cap in radians per second.
@@ -542,6 +538,7 @@ struct Anchors {
     drown: f64,
     drown_after: f64,
     cruise: f64,
+    yaw: f64,
     mass: f64,
 }
 
@@ -561,19 +558,18 @@ fn anchors(founder: Founder) -> Anchors {
         wade: p.wade_height_fraction,
         drown: p.drown_height_fraction,
         drown_after: p.drown_after_s,
-        cruise: cruise_body_lengths_per_s(founder) * p.adult_length_m,
+        cruise: p.cruise_body_lengths_per_s * p.adult_length_m,
+        yaw: p.yaw_cap_rad_per_s,
         mass: p.mass_scale,
     }
 }
 
-/// A lineage's cruise in body lengths per second: [`CRUISE_BODY_LENGTHS_PER_S`] for the
+/// A lineage's cruise in body lengths per second, as the frozen physiology has it
+/// ([`FounderPhysiology::cruise_body_lengths_per_s`](crate::FounderPhysiology)): 1 for the
 /// two grazing lineages, 0.6 for the lanternjaw (§2.12), which wins by the lunge and not
 /// the chase — slower than a fleeing grazer.
 pub fn cruise_body_lengths_per_s(founder: Founder) -> f64 {
-    match founder {
-        Founder::Blind | Founder::Browser => CRUISE_BODY_LENGTHS_PER_S,
-        Founder::Lanternjaw => 0.6,
-    }
+    crate::FounderPhysiology::frozen(founder).cruise_body_lengths_per_s
 }
 
 impl Manifest {
@@ -609,7 +605,7 @@ impl Manifest {
             adult_reserve_reference: 0.00625,
             structural_reference: 0.0125,
             cruise_m_per_s: a.cruise,
-            yaw_cap_rad_per_s: 2.0,
+            yaw_cap_rad_per_s: a.yaw,
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             turn_reference_rad: 0.5,
             mouth_reach_body_lengths: a.reach,
@@ -622,7 +618,7 @@ impl Manifest {
             ray_yaw_offsets_deg: &[],
             ray_pitch_offsets_deg: &[],
             cone_range_m: 0.0,
-            pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
+            pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
             mass_scale: a.mass,
@@ -659,7 +655,7 @@ impl Manifest {
             adult_reserve_reference: 0.025,
             structural_reference: 0.05,
             cruise_m_per_s: a.cruise,
-            yaw_cap_rad_per_s: 2.0,
+            yaw_cap_rad_per_s: a.yaw,
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             turn_reference_rad: 0.5,
             mouth_reach_body_lengths: a.reach,
@@ -672,7 +668,7 @@ impl Manifest {
             ray_yaw_offsets_deg: &BROWSER_RAY_YAW_OFFSETS_DEG,
             ray_pitch_offsets_deg: &BROWSER_RAY_PITCH_OFFSETS_DEG,
             cone_range_m: 2.0,
-            pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
+            pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
             mass_scale: a.mass,
@@ -711,7 +707,7 @@ impl Manifest {
             adult_reserve_reference: 0.035,
             structural_reference: 0.035,
             cruise_m_per_s: a.cruise,
-            yaw_cap_rad_per_s: 2.0,
+            yaw_cap_rad_per_s: a.yaw,
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             turn_reference_rad: 0.5,
             mouth_reach_body_lengths: a.reach,
@@ -724,7 +720,7 @@ impl Manifest {
             ray_yaw_offsets_deg: &BROWSER_RAY_YAW_OFFSETS_DEG,
             ray_pitch_offsets_deg: &BROWSER_RAY_PITCH_OFFSETS_DEG,
             cone_range_m: 2.0,
-            pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
+            pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
             mass_scale: a.mass,

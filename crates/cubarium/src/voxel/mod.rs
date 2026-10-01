@@ -3006,7 +3006,7 @@ impl Control {
                         x,
                         z,
                         founder: Founder::Browser,
-                        stores: habitat::FOUNDER_ARRIVAL,
+                        stores: habitat::founder_arrival(&fauna.config().founding),
                         heading_rad: 0.0,
                     },
                 ) {

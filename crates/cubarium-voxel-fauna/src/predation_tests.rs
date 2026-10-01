@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 
 use super::predation_fixture::*;
 use crate::{
-    Activity, DT, Departure, Diet, Fauna, FaunaConfig, Founder, HEAL_COST, StartingStores,
+    Activity, DT, Departure, Diet, Fauna, FaunaConfig, Founder, StartingStores,
     State, StrikePhase, dodge_chance, dodges,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Trophic};
@@ -108,18 +108,18 @@ fn the_dodge_chance_is_the_tables_product() {
         (State::Climbing, 0.4),
         (State::Asleep, 0.0),
     ] {
-        assert_eq!(state.awareness(), awareness, "{state:?}");
+        assert_eq!(crate::PredationConfig::default().awareness(state), awareness, "{state:?}");
     }
     let eq = |a: f64, b: f64| (a - b).abs() < 1e-12;
-    assert!(eq(dodge_chance(0.5, State::Walking, false, 1.0), 0.5));
-    assert!(eq(dodge_chance(0.3, State::Walking, false, 1.0), 0.3));
-    assert!(eq(dodge_chance(0.5, State::Walking, true, 1.0), 0.25));
-    assert!(eq(dodge_chance(0.5, State::Cropping, true, 1.0), 0.1));
-    assert!(eq(dodge_chance(0.5, State::Resting, false, 0.8), 0.28));
+    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Walking, false, 1.0), 0.5));
+    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.3, State::Walking, false, 1.0), 0.3));
+    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Walking, true, 1.0), 0.25));
+    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Cropping, true, 1.0), 0.1));
+    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Resting, false, 0.8), 0.28));
     // Condition clamps: a starving animal is slow but never slower than half.
-    assert!(eq(dodge_chance(0.5, State::Walking, false, 0.1), 0.25));
-    assert!(eq(dodge_chance(0.5, State::Walking, false, 1.4), 0.5));
-    assert_eq!(dodge_chance(0.5, State::Asleep, false, 1.0), 0.0);
+    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Walking, false, 0.1), 0.25));
+    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Walking, false, 1.4), 0.5));
+    assert_eq!(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Asleep, false, 1.0), 0.0);
 }
 
 // ------------------------------------------------------------------ case 1
@@ -410,7 +410,7 @@ fn a_miss_pays_the_strike_cost_and_recovery_blocks_a_second_strike_for_3_s() {
 #[test]
 fn walking_prey_facing_the_striker_dodge_at_the_tables_rate() {
     for (agility, want) in [(0.5, 0.5), (0.3, 0.3)] {
-        let chance = dodge_chance(agility, State::Walking, false, 1.0);
+        let chance = dodge_chance(&crate::PredationConfig::default(), agility, State::Walking, false, 1.0);
         let n = 4000u64;
         let dodged = (0..n)
             .filter(|&k| dodges(chance, 1 + k % 50, 7, 11 + k / 50, 1000 + k))
@@ -420,7 +420,7 @@ fn walking_prey_facing_the_striker_dodge_at_the_tables_rate() {
             (rate - want).abs() < 0.03,
             "agility {agility}: dodged {rate} of {n} draws, the table says {want}"
         );
-        let asleep = dodge_chance(agility, State::Asleep, false, 1.0);
+        let asleep = dodge_chance(&crate::PredationConfig::default(), agility, State::Asleep, false, 1.0);
         assert!((0..n).all(|k| !dodges(asleep, 1 + k, 7, 11, 1000 + k)));
     }
 }
@@ -576,11 +576,11 @@ fn a_wound_heals_at_the_set_rate_paying_reserve_and_the_speed_cap_follows_it() {
         "healed {healed} in {TICKS} ticks, the rate gives {want}"
     );
     let paid = wounded.ledger.respired_out - whole.ledger.respired_out;
-    let cost = HEAL_COST * healed * a.body;
+    let cost = crate::PredationConfig::default().heal_cost * healed * a.body;
     assert!(paid > 0.0, "healing is paid");
     assert!(
         (paid - cost).abs() <= 1e-6 * cost,
-        "healing respired {paid}, HEAL_COST gives {cost}"
+        "healing respired {paid}, heal_cost gives {cost}"
     );
     assert_closes(&wounded, "healing");
 

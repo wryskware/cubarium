@@ -1,6 +1,6 @@
 //! Predation, the life half: the satiated rest, the buried egg bank and its hatching
 //! trigger, and the snapshot (`design/predation-and-flight-2026-09-28.md` §2.8, §2.12,
-//! §2.13). "Dusk" is the tick `life_daylight` first falls below `Activity::DAY_LINE`;
+//! §2.13). "Dusk" is the tick `life_daylight` first falls below `crate::LifeConfig::default().day_line`;
 //! footfall is distinct prey heard (the tremor rule) within 2 m over the last clock-day.
 
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use super::predation_fixture::*;
 use crate::controller::{Actions, Controller, Response};
 use crate::senses::{Fine, cone_occupancy, ray_first_hit};
 use crate::{
-    Activity, Command, DT, Fauna, apply_hit, FaunaConfig, Founder, EGG_UPKEEP_PER_S, Rest, SCHEMA,
+    Command, DT, Fauna, apply_hit, FaunaConfig, Founder, Rest, SCHEMA,
     StartingStores, State, StrikePhase, egg_hatches,
 };
 use cubarium_voxel::weather::DayClock;
@@ -86,7 +86,7 @@ fn a_full_lanternjaw_rests_at_the_torpor_factor_and_wakes_at_half_its_cap() {
     let a = animal(&fauna, lj);
     assert_eq!(a.state, State::Asleep);
     assert_eq!(a.rest, Some(Rest::Satiated));
-    assert_eq!(a.state.awareness(), 0.0, "a resting animal is prey too");
+    assert_eq!(crate::PredationConfig::default().awareness(a.state), 0.0, "a resting animal is prey too");
 
     let before = fauna.ledger.respired_out;
     fauna.step_with(&world, &mut flora, 1);
@@ -266,7 +266,7 @@ fn a_buried_egg_pays_its_upkeep_and_is_invisible_and_inedible() {
     let respired = fauna.ledger.respired_out;
     fauna.step_with(&world, &mut flora, 1);
     let after: f64 = eggs(&fauna).iter().map(|c| c.organic).sum();
-    let want = EGG_UPKEEP_PER_S * before * DT;
+    let want = crate::PredationConfig::default().egg_upkeep_per_s * before * DT;
     assert!(want > 0.0);
     assert!(
         ((before - after) - want).abs() <= 1e-9 * want,
@@ -388,12 +388,12 @@ fn eggs_draw_a_12_h_median_viability_and_thresholds_around_6() {
 /// The hatching trigger itself: footfall at its threshold, at dusk, no adult within 4 m.
 #[test]
 fn the_hatching_trigger_needs_footfall_dusk_and_no_adult_within_4_m() {
-    assert!(egg_hatches(3, 3, true, None));
-    assert!(egg_hatches(3, 5, true, None));
-    assert!(!egg_hatches(3, 2, true, None), "not before its threshold");
-    assert!(!egg_hatches(3, 3, false, None), "not by day");
-    assert!(!egg_hatches(3, 3, true, Some(3.9)), "an adult within 4 m suppresses");
-    assert!(egg_hatches(3, 3, true, Some(4.1)));
+    assert!(egg_hatches(&crate::PredationConfig::default(), 3, 3, true, None));
+    assert!(egg_hatches(&crate::PredationConfig::default(), 3, 5, true, None));
+    assert!(!egg_hatches(&crate::PredationConfig::default(), 3, 2, true, None), "not before its threshold");
+    assert!(!egg_hatches(&crate::PredationConfig::default(), 3, 3, false, None), "not by day");
+    assert!(!egg_hatches(&crate::PredationConfig::default(), 3, 3, true, Some(3.9)), "an adult within 4 m suppresses");
+    assert!(egg_hatches(&crate::PredationConfig::default(), 3, 3, true, Some(4.1)));
 }
 
 /// A fast day (6 s, 120 ticks) from 16:00, and the step at which its daylight first
@@ -409,11 +409,11 @@ fn fast_afternoon() -> (World, u64) {
     );
     let mut probe = world.clone();
     let mut last = probe.life_daylight();
-    assert!(last >= Activity::DAY_LINE, "16:00 is day");
+    assert!(last >= crate::LifeConfig::default().day_line, "16:00 is day");
     for t in 1..=120u64 {
         probe.step();
         let now = probe.life_daylight();
-        if now < Activity::DAY_LINE && last >= Activity::DAY_LINE {
+        if now < crate::LifeConfig::default().day_line && last >= crate::LifeConfig::default().day_line {
             assert!(t >= 8, "dusk after only {t} ticks");
             return (world, t);
         }

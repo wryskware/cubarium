@@ -25,8 +25,7 @@ use cubarium_voxel_flora::{
 };
 
 use crate::Pose;
-use crate::body::M_EMIT;
-use crate::senses::{DIFFUSE_FRACTION, DetritusField, HALF_LIFE_S, Senses, THRESHOLD, UPDATE_S};
+use crate::senses::{DetritusField, Senses, UPDATE_S};
 
 const V: f64 = 0.25;
 const W: u32 = 32;
@@ -817,7 +816,7 @@ fn detritus_at(fv: &FloraView<'_>, site: Site) -> f64 {
 }
 
 fn decay_factor() -> f64 {
-    (-(std::f64::consts::LN_2 * UPDATE_S / HALF_LIFE_S)).exp()
+    (-(std::f64::consts::LN_2 * UPDATE_S / crate::CueConfig::default().half_life_s)).exp()
 }
 
 impl MapDetritus {
@@ -906,7 +905,7 @@ impl MapDetritus {
             let emit = if sources.binary_search(&cell).is_ok() {
                 let (x, y, z) = c.coords(cell);
                 let stock = detritus_at(fv, Site { x: x as u32, y, z });
-                (stock / M_EMIT).min(1.0) * UPDATE_S
+                (stock / crate::CueConfig::default().emit_reference).min(1.0) * UPDATE_S
             } else {
                 0.0
             };
@@ -938,10 +937,11 @@ impl MapDetritus {
                 total += nb_value;
             }
             let mean = total / 4.0;
-            let updated = (1.0 - DIFFUSE_FRACTION) * p + DIFFUSE_FRACTION * mean;
+            let cue = crate::CueConfig::default();
+            let updated = (1.0 - cue.diffuse_fraction) * p + cue.diffuse_fraction * mean;
             let old = self.value.get(&cell).copied().unwrap_or(0.0);
             max_change = max_change.max((updated - old).abs());
-            if updated >= THRESHOLD {
+            if updated >= cue.threshold {
                 next.insert(cell, updated);
             }
         }

@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::Founder;
-use crate::{Animal, DT, FaunaConfig, State};
+use crate::{Animal, FaunaConfig, PredationConfig, State};
 
 /// A strike's phase (§2.3), each a visible pose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,33 +73,6 @@ pub struct Hit {
     pub by: Founder,
 }
 
-/// §2.2: a body is still once it has not moved faster than [`STILL_SPEED_BL_PER_S`] for
-/// this long.
-pub const STILL_AFTER_S: f64 = 2.0;
-/// §2.2: the speed, in its own body lengths per second, that counts as moving.
-pub const STILL_SPEED_BL_PER_S: f64 = 0.1;
-/// §2.2: a still threat reads as a threat inside this distance.
-pub const STILL_THREAT_NEAR_M: f64 = 0.5;
-/// §2.2: tremor is summed over bodies within this radius.
-pub const TREMOR_RADIUS_M: f64 = 1.5;
-/// §2.13: an egg hears prey that pass within this radius.
-pub const FOOTFALL_RADIUS_M: f64 = 2.0;
-/// §2.13: an adult of the egg's lineage within this distance suppresses its hatching.
-pub const HATCH_SUPPRESS_M: f64 = 4.0;
-/// **The tremor a footstep must make at an egg to be heard** (§2.13 pins the rule, not
-/// the number), in the tremor's own units `organic × m/s / m²`. 5e-4 is a walking
-/// littershredder — the lightest prey, 0.019 organic — at a quarter of its cruise, 2 m
-/// off: every walking prey inside the footfall radius is heard, a still one never.
-pub const FOOTFALL_TREMOR_MIN: f64 = 5.0e-4;
-/// The distances below this are read as this in the tremor's `1 / d²`, so two bodies in
-/// one place do not make an infinite tremor.
-pub const TREMOR_NEAR_M: f64 = 0.1;
-
-/// Ticks of stillness after which a body is still: 40 at 20 Hz.
-pub fn still_after_ticks() -> u64 {
-    (STILL_AFTER_S / DT).round() as u64
-}
-
 /// Whether `hunter` would take `prey` (§2.1): its lineage is on the hunter's list and its
 /// structure is inside the hunter's size window, which follows the hunter's own body.
 pub fn is_prey_of(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool {
@@ -116,9 +89,10 @@ pub fn is_prey_of(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool 
     h.hunts(pf) && prey.body <= h.prey_max_ratio * hunter.body
 }
 
-/// Whether a body has moved faster than 0.1 BL/s within the last 2 s.
-pub fn moved_recently(a: &Animal) -> bool {
-    a.still_ticks < still_after_ticks()
+/// Whether a body has moved faster than `still_speed_bl_per_s` within the last
+/// `still_after_s` ([`PredationConfig`]).
+pub fn moved_recently(cfg: &PredationConfig, a: &Animal) -> bool {
+    a.still_ticks < cfg.still_after_ticks()
 }
 
 /// **What `other` is to `observer`** (§2.2), `distance_m` apart: prey (in the observer's
@@ -134,7 +108,8 @@ pub fn kind_of(
         return BodyKind::Prey;
     }
     if is_prey_of(config, other, observer) {
-        return if moved_recently(other) || distance_m <= STILL_THREAT_NEAR_M {
+        let cfg = &config.predation;
+        return if moved_recently(cfg, other) || distance_m <= cfg.still_threat_near_m {
             BodyKind::Threat
         } else {
             BodyKind::Other
@@ -143,34 +118,24 @@ pub fn kind_of(
     BodyKind::Other
 }
 
-impl State {
-    /// The dodge table's awareness column (§2.3): walking 1.0, awake resting 0.7,
-    /// cropping and climbing 0.4, asleep 0.
-    pub fn awareness(self) -> f64 {
-        match self {
-            State::Walking => 1.0,
-            State::Resting => 0.7,
-            State::Cropping | State::Climbing => 0.4,
-            State::Asleep => 0.0,
-        }
-    }
-}
-
-/// **The dodge chance** (§2.3): `agility × awareness × aspect × condition`, aspect 0.5
-/// when struck from the rear half, condition the reserve fraction clamped to `[0.5, 1]`.
+/// **The dodge chance** (§2.3): `agility × awareness × aspect × condition`, aspect
+/// `dodge_rear_aspect` (0.5) when struck from the rear half, condition the reserve
+/// fraction clamped to `[dodge_condition_floor, 1]`, awareness the table's
+/// ([`PredationConfig::awareness`]).
 pub fn dodge_chance(
+    cfg: &PredationConfig,
     agility: f64,
     state: State,
     struck_from_rear: bool,
     reserve_fraction: f64,
 ) -> f64 {
-    let aspect = if struck_from_rear { 0.5 } else { 1.0 };
+    let aspect = if struck_from_rear { cfg.dodge_rear_aspect } else { 1.0 };
     let condition = if reserve_fraction.is_finite() {
-        reserve_fraction.clamp(0.5, 1.0)
+        reserve_fraction.clamp(cfg.dodge_condition_floor, 1.0)
     } else {
-        0.5
+        cfg.dodge_condition_floor
     };
-    (agility * state.awareness() * aspect * condition).clamp(0.0, 1.0)
+    (agility * cfg.awareness(state) * aspect * condition).clamp(0.0, 1.0)
 }
 
 /// Stream key for the dodge draw, apart from the step's own.
@@ -188,20 +153,16 @@ pub fn dodges(chance: f64, seed: u64, striker: u64, prey: u64, tick: u64) -> boo
 
 /// **The hatching trigger** (§2.13, Wrysk's choice, behind one function): the egg's
 /// footfall over the last clock-day has reached its threshold, it is dusk, and no adult of
-/// its lineage is within 4 m.
+/// its lineage is within `hatch_suppress_m` ([`PredationConfig`]).
 pub fn egg_hatches(
+    cfg: &PredationConfig,
     threshold: u32,
     footfall: u32,
     dusk: bool,
     nearest_adult_m: Option<f64>,
 ) -> bool {
-    footfall >= threshold && dusk && nearest_adult_m.is_none_or(|d| d > HATCH_SUPPRESS_M)
+    footfall >= threshold && dusk && nearest_adult_m.is_none_or(|d| d > cfg.hatch_suppress_m)
 }
-
-/// **Bet-hedging across dusks**: the chance an egg past its footfall threshold, with no
-/// adult near, hatches at a given dusk. A third, so a bank spreads over several nights,
-/// the way annual-killifish eggs do, instead of all hatching at the first dusk.
-pub const HATCH_CHANCE_PER_DUSK: f64 = 1.0 / 3.0;
 
 /// Stream key for the per-dusk hatch draw.
 const DOMAIN_HATCH: u64 = 0x4A7C4;
@@ -231,8 +192,9 @@ pub fn apply_hit(
 }
 
 /// The tremor one body makes at a point `d` metres away: `mass × speed / d²`, its mass
-/// its organic matter (§2.2).
-pub fn tremor_of(a: &Animal, d: f64) -> f64 {
+/// its organic matter (§2.2); `d` is read as at least `near_m`
+/// ([`PredationConfig::tremor_near_m`]).
+pub fn tremor_of(a: &Animal, d: f64, near_m: f64) -> f64 {
     let speed = if a.speed_m_s.is_finite() {
         a.speed_m_s
     } else {
@@ -241,7 +203,7 @@ pub fn tremor_of(a: &Animal, d: f64) -> f64 {
     if !(speed > 0.0) {
         return 0.0;
     }
-    let d = d.max(TREMOR_NEAR_M);
+    let d = d.max(near_m);
     a.organic() * speed / (d * d)
 }
 
@@ -253,10 +215,11 @@ pub const FOOTFALL_SLOTS: usize = 12;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Dormancy {
     /// Distinct prey heard over the last clock-day it needs before it hatches at dusk:
-    /// drawn per egg, uniform on 2..=10 (mean 6, spread wide).
+    /// drawn per egg, uniform on `egg_footfall_min..=egg_footfall_max` (2..=10: mean 6,
+    /// spread wide).
     pub threshold: u32,
     /// The tick its viability runs out and it dies to the litter of its face: drawn per
-    /// egg, log-uniform over 6–24 h (median 12 h).
+    /// egg, log-uniform over 6–24 h (`egg_viability_median_s` 12 h, `egg_viability_spread` 2).
     pub viable_until_tick: u64,
     /// `(prey id + 1, tick last heard)`, `0` an empty slot. The oldest is forgotten when
     /// it is full.
@@ -269,12 +232,14 @@ pub struct Dormancy {
 impl Dormancy {
     /// A dormant egg drawn from a keyed stream: `seed` the world's, `serial` a counter no
     /// other egg shares.
-    pub fn draw(seed: u64, serial: u64, tick: u64) -> Dormancy {
+    pub fn draw(cfg: &PredationConfig, seed: u64, serial: u64, tick: u64) -> Dormancy {
         let mut rng = crate::step::Rng::keyed(0xE66, seed, serial, tick);
-        let threshold = 2 + (rng.next_u64() % 9) as u32;
-        // Log-uniform over [6, 24] h: 12 h × 2^u, u uniform on [-1, 1].
+        let range = u64::from(cfg.egg_footfall_max - cfg.egg_footfall_min) + 1;
+        let threshold = cfg.egg_footfall_min + (rng.next_u64() % range) as u32;
+        // Log-uniform over [median / spread, median × spread]: median × spread^u, u
+        // uniform on [-1, 1] (6–24 h at the defaults).
         let u = 2.0 * rng.unit() - 1.0;
-        let span_s = 12.0 * 3600.0 * 2f64.powf(u);
+        let span_s = cfg.egg_viability_median_s * cfg.egg_viability_spread.powf(u);
         let ticks = cubarium_voxel::ticks_at_least_one(span_s);
         Dormancy {
             threshold,
@@ -321,20 +286,22 @@ mod hatch_tests {
     #[test]
     fn a_third_of_a_bank_past_its_threshold_hatches_at_one_dusk() {
         let (mut hatched, mut drawn) = (0u32, 0u32);
+        let cfg = PredationConfig::default();
+        let chance = crate::FaunaConfig::default().hatch_chance_per_dusk;
         for seed in 1..=40u64 {
             let dusk_tick = 1_000 + 97 * seed;
             for serial in 0..300u64 {
-                assert!(egg_hatches(4, 6, true, None));
+                assert!(egg_hatches(&cfg, 4, 6, true, None));
                 drawn += 1;
-                if hatch_draw(HATCH_CHANCE_PER_DUSK, seed, serial, dusk_tick) {
+                if hatch_draw(chance, seed, serial, dusk_tick) {
                     hatched += 1;
                 }
-                assert!(!egg_hatches(4, 3, true, None), "below its threshold, never");
+                assert!(!egg_hatches(&cfg, 4, 3, true, None), "below its threshold, never");
             }
         }
         let share = f64::from(hatched) / f64::from(drawn);
         assert!(
-            (share - HATCH_CHANCE_PER_DUSK).abs() <= 0.06,
+            (share - chance).abs() <= 0.06,
             "{share} of the bank hatched at one dusk"
         );
     }

@@ -72,6 +72,8 @@ fn species_rows() -> Vec<Row> {
             .evolve().grade("D").prov("derived"),
         r("reproduction.egg_organic", "org-units per egg", nonneg, "one egg; at least the lineage's body_min")
             .evolve().grade("D"),
+        r("reproduction.litter_min", "organic units", nonneg, "litter an egg-layer's face must hold (more than this) for it to lay")
+            .search(0.0, 0.2),
         r("reproduction.incubation_s", "s", nonneg, "a clutch incubates this long").search(60.0, 6000.0).log().grade("B"),
     ]
 }
@@ -87,6 +89,12 @@ fn founder_rows() -> Vec<Row> {
             .search(0.1, 1.0).grade("B").prov("measured"),
         r("step_down_m", "m", nonneg, "deepest drop stepped").evolve().grade("C").prov("measured"),
         r("wall_climb_cost_factor", "x walking cost", nonneg, "motor cost of a second on a wall").prov("derived"),
+        r("climb_speed_fraction", "x cruise", Range::positive(), "pace of a wall climb, a fraction of the cruise")
+            .search(0.1, 1.0).grade("B").prov("decision"),
+        r("cruise_body_lengths_per_s", "body lengths/s", Range::positive(), "full-forward pace (cruise = this x adult length)")
+            .search(0.3, 3.0).digest().grade("A").prov("decision"),
+        r("yaw_cap_rad_per_s", "rad/s", Range::positive(), "the turn rate of full turn effort")
+            .search(1.0, 10.0).digest().grade("B"),
         r("wade_height_fraction", "x current height", nonneg, "deepest water walked into").search(0.0, 1.0).grade("B"),
         r("drown_height_fraction", "x current height", nonneg, "water deeper than this is over it").grade("A").prov("decision"),
         r("drown_after_s", "s", nonneg, "continuous time under water before it drowns")
@@ -115,6 +123,7 @@ fn founder_rows() -> Vec<Row> {
         r("hunter.prey_max_ratio", "x own body", nonneg, "the size window: prey at most this x its own").optional(),
         r("hunter.strike_reach_length_fraction", "x body length", nonneg, "the strike capsule's reach").optional(),
         r("hunter.jaw_band_height_fraction", "x body height", nonneg, "the jaw band's top").optional(),
+        r("hunter.jaw_forward_length_fraction", "x body length", nonneg, "the jaw's point ahead of the body's centre").search(0.2, 0.8).optional(),
         r("hunter.windup_s", "s", nonneg, "the crouch").optional(),
         r("hunter.lunge_s", "s", nonneg, "the lunge").optional(),
         r("hunter.recovery_s", "s", nonneg, "the recovery, at half speed and unable to strike").optional(),
@@ -137,6 +146,7 @@ fn rows() -> Vec<Row> {
         rows.extend(species_rows().into_iter().map(|row| row.under(&format!("{at}.core"))));
         rows.extend(founder_rows().into_iter().map(|row| row.under(&at)));
     }
+    rows.extend(knob_rows());
     rows.extend([
         r("fauna.hatch_chance_per_dusk", "probability per dusk", Range::fraction(), "a dormant egg past its footfall gate hatches at one dusk"),
         r("fauna.parasite_attach_radius_m", "m", Range::nonneg(), "host search radius from a hatching egg").search(0.25, 2.0).grade("N"),
@@ -150,12 +160,170 @@ fn rows() -> Vec<Row> {
     rows
 }
 
+/// The rows of [`crate::FaunaConfig`]'s grouped knobs (`predation`, `life`, `cue`,
+/// `teachers`, `founding`; package R2-fauna): units and meanings from the field docs,
+/// ranges the smallest that keep the rule defined, search intervals plausible bounds
+/// around today's value (`placeholder` unless the design note pins the number).
+fn knob_rows() -> Vec<Row> {
+    let nonneg = Range::nonneg();
+    let pos = Range::positive();
+    let fraction = Range::fraction();
+    let mut rows = Vec::new();
+
+    // `fauna.predation.*`: predation-and-flight §2.
+    let p = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.predation.{path}"), unit, range, what)
+    };
+    rows.extend([
+        p("still_after_s", "s", nonneg, "a body is still once it has not moved this long").search(0.5, 10.0).prov("decision"),
+        p("still_speed_bl_per_s", "body lengths/s", nonneg, "ground speed that counts as moving").search(0.02, 0.5).prov("decision"),
+        p("still_threat_near_m", "m", nonneg, "a still threat reads as a threat inside this distance").search(0.1, 2.0).prov("decision"),
+        p("tremor_radius_m", "m", nonneg, "tremor is summed over bodies within this radius").search(0.5, 4.0).prov("decision"),
+        p("footfall_radius_m", "m", nonneg, "an egg hears prey that pass within this radius").search(0.5, 5.0).prov("decision"),
+        p("hatch_suppress_m", "m", nonneg, "an adult of the egg's lineage this near suppresses its hatching").search(1.0, 10.0).prov("decision"),
+        p("footfall_tremor_min", "organic x m/s / m^2", nonneg, "the tremor a footstep must make at an egg to be heard")
+            .search(1e-5, 1e-2).log(),
+        p("tremor_near_m", "m", pos, "distances below this are read as this in the tremor's 1/d^2"),
+        p("awareness_walking", "fraction", fraction, "dodge table awareness, walking").prov("decision"),
+        p("awareness_resting", "fraction", fraction, "dodge table awareness, awake resting").prov("decision"),
+        p("awareness_cropping", "fraction", fraction, "dodge table awareness, cropping and climbing").prov("decision"),
+        p("awareness_asleep", "fraction", fraction, "dodge table awareness, asleep").prov("decision"),
+        p("dodge_rear_aspect", "fraction", fraction, "dodge aspect factor when struck from the rear half").search(0.1, 1.0).prov("decision"),
+        p("dodge_condition_floor", "fraction", fraction, "the dodge's condition factor is the reserve fraction clamped to [this, 1]").search(0.1, 1.0).prov("decision"),
+        p("egg_footfall_min", "distinct prey", nonneg, "lowest footfall threshold a dormant egg draws").search(1.0, 6.0),
+        p("egg_footfall_max", "distinct prey", nonneg, "highest footfall threshold a dormant egg draws").search(4.0, 20.0),
+        p("egg_viability_median_s", "s", pos, "median viability of a dormant egg").search(3600.0, 172800.0).log(),
+        p("egg_viability_spread", "factor", Range::at_least(1.0), "the viability draw's multiplicative spread each way").search(1.0, 4.0),
+        p("wound_heal_per_s", "wound/s", nonneg, "the rate a wound heals (0.5 per half hour)").search(1e-5, 1e-2).log().prov("decision"),
+        p("heal_cost", "organic per wound per body", nonneg, "organic matter a unit of wound costs to heal, per unit of body").search(0.0, 5.0),
+        p("egg_upkeep_per_s", "per s", nonneg, "what a dormant egg respires per unit of its own organic matter").search(1e-7, 1e-4).log(),
+        p("alert_s", "s", nonneg, "how long a hit keeps its prey awake").search(0.0, 600.0),
+        p("wound_slow", "per wound", fraction, "speed is multiplied by 1 - this x wound").search(0.0, 1.0).prov("decision"),
+        p("recovery_speed", "x speed", fraction, "a strike's recovery is walked at this fraction of the speed").search(0.1, 1.0).prov("decision"),
+        p("flee_sight_m", "m", nonneg, "how far a sighted prey heuristic looks for a threat").search(1.0, 8.0).prov("decision"),
+        p("flee_tremor", "tremor units", nonneg, "the tremor a blind prey heuristic flees").search(1e-3, 0.1).log(),
+    ]);
+
+    // `fauna.life.*`.
+    let l = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.life.{path}"), unit, range, what)
+    };
+    rows.extend([
+        l("day_line", "daylight 0..1", fraction, "daylight a diurnal body wakes above and a nocturnal one sleeps above")
+            .search(0.05, 0.6).grade("C"),
+        l("twilight_lo", "daylight 0..1", fraction, "lower edge of the twilight band (crepuscular rhythm, unused today)").grade("N"),
+        l("twilight_hi", "daylight 0..1", fraction, "upper edge of the twilight band (crepuscular rhythm, unused today)").grade("N"),
+        l("gut_void_s", "s", pos, "how often an animal voids its gut onto its own face")
+            .search(5.0, 600.0).log().grade("C"),
+        l("lifespan_draw_min", "x median", pos, "lowest multiple of the median a lifespan draw takes").search(0.5, 1.0).grade("C"),
+        l("lifespan_draw_span", "x median", nonneg, "width of the lifespan draw, in medians").search(0.0, 1.0).grade("C"),
+        l("arriving_share_min", "fraction", fraction, "an arriving body keeps a uniform [this, 1) share of a draw").grade("N"),
+    ]);
+
+    // `fauna.cue.*`.
+    let c = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.cue.{path}"), unit, range, what)
+    };
+    rows.extend([
+        c("emit_reference", "organic units", pos, "detritus stock at which a source emits at full strength; the taste reference").grade("C"),
+        c("half_life_s", "s", pos, "cue half-life").search(0.5, 60.0).log().grade("C"),
+        c("diffuse_fraction", "fraction per update", fraction, "convex nearest-neighbour diffusion mix").search(0.05, 0.9).grade("C"),
+        c("threshold", "cue units", nonneg, "cue values below this are dropped after an update").grade("N"),
+        c("pool_bulk_density", "organic units/m^3", pos, "bulk density a ground pool's physical height is computed with")
+            .digest().grade("D"),
+    ]);
+
+    // `fauna.teachers.*`: the heuristic controllers' reflexes.
+    let t = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.teachers.{path}"), unit, range, what)
+    };
+    let count = Range::nonneg();
+    let at_least_1 = Range::at_least(1.0);
+    rows.extend([
+        t("motor_refused", "fraction", fraction, "Self.motor_delivery below this is a refused motor").search(0.1, 0.9),
+        t("escape_samples", "samples", count, "controller samples an escape lasts").search(1.0, 12.0),
+        t("escape_creep", "effort", fraction, "forward effort while turning away").search(0.0, 1.0),
+        t("flat_clear", "fraction of rays", fraction, "share of a sector's rays clear on flat open ground").grade("N"),
+        t("half_ray", "fraction of rays", fraction, "half a ray's share of a sector").grade("N"),
+        t("drop_proximity", "1 - d/range", fraction, "floor rows reading this far on average are an edge").search(0.3, 0.8),
+        t("wander_hold_min", "samples", count, "lowest hold of a wander's heading").search(2.0, 16.0),
+        t("wander_hold_max", "samples", count, "highest hold of a wander's heading").search(8.0, 48.0),
+        t("wander_turn_samples_min", "samples", at_least_1, "lowest length of a wander turn").search(1.0, 4.0),
+        t("wander_turn_samples_max", "samples", at_least_1, "highest length of a wander turn").search(2.0, 8.0),
+        t("wander_turn", "effort", fraction, "turn effort while a wander turn runs").search(0.2, 1.0),
+        t("feed_gate", "taste cue", nonneg, "the heuristics feed when the taste cue is above this").search(0.005, 0.5).log(),
+        t("blocked_forward", "effort", fraction, "forward effort when the front contact is blocked").search(0.0, 0.5),
+        t("chem_response_gate", "chem response", nonneg, "the blind heuristic follows a chem signal at least this strong").search(0.005, 0.2).log(),
+        t("chem_trend_gate", "chem trend", nonneg, "a chem trend beyond this either way is rising or falling").search(0.01, 0.3).log(),
+        t("blind_turn", "effort", fraction, "turn effort of the blind heuristic's wall and falling-signal turns").search(0.2, 1.0),
+        t("browser_sector_gate", "fraction of rays", fraction, "a cone sector sees foliage above this fraction of its rays").search(0.005, 0.2).log(),
+        t("browser_gaze_turn", "effort", fraction, "turn effort of the browser's gaze at the richest sector").search(0.2, 1.0),
+        t("browser_wander_turn", "effort", fraction, "turn effort of the browser's no-signal wander").search(0.2, 1.0),
+        t("browser_wander_flip", "samples", count, "samples the browser's wander holds a side before flipping").search(1.0, 12.0),
+        t("strike_proximity", "1 - d/range", fraction, "a body this close is inside the strike capsule").search(0.2, 0.8),
+        t("stalk", "effort", fraction, "the ambush's forward effort while stalking a body").search(0.0, 0.3),
+        t("near_crown", "1 - d/range", fraction, "a crown this near ahead is a waiting spot").search(0.3, 0.9),
+        t("wait_samples", "samples", count, "samples the ambush waits at an empty spot before leaving").search(40.0, 960.0).log(),
+        t("leave_samples", "samples", count, "samples the ambush walks off after a fruitless wait").search(4.0, 80.0),
+        t("ambush_face_turn", "effort", fraction, "the ambush's turn toward a body it sees off-centre").search(0.1, 1.0),
+        t("ambush_leave_turn", "effort", fraction, "the ambush's turn while leaving a spot").search(0.0, 1.0),
+        t("ambush_gaze_turn", "effort", fraction, "the ambush's turn toward foliage while seeking a crown").search(0.2, 1.0),
+        t("ambush_wander_turn", "effort", fraction, "the ambush's no-signal wander turn").search(0.1, 1.0),
+        t("ambush_wander_flip", "samples", count, "samples the ambush's wander holds a side before flipping").search(2.0, 24.0),
+    ]);
+
+    // `fauna.founding.*`: the seeder's founders.
+    let f = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.founding.{path}"), unit, range, what)
+    };
+    rows.extend([
+        f("arrival_body", "fraction of adult body", fraction, "a seeded founder arrives at this fraction of its adult body").search(0.3, 1.0).prov("decision"),
+        f("arrival_reserve", "fraction of reserve cap", fraction, "a seeded founder arrives with this fraction of its reserve cap").search(0.0, 1.0).prov("decision"),
+        f("starter_litter_organic", "organic units", nonneg, "leaf litter laid under each seeded littershredder").search(0.05, 1.0),
+        f("starter_litter_mineral_fraction", "fraction of organic", fraction, "mineral share of the starter litter").search(0.005, 0.1),
+        f("starter_litter_energy_density", "energy per organic unit", nonneg, "retained energy density of the starter litter").search(0.5, 4.0),
+        f("accept_founder_hours", "founder-hours", nonneg, "founder-hours of adult upkeep a component's stock must cover per founder").search(0.1, 6.0),
+    ]);
+    rows
+}
+
 /// The cross-field rules no single row can state: the body thresholds in an order that
 /// builds a living animal, and an egg-layer's clutch that can build a hatchling.
 pub(crate) fn cross_rules(c: &FaunaConfig) -> Result<(), String> {
     species_rules("fauna.frondgrazer", &c.frondgrazer)?;
     for f in Founder::ALL {
         species_rules(&format!("fauna.founders.{}.core", f.name()), &c.founder(f).core)?;
+    }
+    knob_rules(c)
+}
+
+/// The grouped knobs' ordered pairs: a draw's low end at most its high end, a band's
+/// lower edge below its upper.
+fn knob_rules(c: &FaunaConfig) -> Result<(), String> {
+    let (p, l, t) = (&c.predation, &c.life, &c.teachers);
+    if p.egg_footfall_min > p.egg_footfall_max {
+        return Err(format!(
+            "fauna.predation.egg_footfall_min {} is above egg_footfall_max {}",
+            p.egg_footfall_min, p.egg_footfall_max
+        ));
+    }
+    if l.twilight_lo > l.twilight_hi {
+        return Err(format!(
+            "fauna.life.twilight_lo {} is above twilight_hi {}",
+            l.twilight_lo, l.twilight_hi
+        ));
+    }
+    if t.wander_hold_min > t.wander_hold_max {
+        return Err(format!(
+            "fauna.teachers.wander_hold_min {} is above wander_hold_max {}",
+            t.wander_hold_min, t.wander_hold_max
+        ));
+    }
+    if t.wander_turn_samples_min > t.wander_turn_samples_max {
+        return Err(format!(
+            "fauna.teachers.wander_turn_samples_min {} is above wander_turn_samples_max {}",
+            t.wander_turn_samples_min, t.wander_turn_samples_max
+        ));
     }
     Ok(())
 }

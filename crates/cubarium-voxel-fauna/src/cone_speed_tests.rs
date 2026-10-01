@@ -26,12 +26,17 @@ use cubarium_voxel_flora::{
 };
 
 use crate::senses::{
-    self, CellOccupancy, Dda, Fine, HeldCone, POOL_BULK_DENSITY, build_occupancy,
+    self, CellOccupancy, Dda, Fine, HeldCone, build_occupancy,
     ray_first_hit_cell_in,
 };
 use crate::{Command, Fauna, FaunaConfig, Founder, StartingStores};
 
 const V: f64 = 0.25;
+
+/// The shipped bulk density of a ground pool ([`crate::CueConfig::pool_bulk_density`]).
+fn pool_density() -> f64 {
+    crate::CueConfig::default().pool_bulk_density
+}
 
 // ------------------------------------------------------------------ the reference map
 
@@ -109,7 +114,7 @@ impl MapOccupancy {
                     continue;
                 }
                 let floor = crate::surface_m(g.site.y, v);
-                let top = floor + organic / (v * v * POOL_BULK_DENSITY);
+                let top = floor + organic / (v * v * pool_density());
                 let mut y = g.site.y + 1;
                 while y < c.height && f64::from(y) * v < top {
                     let cell = c.index(i64::from(g.site.x), y, g.site.z);
@@ -287,7 +292,7 @@ fn landscape(seed: u64) -> (World, Flora, Fauna) {
             y: top[(z * W + x) as usize],
             z,
         };
-        let cell_organic = V * V * V * POOL_BULK_DENSITY;
+        let cell_organic = V * V * V * pool_density();
         let organic = [0.1, 0.5, 1.0, 2.7][i % 4] * cell_organic;
         let kind = if i % 3 == 0 {
             DepositKind::Carrion
@@ -673,7 +678,7 @@ fn water_and_a_pool_are_entered_at_the_plane_of_their_surface() {
         }
     }
     let mut flora = Flora::new(FloraConfig::default());
-    let organic = V * V * V * POOL_BULK_DENSITY / 3.0;
+    let organic = V * V * V * pool_density() / 3.0;
     assert!(flora.deposit(
         Site { x: 10, y: 3, z: 10 },
         Deposit {

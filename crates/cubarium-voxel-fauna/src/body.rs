@@ -73,12 +73,6 @@ use crate::controller::Actions;
 use crate::manifest::{Founder, Manifest};
 use crate::{Animal, Fauna, Reproduction, SpeciesConfig};
 
-/// The cue-unit reference the plan fixes for the litter cue (`M_emit`, "Initial cue
-/// field settings"): the field emits `min(litter / M_EMIT, 1)` cue units per second. The
-/// contact Taste response uses the same material reference while reading actual stock;
-/// the remote Chem channel reads the independently diffused concentration.
-pub(crate) const M_EMIT: f64 = 0.05;
-
 /// Below this much requested equivalent displacement an interval counts as "none
 /// requested" for the motor-delivery channel, which then reads 1 by contract.
 const NONE_REQUESTED: f64 = 1e-12;
@@ -207,6 +201,14 @@ pub struct FounderPhysiology {
     /// turning while stopped pays. The frozen default sets full cruise at the same rate
     /// as basal upkeep.
     pub motor_respiration_per_s: f64,
+    /// The lineage's **cruise**, in body lengths per second (decisions: pace is calibrated
+    /// in body lengths, 1 BL/s; the lanternjaw's 0.6 wins by the lunge and not the
+    /// chase, slower than a fleeing grazer). The motion rule's full forward is this ×
+    /// the adult length ([`FaunaConfig::manifest`](crate::FaunaConfig::manifest)); the
+    /// manifest's digest carries the frozen table's value.
+    pub cruise_body_lengths_per_s: f64,
+    /// The yaw cap, radians per second: full turn effort turns this fast.
+    pub yaw_cap_rad_per_s: f64,
     /// The lineage's **step up and step down in metres**: how far up, and how far down, a
     /// body may put its feet in one sub-step, and therefore what counts as a ledge rather
     /// than a wall or a cliff (`design/handoffs/voxel-founder-step-2026-09-22.md`). The
@@ -239,6 +241,10 @@ pub struct FounderPhysiology {
     /// walking at a small arthropod's cost of transport (≈ 20–28 J/kg/m) — so about as
     /// much again. The browser never climbs a wall and never pays it.
     pub wall_climb_cost_factor: f64,
+    /// The pace of a wall climb, **× the cruise** (half walking pace, a decision of package
+    /// mobility): climbing a riser or a drop of `rise_m` takes `rise_m / (fraction ×
+    /// cruise)`. The shredder climbs; the browser never does and never reads it.
+    pub climb_speed_fraction: f64,
     /// The deepest standing water the body walks into, **× its current height**: browser
     /// 0.5 (0.19 m for the adult), shredder 0.25 (≈ 3 cm), the brief's numbers. A juvenile
     /// is shorter, so it wades shallower water.
@@ -338,6 +344,8 @@ pub struct Hunter {
     pub strike_reach_length_fraction: f64,
     /// The jaw band `[0, jaw_band_height_fraction × height]` over its standing surface.
     pub jaw_band_height_fraction: f64,
+    /// The jaw's point: the nose, this × its current length ahead of its centre (half).
+    pub jaw_forward_length_fraction: f64,
     /// The three phases, seconds (§2.3): a crouch, the lunge, and the recovery in which it
     /// cannot strike and moves at half speed.
     pub windup_s: f64,
@@ -365,6 +373,7 @@ impl Hunter {
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
         jaw_band_height_fraction: 0.6,
+        jaw_forward_length_fraction: 0.5,
         windup_s: 0.15,
         lunge_s: 0.25,
         recovery_s: 3.0,
@@ -435,7 +444,7 @@ impl FounderPhysiology {
                     maintenance_per_s: 0.001,
                     bite_per_s: 0.0005,
                     // The browser's K scaled by body (0.0125 / 0.05): a fortieth of the
-                    // litter cue's reference stock `M_EMIT`, so a litter film gives crumbs
+                    // litter cue's reference stock `emit_reference`, so a litter film gives crumbs
                     // and a real pile nearly a whole bite.
                     bite_half_stock: 0.00125,
                     n_tissue: 0.02,
@@ -457,11 +466,14 @@ impl FounderPhysiology {
                     lifespan_median_s: crate::LIFESPAN_MEDIAN_S,
                 },
                 motor_respiration_per_s: 0.001,
+                cruise_body_lengths_per_s: 1.0,
+                yaw_cap_rad_per_s: 2.0,
                 // Two thirds of its length both ways; everything taller is a wall.
                 step_up_m: 0.25,
                 step_down_m: 0.25,
                 climbs_walls: true,
                 wall_climb_cost_factor: WALL_CLIMB_COST_FACTOR,
+                climb_speed_fraction: 0.5,
                 wade_height_fraction: 0.25,
                 drown_height_fraction: 1.0,
                 drown_after_s: DROWN_AFTER_S,
@@ -498,12 +510,15 @@ impl FounderPhysiology {
                 // The frondgrazer gives live birth out of a gestation escrow, which is
                 // in `SpeciesConfig::frondgrazer`'s own table.
                 motor_respiration_per_s: 0.001,
+                cruise_body_lengths_per_s: 1.0,
+                yaw_cap_rad_per_s: 2.0,
                 // Its own height both ways; a longer drop waits for the retrain (see the
                 // field).
                 step_up_m: 0.375,
                 step_down_m: 0.375,
                 climbs_walls: false,
                 wall_climb_cost_factor: WALL_CLIMB_COST_FACTOR,
+                climb_speed_fraction: 0.5,
                 wade_height_fraction: 0.5,
                 drown_height_fraction: 1.0,
                 drown_after_s: DROWN_AFTER_S,
@@ -566,11 +581,14 @@ impl FounderPhysiology {
                 },
                 // Full cruise at its basal rate, both other lineages' rule.
                 motor_respiration_per_s: 0.0002,
+                cruise_body_lengths_per_s: 0.6,
+                yaw_cap_rad_per_s: 2.0,
                 // Its own height both ways, the browser's rule.
                 step_up_m: 0.45,
                 step_down_m: 0.45,
                 climbs_walls: false,
                 wall_climb_cost_factor: WALL_CLIMB_COST_FACTOR,
+                climb_speed_fraction: 0.5,
                 wade_height_fraction: 0.5,
                 drown_height_fraction: 1.0,
                 drown_after_s: DROWN_AFTER_S,
@@ -1847,13 +1865,14 @@ pub(crate) fn taste_reading(
         manifest,
         body,
         founder,
+        crate::CueConfig::default().emit_reference,
         // The unit tests' bodies are the placeholder tables' (mass 1).
         1.0,
     )
 }
 
-/// [`taste_reading`] for a body of `mass_scale`: the reference is `M_EMIT × mass_scale`
-/// (`manifest::TASTE_REFERENCE_RULE`).
+/// [`taste_reading`] for a body of `mass_scale`: the reference is `emit_reference ×
+/// mass_scale` ([`crate::CueConfig::emit_reference`], `manifest::TASTE_REFERENCE_RULE`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn taste_reading_at(
     fv: &FloraView<'_>,
@@ -1863,13 +1882,14 @@ pub(crate) fn taste_reading_at(
     manifest: &Manifest,
     body: &Body,
     founder: Founder,
+    emit_reference: f64,
     mass_scale: f64,
 ) -> TasteReading {
     let sat = manifest.tunings.chem_saturation;
-    // The contact-material response: `amount / (M_EMIT × mass_scale)` cue units through
+    // The contact-material response: `amount / (emit_reference × mass_scale)` cue units through
     // the same curve the field's concentration reads through. The browser's foliage cue
     // is still this — there is no foliage field to sample.
-    let reference = M_EMIT * mass_scale;
+    let reference = emit_reference * mass_scale;
     let response = |amount: f64| {
         let c = (amount / reference).min(1.0);
         c / (c + sat)
@@ -2001,6 +2021,7 @@ pub(crate) fn observation(
         manifest,
         &body,
         founder,
+        fauna.config.cue.emit_reference,
         phys.mass_scale,
     );
     obs[tm.offset] = taste.cue;

@@ -160,3 +160,71 @@ fn the_old_fauna_validator_refusals_still_refuse() {
         });
     }
 }
+
+// ------------------------------------------------------------------ R2-fauna: moved numbers
+
+/// The default config's moved numbers are the values the code ran on before they became
+/// knobs, and a default config's live manifest is the founder's fixed one.
+#[test]
+fn the_moved_numbers_default_to_what_the_code_ran_on() {
+    use cubarium_voxel_fauna::{LifeConfig, PredationConfig, TeacherConfig};
+    let c = FaunaConfig::default();
+    let p = PredationConfig::default();
+    assert_eq!((p.still_after_s, p.still_speed_bl_per_s, p.tremor_radius_m), (2.0, 0.1, 1.5));
+    assert_eq!((p.footfall_radius_m, p.hatch_suppress_m, p.footfall_tremor_min), (2.0, 4.0, 5.0e-4));
+    assert_eq!((p.egg_footfall_min, p.egg_footfall_max, p.egg_viability_median_s), (2, 10, 43_200.0));
+    assert_eq!(p.wound_heal_per_s, 0.5 / 1800.0);
+    assert_eq!((p.heal_cost, p.egg_upkeep_per_s, p.alert_s), (1.0, 5.0e-6, 60.0));
+    assert_eq!(LifeConfig::default().day_line, 0.3);
+    assert_eq!(TeacherConfig::default().flat_clear, 9.0 / 15.0);
+    for f in Founder::ALL {
+        let live = c.manifest(f);
+        let fixed = f.manifest();
+        assert_eq!(live.digest(), fixed.digest(), "{f:?}");
+        assert_eq!(live.cruise_m_per_s, fixed.cruise_m_per_s);
+        assert_eq!(live.forward_reference_m, fixed.forward_reference_m);
+    }
+}
+
+/// Pace is a knob: moving the cruise moves the live manifest (and so its digest).
+#[test]
+fn a_moved_cruise_reaches_the_live_manifest() {
+    let mut c = FaunaConfig::default();
+    let before = c.manifest(Founder::Browser);
+    c.founders[Founder::Browser.index()].cruise_body_lengths_per_s = 2.0;
+    let after = c.manifest(Founder::Browser);
+    assert_eq!(after.cruise_m_per_s, 2.0 * c.founder(Founder::Browser).adult_length_m);
+    assert_ne!(before.digest(), after.digest());
+}
+
+/// A draw's ends the wrong way round is refused by the cross rules.
+#[test]
+fn inverted_draw_ranges_are_refused() {
+    let refuse = |what: &str, edit: &dyn Fn(&mut FaunaConfig)| {
+        let mut c = FaunaConfig::default();
+        edit(&mut c);
+        let e = c.validate().expect_err(what);
+        assert!(e.contains(what), "{what}: {e}");
+    };
+    refuse("egg_footfall_min", &|c| c.predation.egg_footfall_min = 11);
+    refuse("twilight_lo", &|c| c.life.twilight_lo = 0.99);
+    refuse("wander_hold_min", &|c| c.teachers.wander_hold_min = 25);
+    refuse("wander_turn_samples_min", &|c| c.teachers.wander_turn_samples_min = 5);
+}
+
+/// The egg draw reads its knobs: a footfall threshold inside `[min, max]`, a viability
+/// inside `median / spread ..= median x spread`.
+#[test]
+fn the_egg_draw_follows_its_knobs() {
+    let mut p = cubarium_voxel_fauna::PredationConfig::default();
+    p.egg_footfall_min = 7;
+    p.egg_footfall_max = 9;
+    p.egg_viability_median_s = 1000.0;
+    p.egg_viability_spread = 1.5;
+    for serial in 0..200 {
+        let d = cubarium_voxel_fauna::Dormancy::draw(&p, 1, serial, 0);
+        assert!((7..=9).contains(&d.threshold), "{}", d.threshold);
+        let secs = d.viable_until_tick as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ);
+        assert!((1000.0 / 1.5 - 0.1..=1000.0 * 1.5 + 0.1).contains(&secs), "{secs}");
+    }
+}
