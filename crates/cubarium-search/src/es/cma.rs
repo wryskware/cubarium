@@ -6,8 +6,9 @@
 //! Pure `f64`, no external linear algebra: the covariance is kept as a dense matrix and
 //! eigendecomposed by cyclic Jacobi, which is exact enough and instant at this size.
 
-/// The search state.
-#[derive(Clone, Debug)]
+/// The search state. Serializable whole, so a run checkpoints and resumes exactly
+/// (`serde_json`'s `float_roundtrip` keeps every `f64`).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Cma {
     n: usize,
     lambda: usize,

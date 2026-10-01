@@ -830,6 +830,14 @@ enum Command {
         brain_learning_rate: f64,
         #[arg(long, default_value = "runs/ecology-search")]
         out: PathBuf,
+        /// Override the search file's `[targets] persist_only`: `none`, or lineages
+        /// comma-separated (stage 2 runs `none` on 2 h horizons).
+        #[arg(long)]
+        persist_only: Option<String>,
+        /// Continue the search checkpointed in this directory (its `checkpoint.json`: the
+        /// CMA state, the centres and their Adam state, the brain step, the best so far).
+        #[arg(long)]
+        resume: Option<PathBuf>,
     },
     /// The R/S/F pre-screen of an ecology on a world: the three stay-or-go numbers and
     /// each founded species' row.
@@ -1550,6 +1558,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             brain_sigma,
             brain_learning_rate,
             out,
+            persist_only,
+            resume,
         } => {
             let hz = f64::from(cubarium_voxel_fauna::TICK_HZ);
             let genome = match es::voxel::live::ecology::EcologyParams::load(&search)? {
@@ -1585,6 +1595,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 persist_only: [false; cubarium_voxel_fauna::Founder::COUNT],
             }
             .with_targets(&genome.rest)?;
+            if let Some(list) = persist_only {
+                let names: Vec<String> = if list == "none" {
+                    Vec::new()
+                } else {
+                    list.split(',').map(|x| x.trim().to_string()).collect()
+                };
+                let mut t = toml::Table::new();
+                let mut inner = toml::Table::new();
+                inner.insert(
+                    "persist_only".into(),
+                    toml::Value::Array(names.into_iter().map(toml::Value::String).collect()),
+                );
+                t.insert("targets".into(), toml::Value::Table(inner));
+                eval.band = eval.band.with_targets(&t)?;
+            }
             let start = match start {
                 Some(p) => match es::voxel::live::ecology::EcologyParams::load(&p)? {
                     es::voxel::live::ecology::EcologyParams::Genome(g) => Some(g),
@@ -1610,6 +1635,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 brain_sigma,
                 brain_learning_rate,
                 out,
+                resume,
             };
             es::voxel::live::search::search(&spec)?;
             Ok(())
