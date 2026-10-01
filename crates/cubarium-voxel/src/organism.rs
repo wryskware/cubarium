@@ -99,7 +99,7 @@ impl Budget {
             .min(demand)
             .min(self.tissue_left)
             .max(0.0);
-        self.income -= cost * x;
+        self.income = (self.income - cost * x).max(0.0);
         self.tissue_left -= x;
         self.respired += c_g * x;
         x
@@ -123,7 +123,7 @@ impl Budget {
 /// Up to `demand` units out of `stock` at `cost` each, never more than the stock pays for.
 pub fn build_from(stock: &mut f64, demand: f64, cost: f64) -> f64 {
     let x = (*stock / cost).min(demand).max(0.0);
-    *stock -= cost * x;
+    *stock = (*stock - cost * x).max(0.0);
     x
 }
 
