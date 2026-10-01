@@ -1,5 +1,5 @@
 ---
-status: open
+status: done 2026-10-01 (C1, C2, C3 on main)
 date: 2026-09-28
 owner: audit thread (cubarium-a1); Wrysk said go 2026-09-28
 follows: design/7_Research/ecology-parameter-audit-2026-09-28.md §7
