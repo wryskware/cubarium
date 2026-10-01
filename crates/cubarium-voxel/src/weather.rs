@@ -1504,7 +1504,7 @@ fn end(w: &mut World, c: &Climate, end_tick: u64) {
 fn strike_wait(c: &Climate, seed: u64, tick: u64) -> u64 {
     let u = draw(seed, tick, TAG_STRIKE_WAIT);
     let s = (-c.strike_mean_s * (1.0 - u).ln()).clamp(c.strike_min_s, c.strike_max_s);
-    ((s * f64::from(TICK_HZ)).round() as u64).max(1)
+    crate::ticks_at_least_one(s)
 }
 
 /// A strike now: the highest top of a few random sky-open columns.

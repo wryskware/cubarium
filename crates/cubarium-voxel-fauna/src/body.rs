@@ -652,12 +652,7 @@ impl FounderPhysiology {
 
     /// [`FounderPhysiology::drown_after_s`] in whole ticks, never below one.
     pub fn drown_ticks(&self) -> u64 {
-        let t = (self.drown_after_s * f64::from(cubarium_voxel::TICK_HZ)).round();
-        if !t.is_finite() || t < 1.0 {
-            1
-        } else {
-            t as u64
-        }
+        cubarium_voxel::ticks_at_least_one(self.drown_after_s)
     }
 
     /// The assimilation yield this lineage gets out of one food class (decisions §3).

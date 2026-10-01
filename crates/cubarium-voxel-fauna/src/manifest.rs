@@ -889,12 +889,7 @@ impl Manifest {
 
     /// Controller period quantised to whole ticks at the simulation rate, never below one.
     pub fn cadence_ticks(&self) -> u64 {
-        let t = (self.controller_period_s * f64::from(cubarium_voxel::TICK_HZ)).round();
-        if !t.is_finite() || t < 1.0 {
-            1
-        } else {
-            t as u64
-        }
+        cubarium_voxel::ticks_at_least_one(self.controller_period_s)
     }
 }
 
