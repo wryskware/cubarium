@@ -74,7 +74,7 @@ pub use generate::{Budget, Heightfield, LakeDatum, Volume};
 pub use hollows::Hollow;
 pub use hydrate::{Basin, Hydrated, hydrate};
 pub use ledger::Ledger;
-pub use material::Material;
+pub use material::{Material, MaterialProps, Materials};
 pub use terrarium::Terrarium;
 pub use recipe::{
     Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams, Tiers, Water,

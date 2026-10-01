@@ -115,10 +115,10 @@ pub enum Command {
     SetOutlet { open: bool },
 }
 
-/// The fill a cell must hold for the water above it to count as **standing** on it:
-/// [`VoxelView::standing_depth_m`]'s one threshold. Half a cell: a pool's cells sit
-/// 0.87–0.96 full, a shower's falling column a third or less. A placeholder
-/// (`design/backlog.md` §1).
+/// The default of [`Config::standing_support_fill`], kept for `cubarium-voxel-flora`'s
+/// `cover.rs`, which still reads it as a const instead of from the world's config (a
+/// cross-crate change R2-flora owes). Nothing in this crate reads it but the config's
+/// default.
 pub const STANDING_SUPPORT_FILL: f64 = 0.5;
 
 /// Read-only access to the world for drawing and inspection. Borrowed from a `World`;
@@ -502,7 +502,7 @@ impl<'a> VoxelView<'a> {
     ///
     /// The same walk as [`VoxelView::water_depth_m`], with one more stop: a cell's water
     /// counts only while the cell **under** it is the face itself or at least
-    /// [`STANDING_SUPPORT_FILL`] full. A pool's cells sit 0.87–0.96 full with water on
+    /// [`Config::standing_support_fill`] full. A pool's cells sit 0.87–0.96 full with water on
     /// them and read whole; a shower's falling column (fills 0.11 / 0.25 / 0.37 … over a
     /// film) reads as its bottom cell and nothing above it, because a third-full cell is
     /// not holding up the water over it.
@@ -524,7 +524,7 @@ impl<'a> VoxelView<'a> {
                 break;
             }
             let f = self.free_at(x, yy, z);
-            if !(f > 0.0) || below < STANDING_SUPPORT_FILL {
+            if !(f > 0.0) || below < c.standing_support_fill {
                 break;
             }
             depth += f;
@@ -560,7 +560,7 @@ impl<'a> VoxelView<'a> {
     /// capacity times the voxel volume. Zero in air and bedrock.
     pub fn pore_water_m3(&self, x: i64, y: u32, z: u32) -> f64 {
         let i = self.config.index(x, y, z);
-        self.pore[i] * self.material[i].pore_capacity() * self.config.voxel_volume()
+        self.pore[i] * self.config.materials.pore_capacity(self.material[i]) * self.config.voxel_volume()
     }
 
     /// Geometric sky visibility of the top face of `(x, y, z)`: the cosine-weighted
@@ -631,7 +631,7 @@ impl<'a> VoxelView<'a> {
         let mut total = self.aquifer_m3;
         for (i, m) in self.material.iter().enumerate() {
             total += self.free[i] * v * if m.is_solid() { 0.0 } else { 1.0 };
-            total += self.pore[i] * v * m.pore_capacity();
+            total += self.pore[i] * v * self.config.materials.pore_capacity(*m);
         }
         total
     }
@@ -1274,7 +1274,7 @@ impl World {
     /// Pore water held in soil and rock, cubic metres.
     pub fn pore_m3(&self) -> f64 {
         (0..self.config.cells())
-            .map(|i| self.pore[i] * self.material[i].pore_capacity())
+            .map(|i| self.pore[i] * self.config.materials.pore_capacity(self.material[i]))
             .sum::<f64>()
             * self.config.voxel_volume()
     }
@@ -1354,7 +1354,7 @@ impl World {
                 if !self.material[i].is_solid() && self.free[i] > 0.0 {
                     self.wet.insert(i);
                 }
-                if self.material[i].pore_capacity() > 0.0 && self.pore[i] > 0.0 {
+                if self.config.materials.pore_capacity(self.material[i]) > 0.0 && self.pore[i] > 0.0 {
                     self.damp.insert(i);
                 }
                 if crate::water::drains(self, i) {
@@ -1373,7 +1373,7 @@ impl World {
                 if !self.material[i].is_solid() && self.free[i] > 0.0 {
                     self.wet.insert_at(y, col);
                 }
-                if self.material[i].pore_capacity() > 0.0 && self.pore[i] > 0.0 {
+                if self.config.materials.pore_capacity(self.material[i]) > 0.0 && self.pore[i] > 0.0 {
                     self.damp.insert_at(y, col);
                 }
                 if crate::water::drains(self, i) {
@@ -1503,7 +1503,7 @@ impl World {
                 self.free[i]
             );
             ensure!(
-                m.pore_capacity() > 0.0 || self.pore[i] == 0.0,
+                self.config.materials.pore_capacity(m) > 0.0 || self.pore[i] == 0.0,
                 "pore[{i}] is {}, but {m:?} has no pore space",
                 self.pore[i]
             );

@@ -74,7 +74,7 @@ pub struct Config {
     pub climate: crate::weather::Climate,
     /// Closed budget: water returned from the atmosphere store as a **stream at the spring
     /// cell**, cubic metres per second, while the store stands above RH
-    /// [`crate::weather::STREAM_FLOOR_RH`] (WX1b). The river that leaves at
+    /// `Climate::stream_floor_rh` (WX1b). The river that leaves at
     /// the outlet re-enters upstream. Zero — the default — is rain only. Ignored under the
     /// open budget.
     pub reentry_m3_per_s: f64,
@@ -94,6 +94,18 @@ pub struct Config {
     /// may apply, so a filling region can be watched travelling. Zero (the default)
     /// disables the cap and a region settles to its level in one substep.
     pub free_transfer_cap: f64,
+    /// The fill a cell must hold for the water above it to count as **standing** on it:
+    /// [`crate::VoxelView::standing_depth_m`]'s one threshold, a fraction of a cell. Half a
+    /// cell: a pool's cells sit 0.87–0.96 full, a shower's falling column a third or less.
+    pub standing_support_fill: f64,
+    /// The weir at an open outlet's sill: the fraction of a brim-full sill cell it passes
+    /// in one tick, falling off as the head over the crest to the power of one and a half.
+    /// A full cell empties in about twenty ticks at the default; a cell a tenth full passes
+    /// a trickle, not a siphon. A share of the cell, so it means the same on any voxel
+    /// size. [`Config::outlet_m3_per_s`] stays the ceiling.
+    pub outlet_weir_per_tick: f64,
+    /// What rock and soil hold and how fast they pass water: `[world.materials]`.
+    pub materials: crate::material::Materials,
     /// Which generator builds the terrain, and — for
     /// [`crate::Landform::Staged`] — the recipe it builds from, in metres.
     ///
@@ -127,6 +139,9 @@ impl Default for Config {
             reentry_floor_head_m: 0.0,
             lake_drain_m2_per_s: 0.0,
             free_transfer_cap: 0.0,
+            standing_support_fill: crate::world::STANDING_SUPPORT_FILL,
+            outlet_weir_per_tick: 0.05,
+            materials: crate::material::Materials::DEFAULT,
             landform: Landform::Ridge,
         }
     }
@@ -161,6 +176,14 @@ impl Config {
                     self.width, self.height, self.depth
                 )
             })?;
+        for (name, m) in [("rock", &self.materials.rock), ("soil", &self.materials.soil)] {
+            ensure!(
+                m.wilting_point <= m.field_capacity,
+                "world.materials.{name}.wilting_point {} is above its field_capacity {}",
+                m.wilting_point,
+                m.field_capacity
+            );
+        }
         let c = &self.climate;
         ensure!(
             c.dry_gap_min_s <= c.dry_gap_max_s,

@@ -68,7 +68,7 @@ fn rh_at_the_hard_limit_forces_a_downpour_inside_the_dry_gap() {
     c.capacity_share = 1.0 / 1.6;
     let mut w = sky_world(c, 1.0);
     w.weather.gap_until = 100 * MIN;
-    assert!(w.rh() >= RH_MAX, "{}", w.rh());
+    assert!(w.rh() >= Climate::default().rh_max, "{}", w.rh());
     w.step();
     assert_eq!(w.weather().mode(), RainMode::Downpour);
     assert_eq!(w.weather().counts.forced, 1);
@@ -284,7 +284,7 @@ fn the_diurnal_low_is_at_sunrise() {
     let mut high = (f64::NEG_INFINITY, 0.0);
     for i in 0..10_000 {
         let p = i as f64 / 10_000.0;
-        let d = diurnal_shape(p, rise, set);
+        let d = diurnal_shape(p, rise, set, DayClock::default().temperature_peak_fraction);
         if d < low.0 {
             low = (d, p);
         }
@@ -323,13 +323,13 @@ fn a_cycle_clock_has_its_sunrise_noon_and_midnight() {
     assert!((clock.cycle_phase(60 * MIN) - 20.0 / 24.0).abs() < 1e-9);
     let (rise, set) = clock.cycle_rise_set();
     assert!((rise - 0.165).abs() < 1e-12 && (set - 0.835).abs() < 1e-12);
-    let noon = Sun::at(0.5, rise, set);
+    let noon = Sun::at(&DayClock::default(), 0.5, rise, set);
     assert!((noon.elevation - 70f64.to_radians()).abs() < 1e-9);
     assert!((noon.daylight - 1.0).abs() < 1e-12);
-    let dawn = Sun::at(rise, rise, set);
+    let dawn = Sun::at(&DayClock::default(), rise, rise, set);
     assert!(dawn.elevation.abs() < 1e-9);
     assert!((dawn.daylight - 0.5).abs() < 1e-9, "twilight is half light");
-    let midnight = Sun::at(0.0, rise, set);
+    let midnight = Sun::at(&DayClock::default(), 0.0, rise, set);
     assert!(midnight.elevation < 0.0);
     assert_eq!(midnight.daylight, 0.0);
 }
@@ -419,7 +419,7 @@ fn the_ledger_holds_through_a_forced_storm() {
         volume_m3: 0.01,
     });
     w.apply(Command::AddAtmosphere { volume_m3: 0.05 });
-    assert!(w.rh() >= RH_MAX);
+    assert!(w.rh() >= Climate::default().rh_max);
     for _ in 0..200 {
         w.step();
         assert!(residual(&w) < 1e-12, "{}", residual(&w));
@@ -461,21 +461,21 @@ fn auto_speed_is_nature_on_a_24_hour_day_and_five_on_a_2_hour_one() {
         ..DayClock::default()
     };
     let auto = WeatherSpeed::Auto;
-    assert!((auto.factor(&clock(DayMode::Cycle, 1440.0)) - 1.0).abs() < 1e-12);
-    let two_hours = auto.factor(&clock(DayMode::Cycle, 120.0));
+    assert!((auto.factor(&clock(DayMode::Cycle, 1440.0), Climate::default().auto_speed_exponent) - 1.0).abs() < 1e-12);
+    let two_hours = auto.factor(&clock(DayMode::Cycle, 120.0), Climate::default().auto_speed_exponent);
     assert!((two_hours - 5.0).abs() < 0.05, "{two_hours}");
     assert_eq!(
-        auto.factor(&clock(DayMode::Local, 120.0)),
+        auto.factor(&clock(DayMode::Local, 120.0), Climate::default().auto_speed_exponent),
         1.0,
         "local is nature"
     );
     assert_eq!(
-        auto.factor(&clock(DayMode::Off, 120.0)),
+        auto.factor(&clock(DayMode::Off, 120.0), Climate::default().auto_speed_exponent),
         two_hours,
         "off counts length_min"
     );
     assert_eq!(
-        WeatherSpeed::Fixed(2.0).factor(&clock(DayMode::Local, 120.0)),
+        WeatherSpeed::Fixed(2.0).factor(&clock(DayMode::Local, 120.0), Climate::default().auto_speed_exponent),
         2.0
     );
 

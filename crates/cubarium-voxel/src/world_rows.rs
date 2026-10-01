@@ -58,6 +58,15 @@ pub(crate) fn rows() -> Vec<Row> {
         p("lake_drain_m2_per_s", "m3/s per m of head", nonneg, "lake floor joined to the aquifer: flow = k * (lake - table)")
             .grade("C")
             .prov("derived"),
+        p("standing_support_fill", "fraction of a cell", Range::fraction(), "a cell holds the water above it up as standing water at this fill or more")
+            .search(0.3, 0.7)
+            .prov("placeholder (design/backlog.md section 1 row 84)"),
+        p("outlet_weir_per_tick", "fraction of a brim-full cell per tick", Range::fraction(), "the outlet weir's share of a brim-full sill cell passed per tick (head^1.5)")
+            .search(0.01, 0.2)
+            .log()
+            .grade("C")
+            .prov("tuned:T6 'a weir, not a straw'"),
+        // The porous materials: the soil's and the rock's pore space and drainage.
         // The day clock.
         p("day.length_min", "min of sim time", positive, "one day and night (cycle); the 'day' the climate counts in")
             .grade("C")
@@ -74,6 +83,16 @@ pub(crate) fn rows() -> Vec<Row> {
         p("day.longitude", "deg east", Range::closed(-180.0, 180.0), "local clock: the place's longitude")
             .optional()
             .prov("decision"),
+        p("day.noon_elevation_deg", "deg above the horizon", Range::closed(0.0, 90.0).open_lo(), "the sun's elevation at noon")
+            .search(30.0, 85.0)
+            .grade("D")
+            .prov("physical"),
+        p("day.twilight_deg", "deg", Range::closed(0.0, 90.0).open_lo(), "civil twilight: daylight is a smoothstep of the elevation over +/- this")
+            .search(3.0, 12.0)
+            .prov("physical (civil twilight)"),
+        p("day.temperature_peak_fraction", "fraction of the daylight from sunrise", Range::closed(0.0, 1.0).open_lo(), "where in the daylight the temperature and the afternoon convection peak")
+            .search(0.5, 0.8)
+            .prov("physical"),
         p("day.plant_night_factor", "fraction of the daytime rate", Range::fraction(), "plant maintenance and senescence in the dark (1: no night rule)")
             .evolve()
             .prov("decision"),
@@ -123,8 +142,55 @@ pub(crate) fn rows() -> Vec<Row> {
         p("climate.strike_min_s", "s", nonneg_inf, "shortest lightning interval (visual only)").prov("visual"),
         p("climate.strike_max_s", "s", nonneg_inf, "longest lightning interval (visual only)").prov("visual"),
         p("climate.storm_stream_gain", "x stream flow", nonneg_inf, "stream swell at a downpour's peak (0: off)").grade("C").prov("decision"),
+        p("climate.cc_per_c", "per degC", nonneg, "Clausius-Clapeyron: what the air holds grows by this fraction per degC")
+            .search(0.05, 0.09)
+            .prov("physical"),
+        p("climate.rh_max", "RH", positive, "relative humidity never passes this: reaching it starts a forced downpour")
+            .search(1.1, 2.0)
+            .grade("D")
+            .prov("tuned:WX1"),
+        p("climate.evaporation_rh_span", "RH", positive, "evaporation scales with max(0, 1 - RH) / this: the configured rate at RH 1 - span")
+            .search(0.2, 0.8)
+            .prov("design"),
+        p("climate.stream_floor_rh", "RH", nonneg, "the atmosphere-fed stream draws only while the sky stands above this RH")
+            .search(0.3, 0.7)
+            .prov("tuned:WX1b"),
+        p("climate.swell_rise_s", "s", positive, "the stream swell rises toward its target over this while it rains")
+            .search(15.0, 120.0)
+            .log()
+            .prov("decision (Wrysk)"),
+        p("climate.swell_fall_s", "s", positive, "the stream swell falls back over this after the rain")
+            .search(15.0, 120.0)
+            .log()
+            .prov("decision (Wrysk)"),
+        p("climate.auto_speed_exponent", "exponent", Range::any(), "the auto weather speed is (24 h / cycle length) to this power")
+            .search(0.3, 1.0)
+            .prov("decision (Wrysk #8)"),
+        p("climate.founding_rh", "RH", nonneg, "the relative humidity a closed world's sky is founded at")
+            .search(0.3, 0.9)
+            .prov("tuned:WX1b"),
         p("climate.opening_min_s", "s", nonneg_inf, "the host's opening rain falls at least this long").grade("N").prov("preset"),
     ];
+    for (mat, pore, perm, fc, wp, grade, prov) in [
+        ("rock", 0.02, 0.001, 0.5, 0.2, "-", "placeholder ('provisional crevice number')"),
+        ("soil", 0.35, 0.2, 0.65, 0.28, "-", "derived: a loam (voxel-plant-viability W)"),
+    ] {
+        let m = |field: &str, unit: &'static str, range: Range, what: &'static str| {
+            p(&format!("materials.{mat}.{field}"), unit, range, what).grade(grade).prov(prov)
+        };
+        let unit_range = Range::closed(0.0, 1.0);
+        rows.extend([
+            m("pore_capacity", "fraction of voxel volume", unit_range, "the share of a voxel that holds pore water")
+                .search(pore * 0.5, (pore * 1.5).min(1.0)),
+            m("permeability_per_s", "fraction of pore capacity per s on a 0.25 m cell", nonneg, "how much of the pore capacity moves per second (conductivity = this x pore x 0.25 m)")
+                .search(perm / 10.0, perm * 10.0)
+                .log(),
+            m("field_capacity", "fraction of pore capacity", unit_range, "the share of the pores the material holds against gravity")
+                .search((fc - 0.2_f64).max(0.05), (fc + 0.2_f64).min(0.95)),
+            m("wilting_point", "fraction of pore capacity", unit_range, "the share of the pores held too tightly for roots to draw")
+                .search((wp - 0.15_f64).max(0.02), (wp + 0.15_f64).min(0.9)),
+        ]);
+    }
     for mode in ["drizzle", "shower", "downpour"] {
         let m = |field: &str, unit: &'static str, range: Range, what: &'static str| {
             p(&format!("climate.{mode}.{field}"), unit, range, what).prov("tuned")

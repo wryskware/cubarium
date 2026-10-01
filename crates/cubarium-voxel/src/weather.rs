@@ -87,7 +87,7 @@ impl WeatherView {
         cloud_cover: 0.0,
         day_phase: 0.5,
         daylight: 1.0,
-        // The model's noon peak, 70° (`NOON_ELEVATION_DEG`).
+        // The model's noon peak, 70° (`DayClock::noon_elevation_deg`).
         sun_elevation: 1.221_730_5,
         last_strike: None,
     };
@@ -103,25 +103,11 @@ impl Default for WeatherView {
 
 /// Ticks in one simulated minute: the rain draw's cadence.
 pub const TICKS_PER_MIN: u64 = 60 * TICK_HZ as u64;
-/// The Clausius–Clapeyron slope: what the air holds grows 7 % per °C.
-pub const CC_PER_C: f64 = 0.07;
-/// Relative humidity never passes this: reaching it starts a forced downpour.
-pub const RH_MAX: f64 = 1.5;
-/// Evaporation from open water scales with `max(0, 1 − RH) / EVAPORATION_RH_SPAN`: the
-/// configured rate at RH 0.6, none at saturation.
-pub const EVAPORATION_RH_SPAN: f64 = 0.4;
-/// The atmosphere-fed stream draws only while the sky stands above this RH (WX1b).
-pub const STREAM_FLOOR_RH: f64 = 0.5;
-/// The sun's elevation at noon, degrees.
-pub const NOON_ELEVATION_DEG: f64 = 70.0;
-/// Civil twilight: daylight is a smoothstep of the elevation over ±this many degrees.
-pub const TWILIGHT_DEG: f64 = 6.0;
-/// The stream swell's time constants, seconds of simulated time: it rises toward its
-/// target over `SWELL_RISE_S` while it rains and falls back over `SWELL_FALL_S` after (so
-/// it is ~95 % gone 2.5 min after the event). Wrysk's numbers, not scaled by the weather
-/// speed.
-pub const SWELL_RISE_S: f64 = 45.0;
-pub const SWELL_FALL_S: f64 = 50.0;
+// The Clausius–Clapeyron slope, the forced-downpour humidity, the evaporation span, the
+// stream's floor, the swell's time constants and the auto speed's exponent are
+// `Climate` fields (`cc_per_c`, `rh_max`, `evaporation_rh_span`, `stream_floor_rh`,
+// `swell_rise_s`, `swell_fall_s`, `auto_speed_exponent`); the sun's noon elevation,
+// twilight and temperature peak are `DayClock` fields.
 
 /// A lightning strike picks the highest of this many random sky-open columns.
 pub const STRIKE_COLUMNS: usize = 4;
@@ -208,6 +194,16 @@ pub struct DayClock {
     /// no plant dies in the dark; stands 72–88 % of the pre-night reference); 1 is no rule.
     /// Saprotrophs do not read it.
     pub plant_night_factor: f64,
+    /// The sun's elevation at noon, degrees above the horizon. By day the elevation is
+    /// a sine that peaks at this at the middle of the daylight.
+    pub noon_elevation_deg: f64,
+    /// Civil twilight, degrees: daylight is a smoothstep of the elevation over ±this many
+    /// degrees about the horizon.
+    pub twilight_deg: f64,
+    /// Where in the daylight the day's temperature peaks, as a share of it from sunrise
+    /// (2/3: two thirds of the way through); the afternoon convection bump is centred
+    /// there.
+    pub temperature_peak_fraction: f64,
 }
 
 impl Default for DayClock {
@@ -221,6 +217,9 @@ impl Default for DayClock {
             longitude: None,
             look: Look::Day,
             plant_night_factor: 0.05,
+            noon_elevation_deg: 70.0,
+            twilight_deg: 6.0,
+            temperature_peak_fraction: 2.0 / 3.0,
         }
     }
 }
@@ -293,14 +292,14 @@ impl DayClock {
         match self.mode {
             DayMode::Cycle => {
                 let (rise, set) = self.cycle_rise_set();
-                Sun::at(self.cycle_phase(tick), rise, set)
+                Sun::at(self, self.cycle_phase(tick), rise, set)
             }
             DayMode::Local => {
                 let now = wall_s.unwrap_or_else(wall_clock_s);
                 let (phase, rise, set) = self.local_phase(now);
-                Sun::at(phase, rise, set)
+                Sun::at(self, phase, rise, set)
             }
-            DayMode::Off => Sun::at(0.5, 0.25, 0.75),
+            DayMode::Off => Sun::at(self, 0.5, 0.25, 0.75),
         }
     }
 }
@@ -386,11 +385,12 @@ pub struct Sun {
 impl Sun {
     /// The sun at `phase` on a day that rises at `rise` and sets at `set`.
     ///
-    /// By day the elevation is a sine that peaks at [`NOON_ELEVATION_DEG`] at the middle of
-    /// the daylight and crosses zero at sunrise and sunset. By night it is the negative
-    /// sine over the night, scaled so the curve's slope is continuous at the horizon.
-    pub fn at(phase: f64, rise: f64, set: f64) -> Sun {
-        let peak = NOON_ELEVATION_DEG.to_radians();
+    /// By day the elevation is a sine that peaks at [`DayClock::noon_elevation_deg`] at the
+    /// middle of the daylight and crosses zero at sunrise and sunset. By night it is the
+    /// negative sine over the night, scaled so the curve's slope is continuous at the
+    /// horizon. Daylight is a smoothstep over [`DayClock::twilight_deg`].
+    pub fn at(clock: &DayClock, phase: f64, rise: f64, set: f64) -> Sun {
+        let peak = clock.noon_elevation_deg.to_radians();
         let day = (set - rise).clamp(1e-6, 1.0 - 1e-6);
         let night = 1.0 - day;
         let since_rise = (phase - rise).rem_euclid(1.0);
@@ -400,7 +400,7 @@ impl Sun {
             let depth = (peak * night / day).min(core::f64::consts::FRAC_PI_2);
             -depth * (core::f64::consts::PI * (since_rise - day) / night).sin()
         };
-        let tw = TWILIGHT_DEG.to_radians();
+        let tw = clock.twilight_deg.to_radians();
         let x = ((elevation + tw) / (2.0 * tw)).clamp(0.0, 1.0);
         Sun {
             phase,
@@ -411,17 +411,18 @@ impl Sun {
         }
     }
 
-    /// The temperature peak: two thirds of the way through the daylight.
-    pub fn peak(&self) -> f64 {
-        (self.rise + (self.set - self.rise) * 2.0 / 3.0).rem_euclid(1.0)
+    /// The temperature peak: `peak_fraction` of the way through the daylight
+    /// ([`DayClock::temperature_peak_fraction`]).
+    pub fn peak(&self, peak_fraction: f64) -> f64 {
+        (self.rise + (self.set - self.rise) * peak_fraction).rem_euclid(1.0)
     }
 }
 
-/// The diurnal temperature curve, `−1` at sunrise and `+1` two thirds of the way through
-/// the daylight: a half cosine up to the peak and a half cosine back down to the next
-/// sunrise.
-pub fn diurnal_shape(phase: f64, rise: f64, set: f64) -> f64 {
-    let up = ((set - rise) * 2.0 / 3.0).clamp(1e-6, 1.0 - 1e-6);
+/// The diurnal temperature curve, `−1` at sunrise and `+1` `peak_fraction` of the way
+/// through the daylight: a half cosine up to the peak and a half cosine back down to the
+/// next sunrise.
+pub fn diurnal_shape(phase: f64, rise: f64, set: f64, peak_fraction: f64) -> f64 {
+    let up = ((set - rise) * peak_fraction).clamp(1e-6, 1.0 - 1e-6);
     let p = (phase - rise).rem_euclid(1.0);
     let pi = core::f64::consts::PI;
     if p <= up {
@@ -433,11 +434,11 @@ pub fn diurnal_shape(phase: f64, rise: f64, set: f64) -> f64 {
 
 /// The afternoon (convection) bump: 1 at the temperature peak, a Gaussian `width` of the
 /// cycle wide, measured round the clock.
-pub fn afternoon_bump(sun: &Sun, width: f64) -> f64 {
+pub fn afternoon_bump(sun: &Sun, width: f64, peak_fraction: f64) -> f64 {
     if !(width > 0.0) {
         return 0.0;
     }
-    let d = (sun.phase - sun.peak()).rem_euclid(1.0);
+    let d = (sun.phase - sun.peak(peak_fraction)).rem_euclid(1.0);
     let d = d.min(1.0 - d);
     (-0.5 * (d / width).powi(2)).exp()
 }
@@ -514,22 +515,19 @@ pub enum WeatherSpeed {
     Fixed(f64),
 }
 
-/// The exponent of `auto`: `(24 h / cycle)^AUTO_SPEED_EXPONENT`.
-pub const AUTO_SPEED_EXPONENT: f64 = 0.65;
-
 /// Seconds in a day of nature: what the preset's "days" (the drift's time scale, a
 /// front's recovery) count before the weather speed divides them.
 pub const NATURE_DAY_S: f64 = 86_400.0;
 
 impl WeatherSpeed {
     /// The factor on this clock.
-    pub fn factor(self, day: &DayClock) -> f64 {
+    pub fn factor(self, day: &DayClock, auto_exponent: f64) -> f64 {
         match self {
             WeatherSpeed::Fixed(x) => x,
             WeatherSpeed::Auto => match day.mode {
                 DayMode::Local => 1.0,
                 DayMode::Cycle | DayMode::Off => {
-                    (1440.0 / day.length_min).powf(AUTO_SPEED_EXPONENT)
+                    (1440.0 / day.length_min).powf(auto_exponent)
                 }
             },
         }
@@ -683,6 +681,25 @@ pub struct Climate {
     /// The host's opening rain ([`World::open_with_rain`]) falls at least this long,
     /// seconds, before its stop humidity may end it.
     pub opening_min_s: f64,
+    /// The Clausius–Clapeyron slope: what the air holds grows by this fraction per °C
+    /// (0.07: 7 % per °C).
+    pub cc_per_c: f64,
+    /// Relative humidity never passes this: reaching it starts a forced downpour.
+    pub rh_max: f64,
+    /// Evaporation from open water scales with `max(0, 1 − RH) / evaporation_rh_span`:
+    /// the configured rate at RH `1 − span`, none at saturation.
+    pub evaporation_rh_span: f64,
+    /// The atmosphere-fed stream draws only while the sky stands above this RH (WX1b).
+    pub stream_floor_rh: f64,
+    /// The stream swell's time constants, seconds of simulated time: it rises toward its
+    /// target over `swell_rise_s` while it rains and falls back over `swell_fall_s` after
+    /// (~95 % gone 2.5 min after the event). Not scaled by the weather speed.
+    pub swell_rise_s: f64,
+    pub swell_fall_s: f64,
+    /// The exponent of the `auto` weather speed: `(24 h / cycle length)^auto_speed_exponent`.
+    pub auto_speed_exponent: f64,
+    /// The relative humidity a closed world's sky is founded at (WX1b).
+    pub founding_rh: f64,
     pub drizzle: RainParams,
     pub shower: RainParams,
     pub downpour: RainParams,
@@ -756,6 +773,14 @@ climate_keys!(
     strike_max_s,
     storm_stream_gain,
     opening_min_s,
+    cc_per_c,
+    rh_max,
+    evaporation_rh_span,
+    stream_floor_rh,
+    swell_rise_s,
+    swell_fall_s,
+    auto_speed_exponent,
+    founding_rh,
 );
 
 impl TryFrom<ClimateSpec> for Climate {
@@ -830,6 +855,14 @@ impl Climate {
             // downpour's peak.
             storm_stream_gain: 4.0,
             opening_min_s: 60.0,
+            cc_per_c: 0.07,
+            rh_max: 1.5,
+            evaporation_rh_span: 0.4,
+            stream_floor_rh: 0.5,
+            swell_rise_s: 45.0,
+            swell_fall_s: 50.0,
+            auto_speed_exponent: 0.65,
+            founding_rh: 0.6,
             drizzle: RainParams {
                 lambda_max_per_h: 1.5,
                 rh50: 0.98,
@@ -876,7 +909,7 @@ impl Climate {
     /// and the dawn window stay tied to the cycle; the dry gap, the lightning interval,
     /// the rain rates and the fronts per day are not scaled.
     pub fn at_speed(&self, day: &DayClock) -> Climate {
-        let k = self.weather_speed.factor(day).max(1e-9);
+        let k = self.weather_speed.factor(day, self.auto_speed_exponent).max(1e-9);
         let mut c = *self;
         c.drift_days /= k;
         c.front_onset_min /= k;
@@ -895,7 +928,7 @@ impl Climate {
     /// What the air holds at `t_c`, cubic metres, in a world of `total_m3`:
     /// `capacity_share · total · e^{0.07 (T − temperature_c)}`.
     pub fn capacity_m3(&self, total_m3: f64, t_c: f64) -> f64 {
-        self.capacity_share * total_m3 * (CC_PER_C * (t_c - self.temperature_c)).exp()
+        self.capacity_share * total_m3 * (self.cc_per_c * (t_c - self.temperature_c)).exp()
     }
 
     /// A mode's row. `Clear` has none.
@@ -912,7 +945,7 @@ impl Climate {
 /// The multiplier on the configured evaporation rate: `max(0, 1 − RH) / 0.4` times what
 /// the warmer or cooler air can take, `C(T) / C(temperature_c)`.
 pub fn evaporation_scale(c: &Climate, rh: f64, t_c: f64) -> f64 {
-    (1.0 - rh).max(0.0) / EVAPORATION_RH_SPAN * (CC_PER_C * (t_c - c.temperature_c)).exp()
+    (1.0 - rh).max(0.0) / c.evaporation_rh_span * (c.cc_per_c * (t_c - c.temperature_c)).exp()
 }
 
 /// Whether a mode's start and stop read the moisture `M` rather than RH (WX1b).
@@ -966,7 +999,7 @@ pub struct Front {
 pub enum Cause {
     /// The minute's draw.
     Natural,
-    /// RH reached [`RH_MAX`].
+    /// RH reached `Climate::rh_max`.
     Forced,
     /// The host's opening rain ([`World::open_with_rain`]).
     Opening,
@@ -1000,7 +1033,7 @@ pub struct WeatherCounts {
     pub drizzles: u64,
     pub showers: u64,
     pub downpours: u64,
-    /// Downpours forced by RH reaching [`RH_MAX`] (also counted in `downpours`).
+    /// Downpours forced by RH reaching `Climate::rh_max` (also counted in `downpours`).
     pub forced: u64,
     /// Minute draws that would have started drizzle, shower, downpour inside a dry gap.
     pub gap_blocked: [u64; 3],
@@ -1136,7 +1169,7 @@ fn diurnal_c(config: &crate::Config, sun: &Sun) -> f64 {
     if config.day.mode == DayMode::Off {
         0.0
     } else {
-        config.climate.diurnal_c * diurnal_shape(sun.phase, sun.rise, sun.set)
+        config.climate.diurnal_c * diurnal_shape(sun.phase, sun.rise, sun.set, config.day.temperature_peak_fraction)
     }
 }
 
@@ -1218,7 +1251,7 @@ pub(crate) fn step(w: &mut World) {
         let a = if off {
             0.0
         } else {
-            afternoon_bump(&sun, c.afternoon_width)
+            afternoon_bump(&sun, c.afternoon_width, w.config.day.temperature_peak_fraction)
         };
         events(w, &c, a, if fresh_front { 1.0 } else { 0.0 });
         swell(w, &c);
@@ -1252,7 +1285,7 @@ fn events(w: &mut World, c: &Climate, a: f64, f: f64) {
     }
 
     let rh = w.rh();
-    if rh >= RH_MAX && w.weather.mode != RainMode::Downpour {
+    if rh >= c.rh_max && w.weather.mode != RainMode::Downpour {
         if w.weather.event.is_some() {
             end(w, c, tick);
         }
@@ -1313,9 +1346,9 @@ fn swell(w: &mut World, c: &Climate) {
     let (target, tau) = match c.mode(w.weather.mode) {
         Some(m) if c.downpour.rate_r0 > 0.0 => (
             c.storm_stream_gain * (m.rate_r0 / c.downpour.rate_r0).clamp(0.0, 1.0),
-            SWELL_RISE_S,
+            c.swell_rise_s,
         ),
-        _ => (0.0, SWELL_FALL_S),
+        _ => (0.0, c.swell_fall_s),
     };
     let s = &mut w.weather.swell;
     *s += (target - *s) * (1.0 - (-DT / tau).exp());
@@ -1457,8 +1490,8 @@ pub(crate) fn view(w: &World) -> WeatherView {
         _ => w.config.rain_m_per_s,
     };
     let sun = match (w.config.day.mode, w.config.day.look) {
-        (DayMode::Off, Look::Day) => Sun::at(0.5, 0.25, 0.75),
-        (DayMode::Off, Look::Night) => Sun::at(0.0, 0.25, 0.75),
+        (DayMode::Off, Look::Day) => Sun::at(&w.config.day, 0.5, 0.25, 0.75),
+        (DayMode::Off, Look::Night) => Sun::at(&w.config.day, 0.0, 0.25, 0.75),
         _ => wx.sun,
     };
     // Rain falls from cloud: while it rains the cover has a floor by mode, so an
@@ -1515,9 +1548,11 @@ impl World {
     }
 
     /// What the atmosphere-fed stream leaves aloft, cubic metres: RH
-    /// [`STREAM_FLOOR_RH`] of what the air holds at its temperature now.
+    /// [`Climate::stream_floor_rh`] of what the air holds at its temperature now.
     pub fn stream_floor_m3(&self) -> f64 {
-        STREAM_FLOOR_RH
+        self.config
+            .climate
+            .stream_floor_rh
             * self
                 .config
                 .climate

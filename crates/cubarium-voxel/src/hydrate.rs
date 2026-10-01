@@ -33,11 +33,12 @@ pub struct Basin {
     pub catchment: usize,
 }
 
-/// Most of the inventory left after the lake that may go into the water table. The table
-/// has to reach the lake floor for the lake to hold, and on these rings that is the
-/// largest single charge in the budget; this keeps it from taking the pore and the other
-/// pools with it.
-const LAKE_TABLE_SHARE: f64 = 0.85;
+/// The water recipe the world was generated from, or the dry recipe's own numbers for a
+/// world with none (`Ridge`, a hand-built fixture): where the pool-reading thresholds
+/// ([`Water::lake_floor_band`], [`Water::pool_min_fill`], [`Water::min_pool_cells`]) live.
+fn recipe_water(world: &World) -> Water {
+    world.config().landform.water().copied().unwrap_or(Water::DRY)
+}
 
 /// The ring's **lake**: the lowest basin the sky reaches all of, and the water standing
 /// in it. Derived geometry, like [`basins`] — read off the material and free arrays, so
@@ -65,6 +66,9 @@ pub struct Pool {
     pub floor_y: u32,
     /// Water standing in it, cubic metres.
     pub volume_m3: f64,
+    /// Whether it shows at least [`Water::min_pool_cells`] visible surface cells: enough
+    /// to read as a water feature, which is what the host's tier-pool gate counts.
+    pub legible: bool,
 }
 
 /// The ring's **lake**: the lowest pool, which is the one the outlet's datum is seated
@@ -75,6 +79,7 @@ pub fn lake(world: &World) -> Pool {
     let Some(floor) = all.iter().map(|p| p.floor_y).min() else {
         return read_pool(world, Vec::new());
     };
+    let band = recipe_water(world).lake_floor_band;
     // **Every body at the cut, not one puddle of it.** A stepped beach holds its sheet in
     // several disconnected bodies once it has settled — thirty-six of them on `small`
     // seed 5, two of them the same size at the same floor — and taking the first by cell
@@ -83,7 +88,7 @@ pub fn lake(world: &World) -> Pool {
     // down there, bar or no bar between its halves.
     let cells: Vec<usize> = all
         .into_iter()
-        .filter(|p| p.floor_y <= floor + LAKE_FLOOR_BAND)
+        .filter(|p| p.floor_y <= floor + band)
         .flat_map(|p| p.cells)
         .collect();
     read_pool(world, cells)
@@ -106,7 +111,8 @@ pub fn pools(world: &World) -> Vec<Pool> {
     let c = world.config();
     let plane = c.width as usize * c.depth as usize;
     let n = c.cells();
-    let wet = |i: usize| world.free[i] >= POOL_MIN_FILL && !world.material[i].is_solid();
+    let min_fill = recipe_water(world).pool_min_fill;
+    let wet = |i: usize| world.free[i] >= min_fill && !world.material[i].is_solid();
 
     // Standing: resting on solid, or on standing water.
     let mut standing = vec![false; n];
@@ -215,6 +221,7 @@ fn read_pool(world: &World, cells: Vec<usize>) -> Pool {
         level_y,
         floor_y,
         volume_m3,
+        legible: visible_cells >= recipe_water(world).min_pool_cells as usize,
     }
 }
 
@@ -224,28 +231,16 @@ fn read_pool(world: &World, cells: Vec<usize>) -> Pool {
 pub fn tier_pools(pools: &[Pool], lake_level_y: u32) -> usize {
     pools
         .iter()
-        .filter(|p| p.level_y > lake_level_y && p.visible_cells >= MIN_POOL_CELLS)
+        .filter(|p| p.level_y > lake_level_y && p.legible)
         .count()
 }
 
-/// How far above the lowest standing water a body can sit and still be *the lake*.
-///
-/// The lake's bed is stepped, so its sheet breaks into bodies a voxel or two apart as it
-/// settles; they are one water feature to look at and the gate should read them as one.
-/// Anything higher is a tier's pool and is counted as one ([`tier_pools`]).
-pub const LAKE_FLOOR_BAND: u32 = 2;
-
-/// How full a void cell must be to count as **pool** water rather than runoff.
-///
-/// Every surface a stream has crossed carries a film of a few thousandths of a cell, and
-/// a film is not a pond: read at `free > 0` a trickle over a shelf welds the pool above a
-/// waterfall to the lake below it into one body, and the tier pools the gate is looking
-/// for vanish. At 0.05 of a 0.25 m voxel this is twelve millimetres of water — the depth
-/// at which there is something to see.
-pub const POOL_MIN_FILL: f64 = 0.05;
-
-/// Visible surface cells a pool needs before the gate counts it.
-pub const MIN_POOL_CELLS: usize = 4;
+// The lake's floor band, the fill that counts as pool water (read at `free > 0` a trickle
+// over a shelf welds the pool above a waterfall to the lake below it; 0.05 of a 0.25 m
+// voxel is twelve millimetres, the depth at which there is something to see) and the
+// visible cells a pool needs before the gate counts it are the recipe's `Water` fields
+// (`lake_floor_band`, `pool_min_fill`, `min_pool_cells`); a body higher than the band is
+// a tier's pool and is counted as one ([`tier_pools`]).
 
 /// Whether the sky reaches **every** floor cell of this basin: nothing solid anywhere
 /// above it in its own column. One roofed floor cell and the basin is a sump.
@@ -267,21 +262,15 @@ fn open_to_sky(world: &World, b: &Basin) -> bool {
         })
 }
 
-/// How far under its founding water table a ring's aquifer-fed stream may draw it, when
-/// the table stands below the lake (WX1b).
-pub const RING_STREAM_FLOOR_M: f64 = 0.25;
-
-/// The relative humidity a closed world's sky is founded at (WX1b).
-pub const FOUNDING_RH: f64 = 0.6;
-
-/// The founding sky of a closed world whose ground holds `ground_m3`: [`FOUNDING_RH`] of
+/// The founding sky of a closed world whose ground holds `ground_m3`:
+/// [`crate::weather::Climate::founding_rh`] of
 /// what the air holds at the temperature the world starts at (its clock's hour at
 /// `tick`, no drift). The capacity is a share of the world's whole water, the sky
 /// included, so this solves `s = RH · share · e^{0.07 ΔT} · (ground + s)`.
 pub fn founding_sky_m3(c: &crate::Config, tick: u64, ground_m3: f64) -> f64 {
     let t0 = crate::weather::Weather::fresh(c, tick, None).temperature_c();
     // A sky that would hold most of the world is not a sky: cap the share at 0.9.
-    let x = (FOUNDING_RH * c.climate.capacity_m3(1.0, t0)).clamp(0.0, 0.9);
+    let x = (c.climate.founding_rh * c.climate.capacity_m3(1.0, t0)).clamp(0.0, 0.9);
     ground_m3 * x / (1.0 - x)
 }
 
@@ -412,7 +401,7 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
     // inventory they do. It is capped so it can never starve the pore and the other
     // pools: if the lake floor is out of reach, the recipe's own head stands and the lake
     // is reported as the shallow thing it will become.
-    let table_ceiling = LAKE_TABLE_SHARE * (after_lake - bed);
+    let table_ceiling = w.lake_table_share * (after_lake - bed);
     let lake_head_m = match (connected, level_y) {
         (true, Some(level)) => f64::from(level.saturating_sub(1)) * c.voxel_m,
         _ => f64::from(lake_floor_y) * c.voxel_m,
@@ -465,7 +454,7 @@ pub fn hydrate(world: &mut World, w: &Water) -> Hydrated {
             && table_m + 1e-9 < lake_head_m
         {
             let surface_m = f64::from(level) * c.voxel_m;
-            world.config.reentry_floor_head_m = (table_m - RING_STREAM_FLOOR_M).max(0.0);
+            world.config.reentry_floor_head_m = (table_m - w.ring_stream_floor_m).max(0.0);
             world.config.lake_drain_m2_per_s =
                 c.reentry_m3_per_s / (surface_m - table_m).max(c.voxel_m);
         }
@@ -520,7 +509,7 @@ fn seal_lake_bed(world: &mut World, b: &Basin, budget: f64) -> f64 {
         let mut below = i;
         while below >= plane {
             below -= plane;
-            let cap = world.material[below].pore_capacity();
+            let cap = world.config.materials.pore_capacity(world.material[below]);
             if cap <= 0.0 {
                 continue;
             }
@@ -811,19 +800,19 @@ fn wet_soil(world: &mut World, head_m: f64, budget: f64) -> f64 {
     let unit = c.voxel_volume();
     let target = |world: &World, i: usize| -> f64 {
         let m = world.material[i];
-        if m.pore_capacity() <= 0.0 {
+        if c.materials.pore_capacity(m) <= 0.0 {
             return 0.0;
         }
         let top = f64::from(c.coords(i).1 + 1) * c.voxel_m;
         if top <= head_m {
             1.0
         } else {
-            m.field_capacity()
+            c.materials.field_capacity(m)
         }
     };
     let demand: f64 = (0..c.cells())
         .map(|i| {
-            (target(world, i) - world.pore[i]).max(0.0) * world.material[i].pore_capacity() * unit
+            (target(world, i) - world.pore[i]).max(0.0) * c.materials.pore_capacity(world.material[i]) * unit
         })
         .sum();
     if demand <= 0.0 {
@@ -835,7 +824,7 @@ fn wet_soil(world: &mut World, head_m: f64, budget: f64) -> f64 {
         let add = (target(world, i) - world.pore[i]).max(0.0) * scale;
         if add > 0.0 {
             world.pore[i] += add;
-            used += add * world.material[i].pore_capacity() * unit;
+            used += add * c.materials.pore_capacity(world.material[i]) * unit;
         }
     }
     // A scaled-down field took the whole budget. The sum can come back a few 1e-15 short
@@ -1130,9 +1119,9 @@ mod tests {
         // The sky: RH 0.6 at the temperature the world starts at, not the recipe's share
         // plus whatever the ground refused (which founded `default` at RH 15–22).
         assert!(
-            (world.rh() - FOUNDING_RH).abs() < 1e-9,
+            (world.rh() - c.climate.founding_rh).abs() < 1e-9,
             "the founding sky stands at RH {}: {}",
-            FOUNDING_RH,
+            c.climate.founding_rh,
             world.rh()
         );
         // The ground takes what it did, and the inventory is a ceiling: the spare the
@@ -1442,6 +1431,7 @@ mod tests {
                 min_tier_pools: 0,
                 reentry_from_aquifer: false,
                 lake_drain_m2_per_s: 0.0,
+                ..Water::DRY
             },
         );
         let before = lake(&w).level_y;

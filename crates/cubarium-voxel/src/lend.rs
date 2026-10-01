@@ -151,9 +151,9 @@ fn porous_runs(world: &World, plane: usize) -> Vec<Vec<(u32, u32)>> {
             let mut runs = Vec::new();
             let mut c = 0;
             while c < row.len() {
-                if row[c].pore_capacity() > 0.0 {
+                if world.config.materials.pore_capacity(row[c]) > 0.0 {
                     let start = c;
-                    while c < row.len() && row[c].pore_capacity() > 0.0 {
+                    while c < row.len() && world.config.materials.pore_capacity(row[c]) > 0.0 {
                         c += 1;
                     }
                     runs.push((start as u32, (c - start) as u32));

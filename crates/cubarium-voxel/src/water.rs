@@ -237,7 +237,7 @@ fn voxel(w: &World) -> f64 {
 /// per area (`rain_m_per_s · DT · cell_area()`) and are untouched.
 #[inline]
 fn pore_flux_m3(m: Material, c: &Config, dt: f64) -> f64 {
-    m.permeability_per_s() * dt * m.pore_capacity() * (c.cell_area() * REFERENCE_VOXEL_M)
+    c.materials.permeability_per_s(m) * dt * c.materials.pore_capacity(m) * (c.cell_area() * REFERENCE_VOXEL_M)
 }
 
 fn free_m3(w: &World, i: usize) -> f64 {
@@ -257,12 +257,12 @@ fn free_room_m3(w: &World, i: usize) -> f64 {
 }
 
 fn pore_m3(w: &World, i: usize) -> f64 {
-    w.pore[i] * voxel(w) * w.material[i].pore_capacity()
+    w.pore[i] * voxel(w) * w.config.materials.pore_capacity(w.material[i])
 }
 
 #[cfg(test)]
 fn pore_room_m3(w: &World, i: usize) -> f64 {
-    let cap = w.material[i].pore_capacity();
+    let cap = w.config.materials.pore_capacity(w.material[i]);
     if cap <= 0.0 {
         0.0
     } else {
@@ -294,7 +294,7 @@ fn take_free(w: &mut World, i: usize, vol: f64) -> f64 {
 }
 
 fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
-    let cap = w.material[i].pore_capacity();
+    let cap = w.config.materials.pore_capacity(w.material[i]);
     if vol <= 0.0 || cap <= 0.0 {
         return 0.0;
     }
@@ -306,7 +306,7 @@ fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
 }
 
 fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
-    let cap = w.material[i].pore_capacity();
+    let cap = w.config.materials.pore_capacity(w.material[i]);
     if vol <= 0.0 || cap <= 0.0 {
         return 0.0;
     }
@@ -322,12 +322,12 @@ fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
 /// drain's own `excess > 0` test, so the set and the phase can never disagree about a cell.
 pub(crate) fn drains(w: &World, i: usize) -> bool {
     let m = w.material[i];
-    let cap = m.pore_capacity();
-    if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
+    let cap = w.config.materials.pore_capacity(m);
+    if cap <= 0.0 || w.pore[i] <= 0.0 || w.config.materials.permeability_per_s(m) <= 0.0 {
         return false;
     }
     let unit = cap * w.config.voxel_volume();
-    pore_m3(w, i) - m.field_capacity() * unit > 0.0
+    pore_m3(w, i) - w.config.materials.field_capacity(m) * unit > 0.0
 }
 
 /// Hand water a loss phase took out of the in-world stores to wherever this world's
@@ -772,9 +772,9 @@ fn grounds(c: &Config, dt: f64) -> [Ground; 4] {
     MATERIALS.map(|m| Ground {
         solid: m.is_solid(),
         bedrock: m == Material::Bedrock,
-        capacity: m.pore_capacity(),
-        permeable: m.permeability_per_s() > 0.0,
-        field_capacity: m.field_capacity(),
+        capacity: c.materials.pore_capacity(m),
+        permeable: c.materials.permeability_per_s(m) > 0.0,
+        field_capacity: c.materials.field_capacity(m),
         flux: pore_flux_m3(m, c, dt),
     })
 }
@@ -2152,13 +2152,7 @@ fn stream_m3_per_s(w: &World) -> f64 {
     w.config.reentry_m3_per_s * (1.0 + w.weather.swell.max(0.0))
 }
 
-/// Fraction of a brim-full sill cell a weir passes in one tick, falling off as the head
-/// over the crest to the power of one and a half.
-///
-/// A full cell empties in about twenty ticks; a cell a tenth full passes a sixth of one
-/// per cent of itself, a trickle rather than a siphon. Scale-free on purpose: it is a share
-/// of the cell, so it means the same on a 0.125 m ring and a 0.25 m one.
-const OUTLET_WEIR: f64 = 0.05;
+// The weir's share of a brim-full sill cell per tick is `Config::outlet_weir_per_tick`.
 
 /// **The lake's floor drain**: a lake joined to the aquifer through its bed, at every
 /// cell of [`World::lake_drain`]. Water passes whichever way the heads say — down into the
@@ -2277,7 +2271,7 @@ pub fn outlet(w: &mut World) {
         // which is the whole contract.
         let head = w.free[i].clamp(0.0, 1.0);
         // Per tick, so a coarse training step passes `water_every` ticks' worth.
-        let weir = OUTLET_WEIR
+        let weir = w.config.outlet_weir_per_tick
             * head
             * head.sqrt()
             * w.config.voxel_volume()
@@ -3549,12 +3543,12 @@ mod drain_set_tests {
                     continue;
                 }
                 let m = w.material[i];
-                let cap = m.pore_capacity();
-                if cap <= 0.0 || w.pore[i] <= 0.0 || m.permeability_per_s() <= 0.0 {
+                let cap = w.config.materials.pore_capacity(m);
+                if cap <= 0.0 || w.pore[i] <= 0.0 || w.config.materials.permeability_per_s(m) <= 0.0 {
                     continue;
                 }
                 let unit = cap * c.voxel_volume();
-                let excess = pore_m3(w, i) - m.field_capacity() * unit;
+                let excess = pore_m3(w, i) - w.config.materials.field_capacity(m) * unit;
                 if excess <= 0.0 {
                     continue;
                 }
@@ -4667,7 +4661,7 @@ mod units_tests {
 
     /// What the solver computed before package 1c: a fraction of a cell per tick.
     fn pre_1c(m: Material, c: &Config, dt: f64) -> f64 {
-        m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume()
+        c.materials.permeability_per_s(m) * dt * c.materials.pore_capacity(m) * c.voxel_volume()
     }
 
     fn grid(voxel_m: f64) -> Config {
@@ -4712,7 +4706,7 @@ mod units_tests {
             let c = grid(voxel_m);
             for m in [Material::Rock, Material::Soil] {
                 let got = pore_flux_m3(m, &c, DT);
-                let want = m.conductivity_m_per_s() * c.cell_area() * DT;
+                let want = c.materials.conductivity_m_per_s(m) * c.cell_area() * DT;
                 assert!(
                     (got - want).abs() <= 2.0 * f64::EPSILON * want,
                     "{m:?} on {voxel_m} m cells: {got} against K·A·dt = {want}"
@@ -4781,7 +4775,7 @@ mod pool_tests {
         let v = w.config.voxel_volume();
         let free = w.free.iter().sum::<f64>() * v;
         let pore = (0..w.config.cells())
-            .map(|i| w.pore[i] * w.material[i].pore_capacity())
+            .map(|i| w.pore[i] * w.config.materials.pore_capacity(w.material[i]))
             .sum::<f64>()
             * v;
         [free, pore, w.aquifer_m3]
@@ -4794,7 +4788,7 @@ mod pool_tests {
             .filter(|&i| !w.material[i].is_solid() && w.free[i] > 0.0)
             .collect();
         let damp: Vec<usize> = (0..n)
-            .filter(|&i| w.material[i].pore_capacity() > 0.0 && w.pore[i] > 0.0)
+            .filter(|&i| w.config.materials.pore_capacity(w.material[i]) > 0.0 && w.pore[i] > 0.0)
             .collect();
         let drainable: Vec<usize> = (0..n).filter(|&i| drains(w, i)).collect();
         assert_eq!(w.wet.members(), wet, "wet set {when}");

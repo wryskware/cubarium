@@ -634,7 +634,7 @@ pub struct Water {
     /// **River re-entry**, cubic metres per second: under the closed budget the water the
     /// outlet sends aloft comes back not only as showers but as a stream emerging at the
     /// spring cell, drawn from the atmosphere store while it stands above
-    /// RH [`crate::weather::STREAM_FLOOR_RH`]. The ring is a slice of a wider world; the river that leaves at the bottom
+    /// RH `Climate::stream_floor_rh`. The ring is a slice of a wider world; the river that leaves at the bottom
     /// lake re-enters at the top. Zero is showers only, the 2026-09-20 route B cycle.
     /// Wrysk's decision, 2026-09-21.
     pub reentry_m3_per_s: f64,
@@ -646,6 +646,26 @@ pub struct Water {
     /// The lake is joined to the aquifer through its floor:
     /// [`crate::Config::lake_drain_m2_per_s`]. Zero is no drain.
     pub lake_drain_m2_per_s: f64,
+    /// Most of the inventory left after the lake that may go into the water table, `0..=1`.
+    /// The table has to reach the lake floor for the lake to hold, and on these rings that
+    /// is the largest single charge in the budget; this keeps it from taking the pore and
+    /// the other pools with it.
+    pub lake_table_share: f64,
+    /// How far under its founding water table a ring's aquifer-fed stream may draw it,
+    /// metres, when the table stands below the lake (WX1b).
+    pub ring_stream_floor_m: f64,
+    /// How far above the lowest standing water a body can sit and still be *the lake*,
+    /// voxels. The lake's bed is stepped, so its sheet breaks into bodies a voxel or two
+    /// apart as it settles; they are one water feature to look at. Anything higher is a
+    /// tier's pool.
+    pub lake_floor_band: u32,
+    /// How full a void cell must be to count as **pool** water rather than runoff, as a
+    /// fraction of the cell. Every surface a stream has crossed carries a film of a few
+    /// thousandths of a cell, and a film is not a pond.
+    pub pool_min_fill: f64,
+    /// Visible surface cells a pool needs before the host's seed gate counts it (four is
+    /// a quarter of a square metre at 0.25 m: under that a pool is a glint).
+    pub min_pool_cells: u32,
 }
 
 impl Default for Water {
@@ -672,6 +692,11 @@ impl Water {
         min_tier_pools: 0,
         reentry_from_aquifer: false,
         lake_drain_m2_per_s: 0.0,
+        lake_table_share: 0.85,
+        ring_stream_floor_m: 0.25,
+        lake_floor_band: 2,
+        pool_min_fill: 0.05,
+        min_pool_cells: 4,
     };
 
     /// The staged presets' inventory: half a metre of water over the footprint, six per
@@ -726,6 +751,11 @@ impl Water {
         // A hundred times the stream: 1 L/s passes the floor at a centimetre of head
         // between the lake and the table, so the lake holds its level while it runs.
         lake_drain_m2_per_s: 0.1,
+        lake_table_share: 0.85,
+        ring_stream_floor_m: 0.25,
+        lake_floor_band: 2,
+        pool_min_fill: 0.05,
+        min_pool_cells: 4,
     };
 
     /// What a **hand-built fixture** is charged with: the cycle and the rates, at the
