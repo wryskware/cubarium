@@ -233,6 +233,103 @@ def rosette(x, y, z0, z1, rr, n, mat, phase=0.0, w=0.03):
         strap((x + dx * rr * 0.12, y + dy * rr * 0.12, z0), (x + dx * rr, y + dy * rr, z1), w, mat)
 
 
+# --- model-pass helpers (2026-10-01): tubes, lofted ribbons, solids of revolution ------
+
+def tube(pts, r0, r1, mat, seg=8):
+    """A smooth tapering tube through a polyline: cylinders joined by spheres."""
+    n = len(pts) - 1
+    for k in range(n):
+        cyl(pts[k], pts[k + 1], r0 + (r1 - r0) * k / n, r0 + (r1 - r0) * (k + 1) / n, mat=mat, seg=seg)
+        if k:
+            rr = r0 + (r1 - r0) * k / n
+            ell(pts[k], (rr * 0.95, rr * 0.95, rr * 0.95), mat)
+
+
+def bezier(p0, p1, p2, n):
+    """n points along a quadratic Bezier."""
+    p0, p1, p2 = Vector(p0), Vector(p1), Vector(p2)
+    return [p0 * (1 - t) ** 2 + p1 * 2 * t * (1 - t) + p2 * t * t for t in (k / (n - 1) for k in range(n))]
+
+
+def _closed(bm, rings, cap=True):
+    """Quads between consecutive rings (equal lengths), capped at both ends."""
+    m = len(rings[0])
+    for a, b in zip(rings, rings[1:]):
+        for k in range(m):
+            bm.faces.new((a[k], a[(k + 1) % m], b[(k + 1) % m], b[k]))
+    if cap:
+        bm.faces.new(list(reversed(rings[0])))
+        bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+
+def ribbon(pts, widths, mat, th=0.012, up=(0, 0, 1)):
+    """A flat leaf blade along a path: width widths[k] at pts[k], lying across `up`."""
+    pts = [Vector(p) for p in pts]
+    bm = bmesh.new()
+    rings = []
+    for k, p in enumerate(pts):
+        t = (pts[min(k + 1, len(pts) - 1)] - pts[max(k - 1, 0)]).normalized()
+        side = t.cross(Vector(up))
+        if side.length < 1e-6:
+            side = t.cross(Vector((1, 0, 0)))
+        side.normalize()
+        nrm = side.cross(t).normalized()
+        w = max(widths[k], 0.004) / 2
+        rings.append([bm.verts.new(p + side * sx * w + nrm * sz * th / 2)
+                      for sx, sz in ((1, 1), (-1, 1), (-1, -1), (1, -1))])
+    _closed(bm, rings)
+    return mk("ribbon", bm, mat)
+
+
+def revolve(c, prof, mat, seg=24, rot=None):
+    """A closed solid of revolution about the vertical through c: prof is the outline as
+    (radius, height) pairs, walked as a closed polygon (radii > 0)."""
+    c = Vector(c)
+    bm = bmesh.new()
+    rings = []
+    for k in range(seg):
+        a = 2 * math.pi * k / seg
+        rings.append([bm.verts.new(Vector((rr * math.cos(a), rr * math.sin(a), zz))) for rr, zz in prof])
+    m = len(prof)
+    for k in range(seg):
+        a, b = rings[k], rings[(k + 1) % seg]
+        for j in range(m):
+            bm.faces.new((a[j], a[(j + 1) % m], b[(j + 1) % m], b[j]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bmesh.ops.transform(bm, matrix=Matrix.Translation(c) @ (rot or Matrix.Identity(4)), verts=bm.verts)
+    return mk("revolve", bm, mat)
+
+
+def join(objs, name="joined"):
+    """Merge parts of one material into one object (the bake tests each object once)."""
+    objs = [o for o in objs if o is not None]
+    if not objs:
+        return None
+    mat = objs[0].active_material.name
+    bm = bmesh.new()
+    for ob in objs:
+        bm.from_mesh(ob.data)
+        ORG.remove(ob)
+        me = ob.data
+        bpy.data.objects.remove(ob, do_unlink=True)
+        bpy.data.meshes.remove(me)
+    return mk(name, bm, mat)
+
+
+class Collect:
+    """`with Collect() as parts:` gathers every object built inside the block."""
+
+    def __enter__(self):
+        self.n = len(ORG)
+        self.objs = []
+        return self.objs
+
+    def __exit__(self, *exc):
+        self.objs.extend(ORG[self.n:])
+        return False
+
+
 # --- plants ----------------------------------------------------------------------
 
 def springturf(x, y, h, r, layers, i, rng):
@@ -298,55 +395,166 @@ def bloomcrown(x, y, h, r, layers, i, rng):
             ell((x, y, za + 0.55 * (zb - za)), (0.07 * r + 0.02, 0.07 * r + 0.02, 0.05), "warm")  # bloom
 
 
-def frond_tier(x, y, za, zb, rr, n, phase, up=False):
-    for dx, dy in ring_dirs(n, phase):
-        mid = (x + dx * rr * 0.55, y + dy * rr * 0.55, zb + (zb - za) * 0.15)
-        end = (x + dx * rr, y + dy * rr, zb if up else za)
-        strap((x, y, zb), mid, 0.045, "p1")
-        strap(mid, end, 0.04, "p1")
+def frond(x, y, ang, zb, za, rr, top=False, n=14):
+    """One umbrellafrond frond (artbook pick, 2026-09-24): a pale rib (p2) rising from
+    the node and arching down to its tip, lacy teal pinnae (p1) along both sides."""
+    dx, dy = math.cos(ang), math.sin(ang)
+    drop = zb - za
+    if top:  # the crowning tier rises before it curls over
+        ctrl = (x + dx * rr * 0.35, y + dy * rr * 0.35, zb + drop * 0.9)
+    else:
+        ctrl = (x + dx * rr * 0.55, y + dy * rr * 0.55, zb + drop * 0.35)
+    path = bezier((x, y, zb), ctrl, (x + dx * rr, y + dy * rr, za), n)
+    tube(path[::2] + ([path[-1]] if (n - 1) % 2 else []), 0.016, 0.006, "p2", seg=6)
+    with Collect() as blade:
+        ribbon(path, [0.07 * math.sin(math.pi * (0.15 + 0.8 * k / (n - 1))) + 0.02 for k in range(n)], "p1")
+        side = Vector((-dy, dx, 0))
+        for k in range(2, n - 1):
+            s = k / (n - 1)
+            q = path[k]
+            t = (path[k + 1] - path[k - 1]).normalized()
+            ln = rr * (0.38 * (1 - s) + 0.09)
+            for sg in (-1, 1):
+                d = (t * 0.55 + side * sg).normalized()
+                end = q + d * ln - Vector((0, 0, ln * 0.35))
+                mid = q + d * ln * 0.5 - Vector((0, 0, ln * 0.08))
+                ribbon([q, mid, end], [0.045, 0.04, 0.012], "p1", th=0.01)
+    join(blade, "frond")
 
 
 def umbrellafrond(x, y, h, r, layers, i, rng):
-    if i == 0:
-        frond_tier(x, y, 0, h, r, 6, rng.random())
+    """Artbook pick (umbrellafrond.png): a straight segmented violet stem with collars and
+    a flared foot; three regular tiers of eight straight lacy teal fronds with pale ribs,
+    each tier a node with a teal bud, widest at the bottom. Tiers sit in the profile's
+    foliage bands (node at the band top, frond tips at its bottom)."""
+    tiers = [l for l in layers if l[0] in (F, MAT)]
+    phase = rng.uniform(0, math.pi / 8)
+    if i == 0:  # seedling: one low tier of fronds on a stub
+        cyl((x, y, 0), (x, y, h * 0.8), 0.012, mat="violet", seg=6)
+        for k, (dx, dy) in enumerate(ring_dirs(6, phase)):
+            frond(x, y, math.atan2(dy, dx), h * 0.8, 0.0, r, n=8)
         return
-    tiers = [l for l in layers if l[0] == F]
-    for kind, a, b, rf, share, p in layers:
-        if kind == T:
-            cyl((x, y, 0), (x, y, b * h), max(rf * r * 0.5, 0.02), mat="violet")
-    top = tiers[-1][2] * h
-    cyl((x, y, 0), (x, y, top), max(r * 0.05, 0.015), mat="violet")
+    top_node = (tiers[-1][1] + 0.3 * (tiers[-1][2] - tiers[-1][1])) * h
+    rs = max(0.03 * h, 0.02)
+    # stem: a hexagonal shaft tapering a little, a flared stepped foot
+    cyl((x, y, 0), (x, y, top_node), rs, rs * 0.8, mat="violet", seg=6)
+    cyl((x, y, 0), (x, y, 0.05 * h), rs * 2.4, rs * 2.0, mat="plum", seg=6)
+    cyl((x, y, 0.05 * h), (x, y, 0.1 * h), rs * 1.8, rs * 1.5, mat="plum", seg=6)
+    nodes = []
     for k, (kind, a, b, rf, share, p) in enumerate(tiers):
-        frond_tier(x, y, a * h, b * h, rf * r, 8 - k, rng.random(), up=(k == len(tiers) - 1))
+        last = k == len(tiers) - 1
+        zb = top_node if last else b * h
+        nodes.append(zb)
+        # the collar under each node, a node bud, and the tier's fronds
+        rk = rs * (1 - 0.2 * zb / h)
+        cyl((x, y, zb - 0.05 * h), (x, y, zb - 0.01 * h), rk * 1.45, rk * 1.2, mat="plum", seg=6)
+        ell((x, y, zb + 0.012), (rk * 0.9, rk * 0.9, 0.025), "p1")
+        for dx, dy in ring_dirs(8, phase + k * math.pi / 8):
+            frond(x, y, math.atan2(dy, dx), zb, a * h, rf * r, top=last)
+    # collars between the tiers (the pick's segment joints)
+    prev = 0.1 * h
+    for zb in nodes:
+        zm = (prev + zb - 0.05 * h) / 2
+        if zm - prev > 0.08 * h:
+            rk = rs * (1 - 0.2 * zm / h)
+            cyl((x, y, zm - 0.015 * h), (x, y, zm + 0.015 * h), rk * 1.3, rk * 1.15, mat="plum", seg=6)
+        prev = zb
+
+
+# Vaulttree shelves from the artbook pick (vaulttree.png, 1024 x 1536): centre x and top
+# y of each canopy shelf in pick pixels, and its half-width. Read off the image.
+VAULT_SHELVES = [
+    (620, 15, 190), (790, 60, 170), (230, 90, 140), (160, 150, 105), (650, 205, 55),
+    (330, 220, 60), (870, 270, 115), (270, 300, 75), (180, 380, 85), (640, 500, 70),
+    (210, 520, 180), (800, 540, 160),
+]
+VAULT_AXIS_PX, VAULT_HALF_PX, VAULT_LOW_PX = 512.0, 475.0, 540.0
+
+
+def vault_shelf(c, rs, rng, drape_to=None):
+    """One canopy shelf: a domed dark-teal cap (p1) over a drooping mint rim (p2), a fan
+    of fine twigs under it, and cyan tendril clusters (teal, the drape) hanging from it."""
+    cx, cy, ztop = c
+    d = rs * 0.42  # dome rise
+    revolve((cx, cy, ztop), [(0.02, 0.0), (rs * 0.55, -d * 0.3), (rs * 0.88, -d * 0.8), (rs * 0.86, -d * 0.8 - 0.03),
+                             (rs * 0.5, -d * 0.3 - 0.03), (0.02, -0.035)], "p1", seg=20)
+    revolve((cx, cy, ztop), [(rs * 0.86, -d * 0.78), (rs * 1.0, -d * 1.1), (rs * 0.97, -d * 1.1 - 0.03),
+                             (rs * 0.84, -d * 0.8 - 0.03)], "p2", seg=20)
+    with Collect() as twigs:
+        for dx, dy in ring_dirs(4, rng.random() * 6.3):
+            cyl((cx, cy, ztop - d * 1.4 - 0.04), (cx + dx * rs * 0.6, cy + dy * rs * 0.6, ztop - d * 0.7), 0.012,
+                0.006, mat="violet", seg=5)
+    join(twigs, "twigs")
+    if drape_to is None:
+        return
+    with Collect() as drapes:
+        for _ in range(rng.randint(1, 2)):
+            a, dd = rng.uniform(0, 2 * math.pi), rs * rng.uniform(0.35, 0.9)
+            bx, by = cx + math.cos(a) * dd, cy + math.sin(a) * dd
+            z1 = rng.uniform(*drape_to)
+            for _ in range(rng.randint(2, 4)):
+                ox, oy = rng.uniform(-0.02, 0.02), rng.uniform(-0.02, 0.02)
+                cyl((bx + ox, by + oy, ztop - d * 0.8), (bx + ox, by + oy, z1 + rng.uniform(0, 0.12)), 0.006,
+                    mat="teal", seg=4)
+    join(drapes, "drapes")
 
 
 def vaulttree(x, y, h, r, layers, i, rng):
-    if i == 0:
-        rosette(x, y, 0, h, r, 6, "p1", phase=rng.random())
+    """Artbook pick (vaulttree.png): an asymmetric leaning trunk of twisted violet plates
+    with one dark-teal plate, a leader and arching violet limbs, a canopy of separate
+    domed dark-teal shelves with mint rims at many heights (the pick's shelves, squeezed
+    into the profile's foliage band), long fine cyan tendrils (the drape) hanging from
+    the shelves down to the drape band."""
+    if i == 0:  # seedling: one tiny shelf on a stub
+        cyl((x, y, 0), (x, y, h * 0.7), 0.012, mat="violet", seg=5)
+        vault_shelf((x, y, h), r * 0.7, rng)
         return
-    trunk = layers[0]
-    cyl((x, y, 0), (x, y, trunk[2] * h), max(trunk[3] * r * 0.5, 0.03), max(trunk[3] * r * 0.35, 0.025), mat="plum")
-    if i == 1:
-        (_, a, b, _, _, _) = layers[1]
-        cyl((x, y, trunk[2] * h), (x, y, b * h * 0.95), 0.03, mat="plum")
-        for dx, dy in ring_dirs(3, rng.random()):
-            ell((x + dx * r * 0.5, y + dy * r * 0.5, (a + 0.4 * (b - a)) * h), (0.42 * r, 0.42 * r, 0.2 * (b - a) * h), "p1")
-        ell((x, y, (a + 0.8 * (b - a)) * h), (0.35 * r, 0.35 * r, 0.15 * (b - a) * h), "p1")
-        return
-    # adult: arching limbs with sky between, lobes at their ends, drapes under the lobes
-    z0, zl = 0.5 * h, 0.7 * h
-    top_lobe = (x, y, 0.9 * h)
-    cyl((x, y, z0), top_lobe, 0.035, mat="plum")
-    ell(top_lobe, (0.3 * r, 0.3 * r, 0.05 * h), "p1")
-    for dx, dy in ring_dirs(5, rng.random()):
-        elbow = (x + dx * r * 0.6, y + dy * r * 0.6, zl)
-        tip = (x + dx * r * 0.68, y + dy * r * 0.68, 0.82 * h)
-        cyl((x, y, z0), elbow, 0.045, 0.03, mat="plum")
-        cyl(elbow, tip, 0.03, 0.02, mat="plum")
-        ell(tip, (0.32 * r, 0.32 * r, 0.06 * h), "p1")
-        for k in range(3):
-            ax, ay = tip[0] + rng.uniform(-0.15, 0.15) * r, tip[1] + rng.uniform(-0.15, 0.15) * r
-            cyl((ax, ay, 0.72 * h), (ax, ay, rng.uniform(0.35, 0.45) * h), 0.008, mat="teal", seg=4)
+    trunk = next(l for l in layers if l[0] == T)
+    fol = next(l for l in layers if l[0] == F)
+    drape = next((l for l in layers if l[0] == D), None)
+    zs = trunk[2] * h  # where the trunk splits into limbs
+    rt = trunk[3] * r  # trunk radius: the profile's trunk radius
+    lean_a = rng.uniform(-0.6, 0.6)
+    lean = Vector((math.cos(lean_a), math.sin(lean_a), 0)) * 0.07 * h
+    axis = lambda z: Vector((x, y, z)) + lean * (z / zs) ** 1.4  # noqa: E731
+    # trunk: three twisted plates round a core, flaring at the foot
+    nz = 9
+    for s, (mat, ph) in enumerate((("plum", 3.4), ("violet", 1.4), ("detritus", -0.7))):
+        pts = []
+        for k in range(nz):
+            z = zs * k / (nz - 1)
+            foot = max(0.0, 1 - z / (0.18 * h))
+            off = rt * (0.45 + 0.9 * foot)
+            a = ph + 1.4 * z / zs
+            pts.append(axis(z) + Vector((math.cos(a), math.sin(a), 0)) * off)
+        tube(pts, rt * (0.75 if mat != "detritus" else 0.6), rt * 0.45, mat, seg=8)
+    tube([axis(zs * k / 4) for k in range(5)], rt * 0.8, rt * 0.55, "violet", seg=8)
+    top = axis(zs)
+    # canopy: the pick's shelves mapped into the foliage band (all of them for the adult,
+    # the four highest for a juvenile)
+    za, zb = fol[1] * h, fol[2] * h
+    shelves = VAULT_SHELVES if drape is not None else VAULT_SHELVES[:4]
+    for k, (px, py, ph) in enumerate(shelves):
+        f = min(1.0, (py - 15) / (VAULT_LOW_PX - 15))
+        rs = r * ph / VAULT_HALF_PX * (fol[3])
+        ztop = zb - f * (zb - za) * 0.75
+        ox = (px - VAULT_AXIS_PX) / VAULT_HALF_PX * r
+        oy = rng.uniform(-0.45, 0.45) * r
+        ex = math.hypot(ox, oy) + rs - r
+        if ex > 0:  # keep each shelf inside the crown radius
+            s = max(0.0, (math.hypot(ox, oy) - ex) / max(math.hypot(ox, oy), 1e-6))
+            ox, oy = ox * s, oy * s
+        c = Vector((x + ox, y + oy, ztop))
+        # limb: from the leader, a little below the shelf, arching out and up to its base
+        base = c - Vector((0, 0, rs * 0.4 + 0.06))
+        zo = max(zs, min(base.z - 0.15 * h, zs + 0.6 * (base.z - zs)))
+        o = top + Vector((0, 0, zo - zs))
+        mid = o.lerp(base, 0.55) + Vector((0, 0, 0.05 * h))
+        tube(bezier(o, mid, base, 5), 0.06 if k < 2 or ph > 150 else 0.045, 0.02, "violet", seg=6)
+        vault_shelf(c, rs, rng, None if drape is None else (drape[1] * h, drape[2] * h))
+    # the leader to the crowning shelf
+    tube([top, top + Vector((0, 0, (zb - zs) * 0.5)), Vector((x + (VAULT_SHELVES[0][0] - VAULT_AXIS_PX)
+          / VAULT_HALF_PX * r * 0.5, y, zb - 0.1))], rt * 0.55, 0.03, "violet", seg=6)
 
 
 def lanternberry(x, y, h, r, layers, i, rng):

@@ -72,7 +72,8 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
     let r = recipe(species);
     match tag {
         Tag::Trunk => {
-            let bark = lerp(r.bark.0, r.bark.1, t);
+            let (base, top) = r.part(material).unwrap_or(r.bark);
+            let bark = lerp(base, top, t);
             Swatch {
                 shadow: bark,
                 body: bark,
@@ -89,7 +90,10 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
             } else {
                 0.0
             };
-            let body = lerp(r.leaf.0, r.leaf.1, (t + bias).clamp(0.0, 1.0));
+            let body = match r.part(material) {
+                Some((base, tip)) => lerp(base, tip, t),
+                None => lerp(r.leaf.0, r.leaf.1, (t + bias).clamp(0.0, 1.0)),
+            };
             let layer = match tag {
                 Tag::Foliage(i) => i,
                 _ => 0,
@@ -101,7 +105,7 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
             shaded(body, r.leaf_glint)
         }
         Tag::Drape(_) => {
-            let (top, bottom) = r.drape.unwrap_or(r.leaf);
+            let (top, bottom) = r.part(material).or(r.drape).unwrap_or(r.leaf);
             // A drape hangs: its lowest cells are the tips.
             shaded(lerp(bottom, top, t), r.leaf_glint)
         }
@@ -199,6 +203,10 @@ struct Recipe {
     core: Option<(u8, u8, Rgb)>,
     /// Foliage glint, if not the default lift toward white.
     leaf_glint: Option<Rgb>,
+    /// Per-part ramps sampled from the artbook pick (model pass, 2026-10-01): a trunk,
+    /// foliage or drape cell the bake drew in this palette material paints this
+    /// `(base, tip)` ramp instead of `bark`, `leaf` or `drape`.
+    parts: &'static [(&'static str, Rgb, Rgb)],
     /// Drape, `(top, bottom tip)`; `None` uses the leaf ramp.
     drape: Option<(Rgb, Rgb)>,
     /// A ripe warm accent, `(body, glint)`.
@@ -207,12 +215,24 @@ struct Recipe {
     unripe: Rgb,
 }
 
+impl Recipe {
+    /// The pick's ramp for a bake material, if this species has one.
+    fn part(&self, material: u8) -> Option<(Rgb, Rgb)> {
+        let name = model::PALETTE.get(usize::from(material))?.0;
+        self.parts
+            .iter()
+            .find(|(n, _, _)| *n == name)
+            .map(|&(_, a, b)| (a, b))
+    }
+}
+
 fn recipe(species: Species) -> Recipe {
     let plain = Recipe {
         bark: (0x3A_1A5A, 0x5A_2E7A),
         leaf: (0x1E_2798, 0x42_C5F8),
         core: None,
         leaf_glint: None,
+        parts: &[],
         drape: None,
         ripe: (0xFF_9B50, 0xFF_E8A8),
         unripe: 0x4A_2A6A,
@@ -228,11 +248,18 @@ fn recipe(species: Species) -> Recipe {
             unripe: BLOOMCROWN_CORE,
             ..plain
         },
-        // Sea-glass tiers: deep teal at the lowest tier to aquamarine at the top.
+        // Sampled 2026-10-01 from the artbook pick (umbrellafrond.png): a violet stem
+        // with darker collars, teal fronds with pale mint ribs.
         Species::Umbrellafrond => Recipe {
-            bark: (0x24_1650, 0x3E_2A7E),
-            leaf: (0x0A_4A5E, 0x46_F2D2),
-            leaf_glint: Some(0xC8_FFF2),
+            bark: (0x4D_1378, 0x78_23B4),
+            leaf: (0x00_696F, 0x02_9894),
+            leaf_glint: Some(0xDC_FDEE),
+            parts: &[
+                ("violet", 0x4D_1378, 0x78_23B4),
+                ("plum", 0x51_176D, 0x7E_2C9D),
+                ("p1", 0x00_696F, 0x02_9894),
+                ("p2", 0x4D_E0C4, 0xDC_FDEE),
+            ],
             ..plain
         },
         // Mint tufts.
@@ -260,12 +287,21 @@ fn recipe(species: Species) -> Recipe {
             leaf_glint: Some(0xF0_FFF8),
             ..plain
         },
-        // The old giant: emerald lobes over plum bark, curtains of glowing cyan drape.
+        // Sampled 2026-10-01 from the artbook pick (vaulttree.png): lit and mid violet
+        // trunk plates and one dark-teal plate, violet limbs; dark-teal shelves with mint
+        // rims; cyan tendrils, brightest at their tips.
         Species::Vaulttree => Recipe {
-            bark: (0x33_1242, 0x5A_2670),
-            leaf: (0x0B_4A3C, 0x5C_E68E),
-            leaf_glint: Some(0xD6_FFE2),
-            drape: Some((0x1E_8AB8, 0x8C_F6FF)),
+            bark: (0x5F_36A9, 0x4A_2D8E),
+            leaf: (0x01_4C4D, 0x01_696E),
+            leaf_glint: Some(0x96_F9DC),
+            drape: Some((0x01_97B1, 0x00_CEEC)),
+            parts: &[
+                ("plum", 0x7B_46CA, 0x6C_3EB9),
+                ("violet", 0x5F_36A9, 0x4A_2D8E),
+                ("detritus", 0x01_261F, 0x01_261F),
+                ("p1", 0x01_4C4D, 0x01_696E),
+                ("p2", 0x50_C5A9, 0x96_F9DC),
+            ],
             ..plain
         },
         // Acid-lime leaves on plum stems, glowing orange lanterns.
