@@ -1,5 +1,5 @@
 //! The audit round's mass scale (`design/handoffs/voxel-audit-round-2026-09-28.md` §2,
-//! audit §1.4): `founder.mass_scale` multiplies the nine absolute animal quantities and
+//! audit §1.4): `founder.mass_scale` multiplies the eight absolute animal quantities and
 //! nothing else; the heuristic parker; the opt-in mass-relative Self senses. Each at most
 //! 200 ticks.
 
