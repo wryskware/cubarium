@@ -131,6 +131,7 @@ tail channel clearly visible and the capture arms poised around it.
 Retain the accepted v3 six-limbed runner rather than reopening the A/C alternatives
 below. Violet countershading, pale belly/head, soft rosettes rather than bands,
 cyan jaw accent and magenta sensors follow the selected colourway.
+Shoulder height follows the pick, ~0.95 m (Wrysk, 2026-10-01).
 
 > A, leaning. needs some rework and reimagining. perhaps hexapod, or somewhat raptorial like C? not sure i like the smooth body.
 

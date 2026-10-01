@@ -98,7 +98,7 @@ ANIMAL_ROLE = {slot: "accent" for slot in A.ACCENTS}
 # The unsimulated animals, baked as specimens: one adult model each, manifest key
 # `specimens`, at the builders' reference sizes (`animal_models.REF`). Placeholder sizes,
 # length x width x height in metres:
-#   chorister     1.4 x 0.35 x 0.6, + 0.8 m tail     reimagining §Chorister (11 x 3 x 5 v + 6.5)
+#   chorister     1.4 x 0.35 x 0.95, + 0.8 m tail    reimagining §Chorister; shoulder ~0.95 m off the pick (Wrysk 2026-10-01)
 #   ripple-snail  0.19 x 0.19 x 0.125                reimagining §Ripple-snail, roster 1.5 x 1.5 v
 #   capgnawer     0.25 x 0.21 x 0.19                 reimagining §Capgnawer 0.25 x 0.19; width off the pick
 #   seedporter    upright as pictured: 0.5 head to pelvis, 0.62 across the arms, 0.92 tall
