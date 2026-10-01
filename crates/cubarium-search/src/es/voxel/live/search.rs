@@ -532,8 +532,12 @@ pub fn evaluate(
 pub struct SearchSpec {
     /// Lineages with a trained centre; the rest run their heuristic and take no step.
     pub centres: Vec<(Founder, PathBuf)>,
-    /// The search: its genes at their starting values (the CMA mean starts there).
+    /// The search: its genes at their reference values (the default candidate every
+    /// generation runs beside the draws, the persistence reference).
     pub genome: Genome,
+    /// Where the CMA mean starts: the search genome with these genes' values ([`start_from`]);
+    /// the reference itself when `None`.
+    pub start: Option<Genome>,
     pub screen: ScreenSpec,
     pub lambda: usize,
     pub seeds_per_generation: usize,
@@ -669,6 +673,17 @@ fn load_centres(centres: &[(Founder, PathBuf)]) -> Result<Vec<(Founder, VoxelPol
     Ok(out)
 }
 
+/// The search genome `search` with the values `start` gives its genes, matched by name;
+/// a gene `search` lacks, or a value outside its range there, is an error.
+pub fn start_from(search: &Genome, start: &Genome) -> Result<Genome, String> {
+    let mut g = search.clone();
+    for gene in &start.genes {
+        g.set(&gene.name, gene.value)
+            .map_err(|e| format!("--start: {e}"))?;
+    }
+    Ok(g)
+}
+
 /// Run the search. Writes `generations.jsonl`, `best.toml` (the lowest-fitness genome
 /// evaluated so far), `mean.toml` (the search mean), and each as a resolved parameter
 /// file (`best-params.toml`, `mean-params.toml`) under `out`.
@@ -687,7 +702,11 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         .collect();
     let start = spec.genome.clone();
     let bounds = start.search_bounds();
-    let mut cma = Cma::new(start.to_search(), spec.sigma0, spec.lambda, spec.cma_seed);
+    let mean0 = match &spec.start {
+        Some(s) => start_from(&start, s)?.to_search(),
+        None => start.to_search(),
+    };
+    let mut cma = Cma::new(mean0, spec.sigma0, spec.lambda, spec.cma_seed);
     let mut log = std::fs::File::create(spec.out.join("generations.jsonl"))
         .map_err(|e| format!("cannot write the log: {e}"))?;
     let mut best: Option<(f64, Genome, u32)> = None;

@@ -120,3 +120,30 @@ fn the_screen_penalty_grows_with_the_distance_outside_the_bands() {
     assert!(spec.graded(&s, 1e4) > 1e4);
     assert!(spec.graded(&s, 0.0) >= spec.base);
 }
+
+/// The shipped start (`cotrain-start.toml`) sets three of cotrain's genes, and the genome it
+/// starts the search from passes the screen on the terrarium's cell size, where the
+/// defaults fail.
+#[test]
+fn the_shipped_start_passes_the_screen_where_the_defaults_fail() {
+    use super::ecology::EcologyParams;
+    let search = EcologyParams::cotrain().genome().cloned().expect("a genome");
+    let start = cubarium_voxel_sim::params::load_genome(include_str!(
+        "../../../../../../config/training/search/cotrain-start.toml"
+    ))
+    .expect("a valid start");
+    let g = super::search::start_from(&search, &start).expect("its genes are cotrain's");
+    assert_eq!(g.get("growth@turf"), Some(0.24));
+    assert_eq!(g.get("K_bio"), Some(1.0));
+    let spec = ScreenSpec::from_rest(&search.rest).expect("[screen]");
+    let screen = |e: &EcologyParams| {
+        let l = e.layers(VOXEL_M);
+        rsf(&l.flora, &l.fauna, VOXEL_M, &spec)
+    };
+    assert!(!screen(&EcologyParams::cotrain()).passes(&spec));
+    let s = screen(&EcologyParams::Genome(g));
+    assert!(s.passes(&spec), "{:?}", s.failures(&spec));
+    let mut bad = start.clone();
+    bad.genes[0].name = "no_such_gene".into();
+    assert!(super::search::start_from(&search, &bad).is_err());
+}

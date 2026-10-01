@@ -761,6 +761,10 @@ enum Command {
         /// a genome to start the mean from.
         #[arg(long, default_value = "config/training/search/cotrain.toml")]
         search: PathBuf,
+        /// A genome whose genes' values start the CMA mean (by name, the rest at the
+        /// search file's): e.g. config/training/search/cotrain-start.toml.
+        #[arg(long)]
+        start: Option<PathBuf>,
         /// Found from this config file's `[world]` (e.g. config/desktop/terrarium.toml)
         /// instead of the still-water `small` preset.
         #[arg(long)]
@@ -1520,6 +1524,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::VoxelEcologySearch {
             centres,
             search,
+            start,
             world,
             founders,
             lambda,
@@ -1580,9 +1585,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 persist_only: [false; cubarium_voxel_fauna::Founder::COUNT],
             }
             .with_targets(&genome.rest)?;
+            let start = match start {
+                Some(p) => match es::voxel::live::ecology::EcologyParams::load(&p)? {
+                    es::voxel::live::ecology::EcologyParams::Genome(g) => Some(g),
+                    _ => return Err(format!("--start {} has no genes", p.display()).into()),
+                },
+                None => None,
+            };
             let spec = es::voxel::live::search::SearchSpec {
                 centres: parse_centres(&centres)?,
                 genome,
+                start,
                 screen,
                 lambda,
                 seeds_per_generation,
