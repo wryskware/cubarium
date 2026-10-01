@@ -46,7 +46,8 @@ use std::time::Instant;
 use cubarium_voxel::profile::{self, Count, Phase};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_fauna::{
-    Command as FaunaCommand, DT, Fauna, FaunaConfig, Species as Beast, TICK_HZ,
+    Command as FaunaCommand, DT, Fauna, FaunaConfig, Founder, Species as Beast, StartingStores,
+    TICK_HZ,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, SkyCache, Species,
@@ -273,16 +274,16 @@ fn introduce(fauna: &mut Fauna, flora: &Flora, world: &World, n: usize) -> usize
                     .can_establish(&world.view(), s, Species::Springturf)
         })
         .collect();
-    let body = fauna.config().species(Beast::Frondgrazer).body_max;
     let mut placed = 0;
     for site in strided(&pool, n) {
         if fauna.apply(
             world,
-            FaunaCommand::Introduce {
+            FaunaCommand::IntroduceFounder {
                 x: i64::from(site.x),
                 z: site.z,
-                species: Beast::Frondgrazer,
-                body,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
             },
         ) {
             placed += 1;

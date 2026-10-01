@@ -1,12 +1,9 @@
-//! **Continuous pose** for a phase-one founder body: an `(x, z)` position in metres on the
-//! support layer plus a heading in radians.
+//! **Continuous pose** for a founder body: an `(x, z)` position in metres on the support
+//! layer plus a heading in radians.
 //!
-//! An [`Animal`](crate::Animal) still stores the support [`Site`] it stands on — that is how
-//! the existing heuristic browser moves, one face per step, and it stays. A pose is the
-//! finer-grained state the phase-one founders need: P1-B resolves forward effort and turn
-//! effort into a movement of `x`/`z`/`heading`, and P1-C samples receptors at sub-voxel
-//! positions. In P1-A nothing moves the pose: a placed body keeps it while it pays
-//! maintenance and ages.
+//! An [`Animal`](crate::Animal) also stores the support [`Site`] it stands on, which
+//! follows the pose's column. Forward and turn effort move `x`/`z`/`heading`, and the
+//! receptors sample at sub-voxel positions.
 //!
 //! `x` is wrapped by the world width and `z` runs `0..depth`; both are in metres from the
 //! origin of the voxel grid, with voxel centres at `(i + 0.5) · voxel_m`. Heading is

@@ -1,16 +1,19 @@
-//! Dung: the gut, its void and where it goes. A child of `step`, so a case can set an
-//! animal's age and gut directly (every direct edit is booked as introduced matter, so
-//! the layer's residuals stay closed) and call `respire` itself.
+//! Dung: what a bite leaves in the gut, the gut's void and where it goes. A child of
+//! `step`, so a case can set an animal's age and gut directly (every direct edit is booked
+//! as introduced matter, so the layer's residuals stay closed) and call `assimilate` and
+//! `respire` itself.
 
-use super::{GUT_VOID_S, Respiration, respire};
-use crate::{Command, DT, Fauna, FaunaConfig, Species, SpeciesConfig};
+use super::{GUT_VOID_S, Respiration, assimilate, respire};
+use crate::{
+    Actions, Command, DT, Fauna, FaunaConfig, Founder, Scripted, SpeciesConfig, StartingStores,
+};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, Site, Species as Plant, Taken,
 };
 
 /// A flat soil plain, one voxel deep, top face at y = 2, soil at a third of its pore
-/// capacity (round5c's fixture).
+/// capacity, with the day clock off so every body is awake.
 fn plain(width: u32) -> World {
     let mut w = World::empty(VoxelConfig {
         width,
@@ -18,6 +21,10 @@ fn plain(width: u32) -> World {
         depth: 1,
         voxel_m: 1.0,
         seed: 5,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
         ..VoxelConfig::default()
     });
     for x in 0..width as i64 {
@@ -42,18 +49,23 @@ fn plain(width: u32) -> World {
 
 fn config_with(edit: impl FnOnce(&mut SpeciesConfig)) -> FaunaConfig {
     let mut c = FaunaConfig::placeholder();
-    edit(c.species_mut(Species::Frondgrazer));
+    edit(&mut c.founders[Founder::Browser.index()].core);
     c
 }
 
-fn grazer(fauna: &mut Fauna, world: &World, x: i64, body: f64) -> usize {
+/// A grown browser with half a reserve on column `x`, with no controller: it rests.
+fn grazer(fauna: &mut Fauna, world: &World, x: i64) -> usize {
     assert!(fauna.apply(
         world,
-        Command::Introduce {
+        Command::IntroduceFounder {
             x,
             z: 0,
-            species: Species::Frondgrazer,
-            body
+            founder: Founder::Browser,
+            stores: StartingStores {
+                body: 1.0,
+                reserve: 0.5,
+            },
+            heading_rad: 0.0,
         }
     ));
     fauna.animals.len() - 1
@@ -111,7 +123,7 @@ fn the_gut_voids_on_its_period_tick_and_not_before_as_litter_on_its_site() {
     let mut flora = Flora::new(FloraConfig::default());
     // No upkeep, so respiration sheds nothing and the gut is only what the case put there.
     let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 0.0));
-    let i = grazer(&mut fauna, &world, 2, 0.02);
+    let i = grazer(&mut fauna, &world, 2);
     // Energy at one unit per unit organic, under the litter's energy cap.
     let dung = Taken {
         organic: 1e-3,
@@ -161,7 +173,7 @@ fn a_mineral_only_gut_voids_into_the_soluble_pool() {
     let world = plain(6);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 0.0));
-    let i = grazer(&mut fauna, &world, 2, 0.02);
+    let i = grazer(&mut fauna, &world, 2);
     let dung = Taken {
         organic: 0.0,
         mineral: 4e-5,
@@ -190,7 +202,7 @@ fn a_mineral_only_gut_voids_into_the_soluble_pool() {
 fn respiration_keeps_the_body_s_mineral_to_organic_ratio() {
     let world = plain(6);
     let mut fauna = Fauna::new(FaunaConfig::placeholder());
-    let i = grazer(&mut fauna, &world, 2, 0.02);
+    let i = grazer(&mut fauna, &world, 2);
     let start = fauna.animals[i];
     assert!(start.reserve > 0.0 && start.mineral > 0.0);
     let ratio = start.mineral / start.organic();
@@ -229,7 +241,7 @@ fn death_puts_the_gut_into_the_carrion() {
     let world = plain(6);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 0.0));
-    let i = grazer(&mut fauna, &world, 2, 0.02);
+    let i = grazer(&mut fauna, &world, 2);
     let dung = Taken {
         organic: 2e-3,
         mineral: 1e-4,
@@ -238,7 +250,7 @@ fn death_puts_the_gut_into_the_carrion() {
     give_gut(&mut fauna, i, dung);
     // Starve it outright: a body under `body_min` dies this tick. The organic matter taken
     // off it is booked as removed so the ledger still closes.
-    let body_min = fauna.config.species(Species::Frondgrazer).body_min;
+    let body_min = fauna.config.founder(Founder::Browser).core.body_min;
     let a = fauna.animals[i];
     let cut = a.body - 0.5 * body_min;
     let f = cut / a.organic();
@@ -268,7 +280,7 @@ fn death_puts_the_gut_into_the_carrion() {
     assert_flora_closes(&flora, "after the death");
 }
 
-/// Three currencies across a feed-and-void cycle: a grazer bites, its gut fills, the gut
+/// Three currencies across a feed-and-void cycle: a browser bites, its gut fills, the gut
 /// is voided onto its face, and it bites again. What the animal holds (gut included)
 /// changes by exactly what it ate, less what it respired (heat) and what it voided; what
 /// the flora layer booked in is what the fauna layer booked out; and the void is what the
@@ -288,14 +300,26 @@ fn a_feed_and_void_cycle_conserves_the_three_currencies() {
         }
     ));
     let mut fauna = Fauna::new(FaunaConfig::placeholder());
-    let i = grazer(&mut fauna, &world, 2, 0.02);
-    // Void on the third tick: two ticks of bites before it, two after.
-    fauna.animals[i].age_ticks = period() - 3;
+    let i = grazer(&mut fauna, &world, 3);
+    // Feed on every tick, standing still.
+    let id = fauna.animals[i].id;
+    assert!(fauna.set_controller(
+        id,
+        Box::new(Scripted::new(vec![Actions {
+            forward: 0.0,
+            turn: 0.0,
+            feed: 1.0,
+        }])),
+    ));
+    // Bites on its controller's due ticks: two of them before the void, two after.
+    let cadence = Founder::Browser.manifest().cadence_ticks();
+    fauna.animals[i].age_ticks = period() - 2 * cadence - 1;
     let before = fauna.animals[i];
     let site: Site = before.site;
 
-    fauna.step(&world, &mut flora);
-    fauna.step(&world, &mut flora);
+    for _ in 0..2 * cadence {
+        fauna.step(&world, &mut flora);
+    }
     let fed = fauna.animals[i];
     assert!(fauna.ledger.bites > 0, "it ate");
     assert!(fed.gut.organic > 0.0, "and its gut holds the undigested share");
@@ -307,8 +331,9 @@ fn a_feed_and_void_cycle_conserves_the_three_currencies() {
     // exactly what the gut held, the mineral that plus the upkeep's shed share.
     assert_eq!(fauna.ledger.deposited_organic_out, fed.gut.organic);
     assert!(fauna.ledger.deposited_mineral_out >= fed.gut.mineral);
-    fauna.step(&world, &mut flora);
-    fauna.step(&world, &mut flora);
+    for _ in 0..2 * cadence {
+        fauna.step(&world, &mut flora);
+    }
 
     let a = fauna.animals[i];
     assert_eq!(a.site, site, "it grazed where it stood");
@@ -347,4 +372,87 @@ fn a_feed_and_void_cycle_conserves_the_three_currencies() {
     assert!(a.gut.organic > 0.0, "and the gut is filling again");
     assert_fauna_closes(&fauna, "after a feed-and-void cycle");
     assert_flora_closes(&flora, "after a feed-and-void cycle");
+}
+
+/// Hand animal `i` one bite `t` straight to [`assimilate`] at yield `y`, booked as
+/// introduced so the layer's residuals stay closed. Returns what was placed in the reserve.
+fn feed_directly(fauna: &mut Fauna, i: usize, t: Taken, y: f64) -> f64 {
+    fauna.ledger.introduced_organic_in += t.organic;
+    fauna.ledger.introduced_mineral_in += t.mineral;
+    fauna.ledger.introduced_energy_in += t.energy;
+    let sc = super::body::effective_config(&fauna.config, &fauna.animals[i]);
+    assimilate(fauna, i, &sc, t, y)
+}
+
+/// A bite with no mineral in it builds nothing: the share the yield never absorbs is
+/// egested to the gut with its energy, the absorbed share no mineral funds is respired
+/// with its energy as heat, and the body's own mineral is not drawn on.
+#[test]
+fn a_mineral_free_bite_stores_nothing_and_egests_its_undigested_share() {
+    let world = plain(6);
+    let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 0.0));
+    let i = grazer(&mut fauna, &world, 2);
+    let before = fauna.animals[i];
+    let (bite, y) = (1e-4, 0.5);
+    let t = Taken {
+        organic: bite,
+        mineral: 0.0,
+        energy: bite,
+    };
+    let placed = feed_directly(&mut fauna, i, t, y);
+    let a = fauna.animals[i];
+    assert_eq!(placed, 0.0, "nothing is funded");
+    assert_eq!(a.reserve, before.reserve);
+    assert_eq!(a.mineral, before.mineral, "its own mineral is not a reserve");
+    assert!((a.gut.organic - (1.0 - y) * bite).abs() <= 1e-18);
+    assert!((a.gut.energy - (1.0 - y) * bite).abs() <= 1e-18);
+    assert!((fauna.ledger.respired_digestion_out - y * bite).abs() <= 1e-18);
+    assert!((fauna.ledger.heat_out - y * bite).abs() <= 1e-18);
+    assert_fauna_closes(&fauna, "after a mineral-free bite");
+}
+
+/// A bite whose mineral funds less than the yield would build stores exactly
+/// `mineral / n_tissue`, keeps all of that mineral, and respires the unfunded absorbed
+/// share; one carrying more mineral than its tissue needs sends the excess to the gut.
+#[test]
+fn a_bite_stores_what_its_mineral_funds_and_the_excess_mineral_goes_to_the_gut() {
+    let world = plain(6);
+    let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 0.0));
+    let i = grazer(&mut fauna, &world, 2);
+    let n = fauna.config.founder(Founder::Browser).core.n_tissue;
+    let (bite, y) = (1e-4, 0.5);
+
+    // Funds four fifths of what the yield would build.
+    let before = fauna.animals[i];
+    let funded = 0.8 * y * bite;
+    let t = Taken {
+        organic: bite,
+        mineral: funded * n,
+        energy: bite,
+    };
+    let placed = feed_directly(&mut fauna, i, t, y);
+    let a = fauna.animals[i];
+    assert!((placed - funded).abs() <= 1e-12 * funded, "{placed} against {funded}");
+    assert!((a.reserve - (before.reserve + placed)).abs() <= 1e-15);
+    assert!((a.mineral - (before.mineral + t.mineral)).abs() <= 1e-18);
+    assert_eq!(a.gut.mineral, 0.0, "no bite mineral is left over");
+    assert!((a.gut.organic - (1.0 - y) * bite).abs() <= 1e-18);
+    assert!(
+        (fauna.ledger.respired_digestion_out - (y * bite - funded)).abs() <= 1e-12 * bite,
+        "the unfunded absorbed share is respired"
+    );
+
+    // Carries twice what its tissue needs: the yield binds, the excess is dung.
+    let before = fauna.animals[i];
+    let t = Taken {
+        organic: bite,
+        mineral: 2.0 * y * bite * n,
+        energy: bite,
+    };
+    let placed = feed_directly(&mut fauna, i, t, y);
+    let a = fauna.animals[i];
+    assert!((placed - y * bite).abs() <= 1e-15);
+    assert!((a.mineral - (before.mineral + n * placed)).abs() <= 1e-15);
+    assert!((a.gut.mineral - (before.gut.mineral + t.mineral - n * placed)).abs() <= 1e-15);
+    assert_fauna_closes(&fauna, "after two bites");
 }

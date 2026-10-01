@@ -4,8 +4,7 @@
 //!
 //! 1. **Terrain.** An animal whose support face is no longer a support face — buried, dug
 //!    out, turned to air — leaves the world, booked `removed_*_out`. It does not fall and
-//!    it does not die: there is no corpse, because nothing in this round says what a
-//!    collapsing floor does to a body.
+//!    it does not die: there is no corpse.
 //! 2. **Maintenance.** `maintenance_per_s · body · dt` of organic matter is respired from
 //!    the reserve, and from the body once the reserve is empty (dieback). The energy in it
 //!    leaves as heat at the animal's own current density; the mineral it held is **shed
@@ -15,39 +14,32 @@
 //!    A parasite rider then **drains** its host (`parasite_drain_of_host_basal` × the
 //!    host's basal upkeep, by the same pro-rata rule). Then **growth**: the reserve pays
 //!    for new structure at no more than `growth_max_per_s`, scaled by how full it is,
-//!    until `body_max` (package G); a rider grown to its detach size **drops off**.
+//!    until `body_max`; a rider grown to its detach size **drops off**.
 //! 3. **Cue field.** On due ticks, update emission, decay and diffusion after maintenance
 //!    and before any controller samples.
 //! 4. **Controllers** — the sampling point, explicit and shared. Every founder whose
 //!    controller period is due is sampled from the tick's pre-action state: its
-//!    prior-interval feedback is consumed into the observation, its controller (heuristic
-//!    diagnostic or GRU — interchangeable behind [`crate::Controller`]) is driven, and the
-//!    resolved, deadbanded actions are **held** until the next sampling. A post-tick
-//!    sampler is not this stage; the heuristic bodies have no controller and skip it.
-//! 5. **Sense**, from one snapshot of the plant layer taken before any animal has eaten:
-//!    what is in reach of the face each animal stands on, and the best face it can smell.
-//!    Nothing an animal eats this tick moves another animal's plan this tick — the plant
-//!    layer's own light phase works the same way — but a bite is still bounded by the
-//!    stand it reads, so two animals on one stand cannot eat it twice.
-//! 6. **Act**, in id order: for a heuristic body, crop if a whole bite is in reach, else
-//!    step one support face toward the sensed face when a step is due, else rest. For a
-//!    founder, resolve the held actions — the motor budget is paid on the requested
-//!    equivalent displacement, the pose sweeps in bounded sub-steps, and on the due tick
-//!    one local bite is attempted through the plant layer's real transfers — then record
-//!    the interval's motion and intake feedback. Every bite is **sated** (package G): it
+//!    prior-interval feedback is consumed into the observation, its controller (a
+//!    diagnostic heuristic or a GRU — interchangeable behind [`crate::Controller`]) is
+//!    driven, and the resolved, deadbanded actions are **held** until the next sampling.
+//! 5. **Act**, in id order: resolve each founder's held actions — the motor budget is
+//!    paid on the requested equivalent displacement, the pose sweeps in bounded
+//!    sub-steps, and on the due tick one local bite is attempted through the plant
+//!    layer's real transfers — then record the interval's motion and intake feedback. A
+//!    body with no lineage rests. Every bite is **sated**: it
 //!    asks in proportion to hunger, takes `E / (E + K)` of that from food holding `E`,
 //!    and never more than the reserve's room after yield, so a full animal takes nothing
 //!    and nothing eaten is respired as surplus. A rider does none of this: after the act
 //!    it is **carried** to its host's face and pose.
-//! 7. **Reproduction.** A clutch whose face is gone or drowned goes to carrion; every
+//! 6. **Reproduction.** A clutch whose face is gone or drowned goes to carrion; every
 //!    body's surplus counter and refractory move; a gestating frondgrazer pays its
 //!    instalment into its escrow and gives birth at term; a littershredder in surplus
 //!    lays a clutch on the litter it stands on; and clutches at term hatch, a dormant egg
 //!    at dusk only onto a host in reach (parasite hatchlings). Only bodies
 //!    that were alive at the start of the tick reproduce, so a newborn cannot itself
 //!    breed on the tick it appears.
-//! 8. **Death.** Starvation (`body < body_min`) or drowning (standing water deeper than
-//!    `drown_depth_m` on its own face) hands the whole animal back as **carrion** and
+//! 7. **Death.** Starvation (`body < body_min`) or drowning (standing water over its feet
+//!    deeper than its drown depth for its lineage's `drown_after_s`) hands the whole animal back as **carrion** and
 //!    books a death.
 //!
 //! Withdrawals and deposits are the plant layer's between-tick transfers
@@ -62,8 +54,7 @@
 //! stream** — the flora layer's own, key `(domain, world seed, animal id, tick)` — so the
 //! same world, the same animal and the same tick always break a tie the same way, and
 //! nothing about storage order can reach the result. Animals are held in id order and
-//! every pass walks them in it; the plant layer's `reachable_foliage` returns its stands
-//! in site order; and a candidate face is scored before any tie is drawn.
+//! every pass walks them in it.
 
 use cubarium_voxel::{DT, VoxelView, World};
 use cubarium_voxel_flora::{DepositKind, Flora, Site, Taken};
@@ -72,11 +63,7 @@ use crate::body;
 use crate::controller::Actions;
 use crate::manifest::Founder;
 use crate::predation::{Hit, Rest, Strike, StrikePhase};
-use crate::{Animal, Departure, Fauna, Food, IntervalFeedback, SpeciesConfig, State, steppable};
-
-/// Stream keys, so two draws in one tick cannot be the same draw. One per rule that draws.
-const DOMAIN_TARGET: u64 = 1;
-const DOMAIN_STEP: u64 = 2;
+use crate::{Animal, Departure, Fauna, Food, IntervalFeedback, SpeciesConfig, State};
 
 /// What a respiration is for, as [`FaunaLedger`](crate::FaunaLedger) books it. The four
 /// split counters sum to `respired_out` to the bit — every booking adds the same addend
@@ -106,20 +93,8 @@ enum Respiration {
 pub(crate) use cubarium_voxel::KeyedRng as Rng;
 use cubarium_voxel::pro_rata;
 
-/// What one animal sensed this tick, from the pre-bite snapshot of the plant layer.
-struct Plan {
-    /// The stands in reach of the face it stands on, in site order, with their foliage.
-    reach: Vec<(Site, f64)>,
-    /// The foliage in reach, summed.
-    total: f64,
-    /// The face it would rather be standing on: the one within `sense_radius` from which
-    /// the most foliage is reachable, and at least a whole bite of it. `None` when nothing
-    /// it can smell is worth walking to.
-    target: Option<Site>,
-}
-
-pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads: usize) {
-    tick_inner(fauna, world, flora, threads, None);
+pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
+    tick_inner(fauna, world, flora, None);
 }
 
 /// The static arena's tick: [`step`] with the per-arena [`Senses`] handle. The camera-free
@@ -129,17 +104,15 @@ pub(crate) fn step_with_senses(
     fauna: &mut Fauna,
     world: &World,
     flora: &mut Flora,
-    threads: usize,
     senses: &mut crate::Senses,
 ) {
-    tick_inner(fauna, world, flora, threads, Some(senses));
+    tick_inner(fauna, world, flora, Some(senses));
 }
 
 fn tick_inner(
     fauna: &mut Fauna,
     world: &World,
     flora: &mut Flora,
-    threads: usize,
     mut senses: Option<&mut crate::Senses>,
 ) {
     // The tick counter moves first, so `fauna.tick` is the tick this step produces — the
@@ -181,18 +154,17 @@ fn tick_inner(
                 s.update(&view, &fv);
             }
         }
-        let plans = cubarium_voxel::voxel_phase!(FaunaSense, {
+        cubarium_voxel::voxel_phase!(FaunaSense, {
             // The controller stage: sample due founders and hold their actions, before
             // anything moves or eats this tick, from the same pre-action state every
             // controller of the tick reads.
             controllers(fauna, &view, flora, senses);
-            sense(fauna, &view, flora, seed, tick, threads)
         });
         cubarium_voxel::voxel_phase!(FaunaAct, {
             // Strike outcomes are events: the act only reads other bodies, and the hits
             // are applied here, serially, in the order the strikers acted.
             let mut hits: Vec<Hit> = Vec::new();
-            act(fauna, &view, flora, &plans, seed, tick, &mut hits);
+            act(fauna, &view, flora, seed, tick, &mut hits);
             for hit in hits {
                 apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
             }
@@ -881,243 +853,12 @@ fn flee(
     Some(away(if side > 0.0 { -1.0 } else { 1.0 }))
 }
 
-/// Step 4: one snapshot of what every animal can reach and smell.
-///
-/// **The sensing domain is a set of standing faces (Astra R9.5).** A candidate is any
-/// support face within `sense_radius` of the animal's own face — wrapped `x` and plain `z`,
-/// each measured on its own — that this species could stand on, and its score is
-/// `reachable_foliage` from that face, the model's own reach query. So what an animal can
-/// find is bounded by where it could stand, and what it can eat there is decided by the
-/// same rule a bite uses. Nothing here classifies a stand as edible.
-///
-/// Two approximations stay, and stay stated: there is **no line of sight** — the reach box
-/// and this radius are both geometry, so neither knows about a wall between the animal and
-/// the food — and the walk is **greedy** (`toward`), one strictly-closer orthogonal step
-/// per period. Neither establishes a body-sized passage, an obstacle refuge or a path.
-fn sense(
-    fauna: &Fauna,
-    view: &VoxelView<'_>,
-    flora: &Flora,
-    seed: u64,
-    tick: u64,
-    threads: usize,
-) -> Vec<Plan> {
-    let fv = flora.view();
-    let width = i64::from(view.config.width);
-    let animals = &fauna.config;
-
-    #[cfg(feature = "parallel")]
-    if threads > 1 && fauna.animals.len() >= 2 {
-        // One chunk per worker, at least one animal each. Each chunk returns its plans in
-        // its own animal order together with **which chunk it was**, and the chunks are
-        // folded back in that order, so the finishing order of the workers cannot reach
-        // the result: `out` is the same `Vec<Plan>` in the same animal order the serial
-        // pass builds. `act` still applies them in id order.
-        let per = fauna.animals.len().div_ceil(threads);
-        let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
-            bevy_tasks::TaskPoolBuilder::new()
-                .num_threads(threads)
-                .build()
-        });
-        let mut parts: Vec<(usize, Vec<Plan>)> = pool.scope(|scope| {
-            for (k, chunk) in fauna.animals.chunks(per).enumerate() {
-                scope.spawn(async move {
-                    let plans = chunk
-                        .iter()
-                        .map(|a| plan_for(a, animals, view, &fv, width, seed, tick))
-                        .collect::<Vec<Plan>>();
-                    (k, plans)
-                });
-            }
-        });
-        parts.sort_by_key(|&(k, _)| k);
-        let mut out = Vec::with_capacity(fauna.animals.len());
-        for (_, plans) in parts {
-            out.extend(plans);
-        }
-        return out;
-    }
-    let _ = threads;
-
-    let mut out = Vec::with_capacity(fauna.animals.len());
-    for a in &fauna.animals {
-        out.push(plan_for(a, animals, view, &fv, width, seed, tick));
-    }
-    out
-}
-
-/// What one animal senses: a **pure function** of the world, the plant layer as it stood
-/// before anything ate, and this animal. Nothing it returns depends on any other animal,
-/// which is what makes [`sense`] splittable.
-fn plan_for(
-    a: &Animal,
-    config: &crate::FaunaConfig,
-    view: &VoxelView<'_>,
-    fv: &cubarium_voxel_flora::FloraView<'_>,
-    width: i64,
-    seed: u64,
-    tick: u64,
-) -> Plan {
-    // A phase-one founder runs **none of the live heuristic** in P1-A: no sensing, no
-    // target, no crop. It rests where it was placed while maintenance, ageing and death
-    // still run. P1-B replaces this empty plan with the founder's local action resolution;
-    // P1-C fills the senses. Keeping the branch here (and not in `sense`) means the plans
-    // stay one per animal in id order.
-    if a.founder.is_some() {
-        return Plan {
-            reach: Vec::new(),
-            total: 0.0,
-            target: None,
-        };
-    }
-    {
-        let sc = *config.species(a.species);
-        let headroom = body_headroom(a, config, view);
-        let reach = fv.reachable_foliage(view, a.site, sc.reach);
-        let total: f64 = reach.iter().map(|&(_, f)| f).sum();
-        let bite = sc.bite_per_s * DT;
-
-        // Candidate faces, in **candidate-face coordinates** (Astra R9.5). Every support
-        // face this animal could stand on whose distance from the face it *is* standing on
-        // is within `sense_radius` — wrapped `x`, plain `z`, each measured on its own, the
-        // same box `sense_radius` always meant — is a candidate, and it is scored below
-        // with `reachable_foliage` **from that face**. The sensing domain belongs to the
-        // candidate and not to the food: the old stand-centre prefilter bounded the food's
-        // column and then added neighbouring faces without bounding them, so it admitted a
-        // face nine columns away whose stand was eight, and missed a face eight columns
-        // away whose stand was nine. `climb` is deliberately not applied here —
-        // `steppable` reads it against the animal's *current* face, and a target several
-        // voxels up is still worth walking toward one climbable step at a time.
-        //
-        // Walked from the stands rather than over the whole radius, which is the **same
-        // set**: a face with nothing in reach scores zero and is dropped by the `t < bite`
-        // test below, so the only faces that can survive are those within
-        // `reach.horizontal` of some crown cell of a foliage-bearing stand. The crown
-        // radius is in the span because reach is measured to a crown *cell* and a crown is
-        // wider than its own column.
-        let sense = i64::from(sc.sense_radius);
-        let mut candidates: Vec<Site> = Vec::new();
-        for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
-            let crown = fv
-                .config
-                .species(stand.species)
-                .crown_radius(stand.wood, fv.config.voxel_m)
-                .max(0.0);
-            let span = i64::from(sc.reach.horizontal) + crown.floor() as i64;
-            for dz in -span..=span {
-                let z = i64::from(stand.site.z) + dz;
-                if z < 0 || z >= i64::from(view.config.depth) {
-                    continue;
-                }
-                for dx in -span..=span {
-                    let x = i64::from(stand.site.x) + dx;
-                    for face in faces_in_column(view, x, z as u32, &sc, headroom) {
-                        if wrapped_dx(width, i64::from(face.x), i64::from(a.site.x)) > sense
-                            || (i64::from(face.z) - i64::from(a.site.z)).abs() > sense
-                        {
-                            continue;
-                        }
-                        if let Err(at) = candidates.binary_search(&face) {
-                            candidates.insert(at, face);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Score each candidate with the **model's own** reach query, from that face: which
-        // stands a browser can eat depends on the face it stands on and not on the species
-        // it is looking at (Astra round 8), so nothing here classifies a stand as edible.
-        let mut best: Vec<Site> = Vec::new();
-        let mut best_total = 0.0f64;
-        for &face in &candidates {
-            if face == a.site {
-                continue;
-            }
-            let t: f64 = fv
-                .reachable_foliage(view, face, sc.reach)
-                .iter()
-                .map(|&(_, f)| f)
-                .sum();
-            if t < bite {
-                continue;
-            }
-            if t > best_total {
-                best_total = t;
-                best.clear();
-                best.push(face);
-            } else if t == best_total {
-                best.push(face);
-            }
-        }
-        #[cfg(feature = "profile")]
-        {
-            use cubarium_voxel::profile::{Count, add};
-            add(Count::ReachQueries, 1 + candidates.len() as u64);
-            add(Count::CandidateFaces, candidates.len() as u64);
-        }
-        let target = match best.len() {
-            0 => None,
-            1 => Some(best[0]),
-            n => {
-                let mut rng = Rng::keyed(DOMAIN_TARGET, seed, a.id, tick);
-                Some(best[rng.below(n)])
-            }
-        };
-        Plan {
-            reach,
-            total,
-            target,
-        }
-    }
-}
-
-/// The void this body needs over the face it stands on: a phase-one founder's own
-/// **height**, in whole voxels ([`crate::Body::headroom_voxels`]). A heuristic species
-/// carries no geometry at all, so it asks for the one voxel `is_support` already
-/// guarantees.
-fn body_headroom(a: &Animal, config: &crate::FaunaConfig, view: &VoxelView<'_>) -> u32 {
-    crate::body_of(config, a).map_or(1, |b| b.headroom_voxels(view.config.voxel_m))
-}
-
-/// Every support face of a column an animal of this species could stand on: shallow
-/// enough water to wade, and `headroom` voxels of void over it, so a body is not offered
-/// a slot it does not fit in ([`crate::body::headroom_voxels`]). The `climb` bound
-/// belongs to a step and is applied there.
-fn faces_in_column(
-    view: &VoxelView<'_>,
-    x: i64,
-    z: u32,
-    sc: &SpeciesConfig,
-    headroom: u32,
-) -> Vec<Site> {
-    let c = view.config;
-    if z >= c.depth {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for y in 0..c.height {
-        if view.is_support(x, y, z)
-            && view.water_depth_m(x, y, z) <= sc.wade_depth_m
-            && crate::body::has_headroom(view, x, y, z, headroom)
-        {
-            out.push(Site {
-                x: x.rem_euclid(i64::from(c.width)) as u32,
-                y,
-                z,
-            });
-        }
-    }
-    out
-}
-
-/// Step 5: crop, walk or rest for a heuristic body; resolve the held actions for a
-/// founder — all in id order.
+/// Step 5: resolve each founder's held actions, in id order. A body with no lineage
+/// rests.
 fn act(
     fauna: &mut Fauna,
     view: &VoxelView<'_>,
     flora: &mut Flora,
-    plans: &[Plan],
     seed: u64,
     tick: u64,
     hits: &mut Vec<Hit>,
@@ -1137,7 +878,7 @@ fn act(
             continue;
         }
         let before = fauna.animals[i].pose;
-        act_one(fauna, view, flora, plans, seed, tick, hits, i);
+        act_one(fauna, view, flora, seed, tick, hits, i);
         // What the body did, for the senses of others (predation §2.2): its ground speed
         // this tick, and how long it has been still.
         let length = crate::body_of(&fauna.config, &fauna.animals[i]).map_or(v, |b| b.length_m);
@@ -1155,60 +896,26 @@ fn act(
 }
 
 /// One body's act (step 5).
-#[allow(clippy::too_many_arguments)]
 fn act_one(
     fauna: &mut Fauna,
     view: &VoxelView<'_>,
     flora: &mut Flora,
-    plans: &[Plan],
     seed: u64,
     tick: u64,
     hits: &mut Vec<Hit>,
     i: usize,
 ) {
-    {
-        if fauna.animals[i].state == State::Asleep {
-            // WX4: no movement, no feeding; the founder's tick is still counted alive.
-            if let Some(founder) = fauna.animals[i].founder {
-                fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
-            }
-            return;
+    if fauna.animals[i].state == State::Asleep {
+        // No movement, no feeding; the founder's tick is still counted alive.
+        if let Some(founder) = fauna.animals[i].founder {
+            fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
         }
-        if fauna.animals[i].founder.is_some() {
-            founder_act(fauna, i, view, flora, seed, tick, hits);
-            return;
-        }
-        let sc = *fauna.config.species(fauna.animals[i].species);
-        let bite = sc.bite_per_s * DT;
-        let plan = &plans[i];
-        if plan.total >= bite && bite > 0.0 {
-            // At food: a sated body rests where it is, a hungry one crops.
-            let want = bite * hunger(&fauna.animals[i], &sc);
-            fauna.animals[i].state = if want > 0.0 {
-                crop(fauna, flora, i, &sc, want, &plan.reach);
-                State::Cropping
-            } else {
-                State::Resting
-            };
-            return;
-        }
-        let Some(target) = plan.target else {
-            fauna.animals[i].state = State::Resting;
-            return;
-        };
-        fauna.animals[i].state = State::Walking;
-        if fauna.animals[i].age_ticks % sc.step_period_ticks() != 0 {
-            return;
-        }
-        let a = fauna.animals[i];
-        let config = fauna.config;
-        if let Some(to) = toward(view, &a, &config, target, &sc, seed, tick) {
-            fauna.animals[i].site = to;
-            // Keep the continuous pose tied to the support face the heuristic just moved
-            // to; P1-A's founders do not take this path at all.
-            fauna.animals[i].pose = crate::Pose::at_site(to, view.config.voxel_m);
-            fauna.ledger.steps += 1;
-        }
+        return;
+    }
+    if fauna.animals[i].founder.is_some() {
+        founder_act(fauna, i, view, flora, seed, tick, hits);
+    } else {
+        fauna.animals[i].state = State::Resting;
     }
 }
 
@@ -2080,57 +1787,6 @@ fn founder_feed(
     true
 }
 
-/// One mouthful, spent over the stands in reach in site order: the plant layer bounds each
-/// withdrawal by the foliage it finds, so what comes back is what the animal got.
-///
-/// `want` is already scaled by hunger. The sated bite applies here as in the founder
-/// mouth: each stand holding `E` edible gives `E / (E + K)` of what is still wanted, and
-/// the whole mouthful is capped at the reserve's room after yield.
-///
-/// **This is the legacy heuristic-species path and it has no diet.** Decisions §3's
-/// acceptance rule is written against the two founder *lineages* and is applied at
-/// [`crate::Diet`] in the founder mouth; a non-founder body still reaches through
-/// `reachable_foliage`, which is species-agnostic, so a heuristic grazer standing at a
-/// glowcap would still crop it. Giving the live species a diet means a field on
-/// [`SpeciesConfig`] and is not this package's (the live world runs founders).
-fn crop(
-    fauna: &mut Fauna,
-    flora: &mut Flora,
-    i: usize,
-    sc: &SpeciesConfig,
-    want: f64,
-    reach: &[(Site, f64)],
-) {
-    // The room cap, once for the whole mouthful.
-    let mut left = want.min(room_after_yield(&fauna.animals[i], sc, sc.yield_fraction));
-    for &(site, stock) in reach {
-        if !(left > 0.0) {
-            break;
-        }
-        let ask = if sc.bite_half_stock > 0.0 {
-            left * (stock / (stock + sc.bite_half_stock))
-        } else {
-            left
-        };
-        if !(ask > 0.0) {
-            continue;
-        }
-        // Whose foliage this is, read before the withdrawal, so the report can say which
-        // species was eaten rather than which species is in principle edible.
-        let plant = flora.view().stand_at(site).map(|s| s.species);
-        let Some(taken) = flora.take_foliage(site, ask) else {
-            continue;
-        };
-        let taken = fauna.book_eaten(taken, Food::Foliage);
-        if let Some(plant) = plant {
-            fauna.ledger.bites_by_plant[plant.index()] += 1;
-            fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
-        }
-        left -= taken.organic;
-        assimilate(fauna, i, sc, taken, sc.yield_fraction);
-    }
-}
-
 /// A bite becoming tissue: the food class's own `yield_fraction` of it is built **as far as the bite's own
 /// mineral pays for**, the undigested `(1 − yield)` share is egested, the unfunded rest is
 /// respired, the energy follows the organic matter at the
@@ -2213,76 +1869,7 @@ fn assimilate(
     placed
 }
 
-/// One step toward `target`: the strictly closer support face of an orthogonal neighbour
-/// column that this animal can climb and wade to, ties broken by the keyed stream.
-///
-/// `None` when nothing it can stand on is closer — a wall it cannot climb, a pool it
-/// cannot wade, or the target being where it already is.
-fn toward(
-    view: &VoxelView<'_>,
-    a: &Animal,
-    config: &crate::FaunaConfig,
-    target: Site,
-    sc: &SpeciesConfig,
-    seed: u64,
-    tick: u64,
-) -> Option<Site> {
-    let width = i64::from(view.config.width);
-    let headroom = body_headroom(a, config, view);
-    let here = distance(width, a.site, target);
-    if here == 0 {
-        return None;
-    }
-    let mut best: Vec<Site> = Vec::new();
-    let mut best_d = here;
-    for (dx, dz) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
-        let z = i64::from(a.site.z) + dz;
-        if z < 0 || z >= i64::from(view.config.depth) {
-            continue;
-        }
-        let x = i64::from(a.site.x) + dx;
-        // At most one face per column is a candidate: the one closest in height to the
-        // face the animal is standing on, and the lower of two equally close ones. A
-        // column is a place to stand, not a choice of storeys.
-        let mut faces = steppable(view, a.site, x, z as u32, sc, headroom);
-        faces.sort_by_key(|f| (f.y.abs_diff(a.site.y), f.y));
-        let Some(&face) = faces.first() else { continue };
-        let d = distance(width, face, target);
-        if d < best_d {
-            best_d = d;
-            best.clear();
-            best.push(face);
-        } else if d == best_d && d < here {
-            best.push(face);
-        }
-    }
-    match best.len() {
-        0 => None,
-        1 => Some(best[0]),
-        n => {
-            best.sort_unstable();
-            let mut rng = Rng::keyed(DOMAIN_STEP, seed, a.id, tick);
-            Some(best[rng.below(n)])
-        }
-    }
-}
-
-/// Manhattan distance on the ring: `x` takes the short way round, `z` has real ends. The
-/// height is not in it — a browser walks the surface it can stand on, and `climb` is what
-/// says whether it can.
-fn distance(width: i64, from: Site, to: Site) -> i64 {
-    wrapped_dx(width, i64::from(from.x), i64::from(to.x))
-        + (i64::from(from.z) - i64::from(to.z)).abs()
-}
-
-/// The shorter of the two ways round the strip, in voxels.
-fn wrapped_dx(width: i64, a: i64, b: i64) -> i64 {
-    let w = width.max(1);
-    let d = (a - b).rem_euclid(w);
-    d.min(w - d)
-}
-
-/// Step 7: **reproduction** — the gestation escrow, live birth, egg laying, incubation
+/// Step 6: **reproduction** — the gestation escrow, live birth, egg laying, incubation
 /// and hatching, in that one place.
 ///
 /// The rule the two founder lineages were given

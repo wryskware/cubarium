@@ -1,63 +1,24 @@
-//! Consumers on the voxel strip. One species — the **frondgrazer**, a ground browser that
-//! stands on a support face, crops the foliage it can reach, walks toward the best food it
-//! can sense, and pays for every unit of it — living as [`Animal`]s beside a
+//! Consumers on the voxel strip: the founder lineages — the littershredder, the
+//! frondgrazer (the browser) and the lanternjaw — living as [`Animal`]s beside a
 //! [`cubarium_voxel_flora::Flora`] on a [`cubarium_voxel::World`].
 //!
 //! This crate never draws, never reads the clock and never touches the world's stores: it
 //! reads the world through [`cubarium_voxel::VoxelView`] (support faces, heights, water
-//! depth, the `x` wrap) and changes the plant layer only through round 5a's bounded
-//! transfers — [`cubarium_voxel_flora::Flora::take_foliage`] and
-//! [`cubarium_voxel_flora::Flora::deposit`], with
-//! [`cubarium_voxel_flora::FloraView::reachable_foliage`] as the geometry of what a
-//! browser standing somewhere can actually get at.
+//! depth, the `x` wrap) and changes the plant layer only through its bounded transfers
+//! ([`cubarium_voxel_flora::Flora::take_foliage_in_layers`], `take_litter`,
+//! `take_carrion` and [`cubarium_voxel_flora::Flora::deposit`]).
 //!
-//! # What this layer is, and is not
+//! Every quantity is paid out of a stock this layer holds, and every unit that leaves it
+//! is a named boundary flow of [`FaunaLedger`], so the plant layer's `consumed_*` and
+//! `deposited_*` and this layer's `eaten_*` and `deposited_*` are the same transfers seen
+//! from two sides and the two ledgers close together.
 //!
-//! It is a **heuristic** animal, not a policy and not the cube's hunter: there is no
-//! network, no learning, no drive system and no game hook. Every quantity is paid out of a
-//! stock this layer holds, and every unit that leaves it is a named boundary flow of
-//! [`FaunaLedger`], so the plant layer's `consumed_*` and `deposited_*` and this layer's
-//! `eaten_*` and `deposited_*` are the same transfers seen from two sides and the two
-//! ledgers close together.
-//!
-//! It says **nothing** about populations, carrying capacity or viability. Astra's round 7
-//! left those unclaimed on purpose and this round does not claim them: what a run can show
-//! is that the flows are paid and observable.
-//!
-//! # Stated assumptions of this round
-//!
-//! 1. **No mating system.** An adult that has the reserve pays the whole `birth_cost`
-//!    itself and a newborn appears beside it. One specimen is therefore a lineage here,
-//!    which `design/theoretical-biosphere-2026-09-16.md` says a population is not; a
-//!    two-parent contract (encounter, pairing, gestation) is a later round and not a
-//!    missing line of code.
-//! 2. **Growth is unrated and unpriced.** Assimilated matter fills the body up to
-//!    `body_max` and then the reserve up to `reserve_cap · body`; there is no growth rate
-//!    and no construction cost, because [`SpeciesConfig::yield_fraction`] already carries
-//!    the loss between what was eaten and what was built.
-//! 3. **Dung is mineral only.** The undigested fraction of a bite is *respired*, per the
-//!    round's brief, and what is excreted is the mineral a bite carried in excess of the
-//!    tissue it built — as a litter deposit, because litter is where this round puts dung.
-//! 4. **No sub-tick motion.** An animal is on one support face per tick. How a body moves
-//!    between faces is the art thread's question (`design/voxel-art-direction.md`, when it
-//!    lands), and `pace-in-body-lengths` applies to it then, not here.
-//! 5. **The interim look is not the look.** The presenter draws a 2×1×2 block in a
-//!    placeholder colour (`crates/cubarium/src/voxel/animal.rs`), named interim in the
-//!    code, until the art direction says what a consumer looks like.
-//!
-//! Every number in [`SpeciesConfig::frondgrazer`] is an untuned **placeholder** listed in
-//! `design/backlog.md` §1. Nothing here is tuned and no result in this round depends on a
-//! value.
-//!
-//! # The phase-one founder path (P1-B)
-//!
-//! A body carrying a [`Founder`] marker is not run by the heuristic at all. It runs the
-//! phase-one body model instead: a [`Controller`] is sampled at the tick's controller
-//! stage ([`step`]'s order), its three bounded actions are held, and the body resolves
-//! paid heading motion, contact/taste receptors and local feeding through real
-//! transfers — [`body`]'s and [`controller`]'s docs carry the rules. The live heuristic
-//! path above is untouched by that: `founder: None` is the frondgrazer, unchanged, and
-//! a founder with no controller installed rests exactly as it did in P1-A.
+//! A body carries a [`Founder`] marker that selects its physiology
+//! ([`FounderPhysiology`], looked up through [`effective_config`]) and its controller: a
+//! [`Controller`] is sampled at the tick's controller stage ([`step`]'s order), its three
+//! bounded actions are held, and the body resolves paid heading motion, contact and taste
+//! receptors and local feeding through real transfers — [`body`]'s and [`controller`]'s
+//! docs carry the rules. A founder with no controller installed rests.
 
 #![forbid(unsafe_code)]
 
@@ -418,8 +379,8 @@ pub fn browser_mouth_foliage(
 }
 
 /// The physical geometry of one animal right now, from its lineage's physiology and its
-/// structure ([`FounderPhysiology::body_at`]). `None` for a body with no founder marker:
-/// the live heuristic species carry no dimensions at all.
+/// structure ([`FounderPhysiology::body_at`]). `None` for a body with no founder marker,
+/// which carries no dimensions.
 pub fn body_of(config: &FaunaConfig, animal: &Animal) -> Option<Body> {
     Some(config.founder(animal.founder?).body_at(animal.body))
 }
@@ -604,28 +565,17 @@ pub struct Animal {
     pub species: Species,
     /// The support face it stands on. Its body is drawn in the void above this.
     pub site: Site,
-    /// The continuous place and heading on that support layer. The live heuristic
-    /// browser treats `site` as authoritative and re-anchors the pose to each face it
-    /// steps to; a **founder body is the other way round** — its pose is authoritative
-    /// and `site` follows the pose's column at the standing layer ([`step`]'s founder
-    /// path moves the pose and re-derives the site).
+    /// The continuous place and heading on that support layer. The pose is
+    /// authoritative and `site` follows the pose's column at the standing layer.
     pub pose: Pose,
-    /// `Some` for a phase-one founder: the lineage whose manifest its controller will be
-    /// authored against. P1-B runs the founder's local actions: held controller actions,
-    /// paid heading motion, contacts and local feeding. `None` is the live frondgrazer
-    /// heuristic path, unchanged.
+    /// The lineage: which physiology the body runs and whose manifest its controller is
+    /// authored against. A body with `None` rests.
     pub founder: Option<Founder>,
-    /// The founder's held actions and prior-interval feedback. All-default for a
-    /// heuristic body (`founder: None`), which never reads it.
+    /// The founder's held actions and prior-interval feedback.
     pub founder_state: FounderState,
     /// Where this body is in its own reproductive cycle: the surplus it has held, the
-    /// refractory left after its last offspring, and the escrow it is filling.
-    ///
-    /// **On the animal and not in [`FounderState`]**, which the reproduction brief
-    /// suggested, because the rule is not a founder's: a body with no lineage runs the
-    /// same eligibility, hold and gestation ([`Reproduction::LIVE_BIRTH_PLACEHOLDER`]),
-    /// and `FounderState` is documented as the controller's interval state that a
-    /// heuristic body never reads.
+    /// refractory left after its last offspring, and the escrow it is filling. On the
+    /// animal and not in [`FounderState`], which is the controller's interval state.
     pub reproduction: ReproductionState,
     /// Organic structure. Below `body_min` it is dead.
     pub body: f64,
@@ -984,8 +934,7 @@ impl SurplusWindow {
 
 impl Reproduction {
     /// The frondgrazer's gestation placeholders, and the table a body with **no**
-    /// lineage runs: the browser founder is the frondgrazer, so the live heuristic
-    /// species and the browser lineage reproduce the same way.
+    /// lineage runs.
     ///
     /// Against the frondgrazer's frozen physiology (`birth_cost` 0.01, a reserve
     /// ceiling of 0.025 at `body_max`): eligibility at 0.015 is 60 % of a full reserve,
@@ -1854,7 +1803,7 @@ impl Diet {
 /// maintenance, a parent paying for a newborn — never appear here.
 ///
 /// **Two pairs of terms the brief did not name are here because the residuals do not close
-/// without them.** An [`Command::Introduce`] creates an animal out of nothing, exactly as
+/// without them.** An [`Command::IntroduceFounder`] creates an animal out of nothing, exactly as
 /// the plant layer's `Seed` creates a founder stand, so it is booked `introduced_*_in`
 /// the way that is booked `seeded_*_in`; and [`Command::Remove`] takes one out of the
 /// world without a corpse, so it is booked `removed_*_out`. Both are named boundary flows
@@ -1900,7 +1849,8 @@ pub struct FaunaLedger {
     pub deposited_organic_out: f64,
     pub deposited_mineral_out: f64,
     pub deposited_energy_out: f64,
-    /// What an [`Command::Introduce`] created out of nothing.
+    /// What an introduction ([`Command::IntroduceFounder`], [`Command::BuryClutch`])
+    /// created out of nothing.
     pub introduced_organic_in: f64,
     pub introduced_mineral_in: f64,
     pub introduced_energy_in: f64,
@@ -1929,7 +1879,7 @@ pub struct FaunaLedger {
     /// Eggs lost with their site: the face was taken away or drowned, and the clutch
     /// went to carrion where it lay.
     pub eggs_lost: u64,
-    /// Animals an [`Command::Introduce`] put into the world.
+    /// Animals an [`Command::IntroduceFounder`] put into the world.
     pub introduced: u64,
     /// Animals that died: starved below `body_min`, or drowned.
     pub deaths: u64,
@@ -1951,18 +1901,15 @@ pub struct FaunaLedger {
     pub deaths_by_cause: [u64; Departure::COUNT],
     /// The same three counters restricted to bodies that carry a lineage, indexed
     /// `[founder][cause]` in [`Founder::index`] and [`Departure::index`] order. A
-    /// heuristic body carries no lineage and appears only in the totals above.
+    /// body with no lineage appears only in the totals above.
     pub deaths_by_founder_cause: [[u64; Departure::COUNT]; Founder::COUNT],
     /// Withdrawals that returned something.
     pub bites: u64,
     /// Bites and organic matter **by the plant species they came off**, indexed by
     /// [`cubarium_voxel_flora::Species::index`].
     ///
-    /// The plant layer's `consumed_*` have no species in them and a reach box does not
-    /// choose one (round 5a's note), and Astra's round 8 asks a consumer's report to say
-    /// which species it actually ate: which stands a browser can reach depends on the
-    /// face it stands on, so "what it ate" is a measurement and never a property of a
-    /// species. This is that measurement, taken where the bite happens.
+    /// The plant layer's `consumed_*` have no species in them; what a body ate depends on
+    /// where its mouth was, so this is a measurement taken where the bite happens.
     pub bites_by_plant: [u64; cubarium_voxel_flora::Species::COUNT],
     pub eaten_by_plant: [f64; cubarium_voxel_flora::Species::COUNT],
     /// Local founder bites and the organic matter they actually **placed** into body
@@ -1972,8 +1919,7 @@ pub struct FaunaLedger {
     /// transfer: what a lineage got, not what a species lost. `assimilated_by_founder`
     /// is the placed figure and not the bite's gross organic matter, because that is
     /// what became tissue — it is the same number the body's own `Self`
-    /// `assimilated_intake` channel reports. A heuristic body carries no lineage and
-    /// appears in neither.
+    /// `assimilated_intake` channel reports.
     pub bites_by_founder: [u64; Founder::COUNT],
     pub assimilated_by_founder: [f64; Founder::COUNT],
     /// Bites and the **gross** organic matter they took, by the [`Food`] class the
@@ -2182,38 +2128,24 @@ impl<'a> FaunaView<'a> {
 /// A frontend, a harness or a test changes this layer only through these.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
-    /// Put an animal of `body` on the **highest** support face of column `(x, z)`, with a
-    /// full reserve, its species' `n_tissue` of mineral and its `energy_density` of
-    /// energy — a body grown outside the system, booked `introduced_*_in`. Refused if the
-    /// column has no support face or `body` is below the species' `body_min`.
-    ///
+    /// Put a **founder** body on the highest support face of column `(x, z)`, at that
+    /// face's centre and the given `heading_rad`, with its lineage's `n_tissue` of mineral
+    /// and `energy_density` of energy — a body grown outside the system, booked
+    /// `introduced_*_in`. A body that is not finite, a heading that is not finite, a
+    /// column with no support, or a body below the founder's own `body_min` is refused.
     /// More than one animal may stand on a face, so this is never refused for being
     /// occupied.
-    Introduce {
-        x: i64,
-        z: u32,
-        species: Species,
-        body: f64,
-    },
-    /// Put a **phase-one founder** body of `body` organic matter on the highest support
-    /// face of column `(x, z)`, at that face's centre and the given `heading_rad`. Booked
-    /// exactly as [`Command::Introduce`]. A body that is not finite, a heading that is not
-    /// finite, a column with no support, or a body below the founder's own `body_min` is
-    /// refused.
     ///
     /// The founder marker selects which manifest's controller the body belongs to and
-    /// which physiology it runs (P1-B): the litter feeder's digestive configuration is its
-    /// own, set deliberately from the real `Taken` composition of litter. The species is
-    /// still the shared phase-one placeholder (`Species::Frondgrazer`); every rule that
-    /// reads a founder's numbers goes through [`effective_config`], which substitutes the
-    /// founder table for the placeholder.
+    /// which physiology it runs. The species tag is the shared placeholder
+    /// (`Species::Frondgrazer`); every rule that reads a founder's numbers goes through
+    /// [`effective_config`], which substitutes the founder table for it.
     IntroduceFounder {
         x: i64,
         z: u32,
         founder: Founder,
-        /// How full the body arrives ([`StartingStores`]). Unlike [`Command::Introduce`],
-        /// which always grows a full body outside the system, a founder may be placed
-        /// hungry — which is what makes eating worth anything to it.
+        /// How full the body arrives ([`StartingStores`]): a founder may be placed
+        /// hungry, which is what makes eating worth anything to it.
         stores: StartingStores,
         heading_rad: f64,
     },
@@ -2265,14 +2197,13 @@ pub struct StartingStores {
 }
 
 impl StartingStores {
-    /// Everything the body can hold: what [`Command::Introduce`] does, and what the
-    /// live schedule's founders keep.
+    /// Everything the body can hold.
     pub const FULL: StartingStores = StartingStores {
         body: 1.0,
         reserve: 1.0,
     };
 
-    /// The arenas' hungry founder (P2-C): half its structure and no reserve, so a whole
+    /// The arenas' hungry founder: half its structure and no reserve, so a whole
     /// reference body of headroom is there to be eaten into.
     pub const HUNGRY: StartingStores = StartingStores {
         body: 0.5,
@@ -2501,20 +2432,14 @@ impl Fauna {
     /// just moved and grows, and then the animals eat what is there. The order within the
     /// tick is [`step`]'s module doc, and it is written down in exactly one place.
     pub fn step(&mut self, world: &World, flora: &mut Flora) {
-        step::step(self, world, flora, cubarium_voxel::default_threads());
+        step::step(self, world, flora);
     }
 
-    /// [`Fauna::step`] with a thread count for the one phase that splits: `sense`, which
-    /// only reads. [`Fauna::step`] is this with [`cubarium_voxel::default_threads`];
-    /// `1` runs it on this thread.
-    ///
-    /// **Execution, never a rule.** Every animal's plan is a pure function of the world,
-    /// the plant layer and that animal, the plans are gathered in animal order whatever
-    /// order the chunks finish in, and `act` still applies them serially in id order. So
-    /// the thread count cannot reach a result, and with the `parallel` feature off it is
-    /// ignored altogether (`design/handoffs/voxel-schedule-brief-2026-09-18.md`).
+    /// [`Fauna::step`], taking the host's thread count. The animal tick has no parallel
+    /// phase, so `threads` is not read; the signature matches the other layers' `step_with`.
     pub fn step_with(&mut self, world: &World, flora: &mut Flora, threads: usize) {
-        step::step(self, world, flora, threads);
+        let _ = threads;
+        step::step(self, world, flora);
     }
 
     /// The **static arena's** stepping: [`Fauna::step_with`] with the arena's per-arena
@@ -2530,19 +2455,14 @@ impl Fauna {
         threads: usize,
         senses: &mut Senses,
     ) {
-        step::step_with_senses(self, world, flora, threads, senses);
+        let _ = threads;
+        step::step_with_senses(self, world, flora, senses);
     }
 
     /// Apply a command now, between ticks, the way the plant layer's are applied. Returns
     /// whether it was accepted.
     pub fn apply(&mut self, world: &World, command: Command) -> bool {
         match command {
-            Command::Introduce {
-                x,
-                z,
-                species,
-                body,
-            } => self.introduce(world, x, z, species, None, body, 0.0),
             Command::IntroduceFounder {
                 x,
                 z,
@@ -2670,29 +2590,8 @@ impl Fauna {
         true
     }
 
-    /// One body placed on a column's highest support face: shared by [`Command::Introduce`]
-    /// and [`Command::IntroduceFounder`], so the booking is one path. `founder` `None` is
-    /// the live heuristic browser.
-    fn introduce(
-        &mut self,
-        world: &World,
-        x: i64,
-        z: u32,
-        species: Species,
-        founder: Option<Founder>,
-        body: f64,
-        heading_rad: f64,
-    ) -> bool {
-        let view = world.view();
-        let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
-            return false;
-        };
-        self.introduce_body(world, site, species, founder, body, None, heading_rad)
-    }
-
-    /// The placement itself. `reserve` `None` is the full reserve `body` can carry — what
-    /// every live introduction does and did. `Some(r)` is an explicit starting reserve,
-    /// which only a founder introduction asks for.
+    /// The placement itself. `reserve` `None` is the full reserve `body` can carry;
+    /// `Some(r)` is an explicit starting reserve.
     #[allow(clippy::too_many_arguments)]
     fn introduce_body(
         &mut self,
@@ -2869,49 +2768,6 @@ impl Fauna {
             self.ledger.deaths_by_founder_cause[founder.index()][cause.index()] += 1;
         }
     }
-}
-
-/// Every support face of column `(x, z)` an animal on `from` could step onto, ascending in
-/// `y`: within `climb` of `from.y`, with no more than `wade_depth_m` of standing water on
-/// it, and with `headroom` voxels of void over it — a body does not stand in a slot it
-/// does not fit in ([`crate::body::headroom_voxels`]).
-///
-/// Public because the geometry is worth stating without a tick in the way — a test, or a
-/// harness choosing where to introduce an animal, asks exactly this question.
-pub fn steppable(
-    view: &VoxelView<'_>,
-    from: Site,
-    x: i64,
-    z: u32,
-    sc: &SpeciesConfig,
-    headroom: u32,
-) -> Vec<Site> {
-    let c = view.config;
-    if z >= c.depth {
-        return Vec::new();
-    }
-    let climb = i64::from(sc.climb);
-    let mut out = Vec::new();
-    for y in 0..c.height {
-        if !view.is_support(x, y, z) {
-            continue;
-        }
-        if !crate::body::has_headroom(view, x, y, z, headroom) {
-            continue;
-        }
-        if (i64::from(y) - i64::from(from.y)).abs() > climb {
-            continue;
-        }
-        if view.water_depth_m(x, y, z) > sc.wade_depth_m {
-            continue;
-        }
-        out.push(Site {
-            x: x.rem_euclid(i64::from(c.width)) as u32,
-            y,
-            z,
-        });
-    }
-    out
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@
 
 use bevy_ecs::prelude::{IntoScheduleConfigs, Res, ResMut, Resource};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Species as Beast};
+use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, StartingStores};
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Site, Species};
 use cubarium_voxel_sim::{Sim, SimConfig, TickPhase, VoxelWorld};
 
@@ -128,15 +128,15 @@ fn rained_on() -> (World, Flora, Fauna) {
         }
     }
     let mut fauna = Fauna::new(FaunaConfig::default());
-    let body = fauna.config().species(Beast::Frondgrazer).body_max;
     for site in skyline.iter().step_by(skyline.len() / 2).take(2) {
         fauna.apply(
             &world,
-            FaunaCommand::Introduce {
+            FaunaCommand::IntroduceFounder {
                 x: i64::from(site.x),
                 z: site.z,
-                species: Beast::Frondgrazer,
-                body,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
             },
         );
     }
@@ -336,23 +336,25 @@ fn flood_hook(mut w: ResMut<VoxelWorld>, f: Res<Flood>) {
 }
 
 /// **4.** An animal in tick `t` sees the water depth from the end of tick `t − 1`: a flood
-/// the water leg makes in tick `t` drowns an animal (the instant rule, deeper than its
-/// `drown_depth_m`) in tick `t + 1` under overlap, and in tick `t` itself on the chained
-/// tick.
+/// the water leg makes in tick `t` drowns an animal (its lineage's `drown_after_s` set to
+/// zero, so one tick over its drown depth is enough) in tick `t + 1` under overlap, and in
+/// tick `t` itself on the chained tick.
 #[test]
 fn an_animal_sees_the_water_of_the_tick_before() {
     for (overlap, threads) in [(true, 1usize), (true, 2), (false, 1)] {
         let world = slab(6, 3, 0.4);
         let flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
-        let body = fauna.config().species(Beast::Frondgrazer).body_max;
+        let mut fauna_config = FaunaConfig::default();
+        fauna_config.founders[Founder::Browser.index()].drown_after_s = 0.0;
+        let mut fauna = Fauna::new(fauna_config);
         assert!(fauna.apply(
             &world,
-            FaunaCommand::Introduce {
+            FaunaCommand::IntroduceFounder {
                 x: 3,
                 z: 1,
-                species: Beast::Frondgrazer,
-                body,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
             },
         ));
         let mut sim = Sim::new(world, flora, fauna, config(threads, overlap), None);

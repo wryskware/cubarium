@@ -2159,9 +2159,8 @@ fn clamp_sym(v: f64) -> f64 {
     }
 }
 
-/// The founder physiology an animal actually runs: its own founder's when it carries
-/// the marker, its species' placeholder otherwise. The live heuristic path is the
-/// `None` branch and is unchanged.
+/// The physiology an animal actually runs: its own founder's when it carries the marker,
+/// its species' placeholder otherwise.
 pub fn effective_config(config: &crate::FaunaConfig, animal: &Animal) -> SpeciesConfig {
     match animal.founder {
         Some(founder) => config.founder(founder).core,
@@ -2485,20 +2484,6 @@ mod tests {
             2,
             adult(Founder::Blind).headroom_voxels(view.config.voxel_m)
         ));
-
-        // And the walk agrees: from the open face at x = 3 the three-cell slot is
-        // steppable and the two-cell slot is not.
-        let sc = *crate::FaunaConfig::placeholder().founder(Founder::Browser);
-        let from = Site { x: 3, y: 2, z: 2 };
-        assert_eq!(
-            crate::steppable(&view, from, 4, 2, &sc.core, need).len(),
-            1,
-            "the body fits under the higher roof"
-        );
-        assert!(
-            crate::steppable(&view, from, 5, 2, &sc.core, need).is_empty(),
-            "the body does not fit under the lower one"
-        );
     }
 
     /// A rise beyond the climb is a wall and a drop beyond it is a cliff edge: the

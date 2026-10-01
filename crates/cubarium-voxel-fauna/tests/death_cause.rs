@@ -13,7 +13,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_fauna::{
-    Command, Departure, Fauna, FaunaConfig, Founder, Species, StartingStores,
+    Command, Departure, Fauna, FaunaConfig, Founder, StartingStores,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig};
 
@@ -59,28 +59,29 @@ fn flood(w: &mut World, x: i64, top: u32) {
     assert!(got > 0.0, "the void above the face took water");
 }
 
-/// A starving layer: 5 /s against the placeholder 0.001 /s for **every** body, species
-/// and founder alike. The point of each test is the cause label, not how long a body
+/// A starving layer: 5 /s against the placeholder 0.001 /s for every founder. The point of each test is the cause label, not how long a body
 /// takes to starve, and 5 /s reaches it in a few dozen ticks.
 fn starving_config() -> FaunaConfig {
     let mut c = FaunaConfig::placeholder();
-    c.frondgrazer.maintenance_per_s = 5.0;
     for f in Founder::ALL {
         c.founders[f.index()].core.maintenance_per_s = 5.0;
     }
     c
 }
 
-fn grazer(fauna: &mut Fauna, world: &World, x: i64, body: f64) -> u64 {
+/// A grown browser with a full reserve at column `x`: well fed, under its `birth_body`
+/// gate only if the case starves it first.
+fn grazer(fauna: &mut Fauna, world: &World, x: i64) -> u64 {
     let id = fauna.view().ledger.births;
     assert!(
         fauna.apply(
             world,
-            Command::Introduce {
+            Command::IntroduceFounder {
                 x,
                 z: 0,
-                species: Species::Frondgrazer,
-                body,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
             }
         ),
         "a grazer at x {x}"
@@ -137,37 +138,37 @@ fn starvation_is_booked_starved_and_the_causes_still_sum_to_deaths() {
     let world = plain(4, 2);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(starving_config());
-    // Under `birth_body`: a starving adult that could still afford a birth would leave a
-    // newborn to starve beside it, and this test is about one death.
-    grazer(&mut fauna, &world, 1, 0.02);
+    // Hungry, so under `birth_body`: a starving adult that could still afford a birth
+    // would leave a newborn to starve beside it, and this test is about one death.
+    founder(&mut fauna, &world, 1, Founder::Browser);
 
     step_until_empty(&mut fauna, &world, &mut flora, 200);
 
     assert_eq!(fauna.view().ledger.deaths, 1);
     assert_eq!(split(&fauna), (1, 0, 0));
     assert_eq!(fauna.view().ledger.deaths_accounted(), 1);
-    for f in Founder::ALL {
-        for c in Departure::ALL {
-            assert_eq!(
-                fauna.view().ledger.departed_founder(f, c),
-                0,
-                "a heuristic body carries no lineage"
-            );
-        }
-    }
+    assert_eq!(
+        fauna
+            .view()
+            .ledger
+            .departed_founder(Founder::Browser, Departure::Starved),
+        1
+    );
 }
 
-/// A well-fed body standing under water deeper than its own `drown_depth_m` is booked
-/// `Drowned` — on the first tick, with its body nowhere near `body_min`, so nothing about
-/// this death could be read as starvation.
+/// A well-fed body standing under water deeper than its drown depth is booked `Drowned`
+/// — on the first tick (its lineage's `drown_after_s` set to zero), with its body nowhere
+/// near `body_min`, so nothing about this death could be read as starvation.
 #[test]
 fn drowning_is_booked_drowned() {
     let mut world = plain(4, 2);
     flood(&mut world, 1, 2);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::placeholder());
-    let id = grazer(&mut fauna, &world, 1, 0.02);
-    let body_min = fauna.config().species(Species::Frondgrazer).body_min;
+    let mut config = FaunaConfig::placeholder();
+    config.founders[Founder::Browser.index()].drown_after_s = 0.0;
+    let mut fauna = Fauna::new(config);
+    let id = grazer(&mut fauna, &world, 1);
+    let body_min = fauna.config().founder(Founder::Browser).core.body_min;
     assert!(fauna.view().animal(id).unwrap().body > body_min);
 
     fauna.step(&world, &mut flora);
@@ -192,11 +193,11 @@ fn a_body_that_is_both_starved_and_drowned_is_booked_starved() {
     // 200 /s: one tick of upkeep is more than the whole body, so the starvation clause
     // is true on the very tick the standing water is.
     let mut cfg = FaunaConfig::placeholder();
-    cfg.frondgrazer.maintenance_per_s = 200.0;
+    let browser = &mut cfg.founders[Founder::Browser.index()];
+    browser.core.maintenance_per_s = 200.0;
+    browser.drown_after_s = 0.0;
     let mut fauna = Fauna::new(cfg);
-    grazer(&mut fauna, &world, 1, 0.005);
-    let body_min = fauna.config().species(Species::Frondgrazer).body_min;
-    assert_eq!(body_min, 0.005, "introduced exactly at the floor");
+    founder(&mut fauna, &world, 1, Founder::Browser);
 
     fauna.step(&world, &mut flora);
 
@@ -211,8 +212,8 @@ fn a_remove_and_a_lost_support_face_book_a_removal_and_not_a_death() {
     let mut world = plain(4, 2);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::placeholder());
-    grazer(&mut fauna, &world, 1, 0.02);
-    grazer(&mut fauna, &world, 3, 0.02);
+    grazer(&mut fauna, &world, 1);
+    grazer(&mut fauna, &world, 3);
 
     assert!(fauna.apply(&world, Command::Remove { x: 1, z: 0 }));
     assert_eq!(split(&fauna), (0, 0, 1));

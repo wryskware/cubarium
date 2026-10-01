@@ -525,7 +525,7 @@ mod tests {
         );
         assert!(err.contains("structural_loss"), "{err}");
 
-        // And a heuristic body's default founder state never trips any of it.
+        // And a body with no lineage, whose founder state is all default, never trips it.
         assert!(decode(&encode(&layer(vec![animal(0, 0.02)], 1))).is_ok());
     }
 

@@ -73,7 +73,7 @@ use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Material, PoreBand, ViabilitySpec, World};
 use cubarium_voxel_fauna::{
     Command as FaunaCommand, Controller, Fauna, FaunaConfig, FaunaLedger, Founder, Response,
-    Senses, Species as Beast,
+    Senses,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
@@ -96,7 +96,7 @@ const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 cha
                         m X Y Z air|rock|soil|bedrock set material, \
                         f X Z bloomcrown|umbrellafrond [wood] seed a stand, \
                         c X Z clear a stand, \
-                        g X Z frondgrazer [body] introduce an animal, \
+                        g X Z introduce a frondgrazer, \
                         e [N] bury N lanternjaw egg clutches where prey live, \
                         j [N] introduce N adult lanternjaws where prey live, \
                         w PATH save the terrain only, \
@@ -2940,49 +2940,32 @@ impl Control {
                 }
             }
             "g" | "grazer" => {
-                let usage = "g X Z frondgrazer [body]";
+                let usage = "g X Z";
                 let Some((x, z)) = column(world, usage, &rest) else {
                     return;
                 };
-                let Some(species) = rest.get(2).and_then(|n| Beast::parse(n)) else {
-                    eprintln!(
-                        "cubarium voxel: `{usage}` — `{}` is not an animal",
-                        rest.get(2).copied().unwrap_or(""),
-                    );
-                    return;
-                };
-                // No body named is a grown one: the picture this command exists for is an
-                // animal you can see, as `f`'s is a stand you can see.
-                let body = match rest.get(3) {
-                    None => fauna.config().species(species).body_max,
-                    Some(text) => match text.parse::<f64>() {
-                        Ok(v) if v.is_finite() && v > 0.0 => v,
-                        _ => {
-                            eprintln!("cubarium voxel: `{usage}` wants a positive body");
-                            return;
-                        }
-                    },
-                };
+                // A grown frondgrazer (the browser founder) with half a reserve, as the
+                // seeder founds one, with its lineage's controller.
                 if fauna.apply(
                     world,
-                    FaunaCommand::Introduce {
+                    FaunaCommand::IntroduceFounder {
                         x,
                         z,
-                        species,
-                        body,
+                        founder: Founder::Browser,
+                        stores: habitat::FOUNDER_ARRIVAL,
+                        heading_rad: 0.0,
                     },
                 ) {
+                    let id = fauna.view().ledger.births - 1;
+                    fauna.install_founder_controller(id, Founder::Browser);
                     eprintln!(
-                        "cubarium voxel: introduced {} at {:?} with body {body}",
-                        species.name(),
+                        "cubarium voxel: introduced a frondgrazer at {:?}",
                         highest_site(world, x, z),
                     );
                 } else {
                     eprintln!(
-                        "cubarium voxel: no animal at ({x}, {z}): either the column has no \
-                         support face, or body {body} is below {}'s body_min {}",
-                        species.name(),
-                        fauna.config().species(species).body_min,
+                        "cubarium voxel: no frondgrazer at ({x}, {z}): the column has no \
+                         support face"
                     );
                 }
             }
@@ -4220,11 +4203,12 @@ mod tests {
         let mut fauna = Fauna::new(FaunaConfig::placeholder());
         assert!(fauna.apply(
             &world,
-            FaunaCommand::Introduce {
+            FaunaCommand::IntroduceFounder {
                 x: 3,
                 z: 1,
-                species: Beast::Frondgrazer,
-                body: 0.02,
+                founder: Founder::Browser,
+                stores: cubarium_voxel_fauna::StartingStores::FULL,
+                heading_rad: 0.0,
             }
         ));
         let mut flora = Flora::new(FloraConfig::default());

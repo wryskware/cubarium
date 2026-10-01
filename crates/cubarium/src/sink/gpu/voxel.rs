@@ -1446,7 +1446,7 @@ mod tests {
     use super::*;
     use cubarium_gpu::voxel::SlowPlanes;
     use cubarium_voxel::{Command, Config};
-    use cubarium_voxel_fauna::{Command as FaunaCommand, FaunaConfig, Species as Beast};
+    use cubarium_voxel_fauna::{Command as FaunaCommand, FaunaConfig};
     use cubarium_voxel_flora::{Command as FloraCommand, FloraConfig, Species};
 
     /// The pack as it was before the cheap one: every voxel through the wrapping
@@ -1760,16 +1760,15 @@ mod tests {
 
     fn grazer(world: &World, x: i64, z: u32) -> Fauna {
         let mut fauna = Fauna::new(FaunaConfig::default());
-        let body = fauna.config().species(Beast::Frondgrazer).body_max;
-        let species = Beast::Frondgrazer;
         assert!(
             fauna.apply(
                 world,
-                FaunaCommand::Introduce {
+                FaunaCommand::IntroduceFounder {
                     x,
                     z,
-                    species,
-                    body
+                    founder: cubarium_voxel_fauna::Founder::Browser,
+                    stores: cubarium_voxel_fauna::StartingStores::FULL,
+                    heading_rad: 0.0,
                 }
             ),
             "a support face for the grazer at ({x}, {z})"

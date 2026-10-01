@@ -13,7 +13,7 @@
 //! which is the only thing that could reassociate a sum. That is what is being tested.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Species as Beast};
+use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, StartingStores};
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Site, Species};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
@@ -86,15 +86,15 @@ fn conditioned() -> (World, Flora, Fauna) {
                     .can_establish(&world.view(), *s, Species::Springturf)
         })
         .collect();
-    let body = fauna.config().species(Beast::Frondgrazer).body_max;
     for site in strided(&pool, GRAZERS) {
         fauna.apply(
             &world,
-            FaunaCommand::Introduce {
+            FaunaCommand::IntroduceFounder {
                 x: i64::from(site.x),
                 z: site.z,
-                species: Beast::Frondgrazer,
-                body,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
             },
         );
     }

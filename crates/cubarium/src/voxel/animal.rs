@@ -1430,7 +1430,7 @@ impl Animals {
 #[cfg(test)]
 mod tests {
     use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-    use cubarium_voxel_fauna::{Command, Fauna, FaunaConfig, Founder, Species, StartingStores};
+    use cubarium_voxel_fauna::{Command, Fauna, FaunaConfig, Founder, StartingStores};
 
     use super::*;
 
@@ -1456,86 +1456,6 @@ mod tests {
             }
         }
         w
-    }
-
-    /// The interim glyph is four cells — 2 in `x`, 1 in `y`, 2 in `z` — in the void above
-    /// the face the model puts the animal on, and it paints in one placeholder colour.
-    #[test]
-    fn the_interim_glyph_is_a_two_by_one_by_two_block_over_its_support_face() {
-        let w = world();
-        let mut fauna = Fauna::new(FaunaConfig::placeholder());
-        assert!(fauna.apply(
-            &w,
-            Command::Introduce {
-                x: 3,
-                z: 1,
-                species: Species::Frondgrazer,
-                body: 0.02
-            }
-        ));
-        let mut grid = Animals::empty(0, 0, 0);
-        grid.rebuild(&w.view(), Some(fauna.view()));
-        assert!(!grid.is_empty());
-
-        // The support face is the top soil row, `y = 2`, so the body fills `y = 3`.
-        for (x, z, held) in [
-            (3, 1, true),
-            (4, 1, true),
-            (3, 2, true),
-            (4, 2, true),
-            (2, 1, false),
-            (5, 1, false),
-            (3, 0, false),
-        ] {
-            assert_eq!(
-                grid.at(x, 3, z).is_block(),
-                held,
-                "({x}, 3, {z}) should {} be part of the body",
-                if held { "" } else { "not" }
-            );
-        }
-        // Nothing in the face itself, nothing above the block.
-        assert_eq!(grid.at(3, 2, 1), AnimalPart::None);
-        assert_eq!(grid.at(3, 4, 1), AnimalPart::None);
-
-        let style = grid.style(grid.at(3, 3, 1)).expect("the interim style");
-        assert_eq!(style, interim_style(Species::Frondgrazer));
-        assert_eq!(
-            style.wood, style.crown,
-            "the interim glyph is one flat colour"
-        );
-        // And it is none of the five plant palettes.
-        for plant in cubarium_voxel_flora::Species::ALL {
-            assert_ne!(style.wood, super::super::stand::seed_style(plant).crown);
-        }
-    }
-
-    /// A body at the seam wraps in `x`, and one against the back wall is clipped in `z`
-    /// rather than wrapping into the front.
-    #[test]
-    fn the_glyph_wraps_in_x_and_clips_at_the_back_wall() {
-        let w = world();
-        let mut fauna = Fauna::new(FaunaConfig::placeholder());
-        // The last column, so the block's second half is column 0.
-        assert!(fauna.apply(
-            &w,
-            Command::Introduce {
-                x: 7,
-                z: 2,
-                species: Species::Frondgrazer,
-                body: 0.02
-            }
-        ));
-        let mut grid = Animals::empty(0, 0, 0);
-        grid.rebuild(&w.view(), Some(fauna.view()));
-        assert!(grid.at(7, 3, 2).is_block());
-        assert!(grid.at(0, 3, 2).is_block(), "the body crosses the seam");
-        assert!(
-            grid.at(8, 3, 2).is_block(),
-            "which is the same cell, unwrapped"
-        );
-        // `z = 3` is outside a 3-deep world, and nothing of it landed at `z = 0`.
-        assert_eq!(grid.at(7, 3, 0), AnimalPart::None);
     }
 
     #[test]
