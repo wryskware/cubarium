@@ -28,10 +28,16 @@ light_moisture = 0.67
 harvest = 0.2
 
 [targets]
-# Held to persistence alone (bodies plus viable eggs): no share and no late-breeding
-# target. Stage 1's lanternjaw egg bank first hatches at the first dusk, ~60 min into the
-# terrarium's 2 h day; stage 2 drops this and runs 2 h horizons.
-persist_only = ["lanternjaw"]
+# Persistence only (bodies plus viable eggs; no share, no late-breeding target): none.
+# Stage 1 held the lanternjaw so on 1 h horizons; stage 2 runs 2 h.
+persist_only = []
+# Exempt from the breeding term alone (persistence and share still apply): the
+# lanternjaw. A hatchling of the first dusk (~min 60) grows to birth_body in ~117 min and
+# holds surplus 12 more before it lays; its eggs hatch only at a later dusk.
+breed_exempt = ["lanternjaw"]
+# The moving-share term's weight: a still browser costs on the scale of a non-breeding
+# lineage (missing_cost 10).
+lively_weight = 10.0
 # A lineage alive with no late birth pays missing_cost x (1 - min(1, readiness / this)),
 # readiness its bodies' second-half mean breeding progress (1 gestating, else half the
 # reserve toward the surplus line plus half the surplus hold met; below birth_body only

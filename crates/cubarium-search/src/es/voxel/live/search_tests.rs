@@ -335,6 +335,7 @@ fn the_penalty_is_zero_in_the_band_and_monotonic_outside() {
         moving_min: 0.30,
         missing_cost: 10.0,
         lanternjaw_share: None,
+        lively_weight: 1.0,
     };
     for n in [30, 45, 80] {
         assert_eq!(penalty(&trace_at(n, 0.3), &band).total, 0.0, "n = {n}");

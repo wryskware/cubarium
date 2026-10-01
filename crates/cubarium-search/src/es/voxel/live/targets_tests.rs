@@ -216,3 +216,60 @@ fn a_persist_only_lineage_of_eggs_takes_no_share_or_breeding_penalty() {
             .is_err()
     );
 }
+
+/// `lively_weight` multiplies the moving-share term and nothing else.
+#[test]
+fn the_lively_weight_scales_only_the_lively_term() {
+    let mut t = trace(30, 3);
+    t.browser_moving = 0.15;
+    t.silent_lineages = 0.5;
+    let one = Band::for_founding(
+        16,
+        true,
+        &BandSpec {
+            lively_weight: 1.0,
+            ..BandSpec::default()
+        },
+    );
+    let ten = Band::for_founding(16, true, &BandSpec::default());
+    assert_eq!(BandSpec::default().lively_weight, 10.0, "the default");
+    let (p1, p10) = (penalty(&t, &one), penalty(&t, &ten));
+    assert!((p1.lively - 0.5).abs() < 1e-12, "{p1:?}");
+    assert!((p10.lively - 5.0).abs() < 1e-12, "{p10:?}");
+    assert_eq!(
+        (p1.bound, p1.peak, p1.share, p1.persist),
+        (p10.bound, p10.peak, p10.share, p10.persist)
+    );
+    assert!((p10.total - p1.total - 4.5).abs() < 1e-12);
+}
+
+/// A lineage founded only as eggs (the lanternjaw's bank) counts as founded: it is held to
+/// persistence, its share target applies, and it is lost only with no bodies and no eggs.
+/// `breed_exempt` drops its breeding term alone.
+#[test]
+fn an_egg_founded_lineage_is_scored() {
+    use super::search::{founded_lineages, lost_lineages};
+    let founded = founded_lineages(&[8, 8, 0], &[0, 0, 9]);
+    assert_eq!(founded, vec![8, 8, 9]);
+    let lj = Founder::Lanternjaw.index();
+    let spec = BandSpec {
+        persist_only: [false; 3],
+        ..BandSpec::default()
+    };
+    let b = Band::for_founding(16, founded[lj] > 0, &spec);
+    assert!(b.lanternjaw_share.is_some());
+    assert!(penalty(&trace(30, 0), &b).share > 0.0, "the share target applies");
+    assert_eq!(lost_lineages(&founded, &[3, 3, 0], &[0, 0, 4]), 0, "eggs keep it");
+    assert_eq!(lost_lineages(&founded, &[3, 3, 0], &[0, 0, 0]), 1, "no bodies, no eggs");
+    // Breeding: held to it by default, exempt with breed_exempt; persistence either way.
+    let lost = [false; 3];
+    let ready = [0.0; 3];
+    let late = [1, 1, 0];
+    assert_eq!(breeding_shortfall(&founded, &late, &lost, &ready, &spec, true), 1.0);
+    let rest: toml::Table = "[targets]\nbreed_exempt = [\"lanternjaw\"]\n".parse().unwrap();
+    let exempt = spec.with_targets(&rest).expect("valid");
+    assert!(exempt.breed_exempt[lj] && !exempt.persist_only[lj]);
+    assert_eq!(breeding_shortfall(&founded, &late, &lost, &ready, &exempt, true), 0.0);
+    let b = Band::for_founding(16, true, &exempt);
+    assert!(b.lanternjaw_share.is_some(), "the share target stays");
+}
