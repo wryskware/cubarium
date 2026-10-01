@@ -163,6 +163,7 @@ number as a tunable knob:
   its unit and meaning.
 - **What's not allowed:** inline literals, and new `const`s for ecological numbers. Only
   pure numerics stay `const`: tolerances, epsilons, cache sizes.
-- **Registry:** each new field gets a row in the parameter registry
-  (`design/ecology-parameter-registry-2026-09-28.md`; until R1 lands, the audit's
-  `parameters.tsv`).
+- **Registry:** each new field gets a row in its crate's registry table
+  (`cubarium_voxel::registry`, the tables built by R1). The coverage test fails on a field
+  with no row. Regenerate `design/parameters.md` with
+  `cargo run -p cubarium-voxel-sim --example params -- --write design/parameters.md`.
