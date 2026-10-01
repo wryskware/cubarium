@@ -126,6 +126,7 @@ fn main() -> Result<()> {
             roof_from_texture: !args.roof_walk,
             models: None,
             textures_under: None,
+            specimens: Vec::new(),
         },
     ) {
         Ok(sink) => sink,

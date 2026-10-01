@@ -15,7 +15,10 @@
 //!
 //! Each producer stands at three sizes (wood at 10 %, 40 % and 100 % of its maximum),
 //! left to right, in the front slab. Bloomcrown, lanternberry and glowcap get a fourth,
-//! adult and ripe. Both founders stand at the end, facing each way. Every stand is drawn at full
+//! adult and ripe. Both founders stand at the end, facing each way, and after them the
+//! unsimulated animals the models carry as `specimens` (model pass MP-A: chorister,
+//! ripple-snail, capgnawer, seedporter, bellwing), drawn from the library only, never
+//! simulated. Every stand is drawn at full
 //! moisture (or at `--wilt W`, a moisture of `1 − W`), with full foliage. The picture is
 //! written at 2× nearest, the panel's own upscale.
 //!
@@ -28,7 +31,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 
 use cubarium::sink::gpu::{VoxelGpuSink, VoxelGpuSinkOptions};
-use cubarium::voxel::model::ModelLibrary;
+use cubarium::voxel::animal::Specimen;
+use cubarium::voxel::model::{self, ModelLibrary};
+use cubarium::voxel::stand::Cell;
 use cubarium::voxel::present::VoxelPresenter;
 use cubarium::voxel::project::Projection;
 use cubarium::voxel::{Lighting, OrganismLook, VoxelConfig};
@@ -42,6 +47,16 @@ use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, FloraVie
 
 /// Voxels between one specimen's crown edge and the next one's.
 const GAP: i64 = 3;
+
+/// The unsimulated animals drawn after the founders: manifest name, heading (π/2 faces
+/// +x, side-on; π faces the viewer), and how many voxels above the ground it hovers.
+const SPECIMENS: [(&str, f64, u32); 5] = [
+    ("chorister", std::f64::consts::FRAC_PI_2, 0),
+    ("ripple-snail", std::f64::consts::FRAC_PI_2, 0),
+    ("capgnawer", std::f64::consts::PI, 0),
+    ("seedporter", std::f64::consts::PI, 0),
+    ("bellwing", std::f64::consts::PI, 3),
+];
 
 fn main() -> Result<()> {
     let mut out = None;
@@ -98,12 +113,51 @@ fn main() -> Result<()> {
         x += 2 * r + 1 + GAP;
     }
     let animal_x: Vec<i64> = (0..4).map(|k| x + 3 + k * 9).collect();
-    let width = (x + 4 * 9 + 6) as u32;
+    let mut width = (x + 4 * 9 + 6) as u32;
+
+    // The unsimulated animals (the models' `specimens`) after the founders, each in its
+    // own footprint: side-on as the chorister and ripple-snail picks are, the others facing
+    // the viewer as theirs do, the bellwing hovering.
+    let models_dir = VoxelConfig::default().models_dir;
+    let models: Option<Arc<ModelLibrary>> = if glyphs {
+        None
+    } else {
+        Some(Arc::new(
+            ModelLibrary::load(&models_dir, voxel_m).context("the baked models")?,
+        ))
+    };
+    let depth = 8u32;
+    let mut specimens = Vec::new();
+    if let Some(lib) = &models {
+        let mut sx = x + 4 * 9 + 3;
+        for (name, heading_rad, lift) in SPECIMENS {
+            let Some(cells) = lib.specimen(name).and_then(|m| m.select(f64::INFINITY)) else {
+                eprintln!("voxel_specimens: no {name} model; skipped");
+                continue;
+            };
+            let q = model::quarter_turns(heading_rad);
+            let turned: Vec<(i32, i32)> =
+                cells.iter().map(|m| model::turn(q, m.offset[0], m.offset[2])).collect();
+            let (x0, x1) = (turned.iter().map(|t| t.0).min().unwrap_or(0), turned.iter().map(|t| t.0).max().unwrap_or(0));
+            let z0 = turned.iter().map(|t| t.1).min().unwrap_or(0);
+            specimens.push(Specimen {
+                name: name.to_string(),
+                anchor: Cell {
+                    x: sx - i64::from(x0),
+                    y: 3 + lift,
+                    z: (1 - z0).max(1) as u32,
+                },
+                heading_rad,
+            });
+            sx += i64::from(x1 - x0) + 1 + GAP;
+        }
+        width = (sx + 3) as u32;
+    }
 
     let world_cfg = Config {
         width,
         height: 40,
-        depth: 6,
+        depth,
         voxel_m,
         ..Config::default()
     };
@@ -232,13 +286,6 @@ fn main() -> Result<()> {
         },
         ..VoxelConfig::default()
     };
-    let models: Option<Arc<ModelLibrary>> = if glyphs {
-        None
-    } else {
-        Some(Arc::new(
-            ModelLibrary::load(&cfg.models_dir, voxel_m).context("the baked models")?,
-        ))
-    };
     if gpu {
         let under = layered.then(|| cfg.textures_dir.clone());
         let cfg = VoxelConfig {
@@ -255,6 +302,7 @@ fn main() -> Result<()> {
             VoxelGpuSinkOptions {
                 models,
                 textures_under: under,
+                specimens: specimens.clone(),
                 ..Default::default()
             },
         )?;
@@ -302,6 +350,7 @@ fn main() -> Result<()> {
         proj,
     )
     .with_models(models)
+    .with_specimens(specimens.clone())
     .draw_with_fauna(&world.view(), view, Some(fauna_view), &mut canvas);
     canvas.encode_raster(&mut raster);
 

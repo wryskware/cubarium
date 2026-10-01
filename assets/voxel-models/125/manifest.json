@@ -12,7 +12,19 @@
   "teal",
   "magenta",
   "warm",
-  "starved"
+  "starved",
+  "a_main",
+  "a_dark",
+  "a_pale",
+  "a_mark",
+  "a_limb",
+  "a_foot",
+  "a_head",
+  "a_eye",
+  "a_glow",
+  "a_membrane",
+  "a_fruit",
+  "a_tendril"
  ],
  "variants": 3,
  "bins": 5,
@@ -1758,7 +1770,7 @@
    ]
   },
   "littershredder": {
-   "bytes": 204,
+   "bytes": 229,
    "bins": [
     {
      "length_m": 0.2362,
@@ -1783,29 +1795,81 @@
    ]
   },
   "frondgrazer": {
-   "bytes": 939,
+   "bytes": 1306,
    "bins": [
     {
      "length_m": 0.3481,
-     "cells": 14
+     "cells": 17
     },
     {
      "length_m": 0.4486,
-     "cells": 21
-    },
-    {
-     "length_m": 0.5491,
      "cells": 30
     },
     {
+     "length_m": 0.5491,
+     "cells": 37
+    },
+    {
      "length_m": 0.6495,
-     "cells": 44
+     "cells": 61
     },
     {
      "length_m": 0.75,
-     "cells": 51
+     "cells": 81
+    }
+   ]
+  },
+  "chorister": {
+   "bytes": 794,
+   "bins": [
+    {
+     "length_m": 1.4,
+     "cells": 142
+    }
+   ]
+  },
+  "ripple-snail": {
+   "bytes": 80,
+   "bins": [
+    {
+     "length_m": 0.19,
+     "cells": 6
+    }
+   ]
+  },
+  "capgnawer": {
+   "bytes": 125,
+   "bins": [
+    {
+     "length_m": 0.25,
+     "cells": 12
+    }
+   ]
+  },
+  "seedporter": {
+   "bytes": 254,
+   "bins": [
+    {
+     "length_m": 0.2,
+     "cells": 34
+    }
+   ]
+  },
+  "bellwing": {
+   "bytes": 132,
+   "bins": [
+    {
+     "length_m": 0.05,
+     "cells": 12
     }
    ]
   }
+ },
+ "specimens": {
+  "chorister": "chorister.cvm",
+  "ripple-snail": "ripple-snail.cvm",
+  "capgnawer": "capgnawer.cvm",
+  "seedporter": "seedporter.cvm",
+  "bellwing": "bellwing.cvm"
  }
 }

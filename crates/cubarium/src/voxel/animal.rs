@@ -601,6 +601,16 @@ fn place_local(
     }
 }
 
+/// One unsimulated animal placed for drawing ([`Animals::stamp_specimens`]): its name in
+/// the model library's `specimens`, the anchor cell (just above its support face, as a
+/// founder's), and its heading.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Specimen {
+    pub name: String,
+    pub anchor: Cell,
+    pub heading_rad: f64,
+}
+
 /// Every animal of a frame, as voxels plus the styles they paint with.
 ///
 /// Indexed `(z · width + x) · height + y`, the roof map's and [`super::stand::Stands`]'s
@@ -1354,6 +1364,49 @@ impl Animals {
                     };
                     self.place_if_empty(view, cell, AnimalPart::Model(style));
                 }
+            }
+        }
+    }
+
+    /// **Specimens** (model pass MP-A): unsimulated animals drawn from the library's
+    /// `specimens` at fixed placements, for `voxel_specimens`'s strip. Each stamps its adult
+    /// model like a founder's (turned to the nearest quarter heading), in
+    /// [`colours::specimen`]'s coat. Call after [`Animals::rebuild_with`]; a name the
+    /// library lacks draws nothing.
+    pub fn stamp_specimens(&mut self, view: &VoxelView<'_>, lib: &ModelLibrary, specimens: &[Specimen]) {
+        if !lib.serves(view.config.voxel_m) {
+            return;
+        }
+        for s in specimens {
+            let Some(cells) = lib.specimen(&s.name).and_then(|m| m.select(f64::INFINITY)) else {
+                continue;
+            };
+            let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
+            let mut placed = Vec::with_capacity(cells.len());
+            model::each_animal_cell(cells, s.anchor, s.heading_rad, view, |c, m| placed.push((c, m)));
+            let mut style_of: FxHashMap<(u8, u8), u16> = FxHashMap::default();
+            for (cell, m) in placed {
+                let band = colours::band(m.offset[1], top);
+                let style = match style_of.get(&(m.material, band)) {
+                    Some(&style) => style,
+                    None => {
+                        let Some(sw) = colours::specimen(&s.name, m.material, band) else {
+                            break;
+                        };
+                        let Some(style) = u16::try_from(self.styles.len()).ok().filter(|&v| v != u16::MAX)
+                        else {
+                            return;
+                        };
+                        self.styles.push(Style {
+                            wood: srgb_linear(sw.shadow),
+                            crown: srgb_linear(sw.body),
+                            heart: srgb_linear(sw.glint),
+                        });
+                        style_of.insert((m.material, band), style);
+                        style
+                    }
+                };
+                self.place(view, cell, AnimalPart::Model(style));
             }
         }
     }

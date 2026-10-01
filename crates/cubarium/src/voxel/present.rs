@@ -120,7 +120,7 @@ use cube_proto::Face;
 use crate::present::{mix, srgb_linear};
 
 use super::VoxelConfig;
-use super::animal::{AnimalPart, Animals};
+use super::animal::{AnimalPart, Animals, Specimen};
 use super::appearance::{self, FaceTexel, Pigment};
 use super::model::ModelLibrary;
 use super::project::Projection;
@@ -360,6 +360,8 @@ pub struct VoxelPresenter {
     animals: Animals,
     /// The baked voxel models (package V), or `None` for the dev-mode glyphs.
     models: Option<Arc<ModelLibrary>>,
+    /// Unsimulated animals drawn from the models' `specimens` (`voxel_specimens` only).
+    specimens: Vec<Specimen>,
 }
 
 impl VoxelPresenter {
@@ -372,7 +374,15 @@ impl VoxelPresenter {
             stands: Stands::empty(0, 0, 0),
             animals: Animals::empty(0, 0, 0),
             models: None,
+            specimens: Vec::new(),
         }
+    }
+
+    /// Also draw these unsimulated animals from the models' `specimens`
+    /// ([`Animals::stamp_specimens`]); drawn only with models.
+    pub fn with_specimens(mut self, specimens: Vec<Specimen>) -> VoxelPresenter {
+        self.specimens = specimens;
+        self
     }
 
     /// Draw these covered faces instead of the flora's own; `None` goes back to them. The
@@ -475,6 +485,7 @@ impl VoxelPresenter {
             Some(lib) => {
                 self.stands.rebuild_with(view, flora, lib);
                 self.animals.rebuild_with(view, fauna, lib);
+                self.animals.stamp_specimens(view, lib, &self.specimens);
             }
             None => {
                 self.stands.rebuild(view, flora);
