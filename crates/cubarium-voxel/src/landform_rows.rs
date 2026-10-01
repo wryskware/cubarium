@@ -127,10 +127,52 @@ fn water(prefix: &'static str) -> Vec<Row> {
     rows
 }
 
+/// The ridge generator's rows (`world.ridge.*`): always present, whatever the landform.
+fn ridge() -> Vec<Row> {
+    let (n, p, f) = (Range::nonneg(), Range::positive(), Range::fraction());
+    let mut t = T::new("world.ridge");
+    t.f("front_fraction", "fraction of the height", f, (0.15, 0.45), "surface height at the front")
+        .f("ridge_amp_fraction", "fraction of the height", f, (0.08, 0.3), "the ridge's amplitude")
+        .f("ridge_amp_min", "voxels", n, (0.5, 3.0), "the ridge's least amplitude")
+        .f("second_amp_fraction", "fraction of the height", f, (0.0, 0.12), "the second harmonic's amplitude")
+        .f("climb_fraction", "fraction of the height", f, (0.1, 0.4), "how far the back stands above the front")
+        .f("basin_depth", "ridge amplitudes", n, (0.3, 1.2), "the receiving basin's floor under the front, in ridge amplitudes")
+        .f("basin_keep", "fraction of the depth", f, (0.0, 0.5), "relief below the basin floor keeps this share of its depth")
+        .f("wobble_terms", "sine terms", Range::at_least(0.0), (0.0, 8.0), "terms of the weak correlated wobble")
+        .f("wobble_first_harmonic", "harmonic", Range::at_least(0.0), (1.0, 6.0), "the wobble's first harmonic around the ring")
+        .f("wobble_harmonic_step", "harmonics", Range::at_least(0.0), (1.0, 4.0), "the step between the wobble's harmonics")
+        .f("wobble_amp", "voxels", n, (0.0, 1.5), "the first wobble term's amplitude")
+        .f("wobble_amp_falloff", "per term", n, (0.0, 2.0), "how fast the wobble's amplitude falls per term")
+        .f("wobble_depth_freq.*", "cycles per voxel of depth", n, (0.02, 0.4), "range of the wobble's frequencies in depth")
+        .f("soil_slope", "voxels", n, (0.0, 6.0), "soil depth on flat ground from slope")
+        .f("soil_slope_cap", "voxels per voxel", p, (0.5, 2.0), "the slope at which the slope's soil vanishes")
+        .f("soil_deposit", "voxels", n, (0.0, 6.0), "soil depth added by deposition in the basin")
+        .f("soil_base", "voxels", n, (0.0, 2.0), "soil depth everywhere")
+        .f("soil_max_rows", "voxels", n, (2.0, 12.0), "the deepest soil")
+        .f("rock_thick", "voxels", n, (2.0, 12.0), "thickness of the rock body under the soil")
+        .f("rock_thick_swing", "voxels", n, (0.0, 6.0), "the rock body's swing around the ring")
+        .f("strata_warp", "voxels", n, (0.0, 4.0), "how far the hard strata warp around the ring")
+        .f("strata_thickness", "voxels", p, (1.0, 4.0), "thickness of one rock layer")
+        .f("strata_period", "layers", Range::at_least(1.0), (2.0, 8.0), "how many layers apart the hard ones are")
+        .f("pockets", "pockets", Range::at_least(0.0), (0.0, 8.0), "soil pockets inside the rock")
+        .f("pocket_cy_min", "voxels", n, (1.0, 4.0), "the lowest a pocket's centre may be")
+        .f("pocket_height_fraction", "fraction of the height", f, (0.2, 0.8), "the highest a pocket's centre may be, as a share of the height")
+        .f("pocket_cy_floor", "voxels", n, (2.0, 6.0), "the least that highest bound may be")
+        .f("pocket_rx.*", "voxels", p, (1.0, 8.0), "a pocket's radius along the ring")
+        .f("pocket_ry.*", "voxels", p, (1.0, 6.0), "a pocket's radius in height")
+        .f("pocket_rz.*", "voxels", p, (1.0, 6.0), "a pocket's radius in depth");
+    // The ridge rows are not optional: the default config holds them.
+    for r in &mut t.rows {
+        r.optional = false;
+    }
+    t.rows
+}
+
 /// Every landform row.
 pub(crate) fn rows() -> Vec<Row> {
     let (n, p, f) = (Range::nonneg(), Range::positive(), Range::fraction());
     let mut rows = Vec::new();
+    rows.extend(ridge());
     rows.extend(erosion("world.landform.*.erosion"));
     rows.extend(water("world.landform.*.water"));
 
@@ -162,7 +204,13 @@ pub(crate) fn rows() -> Vec<Row> {
         .f("hardness_region_m", "m", p, (8.0, 36.0), "wavelength of the slow regional variation in hardness")
         .f("bedrock_hardness", "0..1", n, (0.5, 0.9), "at or above this hardness the rock voxelises as bedrock")
         .f("core_m", "m above y=0", n, (0.5, 3.0), "everything below this height is the impermeable core")
-        .f("pockets", "pockets", Range::at_least(0.0), (0.0, 8.0), "soil pockets inside the rock");
+        .f("pockets", "pockets", Range::at_least(0.0), (0.0, 8.0), "soil pockets inside the rock")
+        .f("core_blend_m", "m", n, (0.1, 1.5), "how thick the core's upper edge blends into the strata")
+        .f("hardness_band_share", "fraction", f, (0.4, 0.95), "how much of the strata's hardness is the banding, the rest the slow regional variation")
+        .f("rocky_edge_width", "noise units", p, (0.2, 1.0), "the width of the rocky mask's soft edge")
+        .f("bench_ramp_factor", "x", n, (2.0, 8.0), "how the benches' ramp length is read against the rocky mask's wavelength")
+        .f("basin_keep", "fraction of the depth", f, (0.0, 0.5), "relief below the basin floor keeps this share of its depth")
+        .f("min_climb_share", "fraction of back_rise_m", f, (0.2, 1.0), "the back wall stands at least this share of back_rise_m above the front");
     rows.extend(t.rows);
 
     let mut t = T::new("world.landform.staged.tiers");
@@ -178,7 +226,24 @@ pub(crate) fn rows() -> Vec<Row> {
         .f("front_setback_m", "m", n, (0.0, 0.75), "how far back from a shelf's front edge the bowl starts")
         .f("shore_m", "m", n, (0.0, 5.0), "how far out from the lake its wet shore reaches (0: no shore)")
         .f("shore_slope", "m per m", n, (0.1, 0.6), "the shore's rise, metres per metre out from the water")
-        .f("shore_lip_m", "m", n, (0.0, 1.0), "width of the shore's dry lip at the water's edge");
+        .f("shore_lip_m", "m", n, (0.0, 1.0), "width of the shore's dry lip at the water's edge")
+        .f("mass_spacing_share", "x edge_wavelength_m", p, (0.5, 1.5), "a shelf mass's spacing around the ring, in edge wavelengths")
+        .f("mass_jitter", "fraction of the spacing", n, (0.0, 0.4), "how far a mass is jittered from its even spacing")
+        .f("mass_taper", "fraction of the radius per elevation", n, (0.0, 0.3), "how much narrower each higher elevation of a mass is")
+        .f("mass_radius_share", "x edge_wavelength_m", p, (0.2, 0.5), "a mass's half-width at its lowest elevation, in edge wavelengths")
+        .f("mass_min_pool_radii", "x pool_radius_m", n, (1.0, 4.0), "the least a mass's half-width may be, in pool radii")
+        .f("front_base", "fraction of the depth", f, (0.0, 0.3), "a shelf's front edge at elevation 0, as a share of the depth")
+        .f("front_step", "fraction of the depth", f, (0.05, 0.3), "how much further back each elevation's front edge stands")
+        .f("front_bow", "fraction of the depth", n, (0.0, 0.3), "how far a shelf's front edge is pushed back at the mass's ends")
+        .f("back_base", "fraction of the depth", f, (0.3, 0.8), "a shelf's back edge at elevation 0, as a share of the depth")
+        .f("back_step", "fraction of the depth", n, (0.0, 0.3), "how much further back each elevation's back edge stands")
+        .f("back_edge_share", "fraction", n, (0.0, 1.0), "how much of the edge noise pulls the back edge in")
+        .f("back_bow", "fraction of the depth", n, (0.0, 0.3), "how far a shelf's back edge is pulled in at the mass's ends")
+        .f("pool_bowl_rows", "voxels", Range::at_least(0.0), (1.0, 4.0), "how deep an upper pool's bowl is cut, in voxels of water over its bed")
+        .f("pool_taper", "fraction of the bowl's length", n, (0.0, 0.7), "how much a pool's bowl tapers away from its notch")
+        .f("lake_beach_rows", "voxels", Range::at_least(0.0), (0.0, 4.0), "rings of the lake's beach, each one voxel deeper going in")
+        .f("ramp_step_m", "m", p, (0.25, 0.75), "the steepest step a ramp through a riser may have (what a body can walk)")
+        .f("shore_soil_rows", "voxels", Range::at_least(0.0), (1.0, 8.0), "rows of soil under the waterline the wet shore lays");
     rows.extend(t.rows);
 
     let mut t = T::new("world.landform.staged.benches");
@@ -202,6 +267,14 @@ pub(crate) fn rows() -> Vec<Row> {
         .f("gallery_min_depth_m", "m", n, (0.3, 1.5), "how far under the surface a gallery has to start")
         .f("mouth_reach_m", "m", n, (0.3, 2.0), "how far a mouth may be cut through rock to open a gallery")
         .f("skylight_m", "m", n, (0.3, 2.0), "how close a gallery's ceiling must come to the surface for a skylight")
+        .f("chamber_radius_share", "x grotto_wavelength_m", p, (0.15, 0.5), "a chamber's half-width, in grotto wavelengths")
+        .f("chamber_depth_factor", "x undercut_depth_m", p, (1.0, 4.0), "a chamber's depth into the bank, in undercut depths")
+        .f("chamber_room_factor", "x clearance_m", p, (1.0, 3.0), "a chamber's room height, in clearances")
+        .f("chamber_spacing_m", "m of ring per chamber", p, (8.0, 40.0), "the ring length each chamber is asked for")
+        .f("chamber_max", "chambers", Range::at_least(0.0), (0.0, 6.0), "most chambers a ring is given")
+        .f("chamber_taper", "fraction", p, (0.3, 1.0), "how far a chamber's far wall is rounded in")
+        .f("gallery_gate", "noise units", Range::any(), (0.3, 0.9), "the gallery noise's gate at zero density")
+        .f("gallery_gate_slope", "noise units per unit density", n, (0.6, 1.8), "how fast the gate falls with gallery density")
         .fixed("stream", "-", n, "this section's own seed stream");
     rows.extend(t.rows);
 

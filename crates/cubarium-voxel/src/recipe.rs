@@ -57,6 +57,100 @@ impl Landform {
     }
 }
 
+/// The shape numbers of the original [`Landform::Ridge`] generator: one broad ridge, one
+/// receiving basin, the climb to the back, soil from slope and deposition, a rock body
+/// with hard strata and soil pockets (`[world.ridge]`). Lengths are in **voxels** and
+/// heights are shares of the world's height, because that generator was authored on the
+/// grid, not in metres.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RidgeShape {
+    /// Surface height at the front, as a share of the world's height.
+    pub front_fraction: f64,
+    /// The ridge's amplitude, as a share of the world's height, and its least, voxels.
+    pub ridge_amp_fraction: f64,
+    pub ridge_amp_min: f64,
+    /// The second harmonic's amplitude, as a share of the world's height.
+    pub second_amp_fraction: f64,
+    /// How far the back stands above the front, as a share of the world's height.
+    pub climb_fraction: f64,
+    /// The receiving basin's floor lies this many ridge amplitudes under the front.
+    pub basin_depth: f64,
+    /// Relief below the basin floor keeps this share of its depth: the basin flattens.
+    pub basin_keep: f64,
+    /// The weak correlated wobble: how many sine terms, the first harmonic and the step
+    /// between harmonics around the ring, the first term's amplitude (voxels) and how
+    /// fast it falls off per term, and the range of the terms' frequencies in depth.
+    pub wobble_terms: u32,
+    pub wobble_first_harmonic: u32,
+    pub wobble_harmonic_step: u32,
+    pub wobble_amp: f64,
+    pub wobble_amp_falloff: f64,
+    pub wobble_depth_freq: [f64; 2],
+    /// Soil depth, voxels: `soil_slope x (1 - slope / soil_slope_cap) + soil_deposit x
+    /// deposition + soil_base`, rounded and capped at `soil_max_rows`.
+    pub soil_slope: f64,
+    pub soil_slope_cap: f64,
+    pub soil_deposit: f64,
+    pub soil_base: f64,
+    pub soil_max_rows: f64,
+    /// The rock body under the soil: thickness and its swing around the ring, voxels.
+    pub rock_thick: f64,
+    pub rock_thick_swing: f64,
+    /// The hard strata: how far they warp around the ring (voxels), the thickness of
+    /// one layer (voxels) and how many layers apart the hard ones are.
+    pub strata_warp: f64,
+    pub strata_thickness: f64,
+    pub strata_period: u32,
+    /// Soil pockets inside the rock: how many, their centre's height range (voxels from
+    /// `pocket_cy_min` up to the share `pocket_height_fraction` of the world's height, at
+    /// least `pocket_cy_floor`) and their radii ranges, voxels.
+    pub pockets: u32,
+    pub pocket_cy_min: f64,
+    pub pocket_height_fraction: f64,
+    pub pocket_cy_floor: f64,
+    pub pocket_rx: [f64; 2],
+    pub pocket_ry: [f64; 2],
+    pub pocket_rz: [f64; 2],
+}
+
+impl Default for RidgeShape {
+    fn default() -> RidgeShape {
+        RidgeShape {
+            front_fraction: 0.30,
+            ridge_amp_fraction: 0.17,
+            ridge_amp_min: 1.0,
+            second_amp_fraction: 0.05,
+            climb_fraction: 0.26,
+            basin_depth: 0.72,
+            basin_keep: 0.12,
+            wobble_terms: 4,
+            wobble_first_harmonic: 3,
+            wobble_harmonic_step: 2,
+            wobble_amp: 0.55,
+            wobble_amp_falloff: 0.6,
+            wobble_depth_freq: [0.05, 0.22],
+            soil_slope: 3.2,
+            soil_slope_cap: 1.0,
+            soil_deposit: 2.5,
+            soil_base: 0.3,
+            soil_max_rows: 6.0,
+            rock_thick: 6.0,
+            rock_thick_swing: 3.0,
+            strata_warp: 1.6,
+            strata_thickness: 2.0,
+            strata_period: 4,
+            pockets: 3,
+            pocket_cy_min: 2.0,
+            pocket_height_fraction: 0.5,
+            pocket_cy_floor: 3.0,
+            pocket_rx: [2.0, 5.0],
+            pocket_ry: [1.5, 3.0],
+            pocket_rz: [1.5, 4.0],
+        }
+    }
+}
+
 /// One deterministic stream per generation pass. Distinct constants, xored into the
 /// world seed: retuning one pass does not reshuffle the others.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -218,6 +312,45 @@ pub struct Tiers {
     /// reaches no soil, so the wettest ground a founder is offered is the bank and not
     /// the shallows a shower floods.
     pub shore_lip_m: f64,
+    /// A shelf mass's spacing around the ring, as a share of `edge_wavelength_m`: the
+    /// ring holds `circumference / (edge_wavelength_m x this)` masses (at least two).
+    pub mass_spacing_share: f64,
+    /// How far a mass is jittered from its even spacing, as a share of the spacing, either
+    /// way.
+    pub mass_jitter: f64,
+    /// How much narrower each higher elevation of a mass is: a fraction of the radius
+    /// lost per elevation.
+    pub mass_taper: f64,
+    /// A mass's half-width at its lowest elevation, as a share of `edge_wavelength_m`.
+    pub mass_radius_share: f64,
+    /// The least a mass's half-width may be, in `pool_radius_m`: wide enough to hold a
+    /// pool and its bank.
+    pub mass_min_pool_radii: f64,
+    /// A shelf's front edge, as shares of the ring's depth: `front_base + front_step x k`
+    /// at elevation `k`, pushed back by `front_bow` of the depth at the mass's ends.
+    pub front_base: f64,
+    pub front_step: f64,
+    pub front_bow: f64,
+    /// A shelf's back edge, as shares of the depth: `back_base + back_step x k`, pulled in
+    /// by `back_edge_share` of the edge noise and by `back_bow` of the depth at the mass's
+    /// ends. (The route mass reaches the back wall.)
+    pub back_base: f64,
+    pub back_step: f64,
+    pub back_edge_share: f64,
+    pub back_bow: f64,
+    /// How deep the bowl of an upper pool is cut, in voxels of water over its rock bed.
+    pub pool_bowl_rows: u32,
+    /// How much a pool's bowl tapers away from its notch: the depth of the bowl's far
+    /// corners, as a share of its length.
+    pub pool_taper: f64,
+    /// The lake's beach, in rings of voxels: each ring in from the edge sits one voxel
+    /// deeper, up to this many.
+    pub lake_beach_rows: u32,
+    /// The steepest step a ramp through a riser may have, metres: the bound a body can
+    /// walk, which sets how many rows of depth the rise is spread over.
+    pub ramp_step_m: f64,
+    /// Rows of soil under the waterline the wet shore lays, in voxels.
+    pub shore_soil_rows: u32,
 }
 
 impl Default for Tiers {
@@ -242,6 +375,23 @@ impl Tiers {
         shore_m: 0.0,
         shore_slope: 0.25,
         shore_lip_m: 0.0,
+        mass_spacing_share: 0.9,
+        mass_jitter: 0.18,
+        mass_taper: 0.11,
+        mass_radius_share: 0.34,
+        mass_min_pool_radii: 2.2,
+        front_base: 0.08,
+        front_step: 0.17,
+        front_bow: 0.09,
+        back_base: 0.57,
+        back_step: 0.09,
+        back_edge_share: 0.5,
+        back_bow: 0.12,
+        pool_bowl_rows: 2,
+        pool_taper: 0.35,
+        lake_beach_rows: 2,
+        ramp_step_m: 0.5,
+        shore_soil_rows: 4,
     };
 
     /// `default` and `wide`: four elevations, each one 2 m stratum apart.
@@ -392,14 +542,17 @@ pub struct Strata {
     span: f64,
     strata_m: f64,
     core_m: f64,
+    core_blend_m: f64,
+    band_share: f64,
 }
 
 impl Strata {
     /// Hardness at a height in this column, `0..=1`.
     pub fn hardness(&self, y_m: f64) -> f64 {
         let band = 0.5 - 0.5 * (TAU * (y_m + self.warp_m) / self.strata_m).cos();
-        let layered = self.soft + self.span * (0.72 * band + 0.28 * self.region);
-        let core = 1.0 - smoothstep(self.core_m, self.core_m + 0.5, y_m);
+        let layered = self.soft
+            + self.span * (self.band_share * band + (1.0 - self.band_share) * self.region);
+        let core = 1.0 - smoothstep(self.core_m, self.core_m + self.core_blend_m, y_m);
         layered.max(core).clamp(0.0, 1.0)
     }
 
@@ -413,7 +566,8 @@ impl Strata {
             return None;
         }
         // Hard is `band >= t`, with the region's share already taken out.
-        let t = ((threshold - self.soft) / self.span - 0.28 * self.region) / 0.72;
+        let t = ((threshold - self.soft) / self.span - (1.0 - self.band_share) * self.region)
+            / self.band_share;
         if !(0.0..1.0).contains(&t) {
             return None;
         }
@@ -489,6 +643,24 @@ pub struct Hollows {
     /// metres. A gallery that gets neither is filled.
     pub skylight_m: f64,
 
+    /// A chamber's half-width, as a share of `grotto_wavelength_m`.
+    pub chamber_radius_share: f64,
+    /// A chamber's depth into the bank, in `undercut_depth_m`.
+    pub chamber_depth_factor: f64,
+    /// A chamber's room height, in `clearance_m`.
+    pub chamber_room_factor: f64,
+    /// The ring length each chamber is asked for, metres: a few legible rooms, not every
+    /// mass perforated.
+    pub chamber_spacing_m: f64,
+    /// Most chambers a ring is given.
+    pub chamber_max: u32,
+    /// How far a chamber's far wall is rounded in: its depth axis is scaled by this before
+    /// the ellipse test.
+    pub chamber_taper: f64,
+    /// The gallery noise's gate is `gallery_gate - gallery_gate_slope x gallery_density`:
+    /// a monotone gate, not a measured quantile — more density, lower bar.
+    pub gallery_gate: f64,
+    pub gallery_gate_slope: f64,
     /// This section's own seed stream.
     pub stream: u64,
 }
@@ -517,6 +689,14 @@ impl Hollows {
         gallery_min_depth_m: 0.6,
         mouth_reach_m: 1.0,
         skylight_m: 1.0,
+        chamber_radius_share: 0.30,
+        chamber_depth_factor: 2.5,
+        chamber_room_factor: 1.8,
+        chamber_spacing_m: 18.0,
+        chamber_max: 3,
+        chamber_taper: 0.72,
+        gallery_gate: 0.6,
+        gallery_gate_slope: 1.2,
         stream: 0x_5354_4147_5F48_4C57,
     };
 
@@ -915,6 +1095,23 @@ pub struct Recipe {
     pub bedrock_hardness: f64,
     /// Everything below this height is the impermeable core, hardness `1`.
     pub core_m: f64,
+    /// How thick the core's upper edge blends into the strata, metres.
+    pub core_blend_m: f64,
+    /// How much of the strata's hardness is the banding (a cosine in height) and how much
+    /// the slow regional variation: `hardness_band_share` and the rest.
+    pub hardness_band_share: f64,
+    /// The width of the rocky mask's soft edge, in the noise's own units (a smoothstep
+    /// from `lo` to `lo + this`).
+    pub rocky_edge_width: f64,
+    /// How the benches' ramp is read against the rocky mask's wavelength: the ramp is
+    /// `bench_ramp_factor x ramp_m / rocky_wavelength_m` of the mask's rise.
+    pub bench_ramp_factor: f64,
+    /// Relief below `basin_floor_m` keeps this share of its depth below the floor: the
+    /// receiving basin's bottom flattens to this fraction.
+    pub basin_keep: f64,
+    /// The back wall is guaranteed to stand at least this share of `back_rise_m` above the
+    /// front, column by column.
+    pub min_climb_share: f64,
 
     /// Soil pockets inside the rock.
     pub pockets: u32,
@@ -970,6 +1167,12 @@ impl Recipe {
         hardness_region_m: 18.0,
         bedrock_hardness: 0.7,
         core_m: 2.0,
+        core_blend_m: 0.5,
+        hardness_band_share: 0.72,
+        rocky_edge_width: 0.5,
+        bench_ramp_factor: 4.0,
+        basin_keep: 0.12,
+        min_climb_share: 0.5,
         pockets: 3,
         erosion: Erosion::DEFAULT,
         tiers: Tiers::NONE,
@@ -1282,6 +1485,8 @@ impl Recipe {
             span: self.hardness_hard - self.hardness_soft,
             strata_m: self.strata_m.max(1e-9),
             core_m: self.core_m,
+            core_blend_m: self.core_blend_m,
+            band_share: self.hardness_band_share,
         }
     }
 
@@ -1298,7 +1503,7 @@ impl Recipe {
             seed ^ self.streams.rocky,
         );
         let lo = 1.0 - 2.0 * self.rocky_fraction.clamp(0.0, 1.0);
-        smoothstep(lo, lo + 0.5, at)
+        smoothstep(lo, lo + self.rocky_edge_width, at)
     }
 
     /// Where the bench pull puts the bedrock surface: on the top of the hard band under
@@ -1325,7 +1530,7 @@ impl Recipe {
         // `ramp_m` is a length; the mask is a field with a wavelength. A quarter of that
         // wavelength is about the distance its smoothstep takes to rise, so this is the
         // share of the rise given over to the ramp.
-        let edge = (4.0 * b.ramp_m / self.rocky_wavelength_m.max(1e-9)).clamp(0.05, 1.0);
+        let edge = (self.bench_ramp_factor * b.ramp_m / self.rocky_wavelength_m.max(1e-9)).clamp(0.05, 1.0);
         let pull = b.strength.clamp(0.0, 1.0) * smoothstep(0.0, edge, mask);
         if pull <= 0.0 {
             return raw_m;

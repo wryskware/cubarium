@@ -104,6 +104,13 @@ pub struct Config {
     /// a trickle, not a siphon. A share of the cell, so it means the same on any voxel
     /// size. [`Config::outlet_m3_per_s`] stays the ceiling.
     pub outlet_weir_per_tick: f64,
+    /// The original ridge generator's shape numbers: `[world.ridge]`.
+    pub ridge: crate::recipe::RidgeShape,
+    /// Where the spring is placed, as a share of the ring along from the lowest ground
+    /// (an eighth), and as a share of the depth (mid-depth), for every generator that
+    /// names no spring of its own.
+    pub spring_offset_fraction: f64,
+    pub spring_depth_fraction: f64,
     /// What rock and soil hold and how fast they pass water: `[world.materials]`.
     pub materials: crate::material::Materials,
     /// Which generator builds the terrain, and — for
@@ -141,6 +148,9 @@ impl Default for Config {
             free_transfer_cap: 0.0,
             standing_support_fill: crate::world::STANDING_SUPPORT_FILL,
             outlet_weir_per_tick: 0.05,
+            ridge: crate::recipe::RidgeShape::default(),
+            spring_offset_fraction: 0.125,
+            spring_depth_fraction: 0.5,
             materials: crate::material::Materials::DEFAULT,
             landform: Landform::Ridge,
         }

@@ -142,12 +142,15 @@ fn chamber_candidates(
         return Vec::new();
     }
     let clearance = (h.clearance_m / vm).ceil().max(2.0) as i32;
-    let radius_x = (h.grotto_wavelength_m * 0.30 / vm).round().max(3.0) as i64;
-    let depth = (h.undercut_depth_m * 2.5 / vm).round().max(3.0) as usize;
-    let room_h = (h.clearance_m * 1.8 / vm).round().max(clearance as f64) as i32;
+    let radius_x = (h.grotto_wavelength_m * h.chamber_radius_share / vm).round().max(3.0) as i64;
+    let depth = (h.undercut_depth_m * h.chamber_depth_factor / vm).round().max(3.0) as usize;
+    let room_h = (h.clearance_m * h.chamber_room_factor / vm).round().max(clearance as f64) as i32;
     // A few legible rooms, not a requirement to perforate every mass. Existing
     // undercuts and galleries supply the smaller openings around them.
-    let desired = ((w as f64 * vm) / 18.0).ceil().clamp(1.0, 3.0) as usize;
+    let desired = ((w as f64 * vm) / h.chamber_spacing_m)
+        .ceil()
+        .max(1.0)
+        .min(h.chamber_max as f64) as usize;
 
     let mut banks = Vec::new();
     for x in 0..w {
@@ -200,7 +203,7 @@ fn chamber_candidates(
                     continue;
                 }
                 let inward = dz as f64 / depth.max(1) as f64;
-                if side + (inward * 0.72).powi(2) > 1.0 {
+                if side + (inward * h.chamber_taper).powi(2) > 1.0 {
                     continue;
                 }
                 let outside = volume.surface[(z0 - 1) * w + x];
@@ -749,7 +752,7 @@ fn gallery_candidates(
     let min_depth = (h.gallery_min_depth_m / vm).round().max(1.0) as i32;
     let cells = ring_cells(field.circumference_m, h.gallery_wavelength_m);
     // A monotone gate, not a measured quantile: more density, lower bar.
-    let gate = 0.6 - 1.2 * h.gallery_density.clamp(0.0, 1.0);
+    let gate = h.gallery_gate - h.gallery_gate_slope * h.gallery_density.clamp(0.0, 1.0);
     let mut carved = Vec::new();
     for z in 0..d {
         let z_m = (z as f64 + 0.5) * vm;

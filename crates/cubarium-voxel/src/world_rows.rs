@@ -58,6 +58,12 @@ pub(crate) fn rows() -> Vec<Row> {
         p("lake_drain_m2_per_s", "m3/s per m of head", nonneg, "lake floor joined to the aquifer: flow = k * (lake - table)")
             .grade("C")
             .prov("derived"),
+        p("spring_offset_fraction", "fraction of the ring", Range::fraction(), "where the spring stands, along the ring from the lowest ground")
+            .search(0.05, 0.5)
+            .prov("design"),
+        p("spring_depth_fraction", "fraction of the depth", Range::fraction(), "where the spring stands in depth (mid-depth)")
+            .search(0.2, 0.8)
+            .prov("design"),
         p("standing_support_fill", "fraction of a cell", Range::fraction(), "a cell holds the water above it up as standing water at this fill or more")
             .search(0.3, 0.7)
             .prov("placeholder (design/backlog.md section 1 row 84)"),

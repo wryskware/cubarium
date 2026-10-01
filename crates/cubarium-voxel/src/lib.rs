@@ -78,7 +78,8 @@ pub use ledger::Ledger;
 pub use material::{Material, MaterialProps, Materials};
 pub use terrarium::Terrarium;
 pub use recipe::{
-    Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, Strata, Streams, Tiers, Water,
+    Benches, Erosion, Hollows, Landform, PRESETS, Preset, Recipe, RidgeShape, Strata, Streams, Tiers,
+    Water,
 };
 pub use snapshot::SchemaMismatch;
 pub use viability::{BandResult, PoreBand, Viability, ViabilitySpec};

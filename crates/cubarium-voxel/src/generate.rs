@@ -108,26 +108,32 @@ fn ridge(world: &mut World) {
     let mut rng = Rng::new(c.seed ^ 0x_4C41_4E44_0001);
 
     // ---- the broad shape: one ridge, one receiving basin, rising toward the back ----
+    let rs = c.ridge;
     let hf = h as f64;
-    let front = hf * 0.30;
-    let amp1 = (hf * 0.17).max(1.0);
-    let amp2 = hf * 0.05;
+    let front = hf * rs.front_fraction;
+    let amp1 = (hf * rs.ridge_amp_fraction).max(rs.ridge_amp_min);
+    let amp2 = hf * rs.second_amp_fraction;
     // The camera's climb: the whole surface stands higher at the back than at the
     // front, which is where the landform rule wants the hills to peak.
-    let rise_z = hf * 0.26;
+    let rise_z = hf * rs.climb_fraction;
     let ridge_phase = rng.unit() * TAU;
     let second_phase = rng.unit() * TAU;
-    let basin_floor = front - amp1 * 0.72;
+    let basin_floor = front - amp1 * rs.basin_depth;
 
     // ---- the weak correlated wobble, added last and small ----
     // The depth frequency stays low: the wobble must not undo the climb between two
     // neighbouring depths, or every column would need flattening afterwards.
     let wobble = |rng: &mut Rng| -> Vec<(f64, f64, f64, f64)> {
-        (0..4)
+        (0..rs.wobble_terms)
             .map(|k| {
-                let harmonic = (3 + k * 2) as f64;
-                let amp = 0.55 / (1.0 + k as f64 * 0.6);
-                (harmonic, amp, rng.unit() * TAU, rng.range(0.05, 0.22))
+                let harmonic = (rs.wobble_first_harmonic + k * rs.wobble_harmonic_step) as f64;
+                let amp = rs.wobble_amp / (1.0 + k as f64 * rs.wobble_amp_falloff);
+                (
+                    harmonic,
+                    amp,
+                    rng.unit() * TAU,
+                    rng.range(rs.wobble_depth_freq[0], rs.wobble_depth_freq[1]),
+                )
             })
             .collect()
     };
@@ -152,7 +158,7 @@ fn ridge(world: &mut World) {
             // A receiving basin, not a smooth trough: the bottom flattens into a floor,
             // low and at the front, with its flanks carried up by the climb.
             if e < basin_floor {
-                e = basin_floor + (basin_floor - e) * 0.12;
+                e = basin_floor + (basin_floor - e) * rs.basin_keep;
             }
             if d > 1 {
                 e += rise_z * (z as f64 / (d - 1) as f64);
@@ -179,8 +185,10 @@ fn ridge(world: &mut World) {
             let slope = (right - left).abs() * 0.5;
             let here = surf[z * w + x] as f64;
             let deposition = ((mean - here) / amp1).clamp(0.0, 1.0);
-            let s = 3.2 * (1.0 - (slope / 1.0).min(1.0)) + 2.5 * deposition + 0.3;
-            soil[z * w + x] = s.round().clamp(0.0, 6.0) as i32;
+            let s = rs.soil_slope * (1.0 - (slope / rs.soil_slope_cap).min(1.0))
+                + rs.soil_deposit * deposition
+                + rs.soil_base;
+            soil[z * w + x] = s.round().clamp(0.0, rs.soil_max_rows) as i32;
         }
     }
 
@@ -192,7 +200,7 @@ fn ridge(world: &mut World) {
             let th = TAU * x as f64 / w as f64;
             let top = surf[z * w + x];
             let soil_depth = soil[z * w + x];
-            let rock_thick = 6.0 + 3.0 * (th + rock_phase).sin();
+            let rock_thick = rs.rock_thick + rs.rock_thick_swing * (th + rock_phase).sin();
             let bedrock_top = ((top - soil_depth) as f64 - rock_thick).round().max(1.0) as i32;
             for y in 0..=top {
                 let mut m = if y > top - soil_depth {
@@ -204,8 +212,10 @@ fn ridge(world: &mut World) {
                 };
                 if m == Material::Rock {
                     // Hard layers: gently warped, periodic, so water perches on them.
-                    let band = ((y as f64 + 1.6 * (th + strata_phase).sin()) / 2.0).floor() as i64;
-                    if band.rem_euclid(4) == 0 {
+                    let band = ((y as f64 + rs.strata_warp * (th + strata_phase).sin())
+                        / rs.strata_thickness)
+                        .floor() as i64;
+                    if band.rem_euclid(rs.strata_period as i64) == 0 {
                         m = Material::Bedrock;
                     }
                 }
@@ -216,14 +226,14 @@ fn ridge(world: &mut World) {
     }
 
     // ---- soil pockets inside the rock ----
-    for _ in 0..3 {
+    for _ in 0..rs.pockets {
         let cx = rng.unit() * w as f64;
         let cz = rng.range(0.0, d as f64);
-        let cy = rng.range(2.0, (hf * 0.5).max(3.0));
+        let cy = rng.range(rs.pocket_cy_min, (hf * rs.pocket_height_fraction).max(rs.pocket_cy_floor));
         let (rx, ry, rz) = (
-            rng.range(2.0, 5.0),
-            rng.range(1.5, 3.0),
-            rng.range(1.5, 4.0),
+            rng.range(rs.pocket_rx[0], rs.pocket_rx[1]),
+            rng.range(rs.pocket_ry[0], rs.pocket_ry[1]),
+            rng.range(rs.pocket_rz[0], rs.pocket_rz[1]),
         );
         for z in 0..d {
             for x in 0..w {
@@ -417,7 +427,7 @@ fn outlet_and_spring(
     lake: Option<LakeDatum>,
 ) {
     let at = |x: i64, z: usize| surf[z * w + x.rem_euclid(w as i64) as usize];
-    let zm = d / 2;
+    let zm = ((d as f64 * world.config.spring_depth_fraction).floor() as usize).min(d.saturating_sub(1));
     let mut low = (0usize, 0usize, i32::MAX);
     for z in 0..d {
         for x in 0..w {
@@ -437,7 +447,7 @@ fn outlet_and_spring(
         None => (low.0, (low.2 + 1).min(h as i32 - 1), low.1),
     };
     world.outlet_cell = Some((outlet.0 as u32, outlet.1 as u32, outlet.2 as u32));
-    let sx = ((low.0 + w / 8) % w) as i64;
+    let sx = ((low.0 + (w as f64 * world.config.spring_offset_fraction).floor() as usize) % w) as i64;
     let spring_y = (at(sx, zm) + 1).min(h as i32 - 1) as u32;
     world.spring_cell = Some((sx as u32, spring_y, zm as u32));
 }
@@ -707,7 +717,7 @@ fn stamp_shore(
         .collect();
     // The water fills the rows under `level_y`; the first dry row is `level_y` itself.
     let first_dry = datum.level_y;
-    let soil_floor = first_dry - 4;
+    let soil_floor = first_dry - t.shore_soil_rows as i32;
     let kept = other_hollows_and_rims(&volume.surface, w, d, &lake.cells, first_dry - 1);
     let in_lake: std::collections::BTreeSet<usize> = lake.cells.iter().copied().collect();
     // Where the bank may go: in reach, on tier 0, not the lake's or a pool's own
@@ -899,7 +909,7 @@ pub fn tier_at(
         return 0;
     }
     let depth_m = depth as f64 * voxel_m;
-    let masses = (circumference_m / (t.edge_wavelength_m * 0.9))
+    let masses = (circumference_m / (t.edge_wavelength_m * t.mass_spacing_share))
         .round()
         .max(2.0) as usize;
     let spacing = circumference_m / masses as f64;
@@ -912,12 +922,13 @@ pub fn tier_at(
         let centre_x = if mass == 0 {
             route
         } else {
-            (route + mass as f64 * spacing + rng.range(-0.18, 0.18) * spacing)
+            (route + mass as f64 * spacing + rng.range(-t.mass_jitter, t.mass_jitter) * spacing)
                 .rem_euclid(circumference_m)
         };
         for k in 1..t.count {
-            let taper = 1.0 - 0.11 * (k - 1) as f64;
-            let radius_x = (t.edge_wavelength_m * 0.34 * taper).max(t.pool_radius_m * 2.2);
+            let taper = 1.0 - t.mass_taper * (k - 1) as f64;
+            let radius_x = (t.edge_wavelength_m * t.mass_radius_share * taper)
+                .max(t.pool_radius_m * t.mass_min_pool_radii);
             let dx = wrapped_delta(x_m, centre_x, circumference_m).abs();
             if dx > radius_x {
                 continue;
@@ -930,15 +941,15 @@ pub fn tier_at(
                     cells,
                     seed ^ 0x_4c4f_4245_5f45_4447u64.wrapping_add((mass as u64) << 8 | k as u64),
                 );
-            let front = depth_m * (0.08 + 0.17 * k as f64)
+            let front = depth_m * (t.front_base + t.front_step * k as f64)
                 + edge
-                + (dx / radius_x).powi(2) * depth_m * 0.09;
+                + (dx / radius_x).powi(2) * depth_m * t.front_bow;
             let back = if mass == 0 {
                 depth_m + voxel_m
             } else {
-                depth_m * (0.57 + 0.09 * k as f64)
-                    - edge * 0.5
-                    - (dx / radius_x).powi(2) * depth_m * 0.12
+                depth_m * (t.back_base + t.back_step * k as f64)
+                    - edge * t.back_edge_share
+                    - (dx / radius_x).powi(2) * depth_m * t.back_bow
             };
             if z_m >= front && z_m <= back {
                 level = level.max(k);
@@ -988,7 +999,7 @@ pub fn heightfield(c: &Config, r: &Recipe) -> Heightfield {
             // A receiving basin with a floor, not a clipped trough: relief below the
             // floor is compressed, so the basin has a bottom and keeps its shape.
             if el < r.basin_floor_m {
-                el = r.basin_floor_m - (r.basin_floor_m - el) * 0.12;
+                el = r.basin_floor_m - (r.basin_floor_m - el) * r.basin_keep;
             }
             elevation[z * w + x] = el + climb;
         }
@@ -1017,7 +1028,7 @@ pub fn heightfield(c: &Config, r: &Recipe) -> Heightfield {
     // The camera's climb, guaranteed per column. A linear tilt, so whatever the relief
     // did between front and back survives it; only the two ends are what the landform
     // rule and a readable diorama need.
-    let min_climb_m = r.back_rise_m * 0.5;
+    let min_climb_m = r.back_rise_m * r.min_climb_share;
     if d > 1 {
         for x in 0..w {
             let short = min_climb_m - (elevation[(d - 1) * w + x] - elevation[x]);
@@ -1128,7 +1139,7 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
     // small catchment allocation before reaching a visible head and were dry again by
     // the host's 40-tick acceptance read. The terminal lake keeps its own authored
     // depth below.
-    let bowl_v = 2i32;
+    let bowl_v = t.pool_bowl_rows as i32;
     // The crests first, before anything is measured against the ground: they lower a
     // riser's lip by as much as a whole band, and a lake bowl cut to be the ring's low
     // point against the ground as it stood *before* that is not the low point after it —
@@ -1198,7 +1209,7 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
             let inset = if tier == 0 || dx.abs() <= notch_half {
                 0
             } else {
-                ((dx.abs() as f64 / (rx as f64 + 0.5)).powi(2) * (basin_len as f64 * 0.35)).round()
+                ((dx.abs() as f64 / (rx as f64 + 0.5)).powi(2) * (basin_len as f64 * t.pool_taper)).round()
                     as usize
             };
             let bowl_end = if tier == 0 || dx.abs() <= notch_half {
@@ -1260,7 +1271,7 @@ pub fn stamp_terraces(field: &mut Heightfield, c: &Config, r: &Recipe) -> Vec<Po
             }
             let (x, z) = (i % w, i / w);
             let mut rings = 0;
-            for step in 1..=2i64 {
+            for step in 1..=i64::from(t.lake_beach_rows) {
                 let edge = [
                     ((x as i64 - step).rem_euclid(w as i64) as usize, z as i64),
                     ((x as i64 + step).rem_euclid(w as i64) as usize, z as i64),
@@ -1427,7 +1438,7 @@ fn stamp_riser_crests(field: &mut Heightfield, c: &Config, r: &Recipe, skip: &[u
 fn stamp_ramps(field: &mut Heightfield, c: &Config, r: &Recipe, pool_x: usize) {
     let t = r.tiers;
     let (w, d, vm) = (field.width, field.depth, field.cell_m);
-    let rows = ((t.rise_m / 0.5).ceil().max(1.0) as usize).min(d / t.count.max(1) as usize);
+    let rows = ((t.rise_m / t.ramp_step_m).ceil().max(1.0) as usize).min(d / t.count.max(1) as usize);
     if rows == 0 {
         return;
     }
