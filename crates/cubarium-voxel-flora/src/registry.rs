@@ -111,6 +111,12 @@ fn species_rows() -> Vec<Row> {
             .evolve().log().grade("D").prov("measured"),
         r("defence_half_life_s", "s (<= 0: no decay)", finite, "induced defence half-life once grazing stops")
             .evolve().log().grade("D"),
+        r("runner_reach", "voxels (not rescaled)", nonneg, "columns sideways a runner daughter may root from its parent")
+            .search(1.0, 3.0),
+        r("founder_per_m2", "founders per m2 of habitat", nonneg, "founding: stands per square metre of ground the species' own gates pass on")
+            .search(0.0, 10.0),
+        r("founder_colony", "stands", Range::at_least(1.0), "founding: the size of one founder colony").search(1.0, 12.0),
+        r("founder_cap", "stands", nonneg, "founding: the cap a world puts on this species' founders").search(0.0, 400.0),
         r("profile.*.wood_fraction_max", "fraction of wood_max (inf: the last stage)", Range::nonneg_or_inf(), "a stage applies up to this wood fraction")
             .evolve().grade("C"),
         r("profile.*.height_m_max", "m", Range::positive(), "a stage's crown-height ceiling (a capped seedling)")
@@ -171,6 +177,8 @@ fn vine_rows() -> Vec<Row> {
         r("founders", "vines", nonneg, "founder vines rooted on a fresh world").evolve().grade("C"),
         r("founder_reserve", "org-units per reference face", nonneg, "each founder's starting reserve")
             .scale(area).evolve().grade("C"),
+        r("founder_spacing", "voxels (not rescaled)", nonneg, "the fewest voxels between two founders' roots")
+            .search(2.0, 24.0),
     ]
 }
 
@@ -182,6 +190,8 @@ fn rows() -> Vec<Row> {
     }
     rows.extend(vine_rows().into_iter().map(|row| row.under("flora.latticevine")));
     let nonneg = Range::nonneg();
+    let positive = Range::positive();
+    let fraction = Range::fraction();
     rows.extend([
         r("flora.shade_k_per_m2", "m2 per org-unit", nonneg, "canopy attenuation per square metre").evolve().log().grade("D").prov("derived"),
         r("flora.decomposition", "/s", nonneg, "k_d: litter decomposition").evolve().log().grade("B"),
@@ -190,6 +200,24 @@ fn rows() -> Vec<Row> {
         r("flora.litter_energy_cap", "energy per org-unit", nonneg, "retained energy cap per unit of litter").grade("C"),
         r("flora.initial_mineral", "mineral per site", nonneg, "mineral a site is provisioned with").evolve().log().grade("D"),
         r("flora.seed_check_s", "s", nonneg, "how often a banked site is tested").grade("N").prov("numerics"),
+        r("flora.upkeep_q10", "x per 10 C", positive, "Q10 of plant upkeep around the climate's mean").search(1.0, 4.0),
+        r("flora.wind_tries", "tries", Range::at_least(1.0), "a wind seed's draws before the donor keeps its package")
+            .search(1.0, 16.0),
+        r("flora.wind_shape", "-", positive, "wind kernel: Lomax shape k (larger is a thinner tail)").search(1.2, 4.0),
+        r("flora.wind_scale_hops", "hops", positive, "wind kernel: Lomax scale a, in the species' hops").search(0.5, 8.0),
+        r("flora.carcass_remains_fraction", "fraction of the body's organic matter", fraction, "carrion below this draws as remains, not the body")
+            .search(0.1, 0.6),
+        r("flora.carcass_gone_fraction", "fraction of the body's organic matter", fraction, "carrion at or below this drops the carcass record")
+            .search(0.005, 0.1).log(),
+        r("flora.seed_mark_recent_s", "s", nonneg, "how long a seed landing keeps its site's mark").search(10.0, 600.0),
+        r("flora.min_layer_area_m2", "m2", positive, "floor on a foliage layer's area in the shade exponent")
+            .search(0.01, 0.25),
+        r("flora.founder_wood_fractions.*", "fraction of wood_max", fraction, "founding: a founder's starting wood, cycled in placement order")
+            .search(0.1, 1.0),
+        r("flora.founder_canopy_shade", "fraction of sky", fraction, "founding: sky a crown takes from the sites under it while placing")
+            .search(0.2, 0.9),
+        r("flora.founder_log_organic", "org-units", nonneg, "founding: dead wood laid under each glowcap founder").search(0.1, 1.0),
+        r("flora.founder_patch_spacing_m", "m", nonneg, "founding: least distance between two patch centres").search(0.5, 4.0),
         r("flora.voxel_m", "m", Range::positive(), "the world's cell size, recorded (set from world.voxel_m)").prov("derived"),
     ]);
     rows

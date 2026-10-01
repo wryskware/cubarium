@@ -3,16 +3,16 @@
 use cubarium_voxel::weather::{DayClock, DayMode};
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
-    Command, Flora, FloraConfig, Species, UPKEEP_Q10, upkeep_factor,
+    Command, Flora, FloraConfig, Species, upkeep_factor,
 };
 
 #[test]
 fn the_factor_is_one_at_the_mean_half_ten_below_double_ten_above() {
-    assert_eq!(UPKEEP_Q10, 2.0);
-    assert_eq!(upkeep_factor(26.0, 26.0), 1.0);
-    assert!((upkeep_factor(16.0, 26.0) - 0.5).abs() < 1e-12);
-    assert!((upkeep_factor(36.0, 26.0) - 2.0).abs() < 1e-12);
-    assert!((upkeep_factor(31.0, 26.0) - 2f64.sqrt()).abs() < 1e-12);
+    assert_eq!(FloraConfig::default().upkeep_q10, 2.0);
+    assert_eq!(upkeep_factor(26.0, 26.0, 2.0), 1.0);
+    assert!((upkeep_factor(16.0, 26.0, 2.0) - 0.5).abs() < 1e-12);
+    assert!((upkeep_factor(36.0, 26.0, 2.0) - 2.0).abs() < 1e-12);
+    assert!((upkeep_factor(31.0, 26.0, 2.0) - 2f64.sqrt()).abs() < 1e-12);
 }
 
 
@@ -96,7 +96,7 @@ fn a_cooler_night_burns_less_reserve_by_the_factor() {
     let (a, fa) = burned(&mut flat);
     let (b, fb) = burned(&mut swing);
     assert!(a > 0.0);
-    let want = upkeep_factor(t, mean);
+    let want = upkeep_factor(t, mean, 2.0);
     assert!(want < 1.0);
     assert!((b / a - want).abs() < 1e-6, "burned {b} / {a}, want {want}");
     assert_closed(&fa);

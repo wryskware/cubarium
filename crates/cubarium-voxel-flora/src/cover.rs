@@ -75,8 +75,6 @@ const EPS: f64 = 1e-9;
 const FAR: u32 = u32::MAX;
 /// A flat voxel index not yet resolved.
 const UNRESOLVED: u32 = u32::MAX;
-/// The fewest voxels between two founders' roots, measured along the strip.
-const FOUNDER_SPACING: i64 = 8;
 
 /// Which way a covered face looks. Up is not here: the top of a solid is a stand's
 /// support face.
@@ -785,6 +783,9 @@ pub struct VineConfig {
     pub founders: u32,
     /// Each founder's starting reserve.
     pub founder_reserve: f64,
+    /// The fewest voxels between two founders' roots (straight-line distance, the `x`
+    /// axis wrapped). A count of voxels, **not** rescaled with the voxel size.
+    pub founder_spacing: u32,
 }
 
 impl Default for VineConfig {
@@ -844,6 +845,7 @@ impl Default for VineConfig {
             energy_density: 1.0,
             founders: 6,
             founder_reserve: 0.1,
+            founder_spacing: 8,
         }
     }
 }
@@ -1179,6 +1181,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
     let upkeep_q = crate::step::upkeep_factor(
         world.life_temperature_c(),
         world.config().climate.temperature_c,
+        config.upkeep_q10,
     );
     // WX3 round 4: and the plant night rule, like every photosynthetic plant's.
     let night = world.plant_night_scale();
@@ -1920,7 +1923,7 @@ impl Flora {
     /// Root [`VineConfig::founders`] founder vines on a fresh world, each with
     /// [`VineConfig::founder_reserve`]: on soil support faces at the **foot** of a wall at
     /// least three faces tall, or on the **lip** of a soil ledge with at least two faces of
-    /// drop below it (a stepped slope's risers count, joined by [`stair_up`]), drawn by the world seed and kept [`FOUNDER_SPACING`] voxels apart.
+    /// drop below it (a stepped slope's risers count, joined by [`stair_up`]), drawn by the world seed and kept [`VineConfig::founder_spacing`] voxels apart.
     /// Returns how many rooted.
     pub fn seed_vine_founders(&mut self, world: &World) -> usize {
         let want = self.config.latticevine.founders as usize;
@@ -1979,12 +1982,13 @@ impl Flora {
             candidates.swap(i, j);
         }
         let width = c.width as i64;
+        let spacing = i64::from(self.config.latticevine.founder_spacing);
         let apart = |a: Site, b: Site| {
             let dx = (a.x as i64 - b.x as i64).rem_euclid(width);
             let dx = dx.min(width - dx);
             let dy = a.y as i64 - b.y as i64;
             let dz = a.z as i64 - b.z as i64;
-            dx * dx + dy * dy + dz * dz >= FOUNDER_SPACING * FOUNDER_SPACING
+            dx * dx + dy * dy + dz * dz >= spacing * spacing
         };
         let reserve = self.config.latticevine.founder_reserve;
         let mut rooted: Vec<Site> = Vec::new();
