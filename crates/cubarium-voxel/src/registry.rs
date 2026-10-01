@@ -270,6 +270,11 @@ pub struct Registry {
     rows: Vec<Row>,
     aliases: Vec<Alias>,
     opaque: Vec<String>,
+    /// Rows without a `*`, by path; the rest are scanned.
+    exact: std::collections::HashMap<String, usize>,
+    wild: Vec<usize>,
+    /// Each alias pattern split into segments.
+    alias_segs: Vec<Vec<String>>,
 }
 
 impl Registry {
@@ -277,7 +282,20 @@ impl Registry {
     /// here (the terrain recipe): they are set and replaced whole and validated by their
     /// own struct, and no row is asked of them.
     pub fn new(root: &'static str, rows: Vec<Row>, aliases: Vec<Alias>, opaque: Vec<String>) -> Registry {
-        Registry { root, rows, aliases, opaque }
+        let mut exact = std::collections::HashMap::new();
+        let mut wild = Vec::new();
+        for (i, row) in rows.iter().enumerate() {
+            if row.wildcards() == 0 {
+                exact.insert(row.path.clone(), i);
+            } else {
+                wild.push(i);
+            }
+        }
+        let alias_segs = aliases
+            .iter()
+            .map(|a| a.pattern.split('.').map(str::to_string).collect())
+            .collect();
+        Registry { root, rows, aliases, opaque, exact, wild, alias_segs }
     }
 
     pub fn root(&self) -> &'static str {
@@ -290,19 +308,24 @@ impl Registry {
 
     /// The row a concrete path falls under: the most specific match (fewest `*`).
     pub fn row_for(&self, path: &str) -> Option<&Row> {
-        let path = self.display(path);
-        self.rows
+        let shown = self.display(path);
+        if let Some(&i) = self.exact.get(&shown) {
+            return Some(&self.rows[i]);
+        }
+        let canon = self.canonical(path);
+        self.wild
             .iter()
-            .filter(|r| r.matches(&path) || r.matches(&self.canonical(&path)))
+            .map(|&i| &self.rows[i])
+            .filter(|r| r.matches(&shown) || r.matches(&canon))
             .min_by_key(|r| r.wildcards())
     }
 
-    /// Whether `path` lies in an opaque subtree.
+    /// Whether `path` lies in an opaque subtree (opaque paths name no aliased element).
     pub fn is_opaque(&self, path: &str) -> bool {
-        let path = self.canonical(path);
-        self.opaque
-            .iter()
-            .any(|o| path == *o || path.starts_with(&format!("{o}.")))
+        self.opaque.iter().any(|o| {
+            path.strip_prefix(o.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+        })
     }
 
     /// `path` with every named element replaced by its index.
@@ -323,18 +346,20 @@ impl Registry {
     }
 
     fn rename(&self, path: &str, f: impl Fn(&Alias, &str) -> Option<String>) -> String {
-        let segs: Vec<&str> = path.split('.').collect();
-        let mut out: Vec<String> = Vec::with_capacity(segs.len());
-        for seg in segs {
-            let parent = out.join(".");
+        if self.aliases.is_empty() {
+            return path.to_string();
+        }
+        let mut out: Vec<String> = Vec::new();
+        for seg in path.split('.') {
             let renamed = self
                 .aliases
                 .iter()
-                .filter(|a| {
-                    let row = Row::new(a.pattern.clone(), "", Range::any(), "");
-                    row.matches(&parent)
+                .zip(&self.alias_segs)
+                .filter(|(_, pat)| {
+                    pat.len() == out.len()
+                        && pat.iter().zip(&out).all(|(p, s)| p == "*" || p == s)
                 })
-                .find_map(|a| f(a, seg));
+                .find_map(|(a, _)| f(a, seg));
             out.push(renamed.unwrap_or_else(|| seg.to_string()));
         }
         out.join(".")

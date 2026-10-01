@@ -1053,46 +1053,6 @@ impl Reproduction {
     pub fn incubation_ticks(&self) -> u64 {
         cubarium_voxel::ticks_at_least_one(self.incubation_s)
     }
-
-    /// Structural refusals only, in [`SpeciesConfig::validate`]'s shape: finite
-    /// nonnegative numbers, a loss fraction that is a fraction, and — for an egg layer —
-    /// a clutch of at least one egg each of which can build a `body_min` hatchling.
-    /// **Not** a plausibility check on the placeholders themselves.
-    pub fn validate(&self, name: &str, sc: &SpeciesConfig) -> Result<(), String> {
-        let fields: [(&str, f64); 6] = [
-            ("surplus_floor", self.surplus_floor),
-            ("surplus_hold_s", self.surplus_hold_s),
-            ("gestation_s", self.gestation_s),
-            ("gestation_loss_fraction", self.gestation_loss_fraction),
-            ("birth_interval_s", self.birth_interval_s),
-            ("incubation_s", self.incubation_s),
-        ];
-        for (field, v) in fields {
-            if !v.is_finite() || v < 0.0 {
-                return Err(format!(
-                    "{name}.{field} must be finite and nonnegative, not {v}"
-                ));
-            }
-        }
-        if !(self.gestation_loss_fraction <= 1.0) {
-            return Err(format!(
-                "{name}.gestation_loss_fraction must be at most 1, not {}",
-                self.gestation_loss_fraction
-            ));
-        }
-        if self.mode == BirthMode::Eggs {
-            if self.clutch_size == 0 {
-                return Err(format!("{name}.clutch_size must be at least one egg"));
-            }
-            if !(self.egg_organic.is_finite() && self.egg_organic >= sc.body_min) {
-                return Err(format!(
-                    "{name}.egg_organic {} cannot build a hatchling of body_min {}",
-                    self.egg_organic, sc.body_min
-                ));
-            }
-        }
-        Ok(())
-    }
 }
 
 /// A phase-one founder's held actions and prior-interval feedback. The heuristic bodies
@@ -1291,55 +1251,6 @@ impl SpeciesConfig {
     pub fn reserve_of(&self, body: f64) -> f64 {
         self.reserve_cap * body
     }
-
-    /// Structural refusals only, in the shape of [`cubarium_voxel_flora::FloraConfig`]'s:
-    /// finite nonnegative numbers, and the four body thresholds in an order that can
-    /// build a living animal. **Not** a plausibility check — the placeholders above are
-    /// the values known to be arbitrary, and refusing them here would be tuning in a
-    /// validator's clothes.
-    pub fn validate(&self, name: &str) -> Result<(), String> {
-        let fields: [(&str, f64); 12] = [
-            ("maintenance_per_s", self.maintenance_per_s),
-            ("bite_per_s", self.bite_per_s),
-            ("bite_half_stock", self.bite_half_stock),
-            ("growth_max_per_s", self.growth_max_per_s),
-            ("n_tissue", self.n_tissue),
-            ("body_max", self.body_max),
-            ("body_min", self.body_min),
-            ("birth_body", self.birth_body),
-            ("birth_cost", self.birth_cost),
-            ("reserve_cap", self.reserve_cap),
-            ("drown_depth_m", self.drown_depth_m),
-            ("energy_density", self.energy_density),
-        ];
-        for (field, v) in fields {
-            if !v.is_finite() || v < 0.0 {
-                return Err(format!(
-                    "{name}.{field} must be finite and nonnegative, not {v}"
-                ));
-            }
-        }
-        if !(self.body_min > 0.0) {
-            return Err(format!(
-                "{name}.body_min must be positive, not {}",
-                self.body_min
-            ));
-        }
-        if self.body_min > self.birth_body || self.birth_body > self.body_max {
-            return Err(format!(
-                "{name} needs body_min <= birth_body <= body_max, not {} <= {} <= {}",
-                self.body_min, self.birth_body, self.body_max
-            ));
-        }
-        if self.birth_cost < self.body_min {
-            return Err(format!(
-                "{name}.birth_cost {} cannot build a newborn of body_min {}",
-                self.birth_cost, self.body_min
-            ));
-        }
-        self.reproduction.validate(name, self)?;
-        Ok(())
-    }
 }
 
 /// The whole layer's numbers: one [`SpeciesConfig`] per species, and nothing else. There is
@@ -1438,104 +1349,14 @@ impl FaunaConfig {
         &self.founders[founder.index()]
     }
 
+    /// Every number inside its row's range in the parameter registry ([`registry`]),
+    /// and the cross-field rules: `body_min <= birth_body <= body_max`, a birth that can
+    /// build a newborn, an egg-layer's clutch of at least one egg that can build a
+    /// hatchling. **Not** a plausibility check: the placeholders are known to be
+    /// arbitrary, and refusing them here would be tuning in a validator's clothes.
     pub fn validate(&self) -> Result<(), String> {
-        for (name, value) in [
-            ("parasite_attach_radius_m", self.parasite_attach_radius_m),
-            ("parasite_drain_of_host_basal", self.parasite_drain_of_host_basal),
-        ] {
-            if !(value.is_finite() && value >= 0.0) {
-                return Err(format!("{name} must be finite and nonnegative, not {value}"));
-            }
-        }
-        let detach = self.parasite_detach_body_fraction;
-        if !(detach.is_finite() && detach > 0.0 && detach <= 1.0) {
-            return Err(format!(
-                "parasite_detach_body_fraction must be within (0, 1], not {detach}"
-            ));
-        }
-        if !(self.hatch_chance_per_dusk.is_finite()
-            && (0.0..=1.0).contains(&self.hatch_chance_per_dusk))
-        {
-            return Err(format!(
-                "hatch_chance_per_dusk must be within 0..=1, not {}",
-                self.hatch_chance_per_dusk
-            ));
-        }
-        for s in Species::ALL {
-            self.species(s).validate(s.name())?;
-        }
-        for founder in Founder::ALL {
-            let phys = self.founder(founder);
-            phys.core.validate(founder.name())?;
-            if !phys.motor_respiration_per_s.is_finite() || phys.motor_respiration_per_s < 0.0 {
-                return Err(format!(
-                    "{}.motor_respiration_per_s must be finite and nonnegative, not {}",
-                    founder.name(),
-                    phys.motor_respiration_per_s
-                ));
-            }
-            if !phys.organ_structure_fraction.is_finite()
-                || !(0.0..1.0).contains(&phys.organ_structure_fraction)
-            {
-                return Err(format!(
-                    "{}.organ_structure_fraction must be finite and below 1, not {}",
-                    founder.name(),
-                    phys.organ_structure_fraction
-                ));
-            }
-            for (name, value) in [
-                ("sleep_upkeep", phys.sleep_upkeep),
-                ("wake_hunger", phys.wake_hunger),
-                ("armour", phys.armour),
-                ("agility", phys.agility),
-            ] {
-                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-                    return Err(format!(
-                        "{}.{name} must be finite, within 0..=1, not {value}",
-                        founder.name()
-                    ));
-                }
-            }
-            if !(phys.mass_scale.is_finite() && phys.mass_scale > 0.0) {
-                return Err(format!(
-                    "{}.mass_scale must be finite and positive, not {}",
-                    founder.name(),
-                    phys.mass_scale
-                ));
-            }
-            // The body is a physical object: every dimension positive, every anchor a
-            // finite nonnegative fraction of one. A zero-height animal has no eye, no
-            // mouth band and no clearance, so it is refused rather than clamped.
-            for (name, value) in [
-                ("adult_length_m", phys.adult_length_m),
-                ("adult_width_m", phys.adult_width_m),
-                ("adult_height_m", phys.adult_height_m),
-            ] {
-                if !value.is_finite() || value <= 0.0 {
-                    return Err(format!(
-                        "{}.{name} must be finite and positive, not {value}",
-                        founder.name()
-                    ));
-                }
-            }
-            for (name, value) in [
-                ("eye_height_fraction", phys.eye_height_fraction),
-                ("mouth_ceiling_fraction", phys.mouth_ceiling_fraction),
-                ("contact_height_fraction", phys.contact_height_fraction),
-                (
-                    "mouth_reach_length_fraction",
-                    phys.mouth_reach_length_fraction,
-                ),
-            ] {
-                if !value.is_finite() || value < 0.0 {
-                    return Err(format!(
-                        "{}.{name} must be finite and nonnegative, not {value}",
-                        founder.name()
-                    ));
-                }
-            }
-        }
-        Ok(())
+        registry().check(self)?;
+        registry::cross_rules(self)
     }
 }
 
