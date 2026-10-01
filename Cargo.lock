@@ -680,6 +680,7 @@ dependencies = [
  "postcard",
  "rustc-hash",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

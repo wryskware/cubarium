@@ -668,6 +668,18 @@ pub struct Animal {
     pub speed_m_s: f64,
     /// Ticks it is kept awake after a hit woke it ([`ALERT_S`]).
     pub alert_ticks: u32,
+    /// **Riding a host** (parasite hatchlings,
+    /// `design/handoffs/voxel-predation-parasite-2026-10-01.md`): `Some` while this
+    /// lanternjaw hatchling is clamped onto a living non-lanternjaw host. A rider has no
+    /// motion, controller, sensing or strikes of its own; its position is its host's.
+    /// Saved as the host's id.
+    pub attached: Option<Attachment>,
+}
+
+/// A rider's hold on its host (parasite hatchlings): the host's [`Animal::id`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attachment {
+    pub host: u64,
 }
 
 /// The rate a wound heals, wound units a second (§2.4: 0.5 per 30 min).
@@ -1450,6 +1462,20 @@ pub struct FaunaConfig {
     /// ([`hatch_draw`]; default [`HATCH_CHANCE_PER_DUSK`], a third: the bank bet-hedges
     /// across nights).
     pub hatch_chance_per_dusk: f64,
+    /// **Parasite hatchlings** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`):
+    /// metres from a hatching egg's column centre within which the nearest living
+    /// non-lanternjaw animal with room is taken as its host. Default one grazer body
+    /// length (the browser's `adult_length_m`, 0.75 m; metres do not scale with mass).
+    pub parasite_attach_radius_m: f64,
+    /// Riders one host can carry at once, count. Default 1.
+    pub parasite_max_per_host: u32,
+    /// A rider's drain each tick, as a fraction of its host's basal upkeep
+    /// (`maintenance_per_s × body`), moved host → rider through the three-currency
+    /// pro-rata path. Default 0.01.
+    pub parasite_drain_of_host_basal: f64,
+    /// A rider drops off when its body reaches this fraction of its lineage's adult
+    /// `body_max`. Default 0.24.
+    pub parasite_detach_body_fraction: f64,
 }
 
 /// **The shipped org-unit mass scale** (Wrysk, 2026-09-29; audit
@@ -1472,6 +1498,11 @@ impl Default for FaunaConfig {
                 FounderPhysiology::frozen(Founder::Lanternjaw),
             ],
             hatch_chance_per_dusk: HATCH_CHANCE_PER_DUSK,
+            parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
+                .adult_length_m,
+            parasite_max_per_host: 1,
+            parasite_drain_of_host_basal: 0.01,
+            parasite_detach_body_fraction: 0.24,
         }
     }
 }
@@ -1488,7 +1519,7 @@ impl FaunaConfig {
                 FounderPhysiology::placeholder(Founder::Browser),
                 FounderPhysiology::placeholder(Founder::Lanternjaw),
             ],
-            hatch_chance_per_dusk: HATCH_CHANCE_PER_DUSK,
+            ..FaunaConfig::default()
         }
     }
 
@@ -1973,6 +2004,12 @@ pub struct FaunaLedger {
     /// Eggs a [`Command::BuryClutch`] put into the world (a founding bank or the viewer's
     /// key), booked `introduced_*_in`.
     pub eggs_buried: u64,
+    /// Parasite hatchlings: eggs that hatched onto a host (riders attached, cumulative),
+    /// riders that dropped off at their detach size, and riders freed by their host's
+    /// departure (any cause).
+    pub riders_attached: u64,
+    pub rider_dropoffs: u64,
+    pub riders_freed: u64,
 }
 
 impl FaunaLedger {
@@ -2703,6 +2740,7 @@ impl Fauna {
             still_ticks: still_after_ticks(),
             speed_m_s: 0.0,
             alert_ticks: 0,
+            attached: None,
         };
         self.ledger.births += 1;
         self.ledger.introduced += 1;

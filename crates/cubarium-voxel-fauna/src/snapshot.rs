@@ -382,6 +382,7 @@ mod tests {
             still_ticks: 0,
             speed_m_s: 0.0,
             alert_ticks: 0,
+            attached: None,
         }
     }
 

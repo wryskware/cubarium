@@ -2407,6 +2407,7 @@ fn gestate(
         still_ticks: crate::still_after_ticks(),
         speed_m_s: 0.0,
         alert_ticks: 0,
+        attached: None,
     })
 }
 
@@ -2674,6 +2675,7 @@ fn hatchling(
         still_ticks: crate::still_after_ticks(),
         speed_m_s: 0.0,
         alert_ticks: 0,
+        attached: None,
     }
 }
 
@@ -2857,3 +2859,6 @@ mod predation_senses_tests;
 #[cfg(test)]
 #[path = "predation_life_tests.rs"]
 mod predation_life_tests;
+#[cfg(test)]
+#[path = "parasite_tests.rs"]
+mod parasite_tests;
