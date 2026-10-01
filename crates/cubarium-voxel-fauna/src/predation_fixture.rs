@@ -1,14 +1,5 @@
-//! P1 (predation substrate): the small worlds, placements and controllers the three
-//! predation test files share. A child of `step`, so a case can reach the controller
-//! table and the layer's own fields.
-//!
-//! API this file expects (added by P1's implementation commit):
-//! - `Founder::Lanternjaw` (manifest.rs), with its `FounderPhysiology` in the default
-//!   `FaunaConfig::founders` table (body.rs, lib.rs);
-//! - `FounderPhysiology::hunter: Option<Hunter>` (body.rs), `Hunter` re-exported at the
-//!   crate root;
-//! - `Animal::strike: Option<Strike>`, `Strike::phase`, `StrikePhase::{Windup, Lunge,
-//!   Recovery}` (predation.rs, re-exported at the crate root).
+//! The small worlds, placements and controllers the predation test files share. A child
+//! of `step`, so a case can reach the controller table and the layer's own fields.
 
 use std::f64::consts::FRAC_PI_2;
 use std::sync::Arc;

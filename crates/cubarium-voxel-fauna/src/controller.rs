@@ -11,7 +11,8 @@
 //!
 //! Two kinds of controller are interchangeable behind the trait:
 //!
-//! - **Diagnostic controllers** (the P1-C heuristics; [`Scripted`] here for tests)
+//! - **Diagnostic controllers** (the observation-only heuristics; [`Scripted`] here for
+//!   tests)
 //!   return [`Response::Bounded`] — actions already inside the manifest's bounds.
 //! - **A GRU policy** returns [`Response::Logits`] — the raw network outputs. The
 //!   adapter ([`resolve_actions`]) applies the manifest's transfers (sigmoid for
@@ -19,7 +20,7 @@
 //!   deadband to bounded actions, **identically in training and viewing**: the arena
 //!   tick, the ES episode driver and the viewer all resolve through this one function.
 //!
-//! The shape-aware GRU runtime itself is P1-D (`crates/cubarium-search`): it plugs in as
+//! The shape-aware GRU runtime itself lives in `crates/cubarium-search`: it plugs in as
 //! a `Controller` whose `drive` runs one GRU forward step over the observation and wraps
 //! the three outputs in [`Response::Logits`], keeping its hidden state as its private
 //! memory and clearing it in `reset` when a fresh episode starts.
@@ -307,8 +308,7 @@ impl std::fmt::Debug for FounderFactories {
 
 /// A diagnostic controller that cycles a fixed script of already-bounded actions, one
 /// per drive. It is the plumbing test's controller — motion, contact and feeding
-/// behaviour are driven with it — and **not** the P1-C foraging heuristic, which reads
-/// the senses this phase does not have yet.
+/// behaviour are driven with it — and not a foraging heuristic: it reads no senses.
 #[derive(Clone, Debug, Default)]
 pub struct Scripted {
     script: Vec<Actions>,
@@ -533,7 +533,7 @@ impl Controller for BlindForager {
             o[self.chem.offset + 2],
         );
 
-        // On a terrain face (package mobility): nothing is under the body — on the
+        // On a terrain face: nothing is under the body — on the
         // ground there always is. Keep climbing at full effort: the turn is not read on a
         // face, and slowing for "a wall ahead" would only leave it hanging there.
         let (underside, contact_valid) = (o[c.offset + 3], o[c.offset + 4]);

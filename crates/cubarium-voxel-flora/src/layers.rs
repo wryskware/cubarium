@@ -87,8 +87,8 @@ pub struct Profile {
     /// applies, overriding the interpolated height. Decisions §5: a woody seedling is a
     /// ground rosette no taller than 0.125 m, whatever the wood interpolation says.
     ///
-    /// On a species' **first** stage it makes the stage a capped seedling (package L,
-    /// [`crate::SpeciesConfig::capped_seedling`]): the ceiling bounds the crown's radius
+    /// On a species' **first** stage it makes the stage a capped seedling
+    /// ([`crate::SpeciesConfig::capped_seedling`]): the ceiling bounds the crown's radius
     /// too, and growth after the seedling starts from it rather than from the range's
     /// minimum. On a later stage it is read by nothing.
     pub height_m_max: Option<f64>,

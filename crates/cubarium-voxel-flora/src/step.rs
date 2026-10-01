@@ -64,7 +64,7 @@
 //! and for a corpse. A withdrawal has no phase at all: it lowers the stock it reads, and
 //! the next tick's income and decomposition simply see less of it.
 //!
-//! **What waits is the organic throughput, and not every currency** (Astra R8.5). The
+//! **What waits is the organic throughput, and not every currency**. The
 //! snapshot stores organic *amounts*, and [`decompose_pool`] then takes the mineral and the
 //! energy at the pool's **current** density, so material parcels are not age-isolated:
 //! one old unit holding no mineral plus one unit shed inside the tick holding one, at a
@@ -98,14 +98,12 @@
 //!
 //! # Organic matter and mineral
 //!
-//! Round 3's first correction: the two are separate currencies (`lib.rs`'s `FloraLedger`).
-//! Assimilation creates **organic matter** from light (`fixed_in`); every respiration —
+//! The two are separate currencies (`lib.rs`'s `FloraLedger`). Assimilation creates **organic matter** from light (`fixed_in`); every respiration —
 //! maintenance, construction `c_g`, reflush, a capped income's leftover, decomposition —
 //! destroys organic matter and books it out (`respired_out`, energy to heat) and moves
 //! **no** mineral. Mineral only ever moves between stocks: the site's pool pays
 //! `n_tissue` per unit of new tissue, tissue that dies or falls carries its mineral into
-//! litter and dead wood, and decomposition hands it back to the pool. So respiring a
-//! kilogram of wood no longer produces a kilogram of fertilizer.
+//! litter and dead wood, and decomposition hands it back to the pool.
 //!
 //! A stand's mineral is its own stock and not `n_tissue · O`: respiration takes organic
 //! matter and leaves mineral behind. Every transfer out of a stand therefore takes the
@@ -1194,7 +1192,7 @@ fn drink_read(
         } else {
             sc.moisture_at(water / band)
         };
-        // A species that needs standing water (package N) and has lost it reads
+        // A species that needs standing water and has lost it reads
         // `μ = 0`: it earns nothing and pays its upkeep out of reserve.
         if sc.water_depth_min_m > 0.0
             && standing_water_beside(view, stand.site) < sc.water_depth_min_m
@@ -1589,7 +1587,7 @@ pub(crate) fn root_box_dims_into(
 }
 
 /// What one cell of ground offers a root, on the scale `μ` and the establishment water
-/// gate read (package F, `design/handoffs/voxel-plant-viability-2026-09-23.md`):
+/// gate read:
 /// `a = (p − wp)/(fc − wp)` with `p` the cell's pore fraction and `wp`, `fc` its **own**
 /// material's wilting point and field capacity, floored at zero.
 ///
@@ -1658,10 +1656,7 @@ fn saturated_fraction(view: &VoxelView<'_>, box_: &[usize], sc: &SpeciesConfig) 
 ///
 /// This is a **target**, not an increment: the stress relaxes toward it first-order, so a
 /// box held half saturated settles at a stress strictly inside `0..1` and the two rates
-/// say how fast it gets there rather than which boundary it ramps to. Package I measured
-/// what the increment rule did instead (`design/7_Research/voxel-round3-experiment-2026-09-16.md`,
-/// findings 1 and 2): `f* = relax / (rate + relax)` was a threshold, and two saturated
-/// voxels of an eighteen-voxel box pinned a bloomcrown at stress 1 forever.
+/// say how fast it gets there rather than which boundary it ramps to.
 fn aeration_target(saturated: f64, sc: &SpeciesConfig) -> f64 {
     let tol = sc.establish_saturated_max;
     if tol >= 1.0 {
@@ -1702,13 +1697,10 @@ pub(crate) fn ramp(value: f64, lo: f64, hi: f64) -> f64 {
 /// stocks live one per support face. A site in the box that has never held anything has no
 /// [`Ground`] and therefore no dead wood, which is the same thing as holding none.
 ///
-/// **The vertical reach is its own field and symmetric (Astra R9.3).** It used to be
-/// [`root_box`]'s geometry, which reaches `rooting_depth` **down** and never up, so at
-/// glowcap's `rooting_depth` 1 the box was the stand's own row alone and a spore one voxel
-/// above or below a full log found nothing to eat — which is what refused all three
-/// landings of the round-5b `community` run. Mycelium in a log is not a root in soil, so
-/// substrate access is now decided by `substrate_reach_up_down` and the soil-water box is
-/// untouched.
+/// **The vertical reach is its own field and symmetric**, unlike [`root_box`], which
+/// reaches `rooting_depth` **down** and never up: mycelium in a log is not a root in soil,
+/// so a spore one voxel above or below a log still finds it. `substrate_reach_up_down`
+/// decides it and the soil-water box is separate.
 ///
 /// Still a box and not a path: a log across a one-voxel wall is in reach of a mycelium that
 /// could not actually grow through it, exactly as [`crate::Reach`] is a box with no line of
@@ -1819,9 +1811,8 @@ pub(crate) fn substrate_in_box(
 ///
 /// The uptake is bounded twice — by the rate and by the pools — so an empty log feeds
 /// nothing and a pool can never go negative. It is **not** multiplied by
-/// `1 − aeration_stress`: a saprotroph's only water term is `μ`, which is the round-5b
-/// brief's rule, and the consequence is stated in the glowcap preset's own doc (a spore
-/// will not start on a waterlogged log, while the mycelium already in one pays nothing).
+/// `1 − aeration_stress`: a saprotroph's only water term is `μ`. So a spore will not
+/// start on a waterlogged log, while the mycelium already in one pays nothing.
 ///
 /// Nothing is booked at the layer's boundary here. The material moves from a ground stock
 /// to a stand, both inside this layer, so the only ledger term it touches is the
@@ -2682,7 +2673,7 @@ pub(crate) fn pull_mineral(stand: &mut Stand, before: f64, moved: f64) -> f64 {
 /// each takes.
 ///
 /// The one death path, whatever killed the stand. For a species with
-/// [`crate::SpeciesConfig::falls`] (the vaulttree, package N) the wood, its mineral and
+/// [`crate::SpeciesConfig::falls`] (the vaulttree) the wood, its mineral and
 /// its energy are laid in equal shares along its [`fall_line`] instead of on its own site;
 /// the litter stays where the stand stood. Every other species' line is its own site.
 pub(crate) fn die(
@@ -2743,7 +2734,7 @@ pub(crate) fn die(
     ledger.deaths += 1;
 }
 
-/// **The fall** (package N, model addition 1): where a falling stand's wood lands, as
+/// **The fall**: where a falling stand's wood lands, as
 /// `(site, shares)` with the shares summing to `round(crown_radius / voxel)`, at least
 /// one.
 ///
@@ -2894,7 +2885,7 @@ fn ground_slot(ground: &mut Vec<Ground>, site: Site) -> usize {
 /// The dead pools' tick alone: the tick-start snapshot and [`decompose`], exactly as
 /// [`step`] runs them, and nothing else — no clock, no growth, no litterfall. For a frozen
 /// episode that replays a world's production and must still let its dead pools rot at
-/// the model's own rates (P5-C S1).
+/// the model's own rates.
 pub(crate) fn decompose_only(flora: &mut Flora) {
     let pre: Vec<Pre> = flora
         .ground
@@ -3040,7 +3031,7 @@ pub struct Gates {
     /// Soil voxels in the species' root box. Zero means there is no soil under this site
     /// at all: rock, or a box that falls outside the world.
     pub soil_voxels: usize,
-    /// Mean [`available_water`] of the root box (package F): 0 at the wilting point, 1 at
+    /// Mean [`available_water`] of the root box: 0 at the wilting point, 1 at
     /// field capacity. `None` for a box with no plant-available band in it at all.
     pub mean_water: Option<f64>,
     /// Fraction of the root box's voxels at or above the species' `saturated_pore`.
@@ -3186,8 +3177,8 @@ pub fn establishment_gates_with_sky(
     }
 }
 
-/// The deepest **settled standing water** on `site`'s own face or beside it, metres
-/// (package N, model addition 2): [`VoxelView::standing_depth_m`] on the site, and on
+/// The deepest **settled standing water** on `site`'s own face or beside it, metres:
+/// [`VoxelView::standing_depth_m`] on the site, and on
 /// the highest support face of each of the four neighbouring columns **at or below** the
 /// site's face, when its standing water reaches up to the site's own support voxel —
 /// water lapping at the bank, and not a pool at the foot of a cliff beside it.
@@ -3403,7 +3394,7 @@ mod tests {
         assert_eq!(ramp(0.5, 0.5, 0.5), 1.0);
     }
 
-    /// **Two fungi on one log, with unequal demands (Astra R9.3).** `feed` itself, not the
+    /// **Two fungi on one log, with unequal demands.** `feed` itself, not the
     /// scalar arithmetic under it: the collect-then-withdraw rule is what makes two
     /// mycelia *share* a log instead of the earlier one in the sweep eating its fill, and
     /// until now only [`split_proportional`] was tested, which is not `feed` and not its

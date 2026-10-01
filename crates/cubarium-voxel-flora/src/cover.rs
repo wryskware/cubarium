@@ -325,7 +325,7 @@ pub struct Vine {
     /// The face next to the root that carries the root arch; path distances along the
     /// cover are measured from it.
     pub root_face: Face,
-    /// The root box's mean available water last tick (package F's scale: 0 at the wilting
+    /// The root box's mean available water last tick (the available-water scale: 0 at the wilting
     /// point, 1 at field capacity): what income's moisture ramp and the dormancy spells
     /// read.
     pub water: f64,
@@ -724,7 +724,7 @@ pub struct VineConfig {
     /// moisture ramp. Not capped: a thirsty vine can empty its box, and shares it with any
     /// stand there through the one split.
     pub transpiration_m3_per_s: f64,
-    /// Income moisture ramp on the available-water scale (package F): 0 at `wilt_water`,
+    /// Income moisture ramp on the available-water scale: 0 at `wilt_water`,
     /// 1 at `full_water`.
     pub wilt_water: f64,
     pub full_water: f64,

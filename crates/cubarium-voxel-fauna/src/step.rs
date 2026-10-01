@@ -78,7 +78,7 @@ enum Respiration {
     Motor,
     /// Digestion: the absorbed share of a bite its mineral cannot fund (the undigested
     /// share is egested to the gut, not respired). Anything assimilated that the reserve
-    /// could not hold would be booked here too, but the sated bite (package G) never takes
+    /// could not hold would be booked here too, but the sated bite never takes
     /// more than the room after yield, so that share is zero by construction.
     Digestion,
     /// An interrupted gestation: the loss fraction of an escrow whose parent could not
@@ -393,7 +393,7 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
     }
 }
 
-/// Step 1b (WX4): who sleeps this tick. A founder sleeps when its lineage's
+/// Step 1b: who sleeps this tick. A founder sleeps when its lineage's
 /// [`Activity`](crate::Activity) says it is not its hour, unless a wake rule fires: it is
 /// hungry (its reserve short of its cap by at least `wake_hunger`), it is on a wall face,
 /// or it is under water. It sleeps where it stands. Waking is the same test failing, so
@@ -401,7 +401,7 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
 /// A body that falls asleep drops its held actions, so waking does not replay a stale
 /// stride; heuristic bodies carry no lineage and never sleep.
 ///
-/// **A rest with a reason** (predation §2.8): the same state carries WX4's [`Rest::Sleep`]
+/// **A rest with a reason** (predation §2.8): the same state carries the [`Rest::Sleep`]
 /// and a carnivore's [`Rest::Satiated`] — down in any phase once its reserve is at
 /// `rest_at` of its cap, up again below `wake_at` (or by the hunger rule), at its
 /// `torpor_upkeep`. A body a hit woke stays up for [`crate::ALERT_S`]; a body mid-strike
@@ -467,7 +467,7 @@ fn maintenance(fauna: &mut Fauna) {
         // A founder body pays upkeep under its own physiology's rate.
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let is_founder = fauna.animals[i].founder.is_some();
-        // Asleep it pays the lineage's fraction of it (WX4): its sleep factor, or a
+        // Asleep it pays the lineage's fraction of it: its sleep factor, or a
         // carnivore's torpor in a satiated rest (predation §2.8).
         let rest = match fauna.animals[i].founder {
             Some(founder) if fauna.animals[i].state == State::Asleep => {
@@ -536,7 +536,7 @@ fn egg_upkeep(fauna: &mut Fauna) {
     }
 }
 
-/// Step 2, second half: **growth on plant time** (package G, decision 4). New structure is
+/// Step 2, second half: **growth on plant time**. New structure is
 /// paid out of the reserve — a relabelling inside the body, so mineral and energy stay
 /// where they are and no ledger moves — at `growth_max_per_s · DT · fullness`, where
 /// `fullness` is the reserve over `reserve_cap · body`, at most one, and never past
@@ -580,7 +580,7 @@ fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
     (1.0 - a.reserve / cap).clamp(0.0, 1.0)
 }
 
-/// **The sated bite** (package G, decisions 1 and 2): `want · E / (E + K)` from food
+/// **The sated bite**: `want · E / (E + K)` from food
 /// holding `E` at the mouth, and never more than `room / yield` — the organic matter
 /// whose assimilated share exactly fills the reserve's room. Assimilation is at most
 /// `yield ·` the bite (less when the bite's mineral binds), so what is built always fits
@@ -634,7 +634,7 @@ fn controllers(
             let Some(founder) = a.founder else {
                 return false;
             };
-            // An asleep body's controller is not consulted (WX4).
+            // An asleep body's controller is not consulted.
             // WX4: a phase input for trained brains is the next training round's job; the
             // sensor manifest gains it there, not here.
             // A rider has no controller of its own while it rides (parasite §2).
@@ -649,7 +649,7 @@ fn controllers(
     }
     let fv = flora.view();
     // The cone occupancy is built once per stage, and only over the columns the due
-    // browsers' rays can reach (P5-A item 7): a ray reads exactly what it would against
+    // browsers' rays can reach: a ray reads exactly what it would against
     // the whole world, and a stage with one browser due indexes one browser's share of
     // the ring. A static episode's senses hold it instead (cone-speed item 4): built
     // once, patched from bites and deaths, bodies re-indexed — the same grid either way.
@@ -923,8 +923,7 @@ fn act_one(
 /// displacement, resolve the held motion on the continuous pose, re-derive the support
 /// site from the pose, record the interval's motion feedback, and — on the due tick —
 /// attempt the one local bite. A founder with a zero held action set (no controller
-/// yet, or a controller at rest) pays no motor budget and eats nothing, exactly as in
-/// P1-A.
+/// yet, or a controller at rest) pays no motor budget and eats nothing.
 fn founder_act(
     fauna: &mut Fauna,
     i: usize,
@@ -1441,7 +1440,7 @@ fn beside_plane(col: i64, dir: i64, voxel_m: f64, r: f64, side: f64) -> f64 {
     plane + side * dir as f64 * r * (1.0 + 1e-9)
 }
 
-/// **Attach to a face** (package mobility, decision 1). The body's sweep was refused
+/// **Attach to a face**. The body's sweep was refused
 /// while it held forward effort; if the column ahead along its heading's axis is a wall
 /// taller than its step ([`body::wall_ascent`]) or a cliff deeper than its step down
 /// ([`body::wall_descent`]) and the body is pressed against it, it goes onto the face:
@@ -1561,7 +1560,7 @@ fn attach(
     Attach::Climbing
 }
 
-/// **One tick on a face** (package mobility, decision 1). The feet move along it at half
+/// **One tick on a face**. The feet move along it at half
 /// the walking pace the held forward effort asks for, `0.5 · forward · cruise`, and the
 /// motor cost is the walking cost at that effort × [`crate::FounderPhysiology::
 /// wall_climb_cost_factor`]. Turn effort is not read on a face: the heading stays into

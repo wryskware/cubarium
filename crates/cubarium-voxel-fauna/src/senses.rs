@@ -1098,7 +1098,7 @@ pub(crate) fn cone_occupancy_with(
 
 /// The live occupancy for **one controller stage**: indexed only over the columns the
 /// observers at `observer_x_m` can see within `range_m`, plus a column of margin either
-/// side (P5-A item 7). A ray from one of those observers never leaves that window
+/// side. A ray from one of those observers never leaves that window
 /// horizontally, so it reads exactly what the full build would give it; the cost is
 /// proportional to the observers' share of the ring instead of to the whole world.
 pub(crate) fn cone_occupancy_window(
@@ -1750,9 +1750,7 @@ pub(crate) fn cone_valid(
 /// **standing surface** `(standing_y + 1) · voxel_m` (decisions §6;
 /// `design/handoffs/voxel-body-anchors-2026-09-22.md`).
 ///
-/// It used to be one and a half **voxels** over the standing face, so the same browser's
-/// eye was twice as high on a 0.25 m world as on a 0.125 m one. It is now a length, and
-/// the grid does not appear in it at all. Contract v2 writes the eye fraction into the
+/// It is a length, so the grid does not appear in it at all. Contract v2 writes the eye fraction into the
 /// manifest's digest (D1).
 pub(crate) fn cone_origin(
     view: &VoxelView<'_>,

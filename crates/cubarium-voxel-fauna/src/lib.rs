@@ -456,14 +456,14 @@ pub enum State {
     Resting,
     /// On a terrain face, going up or down it ([`Mobility::climb`]).
     Climbing,
-    /// The rest state (WX4): its phase is not now and it is not hungry, so it stands where
+    /// The rest state: its phase is not now and it is not hungry, so it stands where
     /// it is, its controller is not consulted, it does not move or feed, and it pays
     /// [`FounderPhysiology::sleep_upkeep`] × its basal upkeep. Kept general, a rest with an
     /// upkeep factor and not a thing tied to night: a predator's long rest is the same state.
     Asleep,
 }
 
-/// When a lineage is awake (WX4), read against the world's `life_daylight`. With the day
+/// When a lineage is awake, read against the world's `life_daylight`. With the day
 /// clock off everyone is awake, so the clock's own switch reaches here as `clock_on`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Activity {
@@ -501,8 +501,8 @@ impl Activity {
     }
 }
 
-/// A body's movement state that outlives a tick (package mobility,
-/// `design/handoffs/voxel-mobility-2026-09-23.md`): the face it is on, if any, and how
+/// A body's movement state that outlives a tick
+/// (`design/handoffs/voxel-mobility-2026-09-23.md`): the face it is on, if any, and how
 /// long it has been under water deeper than its height.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Mobility {
@@ -513,7 +513,7 @@ pub struct Mobility {
     pub submerged_ticks: u64,
 }
 
-/// A body **on a terrain face** (package mobility, decision 1): a shredder going up a
+/// A body **on a terrain face**: a shredder going up a
 /// wall from the face it stood on to the top of the neighbouring column, or down a cliff
 /// from the edge it stood on to the foot of the neighbouring column.
 ///
@@ -600,7 +600,7 @@ pub struct Animal {
     #[serde(default)]
     pub lifespan_ticks: u64,
     pub state: State,
-    /// On a wall, and how long under water (package mobility).
+    /// On a wall, and how long under water.
     pub mobility: Mobility,
     /// **The wound stock** in `[0, 1)` (`design/predation-and-flight-2026-09-28.md`
     /// §2.4): each hit adds to it, at 1 the body dies [`Departure::Killed`]. It slows the
@@ -843,8 +843,7 @@ pub struct Reproduction {
     /// hatching trigger instead of an incubation.
     pub dormant: bool,
     /// The share of the last `surplus_hold_s` a body must have spent in surplus: 0.8
-    /// shipped, so a foraging trip of up to a fifth of the hold is not a reset (Wrysk,
-    /// 2026-09-28, `design/handoffs/voxel-audit-round-2026-09-28.md` §3). 1.0 is the old
+    /// shipped, so a foraging trip of up to a fifth of the hold is not a reset. 1.0 is an
     /// unbroken hold.
     #[serde(default = "default_surplus_share")]
     pub surplus_share: f64,
@@ -942,7 +941,7 @@ impl Reproduction {
     /// `0.01 / 180 s` = 5.6e-5 /s against a basal upkeep of 5e-5 /s at `body_max`, so
     /// gestating roughly doubles what the parent is paying out.
     ///
-    /// **On plant time** (package G, decision 4): `surplus_hold_s` 900 and
+    /// **On plant time**: `surplus_hold_s` 900 and
     /// `birth_interval_s` 1,800 put hold + gestation + interval = 2,880 s (48 min)
     /// between one parent's offspring — the brief's "at least ~30 min apart" — and, with
     /// `growth_max_per_s`, a newborn's first birth an hour after its own. A founder that
@@ -972,7 +971,7 @@ impl Reproduction {
     /// `body_min` revisited, which is a physiology decision and not this round's
     /// (`design/backlog.md` §1). The rule itself is written for any count.
     ///
-    /// **On plant time** (package G, decision 4, "the same in their own terms"):
+    /// **On plant time**:
     /// `surplus_hold_s` 900 and `birth_interval_s` 1,800 put 2,700 s (45 min) between one
     /// parent's clutches, and with the shredder's `growth_max_per_s` a hatchling lays its
     /// first clutch no sooner than an hour after it hatched. A founder that arrives full
@@ -1149,8 +1148,7 @@ pub struct SpeciesConfig {
     /// Organic matter a mouth can take per second, spread over the stands in reach in site
     /// order. The bound on what a bite *asks* for; the plant layer bounds what it gets.
     ///
-    /// Since package G (`design/handoffs/voxel-plant-viability-2026-09-23.md` §G) it is
-    /// the *hungry* rate: a bite asks for `bite_per_s · period · effort · hunger`, where
+    /// It is the *hungry* rate: a bite asks for `bite_per_s · period · effort · hunger`, where
     /// hunger is the reserve's shortfall from `reserve_cap · body`, then takes
     /// `E / (E + bite_half_stock)` of that from food holding `E`, and never more than
     /// `room / yield`, the reserve's room after yield — so nothing it eats is respired as
@@ -1192,8 +1190,7 @@ pub struct SpeciesConfig {
     pub birth_cost: f64,
     /// The ceiling on **new intake** into the reserve, per unit of body: assimilated
     /// matter stops going to the reserve at `reserve_cap · body` and is respired instead
-    /// ([`step`]'s assimilation). It is deliberately **not** a universal storage bound
-    /// (Astra R9.4).
+    /// ([`step`]'s assimilation). It is deliberately **not** a universal storage bound.
     ///
     /// **The one exception, named.** A paid birth endowment may sit above it. A newborn is
     /// `body_min` of body and `birth_cost − body_min` of reserve, which at the
@@ -1240,11 +1237,9 @@ impl SpeciesConfig {
     /// cannot climb a step taller than itself, wades a film and drowns in a pool.
     ///
     /// **Every number is a placeholder and nothing measured any of them.** They are
-    /// chosen to encode that sentence at the scale the round-4 presets already set: a
+    /// chosen to encode that sentence at the scale of the small plant presets: a
     /// springturf founder carries `α · W` = 0.06 of foliage, so a body of 0.05 and a
-    /// mouth of 0.002 /s put one animal and one turf in the same order of magnitude, and
-    /// `bite_per_s` is deliberately the same rate as round 5a's harvest probe so that the
-    /// two are comparable.
+    /// mouth of 0.002 /s put one animal and one turf in the same order of magnitude.
     pub fn frondgrazer() -> SpeciesConfig {
         SpeciesConfig {
             maintenance_per_s: 0.001,
@@ -1882,7 +1877,7 @@ pub struct FaunaLedger {
     pub eaten_by_food: [f64; Food::COUNT],
     /// Steps taken, one voxel each.
     pub steps: u64,
-    /// Package mobility's movement counters, per lineage: walls climbed to the top and
+    /// Movement counters, per lineage: walls climbed to the top and
     /// cliffs climbed to the foot (each counted once, on arrival); ticks spent on a face
     /// and ticks alive, so the share of time on walls is the one over the other; and
     /// sweeps that moved the standing layer up or down a ledge.
@@ -2126,12 +2121,9 @@ pub enum Command {
 
 /// How full a founder body arrives, as fractions of what its physiology lets it hold.
 ///
-/// Phase one introduced every founder at [`StartingStores::FULL`] — body at `body_max`
-/// and a full reserve — and P2-B measured what that costs: with no headroom, settled
-/// intake can only replace the upkeep the body already burned, so the whole score is
-/// capped at `0.25 + maintenance/reference` and standing still is within a hair of the
-/// best attainable episode. A body placed at [`StartingStores::HUNGRY`] has somewhere to
-/// put what it eats.
+/// A body introduced at [`StartingStores::FULL`] has no headroom: settled intake can only
+/// replace the upkeep it already burned, so an episode's score is capped near standing
+/// still. A body placed at [`StartingStores::HUNGRY`] has somewhere to put what it eats.
 ///
 /// The manifest's `body_reference` is **not** this: it is the schema's fixed normaliser
 /// and does not move with the start state.

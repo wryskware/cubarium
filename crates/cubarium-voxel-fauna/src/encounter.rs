@@ -20,7 +20,7 @@
 //!
 //! A founder body changes its standing layer by at most its lineage's step up or down
 //! ([`crate::FounderPhysiology::step_limits`]; `design/handoffs/voxel-founder-step-2026-09-22.md`),
-//! or — a shredder — by climbing a terrain wall (package mobility), so the walkable
+//! or — a shredder — by climbing a terrain wall, so the walkable
 //! neighbourhood of a founder is what [`route_components`] computes, from the one shared
 //! rule in `cubarium_voxel::walk` plus the wall rule, for this crate, the seeder and the
 //! observer alike.
@@ -38,7 +38,7 @@ use crate::{ConeHit, Diet, FaunaView, Pose};
 /// How many headings a face is asked about when the question is "from *some* pose here".
 ///
 /// The mouth region's furthest probe is `2 · footprint_radius + reach` from the body's
-/// centre — 0.5625 m for package L's adult browser, 0.22 m for the shredder — so a
+/// centre — 0.5625 m for the adult browser, 0.22 m for the shredder — so a
 /// five-degree turn moves it by at most 0.05 m, under half a 0.125 m voxel. Seventy-two
 /// headings therefore enumerate the union of mouth columns a body standing on one face
 /// could cover, short of a column the region only clips at a corner for less than five
@@ -322,7 +322,7 @@ pub fn walkable_components(faces: &[Site], width: u32, climb: u32) -> Vec<usize>
     cubarium_voxel::walk::components(&cells, width, climb)
 }
 
-/// How a lineage's standable faces join into walkable components (package mobility).
+/// How a lineage's standable faces join into walkable components.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RouteRule {
     /// Its step up and down, whole voxels.
@@ -379,9 +379,8 @@ pub fn route_components(
 /// the walkable component of each under the lineage's climb, and the mouth columns a body
 /// standing there could cover at any heading.
 ///
-/// This is the route computation `voxel_edible_stock` used to carry privately, lifted so
-/// that the observer and the seeder's acceptance check ask the same thing
-/// (`design/handoffs/voxel-startup-acceptance-2026-09-22.md` item 4). Every rule in it is
+/// The observer (`voxel_edible_stock`) and the seeder's acceptance check ask the same
+/// thing through it. Every rule in it is
 /// one of the helpers above: [`standable_faces`], [`walkable_components`],
 /// [`mouth_columns_from_face`], the mouth band and [`reachable_layers_of`].
 pub struct RouteMap {
@@ -401,7 +400,7 @@ pub struct RouteMap {
 impl RouteMap {
     /// The route map of a founder lineage's **adult** body: its wade depth (a fraction of
     /// its height), its step up and down, and — for a climber — the walls it goes up and
-    /// down (package mobility).
+    /// down.
     pub fn for_founder(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> RouteMap {
         let body = phys.adult_body();
         RouteMap::new(

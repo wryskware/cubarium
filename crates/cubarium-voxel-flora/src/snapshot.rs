@@ -2,65 +2,17 @@
 //! [`cubarium_voxel::snapshot`] and `cubarium_voxel_fauna::snapshot` do it. A different
 //! tag is refused; there is no migration, ever.
 //!
-//! This is the standing rule and not a choice of this package: `always-fresh-never-migrate`
-//! says a new schema refuses old worlds and nothing is synthesized or re-anchored.
-//!
-//! **Why schema 1 and not a bump.** The plant layer had no snapshot at all before this
-//! package: `Flora` did not implement `Serialize`, and the host's `w`/`l` commands write
-//! and read `World::save()` alone, so a restart has always rebuilt the plants from the
-//! seeder (`crates/cubarium-voxel-fauna/src/snapshot.rs`, "What this does not do yet").
-//! The layers package is the one that gives a stand state a seeder cannot re-derive — a
-//! plant grazed at the base is a different plant from one grazed evenly, and only its
-//! `layer_stock` says which — so the plant layer gets its own always-fresh envelope
-//! here, ready for the host envelope that carries the world, the plants and the animals
-//! together. **The host wiring is still owed**; nothing writes one of these yet.
+//! `always-fresh-never-migrate`: a new schema refuses old worlds and nothing is
+//! synthesized or re-anchored. Nothing in the host writes one of these yet.
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::Flora;
 
-/// Schema 1: the first flora snapshot there has ever been, and the first format that
-/// could not be re-derived from a seed — [`crate::Stand::layer_stock`] and
-/// [`crate::Stand::profile_stage`], the per-layer tissue of
-/// `design/handoffs/voxel-plant-layers-2026-09-22.md`. Postcard is not
-/// self-describing, so a new field is a new format: other tags are refused, never
-/// migrated.
-///
-/// Schema 2: package L (`design/handoffs/voxel-ladder-growth-2026-09-23.md`) states every
-/// crown in metres (`SpeciesConfig::crown_height_m` / `crown_radius_m`) at the size
-/// ladder, with the capped-seedling growth rule. The serialised config's fields changed,
-/// and a schema-1 stand's wood would grow a different plant: refused, not migrated.
-///
-/// Schema 3: package N (`design/handoffs/voxel-new-plants-2026-09-23.md`) appends three
-/// species (the per-species ledger arrays grow to nine) and two config fields
-/// (`water_depth_min_m`, `falls`): refused, not migrated.
-///
-/// Schema 4: the plant-viability packages (`design/handoffs/voxel-plant-viability-2026-09-23.md`).
-/// G adds `SpeciesConfig::graze_refuge` to the serialised config; F moves every species'
-/// water thresholds from pore fraction to available water (`wilt_water`, `full_water`,
-/// `establish_water_min`), same bytes, new meaning. Refused, not migrated.
-/// Package S joins it: whole seeds banked for hours on a staggered check clock — two
-/// species fields (`dispersal`, `clonal_share`), the config's `seed_check_s`, five
-/// per-species seed counters in the ledger and the shower flag the bank's flush reads.
-///
-/// Schema 5: package SM (the follow-up round) adds two fields to every `Ground` — the latest
-/// landing and the about-to-sprout flag the D5 seed mark reads: refused, not migrated.
-///
-/// Schema 6: the latticevine face cover (D15 Revision 2,
-/// `design/handoffs/latticevine-cover-sim-2026-09-23.md`): `Flora` gains its vines and
-/// covered faces, `FloraConfig` the `latticevine` section, and the ledger the vine
-/// counters. Refused, not migrated.
-///
-/// Schema 7: package SU (succession): four species fields (`spore_tries`, `seed_mass`,
-/// `ground_cover`, `overtop_per_check`) and the ledger's `overtopped` counts, and a seed is
-/// `seed_mass` minimum packages. Refused, not migrated.
-/// Schema 8: the induced grazing defence — `Stand::defence` and the species'
-/// `defence_per_bite` / `defence_half_life_s`
-/// (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`). Refused, not migrated.
-/// Schema 9: the carcass record on every `Ground` (`Ground::carcass`,
-/// `design/predation-and-flight-2026-09-28.md` §2.5) and carrion's new hour-long decay.
-/// Refused, not migrated.
+/// The plant layer's snapshot format. Bumped whenever a serialized field, the config
+/// inside the snapshot, or what a saved field means changes. Postcard is not
+/// self-describing, so other tags are refused, never migrated.
 pub const SCHEMA: u32 = 9;
 
 #[derive(Serialize, Deserialize)]

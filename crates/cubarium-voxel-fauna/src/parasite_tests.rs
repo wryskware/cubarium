@@ -1,16 +1,6 @@
-//! Parasite hatchlings, tests first (`design/handoffs/voxel-predation-parasite-2026-10-01.md`):
-//! a lanternjaw egg hatches onto a host, rides it, drains it, and drops off as a free
-//! juvenile. Red by design until the implementation commit. The interface the tests
-//! assume, declared as stubs beside them:
-//!
-//! - `FaunaConfig::{parasite_attach_radius_m: f64, parasite_max_per_host: u32,
-//!   parasite_drain_of_host_basal: f64, parasite_detach_body_fraction: f64}`, serde
-//!   fields with the brief's defaults, refused by `FaunaConfig::validate` when not finite
-//!   and nonnegative (the detach fraction within `(0, 1]`);
-//! - `Animal::attached: Option<Attachment>`, `Attachment { host: u64 }`: `Some` exactly
-//!   while the body rides; saved as the host's id;
-//! - `FaunaLedger::{riders_attached, rider_dropoffs, riders_freed}: u64`, cumulative;
-//! - the fauna `SCHEMA` past P1's 21.
+//! Parasite hatchlings (`design/handoffs/voxel-predation-parasite-2026-10-01.md`): a
+//! lanternjaw egg hatches onto a host, rides it, drains it, and drops off as a free
+//! juvenile.
 //!
 //! Readings these cases pin, where the brief leaves room:
 //!

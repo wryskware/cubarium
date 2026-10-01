@@ -1,38 +1,7 @@
-//! P1 (predation substrate), tests first: the satiated rest, the buried egg bank and its
-//! hatching trigger, and the snapshot (`design/predation-and-flight-2026-09-28.md` §2.8,
-//! §2.12, §2.13; brief P1 cases 10, 14, 15 and 16). Red by design until the
-//! implementation commit adds:
-//!
-//! - `Founder::Lanternjaw`, its physiology and `Hunter { rest_at, torpor_upkeep,
-//!   wake_at, .. }` (manifest.rs, body.rs);
-//! - `Rest::{Sleep, Satiated}` (predation.rs or lib.rs, re-exported) and `Animal::rest:
-//!   Option<Rest>`, `Some` exactly while `state == State::Asleep`: WX4's rest state with
-//!   a reason. A satiated rest runs in any phase, with the clock off too;
-//! - `Command::BuryClutch { site: Site, lineage: Founder, eggs: u32 }` (lib.rs): the
-//!   viewer key's and the founding bank's act, booked `introduced_*_in`, refused off a
-//!   support face;
-//! - a lanternjaw clutch is laid or buried as **one `Clutch` per egg** (`count` 1), so
-//!   each egg keeps its own dormancy: `Clutch::dormancy: Option<Dormancy>` (lib.rs),
-//!   `Dormancy { threshold: u32, viable_until_tick: u64, .. }` — the per-egg footfall
-//!   threshold (drawn, mean 6, spread wide) and the tick its viability runs out (drawn,
-//!   median about 12 h);
-//! - `EGG_UPKEEP_PER_S: f64` (lib.rs): organic matter an egg respires per unit of its own
-//!   organic matter per second. The note says "a tiny upkeep" and pins no value;
-//! - `FaunaLedger::eggs_died: u64` (lib.rs): eggs whose viability ran out, gone to the
-//!   litter of their face;
-//! - `egg_hatches(threshold: u32, footfall: u32, dusk: bool, nearest_adult_m:
-//!   Option<f64>) -> bool` (predation.rs, re-exported): the hatching trigger behind one
-//!   function (Wrysk's choice, 2026-09-28);
-//! - "Dusk" is read as the tick `life_daylight` first falls below `Activity::DAY_LINE`,
-//!   when a nocturnal lineage wakes; footfall is distinct prey heard (the tremor rule)
-//!   within 2 m over the last clock-day.
-//!
-//! - `apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by:
-//!   Founder)` (predation.rs, re-exported): the serial pass's application of one `Hit`
-//!   event, called directly by a case; a hit wakes the prey, ending any rest.
-//!
-//! The snapshot case also names `Animal::{wound, strike}` and `StrikePhase` (see
-//! `predation_tests.rs`) and expects the fauna `SCHEMA` bumped past 19.
+//! Predation, the life half: the satiated rest, the buried egg bank and its hatching
+//! trigger, and the snapshot (`design/predation-and-flight-2026-09-28.md` §2.8, §2.12,
+//! §2.13). "Dusk" is the tick `life_daylight` first falls below `Activity::DAY_LINE`;
+//! footfall is distinct prey heard (the tremor rule) within 2 m over the last clock-day.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -216,7 +185,7 @@ fn the_ambush_heuristic_eats_a_carcass_into_the_satiated_rest() {
     assert_closes(&fauna, "fed and resting");
 }
 
-/// WX4's sleep is the other reason on the same state: a diurnal grazer asleep at
+/// the sleep is the other reason on the same state: a diurnal grazer asleep at
 /// midnight rests for `Sleep`.
 #[test]
 fn wx4_sleep_is_a_rest_with_its_own_reason() {

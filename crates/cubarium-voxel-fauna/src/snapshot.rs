@@ -90,7 +90,7 @@ fn riders(fauna: &Fauna) -> Result<(), String> {
 }
 
 /// What a loaded layer has to satisfy beyond its schema tag and its config: the
-/// **state**, and not only the configuration (Astra R9.6).
+/// **state**, and not only the configuration.
 ///
 /// Three things, each of which an invariant of this layer depends on rather than a taste:
 /// every stock is a finite nonnegative number, because a `NaN` body is a `NaN` in the

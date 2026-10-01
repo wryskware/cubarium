@@ -1,18 +1,7 @@
-//! P1 (predation substrate), tests first: carrion decays at the new rate and the ground
-//! pool carries a carcass record (`design/predation-and-flight-2026-09-28.md` §2.5, and
-//! decision 2; brief P1 case 9 and the flora half of case 14). Red by design until the
-//! implementation commit adds:
-//!
-//! - `FloraConfig::carrion_decomposition` at 0.00028 /s (an e-fold of about an hour),
-//!   in the default and the voxel-size presets;
-//! - `Carcass { lineage: u8, heading_rad: f64, organic: f64 }` (lib.rs, deriving `Clone,
-//!   Copy, Debug, PartialEq, Serialize, Deserialize`): the dead animal's lineage code (the
-//!   fauna's `Founder::index`), its heading and the organic matter it died with;
-//! - `Carcass::remains(&self, carrion: f64) -> bool`: the pool is below 30 % of what the
-//!   body died with, when the presenter draws remains instead of the body;
-//! - `Ground::carcass: Option<Carcass>` and `Flora::lay_carcass(&mut self, site: Site,
-//!   carcass: Carcass) -> bool`: the record carries no mass, the pool does;
-//! - the flora snapshot `SCHEMA` bumped past 8 for the new field.
+//! Carrion decays at its own rate and the ground pool carries a carcass record
+//! (`design/predation-and-flight-2026-09-28.md` §2.5): `carrion_decomposition` in every
+//! preset, [`crate::Carcass`] on [`crate::Ground`], `Flora::lay_carcass`, and the record in
+//! the snapshot.
 
 use crate::snapshot::{SCHEMA, decode, encode};
 use crate::{Carcass, Deposit, DepositKind, Flora, FloraConfig, Site};

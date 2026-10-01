@@ -1,8 +1,6 @@
-//! Package SM (`design/handoffs/voxel-plant-viability-2026-09-23.md`, "Follow-up round"):
-//! the D5 seed mark shows only a **recent** landing (within [`crate::SEED_MARK_RECENT_S`])
+//! The D5 seed mark shows only a **recent** landing (within [`crate::SEED_MARK_RECENT_S`])
 //! or a site **about to sprout** — armed at a check whose gates passed, germinating at the
-//! next one. Kept apart from `seeds.rs`'s own tests so the two packages editing that file
-//! do not collide.
+//! next one.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, TICK_HZ, World};
 

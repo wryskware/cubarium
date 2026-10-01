@@ -1,4 +1,4 @@
-//! **The predation substrate** (P1, `design/predation-and-flight-2026-09-28.md` §2): who
+//! **The predation substrate** (`design/predation-and-flight-2026-09-28.md` §2): who
 //! is prey and who is a threat to whom, the strike's phases and its dodge, the rest with
 //! a reason, and the egg bank's hatching trigger — the pure parts, which the tick
 //! ([`crate::step`]) and the heuristics call.
@@ -10,7 +10,7 @@
 //! the act: a striker reads its prey, and only the serial pass wounds, wakes or kills it.
 //!
 //! Every number here is a placeholder for `design/backlog.md`; the note's are marked as
-//! the note's, and the ones this package chose say why where they sit.
+//! the note's, and the others say why where they sit.
 
 use serde::{Deserialize, Serialize};
 
@@ -43,10 +43,10 @@ pub struct Strike {
 }
 
 /// Why a body is at rest ([`crate::Animal::rest`], `Some` exactly while its state is
-/// [`State::Asleep`]): WX4's rest state with a reason (§2.8).
+/// [`State::Asleep`]): the rest state with a reason (§2.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Rest {
-    /// Out of its activity phase and not hungry (WX4), at `sleep_upkeep`.
+    /// Out of its activity phase and not hungry, at `sleep_upkeep`.
     Sleep,
     /// A carnivore at `rest_at` of its reserve cap, in any phase, at `torpor_upkeep`,
     /// until it falls below `wake_at`.

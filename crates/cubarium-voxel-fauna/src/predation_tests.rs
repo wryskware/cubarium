@@ -1,35 +1,5 @@
-//! P1 (predation substrate), tests first: the lanternjaw's table, the strike, dodge,
-//! wounds and the kill (`design/predation-and-flight-2026-09-28.md` §2.1, §2.3–§2.5,
-//! §2.12; brief P1 cases 1–8). Red by design until the implementation commit adds:
-//!
-//! - `Founder::Lanternjaw` (manifest.rs), named `"lanternjaw"`, with its manifest's
-//!   `cruise_m_per_s` at 0.6 BL/s of its 1 m body;
-//! - on `FounderPhysiology` (body.rs): `hunter: Option<Hunter>`, `armour: f64`,
-//!   `agility: f64`, `counter: Option<Counter>`;
-//! - `Hunter` (body.rs, re-exported): `strike_power`, `prey_max_ratio`,
-//!   `strike_reach_length_fraction`, `jaw_band_height_fraction`, `windup_s`, `lunge_s`,
-//!   `recovery_s`, `strike_cost_s`, `rest_at`, `torpor_upkeep`, `wake_at` (all `f64`) and
-//!   `fn hunts(&self, prey: Founder) -> bool`;
-//! - `Counter { reach, damage, cost }` (body.rs, re-exported), `None` for every lineage;
-//! - `Diet::Carrion` (lib.rs): the lanternjaw's mouth, accepting no stand's foliage;
-//! - on `Animal` (lib.rs): `wound: f64` and `strike: Option<Strike>`;
-//! - `Strike { phase: StrikePhase, .. }` and `StrikePhase::{Windup, Lunge, Recovery}`
-//!   (predation.rs, re-exported);
-//! - `State::awareness(self) -> f64` (lib.rs): the dodge table's awareness column;
-//! - `dodge_chance(agility: f64, state: State, struck_from_rear: bool,
-//!   reserve_fraction: f64) -> f64` and `dodges(chance: f64, seed: u64, striker: u64,
-//!   prey: u64, tick: u64) -> bool` (predation.rs, re-exported): the draw is keyed by
-//!   the world seed, like every draw in the step;
-//! - `Departure::Killed { by: Founder }` (lib.rs);
-//! - on `FaunaLedger` (lib.rs): `strikes_by_founder`, `hits_by_founder`,
-//!   `dodges_by_founder`, each `[u64; Founder::COUNT]` indexed by the **striker's**
-//!   lineage (a strike is counted when it begins, a hit and a dodge when contact is
-//!   resolved);
-//! - `HEAL_COST: f64` (lib.rs): organic matter a unit of wound costs to heal per unit of
-//!   body. The note names `heal_cost` and pins no value.
-//! - `cubarium_voxel_flora::Ground::carcass: Option<Carcass>` with `Carcass { lineage:
-//!   u8 (the dead body's Founder::index), heading_rad: f64, organic: f64 }`, written by
-//!   a kill.
+//! Predation: the lanternjaw's table, the strike, the dodge, wounds and the kill
+//! (`design/predation-and-flight-2026-09-28.md` §2.1, §2.3–§2.5, §2.12).
 //!
 //! Readings of the note these cases rely on: a hit wakes the prey, ending any rest,
 //! sleep or satiated (an adult grazer is hard, and big prey can get away); the lunge's

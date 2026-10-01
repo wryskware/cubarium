@@ -1,5 +1,4 @@
-//! The seed bank and dispersal: package S of `design/handoffs/voxel-plant-viability-2026-09-23.md`,
-//! steps 8 and 9 of the tick (`step.rs`'s module doc).
+//! The seed bank and dispersal: steps 8 and 9 of the tick (`step.rs`'s module doc).
 //!
 //! # Whole seeds
 //!
@@ -66,8 +65,8 @@ const WIND_SCALE_HOPS: f64 = 2.5;
 
 /// **One seed**: `seed_mass` minimum packages, where the minimum is the seed-bank organic
 /// matter a germination needs to build a stand at exactly `alive_min` of wood,
-/// `alive_min / w_frac` — 0.05 at the base (package SU: a shrub's or a tree's seed is
-/// several of them). Stated as a division guarded by the caller, never a tuned constant.
+/// `alive_min / w_frac` — 0.05 at the base (a shrub's or a tree's seed is several of
+/// them). Stated as a division guarded by the caller, never a tuned constant.
 ///
 /// Zero for a species whose `w_frac` is zero, which can never germinate anything.
 pub(crate) fn package_of(sc: &SpeciesConfig) -> f64 {
@@ -79,7 +78,7 @@ pub(crate) fn package_of(sc: &SpeciesConfig) -> f64 {
     }
 }
 
-/// A bank's weight in the gap lottery: whole seeds **times seed mass** (package SU), so a
+/// A bank's weight in the gap lottery: whole seeds **times seed mass**, so a
 /// bank weighs what it cost — one seed four minimum packages big weighs what four minimum
 /// seeds do.
 pub(crate) fn lottery_weight(seeds: u64, sc: &SpeciesConfig) -> u64 {
@@ -106,12 +105,11 @@ pub(crate) fn seeds_in(c: &SeedCohort, package: f64) -> u64 {
 
 /// The three stocks a funded newborn is built out of `organic` units of material: wood at
 /// `w_frac` of it — **exactly** `alive_min` for a minimum package, more for a bigger seed
-/// (package SU) — foliage at the preset's `p_frac` of the material, and the remainder —
+/// — foliage at the preset's `p_frac` of the material, and the remainder —
 /// including every unit of floating-point difference — in the reserve.
 ///
-/// Astra's R5.1: a newborn whose wood was `w_frac · organic` could land an ulp under
-/// `alive_min` and die on its first growth tick having been paid for in full. So a seed
-/// within a hair of the minimum package builds wood at the threshold itself, and the
+/// A newborn whose wood was `w_frac · organic` could land an ulp under `alive_min` and
+/// die on its first growth tick having been paid for in full. So a seed within a hair of the minimum package builds wood at the threshold itself, and the
 /// rounding difference goes to the reserve, which feeds no income and no death test.
 /// `wood + foliage + reserve` re-sums to `organic`, and every stock is non-negative by
 /// construction.
@@ -132,7 +130,7 @@ pub(crate) fn newborn_stocks(sc: &SpeciesConfig, organic: f64) -> (f64, f64, f64
 /// weighted by each bank's [`lottery_weight`] — whole seeds times seed mass — from a stream keyed by the world's seed, the
 /// site's voxel index and the tick. `None` when nothing qualifies.
 ///
-/// Astra's R4.5: a fixed enum order is not an ecological rule. The candidates are sorted
+/// A fixed enum order is not an ecological rule. The candidates are sorted
 /// by species before the walk, so the caller's order cannot select the winner, and the
 /// weights are integers, so there is no float comparison in the draw.
 pub(crate) fn lottery(
@@ -355,10 +353,10 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
 /// one. Drawn in a read-only pass first — a saprotroph's gate reads other sites' dead
 /// wood — and spent after.
 ///
-/// **A site held by a ground cover** (package SU) is not closed: its lottery is among the
+/// **A site held by a ground cover** is not closed: its lottery is among the
 /// **woody** banks alone ([`SpeciesConfig::overtop_per_check`] above zero) whose gates
 /// pass as if the site were free, and the winner then needs its own per-check draw
-/// ([`overtops`]). Under package SM's arming the draw is taken at the arming check and
+/// ([`overtops`]). Under the arming rule the draw is taken at the arming check and
 /// the arm survives the cover; at the next check the seedling comes up if its gates still
 /// pass. Then the cover dies an *overtopped* death — the ordinary §4.7 death, its wood to
 /// dead wood and the rest to litter — and the seedling takes the site. Any other stand
@@ -461,8 +459,8 @@ fn germinate(
     crate::step::insert_sorted(stands, born);
 }
 
-/// Package SM's one-check delay, for one tested site with no stand on it — or one a ground
-/// cover holds, where `passing` is the woody banks alone (package SU). A site armed at
+/// The one-check arming delay, for one tested site with no stand on it — or one a ground
+/// cover holds, where `passing` is the woody banks alone. A site armed at
 /// the last check sprouts its armed species now if that species still passes
 /// (`passing`); otherwise this check's lottery (`draw`) arms the site for the next one, or
 /// clears it when nothing passes. Returns the species to germinate now.
@@ -597,11 +595,11 @@ struct Daughter {
     donor: u64,
 }
 
-/// §4.8, round 3b's saving rule, and package S's two ways a package leaves.
+/// §4.8: the donor's saving rule, and the two ways a package leaves.
 ///
 /// Every tick, a stand over `donor_min` asks for `propagule_rate · dt`, gross, funded out
 /// of its reserve above `donor_reserve_floor`; what it pays is respired for construction
-/// (`c_g`) and the rest saved in [`Stand::parcel`] (Astra R4.4). When the parcel holds one
+/// (`c_g`) and the rest saved in [`Stand::parcel`]. When the parcel holds one
 /// whole package it leaves:
 ///
 /// - with probability [`SpeciesConfig::clonal_share`], as a **runner**: a daughter stand on
@@ -711,7 +709,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
             }
             add_cohort(&mut ground[gi], donor.species, package, mineral, tick, sc);
             ledger.seeds_landed[slot] += 1;
-            // The receipt, written where the destination is known (Astra R10.3).
+            // The receipt, written where the destination is known.
             deliveries.push(DeliveryReceipt {
                 tick,
                 donor: donor.id,
@@ -874,7 +872,7 @@ pub(crate) fn landing(
 
 /// **Drop**: the highest support face of each column within `hop` in `x` and `z` is a
 /// candidate — one per column — and one is drawn uniformly. Never the donor's own site,
-/// no habitat screening: the bank waits for the gap. Unchanged from round 3b.
+/// no habitat screening: the bank waits for the gap.
 fn drop_target(
     view: &VoxelView<'_>,
     hop: u32,
@@ -1597,9 +1595,7 @@ mod tests {
     /// at exactly `alive_min` of wood, so `w_frac · package` must not land **under**
     /// `alive_min` in f64 — a newborn a hair under it would be born and die on its first
     /// tick. It is exact at every preset's placeholders, and this is the test a new preset
-    /// has to keep passing: round 4 added three, whose packages are 0.015, 0.025 and 0.0375
-    /// against the original pair's 0.05. The **minimum** package, that is: package SU's
-    /// bigger seeds are whole multiples of it (`a_bigger_seed_costs_its_mass_…`).
+    /// has to keep passing. The **minimum** package, that is: bigger seeds are whole multiples of it (`a_bigger_seed_costs_its_mass_…`).
     #[test]
     fn one_package_builds_a_stand_at_exactly_alive_min() {
         let config = FloraConfig::default().minimum_seeds();
@@ -1722,9 +1718,9 @@ mod tests {
     }
 
     /// The same allocation against **every preset's own split**, on a hair under the
-    /// minimum package (Astra's R5.1 rounding), on the minimum package itself and on a
+    /// minimum package (the rounding case), on the minimum package itself and on a
     /// bigger seed: the wood is `alive_min` on the nose for the first two and `w_frac` of
-    /// the seed for the third (package SU), no stock is negative, the total is preserved,
+    /// the seed for the third, no stock is negative, the total is preserved,
     /// and the foliage and reserve are the intended fractions to within the rounding that
     /// is being corrected. The last two cases are the degenerate splits a future preset
     /// could bring — no reserve at all, and a bank that somehow holds less than
@@ -1830,7 +1826,7 @@ mod tests {
     }
 
     /// SU 1. A woody seed banked under a **ground cover** comes up through it on a check
-    /// whose draw says so — armed at that check (package SM), sprouting at the next — and
+    /// whose draw says so — armed at that check, sprouting at the next — and
     /// the cover dies an "overtopped" death, booked like any other: its wood to dead
     /// wood, its foliage and reserve to litter. One stand per site, every unit accounted
     /// for. The arm **survives the cover** between the two checks: a site held by a

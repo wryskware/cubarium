@@ -1,4 +1,4 @@
-//! WX4: animal circadian rhythms. A child of `step`, so a case can reach the controller
+//! Animal circadian rhythms. A child of `step`, so a case can reach the controller
 //! table. Tiny cases only: a world held at one hour (its tick never advances), one or a
 //! few fauna ticks, and a fast day for the one case that has to see the phase change.
 

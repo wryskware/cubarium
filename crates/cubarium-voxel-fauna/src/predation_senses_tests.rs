@@ -1,20 +1,6 @@
-//! P1 (predation substrate), tests first: kinds per observer, the still-threat rule,
-//! tremor, and bodies with volume in the cone occupancy
-//! (`design/predation-and-flight-2026-09-28.md` §2.2; brief P1 cases 11 and 12). Red by
-//! design until the implementation commit adds:
-//!
-//! - `Founder::Lanternjaw` and its physiology (manifest.rs, body.rs);
-//! - `BodyKind::{Prey, Threat, Other}` and `kind_of(config: &FaunaConfig, observer:
-//!   &Animal, other: &Animal, distance_m: f64) -> BodyKind` (predation.rs, re-exported):
-//!   prey is in the observer's prey list and size window, threat is the other way round,
-//!   and a threat that is still reads as other beyond 0.5 m;
-//! - `Animal::still_ticks: u64` (lib.rs): ticks since the body last moved faster than
-//!   0.1 BL/s; a body is still once that is past 2 s;
-//! - `FaunaView::tremor(&self, view: &VoxelView<'_>, observer: u64) -> [f64; 2]`
-//!   (lib.rs or senses.rs): left and right, the sum over bodies within 1.5 m of
-//!   `mass × speed / distance²`;
-//! - bodies laid into `senses::cone_occupancy` as their footprint disc × current height,
-//!   not one cell.
+//! Predation senses: the body kinds per observer, the still-threat rule, the tremor, and
+//! bodies with volume in the cone occupancy (`design/predation-and-flight-2026-09-28.md`
+//! §2.2).
 
 use super::predation_fixture::*;
 use crate::senses::{Fine, predation_occupancy, ray_first_hit};

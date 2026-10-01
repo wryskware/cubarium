@@ -44,8 +44,7 @@
 //!
 //! [`Manifest::parameter_count`] is the `Gru32`-compatible count for the manifest's shapes:
 //! `3·H·(I + H + 2) + O·(H + 1)` with `H = 32`, which is `cubarium-core`'s
-//! `neural::gru::parameter_count`. The runtime that accepts these shapes is P1-D; this is
-//! the number it must accept (5,571 and 6,915).
+//! `neural::gru::parameter_count`: the number the runtime must accept (5,571 and 6,915).
 
 use std::fmt::Write;
 
@@ -144,7 +143,7 @@ impl Founder {
 }
 
 /// How a raw network output in `[low, high]` is produced from an unbounded logit. The
-/// adapter itself (P1-B) is identical in training and viewing; this only names it.
+/// adapter itself is identical in training and viewing; this only names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Transfer {
     /// `σ(logit)`, for `[0, 1]`.
@@ -237,12 +236,12 @@ pub struct Manifest {
     pub contact_height_fraction: f64,
     /// The lineage's step up and step down, metres: what the step rule treats as a ledge
     /// rather than a wall or a cliff (the contact receptors read the step up), and
-    /// whether it climbs terrain walls (package mobility).
+    /// whether it climbs terrain walls.
     pub step_up_m: f64,
     pub step_down_m: f64,
     pub climbs_walls: bool,
     /// Standing water the body walks into, and water it is under, as fractions of its
-    /// current height, and the seconds under before it drowns (package mobility).
+    /// current height, and the seconds under before it drowns.
     pub wade_height_fraction: f64,
     pub drown_height_fraction: f64,
     pub drown_after_s: f64,
@@ -273,7 +272,7 @@ pub struct Manifest {
     /// band `[0, mouth_ceiling_fraction × height]` ([`crate::Body::mouth_layers`];
     /// decisions §2), which the canonical text carries instead. The field survives only
     /// for the arena layouts' own reachability checks, which package 5's arena rebuild
-    /// (P5-B) replaces; it is deliberately left out of [`Manifest::canonical_text`].
+    /// replaces; it is deliberately left out of [`Manifest::canonical_text`].
     pub mouth_reach_up_voxels: u32,
     /// Which cue the mouth's one taste channel means: `litter` for the blind feeder,
     /// `foliage` for the browser.
@@ -372,7 +371,7 @@ const CHEM_DETRITUS_CHANNELS: [&str; 3] = ["response", "trend", "valid"];
 /// The shredder's one diffused cue channel: the **detritus** field, litter plus carrion
 /// (decisions §3 as amended 2026-09-22; the field is [`crate::senses`]'s
 /// `DetritusField`). Called `Chem(litter)` under schema 1, when the field carried litter
-/// alone; renamed with contract v2 (P5-A item 4). Name and canonical text only: the slot,
+/// alone; renamed with contract v2. Name and canonical text only: the slot,
 /// the width and the channel order are unchanged.
 const MODULE_CHEM_DETRITUS: Module = Module {
     name: "Chem(detritus)",
@@ -632,8 +631,8 @@ impl Manifest {
         }
     }
 
-    /// The sighted browser: 37 inputs with a three-sector cone. The ladder's 0.75 m body
-    /// (package L), cruising at one body length per second; 2 m ray range and 45 rays.
+    /// The sighted browser: 37 inputs with a three-sector cone. The ladder's 0.75 m body,
+    /// cruising at one body length per second; 2 m ray range and 45 rays.
     pub fn browser() -> Manifest {
         let a = anchors(Founder::Browser);
         Manifest {
@@ -682,7 +681,7 @@ impl Manifest {
         }
     }
 
-    /// The lanternjaw (interim, P1): the Browser's layout and cone, its own 1.0 × 0.25 ×
+    /// The lanternjaw (interim): the Browser's layout and cone, its own 1.0 × 0.25 ×
     /// 0.45 m body cruising at 0.6 BL/s, a carrion taste, and the `lure` action. P2's
     /// contract v3 replaces it.
     pub fn lanternjaw() -> Manifest {
@@ -975,7 +974,7 @@ mod tests {
         }
     }
 
-    /// The counts P1-D must accept: 5,571 and 6,915.
+    /// The counts the GRU runtime must accept: 5,571 and 6,915.
     #[test]
     fn the_parameter_counts_are_the_contracts() {
         assert_eq!(Manifest::blind().parameter_count(), 5_571);
@@ -986,7 +985,7 @@ mod tests {
 
     /// The digest is stable across calls, is exactly FNV-1a over the canonical text, and
     /// separates two founders that differ in a single module. The schema-significant
-    /// constants Astra named — Self references, the movement references, the taste cue and
+    /// constants — Self references, the movement references, the taste cue and
     /// its resistance mapping — are all part of the canonical text.
     #[test]
     fn the_digest_is_stable_and_separates_the_founders() {
@@ -1009,7 +1008,7 @@ mod tests {
     }
 
     /// A single changed manifest property moves the digest: the schema text is what
-    /// protects meaning, so P1-C cannot invent a constant the digest does not cover.
+    /// protects meaning, so no constant can be invented that the digest does not cover.
     #[test]
     fn a_single_changed_manifest_property_moves_the_digest() {
         let baseline = Manifest::blind();

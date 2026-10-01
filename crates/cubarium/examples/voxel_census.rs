@@ -81,8 +81,8 @@ use cubarium_voxel_sim::{Sim, SimConfig};
 /// One simulated minute, in ticks: 60 s at the fixed tick rate.
 const TICKS_PER_MIN: u64 = 60 * TICK_HZ as u64;
 
-/// The flora study harness's rain rate, reused as the closed budget's shower rate
-/// (`crates/cubarium-voxel-flora/examples/harness/mod.rs`). An experiment condition.
+/// The closed budget's shower rate: the rain rate the retired flora study harness ran
+/// on. An experiment condition.
 const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
 /// Evaporation for the closed budget: half the shower rate. It has to be **under** the
 /// shower rate or a falling drop is lifted again in the same tick — `evaporate` runs
@@ -343,7 +343,7 @@ fn main() {
         return;
     }
     let mut world = if generated {
-        // The closed budget's water is the flora study's own: the shower rate it ran on,
+        // The closed budget's water is the retired flora study's: the shower rate it ran on,
         // the aquifer charged a metre above the basin floor, and the outlet open — which
         // in a closed world is the return flow into the atmosphere, not an export.
         let mut world_cfg = cfg.world.clone();

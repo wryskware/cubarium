@@ -62,8 +62,8 @@
 //! under its ground-level mouth, or valid-zero bare ground. Never a remote field query,
 //! never a neighbour outside the reach.
 //!
-//! The modules P1-C owns (`Chem`, `Light`, `Cone`) are left **zero with validity 0** in
-//! the observation: this module fabricates nothing it does not measure.
+//! The sense modules (`Chem`, `Light`, `Cone`) are not this module's: it leaves them
+//! **zero with validity 0** in the observation and fabricates nothing it does not measure.
 
 use cubarium_voxel::{DT, VoxelView};
 use cubarium_voxel_flora::{FloraView, Site};
@@ -105,7 +105,7 @@ const MOUTH_REACH_LENGTH_FRACTION: f64 = 0.25;
 const WALL_CLIMB_COST_FACTOR: f64 = 2.0;
 /// [`FounderPhysiology::drown_after_s`], both lineages.
 const DROWN_AFTER_S: f64 = 60.0;
-/// [`FounderPhysiology::sleep_upkeep`], both lineages (WX4, Fable).
+/// [`FounderPhysiology::sleep_upkeep`], both lineages.
 const SLEEP_UPKEEP: f64 = 0.5;
 /// [`FounderPhysiology::wake_hunger`], both lineages: awake once the reserve is under half
 /// its cap.
@@ -209,8 +209,8 @@ pub struct FounderPhysiology {
     pub motor_respiration_per_s: f64,
     /// The lineage's **step up and step down in metres**: how far up, and how far down, a
     /// body may put its feet in one sub-step, and therefore what counts as a ledge rather
-    /// than a wall or a cliff (`design/handoffs/voxel-founder-step-2026-09-22.md`, split
-    /// in two by package mobility). The contract records both (D1). Converted to whole
+    /// than a wall or a cliff (`design/handoffs/voxel-founder-step-2026-09-22.md`). The
+    /// contract records both (D1). Converted to whole
     /// voxels once at the consumer by [`FounderPhysiology::step_limits`], which rounds
     /// **down**: a riser is a step when its height is within the limit.
     ///
@@ -226,7 +226,7 @@ pub struct FounderPhysiology {
     /// time on faces (≈ 500 climbs an hour, seeds 1–2) against 8–10 % at 0.25 m.
     pub step_up_m: f64,
     pub step_down_m: f64,
-    /// Whether this lineage **climbs vertical terrain** (package mobility, decision 1): a
+    /// Whether this lineage **climbs vertical terrain**: a
     /// riser taller than its step up is a face it can go up, an edge deeper than its step
     /// down a face it can go down, at half its walking pace. Stands are never faces. The
     /// shredder does ("basically centipedes"); the browser does not.
@@ -244,14 +244,14 @@ pub struct FounderPhysiology {
     /// is shorter, so it wades shallower water.
     pub wade_height_fraction: f64,
     /// Standing water deeper than this **× its current height** over its feet is water it
-    /// is under: 1.0, its own height (package mobility, decision 3).
+    /// is under: 1.0, its own height.
     pub drown_height_fraction: f64,
     /// Seconds it must be under, **continuously**, before it drowns: 60, the brief's
     /// number. A tick out of the water resets the count.
     pub drown_after_s: f64,
     /// The **adult** body, in metres: length, width and height
     /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`; decisions §1). The ladder's
-    /// animal at package L's sizes — browser 0.75 × 0.375 × 0.375 m, shredder 0.375 ×
+    /// animal at the sizes — browser 0.75 × 0.375 × 0.375 m, shredder 0.375 ×
     /// 0.125 × 0.125 m. Contract v2 (D1) reads the [`Manifest`](crate::Manifest)'s
     /// `body_length_m` / `body_width_m` / `body_height_m` and its 1 BL/s cruise off these,
     /// so moving them moves the trained-policy digest. A living body's dimensions are
@@ -289,7 +289,7 @@ pub struct FounderPhysiology {
     /// raised paid structure when the founder was sized from a core budget; it came
     /// with no free reserve or energy.
     pub organ_structure_fraction: f64,
-    /// When this lineage is awake (WX4): the browser is diurnal, the shredder nocturnal.
+    /// When this lineage is awake: the browser is diurnal, the shredder nocturnal.
     /// Placeholders, `design/backlog.md` §1.
     pub active: crate::Activity,
     /// What upkeep costs while it sleeps, **× its basal upkeep** (0.5, Fable's call).
@@ -880,8 +880,7 @@ fn step_advance(
 /// solid is checked and refuses exactly as before.
 ///
 /// The standing water at the destination must be within the body's wade depth, **or
-/// shallower than the water at the column the sub-step starts from** (package mobility,
-/// decision 3): a body caught deeper than it can wade may always step toward the
+/// shallower than the water at the column the sub-step starts from**: a body caught deeper than it can wade may always step toward the
 /// shallows, and never deeper; it may also move about the face it stands on.
 #[allow(clippy::too_many_arguments)]
 fn advance_candidate(
@@ -1024,9 +1023,8 @@ fn disc_box(v: f64, cx: f64, cz: f64, r: f64) -> (i64, i64, i64, i64) {
 /// radius does not block, it contacts. `cells` is the disc's [`disc_box`].
 ///
 /// One pass over the columns for the whole run of layers — a column's layers read as
-/// one mask ([`VoxelView::solid_in`]) — where the clearance check used to walk the
-/// columns once per layer; whether a column overlaps the disc does not depend on the
-/// layer, so the answer is the same.
+/// one mask ([`VoxelView::solid_in`]): whether a column overlaps the disc does not depend
+/// on the layer.
 fn disc_hits_solid(
     view: &VoxelView<'_>,
     (x0, x1, z0, z1): (i64, i64, i64, i64),
@@ -1075,7 +1073,7 @@ pub enum Face {
     Climb(u32),
 }
 
-/// **The wall rule, going up** (package mobility, decision 1): a body standing on
+/// **The wall rule, going up**: a body standing on
 /// `(x, y, z)` faces the column one step along `dir` (`(±1, 0)` or `(0, ±1)`).
 ///
 /// It is a wall when that column is **solid at the body's layer** `y + 1` and its first
@@ -1288,7 +1286,7 @@ fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, ce
 /// lateral extent — probed at the capsule's extreme points (centre, reach tip, the
 /// tip's forward and lateral extremes) **and at no more than half a voxel between
 /// them**. The five extreme probes alone were enough while a body fitted in about a
-/// cell; package L's 0.75 m browser spans more than two 0.25 m cells from centre to
+/// cell; the 0.75 m browser spans more than two 0.25 m cells from centre to
 /// tip, and five probes skipped the column in the middle — the one a crown beside the
 /// head stands in.
 pub(crate) fn mouth_columns(
@@ -1515,8 +1513,7 @@ pub(crate) fn mouth_foliage_stand(
 
 /// [`mouth_foliage_stand`]'s rule with the **offer** it chose by: among the stands the
 /// mouth touches, the one with the most `(1 − defence) × reachable stock` — what a bite
-/// would actually get, since the plant layer takes `(1 − defence)` of the ask (audit
-/// round, `design/handoffs/voxel-audit-round-2026-09-28.md` §4). Returns the stand, its
+/// would actually get, since the plant layer takes `(1 − defence)` of the ask. Returns the stand, its
 /// reachable stock (the `E` a bite diminishes on: the defence shrinks the bite once, at
 /// the withdrawal, and not again here) and its offer (what taste encodes).
 pub(crate) fn mouth_foliage_offer(
@@ -1680,7 +1677,7 @@ fn each_reachable_layer(
     };
     for layer in every.filter(|l| l.kind.bears_foliage()) {
         // What a mouth could take is what stands above the grazing floor: the flora
-        // layer's one reading of food (package G).
+        // layer's one reading of food.
         let edible = layer.edible();
         if !(edible > 0.0) || !layers.contains(&layer.cell) {
             continue;
@@ -2398,7 +2395,7 @@ mod tests {
 
     /// A body needs **its own height** of void over the face it stands on
     /// (`design/handoffs/voxel-body-anchors-2026-09-22.md`), not the voxels its mouth
-    /// lifts through: package L's 0.375 m browser asks for two cells at 0.25 m and
+    /// lifts through: the 0.375 m browser asks for two cells at 0.25 m and
     /// three at 0.125 m, and the 0.125 m shredder asks for one at either. A void one
     /// cell shorter is not a place to stand and not a place to walk to.
     #[test]
@@ -2766,8 +2763,7 @@ mod tests {
     /// The ticks between an introduction and the first sampling are not an interval the
     /// controller acted in, so channels 3..6 read zero and motor delivery reads 1 — even
     /// though a hungry founder has been paying upkeep out of its own structure since
-    /// tick one. Before P2-C this held by accident: a full reserve absorbed that upkeep
-    /// and `structural_loss` was never incremented (P2-T finding 3).
+    /// tick one.
     #[test]
     fn the_first_sample_reports_no_prior_interval_from_a_depleted_start() {
         for founder in [Founder::Blind, Founder::Browser] {
@@ -2823,7 +2819,7 @@ mod tests {
     }
 
     /// The observation vector: real Self channels against the manifest's references,
-    /// real contacts, and the P1-C spans left zero with validity 0.
+    /// real contacts, and the sense spans left zero with validity 0.
     #[test]
     fn the_observation_is_real_body_state_with_p1c_spans_zero() {
         let mut world = flat_world();
@@ -2957,7 +2953,7 @@ mod tests {
     }
 
     /// The mouth band is a **length**, so the same animal selects the same physical
-    /// layers on either grid: package L's adult browser's `1.33 × 0.375 = 0.49875` m
+    /// layers on either grid: the adult browser's `1.33 × 0.375 = 0.49875` m
     /// ceiling is two 0.25 m cells and four 0.125 m cells, which are the same 0.5 m of
     /// air. The shredder's `1.33 × 0.125 = 0.16625` m ceiling is the standing layer
     /// alone on the 0.25 m grid and — being over one 0.125 m cell — the standing layer
@@ -2984,8 +2980,7 @@ mod tests {
     /// with a 0.75 m one. The crown two 0.25 m voxels above the head layer is out of the
     /// adult's physical band, and the crown at the head layer is in it either way. The
     /// band is what decides, and the manifest's `mouth_reach_up_voxels` is not read at
-    /// all. (Package L doubled the browser; before it the ceiling was 0.249 m and the
-    /// out-of-band crown was one voxel up.)
+    /// all.
     #[test]
     fn the_band_and_not_a_voxel_count_decides_what_the_mouth_takes() {
         use cubarium_voxel_flora::{Command as FloraCommand, Species as Plant};
@@ -3177,7 +3172,7 @@ mod step_rule_tests {
         (pose, layers)
     }
 
-    /// The conversion rounds a physical step **down** (package mobility): the browser's
+    /// The conversion rounds a physical step **down**: the browser's
     /// 0.375 m both ways is 3 voxels on the 0.125 m preset and 1 on the
     /// 0.25 m presets; the shredder's 0.25 m is two voxels on the fine grid and one on
     /// the coarse one.
