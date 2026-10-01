@@ -205,6 +205,7 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         let upkeep = upkeep_factor(
             world.life_temperature_c(),
             world.config().climate.temperature_c,
+            flora.config.upkeep_q10,
         );
         // WX3 round 4: the plant night rule — maintenance and leaf loss at
         // `plant_night_factor` of their daytime rate while it is dark.
@@ -2138,12 +2139,10 @@ fn split_shares(taken: Taken, wants: &[Want], shares: &mut Vec<Taken>) {
 
 // ------------------------------------------- 6. income, growth, senescence, death
 
-/// Q10 of plant upkeep: it doubles for every 10 °C above the climate's mean.
-pub const UPKEEP_Q10: f64 = 2.0;
-
-/// Multiplier on plant maintenance at `t_c` in a climate whose mean is `t_mean_c`.
-pub fn upkeep_factor(t_c: f64, t_mean_c: f64) -> f64 {
-    UPKEEP_Q10.powf((t_c - t_mean_c) / 10.0)
+/// Multiplier on plant maintenance at `t_c` in a climate whose mean is `t_mean_c`, with
+/// `q10` the factor per 10 °C ([`FloraConfig::upkeep_q10`]).
+pub fn upkeep_factor(t_c: f64, t_mean_c: f64, q10: f64) -> f64 {
+    q10.powf((t_c - t_mean_c) / 10.0)
 }
 
 fn grow(
@@ -2947,7 +2946,7 @@ fn decompose(flora: &mut Flora, pre: &[Pre]) {
             carrion0,
             ledger,
         );
-        g.clear_spent_carcass();
+        g.clear_spent_carcass(config.carcass_gone_fraction);
     }
 }
 

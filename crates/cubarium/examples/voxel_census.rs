@@ -1078,7 +1078,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     let marked = f
         .ground
         .iter()
-        .filter(|g| g.seed_mark(f.tick).is_some() && f.stand_at(g.site).is_none())
+        .filter(|g| g.seed_mark(f.tick, f.config).is_some() && f.stand_at(g.site).is_none())
         .count();
     let c = world.config();
     let mut supports = 0usize;
@@ -1090,7 +1090,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     let sprouting = f
         .ground
         .iter()
-        .filter(|g| g.sprouting.is_some() && g.seed_mark(f.tick) == g.sprouting)
+        .filter(|g| g.sprouting.is_some() && g.seed_mark(f.tick, f.config) == g.sprouting)
         .count();
     row.push(banked.to_string());
     row.push(marked.to_string());

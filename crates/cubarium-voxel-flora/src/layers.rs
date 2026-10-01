@@ -176,10 +176,6 @@ impl StandLayer {
 /// a withdrawal, some ten orders under the smallest bite a mouth asks for.
 pub const EDIBLE_DUST: f64 = 1e-12;
 
-/// The floor on a layer's area in the shade exponent: one 0.25 m reference cell, which
-/// is what the pre-layer crown model floored at.
-pub const MIN_LAYER_AREA_M2: f64 = 0.25 * 0.25;
-
 /// The cell offset above the support face a band's top occupies: `round(top × height)`,
 /// never below one. For a `[0, 1.0]` band this is `crown_voxels(wood)` exactly.
 pub fn disc_offset(band_top: f64, crown_height_v: f64) -> u32 {

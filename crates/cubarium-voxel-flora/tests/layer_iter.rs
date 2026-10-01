@@ -9,7 +9,7 @@
 
 use cubarium_voxel::{Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
-    Command, Flora, FloraConfig, MAX_FOLIAGE_LAYERS, MIN_LAYER_AREA_M2, Species, Stand, StandLayer,
+    Command, Flora, FloraConfig, MAX_FOLIAGE_LAYERS, Species, Stand, StandLayer,
     disc_offset, layer_iter, layers_of, trunk_offsets,
 };
 
@@ -68,7 +68,7 @@ fn reference(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<StandLaye
                 0.0
             },
             porosity: layer.porosity,
-            area_m2: (std::f64::consts::PI * r_m * r_m).max(MIN_LAYER_AREA_M2),
+            area_m2: (std::f64::consts::PI * r_m * r_m).max(config.min_layer_area_m2),
         });
     }
     out

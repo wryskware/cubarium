@@ -114,8 +114,8 @@ fn the_ground_pool_carries_a_massless_carcass_record() {
     assert_eq!(*flora.view().ledger, ledger, "laying a record books nothing");
     assert_closes(&flora, "carcass laid");
 
-    assert!(!record.remains(0.31 * 0.05), "above 30 % it is still the body");
-    assert!(record.remains(0.29 * 0.05), "below 30 % it is remains");
+    assert!(!record.remains(0.31 * 0.05, flora.config()), "above 30 % it is still the body");
+    assert!(record.remains(0.29 * 0.05, flora.config()), "below 30 % it is remains");
 
     let back = decode(&encode(&flora)).expect("round trip");
     assert_eq!(back.view().ground_at(SITE).unwrap().carcass, Some(record));

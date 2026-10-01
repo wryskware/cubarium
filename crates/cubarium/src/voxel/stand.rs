@@ -596,7 +596,7 @@ impl Stands {
         // landed recently or is about to sprout (package SM), in that species' colours. A
         // bank that is only waiting draws nothing.
         for g in flora.ground {
-            let Some(species) = g.seed_mark(flora.tick) else {
+            let Some(species) = g.seed_mark(flora.tick, flora.config) else {
                 continue;
             };
             let style = self.styles.len().min(u16::MAX as usize) as u16;
@@ -1416,11 +1416,11 @@ mod tests {
     /// draws nothing, however much seed it holds.
     #[test]
     fn only_a_recent_landing_or_a_site_about_to_sprout_draws_a_seed_mark() {
-        use cubarium_voxel_flora::{FloraLedger, Ground, SEED_MARK_RECENT_S, SeedCohort};
+        use cubarium_voxel_flora::{FloraLedger, Ground, SeedCohort};
         let world = world();
         let config = FloraConfig::default();
         let tick = 100_000u64;
-        let recent = (SEED_MARK_RECENT_S * f64::from(cubarium_voxel::TICK_HZ)) as u64;
+        let recent = (config.seed_mark_recent_s * f64::from(cubarium_voxel::TICK_HZ)) as u64;
         let bank = |x: u32, landed: u64, sprouting: Option<Species>| {
             let mut g = Ground::new(Site { x, y: 3, z: 1 }, 1.0);
             g.seeds.push(SeedCohort {

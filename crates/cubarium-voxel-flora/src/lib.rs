@@ -67,15 +67,10 @@ pub use cover::{
     face_eligible, face_light,
 };
 
-/// How long a seed landing keeps its site's D5 mark: **two simulated minutes** (package
-/// SM, the brief's "recent"). Long enough to see a donor's fall of seed arrive; short
-/// enough that a bank waiting hours for its gap is not drawn for hours.
-pub const SEED_MARK_RECENT_S: f64 = 120.0;
 pub use layers::{
-    Layer, LayerKind, MAX_FOLIAGE_LAYERS, MIN_LAYER_AREA_M2, Profile, StandLayer, disc_offset,
-    trunk_offsets,
+    Layer, LayerKind, MAX_FOLIAGE_LAYERS, Profile, StandLayer, disc_offset, trunk_offsets,
 };
-pub use step::{UPKEEP_Q10, upkeep_factor};
+pub use step::upkeep_factor;
 /// The germination predicate the model itself uses, gate by gate, for a caller outside a
 /// tick (a harness picking founder columns, a diagnosis of which gate is shut):
 /// `Gates::passes()` is the predicate. `establishment_gates_with_sky` is the one function
@@ -443,17 +438,13 @@ pub struct Carcass {
 }
 
 impl Carcass {
-    /// Whether the pool holding `carrion` is **remains** rather than the body: below 30 %
-    /// of what the body died with (dossier D2's "collapsed body, then bone").
-    pub fn remains(&self, carrion: f64) -> bool {
-        carrion < CARCASS_REMAINS_FRACTION * self.organic
+    /// Whether the pool holding `carrion` is **remains** rather than the body: below
+    /// [`FloraConfig::carcass_remains_fraction`] (30 % shipped) of what the body died with
+    /// (dossier D2's "collapsed body, then bone").
+    pub fn remains(&self, carrion: f64, config: &FloraConfig) -> bool {
+        carrion < config.carcass_remains_fraction * self.organic
     }
 }
-
-/// The share of a carcass's organic matter below which it is drawn as remains.
-pub const CARCASS_REMAINS_FRACTION: f64 = 0.3;
-/// The share below which the record is dropped: the remains have gone into the soil.
-pub const CARCASS_GONE_FRACTION: f64 = 0.02;
 
 /// Non-living stocks that sit on a site: the mineral pool and the stand's own detritus.
 /// One entry per site that has ever held a stand or received litter.
@@ -514,8 +505,8 @@ pub struct Ground {
     /// animal whose body lies in `carrion` here, so the presenter can draw it — its model
     /// lying flat, then remains below 30 % ([`Carcass::remains`]). It carries **no
     /// mass**: the carrion pool does. Laid by a kill ([`Flora::lay_carcass`]) and cleared
-    /// once the pool has fallen below [`CARCASS_GONE_FRACTION`] of what the body died
-    /// with.
+    /// once the pool has fallen below [`FloraConfig::carcass_gone_fraction`] of what the body
+    /// died with.
     pub carcass: Option<Carcass>,
     /// The species and tick of the latest seed **landing** here: what the D5
     /// seed mark reads as "recent" ([`Ground::seed_mark`]). A cohort's `bin_start_tick`
@@ -529,11 +520,11 @@ pub struct Ground {
 }
 
 impl Ground {
-    /// Drop the carcass record once its pool has gone below [`CARCASS_GONE_FRACTION`] of
-    /// what the body died with.
-    pub(crate) fn clear_spent_carcass(&mut self) {
+    /// Drop the carcass record once its pool has gone below `gone_fraction`
+    /// ([`FloraConfig::carcass_gone_fraction`]) of what the body died with.
+    pub(crate) fn clear_spent_carcass(&mut self, gone_fraction: f64) {
         if let Some(c) = self.carcass {
-            if self.carrion <= CARCASS_GONE_FRACTION * c.organic {
+            if self.carrion <= gone_fraction * c.organic {
                 self.carcass = None;
             }
         }
@@ -562,10 +553,10 @@ impl Ground {
 
     /// The species whose D5 seed mark this site shows at `tick`, if any ("draw only recent
     /// seeds and about to sprout ones"): the species about
-    /// to sprout, or else the species of a landing within [`SEED_MARK_RECENT_S`] — and in
-    /// either case only while the bank still holds that species' seed. A bank that is
-    /// simply waiting shows nothing.
-    pub fn seed_mark(&self, tick: u64) -> Option<Species> {
+    /// to sprout, or else the species of a landing within
+    /// [`FloraConfig::seed_mark_recent_s`] — and in either case only while the bank still
+    /// holds that species' seed. A bank that is simply waiting shows nothing.
+    pub fn seed_mark(&self, tick: u64, config: &FloraConfig) -> Option<Species> {
         let held = |sp: Species| {
             self.seeds
                 .iter()
@@ -576,7 +567,7 @@ impl Ground {
         {
             return Some(sp);
         }
-        let recent = (SEED_MARK_RECENT_S * f64::from(TICK_HZ)).round() as u64;
+        let recent = (config.seed_mark_recent_s * f64::from(TICK_HZ)).round() as u64;
         match self.last_landing {
             Some((sp, at)) if tick.saturating_sub(at) <= recent && held(sp) => Some(sp),
             _ => None,
@@ -974,6 +965,21 @@ pub struct SpeciesConfig {
     pub defence_per_bite: f64,
     /// The defence's **half-life** once grazing stops, seconds. Zero or less: no decay.
     pub defence_half_life_s: f64,
+    /// **A runner's reach**: how many columns sideways, in `x` and `z`, a runner or rhizome
+    /// daughter may root from the parent (the square ring around the home column); the
+    /// support face is then the one at the parent's height or a voxel above or below. A
+    /// count of voxels, **not** rescaled with the voxel size. Only read when
+    /// `clonal_share > 0`.
+    pub runner_reach: u32,
+    /// **Founding** (the habitat seeder, `cubarium-voxel-sim`): founders per square metre
+    /// of habitat this species can actually live in (the faces where its own gates pass).
+    /// Zero founds none of this species.
+    pub founder_per_m2: f64,
+    /// **Founding**: the size of one founder colony, in stands; colonies grow out from
+    /// their own anchor. At least 1.
+    pub founder_colony: u32,
+    /// **Founding**: the cap a world puts on founders of this species, in stands.
+    pub founder_cap: u32,
     /// **What is in that volume**: the species' anatomy, staged by `wood / wood_max`.
     /// The first entry whose `wood_fraction_max` is at or above the fraction applies;
     /// the last must catch a full-grown stand. Its foliage-bearing layers are the
@@ -1257,6 +1263,12 @@ impl SpeciesConfig {
             graze_refuge: 0.15,
             defence_per_bite: DEFENCE_PER_BITE,
             defence_half_life_s: DEFENCE_HALF_LIFE_S,
+            // A runner roots on the next column over (the eight neighbours).
+            runner_reach: 1,
+            // No founders: every preset that is seeded says so.
+            founder_per_m2: 0.0,
+            founder_colony: 1,
+            founder_cap: 0,
             // The v1 base carries no anatomy of its own: every preset states one.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
                 [0.0, 1.0],
@@ -1271,6 +1283,9 @@ impl SpeciesConfig {
     /// sketch says they must: light need, rooting, water tolerance, crown and hop.
     pub fn bloomcrown() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 0.25,
+            founder_colony: 3,
+            founder_cap: 64,
             light_half: 0.8,
             rooting_depth: 2,
             rooting_radius: 1,
@@ -1350,6 +1365,9 @@ impl SpeciesConfig {
 
     pub fn umbrellafrond() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 0.15,
+            founder_colony: 3,
+            founder_cap: 40,
             light_half: 0.15,
             rooting_depth: 4,
             rooting_radius: 1,
@@ -1481,6 +1499,9 @@ impl SpeciesConfig {
     ///   with no stem at all.
     pub fn springturf() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 0.6,
+            founder_colony: 6,
+            founder_cap: 160,
             light_half: 1.0,
             rooting_depth: 1,
             rooting_radius: 1,
@@ -1569,6 +1590,9 @@ impl SpeciesConfig {
     ///   at any size — and `[0.125, 0.15625]` m in radius.
     pub fn stonecushion() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 0.2,
+            founder_colony: 3,
+            founder_cap: 64,
             light_half: 0.3,
             rooting_depth: 2,
             rooting_radius: 1,
@@ -1655,6 +1679,9 @@ impl SpeciesConfig {
     ///   stem, and the widest ground cover relative to its height.
     pub fn velvetpad() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 0.4,
+            founder_colony: 6,
+            founder_cap: 120,
             light_half: 0.1,
             rooting_depth: 2,
             rooting_radius: 1,
@@ -1781,6 +1808,9 @@ impl SpeciesConfig {
     ///   because it does not eat light.
     pub fn glowcap() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 0.15,
+            founder_colony: 3,
+            founder_cap: 40,
             trophic: Trophic::Saprotroph,
             substrate_uptake_per_s: 0.02,
             substrate_yield: 0.4,
@@ -1855,6 +1885,9 @@ impl SpeciesConfig {
     ///   the profile is anatomy §3's table.
     pub fn vaulttree() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 0.1,
+            founder_colony: 1,
+            founder_cap: 12,
             light_half: 0.6,
             establish_light_min: 0.9,
             rooting_depth: 6,
@@ -1954,6 +1987,9 @@ impl SpeciesConfig {
     /// crown above it. A young adult is inside the band entirely.
     pub fn lanternberry() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 0.25,
+            founder_colony: 3,
+            founder_cap: 40,
             light_half: 0.4,
             establish_light_min: 0.35,
             rooting_depth: 3,
@@ -2022,6 +2058,9 @@ impl SpeciesConfig {
     /// - **Shape.** Crown `[0.75, 1.5]` m × `[0.0625, 0.125]` m, one porous column for life.
     pub fn siphonreed() -> SpeciesConfig {
         SpeciesConfig {
+            founder_per_m2: 4.0,
+            founder_colony: 6,
+            founder_cap: 64,
             light_half: 0.8,
             establish_light_min: 0.6,
             rooting_depth: 2,
@@ -2180,6 +2219,48 @@ pub struct FloraConfig {
     /// fixture whose subject is not the bank's clock
     /// ([`FloraConfig::drop_seeds_checked_each_tick`]).
     pub sprout_after_arming: bool,
+    /// **Q10 of plant upkeep**: maintenance and the vines' upkeep are multiplied by
+    /// `upkeep_q10^((T - T_mean) / 10 °C)` ([`upkeep_factor`]), `T` the air temperature
+    /// and `T_mean` the climate's mean. Dimensionless; 2.0 doubles it per 10 °C.
+    pub upkeep_q10: f64,
+    /// **Wind seed: tries.** A wind package's draws at columns before the donor keeps its
+    /// package for the next tick; only a void column refuses one. Count, at least 1.
+    pub wind_tries: u32,
+    /// **Wind seed: kernel shape** `k` of the Lomax (Pareto II) distance
+    /// `P(R > r) = (1 + r/a)^-k`. Dimensionless; at 2 the median seed lands 1.04 hops
+    /// out, 79 % within 3 hops and 4 % past 10. A larger `k` is a thinner tail.
+    pub wind_shape: f64,
+    /// **Wind seed: kernel scale** `a`, in the species' `hop`s (distances in `hop`
+    /// multiples, so it follows the voxel rescale through `hop`).
+    pub wind_scale_hops: f64,
+    /// A carcass is drawn as **remains** rather than the body once the carrion pool is
+    /// below this fraction of the organic matter the body died with. Fraction.
+    pub carcass_remains_fraction: f64,
+    /// A carcass record is dropped once its carrion pool has fallen to this fraction of
+    /// what the body died with: the remains have gone into the soil. Fraction.
+    pub carcass_gone_fraction: f64,
+    /// How long a seed landing keeps its site's D5 mark, simulated seconds: long enough
+    /// to see a donor's fall of seed arrive, short enough that a bank waiting hours for
+    /// its gap is not drawn for hours.
+    pub seed_mark_recent_s: f64,
+    /// The floor on a foliage layer's area in the shade exponent, square metres: one
+    /// reference 0.25 m cell, which is what the pre-layer crown model floored at.
+    pub min_layer_area_m2: f64,
+    /// **Founding** (the habitat seeder, `cubarium-voxel-sim`): a founder's starting wood as
+    /// fractions of its species' `wood_max`, cycled in placement order, so the first
+    /// colony is a mix of low growth, middle-height clumps and a few canopy anchors.
+    /// Fractions of `wood_max`.
+    pub founder_wood_fractions: [f64; 5],
+    /// **Founding**: how much of a site's sky a crown standing over it takes away while
+    /// the seeder is still placing founders. A placement proxy and not the light model.
+    /// Fraction of open sky.
+    pub founder_canopy_shade: f64,
+    /// **Founding**: dead wood laid under each glowcap founder so its substrate gate can
+    /// pass, in organic-matter units (twice the fungus's `establish_substrate_min`).
+    pub founder_log_organic: f64,
+    /// **Founding**: the least distance between two founder patch centres, metres. Colonies
+    /// grow out from their own anchor, so this keeps gaps between them.
+    pub founder_patch_spacing_m: f64,
     /// The world's cell size in metres, recorded so that geometry authored in **metres** can
     /// be applied to a grid stored in **voxels**: every crown is in metres since package
     /// L, and the voxel readings ([`SpeciesConfig::crown_height`]) divide by this. Set by
@@ -2209,6 +2290,18 @@ impl Default for FloraConfig {
             provision: Provision::Lazy,
             seed_check_s: 30.0,
             sprout_after_arming: true,
+            upkeep_q10: 2.0,
+            wind_tries: 4,
+            wind_shape: 2.0,
+            wind_scale_hops: 2.5,
+            carcass_remains_fraction: 0.3,
+            carcass_gone_fraction: 0.02,
+            seed_mark_recent_s: 120.0,
+            min_layer_area_m2: 0.25 * 0.25,
+            founder_wood_fractions: [0.30, 0.42, 0.55, 0.70, 0.85],
+            founder_canopy_shade: 0.6,
+            founder_log_organic: 0.4,
+            founder_patch_spacing_m: 1.5,
             voxel_m: 0.25,
         }
     }
@@ -2791,6 +2884,7 @@ pub fn layer_iter<'c>(config: &'c FloraConfig, stand: &Stand, voxel_m: f64) -> L
     let stage = sc.profile_at(stand.wood);
     LayerIter {
         graze_refuge: sc.graze_refuge,
+        min_area_m2: config.min_layer_area_m2,
         layers: stage.layers.iter().enumerate(),
         height_v: sc.crown_height(stand.wood, voxel_m),
         radius_v: sc.crown_radius(stand.wood, voxel_m).max(0.0),
@@ -2807,6 +2901,8 @@ pub fn layer_iter<'c>(config: &'c FloraConfig, stand: &Stand, voxel_m: f64) -> L
 #[derive(Clone, Debug)]
 pub struct LayerIter<'c> {
     graze_refuge: f64,
+    /// [`FloraConfig::min_layer_area_m2`].
+    min_area_m2: f64,
     layers: std::iter::Enumerate<std::slice::Iter<'c, Layer>>,
     height_v: f64,
     radius_v: f64,
@@ -2959,6 +3055,7 @@ impl Crown {
         let sc = config.species(stand.species);
         LayerIter {
             graze_refuge: sc.graze_refuge,
+            min_area_m2: config.min_layer_area_m2,
             layers: sc.profile[usize::from(self.stage)].layers.iter().enumerate(),
             height_v: self.height_v,
             radius_v: self.radius_v,
@@ -3157,7 +3254,7 @@ impl Iterator for LayerIter<'_> {
                     0.0
                 },
                 porosity: layer.porosity,
-                area_m2: (std::f64::consts::PI * r_m * r_m).max(MIN_LAYER_AREA_M2),
+                area_m2: (std::f64::consts::PI * r_m * r_m).max(self.min_area_m2),
             });
         }
         None
@@ -4171,7 +4268,7 @@ impl Flora {
             &mut g.carrion_energy,
             want,
         )?;
-        g.clear_spent_carcass();
+        g.clear_spent_carcass(self.config.carcass_gone_fraction);
         Some(self.book_consumed(taken))
     }
 

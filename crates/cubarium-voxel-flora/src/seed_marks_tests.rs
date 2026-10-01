@@ -1,11 +1,11 @@
-//! The D5 seed mark shows only a **recent** landing (within [`crate::SEED_MARK_RECENT_S`])
+//! The D5 seed mark shows only a **recent** landing (within [`FloraConfig::seed_mark_recent_s`])
 //! or a site **about to sprout** — armed at a check whose gates passed, germinating at the
 //! next one.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, TICK_HZ, World};
 
 use crate::seeds::{add_cohort, check_period, check_phase, package_of};
-use crate::{Flora, FloraConfig, Ground, SEED_MARK_RECENT_S, Site, Species};
+use crate::{Flora, FloraConfig, Ground, Site, Species};
 
 const SITE: Site = Site { x: 1, y: 2, z: 0 };
 
@@ -90,7 +90,7 @@ fn mark(flora: &Flora) -> Option<Species> {
     flora
         .view()
         .ground_at(SITE)
-        .and_then(|g| g.seed_mark(flora.tick))
+        .and_then(|g| g.seed_mark(flora.tick, &flora.config))
 }
 
 fn config() -> FloraConfig {
@@ -100,7 +100,7 @@ fn config() -> FloraConfig {
     c
 }
 
-/// A landing marks its site for [`SEED_MARK_RECENT_S`] and no longer: on dry ground,
+/// A landing marks its site for [`FloraConfig::seed_mark_recent_s`] and no longer: on dry ground,
 /// where the gates never pass, the mark goes when the landing stops being recent, while
 /// the seed stays banked.
 #[test]
@@ -111,7 +111,7 @@ fn a_landing_marks_its_site_for_two_minutes_and_then_the_waiting_bank_shows_noth
     land(&mut flora);
     assert_eq!(mark(&flora), Some(Species::Bloomcrown), "just landed");
 
-    let recent = (SEED_MARK_RECENT_S * f64::from(TICK_HZ)).round() as u64;
+    let recent = (config().seed_mark_recent_s * f64::from(TICK_HZ)).round() as u64;
     run_to(&mut flora, &mut world, 1000 + recent);
     assert_eq!(mark(&flora), Some(Species::Bloomcrown), "still recent");
     flora.step(&mut world);

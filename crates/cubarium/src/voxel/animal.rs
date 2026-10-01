@@ -1319,7 +1319,7 @@ impl Animals {
             let phys = config.founder(founder);
             let y = g.site.y + 1;
             let (cx, cz) = (i64::from(g.site.x), i64::from(g.site.z));
-            if carcass.remains(g.carrion) {
+            if carcass.remains(g.carrion, flora.config) {
                 let Some(style) = self.flat_style(srgb_linear(REMAINS_SRGB), false) else {
                     return;
                 };

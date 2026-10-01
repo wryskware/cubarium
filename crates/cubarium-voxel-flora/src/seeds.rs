@@ -51,18 +51,6 @@ pub(crate) fn check_period(config: &FloraConfig) -> u64 {
     cubarium_voxel::ticks_at_least_one(config.seed_check_s)
 }
 
-/// A wind seed's tries at a column with a support face before the donor keeps its package
-/// for the next tick: **4**. Only a void column refuses one.
-const WIND_TRIES: usize = 4;
-
-/// The wind kernel's distance is a Lomax (Pareto II) draw, `P(R > r) = (1 + r/a)^-k`,
-/// with shape `k` **2** and scale `a` **2.5 hops**: the median seed lands 1.04 hops out,
-/// 79 % within 3 hops, and 4 % past 10 hops — the brief's "most within a few hops, a few
-/// percent past 10". Shape 2 is the thinnest tail that still has a few percent that far
-/// out at a median near one hop.
-const WIND_SHAPE: f64 = 2.0;
-const WIND_SCALE_HOPS: f64 = 2.5;
-
 /// **One seed**: `seed_mass` minimum packages, where the minimum is the seed-bank organic
 /// matter a germination needs to build a stand at exactly `alive_min` of wood,
 /// `alive_min / w_frac` — 0.05 at the base (a shrub's or a tree's seed is several of
@@ -691,7 +679,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
         }
 
         // ---- one seed.
-        let (site, banked) = match landing(&view, ground, sc, home, world_seed, tick) {
+        let (site, banked) = match landing(&view, ground, config, sc, home, world_seed, tick) {
             Landing::Bank(site) => (site, true),
             Landing::Lost(site) => (site, false),
             Landing::Retry => continue,
@@ -793,12 +781,13 @@ fn runner_target(
 ) -> Option<Site> {
     let c = view.config;
     let mut free: Vec<Site> = Vec::new();
-    for dz in -1i64..=1 {
+    let reach = i64::from(sc.runner_reach);
+    for dz in -reach..=reach {
         let z = home.z as i64 + dz;
         if z < 0 || z >= c.depth as i64 {
             continue;
         }
-        for dx in -1i64..=1 {
+        for dx in -reach..=reach {
             if dx == 0 && dz == 0 {
                 continue;
             }
@@ -854,6 +843,7 @@ pub(crate) enum Landing {
 pub(crate) fn landing(
     view: &VoxelView<'_>,
     ground: &[Ground],
+    config: &FloraConfig,
     sc: &SpeciesConfig,
     home: Site,
     world_seed: u64,
@@ -863,7 +853,7 @@ pub(crate) fn landing(
     match sc.dispersal {
         Dispersal::Drop => drop_target(view, sc.hop, home, world_seed, home_index, tick)
             .map_or(Landing::Retry, Landing::Bank),
-        Dispersal::Wind => wind_target(view, sc.hop, home, world_seed, home_index, tick)
+        Dispersal::Wind => wind_target(view, config, sc.hop, home, world_seed, home_index, tick)
             .map_or(Landing::Retry, Landing::Bank),
         Dispersal::Spores => spore_target(view, ground, sc, home, world_seed, home_index, tick),
         Dispersal::Water => water_target(view, sc, home, world_seed, home_index, tick),
@@ -905,14 +895,16 @@ fn drop_target(
     Some(targets[rng.below(targets.len())])
 }
 
-/// One wind offset in whole columns: a Lomax distance ([`WIND_SHAPE`], [`WIND_SCALE_HOPS`]
-/// hops), capped at `cap` columns, in a uniform direction. A seed that would fall back on
-/// its own column lands one column out in the same direction, so the offset is never
-/// `(0, 0)`.
-pub(crate) fn wind_offset(rng: &mut Rng, hop: u32, cap: f64) -> (i64, i64) {
-    let a = WIND_SCALE_HOPS * f64::from(hop.max(1));
+/// One wind offset in whole columns: a Lomax (Pareto II) distance,
+/// `P(R > r) = (1 + r/a)^-k`, with shape `k` [`FloraConfig::wind_shape`] and scale `a`
+/// [`FloraConfig::wind_scale_hops`] hops (shipped 2 and 2.5: the median seed lands 1.04
+/// hops out, 79 % within 3 hops, 4 % past 10), capped at `cap` columns, in a uniform
+/// direction. A seed that would fall back on its own column lands one column out in the
+/// same direction, so the offset is never `(0, 0)`.
+pub(crate) fn wind_offset(rng: &mut Rng, config: &FloraConfig, hop: u32, cap: f64) -> (i64, i64) {
+    let a = config.wind_scale_hops * f64::from(hop.max(1));
     let u = rng.unit();
-    let r = (a * ((1.0 - u).powf(-1.0 / WIND_SHAPE) - 1.0)).min(cap);
+    let r = (a * ((1.0 - u).powf(-1.0 / config.wind_shape) - 1.0)).min(cap);
     let theta = std::f64::consts::TAU * rng.unit();
     let (s, co) = theta.sin_cos();
     let (dx, dz) = ((r * co).round() as i64, (r * s).round() as i64);
@@ -940,6 +932,7 @@ fn reflect(z: i64, depth: u32) -> u32 {
 /// the column's highest support face. No habitat screening, like a drop.
 fn wind_target(
     view: &VoxelView<'_>,
+    config: &FloraConfig,
     hop: u32,
     home: Site,
     world_seed: u64,
@@ -949,8 +942,8 @@ fn wind_target(
     let c = view.config;
     let cap = f64::from(c.width.max(c.depth));
     let mut rng = Rng::keyed(DOMAIN_WIND, world_seed, home_index, tick);
-    for _ in 0..WIND_TRIES {
-        let (dx, dz) = wind_offset(&mut rng, hop, cap);
+    for _ in 0..config.wind_tries {
+        let (dx, dz) = wind_offset(&mut rng, config, hop, cap);
         let z = reflect(home.z as i64 + dz, c.depth);
         if let Some(site) = highest_support(view, home.x as i64 + dx, z)
             && site != home
@@ -1344,7 +1337,7 @@ mod tests {
         let mut signs = [[0u64; 2]; 2];
         for i in 0..n {
             let mut rng = Rng::keyed(DOMAIN_WIND, 1, i, 0);
-            let (dx, dz) = wind_offset(&mut rng, hop, 1e9);
+            let (dx, dz) = wind_offset(&mut rng, &FloraConfig::default(), hop, 1e9);
             assert!(
                 (dx, dz) != (0, 0),
                 "a wind seed never lands on its own column"
@@ -1373,7 +1366,7 @@ mod tests {
         // Capped at the world.
         for i in 0..2_000u64 {
             let mut rng = Rng::keyed(DOMAIN_WIND, 2, i, 0);
-            let (dx, dz) = wind_offset(&mut rng, hop, 5.0);
+            let (dx, dz) = wind_offset(&mut rng, &FloraConfig::default(), hop, 5.0);
             assert!(((dx * dx + dz * dz) as f64).sqrt() <= 6.0, "({dx}, {dz})");
         }
     }
@@ -1402,7 +1395,7 @@ mod tests {
         let ground: Vec<Ground> = Vec::new();
         let (mut banked, mut lost) = (0, 0);
         for tick in 0..400u64 {
-            match landing(&view, &ground, &sc, home, 11, tick) {
+            match landing(&view, &ground, &FloraConfig::default(), &sc, home, 11, tick) {
                 Landing::Bank(site) => {
                     banked += 1;
                     assert_ne!(site, home);
@@ -1472,7 +1465,7 @@ mod tests {
         let ground: Vec<Ground> = Vec::new();
         let mut banked = 0;
         for tick in 0..200u64 {
-            match landing(&view, &ground, &sc, home, 11, tick) {
+            match landing(&view, &ground, &FloraConfig::default(), &sc, home, 11, tick) {
                 Landing::Bank(site) => {
                     banked += 1;
                     assert!(
@@ -2052,7 +2045,7 @@ mod tests {
             sc.hop = 5;
             sc.spore_tries = tries;
             (0..400u64)
-                .filter(|&t| matches!(landing(&view, &ground, &sc, home, 11, t), Landing::Bank(_)))
+                .filter(|&t| matches!(landing(&view, &ground, &FloraConfig::default(), &sc, home, 11, t), Landing::Bank(_)))
                 .count()
         };
         let (two, eight) = (banked(2), banked(8));
