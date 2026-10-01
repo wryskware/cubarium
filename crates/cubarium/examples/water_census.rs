@@ -27,9 +27,8 @@ use std::time::Instant;
 
 use cubarium::voxel::{self, habitat, install_default_founders};
 use cubarium_voxel::profile::{self, Count, Phase, census};
-use cubarium_voxel::{Command as WorldCommand, World};
-use cubarium_voxel_fauna::{Fauna, FaunaConfig, Senses};
-use cubarium_voxel_flora::{Flora, FloraConfig};
+use cubarium_voxel::Command as WorldCommand;
+use cubarium_voxel_fauna::Senses;
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 /// The water leaves the host's `world` column sums (`voxel/mod.rs`, `WATER_PHASES`).
@@ -70,24 +69,13 @@ fn main() {
     let every: u64 = arg::<u64>("every", 4).max(1);
 
     let cfg = voxel::load_config(std::path::Path::new(&config)).expect("the voxel config");
-    let mut next = seed.wrapping_add(1);
-    let founded = voxel::found_a_habitat(
+    let params = voxel::params_of(&cfg, &[]).expect("the config's parameter set");
+    let founded = voxel::found(
         &cfg.world,
-        Some(seed),
-        voxel::LAKE_SEED_TRIES,
-        voxel::HABITAT_TRIES,
-        move || {
-            next = next.wrapping_add(1);
-            next
-        },
-        |w: &World| {
-            (
-                Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
-                Fauna::new(FaunaConfig::default()),
-            )
-        },
+        &voxel::LayerConfig::new(&params, cfg.world.voxel_m),
         habitat::FOUNDER_COUNTS,
-        |s: &habitat::Seeded| s.acceptance.accepted,
+        voxel::Seeds::Asked(seed),
+        false,
     );
     let (world, flora, mut fauna) = (founded.world, founded.flora, founded.fauna);
     install_default_founders(&mut fauna).expect("the built-in centres validate");

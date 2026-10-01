@@ -31,7 +31,6 @@ use cubarium::voxel::project::Projection;
 use cubarium::voxel::{Lighting, OrganismLook, VoxelConfig, install_founders_with};
 use cubarium_voxel::Command as WorldCommand;
 use cubarium_voxel_fauna::{Departure, Founder, Senses, TICK_HZ};
-use cubarium_voxel_flora::FloraConfig;
 use cubarium_voxel_sim::{Sim, SimConfig, habitat};
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -45,11 +44,13 @@ struct Events {
 
 fn found(preset: &str, seed: u64, introduce: usize) -> Result<Sim> {
     let preset = cubarium_voxel::Preset::find(preset).context("no such preset")?;
-    let f = cubarium::voxel::ambient_habitat(
-        &preset.config(),
-        seed,
-        FloraConfig::for_voxel_size,
+    let cfg = preset.config();
+    let f = cubarium::voxel::found(
+        &cfg,
+        &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), cfg.voxel_m),
         habitat::FOUNDER_COUNTS,
+        cubarium::voxel::Seeds::from(seed),
+        false,
     );
     let (world, flora, mut fauna) = (f.world, f.flora, f.fauna);
     install_founders_with(&mut fauna, &[])?;

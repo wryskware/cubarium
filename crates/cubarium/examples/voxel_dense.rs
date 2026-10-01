@@ -24,7 +24,7 @@ use cubarium::voxel::{habitat, install_default_founders};
 use cubarium_voxel::World;
 use cubarium_voxel::profile::{self, Phase};
 use cubarium_voxel_fauna::{Fauna, Senses, TICK_HZ};
-use cubarium_voxel_flora::{Flora, FloraConfig};
+use cubarium_voxel_flora::Flora;
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 const TICKS_PER_MIN: u64 = 60 * TICK_HZ as u64;
@@ -64,11 +64,13 @@ fn main() {
 
 fn found(config: &Path, seed: u64, threads: usize) -> (Sim, u64) {
     let cfg = cubarium::voxel::load_config(config).expect("a host config");
-    let founded = cubarium::voxel::ambient_habitat(
+    let params = cubarium::voxel::params_of(&cfg, &[]).expect("the config's parameter set");
+    let founded = cubarium::voxel::found(
         &cfg.world,
-        seed,
-        FloraConfig::for_voxel_size,
+        &cubarium::voxel::LayerConfig::new(&params, cfg.world.voxel_m),
         habitat::FOUNDER_COUNTS,
+        cubarium::voxel::Seeds::from(seed),
+        false,
     );
     eprintln!(
         "founded seed {} ({}), stands {}",

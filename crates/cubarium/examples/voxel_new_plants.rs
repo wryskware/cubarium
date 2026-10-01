@@ -27,7 +27,7 @@ use cubarium::voxel::habitat;
 use cubarium::voxel::install_default_founders;
 use cubarium_voxel::Command as WorldCommand;
 use cubarium_voxel_fauna::{Senses, TICK_HZ};
-use cubarium_voxel_flora::{FloraConfig, Site, Species, fall_line};
+use cubarium_voxel_flora::{Site, Species, fall_line};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 fn main() {
@@ -45,11 +45,13 @@ fn main() {
         .collect();
     marks.sort_unstable();
 
-    let founded = cubarium::voxel::ambient_habitat(
-        &preset.config(),
-        seed,
-        FloraConfig::for_voxel_size,
+    let cfg = preset.config();
+    let founded = cubarium::voxel::found(
+        &cfg,
+        &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), cfg.voxel_m),
         habitat::FOUNDER_COUNTS,
+        cubarium::voxel::Seeds::from(seed),
+        false,
     );
     let (world, flora, mut fauna, seeded) =
         (founded.world, founded.flora, founded.fauna, founded.seeded);

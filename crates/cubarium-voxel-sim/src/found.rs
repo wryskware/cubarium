@@ -1,11 +1,8 @@
 //! **The founding loop** — lake gate, pre-roll, seeding and the acceptance check,
-//! redrawn on a refusal — moved here out of the `cubarium` binary crate (P5-B,
-//! `design/handoffs/voxel-retrain-2026-09-22.md` item 1) so the search crate can found
-//! the same worlds the ambient run founds. The host calls it unchanged: `cubarium::voxel`
-//! re-exports every name here.
+//! redrawn on a refusal — shared by the host, the live trainer's worlds and the frozen
+//! trainer's landscapes: [`found`] on a [`LayerConfig`], the config in force.
 //!
-//! The one addition is [`found_a_landscape`] / [`ambient_landscape`], which run the same
-//! loop and also keep the kept try's world half way through its opening shower
+//! A founding can also keep the kept try's world half way through its opening shower
 //! ([`Founded::mid_shower`]): the second frozen water state a training landscape runs in
 //! (decision D6).
 
@@ -14,6 +11,7 @@ use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder};
 use cubarium_voxel_flora::{Flora, FloraConfig};
 
 use crate::habitat;
+use crate::params::Params;
 
 /// Ticks a candidate world is settled for before its water is judged.
 ///
@@ -36,6 +34,52 @@ pub const LAKE_SEED_TRIES: usize = 24;
 /// each try draws its own world through the lake gate.
 pub const HABITAT_TRIES: usize = 8;
 
+/// **The episode-fixture config**: the plant and animal configs a world's layers are
+/// built from. One shape for every world that gets layers — the host's, a live training
+/// world, a frozen arena and a frozen landscape — so the config in force is always the
+/// one passed, never a default picked up on the way.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayerConfig {
+    /// The plant layer's config, already at the world's cell size.
+    pub flora: FloraConfig,
+    pub fauna: FaunaConfig,
+}
+
+impl LayerConfig {
+    /// `params`' plants and animals, the plants rescaled to `voxel_m`
+    /// ([`FloraConfig::rescaled_to`]).
+    pub fn new(params: &Params, voxel_m: f64) -> LayerConfig {
+        LayerConfig {
+            flora: params.flora.clone().rescaled_to(voxel_m),
+            fauna: params.fauna,
+        }
+    }
+
+    /// Fresh, empty plant and animal layers on these configs.
+    pub fn layers(&self) -> (Flora, Fauna) {
+        (Flora::new(self.flora.clone()), Fauna::new(self.fauna))
+    }
+}
+
+/// How a founding draws its terrain seeds.
+#[derive(Clone, Copy, Debug)]
+pub enum Seeds {
+    /// This seed and no other, kept whatever its lake and its habitat verdict, with a
+    /// warning: someone naming a seed wants that world, not a nearby one.
+    Asked(u64),
+    /// `base`, `base + stride`, …: the same founding every time.
+    Counting { base: u64, stride: u64 },
+    /// Whatever the function draws: the ambient run's fresh world.
+    Drawn(fn() -> u64),
+}
+
+impl Seeds {
+    /// `base`, `base + 1`, …
+    pub fn from(base: u64) -> Seeds {
+        Seeds::Counting { base, stride: 1 }
+    }
+}
+
 /// A founded world: generated, lake-gated, pre-rolled, **already seeded** and judged.
 pub struct Founded {
     pub world: World,
@@ -52,84 +96,61 @@ pub struct Founded {
     /// What the loop said loudly about the returned world, if anything.
     pub warnings: Vec<String>,
     /// The world as it stood **half way through the opening shower** of the returned
-    /// try, when the founding was asked to keep one ([`found_a_landscape`]) and the
-    /// world rained. `None` from [`found_a_habitat`], which the host runs: it keeps
-    /// nothing it does not use.
+    /// try, when the founding was asked to keep one and the world rained; otherwise
+    /// `None`.
     pub mid_shower: Option<World>,
 }
 
-/// The founding loop: lake gate → pre-roll → seed → acceptance, redrawing the terrain
-/// seed on a rejection, up to `habitat_tries`; the accepted world is returned already
-/// seeded. `accept` is the verdict (the real one is `|s| s.acceptance.accepted`).
-#[allow(clippy::too_many_arguments)]
-pub fn found_a_habitat(
+/// **The founding loop**: lake gate → pre-roll → seed → acceptance, redrawing the
+/// terrain seed on a refusal, up to [`HABITAT_TRIES`]; the accepted world (or, when none
+/// passes, the one with the best worse-lineage stock) is returned already seeded with
+/// `founder_counts` on `layers`. `keep_mid_shower` also keeps each try's world half way
+/// through its opening shower ([`Founded::mid_shower`]).
+pub fn found(
     cfg: &cubarium_voxel::Config,
-    asked: Option<u64>,
-    lake_tries: usize,
-    habitat_tries: usize,
-    next_seed: impl FnMut() -> u64,
-    layers: impl Fn(&World) -> (Flora, Fauna),
+    layers: &LayerConfig,
     founder_counts: [usize; Founder::COUNT],
-    accept: impl Fn(&habitat::Seeded) -> bool,
-) -> Founded {
-    found(
-        cfg,
-        asked,
-        lake_tries,
-        habitat_tries,
-        next_seed,
-        layers,
-        founder_counts,
-        accept,
-        false,
-    )
-}
-
-/// [`found_a_habitat`], keeping a copy of each try's world half way through its opening
-/// shower ([`Founded::mid_shower`]): the second frozen water state a training landscape
-/// runs in (`design/handoffs/voxel-retrain-2026-09-22.md`, D6). Everything else — the
-/// draws, the pre-roll, the seeding, the verdict — is the host's loop, step for step.
-#[allow(clippy::too_many_arguments)]
-pub fn found_a_landscape(
-    cfg: &cubarium_voxel::Config,
-    asked: Option<u64>,
-    lake_tries: usize,
-    habitat_tries: usize,
-    next_seed: impl FnMut() -> u64,
-    layers: impl Fn(&World) -> (Flora, Fauna),
-    founder_counts: [usize; Founder::COUNT],
-    accept: impl Fn(&habitat::Seeded) -> bool,
-) -> Founded {
-    found(
-        cfg,
-        asked,
-        lake_tries,
-        habitat_tries,
-        next_seed,
-        layers,
-        founder_counts,
-        accept,
-        true,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn found(
-    cfg: &cubarium_voxel::Config,
-    asked: Option<u64>,
-    lake_tries: usize,
-    habitat_tries: usize,
-    next_seed: impl FnMut() -> u64,
-    layers: impl Fn(&World) -> (Flora, Fauna),
-    founder_counts: [usize; Founder::COUNT],
-    accept: impl Fn(&habitat::Seeded) -> bool,
+    seeds: Seeds,
     keep_mid_shower: bool,
 ) -> Founded {
-    let mut next_seed = next_seed;
+    found_judged(
+        cfg,
+        layers,
+        founder_counts,
+        seeds,
+        keep_mid_shower,
+        |s: &habitat::Seeded| s.acceptance.accepted,
+    )
+}
+
+/// [`found`] with the verdict `accept` in place of the acceptance check.
+fn found_judged(
+    cfg: &cubarium_voxel::Config,
+    layers: &LayerConfig,
+    founder_counts: [usize; Founder::COUNT],
+    seeds: Seeds,
+    keep_mid_shower: bool,
+    accept: impl Fn(&habitat::Seeded) -> bool,
+) -> Founded {
+    let (asked, mut next_seed): (Option<u64>, Box<dyn FnMut() -> u64>) = match seeds {
+        Seeds::Asked(seed) => (Some(seed), Box::new(|| unreachable!("an asked seed draws none"))),
+        Seeds::Counting { base, stride } => {
+            let mut next = base;
+            (
+                None,
+                Box::new(move || {
+                    let seed = next;
+                    next = next.wrapping_add(stride);
+                    seed
+                }),
+            )
+        }
+        Seeds::Drawn(draw) => (None, Box::new(draw)),
+    };
     let mut lake_rejected = 0usize;
     let found = |world: World| {
         let mut world = world;
-        let (mut flora, mut fauna) = layers(&world);
+        let (mut flora, mut fauna) = layers.layers();
         let mut mid_shower = None;
         let seeded = habitat::seed_with_founder_counts_capturing(
             &mut world,
@@ -141,7 +162,7 @@ fn found(
         (world, flora, fauna, seeded, mid_shower)
     };
     if let Some(seed) = asked {
-        let (world, seed, _) = generate_with_a_lake(cfg, Some(seed), lake_tries, &mut next_seed);
+        let (world, seed, _) = generate_with_a_lake(cfg, Some(seed), LAKE_SEED_TRIES, &mut next_seed);
         let (world, flora, fauna, seeded, mid_shower) = found(world);
         let accepted = accept(&seeded);
         let mut warnings = Vec::new();
@@ -167,10 +188,10 @@ fn found(
             mid_shower,
         };
     }
-    let tries = habitat_tries.max(1);
+    let tries = HABITAT_TRIES;
     let mut best: Option<Founded> = None;
     for k in 0..tries {
-        let (world, seed, rejected) = generate_with_a_lake(cfg, None, lake_tries, &mut next_seed);
+        let (world, seed, rejected) = generate_with_a_lake(cfg, None, LAKE_SEED_TRIES, &mut next_seed);
         lake_rejected += rejected;
         let (world, flora, fauna, seeded, mid_shower) = found(world);
         let founded = Founded {
@@ -222,76 +243,6 @@ fn found(
     best.habitat_rejected = tries;
     best.lake_rejected = lake_rejected;
     best
-}
-
-/// Found the world the ambient run founds for `cfg`, deterministically: the lake gate
-/// and the habitat loop drawing `base`, `base + 1`, … rather than random seeds, the
-/// plant layer scaled to the cell size as the host scales it, `FaunaConfig::default()`
-/// and the real acceptance check. For a diagnostic arm that has to be the shipped
-/// landscape, **already seeded** — it must not be seeded again.
-pub fn ambient_habitat(
-    cfg: &cubarium_voxel::Config,
-    base: u64,
-    flora_config: impl Fn(f64) -> FloraConfig,
-    founder_counts: [usize; Founder::COUNT],
-) -> Founded {
-    ambient(cfg, base, flora_config, FaunaConfig::default(), founder_counts, false)
-}
-
-/// [`ambient_habitat`] with the animal layer built from `fauna` instead of the default:
-/// the arm of a run whose parameter set moved an animal number
-/// ([`crate::params::Params`]).
-pub fn ambient_habitat_with(
-    cfg: &cubarium_voxel::Config,
-    base: u64,
-    flora_config: impl Fn(f64) -> FloraConfig,
-    fauna: FaunaConfig,
-    founder_counts: [usize; Founder::COUNT],
-) -> Founded {
-    ambient(cfg, base, flora_config, fauna, founder_counts, false)
-}
-
-/// [`ambient_habitat`] keeping the kept try's mid-shower world ([`found_a_landscape`]):
-/// the world a training landscape is founded as — the live founding, from seed base
-/// `base`, exactly.
-pub fn ambient_landscape(
-    cfg: &cubarium_voxel::Config,
-    base: u64,
-    flora_config: impl Fn(f64) -> FloraConfig,
-    founder_counts: [usize; Founder::COUNT],
-) -> Founded {
-    ambient(cfg, base, flora_config, FaunaConfig::default(), founder_counts, true)
-}
-
-fn ambient(
-    cfg: &cubarium_voxel::Config,
-    base: u64,
-    flora_config: impl Fn(f64) -> FloraConfig,
-    fauna: FaunaConfig,
-    founder_counts: [usize; Founder::COUNT],
-    keep_mid_shower: bool,
-) -> Founded {
-    let mut next = base;
-    found(
-        cfg,
-        None,
-        LAKE_SEED_TRIES,
-        HABITAT_TRIES,
-        move || {
-            let seed = next;
-            next = next.wrapping_add(1);
-            seed
-        },
-        |w: &World| {
-            (
-                Flora::new(flora_config(w.config().voxel_m)),
-                Fauna::new(fauna.clone()),
-            )
-        },
-        founder_counts,
-        |s: &habitat::Seeded| s.acceptance.accepted,
-        keep_mid_shower,
-    )
 }
 
 /// Draw generated worlds until one has a lake the camera can actually read.
@@ -489,34 +440,13 @@ mod tests {
         };
         // A shower of a second, so two pre-rolls stay short.
         cfg.climate.opening_min_s = 1.0;
-        let seeds = |list: Vec<u64>| {
-            let mut it = list.into_iter();
-            move || {
-                it.next()
-                    .expect("the loop asked for more seeds than it was given")
-            }
-        };
-        let layers = |w: &World| {
-            (
-                Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
-                Fauna::new(FaunaConfig::default()),
-            )
-        };
+        let layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
         let judged = std::cell::Cell::new(0usize);
         let first_fails = |_: &habitat::Seeded| {
             judged.set(judged.get() + 1);
             judged.get() > 1
         };
-        let founded = found_a_habitat(
-            &cfg,
-            None,
-            1,
-            4,
-            seeds(vec![5, 6]),
-            layers,
-            [2, 2, 0],
-            first_fails,
-        );
+        let founded = found_judged(&cfg, &layers, [2, 2, 0], Seeds::from(5), false, first_fails);
         assert_eq!(judged.get(), 2, "two worlds were judged");
         assert_eq!(founded.seed, 6, "the refused first draw was replaced");
         assert!(founded.accepted && founded.habitat_rejected == 1);
@@ -542,14 +472,12 @@ mod tests {
 
         // An asked-for seed is honoured whatever the verdict, and says so. (Seed 6, whose
         // ring has stands on it, so "seeded" is something that can be checked.)
-        let founded = found_a_habitat(
+        let founded = found_judged(
             &cfg,
-            Some(6),
-            1,
-            4,
-            seeds(vec![]),
-            layers,
+            &layers,
             [2, 2, 0],
+            Seeds::Asked(6),
+            false,
             |_: &habitat::Seeded| false,
         );
         assert_eq!(founded.seed, 6);

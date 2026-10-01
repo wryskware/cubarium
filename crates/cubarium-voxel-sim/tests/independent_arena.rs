@@ -15,7 +15,19 @@ use std::sync::{Arc, Mutex};
 
 use cubarium_voxel_fauna::{Actions, Controller, Founder, Response};
 use cubarium_voxel_flora::{Deposit, DepositKind};
-use cubarium_voxel_sim::{Arena, ScheduleMode, SimConfig};
+use cubarium_voxel_sim::params::Params;
+use cubarium_voxel_sim::{Arena, ArenaGrid, LayerConfig, ScheduleMode, SimConfig};
+
+/// Stage A on the standard grid and the shipped layers.
+fn build(founder: Founder, layout_seed: u64) -> Arena {
+    let grid = ArenaGrid::Standard;
+    Arena::build(
+        founder,
+        layout_seed,
+        grid,
+        LayerConfig::new(&Params::defaults(), grid.voxel_m()),
+    )
+}
 
 /// Records every observation the schedule hands it and answers with one fixed action.
 struct Recorder {
@@ -77,7 +89,7 @@ fn litter_pools(flora: &cubarium_voxel_flora::Flora) -> (f64, f64, f64, f64) {
 /// out of a stock, which would make every arena result unfalsifiable.
 #[test]
 fn an_arena_bite_closes_the_three_currencies_across_stock_animal_and_respiration() {
-    let mut arena = Arena::build(Founder::Blind, 1);
+    let mut arena = build(Founder::Blind, 1);
     // The founder alone: the ledger below is the layer's, so the bystanders go.
     arena.bystanders.clear();
     arena.refound(cubarium_voxel_sim::FOUNDER_START);
@@ -241,7 +253,7 @@ fn an_arena_bite_closes_the_three_currencies_across_stock_animal_and_respiration
 fn every_arena_sampling_hands_the_controller_exactly_its_manifest_width() {
     for founder in cubarium_voxel_sim::ARENA_FOUNDERS {
         let manifest = founder.manifest();
-        let arena = Arena::build(founder, 2);
+        let arena = build(founder, 2);
         let id = arena.animal_id.expect("the arena placed its founder");
         let senses = arena.prepare_senses();
         let mut sim = arena.into_sim_prepared(SimConfig::default(), senses);
@@ -310,7 +322,7 @@ fn every_arena_sampling_hands_the_controller_exactly_its_manifest_width() {
 /// task has no signal to leave on.
 #[test]
 fn eating_the_tile_underfoot_lowers_both_the_taste_and_the_field_reading() {
-    let mut arena = Arena::build(Founder::Blind, 3);
+    let mut arena = build(Founder::Blind, 3);
     let id = arena.animal_id.expect("the arena placed its founder");
     let stand_on = arena
         .fauna

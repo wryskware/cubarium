@@ -123,11 +123,15 @@ fn main() {
     // founding loop, which returns the world already seeded.
     let (world, flora, mut fauna, seeded) = match preset {
         Some(preset) => {
-            let founded = cubarium::voxel::ambient_habitat(
-                &preset.config(),
-                seed_base,
-                |v| layered(FloraConfig::for_voxel_size(v)),
+            let cfg = preset.config();
+            let mut layers = cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), cfg.voxel_m);
+            layers.flora = layered(layers.flora);
+            let founded = cubarium::voxel::found(
+                &cfg,
+                &layers,
                 habitat::FOUNDER_COUNTS,
+                cubarium::voxel::Seeds::from(seed_base),
+                false,
             );
             eprintln!(
                 "scene: preset {} ({}x{}x{} at {} m, seed {}, {} lake / {} habitat rejected, {})",

@@ -11,7 +11,8 @@
 
 use cubarium_voxel_fauna::{Body, Founder};
 use cubarium_voxel_flora::{Site, Trophic};
-use cubarium_voxel_sim::{Arena, ArenaGrid, SuccessorBand};
+use cubarium_voxel_sim::params::Params;
+use cubarium_voxel_sim::{Arena, ArenaGrid, LayerConfig, SuccessorBand};
 
 /// What a mouth band standing at `standing_y` could take off `patch`: the ground pools
 /// the founder eats at that face, and the in-band layers of any stand its diet accepts.
@@ -58,8 +59,14 @@ fn stage_b_patches_are_reachable_by_the_band_from_the_start_face_on_every_layout
         for founder in cubarium_voxel_sim::ARENA_FOUNDERS {
             for band in [SuccessorBand::Near, SuccessorBand::Landed] {
                 for seed in 0..32u64 {
-                    let (arena, initial, successor) =
-                        Arena::build_reacquisition_on(founder, seed, band, grid).into_parts();
+                    let (arena, initial, successor) = Arena::build_reacquisition(
+                        founder,
+                        seed,
+                        band,
+                        grid,
+                        LayerConfig::new(&Params::defaults(), grid.voxel_m()),
+                    )
+                    .into_parts();
                     let start = arena
                         .start_face()
                         .unwrap_or_else(|| panic!("{founder:?} {grid:?} seed {seed}: placed"));

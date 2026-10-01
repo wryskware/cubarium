@@ -75,7 +75,7 @@ mod introduce_tests;
 pub mod scene;
 pub use arena::{
     ARENA_BYSTANDERS, ARENA_FOUNDERS, ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, ArenaGrid,
-    ArenaLayers, arena_start_hour,
+    arena_start_hour,
     BROWSER_FOLIAGE_PER_STAND, FOUNDER_START, GROUND_Y, PatchKind, Placement,
     REACQUISITION_INITIAL_PATCH_FRACTION, REACQUISITION_LITTER_PER_PATCH, ReacquisitionArena,
     SuccessorBand, edible_stock, populate,
@@ -84,6 +84,7 @@ pub use arena::{
 /// Re-exported so a caller holding an [`Arena`] can name its patch sites without
 /// depending on the plant layer directly.
 pub use cubarium_voxel_flora::Site;
+pub use found::{LayerConfig, Seeds};
 
 /// The sensory state as a bevy resource: the litter field and the per-body trend stores.
 ///

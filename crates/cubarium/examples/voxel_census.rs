@@ -341,12 +341,12 @@ fn main() {
         // comes back already seeded.
         let params = resolve(arm_config);
         let arm_config = params.world.clone();
-        let founded = cubarium::voxel::ambient_habitat_with(
+        let founded = cubarium::voxel::found(
             &arm_config,
-            seed_base,
-            |v| params.flora.clone().rescaled_to(v),
-            params.fauna.clone(),
+            &cubarium::voxel::LayerConfig::new(&params, arm_config.voxel_m),
             founder_counts,
+            cubarium::voxel::Seeds::from(seed_base),
+            false,
         );
         let (world, flora, mut fauna, seeded) =
             (founded.world, founded.flora, founded.fauna, founded.seeded);

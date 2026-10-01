@@ -7,7 +7,8 @@
 use std::sync::{Arc, Mutex};
 
 use cubarium_voxel_fauna::{Actions, Controller, FaunaConfig, Founder, Response};
-use cubarium_voxel_sim::{Arena, ArenaGrid, ArenaLayers, SimConfig};
+use cubarium_voxel_sim::params::Params;
+use cubarium_voxel_sim::{Arena, ArenaGrid, LayerConfig, SimConfig};
 
 /// Records the chem response channel of every observation and stands still.
 struct ChemRecorder {
@@ -38,9 +39,9 @@ fn chem_offset() -> usize {
 /// path (`prepared`) or the self-settling one.
 fn chem_trace(fauna: FaunaConfig, prepared: bool) -> Vec<f64> {
     let grid = ArenaGrid::Standard;
-    let mut layers = ArenaLayers::live(grid);
+    let mut layers = LayerConfig::new(&Params::defaults(), grid.voxel_m());
     layers.fauna = fauna;
-    let arena = Arena::build_on_with(Founder::Blind, 1, grid, layers);
+    let arena = Arena::build(Founder::Blind, 1, grid, layers);
     let id = arena.animal_id.expect("the arena placed its founder");
     let mut sim = if prepared {
         let senses = arena.prepare_senses();

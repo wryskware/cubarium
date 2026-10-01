@@ -13,10 +13,10 @@ use cubarium_search::es::voxel::imitate;
 use cubarium_search::es::voxel::landscape::{Landscape, WaterState};
 use cubarium_search::es::voxel::task::Prepared;
 use cubarium_search::es::voxel::{EpisodeDriver, VoxelControl, teacher_sink};
-use cubarium_voxel::{Landform, World};
+use cubarium_voxel::Landform;
 use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder};
-use cubarium_voxel_flora::{Flora, FloraConfig};
-use cubarium_voxel_sim::found;
+use cubarium_voxel_sim::found::{self, LayerConfig};
+use cubarium_voxel_sim::params::Params;
 
 const TICKS: u64 = 160;
 
@@ -39,20 +39,12 @@ fn tiny() -> cubarium_voxel::Config {
 
 /// The tiny ring founded on an asked-for seed, mid-shower water captured.
 fn landscape() -> Landscape {
-    let founded = found::found_a_landscape(
+    let founded = found::found(
         &tiny(),
-        Some(TINY_SEED),
-        1,
-        1,
-        || unreachable!("an asked-for seed draws nothing"),
-        |w: &World| {
-            (
-                Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
-                Fauna::new(FaunaConfig::default()),
-            )
-        },
+        &LayerConfig::new(&Params::defaults(), tiny().voxel_m),
         [3, 3, 0],
-        |_| true,
+        found::Seeds::Asked(TINY_SEED),
+        true,
     );
     Landscape::from_founded("tiny", TINY_SEED, founded)
 }
@@ -311,20 +303,12 @@ fn a_mixed_run_draws_landscapes_and_writes_held_out_checkpoints() {
 fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
     use cubarium_voxel_fauna::RouteMap;
 
-    let founded = found::found_a_landscape(
+    let founded = found::found(
         &tiny(),
-        Some(TINY_SEED),
-        1,
-        1,
-        || unreachable!("an asked-for seed draws nothing"),
-        |w: &World| {
-            (
-                Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
-                Fauna::new(FaunaConfig::default()),
-            )
-        },
+        &LayerConfig::new(&Params::defaults(), tiny().voxel_m),
         [3, 3, 0],
-        |_| true,
+        found::Seeds::Asked(TINY_SEED),
+        true,
     );
     let cfg = FaunaConfig::default();
     for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {

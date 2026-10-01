@@ -55,8 +55,7 @@ pub mod vine;
 // `cubarium-voxel-sim` since P5-B, so the search crate founds the worlds this host founds;
 // every name is re-exported here unchanged.
 pub use cubarium_voxel_sim::found::{
-    Founded, HABITAT_TRIES, LAKE_SEED_TRIES, ambient_habitat, ambient_habitat_with, found_a_habitat,
-    generate_with_a_lake,
+    Founded, HABITAT_TRIES, LAKE_SEED_TRIES, LayerConfig, Seeds, found, generate_with_a_lake,
 };
 pub use cubarium_voxel_sim::{habitat, scene};
 
@@ -79,7 +78,7 @@ use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
 };
 use cubarium_voxel_sim::params::{Layers, Params};
-use cubarium_voxel_sim::{Arena, Sim, SimConfig};
+use cubarium_voxel_sim::{Arena, ArenaGrid, Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{Voxel, VoxelArenaArg, VoxelControllerArg, VoxelSceneArg, VoxelSinkArg};
@@ -235,6 +234,11 @@ impl Default for VoxelConfig {
 /// `[flora]` and `[fauna]` tables, then `--set`, every layer validated against the
 /// parameter registry. A fresh world's plants and animals are built from it.
 pub fn resolve_params(args: &Voxel, cfg: &VoxelConfig) -> Result<Params> {
+    params_of(cfg, &args.set)
+}
+
+/// [`resolve_params`] for a caller without a command line: `cfg`'s tables, then `sets`.
+pub fn params_of(cfg: &VoxelConfig, sets: &[String]) -> Result<Params> {
     let mut file = toml::Table::new();
     if !cfg.flora.is_empty() {
         file.insert("flora".into(), toml::Value::Table(cfg.flora.clone()));
@@ -251,7 +255,7 @@ pub fn resolve_params(args: &Voxel, cfg: &VoxelConfig) -> Result<Params> {
         &Layers {
             file: Some(file),
             genome: None,
-            sets: args.set.clone(),
+            sets: sets.to_vec(),
         },
     )
     .map_err(|e| anyhow::anyhow!("the parameter set: {e}"))
@@ -886,7 +890,7 @@ enum StartLayers {
 /// Resume from a file/directory or create a fresh world according to CLI and config.
 ///
 /// A **fresh generated** world that is going to be seeded goes through the founding loop
-/// ([`found_a_habitat`]) and comes back with its layers, already seeded; every other
+/// ([`found`]) and comes back with its layers, already seeded; every other
 /// world comes back bare, `None`, for the caller to seed.
 fn load_or_create_world(
     args: &Voxel,
@@ -916,20 +920,12 @@ fn load_or_create_world(
                         };
                         (world, label, false)
                     } else {
-                        let founded = found_a_habitat(
+                        let founded = found(
                             &world_cfg,
-                            asked,
-                            LAKE_SEED_TRIES,
-                            HABITAT_TRIES,
-                            random_seed,
-                            |w: &World| {
-                                (
-                                    Flora::new(params.flora.clone().rescaled_to(w.config().voxel_m)),
-                                    Fauna::new(params.fauna.clone()),
-                                )
-                            },
+                            &LayerConfig::new(&params, world_cfg.voxel_m),
                             args.founder_counts(),
-                            |s: &habitat::Seeded| s.acceptance.accepted,
+                            asked.map_or(Seeds::Drawn(random_seed), Seeds::Asked),
+                            false,
                         );
                         let rejected = founded.lake_rejected + founded.habitat_rejected;
                         let label = if rejected > 0 {
@@ -1180,7 +1176,14 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let (mut sim, scene_label) = match args.arena {
         Some(arena) => {
             let (founder, driver) = sensing_driver(args, arena)?;
-            let mut arena = Arena::build(founder, args.arena_seed);
+            // On the run's own parameter set, as a founded world would be.
+            let grid = ArenaGrid::Standard;
+            let mut arena = Arena::build(
+                founder,
+                args.arena_seed,
+                grid,
+                LayerConfig::new(&params, grid.voxel_m()),
+            );
             let senses = arena.prepare_senses();
             let animal_id = arena
                 .animal_id
@@ -1234,9 +1237,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 // Resumed with its own plants and animals: nothing to seed.
                 Some(StartLayers::Restored(flora, fauna)) => (flora, fauna, None),
                 None => {
-                    let mut flora =
-                        Flora::new(params.flora.clone().rescaled_to(world.config().voxel_m));
-                    let mut fauna = Fauna::new(params.fauna.clone());
+                    let (mut flora, mut fauna) =
+                        LayerConfig::new(&params, world.config().voxel_m).layers();
                     let seeded = (!args.empty).then(|| {
                         let pre = habitat::pre_roll(&mut world, !resumed);
                         habitat::seed_pre_rolled(
