@@ -23,6 +23,12 @@ k = 10.0
 light_moisture = 0.67
 harvest = 0.2
 
+[targets]
+# Held to persistence alone (bodies plus viable eggs): no share and no late-breeding
+# target. Stage 1's lanternjaw egg bank first hatches at the first dusk, ~60 min into the
+# terrarium's 2 h day; stage 2 drops this and runs 2 h horizons.
+persist_only = ["lanternjaw"]
+
 # --- Animals: one gene per lineage (littershredder, frondgrazer, lanternjaw). ---
 
 [[gene]]

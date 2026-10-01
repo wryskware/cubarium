@@ -1577,7 +1577,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 moving_min,
                 missing_cost,
                 lanternjaw_share: [share_lo, share_hi],
-            };
+                persist_only: [false; cubarium_voxel_fauna::Founder::COUNT],
+            }
+            .with_targets(&genome.rest)?;
             let spec = es::voxel::live::search::SearchSpec {
                 centres: parse_centres(&centres)?,
                 genome,

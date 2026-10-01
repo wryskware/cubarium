@@ -67,6 +67,39 @@ pub struct BandSpec {
     pub missing_cost: f64,
     /// The lanternjaws' share of the animals over the second half.
     pub lanternjaw_share: [f64; 2],
+    /// Lineages held to persistence alone (by [`Founder::index`]): no late-breeding target
+    /// and, for the lanternjaw, no share target; living bodies plus viable eggs persist.
+    /// Stage 1 holds the lanternjaw so, whose egg bank first hatches at the first dusk
+    /// (~60 min on the terrarium's 2 h day). The search file's `[targets] persist_only`.
+    pub persist_only: [bool; Founder::COUNT],
+}
+
+impl BandSpec {
+    /// The search file's `[targets]` table: `persist_only = ["lanternjaw", ...]`.
+    pub fn with_targets(mut self, rest: &toml::Table) -> Result<BandSpec, String> {
+        let Some(t) = rest.get("targets") else {
+            return Ok(self);
+        };
+        let t = t.as_table().ok_or("[targets] is a table")?;
+        for (k, v) in t {
+            match k.as_str() {
+                "persist_only" => {
+                    let names = v.as_array().ok_or("persist_only is a list of lineages")?;
+                    self.persist_only = [false; Founder::COUNT];
+                    for n in names {
+                        let n = n.as_str().ok_or("persist_only names lineages")?;
+                        let f = Founder::ALL
+                            .into_iter()
+                            .find(|f| f.name() == n)
+                            .ok_or_else(|| format!("[targets] persist_only: no lineage {n:?}"))?;
+                        self.persist_only[f.index()] = true;
+                    }
+                }
+                other => return Err(format!("unknown key `{other}` in [targets]")),
+            }
+        }
+        Ok(self)
+    }
 }
 
 impl Default for BandSpec {
@@ -78,6 +111,7 @@ impl Default for BandSpec {
             moving_min: 0.30,
             missing_cost: 10.0,
             lanternjaw_share: [0.05, 0.15],
+            persist_only: [false; Founder::COUNT],
         }
     }
 }
@@ -105,7 +139,8 @@ impl Band {
             peak: spec.peak_x * n,
             moving_min: spec.moving_min,
             missing_cost: spec.missing_cost,
-            lanternjaw_share: lanternjaw.then_some(spec.lanternjaw_share),
+            lanternjaw_share: (lanternjaw && !spec.persist_only[Founder::Lanternjaw.index()])
+                .then_some(spec.lanternjaw_share),
         }
     }
 }
@@ -330,6 +365,20 @@ fn lost_lineages(founded: &[usize], bodies: &[usize], eggs: &[usize]) -> usize {
         .count()
 }
 
+/// Founded lineages held to breeding (not `persist_only`) with no birth in the second
+/// half; a world stopped before the second half is judged silent on all of them.
+pub fn silent_lineages(
+    founded: &[usize],
+    late_births: &[u64],
+    persist_only: &[bool; Founder::COUNT],
+    reached_second_half: bool,
+) -> usize {
+    (0..Founder::COUNT)
+        .filter(|&i| founded[i] > 0 && !persist_only[i])
+        .filter(|&i| !reached_second_half || late_births[i] == 0)
+        .count()
+}
+
 /// Found a world under `params` from seed base `base`, drive the lineages with a centre
 /// by `drivers` (the rest run their heuristic), and run it for the horizon (unified
 /// mode: with `tables`).
@@ -427,13 +476,12 @@ pub fn evaluate(
     let score_min = spec.score_horizon_ticks.max(spec.horizon_ticks) as f64 / TICKS_PER_MIN as f64;
     let projected_from_min = (trace.minutes.last().copied().unwrap_or(0.0) < score_min)
         .then(|| project(&mut trace, score_min));
-    let founded_lineages = (0..Founder::COUNT).filter(|&i| founded[i] > 0);
-    trace.silent_lineages = if elapsed > half_ticks {
-        founded_lineages.filter(|&i| late_births[i] == 0).count()
-    } else {
-        // Stopped before the second half: judged by the lineages it founded.
-        founded_lineages.count()
-    };
+    trace.silent_lineages = silent_lineages(
+        &founded,
+        &late_births,
+        &spec.band.persist_only,
+        elapsed > half_ticks,
+    );
     let penalty = penalty(&trace, &band);
     let readout_mean = super::readout::pool(&readouts)
         .into_iter()

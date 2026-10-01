@@ -5,7 +5,7 @@
 use cubarium_voxel_fauna::Founder;
 
 use super::ecology::EcologyParams;
-use super::search::{Band, BandSpec, EvalSpec, Trace, evaluate, penalty};
+use super::search::{Band, BandSpec, EvalSpec, Trace, evaluate, penalty, silent_lineages};
 use super::variants::VariantTable;
 use crate::es::tensor::initial_center_shape;
 use crate::es::voxel::{EpisodeDriver, TRAINED_LINEAGES};
@@ -174,4 +174,33 @@ fn unified_mode_with_no_lanternjaw_centre_runs_one_window() {
         e.lineages_end,
         e.eggs_end
     );
+}
+
+/// Stage 1's switch: with the lanternjaw held to persistence, a world whose lanternjaws are
+/// only eggs takes no share penalty and no breeding penalty, and still counts as holding
+/// the lineage; without it, both apply.
+#[test]
+fn a_persist_only_lineage_of_eggs_takes_no_share_or_breeding_penalty() {
+    let rest: toml::Table = "[targets]\npersist_only = [\"lanternjaw\"]\n".parse().unwrap();
+    let held = BandSpec::default().with_targets(&rest).expect("valid");
+    let lj = Founder::Lanternjaw.index();
+    assert!(held.persist_only[lj]);
+    let founded = [8, 8, 9];
+    // Shredders and browsers bred late; the lanternjaw, all eggs, did not.
+    let late = [2, 3, 0];
+    let b = Band::for_founding(16, true, &held);
+    let eggs_only = trace(30, 0);
+    assert_eq!(penalty(&eggs_only, &b).share, 0.0);
+    assert_eq!(silent_lineages(&founded, &late, &held.persist_only, true), 0);
+    let mut t = eggs_only.clone();
+    t.silent_lineages = silent_lineages(&founded, &late, &held.persist_only, true);
+    assert_eq!(penalty(&t, &b).total, 0.0, "{:?}", penalty(&t, &b));
+    // Switched off: the same world pays for both.
+    let open = BandSpec::default();
+    let b = Band::for_founding(16, true, &open);
+    assert!(penalty(&eggs_only, &b).share > 0.0);
+    assert_eq!(silent_lineages(&founded, &late, &open.persist_only, true), 1);
+    assert!(BandSpec::default()
+        .with_targets(&"[targets]\npersist_only = [\"nobody\"]\n".parse().unwrap())
+        .is_err());
 }
