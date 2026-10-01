@@ -57,7 +57,6 @@ pub use predation::{
     tremor_of,
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
-pub use cubarium_voxel_flora::Reach;
 pub use encounter::{
     HEADING_SAMPLES, RouteMap, RouteRule, SightMap, band_crown_layers, crown_columns, crown_layer,
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
