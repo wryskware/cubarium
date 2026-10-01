@@ -45,6 +45,12 @@ pub struct ScreenSpec {
     /// always ranks below every run.
     pub base: f64,
     pub k: f64,
+    /// **The soft margin**: a candidate outside the bands but within this factor of them
+    /// (R and S in `[lo / m, hi × m]`, F at least `f_min / m`) still runs, and pays
+    /// `k_soft × (its log-distance outside the bands)` on top of its run's penalty.
+    /// Beyond it, refused as above. 1 is no margin.
+    pub run_margin: f64,
+    pub k_soft: f64,
     /// Light and moisture's factor on a plant's income (invariants.py's 0.67).
     pub light_moisture: f64,
     /// The share of a field's edible foliage a walker takes in passing (0.2).
@@ -59,13 +65,45 @@ impl Default for ScreenSpec {
             f_min: 10.0,
             base: 200.0,
             k: 10.0,
+            run_margin: 2.0,
+            k_soft: 5.0,
             light_moisture: 0.67,
             harvest: 0.2,
         }
     }
 }
 
+/// What the screen does with a candidate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Verdict {
+    /// Inside every band: runs, no soft term.
+    Inside,
+    /// Outside a band but within the run margin: runs, pays the soft term.
+    Margin,
+    /// Beyond the margin: not run ([`ScreenSpec::graded`]).
+    Refused,
+}
+
 impl ScreenSpec {
+    /// Inside, in the margin, or refused.
+    pub fn verdict(&self, rsf: &Rsf) -> Verdict {
+        if rsf.passes(self) {
+            return Verdict::Inside;
+        }
+        let m = self.run_margin.max(1.0);
+        let within = (self.r[0] / m..=self.r[1] * m).contains(&rsf.r)
+            && (self.s[0] / m..=self.s[1] * m).contains(&rsf.s)
+            && rsf.f >= self.f_min / m;
+        if within { Verdict::Margin } else { Verdict::Refused }
+    }
+
+    /// The soft term a candidate that runs pays: `k_soft ×` its log-distance outside the
+    /// bands (zero inside them).
+    pub fn soft(&self, rsf: &Rsf) -> f64 {
+        self.k_soft * rsf.distance(self)
+    }
+
     /// A refused candidate's fitness ([`ScreenSpec::base`]): above `worst_run`, the worst
     /// fitness of a candidate that ran this generation (minus infinity for none).
     pub fn graded(&self, rsf: &Rsf, worst_run: f64) -> f64 {

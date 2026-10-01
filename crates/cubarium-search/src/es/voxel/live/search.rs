@@ -42,7 +42,7 @@ use serde::Serialize;
 
 use super::ecology::EcologyParams;
 use super::readout::Scan;
-use super::screen::{Rsf, ScreenSpec, rsf};
+use super::screen::{Rsf, ScreenSpec, Verdict, rsf};
 use super::trainer::{ascend, parallel, pooled_scores};
 use super::variants::VariantTable;
 use super::window::{self, BodyScore, TICKS_PER_MIN, Window};
@@ -741,8 +741,11 @@ pub struct CandidateRecord {
     /// fixed penalty for a candidate it refused.
     pub fitness: f64,
     pub box_penalty: f64,
-    /// Its stay-or-go numbers, and whether the screen refused it (unrun).
+    /// Its stay-or-go numbers, and what the screen did: ran inside the bands, ran in the
+    /// soft margin (paying `soft` on top of its runs), or refused (unrun; `screened_out`).
     pub rsf: [f64; 3],
+    pub screen: Verdict,
+    pub soft: f64,
     pub screened_out: bool,
     pub evaluations: Vec<Evaluation>,
 }
@@ -1194,11 +1197,13 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             .map(|p| screen_of(p, &spec.eval.world, &spec.screen))
             .collect();
         let reference_k = candidates.len() - 1;
-        // The default always runs: it is the persistence reference.
-        let run: Vec<bool> = screens
+        // Inside the bands or within the soft margin runs; the default always runs (it is
+        // the persistence reference).
+        let verdicts: Vec<Verdict> = screens.iter().map(|s| spec.screen.verdict(s)).collect();
+        let run: Vec<bool> = verdicts
             .iter()
             .enumerate()
-            .map(|(k, s)| k == reference_k || s.passes(&spec.screen))
+            .map(|(k, v)| k == reference_k || *v != Verdict::Refused)
             .collect();
         let drivers: Vec<(Founder, EpisodeDriver)> = thetas
             .iter()
@@ -1239,11 +1244,11 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 .expect("a reference per seed");
             rescore(e, r);
         }
-        // The runs' fitness first: a screened-out candidate scores above the worst of them.
+        // The runs' fitness first (their penalty plus the soft term): a refused candidate
+        // scores above the worst of them.
         let ran: Vec<Option<f64>> = (0..candidates.len())
             .map(|k| {
-                let screened_out = !screens[k].passes(&spec.screen);
-                (run[k] && !(screened_out && k != reference_k)).then(|| {
+                run[k].then(|| {
                     let pens: Vec<f64> = jobs
                         .iter()
                         .zip(&evals)
@@ -1251,6 +1256,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                         .map(|(_, e)| e.penalty.total)
                         .collect();
                     pens.iter().sum::<f64>() / pens.len().max(1) as f64
+                        + spec.screen.soft(&screens[k])
                 })
             })
             .collect();
@@ -1264,7 +1270,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 .map(|(_, e)| e.clone())
                 .collect();
             let bp = box_penalty(&bounds, x);
-            let screened_out = !screens[k].passes(&spec.screen);
+            let screened_out = verdicts[k] == Verdict::Refused && k != reference_k;
             let fitness = match ran[k] {
                 Some(p) => p + bp,
                 None => spec.screen.graded(&screens[k], worst_run) + bp,
@@ -1275,15 +1281,17 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 fitness,
                 box_penalty: bp,
                 rsf: [screens[k].r, screens[k].s, screens[k].f],
+                screen: verdicts[k],
+                soft: if run[k] { spec.screen.soft(&screens[k]) } else { 0.0 },
                 screened_out,
                 evaluations: mine,
             });
         }
         let fitness: Vec<f64> = recs[..xs.len()].iter().map(|r| r.fitness).collect();
-        // Best so far, by the in-box penalty, over the draws and the default, among those
-        // that ran and passed the screen.
+        // Best so far, by the in-box fitness (run penalty plus soft term), over the draws
+        // and the default, among those the screen let run (inside or in the margin).
         for (k, r) in recs.iter().enumerate() {
-            if r.screened_out {
+            if r.screen == Verdict::Refused {
                 continue;
             }
             let pen = r.fitness - r.box_penalty;

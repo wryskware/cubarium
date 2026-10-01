@@ -18,6 +18,10 @@ s = [0.02, 0.2]
 f_min = 10.0
 base = 200.0
 k = 10.0
+# The soft margin: within run_margin of the bands (R, S in [lo/m, hi*m], F >= f_min/m) a
+# candidate still runs, paying k_soft x its log-distance outside them on top of its runs.
+run_margin = 2.0
+k_soft = 5.0
 # The light-and-moisture factor on a plant's income, and the share of a field's edible
 # foliage a walker harvests in passing (invariants.py's 0.67 and 0.2).
 light_moisture = 0.67
