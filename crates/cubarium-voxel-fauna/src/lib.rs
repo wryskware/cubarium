@@ -1210,10 +1210,13 @@ impl SpeciesConfig {
         }
     }
 
-    /// Multiply the **nine absolute quantities** — `body_max`, `body_min`, `birth_body`,
-    /// `birth_cost`, the reproduction `surplus_floor` and `egg_organic`, `bite_per_s`,
-    /// `bite_half_stock` and `growth_max_per_s` — by `k` (audit §1.4): the animal is `k`
-    /// times heavier against the plants, and every per-unit rate, clock and metre stays.
+    /// Multiply the **eight absolute quantities** — `body_max`, `body_min`, `birth_body`,
+    /// `birth_cost`, the reproduction `surplus_floor` and `egg_organic`, `bite_per_s` and
+    /// `growth_max_per_s` — by `k` (audit §1.4): the animal is `k` times heavier against
+    /// the plants, and every per-unit rate, clock and metre stays. The bite's
+    /// half-saturation `bite_half_stock` stays too: it is measured in the food's stock at
+    /// the mouth, and the food is not scaled (units correction, 2026-10-01; at x30 it had
+    /// cut a browser's bite to ~0.17 of its want).
     pub fn scale_mass(&mut self, k: f64) {
         self.body_max *= k;
         self.body_min *= k;
@@ -1222,7 +1225,6 @@ impl SpeciesConfig {
         self.reproduction.surplus_floor *= k;
         self.reproduction.egg_organic *= k;
         self.bite_per_s *= k;
-        self.bite_half_stock *= k;
         self.growth_max_per_s *= k;
     }
 
@@ -1282,7 +1284,7 @@ pub struct FaunaConfig {
 /// **The shipped org-unit mass scale** (Wrysk, 2026-09-29; audit
 /// `design/7_Research/ecology-parameter-audit-2026-09-28.md` §1.4): both lineages are
 /// built this many times heavier against the plants than the placeholder tables
-/// ([`SpeciesConfig::scale_mass`]: the nine absolute quantities, nothing per unit), so one
+/// ([`SpeciesConfig::scale_mass`]: the eight absolute quantities, nothing per unit), so one
 /// plant no longer feeds a parked animal for ever. Plants are to be re-tuned for day and
 /// night later; this is not a measured optimum.
 pub const SHIPPED_MASS_SCALE: f64 = 30.0;

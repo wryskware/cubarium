@@ -234,7 +234,7 @@ value = 3.0
         6.0 * motor(&d, Founder::Browser)
     ));
 
-    // The mass scale (a digest row, so only with `retrain`) carries the nine absolute
+    // The mass scale (a digest row, so only with `retrain`) carries the eight absolute
     // quantities with it, and the placeholder species follows the browser's body.
     let heavy = decoded(&genome(
         r#"

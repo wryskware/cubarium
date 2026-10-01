@@ -29,8 +29,9 @@ harvest = 0.2
 # terrarium's 2 h day; stage 2 drops this and runs 2 h horizons.
 persist_only = ["lanternjaw"]
 # A lineage alive with no late birth pays missing_cost x (1 - min(1, readiness / this)),
-# readiness its bodies' second-half mean breeding progress (1 gestating, else the share of
-# the surplus hold met, 0 below birth_body).
+# readiness its bodies' second-half mean breeding progress (1 gestating, else half the
+# reserve toward the surplus line plus half the surplus hold met; below birth_body only
+# the reserve half).
 ready_target = 0.5
 
 # --- Animals: one gene per lineage (littershredder, frondgrazer, lanternjaw). ---

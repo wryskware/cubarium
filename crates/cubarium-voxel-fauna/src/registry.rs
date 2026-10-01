@@ -30,9 +30,10 @@ pub fn registry() -> &'static Registry {
     })
 }
 
-/// The nine absolute quantities a body's org-unit mass scale carries
-/// ([`crate::SpeciesConfig::scale_mass`]), relative to a `SpeciesConfig`.
-pub const MASS_SCALED: [&str; 9] = [
+/// The eight absolute quantities a body's org-unit mass scale carries
+/// ([`crate::SpeciesConfig::scale_mass`]), relative to a `SpeciesConfig`. Not
+/// `bite_half_stock`: it is in the food's stock units, and the food is not scaled.
+pub const MASS_SCALED: [&str; 8] = [
     "body_max",
     "body_min",
     "birth_body",
@@ -40,7 +41,6 @@ pub const MASS_SCALED: [&str; 9] = [
     "reproduction.surplus_floor",
     "reproduction.egg_organic",
     "bite_per_s",
-    "bite_half_stock",
     "growth_max_per_s",
 ];
 
@@ -49,7 +49,8 @@ pub const MASS_SCALED: [&str; 9] = [
 /// - Walking is priced against upkeep (audit §8.1): `motor_respiration_per_s =
 ///   motor_factor × maintenance_per_s`, the factor today's ratio.
 /// - The mouth too: `bite_per_s = intake_factor × maintenance_per_s × body`.
-/// - The nine absolute quantities follow the lineage's mass scale (audit §1.4).
+/// - The eight absolute quantities follow the lineage's mass scale (audit §1.4); the bite's
+///   half-saturation, in food units, does not.
 /// - The placeholder species is the browser's body: its mass and lifespan follow the
 ///   browser's.
 pub fn ties() -> Vec<Tie> {

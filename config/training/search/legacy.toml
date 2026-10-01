@@ -74,7 +74,7 @@ what = "walking cost as a multiple of upkeep, on the shipped ratio"
 name = "founder.mass_scale"
 path = "fauna.founders.*.mass_scale"
 range = [1.0, 1000.0]
-what = "animal org-unit mass: the nine absolute animal quantities"
+what = "animal org-unit mass: the eight absolute animal quantities"
 
 [[gene]]
 name = "founder.yield_by_food"

@@ -382,11 +382,12 @@ fn lost_lineages(founded: &[usize], bodies: &[usize], eggs: &[usize]) -> usize {
         .count()
 }
 
-/// **A body's breeding progress**, 0 to 1: 1 while it gestates (its escrow open); 0
-/// below `birth_body`; otherwise its surplus ticks in the last hold
-/// (`reproduction.surplus_ticks`, what `advance_eligibility` keeps from the window) over the
-/// ticks the hold requires to begin ([`cubarium_voxel_fauna::Reproduction::hold_required`]),
-/// capped at 1.
+/// **A body's breeding progress**, 0 to 1: 1 while it gestates (its escrow open);
+/// otherwise half its reserve toward the surplus line (`min(1, reserve /
+/// surplus_reserve)`) plus half its hold (`reproduction.surplus_ticks`, what
+/// `advance_eligibility` keeps from the window, over the ticks the hold requires to
+/// begin, [`cubarium_voxel_fauna::Reproduction::hold_required`], capped at 1). A body below
+/// `birth_body` has only its reserve half: it cannot hold surplus yet.
 pub fn body_readiness(
     a: &cubarium_voxel_fauna::Animal,
     sc: &cubarium_voxel_fauna::SpeciesConfig,
@@ -394,11 +395,14 @@ pub fn body_readiness(
     if a.reproduction.escrow.is_some() {
         return 1.0;
     }
+    let line = sc.reproduction.surplus_reserve(sc);
+    let reserve = if line > 0.0 { (a.reserve / line).clamp(0.0, 1.0) } else { 1.0 };
     if a.body < sc.birth_body {
-        return 0.0;
+        return 0.5 * reserve;
     }
     let need = sc.reproduction.hold_required().max(1);
-    (a.reproduction.surplus_ticks as f64 / need as f64).min(1.0)
+    let hold = (a.reproduction.surplus_ticks as f64 / need as f64).min(1.0);
+    0.5 * reserve + 0.5 * hold
 }
 
 /// **The breeding term**, summed over the founded lineages held to breeding (not
@@ -1469,6 +1473,8 @@ pub fn check(
                 header.push(format!("{}.{}", l.name(), d.name()));
             }
             header.push(format!("{}.moving_share", l.name()));
+            header.push(format!("{}.readiness", l.name()));
+            header.push(format!("{}.reserve_fraction", l.name()));
             header.push(format!("{}.pace_bl_per_s", l.name()));
             for c in ["intake_per_body_h", "walked_m_per_body_h", "nn_m"] {
                 header.push(format!("{}.{c}", l.name()));
@@ -1527,6 +1533,18 @@ pub fn check(
                         f64::NAN
                     }
                 ));
+                // Breeding readiness and reserve over cap, means over the living bodies
+                // now.
+                let fauna = sim.fauna();
+                let core = fauna.config().founder(l).core;
+                let (mut rd, mut rf, mut n) = (0.0, 0.0, 0.0);
+                for a in fauna.view().animals.iter().filter(|a| a.founder == Some(l)) {
+                    rd += body_readiness(a, &core);
+                    rf += a.reserve / core.reserve_of(a.body).max(1e-300);
+                    n += 1.0;
+                }
+                row.push(format!("{:.4}", if n > 0.0 { rd / n } else { f64::NAN }));
+                row.push(format!("{:.4}", if n > 0.0 { rf / n } else { f64::NAN }));
                 row.push(format!(
                     "{:.4}",
                     get(&format!("{}.pace_bl_per_s", l.name()))

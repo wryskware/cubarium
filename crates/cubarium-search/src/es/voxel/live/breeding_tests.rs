@@ -131,7 +131,7 @@ fn readiness_after(cfg: FaunaConfig, stores: StartingStores, ticks: u32) -> (f64
 }
 
 /// A gestating body counts 1; a full body part-way through its hold counts its progress;
-/// a body below breeding size counts 0.
+/// a body below breeding size counts only its reserve part.
 #[test]
 fn a_gestating_body_counts_one() {
     let mut cfg = FaunaConfig::default();
@@ -159,5 +159,23 @@ fn a_gestating_body_counts_one() {
         reserve: 1.0,
     };
     let (r, _) = readiness_after(FaunaConfig::default(), small, 20);
-    assert_eq!(r, 0.0, "below birth_body");
+    let core = FaunaConfig::default().founder(Founder::Browser).core;
+    let reserve = core.reserve_of(0.2 * core.body_max);
+    let part = 0.5 * (reserve / core.reproduction.surplus_reserve(&core)).min(1.0);
+    assert!(r > 0.0, "below birth_body, it still counts its reserve");
+    assert!((r - part).abs() < 0.02 * part, "only its reserve part: {r} vs {part}");
+}
+
+/// Progress is half the reserve toward the surplus line and half the hold: monotonic in
+/// the reserve a body holds, at the same hold.
+#[test]
+fn readiness_is_monotonic_in_reserve() {
+    let mut last = -1.0;
+    for reserve in [0.0, 0.2, 0.4, 0.6, 0.8] {
+        let stores = StartingStores { body: 1.0, reserve };
+        let (r, _) = readiness_after(FaunaConfig::default(), stores, 2);
+        assert!(r > last, "reserve {reserve}: {r} after {last}");
+        assert!(r <= 0.5 + 1e-9 || reserve >= 0.6, "the hold has barely begun: {r}");
+        last = r;
+    }
 }

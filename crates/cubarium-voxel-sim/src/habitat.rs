@@ -2490,7 +2490,6 @@ mod tests {
                 &mut c.birth_cost,
                 &mut c.reproduction.surplus_floor,
                 &mut c.bite_per_s,
-                &mut c.bite_half_stock,
                 &mut c.growth_max_per_s,
             ] {
                 *v *= 100.0;

@@ -318,7 +318,7 @@ pub struct FounderPhysiology {
     /// for every lineage until the loftstrider's kick.
     pub counter: Option<Counter>,
     /// **The org-unit mass scale this physiology was built at** ([`FounderPhysiology::scale_mass`]
-    /// multiplies the nine absolute quantities of [`FounderPhysiology::core`] and records
+    /// multiplies the eight absolute quantities of [`FounderPhysiology::core`] and records
     /// the factor here). The senses read it: the `Self` references and taste's reference
     /// are the manifest's times this (`manifest::SELF_REFERENCE_RULE`,
     /// `TASTE_REFERENCE_RULE`), so a heavier body reads "a fraction of an adult" and a
@@ -408,7 +408,7 @@ fn one() -> f64 {
 }
 
 impl FounderPhysiology {
-    /// Make this lineage `k` times heavier in org-units: the nine absolute quantities of
+    /// Make this lineage `k` times heavier in org-units: the eight absolute quantities of
     /// its core ([`crate::SpeciesConfig::scale_mass`]) times `k`, and the recorded
     /// [`FounderPhysiology::mass_scale`] with them. Per-unit rates, clocks and metres stay.
     pub fn scale_mass(&mut self, k: f64) {

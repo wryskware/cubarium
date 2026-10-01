@@ -795,7 +795,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.founder_cap` | 12 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.vaulttree.profile.*.wood_fraction_max` | 0.1, 0.4, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.vaulttree.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
-| `flora.vaulttree.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.6 … (14 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.vaulttree.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.55 … (14 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
 | `flora.vaulttree.profile.*.layers.*.radius` | 1.0, 0.15, 1.0, 0.15 … (7 values) | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
 | `flora.vaulttree.profile.*.layers.*.share` | 1.0, 0.0, 1.0, 0.0 … (7 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.vaulttree.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.0 … (7 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
@@ -986,7 +986,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `fauna.frondgrazer.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
 | `fauna.frondgrazer.bite_per_s` | 0.06 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
-| `fauna.frondgrazer.bite_half_stock` | 0.15 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.frondgrazer.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.frondgrazer.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.frondgrazer.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.frondgrazer.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
@@ -1009,7 +1009,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.littershredder.core.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
 | `fauna.founders.littershredder.core.bite_per_s` | 0.015 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
-| `fauna.founders.littershredder.core.bite_half_stock` | 0.0375 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.littershredder.core.body_max` | 0.375 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.littershredder.core.growth_max_per_s` | 0.000102 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
@@ -1072,7 +1072,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
 | `fauna.founders.frondgrazer.core.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
 | `fauna.founders.frondgrazer.core.bite_per_s` | 0.06 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
-| `fauna.founders.frondgrazer.core.bite_half_stock` | 0.15 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.founders.frondgrazer.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.frondgrazer.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.frondgrazer.core.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.frondgrazer.core.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
@@ -1135,7 +1135,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
 | `fauna.founders.lanternjaw.core.maintenance_per_s` | 0.0002 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
 | `fauna.founders.lanternjaw.core.bite_per_s` | 0.042 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
-| `fauna.founders.lanternjaw.core.bite_half_stock` | 0.105 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.founders.lanternjaw.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.lanternjaw.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.lanternjaw.core.growth_max_per_s` | 0.00007500000000000001 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
