@@ -5,8 +5,8 @@
 #[path = "support/registry_spec.rs"]
 mod spec;
 
-use cubarium_voxel::Config;
 use cubarium_voxel::registry;
+use cubarium_voxel::{Config, Landform, Recipe, Terrarium};
 use cubarium_voxel::weather::{DayClock, WeatherSpeed};
 
 fn populated() -> Config {
@@ -18,21 +18,89 @@ fn populated() -> Config {
     c
 }
 
+/// The terrain generators' variants: each holds numbers the default `ridge` has none of.
+fn staged() -> Config {
+    Config { landform: Landform::Staged(Recipe::SMALL), ..Config::default() }
+}
+
+fn terrarium() -> Config {
+    Config { landform: Landform::Terrarium(Terrarium::DESK), ..Config::default() }
+}
+
 #[test]
 fn every_world_number_has_a_row_and_every_row_a_number() {
-    spec::coverage(registry::world(), &[&Config::default(), &populated()]);
+    spec::coverage(
+        registry::world(),
+        &[&Config::default(), &populated(), &staged(), &terrarium()],
+    );
+}
+
+/// The landform rows are all optional (the default landform has none of their fields), so
+/// the generic coverage cannot tell a stale one: every row under `world.landform` must
+/// match a leaf of the staged recipe or the terrarium.
+#[test]
+fn every_landform_row_matches_a_field_of_a_variant() {
+    let reg = registry::world();
+    let mut leaves = Vec::new();
+    for cfg in [staged(), terrarium()] {
+        let tree = registry::to_value(&cfg).expect("toml");
+        leaves.extend(reg.numeric_leaves(&tree).into_iter().map(|(p, _)| p));
+    }
+    let stale: Vec<&str> = reg
+        .rows()
+        .iter()
+        .filter(|r| r.path.starts_with("world.landform."))
+        .filter(|r| !leaves.iter().any(|p| r.matches(p)))
+        .map(|r| r.path.as_str())
+        .collect();
+    assert!(stale.is_empty(), "landform rows that match no field: {stale:?}");
 }
 
 #[test]
 fn get_and_set_round_trip_on_every_world_row() {
-    spec::round_trip(registry::world(), &Config::default());
-    spec::round_trip(registry::world(), &populated());
+    for cfg in [Config::default(), populated(), staged(), terrarium()] {
+        spec::round_trip(registry::world(), &cfg);
+    }
 }
 
 #[test]
 fn a_world_value_outside_its_range_is_refused_naming_path_and_range() {
-    spec::range_refusals(registry::world(), &Config::default());
-    spec::range_refusals(registry::world(), &populated());
+    for cfg in [Config::default(), populated(), staged(), terrarium()] {
+        spec::range_refusals(registry::world(), &cfg);
+    }
+}
+
+/// A TOML `[world.landform]` table replaces the variant whole, and the numbers it carries
+/// are range-checked against the rows; a `--set` of one number needs its variant in force.
+#[test]
+fn a_landform_table_replaces_the_variant_and_a_number_sets_inside_it() {
+    let reg = registry::world();
+    let mut c = Config::default();
+    let table: toml::Table = toml::from_str("[landform.terrarium]\nsoil_m = 0.5\n")
+        .map(|t: toml::Table| match t.get("landform") {
+            Some(toml::Value::Table(l)) => l.clone(),
+            _ => panic!("no landform"),
+        })
+        .map(|l| {
+            let mut w = toml::Table::new();
+            w.insert("landform".into(), toml::Value::Table(l));
+            w
+        })
+        .expect("toml");
+    reg.apply_table(&mut c, &table).expect("a whole landform table");
+    assert!(matches!(&c.landform, Landform::Terrarium(t) if t.soil_m == 0.5));
+
+    reg.set(&mut c, "world.landform.terrarium.grove_soil_m", toml::Value::Float(1.0))
+        .expect("a number inside the variant in force");
+    assert!(matches!(&c.landform, Landform::Terrarium(t) if t.grove_soil_m == 1.0));
+    let e = reg
+        .set(&mut c, "world.landform.terrarium.soil_m", toml::Value::Float(-1.0))
+        .expect_err("a negative soil depth");
+    assert!(e.contains("soil_m") && e.contains("[0, inf)"), "{e}");
+    let e = reg
+        .set(&mut Config::default(), "world.landform.terrarium.soil_m", toml::Value::Float(0.5))
+        .expect_err("the ridge has no terrarium numbers");
+    assert!(e.contains("unknown parameter"), "{e}");
 }
 
 #[test]

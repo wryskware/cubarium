@@ -270,6 +270,11 @@ pub struct Registry {
     rows: Vec<Row>,
     aliases: Vec<Alias>,
     opaque: Vec<String>,
+    /// Subtrees that **have rows but are replaced whole** by a TOML table or a `--set` of
+    /// the subtree itself (an enum: the terrain generator, whose variants hold different
+    /// fields). A leaf under one is set by its path like any other, once the variant it
+    /// belongs to is the one in force.
+    whole: Vec<String>,
     /// Rows without a `*`, by path; the rest are scanned.
     exact: std::collections::HashMap<String, usize>,
     wild: Vec<usize>,
@@ -295,7 +300,20 @@ impl Registry {
             .iter()
             .map(|a| a.pattern.split('.').map(str::to_string).collect())
             .collect();
-        Registry { root, rows, aliases, opaque, exact, wild, alias_segs }
+        Registry { root, rows, aliases, opaque, whole: Vec::new(), exact, wild, alias_segs }
+    }
+
+    /// The same table with `whole` subtrees: registered leaves that a TOML file or a set
+    /// replaces as one table, because the subtree is an enum whose variants differ
+    /// ([`Registry::new`]'s `opaque` registers no row for them at all).
+    pub fn with_whole(mut self, whole: Vec<String>) -> Registry {
+        self.whole = whole;
+        self
+    }
+
+    /// Whether `path` is exactly one of the whole-replaced subtrees.
+    fn is_whole(&self, path: &str) -> bool {
+        self.whole.iter().any(|w| w == path)
     }
 
     pub fn root(&self) -> &'static str {
@@ -490,7 +508,9 @@ impl Registry {
         for (k, v) in table {
             let path = format!("{prefix}.{k}");
             match v {
-                Value::Table(t) if !self.is_opaque(&path) => self.flatten_into(path, t, out),
+                Value::Table(t) if !self.is_opaque(&path) && !self.is_whole(&path) => {
+                    self.flatten_into(path, t, out)
+                }
                 other => out.push((path, other.clone())),
             }
         }
@@ -692,6 +712,7 @@ pub use toml;
 pub fn world() -> &'static Registry {
     static TABLE: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
-        Registry::new("world", crate::world_rows::rows(), Vec::new(), vec!["world.landform".into()])
+        Registry::new("world", crate::world_rows::rows(), Vec::new(), Vec::new())
+            .with_whole(vec!["world.landform".into()])
     })
 }

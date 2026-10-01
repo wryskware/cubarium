@@ -208,5 +208,6 @@ pub(crate) fn rows() -> Vec<Row> {
             m("cool_c", "degC", any_inf, "while it rains the air relaxes toward this much cooler").grade("B"),
         ]);
     }
+    rows.extend(crate::landform_rows::rows());
     rows
 }
