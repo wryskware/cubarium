@@ -159,8 +159,10 @@ recovery; saturation-immune (its niche stand-in).
 | Stage | Layers |
 | --- | --- |
 | seedling ≤ 0.1 | Foliage 0–1.0, r 1.0, share 1.0, p 0.4 |
-| juvenile ≤ 0.4 | Trunk 0–0.6, r 0.15 · Foliage 0.6–1.0, r 1.0, share 1.0, p 0.4 |
-| adult | Trunk 0–0.5, r 0.15 · Trunk 0.5–0.7, r 0.6, p 0.85 (limbs: sparse occluder, no foliage) · Foliage 0.7–1.0, r 1.0, share 0.85, p 0.45 (lobes with sky gaps) · Drape 0.35–0.5, r 0.7, share 0.15, p 0.9 (hanging filaments) |
+| juvenile ≤ 0.4 | Trunk 0–0.55, r 0.15 · Foliage 0.55–1.0, r 1.0, share 1.0, p 0.4 |
+| adult | Trunk 0–0.45, r 0.15 · Trunk 0.45–0.55, r 0.6, p 0.85 (limbs: sparse occluder, no foliage) · Foliage 0.55–1.0, r 1.0, share 0.85, p 0.45 (shelves with sky gaps) · Drape 0.25–0.55, r 0.7, share 0.15, p 0.9 (hanging filaments) |
+
+Bands moved to the artbook pick (`art/gen/artbook/vaulttree.png`) on 2026-10-01 at Wrysk's call; shares and porosity unchanged.
 
 The **sky gaps** are a number (p 0.45): an adult vault lets more than half the light
 through, which is what keeps an understory alive under it and is why velvetpad and
