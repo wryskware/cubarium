@@ -19,7 +19,9 @@ foliage layer i, drape i (i = the stage's foliage index, by the band the cell's 
 falls in) or accent.
 
 Animals: each founder in `BINS` size bins, newborn to adult (length ~ body^(1/3)),
-facing +x, one pose, centred on the anchor cell.
+facing +x, one pose, centred on the anchor cell, from `animal_models.py`'s builders (model
+pass MP-A); the unsimulated specimens (`SPECIMENS`) as one adult model each, under the
+manifest's `specimens` key.
 
 Voxelization is the lineup's rule — a cell whose centre lies inside a part or within
 half a voxel of its surface — for everything but the accents (bloom, fruit, sense patch).
@@ -43,6 +45,7 @@ from mathutils.bvhtree import BVHTree
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import organism_lineup as L  # noqa: E402  (import-safe: main() is guarded)
+import animal_models as A  # noqa: E402  (import-safe: main() is guarded)
 
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
@@ -65,7 +68,10 @@ SAMPLES = 4000  # how finely the growth curve is walked to find the size steps
 # (the stonecushion's rock lip, the siphonreed's pool, the glowcap's log) is scenery
 # the world already draws, and is not voxelized.
 PALETTE = ["plum", "violet", "detritus", "lilac", "p0", "p1", "p2", "teal", "magenta",
-           "warm", "starved"]
+           "warm", "starved",
+           # the animals' part slots (model pass MP-A; their colours are per animal)
+           "a_main", "a_dark", "a_pale", "a_mark", "a_limb", "a_foot", "a_head", "a_eye",
+           "a_glow", "a_membrane", "a_fruit", "a_tendril"]
 
 # What each builder material is on a plant: trunk, foliage, drape, accent, or None
 # (scenery). Anything unlisted is foliage.
@@ -73,13 +79,32 @@ PLANT_ROLE = {"plum": "trunk", "violet": "trunk", "detritus": "trunk", "warm": "
               "magenta": "accent", "bark": None, "split": None, "rock": None,
               "water": None, "film": None, "grey": None}
 PLANT_ROLE_BY_SPECIES = {
-    # D1: the cap is the glowcap's tissue, its stalk the mycelium's stem.
-    "glowcap": {"violet": "foliage", "p2": "foliage"},
+    # D1: the cap is the glowcap's tissue, its stalk the mycelium's stem. The model pass
+    # (2026-10-01) paints the cap's magenta speckles as cap tissue, not an accent cell.
+    "glowcap": {"violet": "foliage", "p2": "foliage", "magenta": "foliage"},
     # D11: the teal filaments are the drape layer.
     "vaulttree": {"teal": "drape"},
+    # The lanterns' magenta seams are smaller than a voxel: drawn, not voxelized.
+    "lanternberry": {"magenta": None},
+    # The violet showing between the leaves is the clump's own (mat) tissue.
+    "springturf": {"violet": "foliage"},
+    # The pad and its raised lip are the mat itself.
+    "velvetpad": {"violet": "foliage", "plum": "foliage"},
 }
-# On an animal: magenta is the sense patch / inherited accent; everything else is body.
-ANIMAL_ROLE = {"magenta": "accent"}
+# On an animal (`animal_models.py`): its sense patches and eyes are accents; everything
+# else is body.
+ANIMAL_ROLE = {slot: "accent" for slot in A.ACCENTS}
+
+# The unsimulated animals, baked as specimens: one adult model each, manifest key
+# `specimens`, at the builders' reference sizes (`animal_models.REF`). Placeholder sizes,
+# length x width x height in metres:
+#   chorister     1.4 x 0.35 x 0.6, + 0.8 m tail     reimagining §Chorister (11 x 3 x 5 v + 6.5)
+#   ripple-snail  0.19 x 0.19 x 0.125                reimagining §Ripple-snail, roster 1.5 x 1.5 v
+#   capgnawer     0.25 x 0.21 x 0.19                 reimagining §Capgnawer 0.25 x 0.19; width off the pick
+#   seedporter    upright as pictured: 0.5 head to pelvis, 0.62 across the arms, 0.92 tall
+#                 with the coiled tail               reimagining §Seedporter 0.5 x 0.25 body; pick proportions
+#   bellwing      0.375 wingspan, 0.4 tall with the tendril (0.31 without)   roster 2 x 3 v, D14 wingspan 3 v
+SPECIMENS = ["chorister", "ripple-snail", "capgnawer", "seedporter", "bellwing"]
 
 KIND = {"Foliage": L.F, "Trunk": L.T, "Drape": L.D, "Mat": L.MAT}
 
@@ -173,13 +198,13 @@ def build_plant(name, h, r, stage_i, stage, rng, vox):
 def build_animal(name, s, adult, vox):
     reset_scene()
     x = y = 0.5 * vox
-    fn = getattr(L, name)
-    Lm, Wm, Hm = (adult[0] * s, adult[1] * s, adult[2] * s)
-    if name == "frondgrazer":
-        fn(x, y, Lm, Wm, Hm, overlays=False)
-    else:
-        fn(x, y, Lm, Wm, Hm)
-    return list(L.ORG)
+    return A.build(name, x, y, adult[0] * s, adult[1] * s, adult[2] * s)
+
+
+def animal_role(slot):
+    """An animal part's role by its palette slot: accent, body ("trunk"), or None for a
+    material the palette lacks (not voxelized)."""
+    return ANIMAL_ROLE.get(slot, "trunk") if slot in PALETTE else None
 
 
 def voxelize(objs, vox, role_of):
@@ -336,25 +361,106 @@ def bake_plant(sp, vox, out_dir):
     return file, size, meta
 
 
+def voxelize_animal(objs, vox):
+    """{(i, j, k): slot}: `voxelize`'s rule for an animal, whose lofts carry several
+    materials on one closed mesh (a flank, a back stripe, a belly): a cell is in or out by
+    the whole mesh, and takes the material of the face nearest it. A single-material accent
+    part claims cells as `voxelize`'s accents do."""
+    parts, accents = [], []
+    for ob in objs:
+        me = ob.data
+        vs = [v.co.copy() for v in me.vertices]
+        if not vs:
+            continue
+        slots = [A.slot_of(m.name) for m in me.materials]
+        if not any(animal_role(s) for s in slots):
+            continue
+        bvh = BVHTree.FromPolygons(vs, [tuple(p.vertices) for p in me.polygons])
+        lo = Vector(min(v[k] for v in vs) for k in range(3))
+        hi = Vector(max(v[k] for v in vs) for k in range(3))
+        face_slot = [slots[p.material_index] for p in me.polygons]
+        if len(slots) == 1 and animal_role(slots[0]) == "accent":
+            accents.append((bvh, lo, hi, slots[0]))
+        else:
+            parts.append((bvh, lo, hi, face_slot))
+    half = vox / 2
+    cells = {}
+    if parts:
+        lo = Vector(min(p[1][k] for p in parts) for k in range(3))
+        hi = Vector(max(p[2][k] for p in parts) for k in range(3))
+        rng = [range(math.floor(lo[k] / vox) - 1, math.ceil(hi[k] / vox) + 1) for k in range(3)]
+        for i in rng[0]:
+            for j in rng[1]:
+                for k in rng[2]:
+                    if k < 0:
+                        continue
+                    c = Vector(((i + 0.5) * vox, (j + 0.5) * vox, (k + 0.5) * vox))
+                    best, best_d = None, 1e9
+                    for bvh, plo, phi, face_slot in parts:
+                        if any(c[a] < plo[a] - half or c[a] > phi[a] + half for a in range(3)):
+                            continue
+                        loc, nor, index, dist = bvh.find_nearest(c)
+                        if loc is None:
+                            continue
+                        slot = face_slot[index]
+                        if animal_role(slot) is None:
+                            continue
+                        # inside: the part the centre is deepest in (a thin tendril through
+                        # a bell does not take the bell's cell), in the material of its face
+                        # nearest the centre; outside, within half a voxel: nearest first
+                        d = -1.0 - dist if (c - loc).dot(nor) < 0 else dist
+                        if d <= half and d < best_d:
+                            best, best_d = slot, d
+                    if best is not None:
+                        cells[(i, j, k)] = best
+    for bvh, plo, phi, slot in accents:
+        inside = []
+        for i in range(math.floor(plo[0] / vox), math.ceil(phi[0] / vox)):
+            for j in range(math.floor(plo[1] / vox), math.ceil(phi[1] / vox)):
+                for k in range(max(0, math.floor(plo[2] / vox)), math.ceil(phi[2] / vox)):
+                    c = Vector(((i + 0.5) * vox, (j + 0.5) * vox, (k + 0.5) * vox))
+                    loc, nor, _, _ = bvh.find_nearest(c)
+                    if loc is not None and (c - loc).dot(nor) < 0:
+                        inside.append((i, j, k))
+        if not inside:
+            mid = (plo + phi) / 2
+            key = (math.floor(mid[0] / vox), math.floor(mid[1] / vox), math.floor(mid[2] / vox))
+            if key[2] >= 0:
+                inside.append(key)
+        for key in inside:
+            cells[key] = slot
+    return cells
+
+
+def animal_cells(objs, vox):
+    """An animal's cells, as `cells_of` writes them: tag accent or body."""
+    cells = voxelize_animal(objs, vox)
+    return cells_of(cells, lambda mat, k: 0x30 if animal_role(mat) == "accent" else 0x00)
+
+
 def bake_animal(f, vox, out_dir):
     name = f["name"]
     adult = (f["adult_length_m"], f["adult_width_m"], f["adult_height_m"])
     s0 = (f["body_min"] / f["body_max"]) ** (1.0 / 3.0)
-
-    def role_of(mat):
-        return ANIMAL_ROLE.get(mat, "trunk") if mat in PALETTE else None
-
     steps, meta = [], []
     for n in range(BINS):
         s = s0 + (1.0 - s0) * n / (BINS - 1)
-        objs = build_animal(name, s, adult, vox)
-        cells = voxelize(objs, vox, role_of)
-        cells = cells_of(cells, lambda mat, k: 0x30 if role_of(mat) == "accent" else 0x00)
+        cells = animal_cells(build_animal(name, s, adult, vox), vox)
         steps.append((adult[0] * s, adult[1] * s, [cells]))
         meta.append({"length_m": round(adult[0] * s, 4), "cells": len(cells)})
     file = f"{name}.cvm"
     size = write_cvm(os.path.join(out_dir, file), 1, steps)
     return file, size, meta
+
+
+def bake_specimen(name, vox, out_dir):
+    """One adult bin at the builder's reference size (the placeholder table above)."""
+    _, l0, w0, h0 = A.REF[name]
+    reset_scene()
+    cells = animal_cells(A.build(name, 0.5 * vox, 0.5 * vox, l0, w0, h0), vox)
+    file = f"{name}.cvm"
+    size = write_cvm(os.path.join(out_dir, file), 1, [(l0, w0, [cells])])
+    return file, size, [{"length_m": l0, "cells": len(cells)}]
 
 
 def main():
@@ -373,6 +479,8 @@ def main():
         if ONLY and os.path.exists(manifest_path):
             with open(manifest_path) as fh:
                 manifest = json.load(fh)
+            manifest["palette"] = PALETTE
+        manifest.setdefault("specimens", {})
         for sp in src["species"]:
             if (ONLY and sp["name"] not in ONLY) or not hasattr(L, sp["name"]):
                 continue  # no builder yet: no model, and the presenter falls back
@@ -381,15 +489,23 @@ def main():
             manifest["detail"][sp["name"]] = {"bytes": size, "steps": meta}
             print(f"{vox} m {sp['name']}: {len(meta)} steps, {size} bytes", flush=True)
         for f in src["founders"]:
-            if (ONLY and f["name"] not in ONLY) or not hasattr(L, f["name"]):
+            if (ONLY and f["name"] not in ONLY) or f["name"] not in A.REF:
                 continue
             file, size, meta = bake_animal(f, vox, out_dir)
             manifest["founders"][f["name"]] = file
             manifest["detail"][f["name"]] = {"bytes": size, "bins": meta}
             print(f"{vox} m {f['name']}: {len(meta)} bins, {size} bytes", flush=True)
+        for name in SPECIMENS:
+            if (ONLY and name not in ONLY) or name not in A.REF:
+                continue
+            file, size, meta = bake_specimen(name, vox, out_dir)
+            manifest["specimens"][name] = file
+            manifest["detail"][name] = {"bytes": size, "bins": meta}
+            print(f"{vox} m {name}: specimen, {meta[0]['cells']} cells, {size} bytes", flush=True)
         with open(manifest_path, "w") as fh:
             json.dump(manifest, fh, indent=1)
             fh.write("\n")
 
 
-main()
+if __name__ == "__main__":
+    main()

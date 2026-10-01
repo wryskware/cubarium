@@ -2512,6 +2512,7 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
                     roof_from_texture: !args.gpu_roof_walk,
                     models: load_models(cfg),
                     textures_under: None,
+                    specimens: Vec::new(),
                 },
             )?;
             if args.gpu_web_rate > 0.0 {

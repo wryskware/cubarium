@@ -72,7 +72,8 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
     let r = recipe(species);
     match tag {
         Tag::Trunk => {
-            let bark = lerp(r.bark.0, r.bark.1, t);
+            let (base, top) = r.part(material).unwrap_or(r.bark);
+            let bark = lerp(base, top, t);
             Swatch {
                 shadow: bark,
                 body: bark,
@@ -89,7 +90,10 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
             } else {
                 0.0
             };
-            let body = lerp(r.leaf.0, r.leaf.1, (t + bias).clamp(0.0, 1.0));
+            let body = match r.part(material) {
+                Some((base, tip)) => lerp(base, tip, t),
+                None => lerp(r.leaf.0, r.leaf.1, (t + bias).clamp(0.0, 1.0)),
+            };
             let layer = match tag {
                 Tag::Foliage(i) => i,
                 _ => 0,
@@ -101,7 +105,7 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
             shaded(body, r.leaf_glint)
         }
         Tag::Drape(_) => {
-            let (top, bottom) = r.drape.unwrap_or(r.leaf);
+            let (top, bottom) = r.part(material).or(r.drape).unwrap_or(r.leaf);
             // A drape hangs: its lowest cells are the tips.
             shaded(lerp(bottom, top, t), r.leaf_glint)
         }
@@ -132,38 +136,161 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
 /// The inherited sense patch on any body, and a plant's magenta accent.
 const SENSE: Rgb = 0xFF_2AFC;
 
-/// A founder cell's colours. `band` is the cell's height in the body (the back is
-/// lit, the belly dark); `accent` is a sense patch or eye.
+/// A founder cell's colours. `band` is the cell's height in the body; `accent` is a sense
+/// patch or eye, which flashes [`CROPPING_FLASH`] while the animal crops.
+///
+/// The frondgrazer and littershredder paint each part slot of their model
+/// (`scripts/blender/animal_models.py`) in its ramp from [`FRONDGRAZER`] and
+/// [`LITTERSHREDDER`], sampled from the artbook picks.
 pub fn animal(founder: Founder, material: u8, band: u8, accent: bool, cropping: bool) -> Swatch {
-    let t = f32::from(band.min(BANDS - 1)) / f32::from(BANDS - 1);
-    let (belly, back, eye) = match founder {
-        // Frondgrazer: a coral shell over a maroon belly, cyan eyes.
-        Founder::Browser => (0xA2_2A4A, 0xFF_8A6E, 0x5F_F0FF),
-        // Littershredder: a gold segmented back, magenta feelers (dossier D4's pixel).
-        Founder::Blind => (0xB0_6A18, 0xFF_D860, SENSE),
-        // Lanternjaw (interim, stage 1: its body plan is open): a dark teal carapace, an
-        // ember jaw. No model is baked for it, so this serves a future bake only.
-        Founder::Lanternjaw => (0x14_2A2E, 0x30_5A58, 0xFF_5A3C),
-    };
-    if accent {
-        let c = if cropping { CROPPING_FLASH } else { eye };
+    if accent && cropping {
         return Swatch {
-            shadow: c,
-            body: c,
+            shadow: CROPPING_FLASH,
+            body: CROPPING_FLASH,
             glint: 0xFF_FFFF,
         };
     }
-    // The bake's pale cutting edge (`lilac`) stays pale, and its dark legs (`violet`)
-    // stay dark, on any body.
-    let body = if material == model::named_index("lilac") {
-        0xFF_E0CC
-    } else if material == model::named_index("violet") {
-        lerp(belly, INK, 0.45)
-    } else {
-        lerp(belly, back, t)
-    };
-    // A model body is drawn with the plain block glyph, which paints every face in the
-    // `shadow` slot: the body colour goes there too.
+    match founder {
+        Founder::Browser => coat_swatch(FRONDGRAZER, material, band),
+        Founder::Blind => coat_swatch(LITTERSHREDDER, material, band),
+        // Lanternjaw (interim, stage 1: its body plan is open): a dark teal carapace, an
+        // ember jaw. No model is baked for it, so this serves a future bake only.
+        Founder::Lanternjaw => {
+            if accent {
+                return block(0xFF_5A3C);
+            }
+            let t = f32::from(band.min(BANDS - 1)) / f32::from(BANDS - 1);
+            block(lerp(0x14_2A2E, 0x30_5A58, t))
+        }
+    }
+}
+
+/// An unsimulated specimen's cell colours (`voxel_specimens`; the manifest's `specimens`),
+/// by its name, or `None` for a name with no coat.
+pub fn specimen(name: &str, material: u8, band: u8) -> Option<Swatch> {
+    specimen_coat(name).map(|coat| coat_swatch(coat, material, band))
+}
+
+/// The coat of a specimen by its manifest name.
+pub fn specimen_coat(name: &str) -> Option<Coat> {
+    Some(match name {
+        "chorister" => CHORISTER,
+        "ripple-snail" => RIPPLE_SNAIL,
+        "capgnawer" => CAPGNAWER,
+        "seedporter" => SEEDPORTER,
+        "bellwing" => BELLWING,
+        _ => return None,
+    })
+}
+
+/// One animal's colours: per model part slot (a [`model::PALETTE`] name), its ramp
+/// `(low, high)` by the cell's height band (belly → back, base → tip). The first entry is
+/// the fallback for a slot the coat lacks. Every hex is **sampled 2026-10-01 from the
+/// artbook pick** (`art/gen/artbook/`; `scripts/blender/animal_models.py` `COATS` is the
+/// same table), and is in `design/art-direction/species-colours-2026-09-24.md`.
+pub type Coat = &'static [(&'static str, Rgb, Rgb)];
+
+/// Coral saddle shield: shield, hoof band, belly skirt, wine saddles, legs and neck,
+/// hooves, scoop lining, stalk-eye lens and rim, shoulder sensor spots.
+pub const FRONDGRAZER: Coat = &[
+    ("a_main", 0xEE_7156, 0xFB_8162),
+    ("a_dark", 0x58_342D, 0x5D_3B31),
+    ("a_pale", 0xBB_7A5E, 0xDF_9F7D),
+    ("a_mark", 0x87_2935, 0x90_2C3A),
+    ("a_limb", 0x9B_4341, 0xD9_6862),
+    ("a_foot", 0xC0_927C, 0xCA_9B86),
+    ("a_head", 0xFE_D3AC, 0xFE_D3AC),
+    ("a_eye", 0x30_0919, 0x4E_162B),
+    ("a_glow", 0xEE_699E, 0xF3_70A2),
+    ("magenta", 0xC8_3C66, 0xD8_456F),
+];
+/// Long tapered crawler: gold plates, brown bands, pale underside / legs / feelers, claws,
+/// knee joints, the sensor spot.
+pub const LITTERSHREDDER: Coat = &[
+    ("a_main", 0xF4_AD31, 0xFE_D24E),
+    ("a_dark", 0x5A_2D10, 0x69_3819),
+    ("a_pale", 0xE6_C690, 0xFE_EEC0),
+    ("a_foot", 0x6D_3101, 0xE5_A537),
+    ("a_limb", 0xC0_6F0E, 0xC0_6F0E),
+    ("magenta", 0xA3_0E57, 0xA3_0E57),
+];
+/// Violet stalker: flank, dark back, pale countershade, rosettes, legs, claws, crest
+/// lobes, the magenta eye, the cyan muzzle.
+pub const CHORISTER: Coat = &[
+    ("a_main", 0x6C_55D3, 0x6C_55D5),
+    ("a_dark", 0x31_2675, 0x24_1B56),
+    ("a_pale", 0xB9_A8E2, 0xB9_A8E2),
+    ("a_mark", 0x26_1F5B, 0x26_1F5B),
+    ("a_limb", 0x30_256E, 0x6C_55D5),
+    ("a_foot", 0x2A_2061, 0x34_2878),
+    ("a_head", 0xB7_AAE1, 0xEB_DDFC),
+    ("a_eye", 0xD7_0FE3, 0xFD_22FE),
+    ("a_glow", 0x55_C5FB, 0x52_C4FC),
+];
+/// Organic azure dome: shell, dark foot, pale mantle edge, growth-ridge grooves, palp
+/// stalks, pink palp tips, the dark front opening.
+pub const RIPPLE_SNAIL: Coat = &[
+    ("a_main", 0x41_6EE4, 0x50_81F2),
+    ("a_dark", 0x1B_234C, 0x25_2D5A),
+    ("a_pale", 0x7F_A1F4, 0x96_B5FC),
+    ("a_mark", 0x17_2B6B, 0x17_2B6B),
+    ("a_limb", 0x5E_75CE, 0x5F_5BB9),
+    ("a_glow", 0xFC_56CE, 0xFC_57D0),
+    ("a_head", 0x0A_0D2A, 0x0A_0D2A),
+];
+/// Rose-mauve bark mantle: mantle, bark streaks, fringe, pale spots, body and legs, toes,
+/// mandibles, the mouth slit, the light pink sensor patches.
+pub const CAPGNAWER: Coat = &[
+    ("a_main", 0x9C_607A, 0xA7_6982),
+    ("a_mark", 0x6B_4E63, 0x78_596E),
+    ("a_pale", 0xEF_A8C1, 0xF8_D6EC),
+    ("a_glow", 0xE3_BCF8, 0xEC_CAFB),
+    ("a_limb", 0xB4_768E, 0xB7_778F),
+    ("a_foot", 0xBD_92BF, 0xF0_D1F0),
+    ("a_head", 0xBB_95BB, 0xF5_E5F4),
+    ("a_dark", 0x01_0000, 0x01_0000),
+    ("magenta", 0xFA_B6E4, 0xFE_C7EF),
+];
+/// Moss-green glider: skin, the open mouth, pale underside and face, dorsal stripe,
+/// claws, eyes, flank membranes, the carried fruit, the cheek sensor dots.
+pub const SEEDPORTER: Coat = &[
+    ("a_main", 0x5C_6A28, 0x88_9335),
+    ("a_dark", 0x36_1D13, 0x36_1D13),
+    ("a_pale", 0xBE_B55E, 0xEA_DE97),
+    ("a_mark", 0x21_361D, 0x2D_441F),
+    ("a_foot", 0x19_1817, 0x30_321A),
+    ("a_eye", 0x0C_0707, 0x0C_0707),
+    ("a_membrane", 0xDB_DA7B, 0xED_EAA5),
+    ("a_fruit", 0x80_2B51, 0xD6_658A),
+    ("magenta", 0xB5_376A, 0xC1_3E7B),
+];
+/// Bellwing in its original colours: plum bell (lighter toward the mouth), lilac wings,
+/// cyan leading edges, mauve wing roots, the muted peach tendril, the magenta rim.
+pub const BELLWING: Coat = &[
+    ("a_main", 0x5E_1764, 0x2E_0D3E),
+    ("a_membrane", 0xA5_80F2, 0xC1_9BFC),
+    ("a_glow", 0x5A_BCEF, 0x95_E7FC),
+    ("a_limb", 0x9C_547D, 0x9C_547D),
+    ("a_tendril", 0xEE_B4A7, 0xF1_C4B9),
+    ("magenta", 0xC0_099E, 0xE2_0CAF),
+];
+
+/// A model cell of `coat` in its slot's ramp at its height band.
+fn coat_swatch(coat: Coat, material: u8, band: u8) -> Swatch {
+    let t = f32::from(band.min(BANDS - 1)) / f32::from(BANDS - 1);
+    let name = model::PALETTE.get(usize::from(material)).map(|(n, _)| *n);
+    let (_, lo, hi) = coat
+        .iter()
+        .find(|(slot, _, _)| Some(*slot) == name)
+        .or(coat.first())
+        .copied()
+        .unwrap_or(("", INK, INK));
+    block(lerp(lo, hi, t))
+}
+
+/// A model body is drawn with the plain block glyph, which paints every face in the
+/// `shadow` slot: the body colour goes there too.
+fn block(body: Rgb) -> Swatch {
     Swatch {
         shadow: body,
         body,
@@ -178,15 +305,15 @@ pub const CROPPING_FLASH: Rgb = 0xFF_F27A;
 /// The starving tint of a sense patch (dossier D3/D4).
 pub const STARVED_ACCENT: Rgb = 0x7A_2A78;
 
-/// Bloomcrown's core (D9's rounded mass between the vanes), the blush of
-/// `design/art-direction/species-colours-2026-09-24.md`, which supersedes the dossier's hex.
+/// Bloomcrown's core (D9's rounded mass between the vanes): the pick's blush pod, sampled
+/// 2026-10-01 (`design/art-direction/species-colours-2026-09-24.md`).
 /// Its unripe bloom paints the same colour. It glows (package L5).
-pub const BLOOMCROWN_CORE: Rgb = 0xFF_D2F2;
+pub const BLOOMCROWN_CORE: Rgb = 0xFE_D9F2;
 /// The bake's foliage layer that holds bloomcrown's core (material `p1`).
 const BLOOMCROWN_CORE_LAYER: u8 = 1;
-/// Bloomcrown's ripe bloom: D9's "ripe: the core turns the warm accent", in the colour
-/// file's ripe hex.
-pub const BLOOMCROWN_BLOOM: Rgb = 0xFF_8A3A;
+/// Bloomcrown's ripe bloom: D9's "ripe: the core turns the warm accent", the pick's
+/// orange pod tip (sampled 2026-10-01).
+pub const BLOOMCROWN_BLOOM: Rgb = 0xFE_AC42;
 
 /// One species' colours.
 struct Recipe {
@@ -199,6 +326,10 @@ struct Recipe {
     core: Option<(u8, u8, Rgb)>,
     /// Foliage glint, if not the default lift toward white.
     leaf_glint: Option<Rgb>,
+    /// Per-part ramps sampled from the artbook pick (model pass, 2026-10-01): a trunk,
+    /// foliage or drape cell the bake drew in this palette material paints this
+    /// `(base, tip)` ramp instead of `bark`, `leaf` or `drape`.
+    parts: &'static [(&'static str, Rgb, Rgb)],
     /// Drape, `(top, bottom tip)`; `None` uses the leaf ramp.
     drape: Option<(Rgb, Rgb)>,
     /// A ripe warm accent, `(body, glint)`.
@@ -207,81 +338,159 @@ struct Recipe {
     unripe: Rgb,
 }
 
+impl Recipe {
+    /// The pick's ramp for a bake material, if this species has one.
+    fn part(&self, material: u8) -> Option<(Rgb, Rgb)> {
+        let name = model::PALETTE.get(usize::from(material))?.0;
+        self.parts
+            .iter()
+            .find(|(n, _, _)| *n == name)
+            .map(|&(_, a, b)| (a, b))
+    }
+}
+
 fn recipe(species: Species) -> Recipe {
     let plain = Recipe {
         bark: (0x3A_1A5A, 0x5A_2E7A),
         leaf: (0x1E_2798, 0x42_C5F8),
         core: None,
         leaf_glint: None,
+        parts: &[],
         drape: None,
         ripe: (0xFF_9B50, 0xFF_E8A8),
         unripe: 0x4A_2A6A,
     };
     match species {
-        // Hot pink vanes over a berry rosette, a pale blush core, an orange bloom.
+        // Every plant below is sampled 2026-10-01 from its artbook pick
+        // (art/gen/artbook/README.md): one base-to-tip ramp per part the builder draws.
+        //
+        // Bloomcrown (bloomcrown-pink-preferred.png): violet stem, periwinkle basal straps,
+        // hot-pink vanes round a blush pod (the core), an orange cap (the bloom).
         Species::Bloomcrown => Recipe {
-            bark: (0x4A_1250, 0x6E_1E6A),
-            leaf: (0x9A_1080, 0xFF_52D0),
+            bark: (0x2E_035F, 0x5C_1EAF),
+            leaf: (0x8B_0251, 0xFD_48D1),
             core: Some((BLOOMCROWN_CORE_LAYER, model::named_index("p1"), BLOOMCROWN_CORE)),
-            leaf_glint: Some(0xFF_E0F6),
-            ripe: (BLOOMCROWN_BLOOM, 0xFF_E890),
+            leaf_glint: Some(0xFD_C6F2),
+            parts: &[
+                ("violet", 0x2E_035F, 0x5C_1EAF),
+                ("p0", 0x5D_55C2, 0x85_82F3),
+                ("p2", 0x8B_0251, 0xFD_48D1),
+            ],
+            ripe: (BLOOMCROWN_BLOOM, 0xFE_E6EB),
             unripe: BLOOMCROWN_CORE,
             ..plain
         },
-        // Sea-glass tiers: deep teal at the lowest tier to aquamarine at the top.
+        // Umbrellafrond (umbrellafrond.png): a violet stem with darker collars, teal
+        // fronds with pale mint ribs.
         Species::Umbrellafrond => Recipe {
-            bark: (0x24_1650, 0x3E_2A7E),
-            leaf: (0x0A_4A5E, 0x46_F2D2),
-            leaf_glint: Some(0xC8_FFF2),
+            bark: (0x4D_1378, 0x78_23B4),
+            leaf: (0x00_696F, 0x02_9894),
+            leaf_glint: Some(0xDC_FDEE),
+            parts: &[
+                ("violet", 0x4D_1378, 0x78_23B4),
+                ("plum", 0x51_176D, 0x7E_2C9D),
+                ("p1", 0x00_696F, 0x02_9894),
+                ("p2", 0x4D_E0C4, 0xDC_FDEE),
+            ],
             ..plain
         },
-        // Mint tufts.
+        // Springturf (springturf.png): tall mint-teal straps, a short dark-teal rank,
+        // violet deep between them.
         Species::Springturf => Recipe {
-            leaf: (0x10_6A5A, 0x6A_F7BE),
-            leaf_glint: Some(0xD8_FFEC),
+            leaf: (0x03_7B7E, 0x48_F5BE),
+            leaf_glint: Some(0xA4_FCDB),
+            parts: &[
+                ("p2", 0x03_7B7E, 0x48_F5BE),
+                ("p0", 0x02_3A47, 0x03_7B7E),
+                ("violet", 0x20_054E, 0x32_166B),
+            ],
             ..plain
         },
-        // Pale lilac-white domes over a deep violet root mat.
+        // Stonecushion (stonecushion.png): pale-lilac lobes, cyan pores, a dark
+        // magenta-violet root mat.
         Species::Stonecushion => Recipe {
-            bark: (0x51_0B6D, 0x51_0B6D),
-            leaf: (0x7A_5AC8, 0xEE_E4FF),
+            bark: (0x39_0542, 0x56_1470),
+            leaf: (0x7A_4ED0, 0xDA_BBFD),
+            leaf_glint: Some(0xF4_E6FD),
+            parts: &[
+                ("lilac", 0x7A_4ED0, 0xDA_BBFD),
+                ("p2", 0x01_B8EC, 0x01_B8EC),
+                ("detritus", 0x39_0542, 0x56_1470),
+            ],
             ..plain
         },
-        // Cobalt velvet with cyan glints.
+        // Velvetpad (velvetpad-provisional.png, provisional): a dark violet pad with a
+        // purple lip, cobalt moss, cyan channels and blue-to-cyan buds.
         Species::Velvetpad => Recipe {
-            leaf: (0x1C_46B0, 0x2E_6CE0),
-            leaf_glint: Some(0x7C_E8FF),
+            leaf: (0x1B_296C, 0x38_66DA),
+            leaf_glint: Some(0x75_F1F8),
+            parts: &[
+                ("violet", 0x33_1D47, 0x48_295E),
+                ("plum", 0x5F_3D8D, 0x8F_60B8),
+                ("p1", 0x1B_296C, 0x38_66DA),
+                ("p2", 0x45_94F0, 0x75_F1F8),
+                ("teal", 0x75_F1F8, 0x75_F1F8),
+            ],
             ..plain
         },
-        // Luminous aqua caps on a lilac stalk.
+        // Glowcap (glowcap-on-vaulttree.png, the mushroom only): a dark violet stalk, a
+        // purple cap with flat dark spots, paler lilac spots and magenta speckles, a cyan
+        // brim and underside (the lip that glows).
         Species::Glowcap => Recipe {
-            bark: (0x8A_5AC0, 0xB9_9BE6),
-            leaf: (0x2A_E0B0, 0x7C_FFDA),
-            leaf_glint: Some(0xF0_FFF8),
+            bark: (0x55_4199, 0x35_256D),
+            leaf: (0x44_26A1, 0x76_4BD7),
+            leaf_glint: Some(0xB0_78EF),
+            parts: &[
+                ("detritus", 0x55_4199, 0x35_256D),
+                ("violet", 0x44_26A1, 0x76_4BD7),
+                ("p0", 0x29_1654, 0x29_1654),
+                ("lilac", 0xB0_78EF, 0xB0_78EF),
+                ("magenta", 0xF6_07FC, 0xF6_07FC),
+                ("p2", 0x2F_B0E2, 0x3F_F9FC),
+            ],
             ..plain
         },
-        // The old giant: emerald lobes over plum bark, curtains of glowing cyan drape.
+        // Vaulttree (vaulttree.png): lit and mid violet trunk plates and one dark-teal
+        // plate, violet limbs; dark-teal shelves with mint rims; cyan tendrils,
+        // brightest at their tips.
         Species::Vaulttree => Recipe {
-            bark: (0x33_1242, 0x5A_2670),
-            leaf: (0x0B_4A3C, 0x5C_E68E),
-            leaf_glint: Some(0xD6_FFE2),
-            drape: Some((0x1E_8AB8, 0x8C_F6FF)),
+            bark: (0x5F_36A9, 0x4A_2D8E),
+            leaf: (0x01_4C4D, 0x01_696E),
+            leaf_glint: Some(0x96_F9DC),
+            drape: Some((0x01_97B1, 0x00_CEEC)),
+            parts: &[
+                ("plum", 0x7B_46CA, 0x6C_3EB9),
+                ("violet", 0x5F_36A9, 0x4A_2D8E),
+                ("detritus", 0x01_261F, 0x01_261F),
+                ("p1", 0x01_4C4D, 0x01_696E),
+                ("p2", 0x50_C5A9, 0x96_F9DC),
+            ],
             ..plain
         },
-        // Acid-lime leaves on plum stems, glowing orange lanterns.
+        // Lanternberry (lanternberry-blue.png): violet stems, blue leaflets, deep-plum
+        // lanterns glowing orange inside when ripe.
         Species::Lanternberry => Recipe {
-            bark: (0x3A_1A5A, 0x52_2A6E),
-            leaf: (0x4E_7E16, 0xCC_FF52),
-            leaf_glint: Some(0xF2_FFC0),
-            ripe: (0xFF_7A2A, 0xFF_E6A0),
-            unripe: 0x6A_2E72,
+            bark: (0x2E_0944, 0x4E_178C),
+            leaf: (0x01_3793, 0x18_ADFC),
+            leaf_glint: Some(0x53_F1FD),
+            parts: &[
+                ("violet", 0x2E_0944, 0x4E_178C),
+                ("p1", 0x01_3793, 0x18_ADFC),
+            ],
+            ripe: (LANTERN_RIPE, 0xFD_EC9D),
+            unripe: 0x37_0A49,
             ..plain
         },
-        // Pale celadon stalks rising out of the water to electric magenta heads.
+        // Siphonreed (siphonreed.png): slim teal stems, pale celadon swollen shafts,
+        // rounded pink fan heads.
         Species::Siphonreed => Recipe {
-            leaf: (0x24_4E66, 0xC4_EEDC),
-            core: Some((0, model::named_index("p2"), 0xFF_40D2)),
-            leaf_glint: Some(0xFF_C8F4),
+            leaf: (0x01_4B74, 0x23_A6BC),
+            leaf_glint: Some(0xEE_FCE5),
+            parts: &[
+                ("p1", 0x01_4B74, 0x23_A6BC),
+                ("lilac", 0x57_C5C9, 0xA5_EED3),
+                ("p2", 0xEB_2189, 0xFD_4FB6),
+            ],
             ..plain
         },
     }
@@ -329,13 +538,15 @@ pub enum Lip {
     Ripe = 2,
 }
 
-/// D1 glowcap `[lip]`: "the luminous tissue ... electric cyan", full when ripe.
-pub const LIP_RIPE: Rgb = 0x42_C5F8;
-/// D1 glowcap, fruiting: "lip at half intensity".
-pub const LIP_FRUITING: Rgb = 0x2A_86B8;
+/// D1 glowcap `[lip]`: "the luminous tissue ... electric cyan", full when ripe. Sampled
+/// 2026-10-01 from the pick's brim.
+pub const LIP_RIPE: Rgb = 0x3F_F9FC;
+/// D1 glowcap, fruiting: "lip at half intensity" (the pick's underside cyan).
+pub const LIP_FRUITING: Rgb = 0x2F_B0E2;
 /// D12 lanternberry, ripe: the open lantern's "warm interior seen through the opening"
-/// (the roster names the fruit luminous: organism-scale-and-roster-2026-09-21.md).
-pub const LANTERN_RIPE: Rgb = 0xFF_9B50;
+/// (the roster names the fruit luminous: organism-scale-and-roster-2026-09-21.md),
+/// sampled 2026-10-01 from the pick's lantern interior.
+pub const LANTERN_RIPE: Rgb = 0xFD_A243;
 /// D15 latticevine flower: "its lip flaring into a glowing `#42C5F8` mouth".
 pub const BELL_MOUTH: Rgb = 0x42_C5F8;
 
