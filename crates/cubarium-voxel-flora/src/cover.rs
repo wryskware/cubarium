@@ -60,6 +60,7 @@ use serde::{Deserialize, Serialize};
 use cubarium_voxel::{Config as WorldConfig, DT, Material, VoxelView, World};
 
 use crate::step::{self, Rng};
+use cubarium_voxel::organism::{Budget, build_from};
 use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, Taken};
 
 /// A vine's identity: unique for the life of the layer, never reused.
@@ -1085,23 +1086,18 @@ pub(crate) fn drink_wants(
     wants.clear();
     let Flora { config, cover, .. } = flora;
     let vc = &config.latticevine;
-    let volume = view.config.voxel_volume();
-    let mats = &view.config.materials;
     for vi in 0..cover.vines.len() {
-        let root = cover.vines[vi].root;
-        step::root_box_dims_into(view, root, vc.rooting_depth, vc.rooting_radius, box_);
-        drinkable.clear();
-        let (mut water, mut band) = (0.0, 0.0);
-        for &i in box_.iter() {
-            let m = view.material[i];
-            let pore = view.pore[i];
-            let w =
-                (mats.field_capacity(m) - mats.wilting_point(m)).max(0.0) * mats.pore_capacity(m);
-            water += step::available_water(mats, m, pore) * w;
-            band += w;
-            drinkable
-                .push((pore - mats.wilting_point(m)).max(0.0) * mats.pore_capacity(m) * volume);
-        }
+        // A stand's root box and read. The vine has no aeration rule, so no cell counts
+        // as saturated.
+        let (water, band, _) = step::read_root_box(
+            view,
+            cover.vines[vi].root,
+            vc.rooting_depth,
+            vc.rooting_radius,
+            f64::INFINITY,
+            box_,
+            drinkable,
+        );
         let avail = if band > 0.0 { water / band } else { 0.0 };
         let mu = step::ramp(avail, vc.wilt_water, vc.full_water);
         let a = &mut cover.rt.aux[vi];
@@ -1110,19 +1106,9 @@ pub(crate) fn drink_wants(
         a.demand = demand;
         a.drank = 0.0;
         cover.vines[vi].water = avail;
-        if demand <= 0.0 || box_.is_empty() {
-            continue;
-        }
-        let stock: f64 = drinkable.iter().sum();
-        if stock <= 0.0 {
-            continue;
-        }
-        for (&v, &d) in box_.iter().zip(drinkable.iter()) {
-            let share = demand * d / stock;
-            if share > 0.0 {
-                wants.push((v as u32, vi as u32, share));
-            }
-        }
+        step::share_over_box(demand, box_, drinkable, |v, share| {
+            wants.push((v as u32, vi as u32, share));
+        });
     }
 }
 
@@ -1155,7 +1141,7 @@ pub(crate) fn drink_done(flora: &mut Flora) {
 
 /// After the stands grow: dormancy, the economy, the per-face pass, contests, starvation,
 /// spread and sisters.
-pub(crate) fn grow(flora: &mut Flora, world: &World) {
+pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
     let tick = flora.tick;
     let view = world.view();
     let raining = view.is_raining();
@@ -1179,16 +1165,6 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
     let vc = &config.latticevine;
     let e = vc.energy_density;
     let thr = vc.contest_threshold;
-    // WX3: a vine's leaves earn only what the world's day lets them.
-    let daylight = world.life_daylight();
-    // WX3 round 2: its upkeep follows the air like every plant's.
-    let upkeep_q = crate::step::upkeep_factor(
-        world.life_temperature_c(),
-        world.config().climate.temperature_c,
-        config.upkeep_q10,
-    );
-    // WX3 round 4: and the plant night rule, like every photosynthetic plant's.
-    let night = world.plant_night_scale();
 
     // ---- 1. dormancy and the economy, per vine
     for vi in 0..cover.vines.len() {
@@ -1216,20 +1192,27 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
         } else {
             1.0
         };
+        // A stand's income function, over the vine's lit leaves: `light_leaf` is
+        // Σ light · leafiness, and the limit is the share of its water demand met.
         let income = if v.dormant {
             0.0
         } else {
-            (vc.assimilation * a.mu * water * a.light_leaf * daylight * DT).max(0.0)
+            step::photosynthesis(vc.assimilation, a.light_leaf, climate.daylight, a.mu, water)
         };
-        v.reserve += income;
         ledger.fixed_in += income;
         ledger.light_in += e * income;
 
-        let upkeep = (vc.leaf_upkeep * a.leaf + vc.wood_upkeep * f64::from(a.faces)) * upkeep_q * night * DT;
-        let paid = upkeep.min(v.reserve).max(0.0);
-        v.reserve -= paid;
-        book_respired(ledger, e, paid);
-        let short = upkeep - paid;
+        // The organism budget: upkeep from income, then reserve, and the rest of the income
+        // to the reserve, which has no cap. Building (regrowth, spread, spurs) is paid out
+        // of the reserve below.
+        let upkeep = (vc.leaf_upkeep * a.leaf + vc.wood_upkeep * f64::from(a.faces))
+            * climate.upkeep
+            * climate.night
+            * DT;
+        let mut budget = Budget::new(income, f64::INFINITY);
+        let short = budget.upkeep(&mut v.reserve, upkeep).unpaid;
+        v.reserve += budget.store(f64::INFINITY);
+        book_respired(ledger, e, budget.close());
         let aux = &mut cover.rt.aux[vi];
         aux.leaf_scale = 1.0;
         aux.starving = false;
@@ -1309,14 +1292,9 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
                     drop_at(rt, s, &view, face, root, &mut litter, lost * vc.leaf_mass);
                 }
             } else if open && f.leafiness < 1.0 && vc.regrow_rate > 0.0 && v.reserve > 0.0 {
-                let mut dl = (vc.regrow_rate * DT).min(1.0 - f.leafiness);
-                let mut cost = dl * vc.leaf_mass;
-                if cost > v.reserve {
-                    cost = v.reserve;
-                    dl = cost / vc.leaf_mass;
-                }
-                v.reserve -= cost;
-                f.leafiness += dl;
+                // Leaf out of the reserve at par: a vine's leaf has no construction cost.
+                let want = (vc.regrow_rate * DT).min(1.0 - f.leafiness) * vc.leaf_mass;
+                f.leafiness += build_from(&mut v.reserve, want, 1.0) / vc.leaf_mass;
                 if 1.0 - f.leafiness < 1e-12 {
                     f.leafiness = 1.0;
                 }

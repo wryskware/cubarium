@@ -198,28 +198,16 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
         cubarium_voxel::voxel_phase!(Drown, { drown(flora, world, threads) });
 
-        // WX3: what the world's day lets a plant use of the light it stands in. The light
-        // above is where the stand sits (a view); this is the clock. Twilight is smooth,
-        // and it is always 1 with the day clock off.
-        let life_daylight = world.life_daylight();
-        // WX3 round 2: plant maintenance follows the air, by a Q10 around the climate's mean.
-        let upkeep = upkeep_factor(
-            world.life_temperature_c(),
-            world.config().climate.temperature_c,
-            flora.config.upkeep_q10,
-        );
-        // WX3 round 4: the plant night rule — maintenance and leaf loss at
-        // `plant_night_factor` of their daytime rate while it is dark.
-        let night = world.plant_night_scale();
+        let climate = Climate::of(world, flora.config.upkeep_q10);
         let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
         let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
         let world = target.world();
         let substrate =
             cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads) });
         cubarium_voxel::voxel_phase!(Grow, {
-            grow(flora, world, &light, life_daylight, upkeep, night, &moisture, &substrate, threads)
+            grow(flora, world, &light, climate, &moisture, &substrate, threads)
         });
-        cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world) });
+        cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world, climate) });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
         cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world) });
         cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world) });
@@ -1092,20 +1080,23 @@ impl DrinkScratch {
     }
 }
 
-/// One stand's root box read once for everything [`drink`] needs from it: the box's soil
-/// voxels into `box_`, each one's [`drinkable_m3`] into `drinkable`, and the `(water, band,
-/// saturated)` sums [`mean_available`] and [`saturated_fraction`] take over the same box —
-/// the same arithmetic in the same order, one pass instead of four.
-fn read_root_box(
+/// One root box read once for everything [`drink`] needs from it, a stand's or a
+/// latticevine's: the box's soil voxels into `box_`, each one's [`drinkable_m3`] into
+/// `drinkable`, and the `(water, band, saturated)` sums [`mean_available`] and
+/// [`saturated_fraction`] take over the same box (a cell counts as saturated at
+/// `saturated_pore` and above) — the same arithmetic in the same order, one pass instead
+/// of four.
+pub(crate) fn read_root_box(
     view: &VoxelView<'_>,
     site: Site,
-    sc: &SpeciesConfig,
+    rooting_depth: u32,
+    rooting_radius: u32,
+    saturated_pore: f64,
     box_: &mut Vec<usize>,
     drinkable: &mut Vec<f64>,
 ) -> (f64, f64, usize) {
     box_.clear();
     drinkable.clear();
-    let (rooting_depth, rooting_radius) = (sc.rooting_depth, sc.rooting_radius);
     #[cfg(feature = "profile")]
     cubarium_voxel::profile::add(
         cubarium_voxel::profile::Count::BoxVoxels,
@@ -1147,7 +1138,7 @@ fn read_root_box(
                     let pore = view.pore[i];
                     water += available_water(mats, m, pore) * w;
                     band += w;
-                    if pore >= sc.saturated_pore {
+                    if pore >= saturated_pore {
                         saturated += 1;
                     }
                     box_.push(i);
@@ -1187,7 +1178,15 @@ fn drink_read(
         let stand = &flora.stands[i];
         let sc = flora.config.species(stand.species);
         let mut d = Drink::default();
-        let (water, band, saturated) = read_root_box(view, stand.site, sc, box_, drinkable);
+        let (water, band, saturated) = read_root_box(
+            view,
+            stand.site,
+            sc.rooting_depth,
+            sc.rooting_radius,
+            sc.saturated_pore,
+            box_,
+            drinkable,
+        );
         // `moisture_of`: the species' ramp over the box's mean available water, and an
         // empty box is a wilting one.
         d.moisture = if band <= 0.0 {
@@ -1210,20 +1209,32 @@ fn drink_read(
         };
         out.push(d);
         let demand = (sc.transpiration_m3_per_s * stand.foliage * d.moisture * DT).max(0.0);
-        if demand <= 0.0 || box_.is_empty() {
-            continue;
-        }
-        // Shared over the box in proportion to what each cell holds **above its
-        // wilting point**: water under it is held too tightly for a root.
-        let stock: f64 = drinkable.iter().sum();
-        if stock <= 0.0 {
-            continue;
-        }
-        for (&v, &d) in box_.iter().zip(drinkable.iter()) {
-            let share = demand * d / stock;
-            if share > 0.0 {
-                bands[v / DRINK_BAND].push((v as u32, i as u32, share));
-            }
+        share_over_box(demand, box_, drinkable, |v, share| {
+            bands[v / DRINK_BAND].push((v as u32, i as u32, share));
+        });
+    }
+}
+
+/// A root's `demand` shared over its box in proportion to what each cell holds **above
+/// its wilting point** — water under it is held too tightly for a root — as
+/// `push(voxel, share)`. A stand's and a vine's one rule.
+pub(crate) fn share_over_box(
+    demand: f64,
+    box_: &[usize],
+    drinkable: &[f64],
+    mut push: impl FnMut(usize, f64),
+) {
+    if demand <= 0.0 || box_.is_empty() {
+        return;
+    }
+    let stock: f64 = drinkable.iter().sum();
+    if stock <= 0.0 {
+        return;
+    }
+    for (&v, &d) in box_.iter().zip(drinkable.iter()) {
+        let share = demand * d / stock;
+        if share > 0.0 {
+            push(v, share);
         }
     }
 }
@@ -1537,9 +1548,8 @@ fn root_box_into(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig, out: &mut
     root_box_dims_into(view, site, sc.rooting_depth, sc.rooting_radius, out);
 }
 
-/// [`root_box_into`] for a box given by its own depth and radius: the stands' and the
-/// latticevines' one root box.
-pub(crate) fn root_box_dims_into(
+/// [`root_box_into`] for a box given by its own depth and radius.
+fn root_box_dims_into(
     view: &VoxelView<'_>,
     site: Site,
     rooting_depth: u32,
@@ -2153,13 +2163,38 @@ pub fn upkeep_factor(t_c: f64, t_mean_c: f64, q10: f64) -> f64 {
     q10.powf((t_c - t_mean_c) / 10.0)
 }
 
+/// What the world's clock and air ask of every plant this tick, stands and vines alike.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Climate {
+    /// The share of the light it stands in the day lets a plant use: smooth through
+    /// twilight, always 1 with the day clock off.
+    pub(crate) daylight: f64,
+    /// Maintenance's Q10 factor around the climate's mean temperature ([`upkeep_factor`]).
+    pub(crate) upkeep: f64,
+    /// The plant night rule: maintenance and leaf loss at `plant_night_factor` of their
+    /// daytime rate while it is dark (`World::plant_night_scale`).
+    pub(crate) night: f64,
+}
+
+impl Climate {
+    pub(crate) fn of(world: &World, upkeep_q10: f64) -> Climate {
+        Climate {
+            daylight: world.life_daylight(),
+            upkeep: upkeep_factor(
+                world.life_temperature_c(),
+                world.config().climate.temperature_c,
+                upkeep_q10,
+            ),
+            night: world.plant_night_scale(),
+        }
+    }
+}
+
 fn grow(
     flora: &mut Flora,
     world: &World,
     light: &[f64],
-    daylight: f64,
-    upkeep: f64,
-    night: f64,
+    climate: Climate,
     drink: &[Drink],
     substrate: &[Substrate],
     threads: usize,
@@ -2240,9 +2275,7 @@ fn grow(
                     stand,
                     &mut ground[slots[si] - base],
                     light[si],
-                    daylight,
-                    upkeep,
-                    night,
+                    climate,
                     drink[si],
                     substrate[si],
                     &mut books[k],
@@ -2393,13 +2426,16 @@ fn grow_stand(
     stand: &mut Stand,
     g: &mut Ground,
     light: f64,
-    daylight: f64,
-    upkeep: f64,
-    night: f64,
+    climate: Climate,
     drink: Drink,
     substrate: Substrate,
     book: &mut Booked,
 ) -> bool {
+    let Climate {
+        daylight,
+        upkeep,
+        night,
+    } = climate;
     let species = stand.species;
     let sc = config.species(species);
     let e_v = sc.energy_density;
@@ -3898,8 +3934,13 @@ mod tests {
                 .collect();
             let substrate = feed(&mut flora, &world, &drink, 1);
             let (mut one, mut split) = (flora.clone(), flora.clone());
-            grow(&mut one, &world, &light, 1.0, 1.0, 1.0, &drink, &substrate, 1);
-            grow(&mut split, &world, &light, 1.0, 1.0, 1.0, &drink, &substrate, threads);
+            let climate = Climate {
+                daylight: 1.0,
+                upkeep: 1.0,
+                night: 1.0,
+            };
+            grow(&mut one, &world, &light, climate, &drink, &substrate, 1);
+            grow(&mut split, &world, &light, climate, &drink, &substrate, threads);
             assert!(one.stands.len() < n, "some stands died");
             assert_eq!(one.stands.len(), split.stands.len());
             for (a, b) in one.stands.iter().zip(&split.stands) {
