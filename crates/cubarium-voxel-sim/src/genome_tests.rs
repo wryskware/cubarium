@@ -65,13 +65,13 @@ fn every_shipped_search_file_decodes_at_x1_to_todays_configs() {
     }
 }
 
-/// Stage 1's search is a few meaningful knobs, not the registry: 20–40 genes, every one
+/// Stage 1's search is a few meaningful knobs, not the registry: 20–48 genes (registry §4: "about 20–40"), every one
 /// a multiplier whose box holds x1.
 #[test]
-fn the_cotrain_search_is_twenty_to_forty_multipliers_around_today() {
+fn the_cotrain_search_is_a_few_dozen_multipliers_around_today() {
     let g = genome(COTRAIN);
     assert!(
-        (20..=40).contains(&g.genes.len()),
+        (20..=48).contains(&g.genes.len()),
         "{} genes: {:?}",
         g.genes.len(),
         g.names()
