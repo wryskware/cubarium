@@ -1,0 +1,22 @@
+# Stage 1's CMA starting mean (`voxel-ecology-search --start`): cotrain.toml at x1 except
+# these three genes, the nearest point found that passes the R/S/F screen on the
+# terrarium at x30 (R 0.29, S 0.20, F 18.8; the defaults give R 1.20, S 0.34, F 32.4).
+# Genes left out start at x1. The persistence reference stays cotrain.toml at x1.
+
+[[gene]]
+name = "growth@turf"
+path = "flora.@turf.foliage_rate"
+range = [0.1, 4.0]
+value = 0.24
+
+[[gene]]
+name = "growth@shrub"
+path = "flora.@shrub.foliage_rate"
+range = [0.1, 4.0]
+value = 0.44
+
+[[gene]]
+name = "alpha@turf"
+path = "flora.@turf.alpha"
+range = [0.25, 2.0]
+value = 0.58

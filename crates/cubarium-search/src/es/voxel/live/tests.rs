@@ -118,10 +118,7 @@ fn a_newborn_gets_a_variant_and_its_own_window() {
     let b = newborn[0];
     assert_eq!(b.founder, founder);
     assert!(b.candidate < 4, "a variant of the table");
-    assert_eq!(
-        b.score.survival_term, 0.25,
-        "alive for all of its own part of the window"
-    );
+    assert!(!b.score.died, "alive for all of its own part of the window");
 }
 
 /// A body's score counts only its own window: over a second window on the same world,

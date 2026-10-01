@@ -9,7 +9,7 @@
 //! (`Scale::Length`), and the latticevine's per-face amounts follow a face's area
 //! (`Scale::Area`). Everything else is a rate, a fraction or metres and stays.
 
-use cubarium_voxel::registry::{Alias, Range, Registry, Row, Scale};
+use cubarium_voxel::registry::{Alias, Group, GroupKind, Range, Registry, Row, Scale, Tie};
 
 use crate::{FloraConfig, MAX_FOLIAGE_LAYERS, Species, SpeciesConfig, VineConfig};
 
@@ -26,7 +26,75 @@ pub fn registry() -> &'static Registry {
             }],
             Vec::new(),
         )
+        .with_ties(ties())
+        .with_groups(groups())
     })
+}
+
+/// The plant layer's `derive()` (registry §4): a seed bank's attrition is one over its
+/// age limit, and dead wood and carrion rot with the litter (today's ratios kept).
+pub fn ties() -> Vec<Tie> {
+    vec![
+        Tie::inverse("seed_attrition", "flora.*.seed_attrition_per_s", "flora.*.seed_max_age_s"),
+        Tie::new("wood_decay_follows_litter", "flora.wood_decomposition", "flora.decomposition"),
+        Tie::new("carrion_decay_follows_litter", "flora.carrion_decomposition", "flora.decomposition"),
+    ]
+}
+
+/// The plant groups a search names, and the plant layer's share of the biological clock.
+/// - `@photo`: every photosynthetic species (the glowcap is a fungus).
+/// - Functional groups (audit §6): `@turf` the pioneer herbs, `@mat` the low covers,
+///   `@shrub`, `@tree`.
+/// - `@bio_rate` / `@bio_time` (`K_bio`, registry decision 2), derived fields left out.
+fn groups() -> Vec<Group> {
+    let seg = |name: &'static str, members: &[Species]| Group {
+        name,
+        kind: GroupKind::Segment(members.iter().map(|s| s.name().to_string()).collect()),
+    };
+    let paths = |name: &'static str, members: &[&str]| Group {
+        name,
+        kind: GroupKind::Paths(members.iter().map(|s| s.to_string()).collect()),
+    };
+    use Species::*;
+    vec![
+        seg(
+            "photo",
+            &[Bloomcrown, Umbrellafrond, Springturf, Stonecushion, Velvetpad, Vaulttree, Lanternberry, Siphonreed],
+        ),
+        seg("turf", &[Springturf, Siphonreed]),
+        seg("mat", &[Velvetpad, Stonecushion]),
+        seg("shrub", &[Bloomcrown, Umbrellafrond, Lanternberry]),
+        seg("tree", &[Vaulttree]),
+        paths(
+            "bio_rate",
+            &[
+                "flora.*.foliage_rate",
+                "flora.*.wood_rate",
+                "flora.*.assimilation",
+                "flora.*.maintenance",
+                "flora.*.senescence",
+                "flora.*.propagule_rate",
+                "flora.*.substrate_uptake_per_s",
+                "flora.decomposition",
+                "flora.latticevine.leaf_upkeep",
+                "flora.latticevine.wood_upkeep",
+                "flora.latticevine.regrow_rate",
+            ],
+        ),
+        paths(
+            "bio_time",
+            &[
+                "flora.*.seed_max_age_s",
+                "flora.*.defence_half_life_s",
+                "flora.latticevine.dry_spell_s",
+                "flora.latticevine.wet_spell_s",
+                "flora.latticevine.bud_s",
+                "flora.latticevine.flower_s",
+                "flora.latticevine.fruit_s",
+                "flora.latticevine.spent_s",
+            ],
+        ),
+    ]
 }
 
 fn r(path: &str, unit: &'static str, range: Range, what: &'static str) -> Row {

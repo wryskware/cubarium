@@ -10,7 +10,7 @@ use cubarium_voxel_fauna::{
     Actions, Command as FaunaCommand, Controller, Fauna, FaunaConfig, Founder, Response,
     StartingStores,
 };
-use cubarium_voxel_flora::{Flora, FloraConfig};
+use cubarium_voxel_flora::Flora;
 
 use super::ecology::EcologyParams;
 use super::search::brain_driver;
@@ -39,7 +39,7 @@ fn flat_world() -> World {
 }
 
 fn with(name: &str, v: f64) -> EcologyParams {
-    let mut e = EcologyParams::defaults();
+    let mut e = EcologyParams::legacy();
     e.set(name, v).expect("in range");
     e
 }
@@ -67,7 +67,7 @@ fn absolutes(sc: &cubarium_voxel_fauna::SpeciesConfig) -> [(&'static str, f64); 
 #[test]
 fn mass_scale_multiplies_the_nine_absolute_quantities_and_nothing_else() {
     let base = FaunaConfig::default();
-    let c = with("founder.mass_scale@frondgrazer", 100.0).fauna_config();
+    let c = with("founder.mass_scale@frondgrazer", 100.0).fauna();
     c.validate().expect("a scaled world validates");
     let (b, s) = (Founder::Browser, Founder::Blind);
     for (sc, sb) in [
@@ -104,7 +104,7 @@ fn mass_scale_multiplies_the_nine_absolute_quantities_and_nothing_else() {
     let mut e = with("founder.mass_scale", 3.0);
     e.set("founder.mass_scale@frondgrazer", 10.0)
         .expect("in range");
-    let c = e.fauna_config();
+    let c = e.fauna();
     c.validate().expect("validates");
     assert!((c.founder(b).core.body_max - 30.0 * base.founder(b).core.body_max).abs() < 1e-12);
     let (egg, egg0) = (
@@ -114,42 +114,11 @@ fn mass_scale_multiplies_the_nine_absolute_quantities_and_nothing_else() {
     assert!((egg - 3.0 * egg0).abs() < 1e-12, "{egg} vs 3 x {egg0}");
 }
 
-/// `mass_scale` is a per-lineage search dimension on a log range of [1, 1000], and the
-/// shipped default (1) sits at the bottom of it.
-#[test]
-fn mass_scale_is_a_per_lineage_search_dimension_on_1_to_1000() {
-    let names = EcologyParams::search_names();
-    let bounds = EcologyParams::search_bounds();
-    // The trained lineages: the lanternjaw (P1) is not a search dimension.
-    for f in crate::es::voxel::TRAINED_LINEAGES {
-        let n = format!("founder.mass_scale@{}", f.name());
-        let i = names
-            .iter()
-            .position(|x| *x == n)
-            .unwrap_or_else(|| panic!("{n} is searched"));
-        assert!(bounds[i].0.abs() < 1e-12, "{n}: low end ln 1");
-        assert!(
-            (bounds[i].1 - 1000f64.ln()).abs() < 1e-12,
-            "{n}: high end ln 1000"
-        );
-    }
-    assert!(!names.iter().any(|n| n == "founder.mass_scale"));
-    assert_eq!(
-        EcologyParams::defaults().get("founder.mass_scale@frondgrazer"),
-        Some(1.0)
-    );
-    assert!(
-        EcologyParams::defaults()
-            .set("founder.mass_scale", 0.5)
-            .is_err()
-    );
-}
-
 /// A reserve fraction after `ticks` at rest with no food.
 fn resting_reserve_fraction(e: &EcologyParams, founder: Founder, ticks: u32) -> f64 {
     let world = flat_world();
-    let mut flora = Flora::new(e.flora_config(FloraConfig::for_voxel_size(0.25)));
-    let mut fauna = Fauna::new(e.fauna_config());
+    let mut flora = Flora::new(e.flora(0.25));
+    let mut fauna = Fauna::new(e.fauna());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {
@@ -167,7 +136,7 @@ fn resting_reserve_fraction(e: &EcologyParams, founder: Founder, ticks: u32) -> 
         fauna.step(&world, &mut flora);
     }
     let a = &fauna.view().animals[0];
-    let sc = e.fauna_config().founder(founder).core;
+    let sc = e.fauna().founder(founder).core;
     a.reserve / sc.reserve_of(sc.body_max)
 }
 
@@ -277,8 +246,8 @@ impl Controller for Recorder {
 /// of its full reserve.
 fn self_readings(e: &EcologyParams) -> (f64, f64) {
     let world = flat_world();
-    let mut flora = Flora::new(e.flora_config(FloraConfig::for_voxel_size(0.25)));
-    let mut fauna = Fauna::new(e.fauna_config());
+    let mut flora = Flora::new(e.flora(0.25));
+    let mut fauna = Fauna::new(e.fauna());
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {

@@ -1031,15 +1031,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.littershredder.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
-| `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured | deepest drop stepped |
+| `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.littershredder.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.littershredder.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
 | `fauna.founders.littershredder.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
 | `fauna.founders.littershredder.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
-| `fauna.founders.littershredder.wade_height_fraction` | 0.25 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
-| `fauna.founders.littershredder.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
-| `fauna.founders.littershredder.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
+| `fauna.founders.littershredder.wade_height_fraction` | 0.25 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
+| `fauna.founders.littershredder.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
+| `fauna.founders.littershredder.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder, digest | continuous time under water before it drowns |
 | `fauna.founders.littershredder.adult_length_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
 | `fauna.founders.littershredder.adult_width_m` | 0.125 | m | (0, inf) | yes | N | decision, digest | adult body width |
 | `fauna.founders.littershredder.adult_height_m` | 0.125 | m | (0, inf) | yes | N | decision, digest | adult body height |
@@ -1053,7 +1053,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
-| `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision | the org-unit mass scale the body was built at |
+| `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.littershredder.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.littershredder.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1094,15 +1094,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.frondgrazer.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
-| `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured | deepest drop stepped |
+| `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.frondgrazer.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.frondgrazer.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
 | `fauna.founders.frondgrazer.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
 | `fauna.founders.frondgrazer.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
-| `fauna.founders.frondgrazer.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
-| `fauna.founders.frondgrazer.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
-| `fauna.founders.frondgrazer.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
+| `fauna.founders.frondgrazer.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
+| `fauna.founders.frondgrazer.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
+| `fauna.founders.frondgrazer.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder, digest | continuous time under water before it drowns |
 | `fauna.founders.frondgrazer.adult_length_m` | 0.75 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
 | `fauna.founders.frondgrazer.adult_width_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body width |
 | `fauna.founders.frondgrazer.adult_height_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body height |
@@ -1116,7 +1116,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
-| `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision | the org-unit mass scale the body was built at |
+| `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.frondgrazer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.frondgrazer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1157,15 +1157,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.lanternjaw.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.0002 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
-| `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured | deepest drop stepped |
+| `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.lanternjaw.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.lanternjaw.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
 | `fauna.founders.lanternjaw.cruise_body_lengths_per_s` | 0.6 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
 | `fauna.founders.lanternjaw.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
-| `fauna.founders.lanternjaw.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
-| `fauna.founders.lanternjaw.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
-| `fauna.founders.lanternjaw.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
+| `fauna.founders.lanternjaw.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
+| `fauna.founders.lanternjaw.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
+| `fauna.founders.lanternjaw.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder, digest | continuous time under water before it drowns |
 | `fauna.founders.lanternjaw.adult_length_m` | 1.0 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
 | `fauna.founders.lanternjaw.adult_width_m` | 0.25 | m | (0, inf) | yes | N | decision, digest | adult body width |
 | `fauna.founders.lanternjaw.adult_height_m` | 0.45 | m | (0, inf) | yes | N | decision, digest | adult body height |
@@ -1179,7 +1179,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
-| `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision | the org-unit mass scale the body was built at |
+| `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.lanternjaw.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.lanternjaw.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |

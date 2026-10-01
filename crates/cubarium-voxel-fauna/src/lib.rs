@@ -708,6 +708,11 @@ pub struct ReproductionState {
     /// The offspring package being filled, for a gestating body. `None` is a body that
     /// is not gestating; an egg-laying body never has one.
     pub escrow: Option<Escrow>,
+    /// Organic matter this body has passed to its offspring, cumulative: each birth's
+    /// whole package and each clutch it laid. What the brain reward counts as given, not
+    /// lost (`design/handoffs/cotrain-stage0-2026-10-01.md` §1).
+    #[serde(default)]
+    pub given: f64,
 }
 
 /// An offspring package the parent has already paid for and cannot spend.

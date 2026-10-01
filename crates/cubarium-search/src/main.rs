@@ -34,9 +34,9 @@ use cubarium_search::search::{self, Budget, TRAINING_SEEDS, Variation};
 struct Cli {
     #[command(subcommand)]
     command: Command,
-    /// The ecology vector (`[ecology]` TOML, as `voxel-ecology-check --arm` reads) the
-    /// frozen trainer's arenas and landscapes are built on; the live defaults when absent
-    /// (audit round step 5).
+    /// The ecology (a genome, a parameter file or an old `[ecology]` file, as
+    /// `voxel-ecology-check --arm` reads) the frozen trainer's arenas and landscapes are
+    /// built on; the live defaults when absent (audit round step 5).
     #[arg(long, global = true)]
     training_ecology: Option<PathBuf>,
 }
@@ -753,9 +753,26 @@ enum Command {
     /// over the ecology parameter vector, each candidate scored on freshly founded
     /// training worlds against the population and liveliness band, brains held fixed.
     VoxelEcologySearch {
-        /// `<lineage>=<centre.json>`, once per lineage.
-        #[arg(long = "centre", required = true)]
+        /// `<lineage>=<centre.json>` (or `transfer:<file>`), per trained lineage. A lineage
+        /// given none runs its heuristic and takes no ES step.
+        #[arg(long = "centre")]
         centres: Vec<String>,
+        /// The search file (genes, ranges, `[screen]`): a `config/training/search/` file, or
+        /// a genome to start the mean from.
+        #[arg(long, default_value = "config/training/search/cotrain.toml")]
+        search: PathBuf,
+        /// A genome whose genes' values start the CMA mean (by name, the rest at the
+        /// search file's): e.g. config/training/search/cotrain-start.toml.
+        #[arg(long)]
+        start: Option<PathBuf>,
+        /// Found from this config file's `[world]` (e.g. config/desktop/terrarium.toml)
+        /// instead of the still-water `small` preset.
+        #[arg(long)]
+        world: Option<PathBuf>,
+        /// Founders per lineage, `shredders,browsers,lanternjaw-clutches`; the live
+        /// world's founding (the egg bank included) by default.
+        #[arg(long)]
+        founders: Option<String>,
         #[arg(long, default_value_t = 7)]
         lambda: usize,
         #[arg(long, default_value_t = 2)]
@@ -774,9 +791,9 @@ enum Command {
         #[arg(long, default_value_t = 20260924)]
         cma_seed: u64,
         /// Simulated hours per candidate world.
-        #[arg(long, default_value_t = 6.0)]
+        #[arg(long, default_value_t = 1.0)]
         hours: f64,
-        #[arg(long, default_value_t = 10.0)]
+        #[arg(long, default_value_t = es::voxel::live::window::DEFAULT_WINDOW_MIN)]
         window_min: f64,
         #[arg(long, default_value_t = 4)]
         water_every: u32,
@@ -786,7 +803,25 @@ enum Command {
         /// count is projected on its last hour's trend. Defaults to `--hours`.
         #[arg(long)]
         score_hours: Option<f64>,
-        /// Unified mode: brain antithetic pairs per lineage. 0 holds the brains.
+        /// The animal band's floor, × the world's founding animal count.
+        #[arg(long, default_value_t = 1.0)]
+        band_lo: f64,
+        /// Its ceiling over the second half, × the founding count.
+        #[arg(long, default_value_t = 3.0)]
+        band_hi: f64,
+        /// The count it never passes, × the founding count.
+        #[arg(long, default_value_t = 5.0)]
+        band_peak: f64,
+        /// The browsers' moving share floor.
+        #[arg(long, default_value_t = 0.30)]
+        moving_min: f64,
+        /// The lanternjaws' share of the animals over the second half: `lo,hi`.
+        #[arg(long, default_value = "0.05,0.15")]
+        lanternjaw_share: String,
+        /// The penalty per lineage or species lost, and per lineage not breeding late.
+        #[arg(long, default_value_t = 10.0)]
+        missing_cost: f64,
+        /// Unified mode: brain antithetic pairs per lineage with a centre. 0 holds the brains.
         #[arg(long, default_value_t = 0)]
         brain_pairs: usize,
         #[arg(long, default_value_t = cubarium_search::es::optimizer::SIGMA)]
@@ -796,18 +831,36 @@ enum Command {
         #[arg(long, default_value = "runs/ecology-search")]
         out: PathBuf,
     },
+    /// The R/S/F pre-screen of an ecology on a world: the three stay-or-go numbers and
+    /// each founded species' row.
+    VoxelEcologyScreen {
+        /// `default`, a genome or search file, a parameter file or an old `[ecology]` file.
+        #[arg(long, default_value = "default")]
+        arm: String,
+        #[arg(long)]
+        world: Option<PathBuf>,
+        /// The `[screen]` settings: this search file's (the defaults otherwise).
+        #[arg(long)]
+        search: Option<PathBuf>,
+    },
     /// The ecology search's held-out check: arms (`name=default` or `name=<file.toml>`)
     /// × seeds, one CSV per world with one row per window.
     VoxelEcologyCheck {
-        #[arg(long = "centre", required = true)]
+        /// `<lineage>=<brain>` per lineage (heuristic, parker, herding, a centre file); a
+        /// lineage given none runs its heuristic.
+        #[arg(long = "centre")]
         centres: Vec<String>,
+        /// Founders per lineage, `shredders,browsers,lanternjaw-clutches`; the live
+        /// world's founding (the egg bank included) by default.
+        #[arg(long)]
+        founders: Option<String>,
         #[arg(long = "arm", required = true)]
         arms: Vec<String>,
         #[arg(long, default_value = "1,2,3,4")]
         seeds: String,
         #[arg(long, default_value_t = 6.0)]
         hours: f64,
-        #[arg(long, default_value_t = 10.0)]
+        #[arg(long, default_value_t = es::voxel::live::window::DEFAULT_WINDOW_MIN)]
         window_min: f64,
         #[arg(long, default_value_t = 1)]
         water_every: u32,
@@ -836,7 +889,7 @@ enum Command {
         #[arg(long, default_value_t = 16)]
         pairs: usize,
         /// Window length, simulated minutes.
-        #[arg(long, default_value_t = 10.0)]
+        #[arg(long, default_value_t = es::voxel::live::window::DEFAULT_WINDOW_MIN)]
         window_min: f64,
         #[arg(long, default_value_t = 1000)]
         generations: u32,
@@ -858,7 +911,8 @@ enum Command {
         population_cap: usize,
         #[arg(long, default_value_t = 10)]
         save_every: u32,
-        /// A training-only ecology file (`[ecology]` multipliers); the defaults without.
+        /// A training-only ecology: a genome, a parameter file or an old `[ecology]` file;
+        /// the shipped world without.
         #[arg(long)]
         ecology: Option<PathBuf>,
         #[arg(long, default_value = "runs/live-train")]
@@ -1092,6 +1146,21 @@ fn parse_centres(
             Ok((es::voxel::parse_founder(name)?, PathBuf::from(path)))
         })
         .collect()
+}
+
+/// `shredders,browsers,lanternjaw-clutches`, or the live world's founding.
+fn parse_founders(
+    s: Option<&str>,
+) -> Result<[usize; cubarium_voxel_fauna::Founder::COUNT], String> {
+    let Some(s) = s else {
+        return Ok(cubarium_voxel_sim::habitat::FOUNDER_COUNTS);
+    };
+    let v: Vec<usize> = s
+        .split(',')
+        .map(|x| x.trim().parse::<usize>().map_err(|e| format!("--founders {s}: {e}")))
+        .collect::<Result<_, _>>()?;
+    v.try_into()
+        .map_err(|_| format!("--founders takes one count per lineage, not {s}"))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -1454,6 +1523,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
         Command::VoxelEcologySearch {
             centres,
+            search,
+            start,
+            world,
+            founders,
             lambda,
             seeds_per_generation,
             generations,
@@ -1467,14 +1540,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_every,
             abort_animals,
             score_hours,
+            band_lo,
+            band_hi,
+            band_peak,
+            moving_min,
+            lanternjaw_share,
+            missing_cost,
             brain_pairs,
             brain_sigma,
             brain_learning_rate,
             out,
         } => {
             let hz = f64::from(cubarium_voxel_fauna::TICK_HZ);
+            let genome = match es::voxel::live::ecology::EcologyParams::load(&search)? {
+                es::voxel::live::ecology::EcologyParams::Genome(g) => g,
+                _ => return Err(format!("{} has no genes to search", search.display()).into()),
+            };
+            let screen = es::voxel::live::screen::ScreenSpec::from_rest(&genome.rest)?;
+            let world_cfg = es::voxel::live::search::check_world_config(world.as_deref())?;
+            let share: Vec<f64> = lanternjaw_share
+                .split(',')
+                .map(|x| x.trim().parse::<f64>())
+                .collect::<Result<_, _>>()
+                .map_err(|e| format!("--lanternjaw-share {lanternjaw_share}: {e}"))?;
+            let [share_lo, share_hi] = share[..] else {
+                return Err("--lanternjaw-share takes lo,hi".into());
+            };
+            let mut eval = es::voxel::live::search::EvalSpec::new(
+                world_cfg,
+                (hours * 3600.0 * hz).round() as u64,
+                (window_min * 60.0 * hz).round() as u64,
+            );
+            eval.founders = parse_founders(founders.as_deref())?;
+            eval.water_every = water_every;
+            eval.abort_animals = abort_animals;
+            eval.score_horizon_ticks = (score_hours.unwrap_or(hours) * 3600.0 * hz).round() as u64;
+            eval.band = es::voxel::live::search::BandSpec {
+                lo_x: band_lo,
+                hi_x: band_hi,
+                peak_x: band_peak,
+                moving_min,
+                missing_cost,
+                lanternjaw_share: [share_lo, share_hi],
+                persist_only: [false; cubarium_voxel_fauna::Founder::COUNT],
+            }
+            .with_targets(&genome.rest)?;
+            let start = match start {
+                Some(p) => match es::voxel::live::ecology::EcologyParams::load(&p)? {
+                    es::voxel::live::ecology::EcologyParams::Genome(g) => Some(g),
+                    _ => return Err(format!("--start {} has no genes", p.display()).into()),
+                },
+                None => None,
+            };
             let spec = es::voxel::live::search::SearchSpec {
                 centres: parse_centres(&centres)?,
+                genome,
+                start,
+                screen,
                 lambda,
                 seeds_per_generation,
                 generations,
@@ -1483,15 +1605,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 threads,
                 seed_base,
                 cma_seed,
-                eval: es::voxel::live::search::EvalSpec {
-                    horizon_ticks: (hours * 3600.0 * hz).round() as u64,
-                    window_ticks: (window_min * 60.0 * hz).round() as u64,
-                    water_every,
-                    abort_animals,
-                    band: Default::default(),
-                    score_horizon_ticks: (score_hours.unwrap_or(hours) * 3600.0 * hz).round()
-                        as u64,
-                },
+                eval,
                 brain_pairs,
                 brain_sigma,
                 brain_learning_rate,
@@ -1500,8 +1614,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             es::voxel::live::search::search(&spec)?;
             Ok(())
         }
+        Command::VoxelEcologyScreen { arm, world, search } => {
+            let e = if arm == "default" {
+                es::voxel::live::ecology::EcologyParams::defaults()
+            } else {
+                es::voxel::live::ecology::EcologyParams::load(std::path::Path::new(&arm))?
+            };
+            let screen = match search {
+                Some(p) => match es::voxel::live::ecology::EcologyParams::load(&p)? {
+                    es::voxel::live::ecology::EcologyParams::Genome(g) => {
+                        es::voxel::live::screen::ScreenSpec::from_rest(&g.rest)?
+                    }
+                    _ => es::voxel::live::screen::ScreenSpec::default(),
+                },
+                None => es::voxel::live::screen::ScreenSpec::default(),
+            };
+            let world_cfg = es::voxel::live::search::check_world_config(world.as_deref())?;
+            let r = es::voxel::live::search::screen_of(&e, &world_cfg, &screen);
+            println!(
+                "R {:.4}  S {:.4}  F {:.2}  need {:.3e}/s  {}",
+                r.r,
+                r.s,
+                r.f,
+                r.need_per_s,
+                if r.passes(&screen) {
+                    "passes".to_string()
+                } else {
+                    format!("fails: {}", r.failures(&screen).join("; "))
+                }
+            );
+            for s in &r.species {
+                println!(
+                    "  {:<14} n={:<5.1} edible={:<9.4} regrow={:<10.3e} R={:<8.4} S={:<8.4} F={:.2}",
+                    s.species, s.stands_in_reach, s.edible, s.regrowth_per_s, s.r, s.s, s.f
+                );
+            }
+            Ok(())
+        }
         Command::VoxelEcologyCheck {
             centres,
+            founders,
             arms,
             seeds,
             hours,
@@ -1537,6 +1689,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 window_min,
                 water_every,
                 &parse_centres(&centres)?,
+                parse_founders(founders.as_deref())?,
                 threads,
                 &out,
             )?;

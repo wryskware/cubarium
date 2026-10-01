@@ -2046,6 +2046,7 @@ fn gestate(
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
+    a.reproduction.given += e.organic;
     let (site, species, pose, founder) = (a.site, a.species, a.pose, a.founder);
     let parcel = Taken {
         organic: e.organic,
@@ -2169,8 +2170,11 @@ fn lay(
         return;
     }
     let Taken {
-        mineral, energy, ..
+        organic: paid,
+        mineral,
+        energy,
     } = take_from_reserve(a, cost);
+    a.reproduction.given += paid;
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();

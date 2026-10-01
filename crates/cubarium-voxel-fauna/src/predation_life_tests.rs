@@ -230,6 +230,28 @@ fn a_lanternjaw_in_surplus_lays_three_dormant_eggs() {
     assert_closes(&fauna, "laid");
 }
 
+/// The parent counts what it gave its offspring (the brain reward's `E_given`,
+/// `design/handoffs/cotrain-stage0-2026-10-01.md` §1): after a laying, exactly the
+/// clutch's organic matter.
+#[test]
+fn a_laying_counts_its_clutch_as_given() {
+    let world = clock_off(15);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let rule = fauna.config.founder(Founder::Lanternjaw).core.reproduction;
+    let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
+    assert_eq!(animal(&fauna, lj).reproduction.given, 0.0);
+    for _ in 0..rule.hold_ticks() {
+        animal_mut(&mut fauna, lj).reproduction.window.tick(true, rule.hold_ticks());
+    }
+    step_until(&mut fauna, &world, &mut flora, 3, |f| !eggs(f).is_empty())
+        .expect("a full lanternjaw past its hold lays");
+    let laid: f64 = eggs(&fauna).iter().map(|c| c.organic).sum();
+    let given = animal(&fauna, lj).reproduction.given;
+    assert!(laid > 0.0);
+    assert!((given - laid).abs() <= 1e-12 * laid, "given {given} vs laid {laid}");
+}
+
 /// Case 15, dormancy: a buried egg pays its upkeep out of itself, is invisible to the
 /// cone, and nothing eats it — a shredder and a lanternjaw feeding on its face leave it
 /// exactly as an egg alone.

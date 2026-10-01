@@ -1,35 +1,48 @@
-//! **The ecology half**: a world-level search over the ecology parameter vector
-//! (`design/handoffs/voxel-ecology-search-2026-09-24.md`).
+//! **The ecology half**: a world-level search over a search genome
+//! (`design/handoffs/voxel-ecology-search-2026-09-24.md`; R3 and targets v2,
+//! `design/handoffs/cotrain-stage0-2026-10-01.md` §2–3).
 //!
-//! A candidate is an [`EcologyParams`] vector, searched in log space by CMA-ES
-//! ([`crate::es::cma`]). Each candidate is scored on **freshly founded** worlds — the
-//! training world (`small`, still water), coarse water — run for a horizon with the
-//! brains held at fixed centres, and the score is a [`penalty`]: zero inside the band
-//! (animals per world within `[lo, hi]` over the second half, never above `peak`,
-//! browsers moving at least `moving_min` of their minutes), growing with the normalised
-//! distance outside it, and a large constant per lineage or plant species lost.
+//! A candidate is a [`Genome`] (a search file's genes, `config/training/search/`), searched
+//! in log space by CMA-ES ([`crate::es::cma`]). Each candidate is first **screened**
+//! ([`super::screen`]): one whose R, S or F falls outside the bands takes a fixed penalty
+//! without a run. The rest are scored on **freshly founded** worlds — the `--world` (the
+//! training preset by default), coarse water — run for a horizon with the brains held at
+//! fixed centres (a lineage given none runs its heuristic), and the score is a
+//! [`penalty`]: zero inside the band, growing with the normalised distance outside it.
 //!
-//! Common random numbers: every candidate of a generation (and the search mean,
-//! evaluated beside them for the curve) runs on the same founding seeds; the seeds change
-//! from one generation to the next.
+//! **The band** (targets v2, Wrysk 2026-10-01: persist, breed, bounded):
+//! - every lineage the world founded (the lanternjaw, founded as a dormant egg bank,
+//!   included: its eggs count as its living) and every plant species the default world
+//!   keeps on that seed persists;
+//! - every founded lineage has births in the second half;
+//! - animals per world stay in `[lo, hi]` over the second half and never above `peak`:
+//!   by default 1x, 3x and 5x the world's founding animal count ([`BandSpec`]);
+//! - browsers move at least `moving_min` of their minutes;
+//! - lanternjaws are 5–15 % of the animals over the second half.
+//!
+//! Common random numbers: every candidate of a generation (and the default genome,
+//! evaluated beside them as the persistence reference) runs on the same founding seeds;
+//! the seeds change from one generation to the next.
 //!
 //! A world that booms past [`EvalSpec::abort_animals`] or loses a lineage stops early;
 //! its trace carries its last count to the horizon, which is the trend the penalty reads.
 //!
-//! **Unified mode** (`--brain-pairs > 0`, not used by default): the same worlds also
-//! carry antithetic brain variants, and every lineage's centre takes one ES step per
+//! **Unified mode** (`--brain-pairs > 0`): the same worlds also carry antithetic brain
+//! variants for every lineage with a centre, and each of those takes one ES step per
 //! generation from the pooled body scores, as the live trainer does.
 
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use cubarium_voxel::genome::Genome;
 use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_flora::Species;
 use serde::Serialize;
 
 use super::ecology::EcologyParams;
 use super::readout::Scan;
+use super::screen::{Rsf, ScreenSpec, rsf};
 use super::trainer::{ascend, parallel, pooled_scores};
 use super::variants::VariantTable;
 use super::window::{self, BodyScore, TICKS_PER_MIN, Window};
@@ -39,28 +52,95 @@ use crate::es::optimizer::Adam;
 use crate::es::voxel::EpisodeDriver;
 use crate::es::voxel::store::VoxelPolicyFile;
 
-/// The target band.
+/// The band's settings, as the command line gives them.
 #[derive(Clone, Copy, Debug, Serialize)]
-pub struct Band {
-    /// Animals per world, second half of the horizon.
-    pub lo: f64,
-    pub hi: f64,
-    /// Animals per world, never above.
-    pub peak: f64,
+pub struct BandSpec {
+    /// Animals per world over the second half, at least this × the founding count.
+    pub lo_x: f64,
+    /// At most this × the founding count.
+    pub hi_x: f64,
+    /// Never above this × the founding count.
+    pub peak_x: f64,
     /// Browser moving share (body-minutes over 0.1 BL/s), second half.
     pub moving_min: f64,
-    /// Per lineage or plant species lost by the end.
+    /// Per lineage or plant species lost, and per lineage silent in the second half.
     pub missing_cost: f64,
+    /// The lanternjaws' share of the animals over the second half.
+    pub lanternjaw_share: [f64; 2],
+    /// Lineages held to persistence alone (by [`Founder::index`]): no late-breeding target
+    /// and, for the lanternjaw, no share target; living bodies plus viable eggs persist.
+    /// Stage 1 holds the lanternjaw so, whose egg bank first hatches at the first dusk
+    /// (~60 min on the terrarium's 2 h day). The search file's `[targets] persist_only`.
+    pub persist_only: [bool; Founder::COUNT],
 }
 
-impl Default for Band {
-    fn default() -> Band {
-        Band {
-            lo: 30.0,
-            hi: 80.0,
-            peak: 120.0,
+impl BandSpec {
+    /// The search file's `[targets]` table: `persist_only = ["lanternjaw", ...]`.
+    pub fn with_targets(mut self, rest: &toml::Table) -> Result<BandSpec, String> {
+        let Some(t) = rest.get("targets") else {
+            return Ok(self);
+        };
+        let t = t.as_table().ok_or("[targets] is a table")?;
+        for (k, v) in t {
+            match k.as_str() {
+                "persist_only" => {
+                    let names = v.as_array().ok_or("persist_only is a list of lineages")?;
+                    self.persist_only = [false; Founder::COUNT];
+                    for n in names {
+                        let n = n.as_str().ok_or("persist_only names lineages")?;
+                        let f = Founder::ALL
+                            .into_iter()
+                            .find(|f| f.name() == n)
+                            .ok_or_else(|| format!("[targets] persist_only: no lineage {n:?}"))?;
+                        self.persist_only[f.index()] = true;
+                    }
+                }
+                other => return Err(format!("unknown key `{other}` in [targets]")),
+            }
+        }
+        Ok(self)
+    }
+}
+
+impl Default for BandSpec {
+    fn default() -> BandSpec {
+        BandSpec {
+            lo_x: 1.0,
+            hi_x: 3.0,
+            peak_x: 5.0,
             moving_min: 0.30,
             missing_cost: 10.0,
+            lanternjaw_share: [0.05, 0.15],
+            persist_only: [false; Founder::COUNT],
+        }
+    }
+}
+
+/// The band one world is scored against.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct Band {
+    pub lo: f64,
+    pub hi: f64,
+    pub peak: f64,
+    pub moving_min: f64,
+    pub missing_cost: f64,
+    /// `None` for a world founded without the lanternjaw.
+    pub lanternjaw_share: Option<[f64; 2]>,
+}
+
+impl Band {
+    /// The band of a world founded with `animals` bodies (and the lanternjaw's egg bank,
+    /// if `lanternjaw`).
+    pub fn for_founding(animals: usize, lanternjaw: bool, spec: &BandSpec) -> Band {
+        let n = animals.max(1) as f64;
+        Band {
+            lo: spec.lo_x * n,
+            hi: spec.hi_x * n,
+            peak: spec.peak_x * n,
+            moving_min: spec.moving_min,
+            missing_cost: spec.missing_cost,
+            lanternjaw_share: (lanternjaw && !spec.persist_only[Founder::Lanternjaw.index()])
+                .then_some(spec.lanternjaw_share),
         }
     }
 }
@@ -73,6 +153,9 @@ pub struct Trace {
     pub minutes: Vec<f64>,
     /// Animals in the world at each sample.
     pub animals: Vec<usize>,
+    /// Lanternjaw bodies at each sample.
+    #[serde(default)]
+    pub lanternjaws: Vec<usize>,
     /// Browser moving share over the second half (or all it ran, if it stopped before).
     pub browser_moving: f64,
     /// Lineages and plant species (present at the start) absent at the end.
@@ -89,42 +172,55 @@ pub struct Penalty {
     pub bound: f64,
     pub peak: f64,
     pub lively: f64,
+    /// The lanternjaw share.
+    pub share: f64,
     pub persist: f64,
     pub total: f64,
 }
 
+/// Normalised distance of `x` outside `[lo, hi]`.
+fn outside(x: f64, lo: f64, hi: f64) -> f64 {
+    (lo - x).max(0.0) / lo.max(1e-12) + (x - hi).max(0.0) / hi.max(1e-12)
+}
+
 /// Zero inside the band; outside it the normalised distance: the mean over the second
-/// half's samples of `(lo − n)/lo` below and `(n − hi)/hi` above, plus
-/// `(peak_n − peak)/peak`, plus `(moving_min − m)/moving_min`, plus `missing_cost` per
-/// thing lost. A trace that stopped early is carried at its last count to the horizon.
+/// half's samples of `(lo − n)/lo` below and `(n − hi)/hi` above, plus `(peak_n −
+/// peak)/peak`, plus `(moving_min − m)/moving_min`, plus the lanternjaw share's mean
+/// distance outside its band, plus `missing_cost` per thing lost or silent. A trace that
+/// stopped early is carried at its last sample to the horizon.
 pub fn penalty(t: &Trace, band: &Band) -> Penalty {
     let step = if t.minutes.len() >= 2 {
         t.minutes[1] - t.minutes[0]
     } else {
         1.0
     };
-    let mut samples: Vec<(f64, f64)> = t
+    let lj_at = |i: usize| t.lanternjaws.get(i).or(t.lanternjaws.last()).copied().unwrap_or(0);
+    let mut samples: Vec<(f64, f64, f64)> = t
         .minutes
         .iter()
         .zip(&t.animals)
-        .map(|(m, n)| (*m, *n as f64))
+        .enumerate()
+        .map(|(i, (m, n))| (*m, *n as f64, lj_at(i) as f64))
         .collect();
-    if let Some(&(mut m, n)) = samples.last() {
+    if let Some(&(mut m, n, lj)) = samples.last() {
         while m + step <= t.horizon_min + 1e-9 {
             m += step;
-            samples.push((m, n));
+            samples.push((m, n, lj));
         }
     }
     let half = t.horizon_min / 2.0;
-    let late: Vec<f64> = samples
-        .iter()
-        .filter(|(m, _)| *m > half)
-        .map(|(_, n)| (band.lo - n).max(0.0) / band.lo + (n - band.hi).max(0.0) / band.hi)
-        .collect();
-    let bound = if late.is_empty() {
-        0.0
-    } else {
-        late.iter().sum::<f64>() / late.len() as f64
+    let late: Vec<&(f64, f64, f64)> = samples.iter().filter(|(m, _, _)| *m > half).collect();
+    let mean = |f: &dyn Fn(&(f64, f64, f64)) -> f64| {
+        if late.is_empty() {
+            0.0
+        } else {
+            late.iter().map(|s| f(s)).sum::<f64>() / late.len() as f64
+        }
+    };
+    let bound = mean(&|s| outside(s.1, band.lo, band.hi));
+    let share = match band.lanternjaw_share {
+        Some([lo, hi]) => mean(&|s| outside(if s.1 > 0.0 { s.2 / s.1 } else { 0.0 }, lo, hi)),
+        None => 0.0,
     };
     let peak_n = samples.iter().map(|s| s.1).fold(0.0, f64::max);
     let peak = (peak_n - band.peak).max(0.0) / band.peak;
@@ -134,24 +230,47 @@ pub fn penalty(t: &Trace, band: &Band) -> Penalty {
         bound,
         peak,
         lively,
+        share,
         persist,
-        total: bound + peak + lively + persist,
+        total: bound + peak + lively + share + persist,
     }
 }
 
 /// How one candidate world is run.
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct EvalSpec {
+    /// The world every candidate is founded on.
+    #[serde(skip)]
+    pub world: cubarium_voxel::Config,
+    /// Founders per lineage, in [`Founder::ALL`] order (the lanternjaw's are clutches).
+    pub founders: [usize; Founder::COUNT],
     pub horizon_ticks: u64,
     pub window_ticks: u64,
     pub water_every: u32,
     /// Stop a world that holds more animals than this.
     pub abort_animals: usize,
-    pub band: Band,
+    pub band: BandSpec,
     /// The horizon the band is scored on, ticks. Past what was run (`horizon_ticks`, or
     /// an early stop) the animal count is projected on its last hour's trend
     /// ([`project`]). Equal to `horizon_ticks` is no projection.
     pub score_horizon_ticks: u64,
+}
+
+impl EvalSpec {
+    /// `horizon_ticks` of `world` in windows of `window_ticks`, founded as the live world
+    /// is (the egg bank included), the default band, live water, no projection.
+    pub fn new(world: cubarium_voxel::Config, horizon_ticks: u64, window_ticks: u64) -> EvalSpec {
+        EvalSpec {
+            world,
+            founders: cubarium_voxel_sim::habitat::FOUNDER_COUNTS,
+            horizon_ticks,
+            window_ticks,
+            water_every: 1,
+            abort_animals: 240,
+            band: BandSpec::default(),
+            score_horizon_ticks: horizon_ticks,
+        }
+    }
 }
 
 /// Extend a trace to `to_min` on the exponential trend of its last hour: rate
@@ -179,12 +298,19 @@ pub fn project(t: &mut Trace, to_min: f64) -> f64 {
     } else {
         1.0
     };
+    let lj_share = match (t.lanternjaws.last(), t.animals.last()) {
+        (Some(&lj), Some(&n)) if n > 0 => lj as f64 / n as f64,
+        _ => 0.0,
+    };
     let mut m = last_min;
     while m + step <= to_min + 1e-9 {
         m += step;
         t.minutes.push(m);
-        t.animals
-            .push((n_end * (rate * (m - last_min)).exp()).min(2000.0).round() as usize);
+        let n = (n_end * (rate * (m - last_min)).exp()).min(2000.0).round() as usize;
+        t.animals.push(n);
+        if !t.lanternjaws.is_empty() {
+            t.lanternjaws.push((lj_share * n as f64).round() as usize);
+        }
     }
     t.horizon_min = to_min;
     last_min
@@ -197,6 +323,8 @@ pub struct Evaluation {
     pub world_seed: u64,
     pub trace: Trace,
     pub penalty: Penalty,
+    /// The band it was scored against (from its founding count).
+    pub band: Band,
     /// Why it stopped early, if it did.
     pub stopped: Option<String>,
     /// The minute the scored trace turns from measured to projected, if it does.
@@ -207,7 +335,12 @@ pub struct Evaluation {
     pub readout_end: Vec<(String, f64)>,
     pub species_start: Vec<usize>,
     pub species_end: Vec<usize>,
+    /// Bodies per lineage at the end.
     pub lineages_end: Vec<usize>,
+    /// Eggs (clutches' eggs) per lineage at the end.
+    pub eggs_end: Vec<usize>,
+    /// Founders per lineage (the lanternjaw's are clutches).
+    pub founded: Vec<usize>,
     /// Births per lineage in the second half of what was run.
     pub late_births: Vec<u64>,
     pub ticks: u64,
@@ -216,8 +349,39 @@ pub struct Evaluation {
     pub body_scores: Vec<BodyScore>,
 }
 
-/// Found a training world under `params` from seed base `base`, drive its lineages with
-/// `drivers`, and run it for the horizon (unified mode: with `tables`).
+/// Eggs per lineage now.
+fn eggs(sim: &cubarium_voxel_sim::Sim) -> Vec<usize> {
+    let v = sim.fauna().view();
+    Founder::ALL
+        .iter()
+        .map(|f| v.eggs_by_founder(*f) as usize)
+        .collect()
+}
+
+/// The lineages a world founded (bodies or clutches) that hold neither now.
+fn lost_lineages(founded: &[usize], bodies: &[usize], eggs: &[usize]) -> usize {
+    (0..Founder::COUNT)
+        .filter(|&i| founded[i] > 0 && bodies[i] + eggs[i] == 0)
+        .count()
+}
+
+/// Founded lineages held to breeding (not `persist_only`) with no birth in the second
+/// half; a world stopped before the second half is judged silent on all of them.
+pub fn silent_lineages(
+    founded: &[usize],
+    late_births: &[u64],
+    persist_only: &[bool; Founder::COUNT],
+    reached_second_half: bool,
+) -> usize {
+    (0..Founder::COUNT)
+        .filter(|&i| founded[i] > 0 && !persist_only[i])
+        .filter(|&i| !reached_second_half || late_births[i] == 0)
+        .count()
+}
+
+/// Found a world under `params` from seed base `base`, drive the lineages with a centre
+/// by `drivers` (the rest run their heuristic), and run it for the horizon (unified
+/// mode: with `tables`).
 pub fn evaluate(
     params: &EcologyParams,
     base: u64,
@@ -226,15 +390,13 @@ pub fn evaluate(
     spec: &EvalSpec,
 ) -> Evaluation {
     let started = Instant::now();
-    let cfg = world::training_config();
-    let (mut sim, info) = world::found_world(
-        &cfg,
-        base,
-        cubarium_voxel_sim::habitat::NO_EGG_BANK,
-        params,
-    );
+    let (mut sim, info) = world::found_world(&spec.world, base, spec.founders, params);
     super::install_centres(sim.fauna_mut(), drivers);
     sim.world_mut().set_water_every(spec.water_every);
+    let founded = info.founders.to_vec();
+    let lj = Founder::Lanternjaw.index();
+    let animals0: usize = (0..Founder::COUNT).filter(|&i| i != lj).map(|i| founded[i]).sum();
+    let band = Band::for_founding(animals0, founded[lj] > 0, &spec.band);
     let species_start = Scan::of(&sim).stands.to_vec();
     let horizon_min = spec.horizon_ticks as f64 / TICKS_PER_MIN as f64;
     let half_ticks = spec.horizon_ticks / 2;
@@ -263,16 +425,14 @@ pub fn evaluate(
                 let total = sim.fauna().view().animals.len();
                 trace.minutes.push((elapsed / TICKS_PER_MIN) as f64);
                 trace.animals.push(total);
+                trace.lanternjaws.push(pop[lj]);
                 if total > spec.abort_animals {
                     halt = Some(format!(
                         "{total} animals at minute {}",
                         elapsed / TICKS_PER_MIN
                     ));
-                } else if let Some(f) = crate::es::voxel::TRAINED_LINEAGES
-                    .iter()
-                    .find(|f| pop[f.index()] == 0)
-                {
-                    halt = Some(format!("the {} lineage died out", f.name()));
+                } else if lost_lineages(&founded, &pop, &eggs(&sim)) > 0 {
+                    halt = Some("a lineage died out".to_string());
                 }
                 if halt.is_some() {
                     break;
@@ -305,11 +465,9 @@ pub fn evaluate(
         0.0
     };
     let pop = window::population(&sim);
+    let eggs_end = eggs(&sim);
     let species_end = Scan::of(&sim).stands.to_vec();
-    trace.missing = crate::es::voxel::TRAINED_LINEAGES
-        .iter()
-        .filter(|f| pop[f.index()] == 0)
-        .count()
+    trace.missing = lost_lineages(&founded, &pop, &eggs_end)
         + species_start
             .iter()
             .zip(&species_end)
@@ -318,16 +476,13 @@ pub fn evaluate(
     let score_min = spec.score_horizon_ticks.max(spec.horizon_ticks) as f64 / TICKS_PER_MIN as f64;
     let projected_from_min = (trace.minutes.last().copied().unwrap_or(0.0) < score_min)
         .then(|| project(&mut trace, score_min));
-    trace.silent_lineages = if elapsed >= half_ticks {
-        crate::es::voxel::TRAINED_LINEAGES
-            .iter()
-            .filter(|f| late_births[f.index()] == 0)
-            .count()
-    } else {
-        // Stopped before the second half: judged by the lineages it still has.
-        crate::es::voxel::TRAINED_LINEAGES.len()
-    };
-    let penalty = penalty(&trace, &spec.band);
+    trace.silent_lineages = silent_lineages(
+        &founded,
+        &late_births,
+        &spec.band.persist_only,
+        elapsed > half_ticks,
+    );
+    let penalty = penalty(&trace, &band);
     let readout_mean = super::readout::pool(&readouts)
         .into_iter()
         .map(|(name, v)| {
@@ -355,6 +510,7 @@ pub fn evaluate(
         world_seed: info.seed,
         trace,
         penalty,
+        band,
         stopped,
         projected_from_min,
         readout_mean,
@@ -362,6 +518,8 @@ pub fn evaluate(
         species_start,
         species_end,
         lineages_end: pop.to_vec(),
+        eggs_end,
+        founded,
         late_births,
         ticks: elapsed,
         wall_s: started.elapsed().as_secs_f64(),
@@ -372,7 +530,15 @@ pub fn evaluate(
 /// One search run.
 #[derive(Clone, Debug)]
 pub struct SearchSpec {
+    /// Lineages with a trained centre; the rest run their heuristic and take no step.
     pub centres: Vec<(Founder, PathBuf)>,
+    /// The search: its genes at their reference values (the default candidate every
+    /// generation runs beside the draws, the persistence reference).
+    pub genome: Genome,
+    /// Where the CMA mean starts: the search genome with these genes' values ([`start_from`]);
+    /// the reference itself when `None`.
+    pub start: Option<Genome>,
+    pub screen: ScreenSpec,
     pub lambda: usize,
     pub seeds_per_generation: usize,
     pub generations: u32,
@@ -393,12 +559,16 @@ pub struct SearchSpec {
 /// One candidate's record in a generation.
 #[derive(Clone, Debug, Serialize)]
 pub struct CandidateRecord {
-    /// `c0..` a CMA draw, `mean` the search mean.
+    /// `c0..` a CMA draw, `default` the search file at its starting values.
     pub label: String,
     pub multipliers: Vec<(String, f64)>,
-    /// Mean penalty over the seeds plus the box penalty (what CMA was told).
+    /// Mean penalty over the seeds plus the box penalty (what CMA was told); the screen's
+    /// fixed penalty for a candidate it refused.
     pub fitness: f64,
     pub box_penalty: f64,
+    /// Its stay-or-go numbers, and whether the screen refused it (unrun).
+    pub rsf: [f64; 3],
+    pub screened_out: bool,
     pub evaluations: Vec<Evaluation>,
 }
 
@@ -412,14 +582,8 @@ pub struct SearchRecord {
     pub candidates: Vec<CandidateRecord>,
 }
 
-fn multipliers(e: &EcologyParams) -> Vec<(String, f64)> {
-    EcologyParams::search_names()
-        .into_iter()
-        .map(|n| {
-            let v = e.get(&n).expect("a search name");
-            (n, v)
-        })
-        .collect()
+fn multipliers(g: &Genome) -> Vec<(String, f64)> {
+    g.genes.iter().map(|x| (x.name.clone(), x.value)).collect()
 }
 
 /// Whether a plant species counts as **lost** in a candidate world against the default
@@ -434,12 +598,12 @@ pub fn species_lost(start: usize, end: usize, default_end: usize) -> bool {
     end == 0 || (default_end >= 4 && 4 * end < default_end)
 }
 
-/// Re-score `e` with persistence judged against `reference`, the **default** vector's
+/// Re-score `e` with persistence judged against `reference`, the **default** genome's
 /// world on the same seed: a species counts as lost only if the default world kept it
-/// (and `e`'s own world started with it), since some still-water worlds lose a species
-/// whatever the vector (siphonreed, 2026-09-25). Lineages lost always count.
-pub fn rescore(e: &mut Evaluation, reference: &Evaluation, band: &Band) {
-    let lineages = e.lineages_end.iter().filter(|n| **n == 0).count();
+/// (and `e`'s own world started with it), since some worlds lose a species whatever the
+/// genome (siphonreed, 2026-09-25). Lineages lost always count.
+pub fn rescore(e: &mut Evaluation, reference: &Evaluation) {
+    let lineages = lost_lineages(&e.founded, &e.lineages_end, &e.eggs_end);
     let species = e
         .species_start
         .iter()
@@ -448,17 +612,24 @@ pub fn rescore(e: &mut Evaluation, reference: &Evaluation, band: &Band) {
         .filter(|((start, end), kept)| species_lost(**start, **end, **kept))
         .count();
     e.trace.missing = lineages + species;
-    e.penalty = penalty(&e.trace, band);
+    e.penalty = penalty(&e.trace, &e.band);
 }
 
-/// The box penalty for a log vector outside the search box: squared log distance.
-fn box_penalty(x: &[f64]) -> f64 {
-    EcologyParams::search_bounds()
+/// The box penalty for a search point outside the genome's box: squared distance.
+fn box_penalty(bounds: &[(f64, f64)], x: &[f64]) -> f64 {
+    bounds
         .iter()
         .zip(x)
         .map(|((lo, hi), v)| (lo - v).max(0.0).powi(2) + (v - hi).max(0.0).powi(2))
         .sum::<f64>()
         * 10.0
+}
+
+/// A candidate's R, S and F on `world`.
+pub fn screen_of(e: &EcologyParams, world: &cubarium_voxel::Config, spec: &ScreenSpec) -> Rsf {
+    let voxel_m = world.voxel_m;
+    let layers = e.layers(voxel_m);
+    rsf(&layers.flora, &layers.fauna, voxel_m, spec)
 }
 
 /// One lineage's brain for a check arm: `heuristic` (the fauna's own observation-only
@@ -502,8 +673,20 @@ fn load_centres(centres: &[(Founder, PathBuf)]) -> Result<Vec<(Founder, VoxelPol
     Ok(out)
 }
 
-/// Run the search. Writes `generations.jsonl`, `best.toml` (the lowest-fitness vector
-/// evaluated so far) and `mean.toml` (the search mean) under `out`.
+/// The search genome `search` with the values `start` gives its genes, matched by name;
+/// a gene `search` lacks, or a value outside its range there, is an error.
+pub fn start_from(search: &Genome, start: &Genome) -> Result<Genome, String> {
+    let mut g = search.clone();
+    for gene in &start.genes {
+        g.set(&gene.name, gene.value)
+            .map_err(|e| format!("--start: {e}"))?;
+    }
+    Ok(g)
+}
+
+/// Run the search. Writes `generations.jsonl`, `best.toml` (the lowest-fitness genome
+/// evaluated so far), `mean.toml` (the search mean), and each as a resolved parameter
+/// file (`best-params.toml`, `mean-params.toml`) under `out`.
 pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
     let run_started = Instant::now();
     std::fs::create_dir_all(&spec.out)
@@ -517,15 +700,16 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             (*f, file.theta.clone(), adam)
         })
         .collect();
-    let mut cma = Cma::new(
-        vec![0.0; EcologyParams::search_names().len()],
-        spec.sigma0,
-        spec.lambda,
-        spec.cma_seed,
-    );
+    let start = spec.genome.clone();
+    let bounds = start.search_bounds();
+    let mean0 = match &spec.start {
+        Some(s) => start_from(&start, s)?.to_search(),
+        None => start.to_search(),
+    };
+    let mut cma = Cma::new(mean0, spec.sigma0, spec.lambda, spec.cma_seed);
     let mut log = std::fs::File::create(spec.out.join("generations.jsonl"))
         .map_err(|e| format!("cannot write the log: {e}"))?;
-    let mut best: Option<(f64, EcologyParams, u32)> = None;
+    let mut best: Option<(f64, Genome, u32)> = None;
     let mut records = Vec::new();
     let mut last_gen_wall = 0.0;
     for generation in 0..spec.generations {
@@ -547,12 +731,22 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             .enumerate()
             .map(|(k, x)| (format!("c{k}"), x.clone()))
             .collect();
-        // The default vector on the same seeds: the persistence reference and the
-        // baseline, in the slot the search mean held.
-        candidates.push((
-            "default".into(),
-            vec![0.0; EcologyParams::search_names().len()],
-        ));
+        // The search file's starting genome on the same seeds: the persistence reference
+        // and the baseline.
+        candidates.push(("default".into(), start.to_search()));
+        let genomes: Vec<Genome> = candidates.iter().map(|(_, x)| start.from_search(x)).collect();
+        let params: Vec<EcologyParams> = genomes.iter().cloned().map(EcologyParams::Genome).collect();
+        let screens: Vec<Rsf> = params
+            .iter()
+            .map(|p| screen_of(p, &spec.eval.world, &spec.screen))
+            .collect();
+        let reference_k = candidates.len() - 1;
+        // The default always runs: it is the persistence reference.
+        let run: Vec<bool> = screens
+            .iter()
+            .enumerate()
+            .map(|(k, s)| k == reference_k || s.passes(&spec.screen))
+            .collect();
         let drivers: Vec<(Founder, EpisodeDriver)> = thetas
             .iter()
             .map(|(f, t, _)| (*f, EpisodeDriver::gru(t, *f).expect("a validated centre")))
@@ -571,16 +765,12 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             }
         }
         let jobs: Vec<(usize, u64)> = (0..candidates.len())
+            .filter(|&k| run[k])
             .flat_map(|k| seeds.iter().map(move |&s| (k, s)))
-            .collect();
-        let params: Vec<EcologyParams> = candidates
-            .iter()
-            .map(|(_, x)| EcologyParams::from_search_log(x))
             .collect();
         let mut evals: Vec<Evaluation> = parallel(jobs.clone(), spec.threads, |(k, seed)| {
             evaluate(&params[k], seed, &drivers, &tables, &spec.eval)
         });
-        let reference_k = candidates.len() - 1;
         let references: Vec<Evaluation> = jobs
             .iter()
             .zip(&evals)
@@ -592,8 +782,24 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 .iter()
                 .find(|r| r.base_seed == *seed)
                 .expect("a reference per seed");
-            rescore(e, r, &spec.eval.band);
+            rescore(e, r);
         }
+        // The runs' fitness first: a screened-out candidate scores above the worst of them.
+        let ran: Vec<Option<f64>> = (0..candidates.len())
+            .map(|k| {
+                let screened_out = !screens[k].passes(&spec.screen);
+                (run[k] && !(screened_out && k != reference_k)).then(|| {
+                    let pens: Vec<f64> = jobs
+                        .iter()
+                        .zip(&evals)
+                        .filter(|((j, _), _)| *j == k)
+                        .map(|(_, e)| e.penalty.total)
+                        .collect();
+                    pens.iter().sum::<f64>() / pens.len().max(1) as f64
+                })
+            })
+            .collect();
+        let worst_run = ran.iter().flatten().copied().fold(f64::NEG_INFINITY, f64::max);
         let mut recs: Vec<CandidateRecord> = Vec::new();
         for (k, (label, x)) in candidates.iter().enumerate() {
             let mine: Vec<Evaluation> = jobs
@@ -602,27 +808,37 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 .filter(|((j, _), _)| *j == k)
                 .map(|(_, e)| e.clone())
                 .collect();
-            let mean_pen =
-                mine.iter().map(|e| e.penalty.total).sum::<f64>() / mine.len().max(1) as f64;
-            let bp = box_penalty(x);
+            let bp = box_penalty(&bounds, x);
+            let screened_out = !screens[k].passes(&spec.screen);
+            let fitness = match ran[k] {
+                Some(p) => p + bp,
+                None => spec.screen.graded(&screens[k], worst_run) + bp,
+            };
             recs.push(CandidateRecord {
                 label: label.clone(),
-                multipliers: multipliers(&params[k]),
-                fitness: mean_pen + bp,
+                multipliers: multipliers(&genomes[k]),
+                fitness,
                 box_penalty: bp,
+                rsf: [screens[k].r, screens[k].s, screens[k].f],
+                screened_out,
                 evaluations: mine,
             });
         }
         let fitness: Vec<f64> = recs[..xs.len()].iter().map(|r| r.fitness).collect();
-        // Best so far, by the in-box penalty, over the draws and the mean.
+        // Best so far, by the in-box penalty, over the draws and the default, among those
+        // that ran and passed the screen.
         for (k, r) in recs.iter().enumerate() {
+            if r.screened_out {
+                continue;
+            }
             let pen = r.fitness - r.box_penalty;
             if best.as_ref().is_none_or(|b| pen < b.0) {
-                best = Some((pen, params[k].clone(), generation));
+                best = Some((pen, genomes[k].clone(), generation));
             }
         }
         cma.tell(&xs, &fitness);
-        // Unified mode: one brain step per lineage from every world's bodies.
+        // Unified mode: one brain step per lineage with a centre, from every world's
+        // bodies.
         if spec.brain_pairs > 0 {
             for (f, theta, adam) in thetas.iter_mut() {
                 let per_world: Vec<Vec<(usize, f64)>> = evals
@@ -662,18 +878,19 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             serde_json::to_string(&record).map_err(|e| e.to_string())?
         );
         let _ = log.flush();
-        let mean = EcologyParams::from_search_log(cma.mean());
-        mean.save(
-            &spec.out.join("mean.toml"),
-            &format!("Ecology search mean after generation {generation}. Training only."),
-        )?;
-        if let Some((pen, e, g)) = &best {
+        let mean = EcologyParams::Genome(start.from_search(cma.mean()));
+        let note = format!("Ecology search mean after generation {generation}. Training only.");
+        mean.save(&spec.out.join("mean.toml"), &note)?;
+        mean.params()?.write_beside(&spec.out.join("mean-params"))?;
+        if let Some((pen, g, gen_)) = &best {
+            let e = EcologyParams::Genome(g.clone());
             e.save(
                 &spec.out.join("best.toml"),
                 &format!(
-                    "Lowest-penalty ecology vector so far ({pen:.4}, generation {g}). Training only;\nthe live defaults are unchanged."
+                    "Lowest-penalty genome so far ({pen:.4}, generation {gen_}). Training only;\nthe live defaults are unchanged."
                 ),
             )?;
+            e.params()?.write_beside(&spec.out.join("best-params"))?;
         }
         if spec.brain_pairs > 0 {
             for ((f, theta, _), (_, file)) in thetas.iter().zip(&files) {
@@ -693,9 +910,10 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
 fn summary(r: &SearchRecord, best: Option<f64>) -> String {
     let mut f: Vec<f64> = r.candidates.iter().map(|c| c.fitness).collect();
     f.sort_by(f64::total_cmp);
+    let screened = r.candidates.iter().filter(|c| c.screened_out).count();
     let mean = r.candidates.iter().find(|c| c.label == "default");
     let mut s = format!(
-        "gen {:>3} {:>6.0}s σ={:.3} fit min={:.3} med={:.3} | best so far {:.3}",
+        "gen {:>3} {:>6.0}s σ={:.3} fit min={:.3} med={:.3} screened={screened} | best so far {:.3}",
         r.generation,
         r.wall_s,
         r.sigma,
@@ -716,14 +934,12 @@ fn summary(r: &SearchRecord, best: Option<f64>) -> String {
             })
             .collect();
         s.push_str(&format!(
-            " | default fit={:.3} animals_end={} mult=[{}]",
+            " | default fit={:.3} rsf=[{:.2} {:.2} {:.1}] animals_end={}",
             m.fitness,
+            m.rsf[0],
+            m.rsf[1],
+            m.rsf[2],
             end.join(","),
-            m.multipliers
-                .iter()
-                .map(|(_, v)| format!("{v:.2}"))
-                .collect::<Vec<_>>()
-                .join(" ")
         ));
     }
     s
@@ -745,7 +961,7 @@ pub fn check_world_config(world: Option<&std::path::Path>) -> Result<cubarium_vo
 /// the policy's senses were read at that mass (the manifest's `mass_scale`, in the
 /// digest). A heuristic reads no mass and runs anywhere.
 pub fn check_mass(drivers: &[(Founder, EpisodeDriver)], e: &EcologyParams) -> Result<(), String> {
-    let fauna = e.fauna_config();
+    let fauna = e.fauna();
     for (f, d) in drivers {
         if !matches!(d.kind(), crate::es::voxel::controller::EpisodeKind::Gru(_)) {
             continue;
@@ -771,6 +987,7 @@ pub fn check(
     window_min: f64,
     water_every: u32,
     centres: &[(Founder, PathBuf)],
+    founders: [usize; Founder::COUNT],
     threads: usize,
     out: &std::path::Path,
 ) -> Result<(), String> {
@@ -790,12 +1007,7 @@ pub fn check(
     let results: Vec<Result<(), String>> = parallel(jobs, threads, |(a, seed)| {
         let (name, params) = &arms[a];
         let cfg = world_cfg.clone();
-        let (mut sim, info) = world::found_world(
-            &cfg,
-            seed,
-            cubarium_voxel_sim::habitat::NO_EGG_BANK,
-            params,
-        );
+        let (mut sim, info) = world::found_world(&cfg, seed, founders, params);
         super::install_centres(sim.fauna_mut(), &drivers);
         sim.world_mut().set_water_every(water_every);
         let path = out.join(format!("{name}__seed{seed}.csv"));
@@ -804,6 +1016,7 @@ pub fn check(
         let mut header = vec!["minute".to_string(), "world_seed".into(), "animals".into()];
         for l in Founder::ALL {
             header.push(format!("{}.population", l.name()));
+            header.push(format!("{}.eggs", l.name()));
             header.push(format!("{}.births", l.name()));
             for d in cubarium_voxel_fauna::Departure::ALL {
                 header.push(format!("{}.{}", l.name(), d.name()));
@@ -854,6 +1067,7 @@ pub fn check(
             for l in Founder::ALL {
                 let s = &r.lineages[l.index()];
                 row.push(pop[l.index()].to_string());
+                row.push(sim.fauna().view().eggs_by_founder(l).to_string());
                 row.push(s.births.to_string());
                 for d in s.deaths {
                     row.push(d.to_string());

@@ -3,7 +3,6 @@
 //! night, and the ecology vector. No ticks.
 
 use cubarium_voxel_fauna::{FaunaConfig, Founder};
-use cubarium_voxel_flora::FloraConfig;
 use cubarium_voxel_sim::params::Params;
 use cubarium_voxel_sim::{ArenaGrid, LayerConfig, arena_start_hour};
 
@@ -12,7 +11,7 @@ use super::task::{PreparedArena, Stage};
 use super::training_world::{landscape_config, layers_for};
 
 fn heavy() -> EcologyParams {
-    let mut e = EcologyParams::defaults();
+    let mut e = EcologyParams::legacy();
     e.set("founder.mass_scale@frondgrazer", 100.0)
         .expect("in range");
     e.set("flora.foliage_rate", 2.0).expect("in range");
@@ -29,18 +28,18 @@ fn the_training_layers_are_the_ecology_vectors() {
         );
         let e = heavy();
         let layers = layers_for(&e, grid.voxel_m());
-        assert_eq!(layers.fauna, e.fauna_config());
+        assert_eq!(layers.fauna, e.fauna());
         assert_eq!(
             layers.flora,
-            e.flora_config(FloraConfig::for_voxel_size(grid.voxel_m()))
+            e.flora(grid.voxel_m())
         );
         assert_ne!(layers.fauna, FaunaConfig::default());
     }
     let layers = layers_for(&heavy(), 0.125);
-    assert_eq!(layers.fauna, heavy().fauna_config());
+    assert_eq!(layers.fauna, heavy().fauna());
     assert_eq!(
         layers.flora,
-        heavy().flora_config(FloraConfig::for_voxel_size(0.125))
+        heavy().flora(0.125)
     );
 }
 

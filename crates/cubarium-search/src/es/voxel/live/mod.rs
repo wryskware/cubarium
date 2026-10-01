@@ -30,6 +30,7 @@ use super::EpisodeDriver;
 
 pub mod ecology;
 pub mod readout;
+pub mod screen;
 pub mod search;
 pub mod trainer;
 pub mod variants;
@@ -47,7 +48,13 @@ mod motor_tests;
 #[cfg(test)]
 mod movement_tests;
 #[cfg(test)]
+mod reward_tests;
+#[cfg(test)]
+mod screen_tests;
+#[cfg(test)]
 mod search_tests;
+#[cfg(test)]
+mod targets_tests;
 #[cfg(test)]
 mod tests;
 

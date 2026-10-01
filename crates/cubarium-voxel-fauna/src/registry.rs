@@ -5,7 +5,7 @@
 //! the audit's `parameters.tsv` where it has a row; P1's predation numbers have none and
 //! are `placeholder`. The generic code is [`cubarium_voxel::registry`].
 
-use cubarium_voxel::registry::{Alias, Range, Registry, Row};
+use cubarium_voxel::registry::{Alias, Group, GroupKind, Range, Registry, Row, Tie};
 
 use crate::{BirthMode, FaunaConfig, Food, Founder, SpeciesConfig};
 
@@ -25,7 +25,89 @@ pub fn registry() -> &'static Registry {
             ],
             Vec::new(),
         )
+        .with_ties(ties())
+        .with_groups(groups())
     })
+}
+
+/// The nine absolute quantities a body's org-unit mass scale carries
+/// ([`crate::SpeciesConfig::scale_mass`]), relative to a `SpeciesConfig`.
+pub const MASS_SCALED: [&str; 9] = [
+    "body_max",
+    "body_min",
+    "birth_body",
+    "birth_cost",
+    "reproduction.surplus_floor",
+    "reproduction.egg_organic",
+    "bite_per_s",
+    "bite_half_stock",
+    "growth_max_per_s",
+];
+
+/// The animal layer's `derive()` (registry §4): the fields that follow others by ratio
+/// when a genome moves the others.
+/// - Walking is priced against upkeep (audit §8.1): `motor_respiration_per_s =
+///   motor_factor × maintenance_per_s`, the factor today's ratio.
+/// - The mouth too: `bite_per_s = intake_factor × maintenance_per_s × body`.
+/// - The nine absolute quantities follow the lineage's mass scale (audit §1.4).
+/// - The placeholder species is the browser's body: its mass and lifespan follow the
+///   browser's.
+pub fn ties() -> Vec<Tie> {
+    let mut t = vec![
+        Tie::new(
+            "motor_follows_upkeep",
+            "fauna.founders.*.motor_respiration_per_s",
+            "fauna.founders.*.core.maintenance_per_s",
+        ),
+        Tie::new(
+            "intake_follows_upkeep",
+            "fauna.founders.*.core.bite_per_s",
+            "fauna.founders.*.core.maintenance_per_s",
+        ),
+    ];
+    for q in MASS_SCALED {
+        t.push(Tie::new("mass", format!("fauna.founders.*.core.{q}"), "fauna.founders.*.mass_scale"));
+        t.push(Tie::new(
+            "placeholder_mass",
+            format!("fauna.frondgrazer.{q}"),
+            "fauna.founders.frondgrazer.mass_scale",
+        ));
+    }
+    t.push(Tie::new(
+        "placeholder_lifespan",
+        "fauna.frondgrazer.lifespan_median_s",
+        "fauna.founders.frondgrazer.core.lifespan_median_s",
+    ));
+    t
+}
+
+/// The animal layer's share of the biological clock (`K_bio`, registry decision 2):
+/// `@bio_rate` runs faster with it, `@bio_time` shorter. Derived fields are left out —
+/// they follow their bases.
+fn groups() -> Vec<Group> {
+    let core = |q: &str| format!("fauna.founders.*.core.{q}");
+    vec![
+        Group {
+            name: "bio_rate",
+            kind: GroupKind::Paths(vec![
+                core("maintenance_per_s"),
+                core("growth_max_per_s"),
+                "fauna.predation.wound_heal_per_s".into(),
+                "fauna.predation.egg_upkeep_per_s".into(),
+            ]),
+        },
+        Group {
+            name: "bio_time",
+            kind: GroupKind::Paths(vec![
+                core("lifespan_median_s"),
+                core("reproduction.surplus_hold_s"),
+                core("reproduction.gestation_s"),
+                core("reproduction.birth_interval_s"),
+                core("reproduction.incubation_s"),
+                "fauna.predation.egg_viability_median_s".into(),
+            ]),
+        },
+    ]
 }
 
 fn r(path: &str, unit: &'static str, range: Range, what: &'static str) -> Row {
@@ -86,8 +168,8 @@ fn founder_rows() -> Vec<Row> {
         r("motor_respiration_per_s", "org-units/s per unit body at full cruise", nonneg, "paid motion")
             .search(2.5e-4, 1e-2).log().grade("B"),
         r("step_up_m", "m", nonneg, "tallest riser stepped (rounded down to voxels)")
-            .search(0.1, 1.0).grade("B").prov("measured"),
-        r("step_down_m", "m", nonneg, "deepest drop stepped").evolve().grade("C").prov("measured"),
+            .search(0.1, 1.0).digest().grade("B").prov("measured"),
+        r("step_down_m", "m", nonneg, "deepest drop stepped").evolve().digest().grade("C").prov("measured"),
         r("wall_climb_cost_factor", "x walking cost", nonneg, "motor cost of a second on a wall").prov("derived"),
         r("climb_speed_fraction", "x cruise", Range::positive(), "pace of a wall climb, a fraction of the cruise")
             .search(0.1, 1.0).grade("B").prov("decision"),
@@ -95,10 +177,10 @@ fn founder_rows() -> Vec<Row> {
             .search(0.3, 3.0).digest().grade("A").prov("decision"),
         r("yaw_cap_rad_per_s", "rad/s", Range::positive(), "the turn rate of full turn effort")
             .search(1.0, 10.0).digest().grade("B"),
-        r("wade_height_fraction", "x current height", nonneg, "deepest water walked into").search(0.0, 1.0).grade("B"),
-        r("drown_height_fraction", "x current height", nonneg, "water deeper than this is over it").grade("A").prov("decision"),
+        r("wade_height_fraction", "x current height", nonneg, "deepest water walked into").search(0.0, 1.0).digest().grade("B"),
+        r("drown_height_fraction", "x current height", nonneg, "water deeper than this is over it").digest().grade("A").prov("decision"),
         r("drown_after_s", "s", nonneg, "continuous time under water before it drowns")
-            .search(10.0, 36000.0).log(),
+            .search(10.0, 36000.0).log().digest(),
         r("adult_length_m", "m", Range::positive(), "adult body length (cruise is 1 BL/s)")
             .evolve().digest().grade("N").prov("decision"),
         r("adult_width_m", "m", Range::positive(), "adult body width").evolve().digest().grade("N").prov("decision"),
@@ -117,7 +199,7 @@ fn founder_rows() -> Vec<Row> {
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
-            .prov("decision"),
+            .digest().prov("decision"),
         // The carnivore's table (`Hunter`): the lanternjaw's only, optional on the others.
         r("hunter.strike_power", "wound per hit", nonneg, "a hit adds power x (S_pred / S_prey) x (1 - armour)").optional(),
         r("hunter.prey_max_ratio", "x own body", nonneg, "the size window: prey at most this x its own").optional(),

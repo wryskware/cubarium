@@ -68,6 +68,8 @@ use cubarium_voxel_flora::Flora;
 
 mod arena;
 pub mod found;
+#[cfg(test)]
+mod genome_tests;
 pub mod habitat;
 pub mod params;
 #[cfg(test)]
