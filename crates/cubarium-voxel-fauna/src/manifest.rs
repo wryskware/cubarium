@@ -302,7 +302,23 @@ pub struct Manifest {
     pub occlusion_rule: &'static str,
     /// [`BIRTH_READINESS_RULE`]: what `Self.birth_readiness` reads 1 for.
     pub birth_readiness_rule: &'static str,
+    /// The org-unit **mass scale** the lineage's shipped physiology is built at
+    /// (`FounderPhysiology::mass_scale`): a policy trained here is trained for bodies of
+    /// this mass, and a world of another mass refuses it.
+    pub mass_scale: f64,
+    /// [`SELF_REFERENCE_RULE`] and [`TASTE_REFERENCE_RULE`]: how the `Self` and taste
+    /// references scale with a body's mass.
+    pub self_reference_rule: &'static str,
+    pub taste_reference_rule: &'static str,
 }
+
+/// The `Self` energy, reserve, structural-loss and intake references are the manifest's
+/// times the body's `mass_scale`: each reads a fraction of an adult of that mass.
+pub const SELF_REFERENCE_RULE: &str = "self_refs_x_body_mass_scale";
+
+/// Taste's reference stock is `M_EMIT × the body's mass_scale`, so a "full" taste is the
+/// same share of the body's need at any mass.
+pub const TASTE_REFERENCE_RULE: &str = "taste_ref_m_emit_x_body_mass_scale";
 
 // ---------------------------------------------------------------- static layout
 
@@ -527,6 +543,7 @@ struct Anchors {
     drown: f64,
     drown_after: f64,
     cruise: f64,
+    mass: f64,
 }
 
 fn anchors(founder: Founder) -> Anchors {
@@ -546,6 +563,7 @@ fn anchors(founder: Founder) -> Anchors {
         drown: p.drown_height_fraction,
         drown_after: p.drown_after_s,
         cruise: cruise_body_lengths_per_s(founder) * p.adult_length_m,
+        mass: p.mass_scale,
     }
 }
 
@@ -608,6 +626,9 @@ impl Manifest {
             pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
+            mass_scale: a.mass,
+            self_reference_rule: SELF_REFERENCE_RULE,
+            taste_reference_rule: TASTE_REFERENCE_RULE,
         }
     }
 
@@ -655,6 +676,9 @@ impl Manifest {
             pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
+            mass_scale: a.mass,
+            self_reference_rule: SELF_REFERENCE_RULE,
+            taste_reference_rule: TASTE_REFERENCE_RULE,
         }
     }
 
@@ -704,6 +728,9 @@ impl Manifest {
             pool_bulk_density: crate::senses::POOL_BULK_DENSITY,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
+            mass_scale: a.mass,
+            self_reference_rule: SELF_REFERENCE_RULE,
+            taste_reference_rule: TASTE_REFERENCE_RULE,
         }
     }
 
@@ -808,6 +835,11 @@ impl Manifest {
             self.structural_reference,
             self.forward_reference_m,
             self.turn_reference_rad
+        );
+        let _ = write!(
+            s,
+            "|mass:{}|self_ref:{}|taste_ref:{}",
+            self.mass_scale, self.self_reference_rule, self.taste_reference_rule
         );
         let _ = write!(s, "|taste:{}", self.taste_cue);
         for (class, r) in self.taste_resistances {

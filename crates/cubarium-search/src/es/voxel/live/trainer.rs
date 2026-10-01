@@ -73,6 +73,9 @@ pub struct LiveSpec {
     /// The ecology every world is founded under (training only; defaults: the shipped
     /// world).
     pub ecology: EcologyParams,
+    /// The world every training world is founded from: a host file's `[world]`
+    /// (`--world`, e.g. the desktop terrarium), or the still `small` preset when `None`.
+    pub world: Option<cubarium_voxel::Config>,
 }
 
 /// One lineage's side of a generation.
@@ -171,7 +174,7 @@ pub fn ascend(
 }
 
 fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> LiveWorld {
-    let cfg = world::training_config();
+    let cfg = spec.world.clone().unwrap_or_else(world::training_config);
     let ecology = spec.ecology.clone();
     let (mut sim, info) = world::found_world(
         &cfg,
@@ -265,7 +268,7 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
         .map_err(|e| format!("cannot create {}: {e}", spec.out.display()))?;
     let mut lineages: Vec<Lineage> = Vec::new();
     for (founder, path) in &spec.centres {
-        let file = VoxelPolicyFile::load(path)?;
+        let file = VoxelPolicyFile::load_or_transfer(path)?;
         let declared = file.founder()?;
         if declared != *founder {
             return Err(format!(
@@ -275,7 +278,8 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
                 founder.name()
             ));
         }
-        file.driver()?; // validates length, finiteness and this build's digest
+        // Validates length, finiteness and this build's digest, and the world's mass.
+        super::search::check_mass(&[(*founder, file.driver()?)], &spec.ecology)?;
         let mut adam = Adam::new(file.theta.len());
         adam.learning_rate = spec.learning_rate;
         lineages.push(Lineage {

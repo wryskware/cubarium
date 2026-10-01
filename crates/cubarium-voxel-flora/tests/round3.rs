@@ -810,7 +810,7 @@ fn a_parcel_dies_with_its_donor_and_reaches_the_litter() {
     let mut last = *flora.view().stand_at(home).expect("seeded");
     let mut litter_before = 0.0;
     let mut died_at = None;
-    for tick in 1..=200u32 {
+    for tick in 1..=400u32 {
         let g = flora
             .view()
             .ground_at(home)
@@ -826,7 +826,7 @@ fn a_parcel_dies_with_its_donor_and_reaches_the_litter() {
             }
         }
     }
-    let died_at = died_at.expect("the donor outlived two hundred ticks");
+    let died_at = died_at.expect("the donor outlived four hundred ticks");
     assert_eq!(flora.view().ledger.deaths, 1, "it did not die, or twice");
     assert!(
         last.parcel > 0.0,
@@ -2151,7 +2151,7 @@ fn a_founder_replaced_by_its_own_species_in_one_tick_is_still_a_death_and_a_birt
     // Step until the death, and check every tick that the site is never seen empty — the
     // observation the old site watch depended on, and which never happens here.
     let mut died_on = None;
-    for tick in 1..=200u32 {
+    for tick in 1..=400u32 {
         let (deaths0, est0) = (
             flora.view().ledger.deaths,
             flora.view().ledger.establishments,
@@ -2177,7 +2177,7 @@ fn a_founder_replaced_by_its_own_species_in_one_tick_is_still_a_death_and_a_birt
             break;
         }
     }
-    let died_on = died_on.expect("the victim outlived two hundred ticks");
+    let died_on = died_on.expect("the victim outlived four hundred ticks");
     let v = flora.view();
     assert_eq!(
         v.ledger.deaths, 1,

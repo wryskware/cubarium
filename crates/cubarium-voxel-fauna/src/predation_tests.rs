@@ -93,7 +93,7 @@ fn the_lanternjaw_and_its_prey_carry_the_notes_numbers() {
     let c = FaunaConfig::default();
     let lj = c.founder(Founder::Lanternjaw);
     assert_eq!(Founder::Lanternjaw.name(), "lanternjaw");
-    assert_eq!(lj.core.body_max, 0.035);
+    assert!((lj.core.body_max - 0.035 * crate::SHIPPED_MASS_SCALE).abs() < 1e-12, "x30 since main");
     assert_eq!(lj.core.maintenance_per_s, 0.0002);
     assert_eq!(lj.core.reserve_cap, 1.0);
     assert_eq!(

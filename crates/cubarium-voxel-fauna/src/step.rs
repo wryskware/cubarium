@@ -1899,7 +1899,8 @@ fn founder_feed(
     // Which food is at this mouth, and how much of it — the `E` the bite diminishes
     // with — before anything is withdrawn.
     let meal = match founder {
-        Founder::Blind => body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry),
+        Founder::Blind => body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry)
+            .map(|(meal, stock, _)| (meal, stock)),
         // The carnivore's mouth takes carrion and nothing else (predation §2.6).
         Founder::Lanternjaw => {
             body::mouth_pool_site(&flora.view(), &cols, site_y, Food::Carrion).map(|(site, stock)| {
@@ -2281,6 +2282,7 @@ fn advance_eligibility(
     if a.reproduction.refractory_ticks > 0 {
         a.reproduction.refractory_ticks -= 1;
         a.reproduction.surplus_ticks = 0;
+        a.reproduction.window.reset();
         return;
     }
     if a.reproduction.escrow.is_some() {
@@ -2289,11 +2291,10 @@ fn advance_eligibility(
     let eligible = a.body >= sc.birth_body
         && a.reserve >= rule.surplus_reserve(sc)
         && rule.package_cost(sc) > 0.0;
-    if eligible {
-        a.reproduction.surplus_ticks += 1;
-    } else {
-        a.reproduction.surplus_ticks = 0;
-    }
+    let hold = rule.hold_ticks();
+    a.reproduction.window.tick(eligible, hold);
+    a.reproduction.surplus_ticks = a.reproduction.window.count_for(hold);
+    a.reproduction.eligible_now = eligible;
 }
 
 /// One gestating body's tick: open an escrow when the hold has elapsed, pay this tick's
@@ -2306,7 +2307,7 @@ fn gestate(
 ) -> Option<Animal> {
     let a = &fauna.animals[i];
     if a.reproduction.escrow.is_none() {
-        if a.reproduction.surplus_ticks < rule.hold_ticks() {
+        if !rule.hold_met(&a.reproduction) {
             return None;
         }
         fauna.animals[i].reproduction.escrow = Some(crate::Escrow::default());
@@ -2373,6 +2374,7 @@ fn gestate(
     let a = &mut fauna.animals[i];
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
+    a.reproduction.window.reset();
     let (site, species, pose, founder) = (a.site, a.species, a.pose, a.founder);
     let id = fauna.ledger.births;
     fauna.ledger.births += 1;
@@ -2454,7 +2456,7 @@ fn lay(
     rule: &crate::Reproduction,
     seed: u64,
 ) {
-    if fauna.animals[i].reproduction.surplus_ticks < rule.hold_ticks() {
+    if !rule.hold_met(&fauna.animals[i].reproduction) {
         return;
     }
     // Not on a wall: a clutch goes on the litter the body is standing in.
@@ -2488,6 +2490,7 @@ fn lay(
     a.energy -= energy;
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
+    a.reproduction.window.reset();
     let laid_tick = fauna.tick;
     if rule.dormant {
         // One clutch per egg, each with its own dormancy; the last egg takes the

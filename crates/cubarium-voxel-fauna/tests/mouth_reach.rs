@@ -117,7 +117,7 @@ fn crown_at(flora: &mut Flora, world: &World, x: i64, z: u32, rise: i64) -> f64 
 /// shrink by whatever stock is at the mouth. Their bodies start with an empty reserve,
 /// so package G's satiety asks for the whole bite too.
 fn exact_bites() -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     for f in Founder::ALL {
         c.founders[f.index()].core.bite_half_stock = 0.0;
     }

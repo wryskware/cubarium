@@ -63,7 +63,7 @@ fn flood(w: &mut World, x: i64, top: u32) {
 /// and founder alike. The point of each test is the cause label, not how long a body
 /// takes to starve, and 5 /s reaches it in a few dozen ticks.
 fn starving_config() -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     c.frondgrazer.maintenance_per_s = 5.0;
     for f in Founder::ALL {
         c.founders[f.index()].core.maintenance_per_s = 5.0;
@@ -165,7 +165,7 @@ fn drowning_is_booked_drowned() {
     let mut world = plain(4, 2);
     flood(&mut world, 1, 2);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     let id = grazer(&mut fauna, &world, 1, 0.02);
     let body_min = fauna.config().species(Species::Frondgrazer).body_min;
     assert!(fauna.view().animal(id).unwrap().body > body_min);
@@ -191,7 +191,7 @@ fn a_body_that_is_both_starved_and_drowned_is_booked_starved() {
     let mut flora = Flora::new(FloraConfig::default());
     // 200 /s: one tick of upkeep is more than the whole body, so the starvation clause
     // is true on the very tick the standing water is.
-    let mut cfg = FaunaConfig::default();
+    let mut cfg = FaunaConfig::placeholder();
     cfg.frondgrazer.maintenance_per_s = 200.0;
     let mut fauna = Fauna::new(cfg);
     grazer(&mut fauna, &world, 1, 0.005);
@@ -210,7 +210,7 @@ fn a_body_that_is_both_starved_and_drowned_is_booked_starved() {
 fn a_remove_and_a_lost_support_face_book_a_removal_and_not_a_death() {
     let mut world = plain(4, 2);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
     grazer(&mut fauna, &world, 1, 0.02);
     grazer(&mut fauna, &world, 3, 0.02);
 

@@ -118,6 +118,25 @@ impl VoxelPolicyFile {
         Ok(file)
     }
 
+    /// [`VoxelPolicyFile::load`], or — for a path written `transfer:<file>` — a **transfer
+    /// load**: every check but the manifest digest ([`VoxelPolicyFile::validate_for_transfer`],
+    /// so the same vector length), and the weights restamped to this build's digest. How a
+    /// centre authored against an older contract (round 2's, before the mass-scaled
+    /// references) enters a live check or live training; what it writes back is this
+    /// build's.
+    pub fn load_or_transfer(path: &Path) -> Result<VoxelPolicyFile, String> {
+        let text = path.to_string_lossy();
+        let Some(rest) = text.strip_prefix("transfer:") else {
+            return VoxelPolicyFile::load(path);
+        };
+        let source = Path::new(rest);
+        let mut file = VoxelPolicyFile::read(source)?;
+        file.validate_for_transfer(rest)?;
+        let founder = super::parse_founder(&file.founder).map_err(|e| format!("{rest}: {e}"))?;
+        file.digest = voxel_schema_digest(founder);
+        Ok(file)
+    }
+
     /// Read a file and check its schema token, and nothing else: the caller validates.
     /// Only a **transfer start** ([`super::trainer::InitCenter::transfer`]) reads a
     /// centre this way, because it alone may take weights authored against another

@@ -1,3 +1,7 @@
+# SUPERSEDED 2026-09-28 by the ecology parameter audit
+# (design/7_Research/ecology-parameter-audit-2026-09-28.md, §1.1, §8.1): the search scaled
+# upkeep (x0.25 here) but never the walking cost, so in this world walking costs 4x basal.
+# Do not train on it. Kept only as the record of runs/es3.
 # Ecology search 2026-09-25 (runs/es3, generation 16, c6), lowest penalty 0.953. TRAINING ONLY; live defaults unchanged.
 # Settled 2026-09-28: lifespan x0.50 is the lever (Spearman +0.80 over es3); the senescence and maintenance floors are incidental.
 [ecology]

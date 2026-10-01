@@ -38,6 +38,7 @@ start_hour = 8.0    # cycle: where a fresh world starts, on a 24-hour clock of i
 # longitude = -122.3
 # off: no night in the simulation (plants always lit, animals never sleep)
 # look = "day"      # off only: "day" or "night", the picture alone
+# plant_night_factor = 0.05  # plant upkeep and leaf loss in the dark, a fraction of the day rate (1 = none)
 
 # The climate: temperature and wetness, and so when and how it rains. Any key of the
 # preset can be overridden here one by one (crates/cubarium-voxel/src/weather.rs).

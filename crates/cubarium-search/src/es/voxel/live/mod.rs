@@ -39,6 +39,10 @@ pub mod world;
 #[cfg(test)]
 mod lineage_params_tests;
 #[cfg(test)]
+mod mass_tests;
+#[cfg(test)]
+mod motor_tests;
+#[cfg(test)]
 mod movement_tests;
 #[cfg(test)]
 mod search_tests;

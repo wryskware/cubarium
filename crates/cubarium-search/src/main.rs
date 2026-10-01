@@ -34,6 +34,11 @@ use cubarium_search::search::{self, Budget, TRAINING_SEEDS, Variation};
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// The ecology vector (`[ecology]` TOML, as `voxel-ecology-check --arm` reads) the
+    /// frozen trainer's arenas and landscapes are built on; the live defaults when absent
+    /// (audit round step 5).
+    #[arg(long, global = true)]
+    training_ecology: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -810,6 +815,10 @@ enum Command {
         threads: usize,
         #[arg(long, default_value = "runs/ecology-check")]
         out: PathBuf,
+        /// Found from this config file's `[world]` (a host's, e.g.
+        /// config/desktop/terrarium.toml) instead of the still-water `small` preset.
+        #[arg(long)]
+        world: Option<PathBuf>,
     },
     /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
     /// every body of every lineage given a centre runs its own antithetic variant inside
@@ -854,6 +863,10 @@ enum Command {
         ecology: Option<PathBuf>,
         #[arg(long, default_value = "runs/live-train")]
         out: PathBuf,
+        /// Found the training worlds from this config file's `[world]` (a host's, e.g.
+        /// config/desktop/terrarium.toml) instead of the still-water `small` preset.
+        #[arg(long)]
+        world: Option<PathBuf>,
     },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
@@ -1082,7 +1095,12 @@ fn parse_centres(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    if let Some(path) = &cli.training_ecology {
+        let e = es::voxel::live::ecology::EcologyParams::load(path)?;
+        es::voxel::training_world::set_training_ecology(e)?;
+    }
+    match cli.command {
         Command::Params => print_params(),
         Command::Baseline {
             ticks,
@@ -1491,7 +1509,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             water_every,
             threads,
             out,
+            world,
         } => {
+            let world_cfg =
+                es::voxel::live::search::check_world_config(world.as_deref())?;
             let mut parsed = Vec::new();
             for a in &arms {
                 let (name, src) = a
@@ -1509,6 +1530,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|s| s.trim().parse::<u64>().map_err(|e| format!("seed {s}: {e}")))
                 .collect::<Result<_, _>>()?;
             es::voxel::live::search::check(
+                &world_cfg,
                 &parsed,
                 &seeds,
                 hours,
@@ -1536,6 +1558,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             population_cap,
             save_every,
             out,
+            world,
             ecology,
         } => {
             let ecology = match ecology {
@@ -1543,6 +1566,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => es::voxel::live::ecology::EcologyParams::defaults(),
             };
             let spec = es::voxel::live::trainer::LiveSpec {
+                world: match &world {
+                    Some(p) => Some(cubarium_voxel::world_config_from_file(p)?),
+                    None => None,
+                },
                 ecology,
                 centres: parse_centres(&centres)?,
                 worlds,
@@ -1591,6 +1618,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             remote_wait,
             pin,
         } => {
+            es::voxel::training_world::check_remote(remotes.len())?;
             if overwrite {
                 let _ = std::fs::remove_dir_all(&out);
             }

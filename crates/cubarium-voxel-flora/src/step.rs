@@ -236,13 +236,25 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
         cubarium_voxel::voxel_phase!(Drown, { drown(flora, world, threads) });
 
+        // WX3: what the world's day lets a plant use of the light it stands in. The light
+        // above is where the stand sits (a view); this is the clock. Twilight is smooth,
+        // and it is always 1 with the day clock off.
+        let life_daylight = world.life_daylight();
+        // WX3 round 2: plant maintenance follows the air, by a Q10 around the climate's mean.
+        let upkeep = upkeep_factor(
+            world.life_temperature_c(),
+            world.config().climate.temperature_c,
+        );
+        // WX3 round 4: the plant night rule — maintenance and leaf loss at
+        // `plant_night_factor` of their daytime rate while it is dark.
+        let night = world.plant_night_scale();
         let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
         let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
         let world = target.world();
         let substrate =
             cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads) });
         cubarium_voxel::voxel_phase!(Grow, {
-            grow(flora, world, &light, &moisture, &substrate, threads)
+            grow(flora, world, &light, life_daylight, upkeep, night, &moisture, &substrate, threads)
         });
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world) });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
@@ -2172,10 +2184,21 @@ fn split_shares(taken: Taken, wants: &[Want], shares: &mut Vec<Taken>) {
 
 // ------------------------------------------- 6. income, growth, senescence, death
 
+/// Q10 of plant upkeep: it doubles for every 10 °C above the climate's mean.
+pub const UPKEEP_Q10: f64 = 2.0;
+
+/// Multiplier on plant maintenance at `t_c` in a climate whose mean is `t_mean_c`.
+pub fn upkeep_factor(t_c: f64, t_mean_c: f64) -> f64 {
+    UPKEEP_Q10.powf((t_c - t_mean_c) / 10.0)
+}
+
 fn grow(
     flora: &mut Flora,
     world: &World,
     light: &[f64],
+    daylight: f64,
+    upkeep: f64,
+    night: f64,
     drink: &[Drink],
     substrate: &[Substrate],
     threads: usize,
@@ -2256,6 +2279,9 @@ fn grow(
                     stand,
                     &mut ground[slots[si] - base],
                     light[si],
+                    daylight,
+                    upkeep,
+                    night,
                     drink[si],
                     substrate[si],
                     &mut books[k],
@@ -2378,6 +2404,9 @@ fn grow_stand(
     stand: &mut Stand,
     g: &mut Ground,
     light: f64,
+    daylight: f64,
+    upkeep: f64,
+    night: f64,
     drink: Drink,
     substrate: Substrate,
     book: &mut Booked,
@@ -2438,7 +2467,14 @@ fn grow_stand(
     };
     let p_cap = sc.alpha * w0;
     let q_max = sc.reserve_cap * w0;
-    let m = sc.maintenance * w0 * DT;
+    // Maintenance alone follows the temperature; growth respiration does not. A
+    // photosynthetic stand's maintenance and senescence also follow the night rule
+    // (`World::plant_night_scale`); a saprotroph's do not.
+    let night = match sc.trophic {
+        Trophic::Photo => night,
+        Trophic::Saprotroph => 1.0,
+    };
+    let m = sc.maintenance * upkeep * night * w0 * DT;
     let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * DT);
     let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * DT);
     let d_q = (q_max - q0).max(0.0);
@@ -2446,7 +2482,9 @@ fn grow_stand(
     // The income, by trophic mode. Everything below this is one set of rules.
     let (a, arrived_mineral) = match sc.trophic {
         Trophic::Photo => {
-            let a_pot = (sc.assimilation * l_eff * mu * (1.0 - stress) * p0 * monod * DT)
+            // WX3: income is the light response times the day. Maintenance and
+            // respiration below do not care what time it is.
+            let a_pot = (sc.assimilation * l_eff * daylight * mu * (1.0 - stress) * p0 * monod * DT)
                 .min(sc.nutrient_draw_max * n0 * DT)
                 .min(mineral_cap)
                 .max(0.0);
@@ -2538,9 +2576,16 @@ fn grow_stand(
     let dp_a = (rem / build).min(d_p).min(tissue_left).max(0.0);
     rem -= build * dp_a;
     tissue_left -= dp_a;
+    // WX3: a photosynthetic stand reflushes from its reserve only as far as the day lets
+    // the new leaves earn. In the dark they would earn nothing and senesce before dawn,
+    // and the reserve they cost is what pays the night's maintenance.
+    let flush_light = match sc.trophic {
+        Trophic::Photo => daylight,
+        Trophic::Saprotroph => 1.0,
+    };
     let dp_q = if p0 < sc.reflush_below * p_cap {
         (stand.reserve / build)
-            .min(d_p - dp_a)
+            .min((d_p - dp_a) * flush_light)
             .min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0))
             .max(0.0)
     } else {
@@ -2603,7 +2648,7 @@ fn grow_stand(
     }
 
     // ---- 4.5 senescence
-    let shed = (sc.senescence * stand.foliage * DT).min(stand.foliage);
+    let shed = (sc.senescence * night * stand.foliage * DT).min(stand.foliage);
     let organic_before = stand.material();
     stand.foliage -= shed;
     // Senescence loses from the **top** foliage layer first: a plant drops its
@@ -3005,13 +3050,24 @@ fn decompose_pool(
 /// cohort has no way to carry. It is the half of correction 2 that makes saturation cost
 /// something on the way in: the intolerant species is shut out of the basin instead of
 /// merely doing badly there, which is what Chesson's test needs to have anywhere to bite.
+///
+/// It is also the one gate for every **birth a tick makes** — the bank's lottery and a
+/// runner's daughter — and so it reads the clock as well (WX3 round 4): a photosynthetic
+/// newborn waits for `daylight` above zero, because one that comes up in the dark has no
+/// income until dawn and a reserve sized for minutes. The public habitat predicates below
+/// ([`can_establish`] and the gates) stay about the site, not the hour: a host founding a
+/// world at night on a local clock still finds its habitat.
 pub(crate) fn establishes(
     view: &VoxelView<'_>,
     sky: &mut Vec<(Site, f64)>,
     ground: &[Ground],
     site: Site,
     sc: &SpeciesConfig,
+    daylight: f64,
 ) -> bool {
+    if sc.trophic == Trophic::Photo && daylight <= 0.0 {
+        return false;
+    }
     let visibility = sky_at(sky, view, site);
     let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
     gates(view, site, sc, visibility, dead_wood, litter).passes()
@@ -4016,8 +4072,8 @@ mod tests {
                 .collect();
             let substrate = feed(&mut flora, &world, &drink, 1);
             let (mut one, mut split) = (flora.clone(), flora.clone());
-            grow(&mut one, &world, &light, &drink, &substrate, 1);
-            grow(&mut split, &world, &light, &drink, &substrate, threads);
+            grow(&mut one, &world, &light, 1.0, 1.0, 1.0, &drink, &substrate, 1);
+            grow(&mut split, &world, &light, 1.0, 1.0, 1.0, &drink, &substrate, threads);
             assert!(one.stands.len() < n, "some stands died");
             assert_eq!(one.stands.len(), split.stands.len());
             for (a, b) in one.stands.iter().zip(&split.stands) {

@@ -85,7 +85,7 @@ pub use body::{
     effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
-    Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
+    Actions, BlindForager, BrowserForager, FEED_GATE, Controller, ControllerFactory, FounderControllers,
     FounderFactories, LanternjawAmbush, Response, Scripted, resolve_actions,
 };
 pub use predation::{
@@ -746,11 +746,18 @@ impl Animal {
 /// currently paying for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ReproductionState {
-    /// Consecutive ticks the body has been **eligible** — structure at `birth_body` and
-    /// a reserve at or above the offspring package plus `surplus_floor`. Any tick below
-    /// resets it to zero, which is what makes the hold a *sustained* surplus and not a
-    /// momentary one.
+    /// Ticks within the last hold the body has been **eligible** — structure at
+    /// `birth_body` and a reserve at or above the offspring package plus `surplus_floor`
+    /// ([`SurplusWindow::count_for`]). A body may begin once this reaches
+    /// `surplus_share` of the hold and it is eligible now: a sustained surplus, which a
+    /// short foraging trip does not reset.
     pub surplus_ticks: u64,
+    /// The history `surplus_ticks` is read from.
+    #[serde(default)]
+    pub window: SurplusWindow,
+    /// Whether the body was eligible on its last tick.
+    #[serde(default)]
+    pub eligible_now: bool,
     /// Ticks of refractory still owed after the last birth or laying. Nothing about
     /// eligibility advances while this is above zero.
     pub refractory_ticks: u64,
@@ -837,7 +844,9 @@ pub struct Reproduction {
     /// Reserve a body must hold **above** the offspring package's price before it counts
     /// as being in surplus.
     pub surplus_floor: f64,
-    /// Seconds the surplus must stand, unbroken, before anything begins.
+    /// The window a surplus is judged over, seconds: a body may begin once it has been in
+    /// surplus for [`Reproduction::surplus_share`] of the last `surplus_hold_s` (and is in
+    /// surplus now).
     pub surplus_hold_s: f64,
     /// Seconds a gestation takes, over which the escrow is filled in equal instalments.
     /// [`BirthMode::Eggs`] does not read it.
@@ -860,6 +869,94 @@ pub struct Reproduction {
     /// parent stands on — soil or litter, no litter required — and waits for its
     /// hatching trigger instead of an incubation.
     pub dormant: bool,
+    /// The share of the last `surplus_hold_s` a body must have spent in surplus: 0.8
+    /// shipped, so a foraging trip of up to a fifth of the hold is not a reset (Wrysk,
+    /// 2026-09-28, `design/handoffs/voxel-audit-round-2026-09-28.md` §3). 1.0 is the old
+    /// unbroken hold.
+    #[serde(default = "default_surplus_share")]
+    pub surplus_share: f64,
+}
+
+fn default_surplus_share() -> f64 {
+    SURPLUS_SHARE
+}
+
+/// The shipped [`Reproduction::surplus_share`].
+pub const SURPLUS_SHARE: f64 = 0.8;
+
+/// How many buckets a [`SurplusWindow`] keeps (serde's fixed arrays stop at 32).
+pub const SURPLUS_BUCKETS: usize = 30;
+
+/// **Where a body's surplus has been over the last hold**: a ring of
+/// [`SURPLUS_BUCKETS`] buckets of `ceil(hold / 30)` ticks, each the number of ticks in it
+/// the body was in surplus, and the bucket being filled. Exact per tick for a hold of up
+/// to 30 ticks; otherwise the window reads the last `ceil(hold / bucket)` buckets
+/// including the current one, within one bucket (1/30 of the hold) of the true last hold.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SurplusWindow {
+    buckets: [u32; SURPLUS_BUCKETS],
+    /// Completed buckets so far, up to [`SURPLUS_BUCKETS`].
+    filled: u32,
+    /// The next bucket to complete, and what the current one holds.
+    pos: u32,
+    cur_eligible: u32,
+    cur_ticks: u32,
+}
+
+impl SurplusWindow {
+    fn bucket_ticks(hold: u64) -> u64 {
+        hold.div_ceil(SURPLUS_BUCKETS as u64).max(1)
+    }
+
+    fn span_buckets(hold: u64) -> usize {
+        (hold.div_ceil(SurplusWindow::bucket_ticks(hold)) as usize).clamp(1, SURPLUS_BUCKETS)
+    }
+
+    /// One tick of the body's life: in surplus or not.
+    pub fn tick(&mut self, eligible: bool, hold: u64) {
+        self.cur_ticks += 1;
+        if eligible {
+            self.cur_eligible += 1;
+        }
+        if u64::from(self.cur_ticks) >= SurplusWindow::bucket_ticks(hold) {
+            self.buckets[self.pos as usize] = self.cur_eligible;
+            self.pos = (self.pos + 1) % SURPLUS_BUCKETS as u32;
+            self.filled = (self.filled + 1).min(SURPLUS_BUCKETS as u32);
+            self.cur_ticks = 0;
+            self.cur_eligible = 0;
+        }
+    }
+
+    /// Ticks in surplus within the last hold (the current bucket and the completed ones
+    /// before it).
+    pub fn count_for(&self, hold: u64) -> u64 {
+        let span = SurplusWindow::span_buckets(hold);
+        // A partly filled current bucket counts as one of the span.
+        let completed = if self.cur_ticks > 0 { span - 1 } else { span };
+        let n = completed.min(self.filled as usize);
+        let mut sum = u64::from(self.cur_eligible);
+        for k in 1..=n {
+            let i = (self.pos as usize + SURPLUS_BUCKETS - k) % SURPLUS_BUCKETS;
+            sum += u64::from(self.buckets[i]);
+        }
+        sum
+    }
+
+    /// [`SurplusWindow::count_for`] over a full 30-bucket window.
+    pub fn count(&self) -> u64 {
+        self.count_for(u64::MAX / 2)
+    }
+
+    /// Whether a body in surplus now (`eligible`) has been in surplus for `share` of the
+    /// last `hold` ticks.
+    pub fn met(&self, eligible: bool, hold: u64, share: f64) -> bool {
+        eligible && self.count_for(hold) as f64 >= (share * hold as f64).ceil()
+    }
+
+    /// Forget the history (a birth, a laying, a refractory tick).
+    pub fn reset(&mut self) {
+        *self = SurplusWindow::default();
+    }
 }
 
 impl Reproduction {
@@ -890,6 +987,7 @@ impl Reproduction {
         egg_organic: 0.0,
         incubation_s: 0.0,
         dormant: false,
+        surplus_share: SURPLUS_SHARE,
     };
 
     /// The littershredder's egg placeholders.
@@ -918,6 +1016,7 @@ impl Reproduction {
         egg_organic: 0.004,
         incubation_s: 300.0,
         dormant: false,
+        surplus_share: SURPLUS_SHARE,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13): a clutch of 3 buried eggs laid
@@ -937,6 +1036,7 @@ impl Reproduction {
         egg_organic: 0.005,
         incubation_s: 0.0,
         dormant: true,
+        surplus_share: SURPLUS_SHARE,
     };
 
     /// What one offspring package costs the parent's reserve: a gestation's `birth_cost`
@@ -965,6 +1065,18 @@ impl Reproduction {
 
     pub fn hold_ticks(&self) -> u64 {
         Reproduction::ticks(self.surplus_hold_s)
+    }
+
+    /// The ticks in surplus within the last hold that let a body begin:
+    /// `ceil(surplus_share × hold)`.
+    pub fn hold_required(&self) -> u64 {
+        (self.surplus_share.clamp(0.0, 1.0) * self.hold_ticks() as f64).ceil() as u64
+    }
+
+    /// Whether a body's surplus has stood long enough to begin: eligible now, and in
+    /// surplus for [`Reproduction::surplus_share`] of the last hold.
+    pub fn hold_met(&self, state: &ReproductionState) -> bool {
+        state.eligible_now && state.surplus_ticks >= self.hold_required()
     }
 
     pub fn gestation_ticks(&self) -> u64 {
@@ -1225,6 +1337,22 @@ impl SpeciesConfig {
         }
     }
 
+    /// Multiply the **nine absolute quantities** — `body_max`, `body_min`, `birth_body`,
+    /// `birth_cost`, the reproduction `surplus_floor` and `egg_organic`, `bite_per_s`,
+    /// `bite_half_stock` and `growth_max_per_s` — by `k` (audit §1.4): the animal is `k`
+    /// times heavier against the plants, and every per-unit rate, clock and metre stays.
+    pub fn scale_mass(&mut self, k: f64) {
+        self.body_max *= k;
+        self.body_min *= k;
+        self.birth_body *= k;
+        self.birth_cost *= k;
+        self.reproduction.surplus_floor *= k;
+        self.reproduction.egg_organic *= k;
+        self.bite_per_s *= k;
+        self.bite_half_stock *= k;
+        self.growth_max_per_s *= k;
+    }
+
     /// Whole ticks between steps, never zero.
     pub fn step_period_ticks(&self) -> u64 {
         let t = (self.step_period_s * f64::from(TICK_HZ)).round();
@@ -1324,10 +1452,20 @@ pub struct FaunaConfig {
     pub hatch_chance_per_dusk: f64,
 }
 
+/// **The shipped org-unit mass scale** (Wrysk, 2026-09-29; audit
+/// `design/7_Research/ecology-parameter-audit-2026-09-28.md` §1.4): both lineages are
+/// built this many times heavier against the plants than the placeholder tables
+/// ([`SpeciesConfig::scale_mass`]: the nine absolute quantities, nothing per unit), so one
+/// plant no longer feeds a parked animal for ever. Plants are to be re-tuned for day and
+/// night later; this is not a measured optimum.
+pub const SHIPPED_MASS_SCALE: f64 = 30.0;
+
 impl Default for FaunaConfig {
     fn default() -> FaunaConfig {
+        let mut frondgrazer = SpeciesConfig::frondgrazer();
+        frondgrazer.scale_mass(SHIPPED_MASS_SCALE);
         FaunaConfig {
-            frondgrazer: SpeciesConfig::frondgrazer(),
+            frondgrazer,
             founders: [
                 FounderPhysiology::frozen(Founder::Blind),
                 FounderPhysiology::frozen(Founder::Browser),
@@ -1339,6 +1477,21 @@ impl Default for FaunaConfig {
 }
 
 impl FaunaConfig {
+    /// The placeholder tables before [`SHIPPED_MASS_SCALE`]: every lineage at mass 1. For
+    /// fixtures whose numbers were derived from the placeholders; the shipped world is
+    /// [`FaunaConfig::default`].
+    pub fn placeholder() -> FaunaConfig {
+        FaunaConfig {
+            frondgrazer: SpeciesConfig::frondgrazer(),
+            founders: [
+                FounderPhysiology::placeholder(Founder::Blind),
+                FounderPhysiology::placeholder(Founder::Browser),
+                FounderPhysiology::placeholder(Founder::Lanternjaw),
+            ],
+            hatch_chance_per_dusk: HATCH_CHANCE_PER_DUSK,
+        }
+    }
+
     pub fn species(&self, s: Species) -> &SpeciesConfig {
         match s {
             Species::Frondgrazer => &self.frondgrazer,
@@ -1399,6 +1552,13 @@ impl FaunaConfig {
                         founder.name()
                     ));
                 }
+            }
+            if !(phys.mass_scale.is_finite() && phys.mass_scale > 0.0) {
+                return Err(format!(
+                    "{}.mass_scale must be finite and positive, not {}",
+                    founder.name(),
+                    phys.mass_scale
+                ));
             }
             // The body is a physical object: every dimension positive, every anchor a
             // finite nonnegative fraction of one. A zero-height animal has no eye, no

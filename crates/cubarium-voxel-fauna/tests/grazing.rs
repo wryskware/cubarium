@@ -95,7 +95,7 @@ fn feeding_browser(fauna: &mut Fauna, world: &World, stores: StartingStores) -> 
 /// The browser's own numbers with its upkeep switched off, so a reserve stays exactly
 /// where a case put it and every change in it is a bite.
 fn still_browser(edit: impl FnOnce(&mut cubarium_voxel_fauna::SpeciesConfig)) -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = FaunaConfig::placeholder();
     let core = &mut c.founders[Founder::Browser.index()].core;
     core.maintenance_per_s = 0.0;
     edit(core);
@@ -342,7 +342,7 @@ fn a_newborn_fed_at_the_most_it_can_eat_grows_no_faster_than_the_cap() {
     for z in 2..=4 {
         turf(&mut flora, &world, 2, z);
     }
-    let base = FaunaConfig::default().founder(Founder::Browser).core;
+    let base = FaunaConfig::placeholder().founder(Founder::Browser).core;
     let g = (base.birth_body - base.body_min) / (100.0 * DT);
     let config = still_browser(|core| {
         core.growth_max_per_s = g;
@@ -414,7 +414,8 @@ fn two_births_by_one_parent_are_at_least_the_interval_apart() {
     }
     assert!(births.len() >= 2, "two births in the window: {births:?}");
     let gap = u64::from(births[1] - births[0]);
-    let least = rule.interval_ticks() + rule.hold_ticks() + rule.gestation_ticks() - 1;
+    // The hold is met at `surplus_share` of it (package: audit round 2026-09-28 §3).
+    let least = rule.interval_ticks() + rule.hold_required() + rule.gestation_ticks() - 1;
     assert!(
         gap >= least,
         "births {births:?} are {gap} ticks apart, under {least}"
@@ -428,7 +429,7 @@ fn two_births_by_one_parent_are_at_least_the_interval_apart() {
 /// which is the fastest any body can go.
 #[test]
 fn the_shipped_life_history_runs_on_plant_time() {
-    let c = FaunaConfig::default();
+    let c = FaunaConfig::placeholder();
     let b = c.founder(Founder::Browser).core;
     let r = b.reproduction;
     let grow = (b.birth_body - b.body_min) / b.growth_max_per_s;

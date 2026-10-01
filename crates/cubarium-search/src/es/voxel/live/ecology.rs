@@ -112,15 +112,50 @@ pub const PARAMS: &[ParamSpec] = &[
         max: 4.0,
         what: "grazing defence half-life, every species (1.5 h shipped)",
     },
+    // The audit round (2026-09-28, audit §8.1): walking is priced as a multiple of
+    // upkeep, so an upkeep multiplier no longer silently changes what a metre costs.
+    ParamSpec {
+        name: "founder.motor_factor",
+        kind: Kind::Scale,
+        min: 0.5,
+        max: 4.0,
+        what: "walking cost as a multiple of upkeep, on the shipped ratio (1)",
+    },
+    // The audit round (2026-09-28, audit §1.4, §8.2): the animal's size in org-units
+    // against the plants'. It multiplies the nine absolute animal quantities
+    // (`MASS_SCALED`) and leaves every per-unit rate, clock and metre alone, so one spot
+    // can run out while walking still pays.
+    ParamSpec {
+        name: "founder.mass_scale",
+        kind: Kind::Scale,
+        min: 1.0,
+        max: 1000.0,
+        what: "animal org-unit mass: the nine absolute animal quantities (x1 shipped)",
+    },
+];
+
+/// The absolute animal quantities `founder.mass_scale` multiplies (audit §1.4), by name.
+pub const MASS_SCALED: [&str; 9] = [
+    "body_max",
+    "body_min",
+    "birth_body",
+    "birth_cost",
+    "surplus_floor",
+    "egg_organic",
+    "bite_per_s",
+    "bite_half_stock",
+    "growth_max_per_s",
 ];
 
 /// The founder parameters that also take a **per-lineage** multiplier
 /// (`name@<lineage>`, or an `[ecology.<lineage>]` table in a file), on top of the shared
 /// one (`design/handoffs/voxel-browser-movement-2026-09-28.md`, 2). The two multiply.
-pub const LINEAGE_PARAMS: [&str; 3] = [
+pub const LINEAGE_PARAMS: [&str; 5] = [
     "founder.yield_by_food",
     "founder.maintenance_per_s",
     "founder.lifespan_median_s",
+    "founder.motor_factor",
+    "founder.mass_scale",
 ];
 
 /// One world's parameter vector, aligned with [`PARAMS`], plus the per-lineage
@@ -364,6 +399,9 @@ impl EcologyParams {
         c.frondgrazer.lifespan_median_s *= life;
         // The placeholder species is the browser's body.
         c.frondgrazer.lifespan_median_s *= self.per_lineage[Founder::Browser.index()][2];
+        let mass = self.v("founder.mass_scale");
+        c.frondgrazer
+            .scale_mass(mass * self.per_lineage[Founder::Browser.index()][4]);
         for f in Founder::ALL {
             let own = self.per_lineage[f.index()];
             let phys = &mut c.founders[f.index()];
@@ -372,7 +410,12 @@ impl EcologyParams {
             }
             phys.core.reproduction.surplus_floor *= floor;
             phys.core.maintenance_per_s *= upkeep * own[1];
+            // Walking is priced against upkeep: it keeps its shipped ratio to it, times
+            // the motor factor.
+            phys.motor_respiration_per_s *=
+                upkeep * own[1] * self.v("founder.motor_factor") * own[3];
             phys.core.lifespan_median_s *= life * own[2];
+            phys.scale_mass(mass * own[4]);
         }
         c
     }

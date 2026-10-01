@@ -462,13 +462,15 @@ fn box_penalty(x: &[f64]) -> f64 {
 }
 
 /// One lineage's brain for a check arm: `heuristic` (the fauna's own observation-only
-/// forager), `herding` (the browser's forager with cohesion,
+/// forager), `parker` (the same forager, standing still while it feeds,
+/// [`crate::es::voxel::controller::Parker`]), `herding` (the browser's forager with cohesion,
 /// [`crate::es::voxel::controller::HerdingBrowser`]), or a centre file validated against
 /// this build and the lineage.
 pub fn brain_driver(founder: Founder, spec: &str) -> Result<EpisodeDriver, String> {
     use crate::es::voxel::controller::VoxelControl;
     match spec {
         "heuristic" => Ok(EpisodeDriver::control(VoxelControl::Heuristic, founder)),
+        "parker" => Ok(EpisodeDriver::control(VoxelControl::Parker, founder)),
         "herding" if founder == Founder::Browser => {
             Ok(EpisodeDriver::control(VoxelControl::Herding, founder))
         }
@@ -477,7 +479,7 @@ pub fn brain_driver(founder: Founder, spec: &str) -> Result<EpisodeDriver, Strin
             founder.name()
         )),
         path => {
-            let file = VoxelPolicyFile::load(std::path::Path::new(path))?;
+            let file = VoxelPolicyFile::load_or_transfer(std::path::Path::new(path))?;
             if file.founder()? != founder {
                 return Err(format!("{path} is not a {} centre", founder.name()));
             }
@@ -489,7 +491,7 @@ pub fn brain_driver(founder: Founder, spec: &str) -> Result<EpisodeDriver, Strin
 fn load_centres(centres: &[(Founder, PathBuf)]) -> Result<Vec<(Founder, VoxelPolicyFile)>, String> {
     let mut out = Vec::new();
     for (f, path) in centres {
-        let file = VoxelPolicyFile::load(path)?;
+        let file = VoxelPolicyFile::load_or_transfer(path)?;
         if file.founder()? != *f {
             return Err(format!("{} is not a {} centre", path.display(), f.name()));
         }
@@ -730,7 +732,39 @@ fn summary(r: &SearchRecord, best: Option<f64>) -> String {
 /// The held-out check: `arms` (a name and a vector each) × `seeds`, `hours` of the
 /// training world with the given water cadence, one CSV per world under `out` with one
 /// row per window.
+/// The world a check founds: the `[world]` of a host's config file, read as the app reads
+/// it (its own water, not stilled), or the training preset.
+pub fn check_world_config(world: Option<&std::path::Path>) -> Result<cubarium_voxel::Config, String> {
+    match world {
+        Some(path) => cubarium_voxel::world_config_from_file(path),
+        None => Ok(world::training_config()),
+    }
+}
+
+/// Refuse a trained centre in a world whose lineage is another mass than its manifest's:
+/// the policy's senses were read at that mass (the manifest's `mass_scale`, in the
+/// digest). A heuristic reads no mass and runs anywhere.
+pub fn check_mass(drivers: &[(Founder, EpisodeDriver)], e: &EcologyParams) -> Result<(), String> {
+    let fauna = e.fauna_config();
+    for (f, d) in drivers {
+        if !matches!(d.kind(), crate::es::voxel::controller::EpisodeKind::Gru(_)) {
+            continue;
+        }
+        let (world, trained) = (fauna.founder(*f).mass_scale, f.manifest().mass_scale);
+        if (world / trained - 1.0).abs() > 1e-9 {
+            return Err(format!(
+                "the {} centre was trained at mass x{trained} and this world's {} is x{world}",
+                f.name(),
+                f.name()
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn check(
+    world_cfg: &cubarium_voxel::Config,
     arms: &[(String, EcologyParams)],
     seeds: &[u64],
     hours: f64,
@@ -745,6 +779,9 @@ pub fn check(
         .iter()
         .map(|(f, p)| Ok((*f, brain_driver(*f, &p.display().to_string())?)))
         .collect::<Result<_, String>>()?;
+    for (_, params) in arms {
+        check_mass(&drivers, params)?;
+    }
     let jobs: Vec<(usize, u64)> = (0..arms.len())
         .flat_map(|a| seeds.iter().map(move |&s| (a, s)))
         .collect();
@@ -752,7 +789,7 @@ pub fn check(
     let window_ticks = (window_min * TICKS_PER_MIN as f64).round() as u64;
     let results: Vec<Result<(), String>> = parallel(jobs, threads, |(a, seed)| {
         let (name, params) = &arms[a];
-        let cfg = world::training_config();
+        let cfg = world_cfg.clone();
         let (mut sim, info) = world::found_world(
             &cfg,
             seed,

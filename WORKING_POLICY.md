@@ -127,3 +127,42 @@ Wrysk requests that the main thread stay lean: delegate bounded implementation
 and verification to appropriately tiered persistent workers, then integrate
 concise results. Tachyon deployment must stop `cubarium.service` before native
 compilation to free board resources.
+
+## Verification runs — correction, 2026-09-29
+
+Wrysk: 4 h and 6 h censuses are "a long time to wait to verify every ecological
+edit", so future workers must not start with them. The audit
+(`design/7_Research/census-length-audit-2026-09-29.md`) found:
+- most verdicts were clear within 60–120 min;
+- no 6 h run reached a steady state;
+- single-seed end numbers were noise.
+
+- **Check t = 0 first.** If the founding state already decides the question, don't
+  run: for example, a species with no root water or zero growth rate, or stay-or-go
+  numbers out of band.
+- **The default check for an ecological edit is 8 seeds × 2 h, in parallel.**
+  - Judge the spread across seeds.
+  - Stop a seed's run early once its verdict is settled.
+  - Until the census package lands, `voxel_census` still defaults to 6 h, so pass
+    the hours explicitly.
+- **No single-seed 4–8 h census per edit.** A run longer than 2 h needs a stated
+  reason: a clock slower than 2 h that the edit actually touches (lifespan, seed
+  banks, dead wood).
+- **Edits to slow clocks branch from a saved world.** Use
+  `voxel_census save=`/`load=`, then run 1–2 h beside the baseline continuing from
+  the same save. Don't found fresh and wait out the founders' lives.
+- **Long runs are soaks, off the critical path.** 8 seeds × 8 h on eidolon, overnight
+  or per merge batch. A soak never blocks an edit.
+
+## Every number is a knob — Wrysk, 2026-10-01
+
+A large tuning pass over all parameters comes later, so don't tune new mechanisms to
+today's failing ecology. Give them plausible defaults instead. Write every ecological
+number as a tunable knob:
+- **Where it lives:** a named, serde-visible config field with a doc comment that gives
+  its unit and meaning.
+- **What's not allowed:** inline literals, and new `const`s for ecological numbers. Only
+  pure numerics stay `const`: tolerances, epsilons, cache sizes.
+- **Registry:** each new field gets a row in the parameter registry
+  (`design/ecology-parameter-registry-2026-09-28.md`; until R1 lands, the audit's
+  `parameters.tsv`).

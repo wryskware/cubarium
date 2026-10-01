@@ -21,7 +21,7 @@
 //! faces before the measured window, so the animal layer is measured with animals in it.
 //!
 //! **How this differs from `community`**, which it is modelled on: founders are placed by
-//! `grazed.rs`'s strided gate-passing rule rather than `two_producers.rs`'s `Habitat`
+//! the retired `grazed.rs`'s strided gate-passing rule rather than the retired `two_producers.rs`'s `Habitat`
 //! table, because that table lives in the flora crate's harness. Same six species, same
 //! eight founders each, same founder fraction, same logs — the same *scale* of world, and
 //! not the same sites. Nothing here is an ecological observation, so the placement rule
@@ -35,9 +35,9 @@
 //!    capacity, sites with a `Ground`, stands, animals — sampled every `SAMPLE_EVERY`
 //!    ticks so the sampling is not in the numbers it explains.
 //! 3. What the **harness observers** cost, which is not simulation at all: the
-//!    eligible-set scan `two_producers`/`replacement` run at observation (every skyline
+//!    eligible-set scan retired `two_producers`/`replacement` run at observation (every skyline
 //!    column against every species' germination predicate) and the identity tracking
-//!    `grazed` runs every tick (a `reachable_foliage` query per animal plus a foliage
+//!    retired `grazed` ran every tick (a `reachable_foliage` query per animal plus a foliage
 //!    snapshot of every stand in reach). Both are timed here and reported per tick so that
 //!    a "the sim is slow" reading cannot be a harness reading.
 
@@ -53,9 +53,9 @@ use cubarium_voxel_flora::{
 };
 use cubarium_voxel_sim::{Sim, SimConfig};
 
-/// `grazed.rs`'s and `two_producers.rs`'s conditioning rain: under the outlet's capacity.
+/// the retired `grazed.rs`'s and the retired `two_producers.rs`'s conditioning rain: under the outlet's capacity.
 const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
-/// `two_producers.rs`'s founder size and count, and `community`'s logs.
+/// the retired `two_producers.rs`'s founder size and count, and `community`'s logs.
 const FOUNDER_FRACTION: f64 = 0.5;
 const FOUNDERS_PER_SPECIES: usize = 8;
 const DECLARED_LOGS: usize = 8;
@@ -149,7 +149,7 @@ fn arg<T: std::str::FromStr>(args: &[String], i: usize) -> Option<T> {
     args.get(i).and_then(|s| s.parse().ok())
 }
 
-/// `grazed.rs`'s `prepared_world`, with the conditioning ticks in it: generate once to find
+/// the retired `grazed.rs`'s `prepared_world`, with the conditioning ticks in it: generate once to find
 /// the basin floor, generate the world the run uses with the table a metre above it, open
 /// the outlet, and step it world-only for the warm-up.
 fn prepared_world(seed: u64, warmup_ticks: u64, threads: usize) -> World {
@@ -176,7 +176,7 @@ fn prepared_world(seed: u64, warmup_ticks: u64, threads: usize) -> World {
     world
 }
 
-/// Every column's highest support face, sorted low to high: `grazed.rs`'s skyline.
+/// Every column's highest support face, sorted low to high: the retired `grazed.rs`'s skyline.
 fn skyline_of(world: &World) -> Vec<Site> {
     let (width, depth) = (world.config().width, world.config().depth);
     let mut skyline: Vec<Site> = Vec::new();
@@ -262,7 +262,7 @@ fn plant_founders(flora: &mut Flora, world: &World) -> usize {
     planted
 }
 
-/// `grazed.rs`'s grazer rule: gate-passing open soil, strided.
+/// the retired `grazed.rs`'s grazer rule: gate-passing open soil, strided.
 fn introduce(fauna: &mut Fauna, flora: &Flora, world: &World, n: usize) -> usize {
     let pool: Vec<Site> = skyline_of(world)
         .into_iter()
@@ -349,7 +349,7 @@ fn measure_sets(world: &World, flora: &Flora, fauna: &Fauna) -> Sets {
 /// What the two published harnesses spend per observation, which is not the tick.
 #[derive(Default)]
 struct Observers {
-    /// `two_producers`/`replacement`: every skyline column against every species'
+    /// retired `two_producers`/`replacement`: every skyline column against every species'
     /// germination predicate, through the model's shared sky cache.
     eligible_ns: u64,
     eligible_calls: u64,
@@ -357,7 +357,7 @@ struct Observers {
     /// One terrain sky cache for the whole run: the observer re-reads the gates but not the
     /// geometry while the terrain is unchanged.
     sky: SkyCache,
-    /// `grazed`: one `reachable_foliage` per animal plus the foliage of every stand in
+    /// retired `grazed`: one `reachable_foliage` per animal plus the foliage of every stand in
     /// reach, which is what the receipts table needs.
     identity_ns: u64,
     identity_calls: u64,
@@ -538,7 +538,7 @@ fn report(
     }
     println!(
         "\n(the eligible-set scan is {} skyline columns x {} species = {} predicates; \
-         `two_producers` and `replacement` run it at each observation, not each tick.)",
+         retired `two_producers` and `replacement` ran it at each observation, not each tick.)",
         observers.eligible_columns,
         Species::COUNT,
         observers.eligible_columns * Species::COUNT as u64

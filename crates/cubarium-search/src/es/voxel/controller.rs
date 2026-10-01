@@ -268,6 +268,49 @@ impl Controller for RecordingController {
     }
 }
 
+/// **The heuristic parker** (`design/handoffs/voxel-audit-round-2026-09-28.md` §2): the
+/// fauna's own observation-only forager for the body's founder, except that **whenever its
+/// feed gate is open — the mouth tastes food above the forager's own gate — it stands
+/// still** (forward and turn zero) and feeds. When what is in reach no longer tastes like
+/// food it walks again, exactly as the forager would. The walker and the parker therefore
+/// differ in one thing: whether a body keeps moving while it eats. Neither reads a `Self`
+/// channel, so both are mass-invariant.
+pub struct Parker {
+    inner: Box<dyn Controller>,
+}
+
+impl Parker {
+    pub fn new(founder: Founder) -> Parker {
+        Parker {
+            inner: match founder {
+                Founder::Blind => Box::new(BlindForager::new()),
+                Founder::Browser => Box::new(BrowserForager::new()),
+                // The lanternjaw's own heuristic is its ambush, as in the Heuristic arm.
+                Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
+            },
+        }
+    }
+}
+
+impl Controller for Parker {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        match self.inner.drive(o) {
+            Response::Bounded(mut a) => {
+                if a.feed > 0.5 {
+                    a.forward = 0.0;
+                    a.turn = 0.0;
+                }
+                Response::Bounded(a)
+            }
+            other => other,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+}
+
 /// **Herding, a prototype arm** (`design/handoffs/voxel-browser-movement-2026-09-28.md`,
 /// 3): the fauna's own [`BrowserForager`], plus cohesion toward the bodies its cone
 /// already sees and a little separation from any too close. Observation-only — the same
@@ -401,6 +444,8 @@ pub enum VoxelControl {
     /// The browser's heuristic plus herding ([`HerdingBrowser`]): a prototype arm of
     /// `design/handoffs/voxel-browser-movement-2026-09-28.md`, browser only.
     Herding,
+    /// The heuristic that stands still while it feeds ([`Parker`]), either founder.
+    Parker,
 }
 
 impl EpisodeDriver {
@@ -501,6 +546,7 @@ impl EpisodeDriver {
                 Founder::Blind => Box::new(BlindForager::new()),
                 Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::new()),
             },
+            EpisodeKind::Control(VoxelControl::Parker) => Box::new(Parker::new(self.founder)),
         };
         if let Some(sink) = &self.record {
             controller = Box::new(RecordingController::new(
@@ -523,6 +569,7 @@ impl EpisodeDriver {
             EpisodeKind::Control(VoxelControl::Cruise) => "cruise".into(),
             EpisodeKind::Control(VoxelControl::Heuristic) => "heuristic".into(),
             EpisodeKind::Control(VoxelControl::Herding) => "herding".into(),
+            EpisodeKind::Control(VoxelControl::Parker) => "parker".into(),
         }
     }
 

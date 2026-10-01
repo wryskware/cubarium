@@ -143,3 +143,39 @@ fn the_plant_ledger_closes_with_the_defence_on() {
     }
     assert!(v.ledger.consumed_organic_out > 0.0);
 }
+
+/// The audit round's clock (`design/handoffs/voxel-audit-round-2026-09-28.md` §4): the
+/// shipped defence switches on within a few minutes of grazing — at a browser's 4 bites/s
+/// (one per 0.25 s controller sample) it passes 0.8 in 1–5 min — and relaxes over tens of
+/// minutes, at the half-life it declares.
+#[test]
+fn the_shipped_defence_switches_on_in_minutes_and_relaxes_in_tens_of_minutes() {
+    let shipped = FloraConfig::for_voxel_size(0.25);
+    let half = shipped.species(Species::Bloomcrown).defence_half_life_s;
+    assert!(
+        (600.0..=3600.0).contains(&half),
+        "relaxes over tens of minutes: half-life {half} s"
+    );
+    let (mut world, mut flora, grazed, _) = two_crowns(shipped);
+    let mut bites = 0u32;
+    while defence(&flora, grazed) < 0.8 {
+        flora.take_foliage(grazed, 1e-7).expect("a bite");
+        bites += 1;
+        assert!(bites < 5000, "the defence never switched on");
+    }
+    let seconds = f64::from(bites) / 4.0;
+    assert!(
+        (60.0..=300.0).contains(&seconds),
+        "0.8 after {bites} bites = {seconds} s of grazing"
+    );
+    let start = defence(&flora, grazed);
+    for _ in 0..200 {
+        flora.step(&mut world);
+    }
+    // 200 ticks = 10 s.
+    let ratio = defence(&flora, grazed) / start;
+    assert!(
+        (ratio - 0.5f64.powf(10.0 / half)).abs() < 1e-4,
+        "left {ratio} after 10 s at half-life {half}"
+    );
+}

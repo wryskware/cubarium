@@ -54,8 +54,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use cubarium_voxel_fauna::{
-    Animal, BlindForager, BrowserForager, Controller, Departure, FaunaConfig, Food, Founder,
-    FounderPhysiology, Pose, Response, StartingStores,
+    Animal, BlindForager, BrowserForager, Controller, Departure, Food, Founder, FounderPhysiology,
+    Pose, Response, StartingStores,
 };
 use cubarium_voxel_sim::{ArenaGrid, Placement, Sim, SimConfig, Site, edible_stock, populate};
 use serde::{Deserialize, Serialize};
@@ -476,7 +476,9 @@ pub fn sampled_stores(
     fixture_seed: u64,
     k: usize,
 ) -> StartingStores {
-    let sc = FaunaConfig::default().founder(founder).core;
+    let sc = super::training_world::training_fauna_config()
+        .founder(founder)
+        .core;
     let newborn = (sc.body_min / sc.body_max).clamp(0.0, 1.0);
     let u = unit(
         episode_seed
@@ -623,7 +625,11 @@ fn landscape_episode(
         })
         .chain(others.iter().map(|p| (*p, StartingStores::HUNGRY)));
     let world = prepared.world().clone();
-    let (fauna, ids) = populate(&world, FaunaConfig::default(), bodies);
+    let (fauna, ids) = populate(
+        &world,
+        super::training_world::training_fauna_config(),
+        bodies,
+    );
     let (acting_ids, other_ids) = ids.split_at(acting.len());
     let Some(acting_ids) = acting_ids.iter().copied().collect::<Option<Vec<u64>>>() else {
         return invalid(job, 0, "the fauna refused an acting founder".into());
@@ -870,7 +876,7 @@ fn drive(
     let founder = driver.founder();
     let manifest = founder.manifest();
     let cadence = manifest.cadence_ticks().max(1);
-    let phys = *FaunaConfig::default().founder(founder);
+    let phys = *super::training_world::training_fauna_config().founder(founder);
 
     let mut tracked: Vec<Tracked> = Vec::with_capacity(acting.len());
     for &id in acting {
@@ -1200,7 +1206,9 @@ mod tests {
         for founder in crate::es::voxel::TRAINED_LINEAGES {
             let prepared = Prepared::build(founder, TRAINING_LAYOUT_SEEDS[0]);
             let rest = EpisodeDriver::control(VoxelControl::NoIntake, founder);
-            let sc = FaunaConfig::default().founder(founder).core;
+            let sc = super::super::training_world::training_fauna_config()
+                .founder(founder)
+                .core;
             let mut sizes = Vec::new();
             for seed in 0..6u64 {
                 let e = run_prepared_seeded(&prepared, &rest, 20, Limits::new(&cancel), "t", seed)

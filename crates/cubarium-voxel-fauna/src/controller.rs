@@ -473,6 +473,14 @@ fn escape(escape: &mut u32, hazard: bool, turn: f64) -> Option<(f64, f64)> {
     None
 }
 
+/// The heuristics' **feed gate**: they feed when the mouth's taste cue is above this.
+/// 0.02, "any food" (mass round, 2026-09-29): taste's reference is `M_EMIT x
+/// mass_scale`, so at the shipped x30 a whole springturf or a starter litter tile tastes
+/// ~0.05, and the old gates (0.2 shredder, 0.25 browser: ~2 min of a x30 body's need)
+/// passed no single stand. A bite still shrinks with the stock, and a parker leaves a
+/// stand that no longer tastes of food.
+pub const FEED_GATE: f64 = 0.02;
+
 /// Observation-only **blind foraging** heuristic: go up the litter cue's response and
 /// trend while they support it, feed when the mouth tastes litter, turn away from contact
 /// and cover ground with a remembered, alternating turn preference when there is no
@@ -541,11 +549,9 @@ impl Controller for BlindForager {
         }
         let front_blocked = front > 0.5;
         let forward = if front_blocked { 0.1 } else { 1.0 };
-        // The feed gate is calibrated to the field's own scale: a settled full tile
-        // reads ≈0.29 at the receptor (bilinear over the node's neighbourhood), so a
-        // gate near 0.2 is "the cue here is near-source". Failed attempts off the stock
-        // are free — the gate costs nothing but keeps feeding honest.
-        let feed = if taste_valid > 0.5 && taste_resp > 0.2 {
+        // Feed on any food the mouth tastes ([`FEED_GATE`]). Failed attempts off the
+        // stock are free — the gate costs nothing but keeps feeding honest.
+        let feed = if taste_valid > 0.5 && taste_resp > FEED_GATE {
             1.0
         } else {
             0.0
@@ -667,7 +673,7 @@ impl Controller for BrowserForager {
         let base = self.cone.offset;
         // Per sector, the foliage fraction sits at base + k*6 + 2.
         let frac = [o[base + 2], o[base + 8], o[base + 14]];
-        let feed = if taste_valid > 0.5 && taste_resp > 0.25 {
+        let feed = if taste_valid > 0.5 && taste_resp > FEED_GATE {
             1.0
         } else {
             0.0

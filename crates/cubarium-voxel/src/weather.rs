@@ -232,6 +232,16 @@ pub struct DayClock {
     pub longitude: Option<f64>,
     /// Off only: the picture alone.
     pub look: Look,
+    /// WX3 round 4, the plant night rule: while it is dark, plant maintenance and leaf
+    /// loss (senescence) run at this fraction of their daytime rate — dark respiration
+    /// and a resting leaf, instead of the leftover of the day clock (~12× nature) meeting
+    /// the biological one (~3,000×), where one night is months of a plant's upkeep
+    /// (`design/7_Research/ecology-parameter-audit-2026-09-28.md` §2). The applied rate is
+    /// `rate × (d + (1 − d) · plant_night_factor)` with `d` = `World::life_daylight`, so
+    /// twilight is continuous. Default 0.05 (Wrysk, 2026-09-29, from the round-4 arms:
+    /// no plant dies in the dark; stands 72–88 % of the pre-night reference); 1 is no rule.
+    /// Saprotrophs do not read it.
+    pub plant_night_factor: f64,
 }
 
 impl Default for DayClock {
@@ -244,6 +254,7 @@ impl Default for DayClock {
             latitude: None,
             longitude: None,
             look: Look::Day,
+            plant_night_factor: 0.05,
         }
     }
 }
@@ -264,6 +275,11 @@ impl DayClock {
             (0.0..24.0).contains(&self.start_hour),
             "day.start_hour is an hour of the day, not {}",
             self.start_hour
+        );
+        anyhow::ensure!(
+            (0.0..=1.0).contains(&self.plant_night_factor),
+            "day.plant_night_factor is a fraction of the daytime rate, 0..=1, not {}",
+            self.plant_night_factor
         );
         if let Some(lat) = self.latitude {
             anyhow::ensure!((-90.0..=90.0).contains(&lat), "day.latitude {lat}");
@@ -1640,6 +1656,24 @@ impl World {
             1.0
         } else {
             self.weather.sun.daylight
+        }
+    }
+
+    /// What a plant's maintenance and senescence are multiplied by now: `d + (1 − d) ·
+    /// plant_night_factor` with `d` = [`World::life_daylight`] — 1 by day and with the
+    /// clock off, `plant_night_factor` at full night, continuous through twilight.
+    pub fn plant_night_scale(&self) -> f64 {
+        let d = self.life_daylight();
+        d + (1.0 - d) * self.config.day.plant_night_factor
+    }
+
+    /// The temperature plants and animals live by, °C. The climate's mean with the day
+    /// clock off, whatever the picture shows.
+    pub fn life_temperature_c(&self) -> f64 {
+        if self.config.day.mode == DayMode::Off {
+            self.config.climate.temperature_c
+        } else {
+            self.weather.temp_c
         }
     }
 

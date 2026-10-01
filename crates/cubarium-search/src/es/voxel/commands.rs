@@ -1813,7 +1813,7 @@ pub fn holdout(
 /// face and its cue, and what the heuristic's first minute does with it. A measurement;
 /// nothing here reaches training.
 pub fn start_probe(founder: String, horizons: String, workers: usize) -> Result<(), Boxed> {
-    use cubarium_voxel_fauna::{Departure, FaunaConfig, Food, RouteMap};
+    use cubarium_voxel_fauna::{Departure, Food, RouteMap};
     let founder = parse_founder(&founder)?;
     let horizons: Vec<u64> = horizons
         .split(',')
@@ -1832,7 +1832,7 @@ pub fn start_probe(founder: String, horizons: String, workers: usize) -> Result<
         .map(|p| p.landscape().expect("landscapes").clone())
         .collect();
     let cancel = AtomicBool::new(false);
-    let phys = *FaunaConfig::default().founder(founder);
+    let phys = *super::training_world::training_fauna_config().founder(founder);
     let foods: Vec<Food> = match founder {
         Founder::Blind => vec![Food::Litter, Food::CapTissue, Food::Carrion],
         Founder::Browser => vec![Food::Foliage],

@@ -20,7 +20,7 @@
 //!
 //! **Experiment conditions**, not model defaults, printed in the header of every run:
 //! the shower rate is the flora study harness's own rain rate
-//! (`crates/cubarium-voxel-flora/examples/harness/mod.rs`, `HARNESS_RAIN_M_PER_S` =
+//! (retired `cubarium-voxel-flora/examples/harness`, `HARNESS_RAIN_M_PER_S` =
 //! 2e-4 m/s), the aquifer is charged to a metre above the basin floor exactly as the
 //! study charges it, and the outlet is open — which under a closed budget is the return
 //! flow, not an export. Evaporation defaults to **half** the shower rate and is an

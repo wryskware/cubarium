@@ -199,9 +199,10 @@ fn the_ambush_heuristic_eats_a_carcass_into_the_satiated_rest() {
         site,
         cubarium_voxel_flora::Deposit {
             kind: cubarium_voxel_flora::DepositKind::Carrion,
-            organic: 0.075,
-            mineral: 0.05 * 0.075,
-            energy: 2.0 * 0.075,
+            // A grazer carcass at the shipped mass scale (x30 since main's 2026-09-29).
+            organic: crate::SHIPPED_MASS_SCALE * 0.075,
+            mineral: crate::SHIPPED_MASS_SCALE * 0.05 * 0.075,
+            energy: crate::SHIPPED_MASS_SCALE * 2.0 * 0.075,
         }
     ));
     fauna
@@ -241,7 +242,11 @@ fn a_lanternjaw_in_surplus_lays_three_dormant_eggs() {
     assert_eq!(rule.mode, crate::BirthMode::Eggs);
     assert_eq!(rule.clutch_size, 3);
     let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
-    animal_mut(&mut fauna, lj).reproduction.surplus_ticks = rule.hold_ticks();
+    // Main's breeding window (schema 20) reads the hold off the surplus history, so the
+    // history is filled rather than the counter set.
+    for _ in 0..rule.hold_ticks() {
+        animal_mut(&mut fauna, lj).reproduction.window.tick(true, rule.hold_ticks());
+    }
     let site = animal(&fauna, lj).site;
     step_until(&mut fauna, &world, &mut flora, 3, |f| !eggs(f).is_empty())
         .expect("a full lanternjaw past its hold lays");

@@ -296,7 +296,11 @@ fn the_live_defaults_are_unchanged() {
     let e = EcologyParams::defaults();
     assert_eq!(e.fauna_config(), FaunaConfig::default());
     assert_eq!(e.flora_config(base_flora()), base_flora());
-    let tuned = EcologyParams::from_log(&[0.7, -0.4, 0.2, -0.3, 1.0, 0.5, 0.3, -0.2, 0.4]);
+    let tuned = EcologyParams::from_search_log(
+        &(0..EcologyParams::search_names().len())
+            .map(|i| 0.3 * ((i % 5) as f64 - 2.0))
+            .collect::<Vec<_>>(),
+    );
     let _ = (tuned.fauna_config(), tuned.flora_config(base_flora()));
     assert_eq!(FaunaConfig::default(), e.fauna_config());
     assert_eq!(EcologyParams::from_log(&vec![0.0; PARAMS.len()]), e);

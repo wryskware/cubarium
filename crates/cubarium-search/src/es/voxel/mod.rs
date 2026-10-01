@@ -81,6 +81,9 @@ pub mod score;
 pub mod store;
 pub mod task;
 pub mod trainer;
+pub mod training_world;
+#[cfg(test)]
+mod training_world_tests;
 
 pub use controller::{
     CRUISE_FORWARD, Cruise, EpisodeDriver, EpisodeGru, EpisodeKind, GruBlind, GruBrowser,
