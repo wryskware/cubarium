@@ -64,7 +64,7 @@ pub struct WeatherView {
     /// Ground fog density, 0 (none) to 1 (thick).
     pub fog: f32,
     /// Cloud cover, 0 (clear) to 1 (overcast): `clamp((RH − 0.4) / 0.6)`, and at least
-    /// 0.6 / 0.75 / 0.9 while it drizzles / showers / pours ([`cloud_floor`]).
+    /// 0.6 / 0.75 / 0.9 by default while it drizzles / showers / pours ([`cloud_floor`]).
     pub cloud_cover: f32,
     /// Where in the day, `0..1`: 0 midnight, 0.5 noon, wrapping.
     pub day_phase: f32,
@@ -204,6 +204,10 @@ pub struct DayClock {
     /// (2/3: two thirds of the way through); the afternoon convection bump is centred
     /// there.
     pub temperature_peak_fraction: f64,
+    /// The share of the day the sun is up on the **civil** clock — the local mode without a
+    /// place, and the fixed picture of a clock that is off — centred on noon (0.5: up from
+    /// 06:00 to 18:00).
+    pub civil_daylight: f64,
 }
 
 impl Default for DayClock {
@@ -220,6 +224,7 @@ impl Default for DayClock {
             noon_elevation_deg: 70.0,
             twilight_deg: 6.0,
             temperature_peak_fraction: 2.0 / 3.0,
+            civil_daylight: 0.5,
         }
     }
 }
@@ -251,7 +256,7 @@ impl DayClock {
     /// the machine's own UTC offset.
     pub fn local_phase(&self, unix_s: f64) -> (f64, f64, f64) {
         let (Some(lat), Some(lon)) = (self.latitude, self.longitude) else {
-            return DayClock::civil_phase(unix_s, local_utc_offset_s());
+            return self.civil_phase(unix_s, local_utc_offset_s());
         };
         let days = (unix_s / 86_400.0).floor();
         let utc_min = (unix_s - days * 86_400.0) / 60.0;
@@ -276,14 +281,18 @@ impl DayClock {
         (phase, 0.5 - day / 2.0, 0.5 + day / 2.0)
     }
 
-    /// `(phase, 0.25, 0.75)` on the civil clock `utc_offset_s` from UTC: the local
-    /// clock's own hour, with the sun up from 06:00 to 18:00.
-    pub fn civil_phase(unix_s: f64, utc_offset_s: f64) -> (f64, f64, f64) {
-        (
-            ((unix_s + utc_offset_s) / 86_400.0).rem_euclid(1.0),
-            0.25,
-            0.75,
-        )
+    /// Sunrise and sunset, as phases, on the civil clock: centred on noon, the sun up for
+    /// [`DayClock::civil_daylight`] of the day.
+    pub fn civil_rise_set(&self) -> (f64, f64) {
+        (0.5 - self.civil_daylight / 2.0, 0.5 + self.civil_daylight / 2.0)
+    }
+
+    /// `(phase, sunrise, sunset)` on the civil clock `utc_offset_s` from UTC: the local
+    /// clock's own hour, with the sun up from 06:00 to 18:00 at the default
+    /// [`DayClock::civil_daylight`].
+    pub fn civil_phase(&self, unix_s: f64, utc_offset_s: f64) -> (f64, f64, f64) {
+        let (rise, set) = self.civil_rise_set();
+        (((unix_s + utc_offset_s) / 86_400.0).rem_euclid(1.0), rise, set)
     }
 
     /// Where the simulation's sun is at `tick`: the cycle, the wall clock, or noon when
@@ -299,7 +308,10 @@ impl DayClock {
                 let (phase, rise, set) = self.local_phase(now);
                 Sun::at(self, phase, rise, set)
             }
-            DayMode::Off => Sun::at(self, 0.5, 0.25, 0.75),
+            DayMode::Off => {
+                let (rise, set) = self.civil_rise_set();
+                Sun::at(self, 0.5, rise, set)
+            }
         }
     }
 }
@@ -700,6 +712,14 @@ pub struct Climate {
     pub auto_speed_exponent: f64,
     /// The relative humidity a closed world's sky is founded at (WX1b).
     pub founding_rh: f64,
+    /// The sky's cloud cover (visual only) is `(RH - cloud_start_rh) / cloud_span_rh`,
+    /// clamped to `0..=1`, with a floor by rain mode while it rains: drizzle, shower and
+    /// downpour fall from at least `cloud_floor_drizzle` / `_shower` / `_downpour`.
+    pub cloud_start_rh: f64,
+    pub cloud_span_rh: f64,
+    pub cloud_floor_drizzle: f64,
+    pub cloud_floor_shower: f64,
+    pub cloud_floor_downpour: f64,
     pub drizzle: RainParams,
     pub shower: RainParams,
     pub downpour: RainParams,
@@ -781,6 +801,11 @@ climate_keys!(
     swell_fall_s,
     auto_speed_exponent,
     founding_rh,
+    cloud_start_rh,
+    cloud_span_rh,
+    cloud_floor_drizzle,
+    cloud_floor_shower,
+    cloud_floor_downpour,
 );
 
 impl TryFrom<ClimateSpec> for Climate {
@@ -863,6 +888,11 @@ impl Climate {
             swell_fall_s: 50.0,
             auto_speed_exponent: 0.65,
             founding_rh: 0.6,
+            cloud_start_rh: 0.4,
+            cloud_span_rh: 0.6,
+            cloud_floor_drizzle: 0.6,
+            cloud_floor_shower: 0.75,
+            cloud_floor_downpour: 0.9,
             drizzle: RainParams {
                 lambda_max_per_h: 1.5,
                 rh50: 0.98,
@@ -1468,12 +1498,12 @@ fn fog(w: &mut World, c: &Climate, off: bool) {
 }
 
 /// The least cloud cover a rain mode falls from: drizzle 0.6, shower 0.75, downpour 0.9.
-pub fn cloud_floor(mode: RainMode) -> f64 {
+pub fn cloud_floor(c: &Climate, mode: RainMode) -> f64 {
     match mode {
         RainMode::Clear => 0.0,
-        RainMode::Drizzle => 0.6,
-        RainMode::Shower => 0.75,
-        RainMode::Downpour => 0.9,
+        RainMode::Drizzle => c.cloud_floor_drizzle,
+        RainMode::Shower => c.cloud_floor_shower,
+        RainMode::Downpour => c.cloud_floor_downpour,
     }
 }
 
@@ -1489,14 +1519,17 @@ pub(crate) fn view(w: &World) -> WeatherView {
         }
         _ => w.config.rain_m_per_s,
     };
+    let (civil_rise, civil_set) = w.config.day.civil_rise_set();
     let sun = match (w.config.day.mode, w.config.day.look) {
-        (DayMode::Off, Look::Day) => Sun::at(&w.config.day, 0.5, 0.25, 0.75),
-        (DayMode::Off, Look::Night) => Sun::at(&w.config.day, 0.0, 0.25, 0.75),
+        (DayMode::Off, Look::Day) => Sun::at(&w.config.day, 0.5, civil_rise, civil_set),
+        (DayMode::Off, Look::Night) => Sun::at(&w.config.day, 0.0, civil_rise, civil_set),
         _ => wx.sun,
     };
     // Rain falls from cloud: while it rains the cover has a floor by mode, so an
     // afternoon shower (when RH reads low) does not fall from a clear sky.
-    let cloud = ((rh - 0.4) / 0.6).clamp(0.0, 1.0).max(cloud_floor(wx.mode));
+    let cloud = ((rh - c.cloud_start_rh) / c.cloud_span_rh)
+        .clamp(0.0, 1.0)
+        .max(cloud_floor(c, wx.mode));
     WeatherView {
         temperature_c: wx.temp_c as f32,
         rh: rh as f32,

@@ -377,7 +377,7 @@ fn a_local_clock_reads_the_injected_wall_time() {
     assert!((phase - 0.25).abs() < 0.01, "{phase}");
 
     // Without a place, 06:00 and 18:00 on the local wall clock.
-    let (phase, rise, set) = DayClock::civil_phase(t, 3600.0);
+    let (phase, rise, set) = DayClock::default().civil_phase(t, 3600.0);
     assert!((phase - 13.0 / 24.0).abs() < 1e-9);
     assert_eq!((rise, set), (0.25, 0.75));
 

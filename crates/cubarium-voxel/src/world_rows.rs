@@ -99,6 +99,9 @@ pub(crate) fn rows() -> Vec<Row> {
         p("day.temperature_peak_fraction", "fraction of the daylight from sunrise", Range::closed(0.0, 1.0).open_lo(), "where in the daylight the temperature and the afternoon convection peak")
             .search(0.5, 0.8)
             .prov("physical"),
+        p("day.civil_daylight", "fraction of the day", Range::closed(0.05, 0.95), "the civil clock's daylight (local without a place; a clock that is off), centred on noon")
+            .search(0.4, 0.6)
+            .prov("decision"),
         p("day.plant_night_factor", "fraction of the daytime rate", Range::fraction(), "plant maintenance and senescence in the dark (1: no night rule)")
             .evolve()
             .prov("decision"),
@@ -175,6 +178,11 @@ pub(crate) fn rows() -> Vec<Row> {
         p("climate.founding_rh", "RH", nonneg, "the relative humidity a closed world's sky is founded at")
             .search(0.3, 0.9)
             .prov("tuned:WX1b"),
+        p("climate.cloud_start_rh", "RH", Range::any(), "cloud cover begins at this RH (visual only)").prov("visual"),
+        p("climate.cloud_span_rh", "RH", positive, "cloud cover rises from none to full over this much RH (visual only)").prov("visual"),
+        p("climate.cloud_floor_drizzle", "fraction of the sky", Range::fraction(), "least cloud cover a drizzle falls from (visual only)").prov("visual"),
+        p("climate.cloud_floor_shower", "fraction of the sky", Range::fraction(), "least cloud cover a shower falls from (visual only)").prov("visual"),
+        p("climate.cloud_floor_downpour", "fraction of the sky", Range::fraction(), "least cloud cover a downpour falls from (visual only)").prov("visual"),
         p("climate.opening_min_s", "s", nonneg_inf, "the host's opening rain falls at least this long").grade("N").prov("preset"),
     ];
     for (mat, pore, perm, fc, wp, grade, prov) in [
