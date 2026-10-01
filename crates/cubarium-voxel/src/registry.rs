@@ -284,8 +284,9 @@ pub struct Registry {
 
 impl Registry {
     /// A table under `root`. `opaque` lists subtrees whose numbers are not registered
-    /// here (the terrain recipe): they are set and replaced whole and validated by their
-    /// own struct, and no row is asked of them.
+    /// here: they are set and replaced whole and validated by their own struct, and no
+    /// row is asked of them (none is used now: the world's terrain recipe has rows and is
+    /// a [`Registry::with_whole`] subtree).
     pub fn new(root: &'static str, rows: Vec<Row>, aliases: Vec<Alias>, opaque: Vec<String>) -> Registry {
         let mut exact = std::collections::HashMap::new();
         let mut wild = Vec::new();

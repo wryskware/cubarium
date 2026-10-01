@@ -1,7 +1,7 @@
 //! The world's parameter rows (`world.*`, package R1): [`crate::Config`], its day clock and
 //! its climate. Units, grades and provenance from the audit's `parameters.tsv` where it has
-//! a row; `placeholder` otherwise. The terrain recipe (`world.landform`) is an opaque
-//! subtree: pure terrain shape, validated by its own recipe.
+//! a row; `placeholder` otherwise. The terrain generators' numbers (`world.landform`,
+//! `world.ridge`) have their own rows (`landform_rows.rs`).
 
 use crate::registry::{Range, Row};
 
