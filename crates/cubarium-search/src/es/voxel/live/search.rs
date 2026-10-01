@@ -379,59 +379,115 @@ pub fn silent_lineages(
         .count()
 }
 
-/// Found a world under `params` from seed base `base`, drive the lineages with a centre
-/// by `drivers` (the rest run their heuristic), and run it for the horizon (unified
-/// mode: with `tables`).
-pub fn evaluate(
-    params: &EcologyParams,
+/// **One candidate world in progress**: founded, then stepped one window at a time
+/// ([`EvalRun::window`]), so a unified generation can hold all its worlds and take a brain
+/// step between windows; [`EvalRun::finish`] scores it. [`evaluate`] is the three in a row.
+pub struct EvalRun {
+    spec: EvalSpec,
     base: u64,
-    drivers: &[(Founder, EpisodeDriver)],
-    tables: &[Option<VariantTable>],
-    spec: &EvalSpec,
-) -> Evaluation {
-    let started = Instant::now();
-    let (mut sim, info) = world::found_world(&spec.world, base, spec.founders, params);
-    super::install_centres(sim.fauna_mut(), drivers);
-    sim.world_mut().set_water_every(spec.water_every);
-    let founded = info.founders.to_vec();
-    let lj = Founder::Lanternjaw.index();
-    let animals0: usize = (0..Founder::COUNT).filter(|&i| i != lj).map(|i| founded[i]).sum();
-    let band = Band::for_founding(animals0, founded[lj] > 0, &spec.band);
-    let species_start = Scan::of(&sim).stands.to_vec();
-    let horizon_min = spec.horizon_ticks as f64 / TICKS_PER_MIN as f64;
-    let half_ticks = spec.horizon_ticks / 2;
-    let mut trace = Trace {
-        horizon_min,
-        ..Trace::default()
-    };
-    let (mut late_moving, mut late_minutes, mut all_moving, mut all_minutes) =
-        (0u64, 0u64, 0u64, 0u64);
-    let mut late_births = vec![0u64; Founder::COUNT];
-    let mut readouts: Vec<Vec<(String, super::readout::Pool, f64)>> = Vec::new();
-    let mut body_scores = Vec::new();
-    let mut stopped = None;
-    let mut elapsed = 0u64;
-    let zeros = vec![0usize; Founder::COUNT];
-    'run: while elapsed < spec.horizon_ticks {
-        let ticks = spec.window_ticks.min(spec.horizon_ticks - elapsed);
-        let window_start = elapsed;
-        let mut w = Window::begin(&mut sim, tables, &zeros, ticks);
+    started: Instant,
+    sim: cubarium_voxel_sim::Sim,
+    info: world::FoundInfo,
+    founded: Vec<usize>,
+    band: Band,
+    species_start: Vec<usize>,
+    trace: Trace,
+    moving: [u64; 4],
+    late_births: Vec<u64>,
+    readouts: Vec<Vec<(String, super::readout::Pool, f64)>>,
+    body_scores: Vec<BodyScore>,
+    stopped: Option<String>,
+    elapsed: u64,
+    /// The centre key ([`centre_key`]) each window ran, in order.
+    pub keys: Vec<u64>,
+}
+
+impl EvalRun {
+    /// Found a world under `params` from seed base `base`, the lineages with a centre
+    /// driven by `drivers` (the rest run their heuristic).
+    pub fn begin(
+        params: &EcologyParams,
+        base: u64,
+        drivers: &[(Founder, EpisodeDriver)],
+        spec: &EvalSpec,
+    ) -> EvalRun {
+        let started = Instant::now();
+        let (mut sim, info) = world::found_world(&spec.world, base, spec.founders, params);
+        super::install_centres(sim.fauna_mut(), drivers);
+        sim.world_mut().set_water_every(spec.water_every);
+        let founded = info.founders.to_vec();
+        let lj = Founder::Lanternjaw.index();
+        let animals0: usize = (0..Founder::COUNT).filter(|&i| i != lj).map(|i| founded[i]).sum();
+        let band = Band::for_founding(animals0, founded[lj] > 0, &spec.band);
+        let species_start = Scan::of(&sim).stands.to_vec();
+        let trace = Trace {
+            horizon_min: spec.horizon_ticks as f64 / TICKS_PER_MIN as f64,
+            ..Trace::default()
+        };
+        EvalRun {
+            spec: spec.clone(),
+            base,
+            started,
+            sim,
+            info,
+            founded,
+            band,
+            species_start,
+            trace,
+            moving: [0; 4],
+            late_births: vec![0; Founder::COUNT],
+            readouts: Vec::new(),
+            body_scores: Vec::new(),
+            stopped: None,
+            elapsed: 0,
+            keys: Vec::new(),
+        }
+    }
+
+    /// Whether the horizon is run or the world stopped early.
+    pub fn done(&self) -> bool {
+        self.stopped.is_some() || self.elapsed >= self.spec.horizon_ticks
+    }
+
+    /// Bodies per lineage now.
+    pub fn population(&self) -> [usize; Founder::COUNT] {
+        window::population(&self.sim)
+    }
+
+    /// Run the next window under `tables` (`None` per untrained lineage), the twins'
+    /// placement starting at `first_pair`; `key` records which centres they came from.
+    /// Returns the window's body scores (none once done).
+    pub fn window(
+        &mut self,
+        tables: &[Option<VariantTable>],
+        first_pair: &[usize],
+        key: u64,
+    ) -> Vec<BodyScore> {
+        if self.done() {
+            return Vec::new();
+        }
+        let spec = &self.spec;
+        let lj = Founder::Lanternjaw.index();
+        let half_ticks = spec.horizon_ticks / 2;
+        let ticks = spec.window_ticks.min(spec.horizon_ticks - self.elapsed);
+        let window_start = self.elapsed;
+        let mut w = Window::begin(&mut self.sim, tables, first_pair, ticks);
         let mut halt = None;
         while !w.done() {
-            w.step(&mut sim);
-            elapsed += 1;
-            if elapsed.is_multiple_of(TICKS_PER_MIN) {
-                let pop = window::population(&sim);
-                let total = sim.fauna().view().animals.len();
-                trace.minutes.push((elapsed / TICKS_PER_MIN) as f64);
-                trace.animals.push(total);
-                trace.lanternjaws.push(pop[lj]);
+            w.step(&mut self.sim);
+            self.elapsed += 1;
+            if self.elapsed.is_multiple_of(TICKS_PER_MIN) {
+                let pop = window::population(&self.sim);
+                let total = self.sim.fauna().view().animals.len();
+                self.trace.minutes.push((self.elapsed / TICKS_PER_MIN) as f64);
+                self.trace.animals.push(total);
+                self.trace.lanternjaws.push(pop[lj]);
                 if total > spec.abort_animals {
                     halt = Some(format!(
                         "{total} animals at minute {}",
-                        elapsed / TICKS_PER_MIN
+                        self.elapsed / TICKS_PER_MIN
                     ));
-                } else if lost_lineages(&founded, &pop, &eggs(&sim)) > 0 {
+                } else if lost_lineages(&self.founded, &pop, &eggs(&self.sim)) > 0 {
                     halt = Some("a lineage died out".to_string());
                 }
                 if halt.is_some() {
@@ -439,92 +495,133 @@ pub fn evaluate(
                 }
             }
         }
-        let r = w.finish(&sim, 0);
+        let r = w.finish(&self.sim, 0);
         let b = &r.lineages[Founder::Browser.index()];
-        all_moving += b.moving_minutes;
-        all_minutes += b.body_minutes;
+        self.moving[2] += b.moving_minutes;
+        self.moving[3] += b.body_minutes;
         if window_start >= half_ticks {
-            late_moving += b.moving_minutes;
-            late_minutes += b.body_minutes;
+            self.moving[0] += b.moving_minutes;
+            self.moving[1] += b.body_minutes;
             for f in Founder::ALL {
-                late_births[f.index()] += r.lineages[f.index()].births;
+                self.late_births[f.index()] += r.lineages[f.index()].births;
             }
         }
-        body_scores.extend(r.scores);
-        readouts.push(r.readout);
-        if let Some(h) = halt {
-            stopped = Some(h);
-            break 'run;
+        self.body_scores.extend(r.scores.iter().copied());
+        self.readouts.push(r.readout);
+        self.keys.push(key);
+        self.stopped = halt;
+        r.scores
+    }
+
+    /// Score the world as it stands: the trace to the horizon, persistence, the band.
+    pub fn finish(self) -> Evaluation {
+        let EvalRun {
+            spec,
+            base,
+            started,
+            sim,
+            info,
+            founded,
+            band,
+            species_start,
+            mut trace,
+            moving,
+            late_births,
+            readouts,
+            body_scores,
+            stopped,
+            elapsed,
+            ..
+        } = self;
+        let [late_moving, late_minutes, all_moving, all_minutes] = moving;
+        trace.browser_moving = if late_minutes > 0 {
+            late_moving as f64 / late_minutes as f64
+        } else if all_minutes > 0 {
+            all_moving as f64 / all_minutes as f64
+        } else {
+            0.0
+        };
+        let pop = window::population(&sim);
+        let eggs_end = eggs(&sim);
+        let species_end = Scan::of(&sim).stands.to_vec();
+        trace.missing = lost_lineages(&founded, &pop, &eggs_end)
+            + species_start
+                .iter()
+                .zip(&species_end)
+                .filter(|(s, e)| **s > 0 && **e == 0)
+                .count();
+        let score_min =
+            spec.score_horizon_ticks.max(spec.horizon_ticks) as f64 / TICKS_PER_MIN as f64;
+        let projected_from_min = (trace.minutes.last().copied().unwrap_or(0.0) < score_min)
+            .then(|| project(&mut trace, score_min));
+        trace.silent_lineages = silent_lineages(
+            &founded,
+            &late_births,
+            &spec.band.persist_only,
+            elapsed > spec.horizon_ticks / 2,
+        );
+        let penalty = penalty(&trace, &band);
+        let readout_mean = super::readout::pool(&readouts)
+            .into_iter()
+            .map(|(name, v)| {
+                // `pool` sums `Sum` factors over the list; here the list is one world's
+                // windows, so every factor is averaged instead.
+                let vals: Vec<f64> = readouts
+                    .iter()
+                    .filter_map(|r| r.iter().find(|x| x.0 == name).map(|x| x.2))
+                    .filter(|x| x.is_finite())
+                    .collect();
+                let m = if vals.is_empty() {
+                    v
+                } else {
+                    vals.iter().sum::<f64>() / vals.len() as f64
+                };
+                (name, m)
+            })
+            .collect();
+        let readout_end = readouts
+            .last()
+            .map(|r| r.iter().map(|(n, _, v)| (n.clone(), *v)).collect())
+            .unwrap_or_default();
+        Evaluation {
+            base_seed: base,
+            world_seed: info.seed,
+            trace,
+            penalty,
+            band,
+            stopped,
+            projected_from_min,
+            readout_mean,
+            readout_end,
+            species_start,
+            species_end,
+            lineages_end: pop.to_vec(),
+            eggs_end,
+            founded,
+            late_births,
+            ticks: elapsed,
+            wall_s: started.elapsed().as_secs_f64(),
+            body_scores,
         }
     }
-    trace.browser_moving = if late_minutes > 0 {
-        late_moving as f64 / late_minutes as f64
-    } else if all_minutes > 0 {
-        all_moving as f64 / all_minutes as f64
-    } else {
-        0.0
-    };
-    let pop = window::population(&sim);
-    let eggs_end = eggs(&sim);
-    let species_end = Scan::of(&sim).stands.to_vec();
-    trace.missing = lost_lineages(&founded, &pop, &eggs_end)
-        + species_start
-            .iter()
-            .zip(&species_end)
-            .filter(|(s, e)| **s > 0 && **e == 0)
-            .count();
-    let score_min = spec.score_horizon_ticks.max(spec.horizon_ticks) as f64 / TICKS_PER_MIN as f64;
-    let projected_from_min = (trace.minutes.last().copied().unwrap_or(0.0) < score_min)
-        .then(|| project(&mut trace, score_min));
-    trace.silent_lineages = silent_lineages(
-        &founded,
-        &late_births,
-        &spec.band.persist_only,
-        elapsed > half_ticks,
-    );
-    let penalty = penalty(&trace, &band);
-    let readout_mean = super::readout::pool(&readouts)
-        .into_iter()
-        .map(|(name, v)| {
-            // `pool` sums `Sum` factors over the list; here the list is one world's
-            // windows, so every factor is averaged instead.
-            let vals: Vec<f64> = readouts
-                .iter()
-                .filter_map(|r| r.iter().find(|x| x.0 == name).map(|x| x.2))
-                .filter(|x| x.is_finite())
-                .collect();
-            let m = if vals.is_empty() {
-                v
-            } else {
-                vals.iter().sum::<f64>() / vals.len() as f64
-            };
-            (name, m)
-        })
-        .collect();
-    let readout_end = readouts
-        .last()
-        .map(|r| r.iter().map(|(n, _, v)| (n.clone(), *v)).collect())
-        .unwrap_or_default();
-    Evaluation {
-        base_seed: base,
-        world_seed: info.seed,
-        trace,
-        penalty,
-        band,
-        stopped,
-        projected_from_min,
-        readout_mean,
-        readout_end,
-        species_start,
-        species_end,
-        lineages_end: pop.to_vec(),
-        eggs_end,
-        founded,
-        late_births,
-        ticks: elapsed,
-        wall_s: started.elapsed().as_secs_f64(),
-        body_scores,
+}
+
+/// Found a world under `params` from seed base `base`, drive the lineages with a centre
+/// by `drivers` (the rest run their heuristic), and run it for the horizon under one set
+/// of `tables` ([`EvalRun`] begin, every window, finish).
+pub fn evaluate(
+    params: &EcologyParams,
+    base: u64,
+    drivers: &[(Founder, EpisodeDriver)],
+    tables: &[Option<VariantTable>],
+    spec: &EvalSpec,
+) -> Evaluation {
+    let mut run = EvalRun::begin(params, base, drivers, spec);
+    let zeros = vec![0usize; Founder::COUNT];
+    while !run.done() {
+        run.window(tables, &zeros, 0);
     }
+    run.finish()
 }
 
 /// One search run.
@@ -554,6 +651,9 @@ pub struct SearchSpec {
     pub brain_sigma: f64,
     pub brain_learning_rate: f64,
     pub out: PathBuf,
+    /// Continue from the checkpoint ([`Checkpoint`]) in this directory: the CMA state, the
+    /// centres and their Adam state, the brain step, the best so far.
+    pub resume: Option<PathBuf>,
 }
 
 /// One candidate's record in a generation.
@@ -576,10 +676,246 @@ pub struct CandidateRecord {
 pub struct SearchRecord {
     pub generation: u32,
     pub seeds: Vec<u64>,
+    /// The CMA mean and σ the generation drew from, and both after its step.
+    pub mean_start: Vec<f64>,
+    pub sigma_start: f64,
+    pub mean: Vec<f64>,
     pub sigma: f64,
+    /// Unified mode: one entry per window, each a brain step.
+    pub windows: Vec<WindowLog>,
     pub wall_s: f64,
     pub elapsed_s: f64,
     pub candidates: Vec<CandidateRecord>,
+}
+
+/// One window of a unified generation: every running world stepped, one ES step per
+/// trained lineage.
+#[derive(Clone, Debug, Serialize)]
+pub struct WindowLog {
+    pub generation: u32,
+    pub window: u32,
+    /// The ES step index (perturbation stream and Adam step) this window used.
+    pub brain_step: u32,
+    pub wall_s: f64,
+    /// The centre key ([`centre_key`], all lineages XORed) each running world was handed.
+    pub world_keys: Vec<u64>,
+    pub lineages: Vec<LineageWindow>,
+}
+
+/// One trained lineage in one window.
+#[derive(Clone, Debug, Serialize)]
+pub struct LineageWindow {
+    pub lineage: String,
+    /// Bodies scored, over every world.
+    pub bodies: usize,
+    /// **The signal check**, over the pooled (within-world z) candidate scores: the mean
+    /// |plus − minus| of a pair (the perturbation's effect plus placement noise) against
+    /// the mean |pair mean − overall mean| (placement noise alone: a pair's mean cancels
+    /// its perturbation to first order). At brain σ = 0 both are noise.
+    pub twin_diff: f64,
+    pub pair_spread: f64,
+    /// The step's update rms (0: no step).
+    pub update_rms: f64,
+    /// The centre this window ran, before its step.
+    pub centre_key: u64,
+}
+
+/// A centre's identity: FNV-1a 64 over its weights' bits.
+pub fn centre_key(theta: &[f64]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for x in theta {
+        for b in x.to_bits().to_le_bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    h
+}
+
+/// The signal check of [`LineageWindow`]: `(mean |twin difference|, mean |pair mean −
+/// overall mean|)` over antithetic candidate scores `[p0+, p0−, p1+, …]`.
+pub fn signal(scores: &[f64]) -> (f64, f64) {
+    let pairs = scores.len() / 2;
+    if pairs == 0 {
+        return (0.0, 0.0);
+    }
+    let m = scores.iter().sum::<f64>() / scores.len() as f64;
+    let (mut twin, mut pair) = (0.0, 0.0);
+    for p in 0..pairs {
+        let (a, b) = (scores[2 * p], scores[2 * p + 1]);
+        twin += (a - b).abs();
+        pair += (0.5 * (a + b) - m).abs();
+    }
+    (twin / pairs as f64, pair / pairs as f64)
+}
+
+/// One trained centre's state in a [`Checkpoint`].
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct CentreState {
+    pub lineage: String,
+    pub theta: Vec<f64>,
+    pub adam: Adam,
+}
+
+/// What a search needs to carry on after a generation (`checkpoint.json`, rewritten every
+/// generation; `--resume <dir>` reads it).
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct Checkpoint {
+    pub next_generation: u32,
+    pub brain_step: u32,
+    pub cma: Cma,
+    pub centres: Vec<CentreState>,
+    /// The best so far: its in-box penalty, its genome file, its generation.
+    pub best: Option<(f64, String, u32)>,
+}
+
+impl Checkpoint {
+    pub const FILE: &'static str = "checkpoint.json";
+
+    /// Write it beside the run's output, atomically (a temporary file renamed).
+    pub fn save(&self, dir: &std::path::Path) -> Result<(), String> {
+        let tmp = dir.join(format!("{}.tmp", Checkpoint::FILE));
+        let json = serde_json::to_string(self).map_err(|e| e.to_string())?;
+        std::fs::write(&tmp, json).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+        std::fs::rename(&tmp, dir.join(Checkpoint::FILE))
+            .map_err(|e| format!("cannot replace the checkpoint: {e}"))
+    }
+
+    pub fn load(dir: &std::path::Path) -> Result<Checkpoint, String> {
+        let path = dir.join(Checkpoint::FILE);
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+}
+
+/// A unified generation in lock step: found every running world and hold them; then,
+/// window by window, step every world one window in parallel, pool the body scores
+/// (normalised within each world), take one ES step per trained lineage and hand out fresh
+/// variants for the next window. Returns each world's evaluation at the horizon.
+#[allow(clippy::too_many_arguments)]
+fn lockstep(
+    spec: &SearchSpec,
+    params: &[EcologyParams],
+    jobs: &[(usize, u64)],
+    drivers: &[(Founder, EpisodeDriver)],
+    thetas: &mut [(Founder, Vec<f64>, Adam)],
+    brain_step: &mut u32,
+    generation: u32,
+    logs: &mut Vec<WindowLog>,
+) -> Result<Vec<Evaluation>, String> {
+    let mut runs: Vec<EvalRun> = parallel(jobs.to_vec(), spec.threads, |(k, seed)| {
+        EvalRun::begin(&params[k], seed, drivers, &spec.eval)
+    });
+    let candidates = 2 * spec.brain_pairs;
+    let mut window = 0u32;
+    while runs.iter().any(|r| !r.done()) {
+        let started = Instant::now();
+        let mut tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
+        let mut keys = Vec::new();
+        for (f, theta, _) in thetas.iter() {
+            tables[f.index()] = Some(VariantTable::antithetic(
+                *f,
+                theta,
+                spec.cma_seed,
+                spec.brain_sigma,
+                *brain_step,
+                spec.brain_pairs,
+            )?);
+            keys.push(centre_key(theta));
+        }
+        let key = keys.iter().fold(0u64, |a, k| a ^ k);
+        // Pair numbering runs on from one world to the next, as the live trainer's does.
+        let mut first: Vec<Vec<usize>> = Vec::with_capacity(runs.len());
+        let mut cursor = vec![0usize; Founder::COUNT];
+        for r in &runs {
+            first.push(cursor.clone());
+            let pop = r.population();
+            for f in Founder::ALL {
+                cursor[f.index()] = (cursor[f.index()] + pop[f.index()].div_ceil(2)) % spec.brain_pairs;
+            }
+        }
+        let ran: Vec<usize> = (0..runs.len()).filter(|&i| !runs[i].done()).collect();
+        let live: Vec<(&mut EvalRun, Vec<usize>)> = runs
+            .iter_mut()
+            .zip(first)
+            .filter(|(r, _)| !r.done())
+            .collect();
+        let tables_ref = &tables;
+        let results: Vec<Vec<BodyScore>> = parallel(live, spec.threads, |(r, first)| {
+            r.window(tables_ref, &first, key)
+        });
+        let mut lineages = Vec::new();
+        for ((f, theta, adam), k) in thetas.iter_mut().zip(&keys) {
+            let per_world: Vec<Vec<(usize, f64)>> = results
+                .iter()
+                .map(|sc| {
+                    sc.iter()
+                        .filter(|b| b.founder == *f)
+                        .map(|b| (b.candidate, b.score.score))
+                        .collect()
+                })
+                .collect();
+            let bodies: usize = per_world.iter().map(Vec::len).sum();
+            let (scores, _) = pooled_scores(&per_world, candidates);
+            let (twin_diff, pair_spread) = signal(&scores);
+            // σ = 0 is the placement-noise control: no direction, no step.
+            let (_, update_rms) = if bodies >= 2 && spec.brain_sigma > 0.0 {
+                ascend(theta, adam, &scores, spec.brain_sigma, spec.cma_seed, *brain_step)
+            } else {
+                (0.0, 0.0)
+            };
+            lineages.push(LineageWindow {
+                lineage: f.name().into(),
+                bodies,
+                twin_diff,
+                pair_spread,
+                update_rms,
+                centre_key: *k,
+            });
+        }
+        let log = WindowLog {
+            generation,
+            window,
+            brain_step: *brain_step,
+            wall_s: started.elapsed().as_secs_f64(),
+            world_keys: ran
+                .iter()
+                .map(|&i| *runs[i].keys.last().expect("it ran a window"))
+                .collect(),
+            lineages,
+        };
+        println!("{}", window_line(&log));
+        logs.push(log);
+        *brain_step += 1;
+        window += 1;
+    }
+    Ok(runs.into_iter().map(EvalRun::finish).collect())
+}
+
+/// One line per window: the worlds stepped, the wall time, and per lineage the bodies,
+/// the signal check (twin |Δ| against the pair-mean spread) and the step's size.
+pub fn window_line(w: &WindowLog) -> String {
+    let mut s = format!(
+        "  w {}.{} step {} {:.0}s worlds {}",
+        w.generation,
+        w.window,
+        w.brain_step,
+        w.wall_s,
+        w.world_keys.len()
+    );
+    for l in &w.lineages {
+        s.push_str(&format!(
+            " | {} n={} twin={:.3} pair={:.3} ratio={:.2} rms={:.2e}",
+            l.lineage,
+            l.bodies,
+            l.twin_diff,
+            l.pair_spread,
+            l.twin_diff / l.pair_spread.max(1e-12),
+            l.update_rms
+        ));
+    }
+    s
 }
 
 fn multipliers(g: &Genome) -> Vec<(String, f64)> {
@@ -707,13 +1043,54 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         None => start.to_search(),
     };
     let mut cma = Cma::new(mean0, spec.sigma0, spec.lambda, spec.cma_seed);
-    let mut log = std::fs::File::create(spec.out.join("generations.jsonl"))
-        .map_err(|e| format!("cannot write the log: {e}"))?;
     let mut best: Option<(f64, Genome, u32)> = None;
+    let mut first_generation = 0u32;
+    let mut brain_step = 0u32;
+    if let Some(dir) = &spec.resume {
+        let cp = Checkpoint::load(dir)?;
+        if cp.cma.mean().len() != start.genes.len() {
+            return Err(format!(
+                "the checkpoint searches {} genes, the search file {}",
+                cp.cma.mean().len(),
+                start.genes.len()
+            ));
+        }
+        cma = cp.cma;
+        for (f, theta, adam) in thetas.iter_mut() {
+            let c = cp
+                .centres
+                .iter()
+                .find(|c| c.lineage == f.name())
+                .ok_or_else(|| format!("the checkpoint has no {} centre", f.name()))?;
+            if c.theta.len() != theta.len() {
+                return Err(format!("the checkpoint's {} centre is another shape", f.name()));
+            }
+            *theta = c.theta.clone();
+            *adam = c.adam.clone();
+        }
+        first_generation = cp.next_generation;
+        brain_step = cp.brain_step;
+        best = match cp.best {
+            Some((pen, text, g)) => Some((pen, cubarium_voxel_sim::params::load_genome(&text)?, g)),
+            None => None,
+        };
+        println!(
+            "# resumed from {}: generation {first_generation}, brain step {brain_step}, σ {:.4}",
+            dir.display(),
+            cma.sigma()
+        );
+    }
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(spec.resume.is_some())
+        .write(true)
+        .truncate(spec.resume.is_none())
+        .open(spec.out.join("generations.jsonl"))
+        .map_err(|e| format!("cannot write the log: {e}"))?;
     let mut records = Vec::new();
     let mut last_gen_wall = 0.0;
-    for generation in 0..spec.generations {
-        if generation > 0 && run_started.elapsed().as_secs_f64() + last_gen_wall > spec.wall_seconds
+    for generation in first_generation..spec.generations {
+        if generation > first_generation && run_started.elapsed().as_secs_f64() + last_gen_wall > spec.wall_seconds
         {
             println!("# wall budget: stopping before generation {generation}");
             break;
@@ -725,6 +1102,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                     + (u64::from(generation) * spec.seeds_per_generation as u64 + s as u64) * 1000
             })
             .collect();
+        let (mean_start, sigma_start) = (cma.mean().to_vec(), cma.sigma());
         let xs = cma.ask();
         let mut candidates: Vec<(String, Vec<f64>)> = xs
             .iter()
@@ -751,26 +1129,28 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             .iter()
             .map(|(f, t, _)| (*f, EpisodeDriver::gru(t, *f).expect("a validated centre")))
             .collect();
-        let mut tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
-        if spec.brain_pairs > 0 {
-            for (f, t, _) in &thetas {
-                tables[f.index()] = Some(VariantTable::antithetic(
-                    *f,
-                    t,
-                    spec.cma_seed,
-                    spec.brain_sigma,
-                    generation,
-                    spec.brain_pairs,
-                )?);
-            }
-        }
         let jobs: Vec<(usize, u64)> = (0..candidates.len())
             .filter(|&k| run[k])
             .flat_map(|k| seeds.iter().map(move |&s| (k, s)))
             .collect();
-        let mut evals: Vec<Evaluation> = parallel(jobs.clone(), spec.threads, |(k, seed)| {
-            evaluate(&params[k], seed, &drivers, &tables, &spec.eval)
-        });
+        let mut windows = Vec::new();
+        let mut evals: Vec<Evaluation> = if spec.brain_pairs > 0 {
+            lockstep(
+                spec,
+                &params,
+                &jobs,
+                &drivers,
+                &mut thetas,
+                &mut brain_step,
+                generation,
+                &mut windows,
+            )?
+        } else {
+            let tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
+            parallel(jobs.clone(), spec.threads, |(k, seed)| {
+                evaluate(&params[k], seed, &drivers, &tables, &spec.eval)
+            })
+        };
         let references: Vec<Evaluation> = jobs
             .iter()
             .zip(&evals)
@@ -837,35 +1217,14 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             }
         }
         cma.tell(&xs, &fitness);
-        // Unified mode: one brain step per lineage with a centre, from every world's
-        // bodies.
-        if spec.brain_pairs > 0 {
-            for (f, theta, adam) in thetas.iter_mut() {
-                let per_world: Vec<Vec<(usize, f64)>> = evals
-                    .iter()
-                    .map(|e| {
-                        e.body_scores
-                            .iter()
-                            .filter(|b| b.founder == *f)
-                            .map(|b| (b.candidate, b.score.score))
-                            .collect()
-                    })
-                    .collect();
-                let (scores, _) = pooled_scores(&per_world, 2 * spec.brain_pairs);
-                ascend(
-                    theta,
-                    adam,
-                    &scores,
-                    spec.brain_sigma,
-                    spec.cma_seed,
-                    generation,
-                );
-            }
-        }
         let record = SearchRecord {
             generation,
             seeds,
+            mean_start,
+            sigma_start,
+            mean: cma.mean().to_vec(),
             sigma: cma.sigma(),
+            windows,
             wall_s: started.elapsed().as_secs_f64(),
             elapsed_s: run_started.elapsed().as_secs_f64(),
             candidates: recs,
@@ -902,6 +1261,23 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 out.write(&spec.out.join(format!("centre-{}.json", f.name())))?;
             }
         }
+        Checkpoint {
+            next_generation: generation + 1,
+            brain_step,
+            cma: cma.clone(),
+            centres: thetas
+                .iter()
+                .map(|(f, theta, adam)| CentreState {
+                    lineage: f.name().into(),
+                    theta: theta.clone(),
+                    adam: adam.clone(),
+                })
+                .collect(),
+            best: best
+                .as_ref()
+                .map(|(pen, g, gen_)| (*pen, g.to_toml("best so far"), *gen_)),
+        }
+        .save(&spec.out)?;
         records.push(record);
     }
     Ok(records)

@@ -830,6 +830,10 @@ enum Command {
         brain_learning_rate: f64,
         #[arg(long, default_value = "runs/ecology-search")]
         out: PathBuf,
+        /// Continue the search checkpointed in this directory (its `checkpoint.json`: the
+        /// CMA state, the centres and their Adam state, the brain step, the best so far).
+        #[arg(long)]
+        resume: Option<PathBuf>,
     },
     /// The R/S/F pre-screen of an ecology on a world: the three stay-or-go numbers and
     /// each founded species' row.
@@ -1550,6 +1554,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             brain_sigma,
             brain_learning_rate,
             out,
+            resume,
         } => {
             let hz = f64::from(cubarium_voxel_fauna::TICK_HZ);
             let genome = match es::voxel::live::ecology::EcologyParams::load(&search)? {
@@ -1610,6 +1615,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 brain_sigma,
                 brain_learning_rate,
                 out,
+                resume,
             };
             es::voxel::live::search::search(&spec)?;
             Ok(())
