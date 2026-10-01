@@ -69,6 +69,7 @@ use cubarium_voxel_flora::Flora;
 mod arena;
 pub mod found;
 pub mod habitat;
+pub mod params;
 #[cfg(test)]
 mod introduce_tests;
 pub mod scene;

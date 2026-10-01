@@ -21,3 +21,5 @@ rustc-hash = { workspace = true }
 [dev-dependencies]
 # The parasite knob test reads the default config's serialized field names.
 serde_json = "1"
+# The registry spec (`tests/registry.rs`).
+toml = "0.8"

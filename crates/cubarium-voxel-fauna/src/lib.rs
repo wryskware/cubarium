@@ -28,6 +28,8 @@ mod encounter;
 mod manifest;
 mod pose;
 mod predation;
+mod registry;
+pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;

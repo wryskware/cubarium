@@ -12,6 +12,8 @@ cubarium-voxel-fauna = { workspace = true }
 # (`design/handoffs/voxel-phase-overlap-2026-09-24.md`).
 bevy_ecs = { workspace = true, features = ["multi_threaded"] }
 bevy_tasks.workspace = true
+# The resolved parameter set's TOML layers (`params`).
+toml = "0.8"
 
 [features]
 # Forwarded to the three layers so a profiling build of the schedule times the same

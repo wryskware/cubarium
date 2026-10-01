@@ -45,6 +45,8 @@
 #![forbid(unsafe_code)]
 
 pub mod cover;
+mod registry;
+pub use registry::registry;
 mod layers;
 #[cfg(test)]
 mod seed_marks_tests;
