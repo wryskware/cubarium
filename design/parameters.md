@@ -4,7 +4,7 @@
 
 Every number of the voxel world's `Config`, the plants' `FloraConfig` and the animals' `FaunaConfig`, one row per path, at the code defaults (`design/ecology-parameter-registry-2026-09-28.md`, package R1). Set them in a config TOML's `[world]` / `[flora]` / `[fauna]` tables or with `--set PATH=VALUE`; a run writes its resolved set as `params.toml` beside its output.
 
-**`world.*`** (85 rows)
+**`world.*`** (352 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -26,11 +26,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.reentry_m3_per_s` | 0.0 | m3/s | [0, inf) |  | C | tuned | closed budget: the stream returned at the spring cell |
 | `world.reentry_floor_head_m` | 0.0 | m above y=0 | [0, inf) |  | - | structural | water table at which the aquifer-fed stream stops |
 | `world.lake_drain_m2_per_s` | 0.0 | m3/s per m of head | [0, inf) |  | C | derived | lake floor joined to the aquifer: flow = k * (lake - table) |
+| `world.spring_offset_fraction` | 0.125 | fraction of the ring | [0, 1] | 0.05–0.5 | - | design | where the spring stands, along the ring from the lowest ground |
+| `world.spring_depth_fraction` | 0.5 | fraction of the depth | [0, 1] | 0.2–0.8 | - | design | where the spring stands in depth (mid-depth) |
+| `world.standing_support_fill` | 0.5 | fraction of a cell | [0, 1] | 0.3–0.7 | - | placeholder (design/backlog.md section 1 row 84) | a cell holds the water above it up as standing water at this fill or more |
+| `world.outlet_weir_per_tick` | 0.05 | fraction of a brim-full cell per tick | [0, 1] | 0.01–0.2 log | C | tuned:T6 'a weir, not a straw' | the outlet weir's share of a brim-full sill cell passed per tick (head^1.5) |
 | `world.day.length_min` | 120.0 | min of sim time | (0, inf) |  | C | decision | one day and night (cycle); the 'day' the climate counts in |
 | `world.day.daylight` | 0.67 | fraction of the cycle | [0.05, 0.95] | 0.4–0.7 | B | decision | the share of the cycle the sun is up |
 | `world.day.start_hour` | 8.0 | h on the day's 24 h clock | [0, 24) |  | - | decision | where a fresh world starts |
 | `world.day.latitude` | (absent) | deg north | [-90, 90] |  | - | decision | local clock: the place whose sunrise the day follows |
 | `world.day.longitude` | (absent) | deg east | [-180, 180] |  | - | decision | local clock: the place's longitude |
+| `world.day.noon_elevation_deg` | 70.0 | deg above the horizon | (0, 90] | 30–85 | D | physical | the sun's elevation at noon |
+| `world.day.twilight_deg` | 6.0 | deg | (0, 90] | 3–12 | - | physical (civil twilight) | civil twilight: daylight is a smoothstep of the elevation over +/- this |
+| `world.day.temperature_peak_fraction` | 0.6666666666666666 | fraction of the daylight from sunrise | (0, 1] | 0.5–0.8 | - | physical | where in the daylight the temperature and the afternoon convection peak |
+| `world.day.civil_daylight` | 0.5 | fraction of the day | [0.05, 0.95] | 0.4–0.6 | - | decision | the civil clock's daylight (local without a place; a clock that is off), centred on noon |
 | `world.day.plant_night_factor` | 0.05 | fraction of the daytime rate | [0, 1] | yes | - | decision | plant maintenance and senescence in the dark (1: no night rule) |
 | `world.climate.weather_speed` | (absent) | x nature | (0, inf) | 1–12 log | C | decision | how much faster than nature the weather runs, when fixed ("auto" otherwise) |
 | `world.climate.temperature_c` | 26.0 | degC | [0, inf] |  | A | preset | mean air temperature |
@@ -62,7 +70,28 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.climate.strike_min_s` | 10.0 | s | [0, inf] |  | - | visual | shortest lightning interval (visual only) |
 | `world.climate.strike_max_s` | 60.0 | s | [0, inf] |  | - | visual | longest lightning interval (visual only) |
 | `world.climate.storm_stream_gain` | 4.0 | x stream flow | [0, inf] |  | C | decision | stream swell at a downpour's peak (0: off) |
+| `world.climate.cc_per_c` | 0.07 | per degC | [0, inf) | 0.05–0.09 | - | physical | Clausius-Clapeyron: what the air holds grows by this fraction per degC |
+| `world.climate.rh_max` | 1.5 | RH | (0, inf) | 1.1–2 | D | tuned:WX1 | relative humidity never passes this: reaching it starts a forced downpour |
+| `world.climate.evaporation_rh_span` | 0.4 | RH | (0, inf) | 0.2–0.8 | - | design | evaporation scales with max(0, 1 - RH) / this: the configured rate at RH 1 - span |
+| `world.climate.stream_floor_rh` | 0.5 | RH | [0, inf) | 0.3–0.7 | - | tuned:WX1b | the atmosphere-fed stream draws only while the sky stands above this RH |
+| `world.climate.swell_rise_s` | 45.0 | s | (0, inf) | 15–120 log | - | decision (Wrysk) | the stream swell rises toward its target over this while it rains |
+| `world.climate.swell_fall_s` | 50.0 | s | (0, inf) | 15–120 log | - | decision (Wrysk) | the stream swell falls back over this after the rain |
+| `world.climate.auto_speed_exponent` | 0.65 | exponent | (-inf, inf) | 0.3–1 | - | decision (Wrysk #8) | the auto weather speed is (24 h / cycle length) to this power |
+| `world.climate.founding_rh` | 0.6 | RH | [0, inf) | 0.3–0.9 | - | tuned:WX1b | the relative humidity a closed world's sky is founded at |
+| `world.climate.cloud_start_rh` | 0.4 | RH | (-inf, inf) |  | - | visual | cloud cover begins at this RH (visual only) |
+| `world.climate.cloud_span_rh` | 0.6 | RH | (0, inf) |  | - | visual | cloud cover rises from none to full over this much RH (visual only) |
+| `world.climate.cloud_floor_drizzle` | 0.6 | fraction of the sky | [0, 1] |  | - | visual | least cloud cover a drizzle falls from (visual only) |
+| `world.climate.cloud_floor_shower` | 0.75 | fraction of the sky | [0, 1] |  | - | visual | least cloud cover a shower falls from (visual only) |
+| `world.climate.cloud_floor_downpour` | 0.9 | fraction of the sky | [0, 1] |  | - | visual | least cloud cover a downpour falls from (visual only) |
 | `world.climate.opening_min_s` | 60.0 | s | [0, inf] |  | N | preset | the host's opening rain falls at least this long |
+| `world.materials.rock.pore_capacity` | 0.02 | fraction of voxel volume | [0, 1] | 0.01–0.03 | - | placeholder ('provisional crevice number') | the share of a voxel that holds pore water |
+| `world.materials.rock.permeability_per_s` | 0.001 | fraction of pore capacity per s on a 0.25 m cell | [0, inf) | 0.0001–0.01 log | - | placeholder ('provisional crevice number') | how much of the pore capacity moves per second (conductivity = this x pore x 0.25 m) |
+| `world.materials.rock.field_capacity` | 0.5 | fraction of pore capacity | [0, 1] | 0.3–0.7 | - | placeholder ('provisional crevice number') | the share of the pores the material holds against gravity |
+| `world.materials.rock.wilting_point` | 0.2 | fraction of pore capacity | [0, 1] | 0.05000000000000002–0.35 | - | placeholder ('provisional crevice number') | the share of the pores held too tightly for roots to draw |
+| `world.materials.soil.pore_capacity` | 0.35 | fraction of voxel volume | [0, 1] | 0.175–0.5249999999999999 | - | derived: a loam (voxel-plant-viability W) | the share of a voxel that holds pore water |
+| `world.materials.soil.permeability_per_s` | 0.2 | fraction of pore capacity per s on a 0.25 m cell | [0, inf) | 0.02–2 log | - | derived: a loam (voxel-plant-viability W) | how much of the pore capacity moves per second (conductivity = this x pore x 0.25 m) |
+| `world.materials.soil.field_capacity` | 0.65 | fraction of pore capacity | [0, 1] | 0.45–0.8500000000000001 | - | derived: a loam (voxel-plant-viability W) | the share of the pores the material holds against gravity |
+| `world.materials.soil.wilting_point` | 0.28 | fraction of pore capacity | [0, 1] | 0.13000000000000003–0.43000000000000005 | - | derived: a loam (voxel-plant-viability W) | the share of the pores held too tightly for roots to draw |
 | `world.climate.drizzle.lambda_max_per_h` | 1.5 | events per sim hour | [0, inf] | 0.5–5 log | C | tuned | ceiling of the event hazard |
 | `world.climate.drizzle.rh50` | 0.98 | RH or moisture M | [-inf, inf] | 0.7–1.3 | C | tuned | humidity at which the hazard's logistic is half |
 | `world.climate.drizzle.width` | 0.03 | RH or moisture M | (0, inf] |  | N | tuned | the logistic's width |
@@ -93,8 +122,246 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.climate.downpour.stop_rh` | 0.5 | RH or moisture M | [0, inf] | 0.3–0.9 | C | tuned | the event ends when its reading falls to this |
 | `world.climate.downpour.longest_min` | 50.0 | min of nature | (0, inf] | 10–120 log | B | tuned | or when it has rained this long |
 | `world.climate.downpour.cool_c` | 3.0 | degC | [-inf, inf] |  | B | tuned | while it rains the air relaxes toward this much cooler |
+| `world.ridge.front_fraction` | 0.3 | fraction of the height | [0, 1] | 0.15–0.45 | - | placeholder | surface height at the front |
+| `world.ridge.ridge_amp_fraction` | 0.17 | fraction of the height | [0, 1] | 0.08–0.3 | - | placeholder | the ridge's amplitude |
+| `world.ridge.ridge_amp_min` | 1.0 | voxels | [0, inf) | 0.5–3 | - | placeholder | the ridge's least amplitude |
+| `world.ridge.second_amp_fraction` | 0.05 | fraction of the height | [0, 1] | 0–0.12 | - | placeholder | the second harmonic's amplitude |
+| `world.ridge.climb_fraction` | 0.26 | fraction of the height | [0, 1] | 0.1–0.4 | - | placeholder | how far the back stands above the front |
+| `world.ridge.basin_depth` | 0.72 | ridge amplitudes | [0, inf) | 0.3–1.2 | - | placeholder | the receiving basin's floor under the front, in ridge amplitudes |
+| `world.ridge.basin_keep` | 0.12 | fraction of the depth | [0, 1] | 0–0.5 | - | placeholder | relief below the basin floor keeps this share of its depth |
+| `world.ridge.wobble_terms` | 4 | sine terms | [0, inf) | 0–8 | - | placeholder | terms of the weak correlated wobble |
+| `world.ridge.wobble_first_harmonic` | 3 | harmonic | [0, inf) | 1–6 | - | placeholder | the wobble's first harmonic around the ring |
+| `world.ridge.wobble_harmonic_step` | 2 | harmonics | [0, inf) | 1–4 | - | placeholder | the step between the wobble's harmonics |
+| `world.ridge.wobble_amp` | 0.55 | voxels | [0, inf) | 0–1.5 | - | placeholder | the first wobble term's amplitude |
+| `world.ridge.wobble_amp_falloff` | 0.6 | per term | [0, inf) | 0–2 | - | placeholder | how fast the wobble's amplitude falls per term |
+| `world.ridge.wobble_depth_freq.*` | 0.05, 0.22 | cycles per voxel of depth | [0, inf) | 0.02–0.4 | - | placeholder | range of the wobble's frequencies in depth |
+| `world.ridge.soil_slope` | 3.2 | voxels | [0, inf) | 0–6 | - | placeholder | soil depth on flat ground from slope |
+| `world.ridge.soil_slope_cap` | 1.0 | voxels per voxel | (0, inf) | 0.5–2 | - | placeholder | the slope at which the slope's soil vanishes |
+| `world.ridge.soil_deposit` | 2.5 | voxels | [0, inf) | 0–6 | - | placeholder | soil depth added by deposition in the basin |
+| `world.ridge.soil_base` | 0.3 | voxels | [0, inf) | 0–2 | - | placeholder | soil depth everywhere |
+| `world.ridge.soil_max_rows` | 6.0 | voxels | [0, inf) | 2–12 | - | placeholder | the deepest soil |
+| `world.ridge.rock_thick` | 6.0 | voxels | [0, inf) | 2–12 | - | placeholder | thickness of the rock body under the soil |
+| `world.ridge.rock_thick_swing` | 3.0 | voxels | [0, inf) | 0–6 | - | placeholder | the rock body's swing around the ring |
+| `world.ridge.strata_warp` | 1.6 | voxels | [0, inf) | 0–4 | - | placeholder | how far the hard strata warp around the ring |
+| `world.ridge.strata_thickness` | 2.0 | voxels | (0, inf) | 1–4 | - | placeholder | thickness of one rock layer |
+| `world.ridge.strata_period` | 4 | layers | [1, inf) | 2–8 | - | placeholder | how many layers apart the hard ones are |
+| `world.ridge.pockets` | 3 | pockets | [0, inf) | 0–8 | - | placeholder | soil pockets inside the rock |
+| `world.ridge.pocket_cy_min` | 2.0 | voxels | [0, inf) | 1–4 | - | placeholder | the lowest a pocket's centre may be |
+| `world.ridge.pocket_height_fraction` | 0.5 | fraction of the height | [0, 1] | 0.2–0.8 | - | placeholder | the highest a pocket's centre may be, as a share of the height |
+| `world.ridge.pocket_cy_floor` | 3.0 | voxels | [0, inf) | 2–6 | - | placeholder | the least that highest bound may be |
+| `world.ridge.pocket_rx.*` | 2.0, 5.0 | voxels | (0, inf) | 1–8 | - | placeholder | a pocket's radius along the ring |
+| `world.ridge.pocket_ry.*` | 1.5, 3.0 | voxels | (0, inf) | 1–6 | - | placeholder | a pocket's radius in height |
+| `world.ridge.pocket_rz.*` | 1.5, 4.0 | voxels | (0, inf) | 1–6 | - | placeholder | a pocket's radius in depth |
+| `world.landform.*.erosion.iterations` | (absent) | solver iterations | [0, inf) | 0–300 | - | placeholder | how many iterations the erosion solver runs (0: the identity) |
+| `world.landform.*.erosion.rain` | (absent) | model rain per column per iteration | [0, inf) | 0.1–4 | - | placeholder | model rain per sample column per iteration (with `capacity`, the scale of the cut) |
+| `world.landform.*.erosion.capacity` | (absent) | sediment per unit discharge per unit slope | [0, inf) | 0.0005–0.01 log | - | placeholder | sediment one unit of discharge carries per unit of slope |
+| `world.landform.*.erosion.erode` | (absent) | fraction of the carrying deficit | [0, inf) | 0.1–1 | - | placeholder | fraction of the carrying deficit taken off the bed each iteration |
+| `world.landform.*.erosion.deposit` | (absent) | fraction of the excess load | [0, inf) | 0.1–1 | - | placeholder | fraction of the excess load dropped each iteration |
+| `world.landform.*.erosion.bedrock_resistance` | (absent) | x loose sediment | [0, inf) | 1–20 | - | placeholder | how much slower hardness-1 bedrock yields than loose sediment |
+| `world.landform.*.erosion.max_cut_soft_m` | (absent) | m per iteration | [0, inf) | 0.01–0.5 log | - | placeholder | deepest one iteration may cut at a soft bed |
+| `world.landform.*.erosion.max_cut_hard_m` | (absent) | m per iteration | [0, inf) | 0.002–0.1 log | - | placeholder | deepest one iteration may cut at a hard bed |
+| `world.landform.*.erosion.repose` | (absent) | tangent of the angle | [0, inf) | 0.4–1.4 | - | placeholder | tangent of the angle of repose for loose sediment |
+| `world.landform.*.erosion.repose_sweeps` | (absent) | sweeps per iteration | [0, inf) | 0–6 | - | placeholder | relaxation sweeps of the repose rule per iteration |
+| `world.landform.*.water.inventory_m` | (absent) | m over footprint | [0, inf) | 0.5–3 log | - | placeholder/tuned (sized to lift the table to the lake floor) | total water the world starts with (0: a dry world) |
+| `world.landform.*.water.atmosphere_fraction` | (absent) | fraction of the inventory | [0, 1] | 0–0.2 | - | placeholder | share of the inventory held aloft for the cycle |
+| `world.landform.*.water.aquifer_head_m` | (absent) | m above y=0 | [0, inf) | 0.25–2 | - | tuned | water table at creation, charged out of the inventory |
+| `world.landform.*.water.rain_m_per_s` | (absent) | m/s | [0, inf) | 0.00001–0.0001 log | A | placeholder ('as high as the rule allows') | R0: the rate a shower falls at; the climate's modes rain at multiples of it |
+| `world.landform.*.water.evaporation_m_per_s` | (absent) | m/s | [0, inf) | 0.000001–0.00003 log | - | tuned (kept under R0) | evaporation from open water at the mean temperature and RH 0.6 |
+| `world.landform.*.water.lake_depth_m` | (absent) | m above the lake floor | [0, inf) | 0.25–1 | - | tuned (hollow-count vs readability) | how deep the lake stands before it overflows into the outlet |
+| `world.landform.*.water.min_lake_m2` | (absent) | m2 | [0, inf) | 0–12 | - | placeholder | smallest open-water surface a generated world is accepted with (0: any) |
+| `world.landform.*.water.reentry_m3_per_s` | (absent) | m3/s | [0, inf) | 0.0001–0.01 log | - | tuned:T2 sweep | the stream returned at the spring cell |
+| `world.landform.*.water.min_tier_pools` | (absent) | pools | [0, inf) | 0–3 | - | placeholder | open-sky pools above the lake a generated world must hold water in |
+| `world.landform.*.water.lake_drain_m2_per_s` | (absent) | m3/s per m of head | [0, inf) | 0.01–1 log | - | derived:100x reentry | lake floor joined to the aquifer: flow = k * (lake - table) |
+| `world.landform.*.water.lake_table_share` | (absent) | fraction of post-lake inventory | [0, 1] | 0.5–1 | - | placeholder | most of the inventory left after the lake that may go into the water table |
+| `world.landform.*.water.ring_stream_floor_m` | (absent) | m | [0, inf) | 0–0.5 | - | placeholder | how far under its founding table the aquifer-fed stream may draw it |
+| `world.landform.*.water.lake_floor_band` | (absent) | voxels | [0, inf) | 0–4 | - | placeholder | how far above the lowest standing water a body is still the lake |
+| `world.landform.*.water.pool_min_fill` | (absent) | fraction of a cell | [0, 1] | 0.01–0.2 | - | placeholder | how full a void cell must be to count as pool water rather than runoff |
+| `world.landform.*.water.min_pool_cells` | (absent) | visible surface cells | [0, inf) | 1–12 | - | placeholder | visible surface cells a pool needs before the seed gate counts it |
+| `world.landform.staged.base_m` | (absent) | m above y=0 | [0, inf) | 1–6 | - | placeholder | elevation the front edge is built around |
+| `world.landform.staged.back_rise_m` | (absent) | m | [0, inf) | 0.5–5 | - | placeholder | how much higher the back wall stands than the front |
+| `world.landform.staged.basin_floor_m` | (absent) | m above y=0 | [0, inf) | 0.5–3 | - | placeholder | relief below this is compressed rather than cut |
+| `world.landform.staged.depth_scale` | (absent) | x | (0, inf) | 0.25–1 | - | placeholder | depth anisotropy: features are stretched into z by this factor |
+| `world.landform.staged.relief_wavelength_m` | (absent) | m | (0, inf) | 8–32 | - | placeholder | wavelength of the coarsest relief octave: the landform size |
+| `world.landform.staged.relief_m` | (absent) | m | (0, inf) | 1–5 | - | placeholder | amplitude of the whole relief ladder |
+| `world.landform.staged.relief_octaves` | (absent) | octaves | [0, inf) | 3–8 | - | placeholder | octaves the relief ladder asks for |
+| `world.landform.staged.persistence` | (absent) | ratio | (0, inf) | 0.3–0.7 | - | placeholder | amplitude ratio between successive octaves |
+| `world.landform.staged.lacunarity` | (absent) | ratio | (1, inf) | 1.5–3 | - | placeholder | frequency ratio between successive octaves (above 1) |
+| `world.landform.staged.ridge_wavelength_m` | (absent) | m | (0, inf) | 4–16 | - | placeholder | wavelength of the coarsest ridged octave |
+| `world.landform.staged.ridge_relief_m` | (absent) | m | [0, inf) | 0.5–3 | - | placeholder | amplitude of the ridged noise where the rocky mask is full |
+| `world.landform.staged.ridge_octaves` | (absent) | octaves | [0, inf) | 1–5 | - | placeholder | octaves the ridged ladder asks for |
+| `world.landform.staged.rocky_wavelength_m` | (absent) | m | (0, inf) | 10–40 | - | placeholder | wavelength of the field that decides which stretches are rocky |
+| `world.landform.staged.rocky_fraction` | (absent) | fraction of the ring | [0, inf) | 0.2–0.7 | - | placeholder | roughly what share of the ring the ridged noise reaches |
+| `world.landform.staged.warp_wavelength_m` | (absent) | m | (0, inf) | 8–32 | - | placeholder | wavelength of the domain warp |
+| `world.landform.staged.warp_m` | (absent) | m | [0, inf) | 0–3 | - | placeholder | how far the domain warp displaces the ridged noise |
+| `world.landform.staged.min_feature_voxels` | (absent) | voxels | (0, inf) | 1.5–4 | - | placeholder | the finest octave kept, in voxels of wavelength |
+| `world.landform.staged.mantle_m` | (absent) | m | (0, inf) | 0.1–0.75 | - | placeholder | loose weathered sediment the landscape starts mantled in |
+| `world.landform.staged.soil_max_m` | (absent) | m | [0, inf) | 0.5–3 | - | placeholder | deepest sediment a column may carry into the voxels |
+| `world.landform.staged.strata_m` | (absent) | m | (0, inf) | 1–4 | - | placeholder | one soft-to-hard cycle of the strata, metres of height |
+| `world.landform.staged.strata_warp_m` | (absent) | m | [0, inf) | 0–1 | - | placeholder | how far the strata are warped around the ring |
+| `world.landform.staged.hardness_soft` | (absent) | 0..1 | [0, inf) | 0.1–0.4 | - | placeholder | hardness of the softest rock |
+| `world.landform.staged.hardness_hard` | (absent) | 0..1 | [0, inf) | 0.7–1 | - | placeholder | hardness of the hardest rock |
+| `world.landform.staged.hardness_region_m` | (absent) | m | (0, inf) | 8–36 | - | placeholder | wavelength of the slow regional variation in hardness |
+| `world.landform.staged.bedrock_hardness` | (absent) | 0..1 | [0, inf) | 0.5–0.9 | - | placeholder | at or above this hardness the rock voxelises as bedrock |
+| `world.landform.staged.core_m` | (absent) | m above y=0 | [0, inf) | 0.5–3 | - | placeholder | everything below this height is the impermeable core |
+| `world.landform.staged.pockets` | (absent) | pockets | [0, inf) | 0–8 | - | placeholder | soil pockets inside the rock |
+| `world.landform.staged.core_blend_m` | (absent) | m | [0, inf) | 0.1–1.5 | - | placeholder | how thick the core's upper edge blends into the strata |
+| `world.landform.staged.hardness_band_share` | (absent) | fraction | [0, 1] | 0.4–0.95 | - | placeholder | how much of the strata's hardness is the banding, the rest the slow regional variation |
+| `world.landform.staged.rocky_edge_width` | (absent) | noise units | (0, inf) | 0.2–1 | - | placeholder | the width of the rocky mask's soft edge |
+| `world.landform.staged.bench_ramp_factor` | (absent) | x | [0, inf) | 2–8 | - | placeholder | how the benches' ramp length is read against the rocky mask's wavelength |
+| `world.landform.staged.basin_keep` | (absent) | fraction of the depth | [0, 1] | 0–0.5 | - | placeholder | relief below the basin floor keeps this share of its depth |
+| `world.landform.staged.min_climb_share` | (absent) | fraction of back_rise_m | [0, 1] | 0.2–1 | - | placeholder | the back wall stands at least this share of back_rise_m above the front |
+| `world.landform.staged.tiers.count` | (absent) | elevations | [0, inf) | 0–6 | - | placeholder | how many shelf elevations are available (0: the original relief) |
+| `world.landform.staged.tiers.rise_m` | (absent) | m | (0, inf) | 0.7–3 | - | placeholder | height of one riser |
+| `world.landform.staged.tiers.edge_wavelength_m` | (absent) | m | (0, inf) | 4–24 | - | placeholder | typical spacing and edge wavelength of shelf masses, around the ring |
+| `world.landform.staged.tiers.edge_warp_m` | (absent) | m | [0, inf) | 0–1.5 | - | placeholder | how far a shelf edge wanders, in metres of depth |
+| `world.landform.staged.tiers.flat` | (absent) | fraction | [0, inf) | 0–1 | - | placeholder | how much of the recipe's relief survives on shelf floors |
+| `world.landform.staged.tiers.pool_radius_m` | (absent) | m | (0, inf) | 0.25–2 | - | placeholder | radius of an elevated shelf pool |
+| `world.landform.staged.tiers.lake_radius_m` | (absent) | m | (0, inf) | 1.5–5 | - | placeholder | radius of the lake on the lowest ground |
+| `world.landform.staged.tiers.pool_depth_m` | (absent) | m | (0, inf) | 0.2–1.5 | - | placeholder | how deep a pool's bowl is cut below its own rim |
+| `world.landform.staged.tiers.notch_width_m` | (absent) | m | [0, inf) | 0.1–1 | - | placeholder | width of the spillway notch in a pool's front rim |
+| `world.landform.staged.tiers.front_setback_m` | (absent) | m | [0, inf) | 0–0.75 | - | placeholder | how far back from a shelf's front edge the bowl starts |
+| `world.landform.staged.tiers.shore_m` | (absent) | m | [0, inf) | 0–5 | - | placeholder | how far out from the lake its wet shore reaches (0: no shore) |
+| `world.landform.staged.tiers.shore_slope` | (absent) | m per m | [0, inf) | 0.1–0.6 | - | placeholder | the shore's rise, metres per metre out from the water |
+| `world.landform.staged.tiers.shore_lip_m` | (absent) | m | [0, inf) | 0–1 | - | placeholder | width of the shore's dry lip at the water's edge |
+| `world.landform.staged.tiers.mass_spacing_share` | (absent) | x edge_wavelength_m | (0, inf) | 0.5–1.5 | - | placeholder | a shelf mass's spacing around the ring, in edge wavelengths |
+| `world.landform.staged.tiers.mass_jitter` | (absent) | fraction of the spacing | [0, inf) | 0–0.4 | - | placeholder | how far a mass is jittered from its even spacing |
+| `world.landform.staged.tiers.mass_taper` | (absent) | fraction of the radius per elevation | [0, inf) | 0–0.3 | - | placeholder | how much narrower each higher elevation of a mass is |
+| `world.landform.staged.tiers.mass_radius_share` | (absent) | x edge_wavelength_m | (0, inf) | 0.2–0.5 | - | placeholder | a mass's half-width at its lowest elevation, in edge wavelengths |
+| `world.landform.staged.tiers.mass_min_pool_radii` | (absent) | x pool_radius_m | [0, inf) | 1–4 | - | placeholder | the least a mass's half-width may be, in pool radii |
+| `world.landform.staged.tiers.front_base` | (absent) | fraction of the depth | [0, 1] | 0–0.3 | - | placeholder | a shelf's front edge at elevation 0, as a share of the depth |
+| `world.landform.staged.tiers.front_step` | (absent) | fraction of the depth | [0, 1] | 0.05–0.3 | - | placeholder | how much further back each elevation's front edge stands |
+| `world.landform.staged.tiers.front_bow` | (absent) | fraction of the depth | [0, inf) | 0–0.3 | - | placeholder | how far a shelf's front edge is pushed back at the mass's ends |
+| `world.landform.staged.tiers.back_base` | (absent) | fraction of the depth | [0, 1] | 0.3–0.8 | - | placeholder | a shelf's back edge at elevation 0, as a share of the depth |
+| `world.landform.staged.tiers.back_step` | (absent) | fraction of the depth | [0, inf) | 0–0.3 | - | placeholder | how much further back each elevation's back edge stands |
+| `world.landform.staged.tiers.back_edge_share` | (absent) | fraction | [0, inf) | 0–1 | - | placeholder | how much of the edge noise pulls the back edge in |
+| `world.landform.staged.tiers.back_bow` | (absent) | fraction of the depth | [0, inf) | 0–0.3 | - | placeholder | how far a shelf's back edge is pulled in at the mass's ends |
+| `world.landform.staged.tiers.pool_bowl_rows` | (absent) | voxels | [0, inf) | 1–4 | - | placeholder | how deep an upper pool's bowl is cut, in voxels of water over its bed |
+| `world.landform.staged.tiers.pool_taper` | (absent) | fraction of the bowl's length | [0, inf) | 0–0.7 | - | placeholder | how much a pool's bowl tapers away from its notch |
+| `world.landform.staged.tiers.lake_beach_rows` | (absent) | voxels | [0, inf) | 0–4 | - | placeholder | rings of the lake's beach, each one voxel deeper going in |
+| `world.landform.staged.tiers.ramp_step_m` | (absent) | m | (0, inf) | 0.25–0.75 | - | placeholder | the steepest step a ramp through a riser may have (what a body can walk) |
+| `world.landform.staged.tiers.shore_soil_rows` | (absent) | voxels | [0, inf) | 1–8 | - | placeholder | rows of soil under the waterline the wet shore lays |
+| `world.landform.staged.benches.strength` | (absent) | fraction | [0, inf) | 0–1 | - | placeholder | how far the bedrock surface is pulled onto the band top under it |
+| `world.landform.staged.benches.ramp_m` | (absent) | m | [0, inf) | 0.2–4 | - | placeholder | how much of the rocky mask's edge is given over to ramping the pull in |
+| `world.landform.staged.hollows.clearance_m` | (absent) | m | (0, inf) | 0.5–1.25 | - | placeholder | void a hollow must have above a floor before anyone can stand under it |
+| `world.landform.staged.hollows.soft_hardness` | (absent) | 0..1 | [0, inf) | 0.3–0.6 | - | placeholder | at or below this hardness a band is soft enough to notch out or hold a gallery |
+| `world.landform.staged.hollows.bank_slope` | (absent) | m per m | [0, inf) | 0.6–2 | - | placeholder | how steep the ground must fall toward a neighbour for a column to count as a bank |
+| `world.landform.staged.hollows.cap_thickness_m` | (absent) | m | [0, inf) | 0.2–0.8 | - | placeholder | thickness of the hard cap over an undercut |
+| `world.landform.staged.hollows.cap_drop_m` | (absent) | m | [0, inf) | 0.4–1.5 | - | placeholder | how far below a hard bank a neighbour must be cut to flag it |
+| `world.landform.staged.hollows.undercut_depth_m` | (absent) | m | [0, inf) | 0.4–1.5 | - | placeholder | how far back into the bank the soft band is notched |
+| `world.landform.staged.hollows.undercut_density` | (absent) | fraction of eligible banks | [0, inf) | 0–1 | - | placeholder | share of eligible banks that are notched |
+| `world.landform.staged.hollows.grotto_wavelength_m` | (absent) | m | (0, inf) | 3–12 | - | placeholder | size of the patches the undercuts come in |
+| `world.landform.staged.hollows.front_bias` | (absent) | fraction | [0, inf) | 0–1 | - | placeholder | how strongly hollows are pulled toward the front cut |
+| `world.landform.staged.hollows.gallery_density` | (absent) | fraction of deep soft rock | [0, inf) | 0–0.6 | - | placeholder | share of the soft rock at depth that opens into galleries |
+| `world.landform.staged.hollows.gallery_wavelength_m` | (absent) | m | (0, inf) | 1.5–6 | - | placeholder | size of the galleries |
+| `world.landform.staged.hollows.gallery_flatten` | (absent) | fraction | [0, inf) | 0.1–1 | - | placeholder | how far the gallery noise is stretched vertically |
+| `world.landform.staged.hollows.gallery_min_depth_m` | (absent) | m | [0, inf) | 0.3–1.5 | - | placeholder | how far under the surface a gallery has to start |
+| `world.landform.staged.hollows.mouth_reach_m` | (absent) | m | [0, inf) | 0.3–2 | - | placeholder | how far a mouth may be cut through rock to open a gallery |
+| `world.landform.staged.hollows.skylight_m` | (absent) | m | [0, inf) | 0.3–2 | - | placeholder | how close a gallery's ceiling must come to the surface for a skylight |
+| `world.landform.staged.hollows.chamber_radius_share` | (absent) | x grotto_wavelength_m | (0, inf) | 0.15–0.5 | - | placeholder | a chamber's half-width, in grotto wavelengths |
+| `world.landform.staged.hollows.chamber_depth_factor` | (absent) | x undercut_depth_m | (0, inf) | 1–4 | - | placeholder | a chamber's depth into the bank, in undercut depths |
+| `world.landform.staged.hollows.chamber_room_factor` | (absent) | x clearance_m | (0, inf) | 1–3 | - | placeholder | a chamber's room height, in clearances |
+| `world.landform.staged.hollows.chamber_spacing_m` | (absent) | m of ring per chamber | (0, inf) | 8–40 | - | placeholder | the ring length each chamber is asked for |
+| `world.landform.staged.hollows.chamber_max` | (absent) | chambers | [0, inf) | 0–6 | - | placeholder | most chambers a ring is given |
+| `world.landform.staged.hollows.chamber_taper` | (absent) | fraction | (0, inf) | 0.3–1 | - | placeholder | how far a chamber's far wall is rounded in |
+| `world.landform.staged.hollows.gallery_gate` | (absent) | noise units | (-inf, inf) | 0.3–0.9 | - | placeholder | the gallery noise's gate at zero density |
+| `world.landform.staged.hollows.gallery_gate_slope` | (absent) | noise units per unit density | [0, inf) | 0.6–1.8 | - | placeholder | how fast the gate falls with gallery density |
+| `world.landform.staged.hollows.stream` | (absent) | - | [0, inf) |  | - | structural | this section's own seed stream |
+| `world.landform.staged.streams.relief` | (absent) | - | [0, inf) |  | - | structural | seed stream of one generation pass |
+| `world.landform.staged.streams.ridge` | (absent) | - | [0, inf) |  | - | structural | seed stream of one generation pass |
+| `world.landform.staged.streams.warp` | (absent) | - | [0, inf) |  | - | structural | seed stream of one generation pass |
+| `world.landform.staged.streams.rocky` | (absent) | - | [0, inf) |  | - | structural | seed stream of one generation pass |
+| `world.landform.staged.streams.hardness` | (absent) | - | [0, inf) |  | - | structural | seed stream of one generation pass |
+| `world.landform.staged.streams.material` | (absent) | - | [0, inf) |  | - | structural | seed stream of one generation pass |
+| `world.landform.terrarium.ground_m` | (absent) | m above y=0 | [0, inf) | 0.5–2.5 | - | placeholder | ground at the front glass |
+| `world.landform.terrarium.ground_rise_m` | (absent) | m | [0, inf) | 0.1–1 | - | placeholder | how far the ground climbs from the glass to the back wall |
+| `world.landform.terrarium.ground_relief_m` | (absent) | m | [0, inf) | 0–0.25 | - | placeholder | gentle relief on the ground, either way |
+| `world.landform.terrarium.ground_fall` | (absent) | m per m | [0, inf) | 0.02–0.15 | - | placeholder | how steeply the ground climbs away from the lake around the ring |
+| `world.landform.terrarium.soil_m` | (absent) | m | [0, inf) | 0.125–1 | - | decision (Wrysk 2026-09-22/23) | soil on every open floor |
+| `world.landform.terrarium.mantle_m` | (absent) | m | [0, inf) | 0.1–0.75 | - | placeholder | loose material laid over the massif before erosion |
+| `world.landform.terrarium.crest_m.*` | (absent) | m | (0, inf) | 1–15 | - | placeholder | the crest's height above the foot at the back wall: lowest and tallest stretches |
+| `world.landform.terrarium.crest_wavelength_m` | (absent) | m | (0, inf) | 4–24 | - | placeholder | how long a tall or low stretch of crest is |
+| `world.landform.terrarium.foot.*` | (absent) | fraction of the depth | [-1, 1) | -0.5–0.5 | - | placeholder | where the profile leaves the ground (negative: past the front glass) |
+| `world.landform.terrarium.foot_wavelength_m` | (absent) | m | (0, inf) | 4–24 | - | placeholder | how long a stretch of foot reaching forward or held back is |
+| `world.landform.terrarium.profile` | (absent) | exponent | (0, inf) | 0.5–3 | - | placeholder | the profile's shape from foot to crest (1: straight) |
+| `world.landform.terrarium.storey_m.*` | (absent) | m | (0, inf) | 1–5 | - | placeholder | storey height, from one terrace to the next |
+| `world.landform.terrarium.storey_wavelength_m` | (absent) | m | (0, inf) | 4–24 | - | placeholder | how long a stretch of one storey height is |
+| `world.landform.terrarium.drift` | (absent) | storeys | [0, inf) | 0–0.5 | - | placeholder | how far the levels drift up and down around the ring |
+| `world.landform.terrarium.drift_wavelength_m` | (absent) | m | (0, inf) | 4–32 | - | placeholder | how long one rise or fall of the drift is |
+| `world.landform.terrarium.tread.*` | (absent) | fraction of a storey | [0, 1] | 0–0.5 | - | placeholder | how much of a storey a tread climbs across its depth |
+| `world.landform.terrarium.riser.*` | (absent) | fraction of a storey | [0, 1] | 0.01–0.6 | - | placeholder | how much of a storey a riser takes |
+| `world.landform.terrarium.texture_wavelength_m` | (absent) | m | (0, inf) | 2–16 | - | placeholder | how long a stretch of one tread and riser character is |
+| `world.landform.terrarium.roll_m` | (absent) | m | [0, inf) | 0–0.5 | - | placeholder | gentle roll on the treads, either way |
+| `world.landform.terrarium.roll_wavelength_m` | (absent) | m | (0, inf) | 1–8 | - | placeholder | wavelength of the roll |
+| `world.landform.terrarium.hardness` | (absent) | 0..1 | [0, 1] | 0.3–0.9 | - | placeholder | hardness of the massif's rock for erosion |
+| `world.landform.terrarium.slab_m` | (absent) | m | [0, inf) | 0.25–1.5 | - | placeholder | thickness of the rock left over a hall |
+| `world.landform.terrarium.shelves.*` | (absent) | shelves | [0, inf) | 0–5 | - | placeholder | how many shelves reach out toward the glass over a hall |
+| `world.landform.terrarium.shelf_m.*` | (absent) | m | (0, inf) | 1–8 | - | placeholder | a shelf's length around the ring |
+| `world.landform.terrarium.hall_m.*` | (absent) | m | (0, inf) | 1–5 | - | placeholder | headroom in a hall |
+| `world.landform.terrarium.shelf_front.*` | (absent) | fraction of the depth | [0, 1) | 0–0.4 | - | placeholder | where a shelf's edge stands, as a share of the depth from the glass |
+| `world.landform.terrarium.hall_span_m` | (absent) | m | [0, inf) | 2–12 | - | placeholder | the widest a hall spans without a pillar |
+| `world.landform.terrarium.pillar_m.*` | (absent) | m | (0, inf) | 0.5–3 | - | placeholder | width of a pillar in a hall |
+| `world.landform.terrarium.arches.*` | (absent) | arches | [0, inf) | 0–4 | - | placeholder | how many arches span a saddle along the back wall |
+| `world.landform.terrarium.arch_span_m.*` | (absent) | m | (0, inf) | 2–12 | - | placeholder | an arch's span, abutment to abutment |
+| `world.landform.terrarium.arch_m` | (absent) | m | [0, inf) | 0.25–1.5 | - | placeholder | thickness of an arch's deck at its crown |
+| `world.landform.terrarium.arch_depth_m.*` | (absent) | m | (0, inf) | 0.5–3 | - | placeholder | how far an arch's deck reaches from the back wall toward the glass |
+| `world.landform.terrarium.arch_window_m` | (absent) | m | [0, inf) | 0.25–1.5 | - | placeholder | the least clear height under an arch's crown |
+| `world.landform.terrarium.grove_headroom_m` | (absent) | m | [0, inf) | 1–6 | - | placeholder | clear headroom a grove site for the tallest trees needs |
+| `world.landform.terrarium.grove_radius_m` | (absent) | m | [0, inf) | 0.5–3 | - | placeholder | room for a crown of this radius a grove site needs |
+| `world.landform.terrarium.grove_soil_m` | (absent) | m | [0, inf) | 0.25–1.5 | - | decision (Wrysk 2026-09-22/23) | soil this deep a grove site needs |
+| `world.landform.terrarium.spires.*` | (absent) | spires | [0, inf) | 0–6 | - | placeholder | how many spires rise from the crest |
+| `world.landform.terrarium.spire_top_m.*` | (absent) | m | (0, inf) | 4–18 | - | placeholder | top of a spire |
+| `world.landform.terrarium.spire_radius_m.*` | (absent) | m | (0, inf) | 0.25–2 | - | placeholder | a spire's radius near its foot |
+| `world.landform.terrarium.edge_m` | (absent) | m | [0, inf) | 0.1–0.75 | - | placeholder | radius of every rounded edge |
+| `world.landform.terrarium.warp_m` | (absent) | m | [0, inf) | 0–1 | - | placeholder | how far a gentle warp of the plan moves the terraces' edges |
+| `world.landform.terrarium.warp_wavelength_m` | (absent) | m | (0, inf) | 2–16 | - | placeholder | wavelength of the warp |
+| `world.landform.terrarium.lake_m.*` | (absent) | m | (0, inf) | 2–8 | - | placeholder | length of the lake around the ring |
+| `world.landform.terrarium.lake_depth_m` | (absent) | m | [0, inf) | 0.25–1 | - | tuned (hollow-count vs readability) | depth of the lake's middle below the ground |
+| `world.landform.terrarium.water_level_m` | (absent) | m above the lowest yard ground | [0, inf) | 0.125–1 | - | decision (Wrysk 2026-09-22/23) | where the water stands, above the ground the lake is graded into |
+| `world.landform.terrarium.yard` | (absent) | fraction of the depth | [0, 1) | 0.2–0.5 | - | placeholder | how deep the yard held clear for the lake is |
+| `world.landform.terrarium.pool_m.*` | (absent) | m | (0, inf) | 0.25–2 | - | placeholder | a pool's radius around the ring |
+| `world.landform.terrarium.pool_depth_m` | (absent) | m | [0, inf) | 0.125–0.75 | - | placeholder | a pool's depth |
+| `world.landform.terrarium.stream_width_m` | (absent) | m | (0, inf) | 0.25–1.5 | - | placeholder | the stream's bed: how wide its trough is bank to bank |
+| `world.landform.terrarium.stream_depth_m` | (absent) | m | (0, inf) | 0.125–0.5 | - | placeholder | how deep under the ground the stream runs |
+| `world.landform.terrarium.ground_relief_wavelength_m` | (absent) | m | (0, inf) | 1.5–8 | - | placeholder | wavelength of the ground's gentle relief |
+| `world.landform.terrarium.crest_contrast` | (absent) | x | (0, inf) | 1–3 | - | placeholder | contrast of the crest field (1: plain; above 1 pushes it toward its ends) |
+| `world.landform.terrarium.riser_contrast` | (absent) | x | (0, inf) | 1–3 | - | placeholder | contrast of the riser field |
+| `world.landform.terrarium.spire_squash` | (absent) | x | (0, inf) | 0.5–1.5 | - | placeholder | how much a spire's depth axis is squashed |
+| `world.landform.terrarium.spire_flare` | (absent) | radii | (0, inf) | 1–3 | - | placeholder | how many radii a spire's flared foot reaches |
+| `world.landform.terrarium.spire_tip_exponent` | (absent) | exponent | (0, inf) | 0.3–1.5 | - | placeholder | the exponent of a spire's tip |
+| `world.landform.terrarium.spire_spacing_share` | (absent) | fraction of the ring | [0, 1] | 0.1–0.5 | - | placeholder | how far apart two spires stand |
+| `world.landform.terrarium.spire_lake_clearance` | (absent) | radii | [0, inf) | 2–8 | - | placeholder | how many radii a spire keeps clear of the lake |
+| `world.landform.terrarium.spire_back_radii` | (absent) | radii | [0, inf) | 1–3 | - | placeholder | how many radii a spire stands in from the back wall |
+| `world.landform.terrarium.lake_pick_share` | (absent) | fraction of the ring | (0, 1] | 0.05–0.5 | - | placeholder | the lake is placed among this share of the ring's most middling crest columns |
+| `world.landform.terrarium.yard_blend_voxels` | (absent) | voxels | [0, inf) | 2–16 | - | placeholder | how far beyond the lake's half-length the yard blends back |
+| `world.landform.terrarium.shelf_gap_m` | (absent) | m | [0, inf) | 0.5–3 | - | placeholder | gap between two shelves |
+| `world.landform.terrarium.shelf_lake_clear_m` | (absent) | m | [0, inf) | 0.5–3 | - | placeholder | clearance of a shelf from the lake |
+| `world.landform.terrarium.shelf_tilt` | (absent) | voxels per column | [0, inf) | 0–0.3 | - | placeholder | the most a shelf's top tilts per column |
+| `world.landform.terrarium.shelf_blend_m` | (absent) | m | [0, inf) | 0.5–4 | - | placeholder | the reach over which the massif blends up to a shelf |
+| `world.landform.terrarium.shelf_storey_share` | (absent) | fraction of a storey | [0, inf) | 0.25–1.25 | - | placeholder | how much of a storey the massif rises on behind a shelf |
+| `world.landform.terrarium.first_hall_extra_m` | (absent) | m | [0, inf) | 0–2 | - | placeholder | extra headroom the first hall is given over the grove's |
+| `world.landform.terrarium.shelf_rise` | (absent) | voxels per voxel of depth | [0, inf) | 0–0.3 | - | placeholder | how much a shelf rises toward the back |
+| `world.landform.terrarium.shelf_edge_exponent` | (absent) | exponent | (0, inf) | 0.5–3 | - | placeholder | the exponent of a shelf's rounded tongue |
+| `world.landform.terrarium.erosion_soft_hardness` | (absent) | 0..1 | [0, inf) | 0.2–0.7 | - | placeholder | the hardness below which the erosion run treats rock as soft |
+| `world.landform.terrarium.hall_arch_share` | (absent) | fraction of the headroom | [0, inf) | 0.1–0.6 | - | placeholder | how much of the headroom a bay's arch takes |
+| `world.landform.terrarium.hall_foot_flare` | (absent) | voxels | [0, inf) | 0–6 | - | placeholder | how many voxels a hall's wall flares into the floor |
+| `world.landform.terrarium.hall_depth_factor` | (absent) | headrooms | (0, inf) | 0.75–1.5 | - | placeholder | how deep a hall goes, in headrooms |
+| `world.landform.terrarium.hall_floor_rise` | (absent) | voxels per voxel of depth | [0, inf) | 0–0.3 | - | placeholder | how much a hall's floor rises toward the back |
+| `world.landform.terrarium.hall_back_round` | (absent) | fraction of the headroom | [0, inf) | 0.1–0.8 | - | placeholder | how much of the headroom the back wall rounds over |
+| `world.landform.terrarium.arch_gap_m` | (absent) | m | [0, inf) | 0.5–3 | - | placeholder | gap between two arches |
+| `world.landform.terrarium.arch_vault_exponent.*` | (absent) | exponent | (0, inf) | 1.2–4 | - | placeholder | range of an arch vault's exponent (round, flat or pointed) |
+| `world.landform.terrarium.arch_hump.*` | (absent) | voxels | (-inf, inf) | -3–4 | - | placeholder | range a deck humps (or sags, negative) by |
+| `world.landform.terrarium.arch_waver` | (absent) | voxels | [0, inf) | 0–3 | - | placeholder | the waver of an arch's underside |
+| `world.landform.terrarium.arch_widen` | (absent) | voxels | [0, inf) | 0–4 | - | placeholder | how much a deck widens into its abutments |
+| `world.landform.terrarium.arch_widen_waver` | (absent) | voxels | [0, inf) | 0–3 | - | placeholder | the waver of the deck's widening |
+| `world.landform.terrarium.river_climb_cost` | (absent) | cost per voxel climbed | [0, inf) | 5–100 | - | placeholder | what a route pays per voxel it climbs (a notch cut through) |
+| `world.landform.terrarium.river_fall_cost` | (absent) | cost per voxel dropped | [0, inf) | 0–5 | - | placeholder | what a route pays per voxel it drops over a lip |
+| `world.landform.terrarium.river_side_cost` | (absent) | cost per voxel | [0, inf) | 0–20 | - | placeholder | what a route pays per voxel the ground beside it falls away |
+| `world.landform.terrarium.river_visible_weight` | (absent) | score per visible column | [0, inf) | 0–1 | - | placeholder | what a spring scores per column of its course the camera sees |
+| `world.landform.terrarium.river_climb_weight` | (absent) | score per voxel climbed | [0, inf) | 0–10 | - | placeholder | what a spring's score loses per voxel its course climbs |
+| `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
+| `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (565 rows)
+**`flora.*`** (614 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -150,6 +417,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.bloomcrown.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.bloomcrown.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.bloomcrown.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.bloomcrown.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.bloomcrown.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.bloomcrown.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.bloomcrown.profile.*.wood_fraction_max` | 0.2, 0.5, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.bloomcrown.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.bloomcrown.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.4 … (14 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -208,6 +479,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.umbrellafrond.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.umbrellafrond.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.umbrellafrond.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.umbrellafrond.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.umbrellafrond.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.umbrellafrond.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.umbrellafrond.profile.*.wood_fraction_max` | 0.15, 0.5, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.umbrellafrond.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.umbrellafrond.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.5 … (16 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -266,6 +541,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.graze_refuge` | 0.3 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.springturf.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.springturf.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.springturf.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.springturf.founder_per_m2` | 0.6 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.springturf.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.springturf.founder_cap` | 160 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.springturf.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.springturf.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.springturf.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -324,6 +603,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.graze_refuge` | 0.4 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.stonecushion.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.stonecushion.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.stonecushion.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.stonecushion.founder_per_m2` | 0.2 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.stonecushion.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.stonecushion.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.stonecushion.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.stonecushion.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.stonecushion.profile.*.layers.*.band.*` | 0.0, 0.6, 0.6, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -382,6 +665,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.graze_refuge` | 0.3 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.velvetpad.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.velvetpad.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.velvetpad.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.velvetpad.founder_per_m2` | 0.4 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.velvetpad.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.velvetpad.founder_cap` | 120 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.velvetpad.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.velvetpad.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.velvetpad.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -440,6 +727,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.glowcap.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.glowcap.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.glowcap.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.glowcap.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.glowcap.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.glowcap.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.glowcap.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.glowcap.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.glowcap.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -498,6 +789,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.vaulttree.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.vaulttree.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.vaulttree.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.vaulttree.founder_per_m2` | 0.1 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.vaulttree.founder_colony` | 1 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.vaulttree.founder_cap` | 12 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.vaulttree.profile.*.wood_fraction_max` | 0.1, 0.4, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.vaulttree.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.vaulttree.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.6 … (14 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -556,6 +851,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.lanternberry.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.lanternberry.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.lanternberry.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.lanternberry.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.lanternberry.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.lanternberry.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.lanternberry.profile.*.wood_fraction_max` | 0.2, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.lanternberry.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.lanternberry.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.3 … (8 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -614,6 +913,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.siphonreed.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.siphonreed.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.siphonreed.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.siphonreed.founder_per_m2` | 4.0 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
+| `flora.siphonreed.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
+| `flora.siphonreed.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
 | `flora.siphonreed.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.siphonreed.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.siphonreed.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -655,6 +958,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.energy_density` | 1.0 | energy per org-unit | [0, inf) |  | D | placeholder | vine tissue energy |
 | `flora.latticevine.founders` | 6 | vines | [0, inf) | yes | C | placeholder | founder vines rooted on a fresh world |
 | `flora.latticevine.founder_reserve` | 0.1 | org-units per reference face | [0, inf) | yes | C | placeholder | each founder's starting reserve |
+| `flora.latticevine.founder_spacing` | 8 | voxels (not rescaled) | [0, inf) | 2–24 | - | placeholder | the fewest voxels between two founders' roots |
 | `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
 | `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
 | `flora.wood_decomposition` | 0.0001 | /s | [0, inf) | yes | C | placeholder | k_w: dead-wood decomposition |
@@ -662,9 +966,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.litter_energy_cap` | 2.0 | energy per org-unit | [0, inf) |  | C | placeholder | retained energy cap per unit of litter |
 | `flora.initial_mineral` | 1.0 | mineral per site | [0, inf) | yes | D | placeholder | mineral a site is provisioned with |
 | `flora.seed_check_s` | 30.0 | s | [0, inf) |  | N | numerics | how often a banked site is tested |
+| `flora.upkeep_q10` | 2.0 | x per 10 C | (0, inf) | 1–4 | - | placeholder | Q10 of plant upkeep around the climate's mean |
+| `flora.wind_tries` | 4 | tries | [1, inf) | 1–16 | - | placeholder | a wind seed's draws before the donor keeps its package |
+| `flora.wind_shape` | 2.0 | - | (0, inf) | 1.2–4 | - | placeholder | wind kernel: Lomax shape k (larger is a thinner tail) |
+| `flora.wind_scale_hops` | 2.5 | hops | (0, inf) | 0.5–8 | - | placeholder | wind kernel: Lomax scale a, in the species' hops |
+| `flora.carcass_remains_fraction` | 0.3 | fraction of the body's organic matter | [0, 1] | 0.1–0.6 | - | placeholder | carrion below this draws as remains, not the body |
+| `flora.carcass_gone_fraction` | 0.02 | fraction of the body's organic matter | [0, 1] | 0.005–0.1 log | - | placeholder | carrion at or below this drops the carcass record |
+| `flora.seed_mark_recent_s` | 120.0 | s | [0, inf) | 10–600 | - | placeholder | how long a seed landing keeps its site's mark |
+| `flora.min_layer_area_m2` | 0.0625 | m2 | (0, inf) | 0.01–0.25 | - | placeholder | floor on a foliage layer's area in the shade exponent |
+| `flora.founder_wood_fractions.*` | 0.3, 0.42, 0.55, 0.7, 0.85 | fraction of wood_max | [0, 1] | 0.1–1 | - | placeholder | founding: a founder's starting wood, cycled in placement order |
+| `flora.founder_canopy_shade` | 0.6 | fraction of sky | [0, 1] | 0.2–0.9 | - | placeholder | founding: sky a crown takes from the sites under it while placing |
+| `flora.founder_log_organic` | 0.4 | org-units | [0, inf) | 0.1–1 | - | placeholder | founding: dead wood laid under each glowcap founder |
+| `flora.founder_patch_spacing_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | founding: least distance between two patch centres |
 | `flora.voxel_m` | 0.25 | m | (0, inf) |  | - | derived | the world's cell size, recorded (set from world.voxel_m) |
 
-**`fauna.*`** (201 rows)
+**`fauna.*`** (291 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -689,6 +1005,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.frondgrazer.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
 | `fauna.frondgrazer.reproduction.egg_organic` | 0.0 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.frondgrazer.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.frondgrazer.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.littershredder.core.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
 | `fauna.founders.littershredder.core.bite_per_s` | 0.015 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
@@ -711,11 +1028,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.littershredder.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
 | `fauna.founders.littershredder.core.reproduction.egg_organic` | 0.12 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.littershredder.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.littershredder.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured | deepest drop stepped |
 | `fauna.founders.littershredder.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
+| `fauna.founders.littershredder.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
+| `fauna.founders.littershredder.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.littershredder.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
 | `fauna.founders.littershredder.wade_height_fraction` | 0.25 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
 | `fauna.founders.littershredder.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
 | `fauna.founders.littershredder.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
@@ -737,6 +1058,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.littershredder.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
 | `fauna.founders.littershredder.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
+| `fauna.founders.littershredder.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.littershredder.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
 | `fauna.founders.littershredder.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.littershredder.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
@@ -769,11 +1091,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.frondgrazer.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
 | `fauna.founders.frondgrazer.core.reproduction.egg_organic` | 0.0 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.frondgrazer.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.frondgrazer.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured | deepest drop stepped |
 | `fauna.founders.frondgrazer.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
+| `fauna.founders.frondgrazer.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
+| `fauna.founders.frondgrazer.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.frondgrazer.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
 | `fauna.founders.frondgrazer.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
 | `fauna.founders.frondgrazer.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
 | `fauna.founders.frondgrazer.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
@@ -795,6 +1121,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.frondgrazer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
 | `fauna.founders.frondgrazer.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
+| `fauna.founders.frondgrazer.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.frondgrazer.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
 | `fauna.founders.frondgrazer.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.frondgrazer.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
@@ -827,11 +1154,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.lanternjaw.core.reproduction.clutch_size` | 3 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
 | `fauna.founders.lanternjaw.core.reproduction.egg_organic` | 0.15 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.lanternjaw.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.lanternjaw.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.0002 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured | deepest drop stepped |
 | `fauna.founders.lanternjaw.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
+| `fauna.founders.lanternjaw.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
+| `fauna.founders.lanternjaw.cruise_body_lengths_per_s` | 0.6 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.lanternjaw.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
 | `fauna.founders.lanternjaw.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
 | `fauna.founders.lanternjaw.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
 | `fauna.founders.lanternjaw.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
@@ -853,6 +1184,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.lanternjaw.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
 | `fauna.founders.lanternjaw.hunter.jaw_band_height_fraction` | 0.6 | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
+| `fauna.founders.lanternjaw.hunter.jaw_forward_length_fraction` | 0.5 | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.lanternjaw.hunter.windup_s` | 0.15 | s | [0, inf) |  | - | placeholder | the crouch |
 | `fauna.founders.lanternjaw.hunter.lunge_s` | 0.25 | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.lanternjaw.hunter.recovery_s` | 3.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
@@ -864,6 +1196,80 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.predation.still_after_s` | 2.0 | s | [0, inf) | 0.5–10 | - | decision | a body is still once it has not moved this long |
+| `fauna.predation.still_speed_bl_per_s` | 0.1 | body lengths/s | [0, inf) | 0.02–0.5 | - | decision | ground speed that counts as moving |
+| `fauna.predation.still_threat_near_m` | 0.5 | m | [0, inf) | 0.1–2 | - | decision | a still threat reads as a threat inside this distance |
+| `fauna.predation.tremor_radius_m` | 1.5 | m | [0, inf) | 0.5–4 | - | decision | tremor is summed over bodies within this radius |
+| `fauna.predation.footfall_radius_m` | 2.0 | m | [0, inf) | 0.5–5 | - | decision | an egg hears prey that pass within this radius |
+| `fauna.predation.hatch_suppress_m` | 4.0 | m | [0, inf) | 1–10 | - | decision | an adult of the egg's lineage this near suppresses its hatching |
+| `fauna.predation.footfall_tremor_min` | 0.0005 | organic x m/s / m^2 | [0, inf) | 0.00001–0.01 log | - | placeholder | the tremor a footstep must make at an egg to be heard |
+| `fauna.predation.tremor_near_m` | 0.1 | m | (0, inf) |  | - | placeholder | distances below this are read as this in the tremor's 1/d^2 |
+| `fauna.predation.awareness_walking` | 1.0 | fraction | [0, 1] |  | - | decision | dodge table awareness, walking |
+| `fauna.predation.awareness_resting` | 0.7 | fraction | [0, 1] |  | - | decision | dodge table awareness, awake resting |
+| `fauna.predation.awareness_cropping` | 0.4 | fraction | [0, 1] |  | - | decision | dodge table awareness, cropping and climbing |
+| `fauna.predation.awareness_asleep` | 0.0 | fraction | [0, 1] |  | - | decision | dodge table awareness, asleep |
+| `fauna.predation.dodge_rear_aspect` | 0.5 | fraction | [0, 1] | 0.1–1 | - | decision | dodge aspect factor when struck from the rear half |
+| `fauna.predation.dodge_condition_floor` | 0.5 | fraction | [0, 1] | 0.1–1 | - | decision | the dodge's condition factor is the reserve fraction clamped to [this, 1] |
+| `fauna.predation.egg_footfall_min` | 2 | distinct prey | [0, inf) | 1–6 | - | placeholder | lowest footfall threshold a dormant egg draws |
+| `fauna.predation.egg_footfall_max` | 10 | distinct prey | [0, inf) | 4–20 | - | placeholder | highest footfall threshold a dormant egg draws |
+| `fauna.predation.egg_viability_median_s` | 43200.0 | s | (0, inf) | 3600–172800 log | - | placeholder | median viability of a dormant egg |
+| `fauna.predation.egg_viability_spread` | 2.0 | factor | [1, inf) | 1–4 | - | placeholder | the viability draw's multiplicative spread each way |
+| `fauna.predation.wound_heal_per_s` | 0.0002777777777777778 | wound/s | [0, inf) | 0.00001–0.01 log | - | decision | the rate a wound heals (0.5 per half hour) |
+| `fauna.predation.heal_cost` | 1.0 | organic per wound per body | [0, inf) | 0–5 | - | placeholder | organic matter a unit of wound costs to heal, per unit of body |
+| `fauna.predation.egg_upkeep_per_s` | 0.000005 | per s | [0, inf) | 0.0000001–0.0001 log | - | placeholder | what a dormant egg respires per unit of its own organic matter |
+| `fauna.predation.alert_s` | 60.0 | s | [0, inf) | 0–600 | - | placeholder | how long a hit keeps its prey awake |
+| `fauna.predation.wound_slow` | 0.5 | per wound | [0, 1] | 0–1 | - | decision | speed is multiplied by 1 - this x wound |
+| `fauna.predation.recovery_speed` | 0.5 | x speed | [0, 1] | 0.1–1 | - | decision | a strike's recovery is walked at this fraction of the speed |
+| `fauna.predation.flee_sight_m` | 3.0 | m | [0, inf) | 1–8 | - | decision | how far a sighted prey heuristic looks for a threat |
+| `fauna.predation.flee_tremor` | 0.015 | tremor units | [0, inf) | 0.001–0.1 log | - | placeholder | the tremor a blind prey heuristic flees |
+| `fauna.life.day_line` | 0.3 | daylight 0..1 | [0, 1] | 0.05–0.6 | C | placeholder | daylight a diurnal body wakes above and a nocturnal one sleeps above |
+| `fauna.life.twilight_lo` | 0.05 | daylight 0..1 | [0, 1] |  | N | placeholder | lower edge of the twilight band (crepuscular rhythm, unused today) |
+| `fauna.life.twilight_hi` | 0.95 | daylight 0..1 | [0, 1] |  | N | placeholder | upper edge of the twilight band (crepuscular rhythm, unused today) |
+| `fauna.life.gut_void_s` | 30.0 | s | (0, inf) | 5–600 log | C | placeholder | how often an animal voids its gut onto its own face |
+| `fauna.life.lifespan_draw_min` | 0.8 | x median | (0, inf) | 0.5–1 | C | placeholder | lowest multiple of the median a lifespan draw takes |
+| `fauna.life.lifespan_draw_span` | 0.4 | x median | [0, inf) | 0–1 | C | placeholder | width of the lifespan draw, in medians |
+| `fauna.life.arriving_share_min` | 0.5 | fraction | [0, 1] |  | N | placeholder | an arriving body keeps a uniform [this, 1) share of a draw |
+| `fauna.cue.emit_reference` | 0.05 | organic units | (0, inf) |  | C | placeholder | detritus stock at which a source emits at full strength; the taste reference |
+| `fauna.cue.half_life_s` | 2.0 | s | (0, inf) | 0.5–60 log | C | placeholder | cue half-life |
+| `fauna.cue.diffuse_fraction` | 0.4 | fraction per update | [0, 1] | 0.05–0.9 | C | placeholder | convex nearest-neighbour diffusion mix |
+| `fauna.cue.threshold` | 0.00001 | cue units | [0, inf) |  | N | placeholder | cue values below this are dropped after an update |
+| `fauna.cue.pool_bulk_density` | 80.0 | organic units/m^3 | (0, inf) |  | D | placeholder, digest | bulk density a ground pool's physical height is computed with |
+| `fauna.teachers.motor_refused` | 0.5 | fraction | [0, 1] | 0.1–0.9 | - | placeholder | Self.motor_delivery below this is a refused motor |
+| `fauna.teachers.escape_samples` | 3 | samples | [0, inf) | 1–12 | - | placeholder | controller samples an escape lasts |
+| `fauna.teachers.escape_creep` | 0.3 | effort | [0, 1] | 0–1 | - | placeholder | forward effort while turning away |
+| `fauna.teachers.flat_clear` | 0.6 | fraction of rays | [0, 1] |  | N | placeholder | share of a sector's rays clear on flat open ground |
+| `fauna.teachers.half_ray` | 0.03333333333333333 | fraction of rays | [0, 1] |  | N | placeholder | half a ray's share of a sector |
+| `fauna.teachers.drop_proximity` | 0.55 | 1 - d/range | [0, 1] | 0.3–0.8 | - | placeholder | floor rows reading this far on average are an edge |
+| `fauna.teachers.wander_hold_min` | 8 | samples | [0, inf) | 2–16 | - | placeholder | lowest hold of a wander's heading |
+| `fauna.teachers.wander_hold_max` | 24 | samples | [0, inf) | 8–48 | - | placeholder | highest hold of a wander's heading |
+| `fauna.teachers.wander_turn_samples_min` | 1 | samples | [1, inf) | 1–4 | - | placeholder | lowest length of a wander turn |
+| `fauna.teachers.wander_turn_samples_max` | 4 | samples | [1, inf) | 2–8 | - | placeholder | highest length of a wander turn |
+| `fauna.teachers.wander_turn` | 0.8 | effort | [0, 1] | 0.2–1 | - | placeholder | turn effort while a wander turn runs |
+| `fauna.teachers.feed_gate` | 0.02 | taste cue | [0, inf) | 0.005–0.5 log | - | placeholder | the heuristics feed when the taste cue is above this |
+| `fauna.teachers.blocked_forward` | 0.1 | effort | [0, 1] | 0–0.5 | - | placeholder | forward effort when the front contact is blocked |
+| `fauna.teachers.chem_response_gate` | 0.02 | chem response | [0, inf) | 0.005–0.2 log | - | placeholder | the blind heuristic follows a chem signal at least this strong |
+| `fauna.teachers.chem_trend_gate` | 0.05 | chem trend | [0, inf) | 0.01–0.3 log | - | placeholder | a chem trend beyond this either way is rising or falling |
+| `fauna.teachers.blind_turn` | 0.8 | effort | [0, 1] | 0.2–1 | - | placeholder | turn effort of the blind heuristic's wall and falling-signal turns |
+| `fauna.teachers.browser_sector_gate` | 0.02 | fraction of rays | [0, 1] | 0.005–0.2 log | - | placeholder | a cone sector sees foliage above this fraction of its rays |
+| `fauna.teachers.browser_gaze_turn` | 0.8 | effort | [0, 1] | 0.2–1 | - | placeholder | turn effort of the browser's gaze at the richest sector |
+| `fauna.teachers.browser_wander_turn` | 0.6 | effort | [0, 1] | 0.2–1 | - | placeholder | turn effort of the browser's no-signal wander |
+| `fauna.teachers.browser_wander_flip` | 3 | samples | [0, inf) | 1–12 | - | placeholder | samples the browser's wander holds a side before flipping |
+| `fauna.teachers.strike_proximity` | 0.45 | 1 - d/range | [0, 1] | 0.2–0.8 | - | placeholder | a body this close is inside the strike capsule |
+| `fauna.teachers.stalk` | 0.07 | effort | [0, 1] | 0–0.3 | - | placeholder | the ambush's forward effort while stalking a body |
+| `fauna.teachers.near_crown` | 0.6 | 1 - d/range | [0, 1] | 0.3–0.9 | - | placeholder | a crown this near ahead is a waiting spot |
+| `fauna.teachers.wait_samples` | 240 | samples | [0, inf) | 40–960 log | - | placeholder | samples the ambush waits at an empty spot before leaving |
+| `fauna.teachers.leave_samples` | 20 | samples | [0, inf) | 4–80 | - | placeholder | samples the ambush walks off after a fruitless wait |
+| `fauna.teachers.ambush_face_turn` | 0.4 | effort | [0, 1] | 0.1–1 | - | placeholder | the ambush's turn toward a body it sees off-centre |
+| `fauna.teachers.ambush_leave_turn` | 0.2 | effort | [0, 1] | 0–1 | - | placeholder | the ambush's turn while leaving a spot |
+| `fauna.teachers.ambush_gaze_turn` | 0.8 | effort | [0, 1] | 0.2–1 | - | placeholder | the ambush's turn toward foliage while seeking a crown |
+| `fauna.teachers.ambush_wander_turn` | 0.4 | effort | [0, 1] | 0.1–1 | - | placeholder | the ambush's no-signal wander turn |
+| `fauna.teachers.ambush_wander_flip` | 8 | samples | [0, inf) | 2–24 | - | placeholder | samples the ambush's wander holds a side before flipping |
+| `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
+| `fauna.founding.arrival_reserve` | 0.5 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
+| `fauna.founding.starter_litter_organic` | 0.2 | organic units | [0, inf) | 0.05–1 | - | placeholder | leaf litter laid under each seeded littershredder |
+| `fauna.founding.starter_litter_mineral_fraction` | 0.02 | fraction of organic | [0, 1] | 0.005–0.1 | - | placeholder | mineral share of the starter litter |
+| `fauna.founding.starter_litter_energy_density` | 2.0 | energy per organic unit | [0, inf) | 0.5–4 | - | placeholder | retained energy density of the starter litter |
+| `fauna.founding.accept_founder_hours` | 1.0 | founder-hours | [0, inf) | 0.1–6 | - | placeholder | founder-hours of adult upkeep a component's stock must cover per founder |
 | `fauna.hatch_chance_per_dusk` | 0.3333333333333333 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
 | `fauna.parasite_attach_radius_m` | 0.75 | m | [0, inf) | 0.25–2 | N | placeholder | host search radius from a hatching egg |
 | `fauna.parasite_max_per_host` | 1 | count | [0, inf) | 0–4 | N | placeholder | riders one host carries (0: dormant eggs never hatch) |
