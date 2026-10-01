@@ -44,8 +44,10 @@ fn with(name: &str, v: f64) -> EcologyParams {
     e
 }
 
-/// The nine absolute quantities, as `(name, value)`.
-fn absolutes(sc: &cubarium_voxel_fauna::SpeciesConfig) -> [(&'static str, f64); 9] {
+/// The eight absolute quantities a body's mass carries, as `(name, value)`. The bite's
+/// half-saturation `bite_half_stock` is in food-stock units, not the body's, and is not
+/// one of them (units correction, 2026-10-01).
+fn absolutes(sc: &cubarium_voxel_fauna::SpeciesConfig) -> [(&'static str, f64); 8] {
     [
         ("body_max", sc.body_max),
         ("body_min", sc.body_min),
@@ -54,18 +56,17 @@ fn absolutes(sc: &cubarium_voxel_fauna::SpeciesConfig) -> [(&'static str, f64); 
         ("surplus_floor", sc.reproduction.surplus_floor),
         ("egg_organic", sc.reproduction.egg_organic),
         ("bite_per_s", sc.bite_per_s),
-        ("bite_half_stock", sc.bite_half_stock),
         ("growth_max_per_s", sc.growth_max_per_s),
     ]
 }
 
-/// `founder.mass_scale@frondgrazer` = 100 multiplies the browser's nine absolute
+/// `founder.mass_scale@frondgrazer` = 100 multiplies the browser's eight absolute
 /// quantities (and its placeholder species', which is the same body) by 100; per-unit
 /// rates, yields, the reserve cap, the life history's clocks and the body in metres are
 /// untouched, and the shredder is not moved at all. The shared key reaches both, and the
 /// two multiply. The scaled config validates.
 #[test]
-fn mass_scale_multiplies_the_nine_absolute_quantities_and_nothing_else() {
+fn mass_scale_multiplies_the_eight_absolute_quantities_and_nothing_else() {
     let base = FaunaConfig::default();
     let c = with("founder.mass_scale@frondgrazer", 100.0).fauna();
     c.validate().expect("a scaled world validates");
@@ -81,6 +82,7 @@ fn mass_scale_multiplies_the_nine_absolute_quantities_and_nothing_else() {
             );
         }
         assert_eq!(sc.maintenance_per_s, sb.maintenance_per_s);
+        assert_eq!(sc.bite_half_stock, sb.bite_half_stock, "K is in food units");
         assert_eq!(sc.n_tissue, sb.n_tissue);
         assert_eq!(sc.reserve_cap, sb.reserve_cap);
         assert_eq!(sc.energy_density, sb.energy_density);
@@ -97,8 +99,15 @@ fn mass_scale_multiplies_the_nine_absolute_quantities_and_nothing_else() {
     assert_eq!(pb.adult_length_m, pb0.adult_length_m);
     assert_eq!(pb.adult_height_m, pb0.adult_height_m);
     assert_eq!(c.founder(s), base.founder(s), "the shredder is not moved");
-    assert_eq!(pb.mass_scale, 100.0 * pb0.mass_scale, "the physiology records its scale");
-    assert_eq!(base.founder(b).mass_scale, cubarium_voxel_fauna::SHIPPED_MASS_SCALE);
+    assert_eq!(
+        pb.mass_scale,
+        100.0 * pb0.mass_scale,
+        "the physiology records its scale"
+    );
+    assert_eq!(
+        base.founder(b).mass_scale,
+        cubarium_voxel_fauna::SHIPPED_MASS_SCALE
+    );
 
     // Shared and per-lineage multiply; the shared key reaches the shredder's eggs too.
     let mut e = with("founder.mass_scale", 3.0);
@@ -374,4 +383,34 @@ fn the_check_reads_a_host_world_file() {
     assert!(matches!(c.landform, cubarium_voxel::Landform::Terrarium(_)));
     let small = super::search::check_world_config(None).expect("the default");
     assert_eq!(small, super::world::training_config());
+}
+
+/// The shipped x30 body against the x1 placeholder: the bite's K is the x1 K (the food it
+/// is measured against is not scaled), and the other mass-scaled quantities are x30.
+#[test]
+fn at_x30_the_bites_k_is_the_x1_k_and_the_rest_scale() {
+    let k = cubarium_voxel_fauna::SHIPPED_MASS_SCALE;
+    assert_eq!(k, 30.0);
+    for f in Founder::ALL {
+        let (x1, x30) = (
+            cubarium_voxel_fauna::FounderPhysiology::placeholder(f).core,
+            cubarium_voxel_fauna::FounderPhysiology::frozen(f).core,
+        );
+        assert_eq!(x30.bite_half_stock, x1.bite_half_stock, "{f:?}: K");
+        for ((name, v), (_, v0)) in absolutes(&x30).into_iter().zip(absolutes(&x1)) {
+            assert!(
+                (v - k * v0).abs() <= 1e-12 * v.abs().max(1.0),
+                "{f:?} {name}: {v} vs {k} x {v0}"
+            );
+        }
+    }
+    let (x1, x30) = (
+        cubarium_voxel_fauna::FaunaConfig::placeholder().frondgrazer,
+        FaunaConfig::default().frondgrazer,
+    );
+    assert_eq!(
+        x30.bite_half_stock, x1.bite_half_stock,
+        "the placeholder species' K"
+    );
+    assert!((x30.body_max - k * x1.body_max).abs() < 1e-12);
 }
