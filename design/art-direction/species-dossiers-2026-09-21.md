@@ -1,14 +1,23 @@
 ---
 design_status: proposal
-last_reviewed: 2026-09-21
+last_reviewed: 2026-09-25
 decision_refs: []
 ---
 
 # Species dossiers (Wrysk's design session, part 2)
 
-> **Colour note (2026-09-24):** the hexes in this document are superseded by
-> `design/art-direction/species-colours-2026-09-24.md`. Parts, counts, shapes and
-> states here still bind.
+> **Visual review (2026-09-24–25):** the selected images in
+> `art/gen/artbook/README.md` and the visual notes below supersede conflicting
+> shape and colour proposals in this dossier for concept art. The earlier body
+> plans remain below as exploration; model geometry and state art have not been
+> reconciled. Use `design/art-direction/species-colours-2026-09-24.md` for the
+> earlier colour pass and its later concept-pick exceptions.
+
+The [visual artbook](../../art/gen/artbook/index.html) collects the picks and
+retained alternatives. Chorister, ripple-snail, capgnawer and seedporter have
+their current selection notes in [the body dossiers](../animal-body-reimagining-2026-09-24.md).
+Painted outer halos are cleanup defects, not organism emission. Terrain images
+remain candidates; their inclusion does not approve a tile set or a new simulation feature.
 
 Xenobiologist's field documentation for each Cubarium organism and substrate family,
 written for Wrysk to pick from, mark, or mix. Each dossier proposes one **primary body
@@ -99,11 +108,26 @@ pale lilac `#B99BE6` with a `#510B6D` edge, underside third `#12093A`. Contact: 
 flats under the left and right thirds joined by a shallow concave bark edge, each flat
 with a 1-px `#12093A` contact shadow; the tile never floats.
 
+**Selected host appearance (2026-09-24):** the [glowcap-on-vaulttree image](../../art/gen/artbook/glowcap-on-vaulttree.png)
+uses a fallen vaulttree section with angular violet bark plates and a pale split.
+The cyan lines seen within that log are **glowing fungal mycelium growing through
+the wood**, not teal veins belonging to the wood.
+The mycelial network extends through the colonized log, rather than being confined
+to small areas around individual mushroom stalks.
+
 Decay within an amount bin is the amount itself sliding down: fragment tiles are what
 sections become, so the fragment inherits the section's split (now a hollow) and its
 plate pattern with two plates missing.
 
 ### The glowcap (*Lucerna saprophaga*)
+
+**Selected appearance (2026-09-24):** [purple spotted glowcap on fallen vaulttree](../../art/gen/artbook/glowcap-on-vaulttree.png).
+Use a broad, tilted purple mushroom cap with flat dark-violet spots, lilac and
+magenta markings, a vivid cyan brim and underside, narrow cap-side fissures with
+cyan light peeking through, and a violet stalk emerging
+through the split. The selected image shows one prominent mushroom on a short
+log; colony count and presentation at other wood sizes remain to be worked out.
+The saddle-crown anatomy below is the earlier proposal, not the selected look.
 
 *Niche.* A saprotroph: no light income, no light gate. It establishes only where the
 3 × 3 site box (one layer up and down) holds ≥ 0.02 of dead wood or litter, eats that box
@@ -160,6 +184,13 @@ than on a trunk), registered to the tile's split. Static; no sway.
 
 ## D2 · Litter on the ground (terrain axis), and carrion
 
+**Terrain candidate review (2026-09-25):** [dead-foliage litter](../../art/gen/artbook/litter-dead-foliage.png)
+uses recognisable fallen fragments from our plants, including umbrellafrond,
+vaulttree and springturf, in muted petrol, mauve and lilac. Further positions,
+densities and mixtures are needed. The [artbook](../../art/gen/artbook/index.html)
+also retains rock, damp/puddle/growth, soil-depth, bedrock and water studies as
+candidate sources only. These do not fix tile counts or add simulated lichen.
+
 ### Field entry
 
 *What it is:* fallen foliage, fine and coarse fragments and dead reserve from any stand;
@@ -194,6 +225,16 @@ in the same litter band, so a carcass lies in the drift.
 ---
 
 ## D3 · Frondgrazer (*Tardigradus pratensis*, "the frondgrazer")
+
+**Selected appearance (2026-09-25):** [coral frondgrazer](../../art/gen/artbook/frondgrazer.png).
+A low six-legged browser has a continuous coral saddle shield with raised front
+and rear masses, dark wine saddle markings, and a pale underside. Its muscular
+folded neck ends in a transverse upward-facing cropping scoop. Each of the two
+corner stalks now ends in a small eye-like sensor with a dark plum lens and magenta
+rim. These replace the plain tapered palp tips in the earlier proposal; the shield's
+magenta sensory patches remain. Outer background glow is an artifact to remove.
+The selected illustration guides anatomy; earlier pixel dimensions and rigs below
+have not yet been updated.
 
 ### Field entry
 
@@ -293,6 +334,15 @@ plus baked clips rest (2 f), walk (4 f), crop (3 f), at 5 body sizes and 2 condi
 
 ## D4 · Littershredder (*Segmenta caeca*, "the blind shredder")
 
+**Selected appearance (2026-09-25):** [long tapered littershredder](../../art/gen/artbook/littershredder.png).
+Use the second generated version: an elongated crawler with overlapping rounded
+gold plates, dark brown bands, pale underside and short legs, a large blunt front
+plough, two downward feelers and one magenta sensor spot on the second plate.
+It remains eyeless. The rear progressively tapers; the later bulkier, less-tapered
+version was not selected. Preserve the selected silhouette; the exact plate/leg
+count needs reconciliation rather than enforcing the earlier five-segment sketch.
+Outer background glow is an artifact to remove.
+
 ### Field entry
 
 *Niche.* The blind litter feeder: 23 sensory inputs, no cone of vision; contact,
@@ -369,6 +419,10 @@ is the grazer's main food and the thing that visibly gets cropped.
 *Size under the ladder.* Crown 1–1.5 voxels tall, radius 1–2: a clump **2–4 voxels
 wide, 6–9 px tall**, about three times as wide as it is tall, low to the ground.
 
+**Selected appearance (2026-09-24):** [springturf concept](../../art/gen/artbook/springturf.png),
+a low spreading clump. Use its silhouette and colour balance as the visual
+reference when revisiting the exact leaf pattern below.
+
 ### Body plan, primary: "pleated tuft"
 
 Not blades. Each plant is a dense fan of **pleated, ribbon-like leaves** rising from a
@@ -411,6 +465,12 @@ competitive height; it only offers sites under a standing crown. Very low turnov
 
 *Size.* Crown 1 voxel tall, radius 1.5–3: **3–6 voxels wide, 6 px tall**.
 
+**Provisional selected appearance (2026-09-24):** [velvetpad concept](../../art/gen/artbook/velvetpad-provisional.png).
+An indefinitely spreading violet carpet has a raised purple perimeter, irregular
+cobalt mossy tufts, thin cyan branching channels, and scattered smooth round
+blue-to-cyan young buds. The regular brick-pattern nodules below are superseded
+for visual design. The bud treatment is still open to refinement.
+
 ### Body plan, primary: "carpet autotile"
 
 The pad is not a plant sprite; it is a **surface** drawn as an autotile over the ground
@@ -439,6 +499,10 @@ that is fine while dry and finished under a pool.
 
 *Size.* Crown 1–1.5 voxels tall, radius 1–1.25: **2–2.5 voxels wide, 6–9 px tall**.
 
+**Selected appearance (2026-09-24):** [stonecushion concept](../../art/gen/artbook/stonecushion.png).
+Its compact alien mound is made of several plump lilac lobes; the tightly packed
+miniature rosettes below are not the current visual target.
+
 ### Body plan, primary: "rock-lip dome" (drawn with its rock)
 
 A compact **dome of tight rosettes**, each rosette a 2-px knot of `#B99BE6` pale lilac
@@ -465,6 +529,12 @@ grazer's second food; later nectar and pollen for the bellwing.
 *Size under the ladder.* Crown 3–8 voxels tall, radius 1–2.5: **stem plus crown 18–48
 px tall, crown 12–30 px wide**; the whole plant is about twice as tall as the crown is
 wide, the stem the lower half.
+
+**Selected alternatives (2026-09-24):** keep both the [preferred pink crown](../../art/gen/artbook/bloomcrown-pink-preferred.png)
+and [original blue crown](../../art/gen/runs/2026-09-24-final-pilot/bloomcrown-01.png).
+The preferred version has more than six hot-pink upper vanes, a pale blush-lilac
+central pod and warm orange tip, retaining its violet stem and basal leaf colours.
+The exact crown layout and stem/base adjustment are not locked.
 
 ### Body plan, primary: "vaned crown"
 
@@ -507,6 +577,11 @@ slow; it shades what stands under it, and velvetpad lives under it.
 *Size under the ladder.* Crown 8–16 voxels tall, radius 3–6: **48–96 px tall, crown
 36–72 px wide**; the plant is a third taller than it is wide, the stem showing below
 the lowest tier. The tallest live plant until the vaulttree.
+
+**Selected appearance (2026-09-24):** [umbrellafrond concept](../../art/gen/artbook/umbrellafrond.png).
+The crown uses three regular, nearly geometric tiers of straight lacy teal fronds
+with cyan ribs over a violet stem. Its ordered symmetry and distinct frond
+structure are intentional; the drooping strap fronds below are the earlier plan.
 
 ### Body plan, primary: "layered umbrella"
 
@@ -553,6 +628,12 @@ a share; a model addition packaged with the species).
 *Size.* Crown 18–28 voxels tall, radius 5–8: **108–168 px tall, crown 60–96 px wide**;
 nearly twice as tall as it is wide, rendered on a tall canvas.
 
+**Selected appearance (2026-09-24):** [vaulttree concept](../../art/gen/artbook/vaulttree.png).
+An asymmetric plated violet trunk carries open arching limbs at different depths.
+The canopy forms separated dark-teal layered shelves with bright mint rims, and
+many fine cyan tendrils hang far down the trunk. The earlier rounded green lobes
+and two short drapes below are no longer the visual target.
+
 ### Body plan, primary: "vault"
 
 A **trunk** 2 voxels thick (12 px) `#2A0E4A` with `#3A1A7A` lit face, bark in long
@@ -584,6 +665,10 @@ fruit product exist, its fruit is the visible `parcel` (a full parcel = fruit ha
 
 *Size.* Crown 5–9 voxels tall, radius 2–3.5: **30–54 px tall, 24–42 px wide**.
 
+**Selected appearance (2026-09-24):** [lanternberry concept](../../art/gen/artbook/lanternberry-blue.png).
+Return to blue foliage on violet stems, with deep-plum lanterns, magenta seams,
+and warm orange interiors. The later acid-lime foliage pass was rejected here.
+
 ### Body plan, primary: "bell-lantern shrub"
 
 Three to five **stems** from one base, each 3 px thick `#3A1A7A`, spreading in a fan;
@@ -608,6 +693,11 @@ mechanism umbrellafrond skips), narrow upright clumps at the shore.
 *Size.* Crown 6–12 voxels tall, radius 0.5–1: **36–72 px tall, 6–12 px wide**, in
 clumps; six times as tall as wide, rendered on a tall canvas.
 
+**Selected appearance (2026-09-24):** [siphonreed concept](../../art/gen/artbook/siphonreed.png).
+Four slim celadon stems have swollen upper shafts and broad rounded pink fan
+heads, without side nubs. This replaces the narrow ringed siphon heads below
+as the visual target; clump counts at different growth stages remain open.
+
 ### Body plan, primary: "siphon stems"
 
 A few **hollow stems**, each 2 px thick, standing apart with open water showing
@@ -625,6 +715,15 @@ floating bladder at the base of each stem.
 should read the site's free water as a slow drift.
 
 ## D14 · Bellwing (*Campanula volans*, "bellwing")
+
+**Selected appearance (2026-09-25):** [bellwing with thin corkscrew siphon](../../art/gen/artbook/bellwing.png).
+Keep the hanging plum bell, magenta open rim/underside, and four lilac vanes with
+cyan leading edges. The feeding siphon is a fine round tendril whose distal end
+makes a spindly three-dimensional corkscrew, not a flat spiral, broad ribbon or
+droplet tip. The selected tendril is muted peach; Wrysk requests a little more
+yellow in a later pass, without returning to the strongly saturated yellow/orange
+versions. This image has verified alpha transparency. The earlier poses below
+remain animation proposals, not rendered states.
 
 *Niche.* Nectar for energy, pollen for nutrients; hover-land-sip rhythm; small body,
 costly flight, frequent rest; carries pollen between bloomcrowns (outcrossed seed).
