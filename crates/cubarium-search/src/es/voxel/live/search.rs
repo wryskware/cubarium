@@ -717,6 +717,22 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 .expect("a reference per seed");
             rescore(e, r);
         }
+        // The runs' fitness first: a screened-out candidate scores above the worst of them.
+        let ran: Vec<Option<f64>> = (0..candidates.len())
+            .map(|k| {
+                let screened_out = !screens[k].passes(&spec.screen);
+                (run[k] && !(screened_out && k != reference_k)).then(|| {
+                    let pens: Vec<f64> = jobs
+                        .iter()
+                        .zip(&evals)
+                        .filter(|((j, _), _)| *j == k)
+                        .map(|(_, e)| e.penalty.total)
+                        .collect();
+                    pens.iter().sum::<f64>() / pens.len().max(1) as f64
+                })
+            })
+            .collect();
+        let worst_run = ran.iter().flatten().copied().fold(f64::NEG_INFINITY, f64::max);
         let mut recs: Vec<CandidateRecord> = Vec::new();
         for (k, (label, x)) in candidates.iter().enumerate() {
             let mine: Vec<Evaluation> = jobs
@@ -727,10 +743,9 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 .collect();
             let bp = box_penalty(&bounds, x);
             let screened_out = !screens[k].passes(&spec.screen);
-            let fitness = if run[k] && !(screened_out && k != reference_k) {
-                mine.iter().map(|e| e.penalty.total).sum::<f64>() / mine.len().max(1) as f64 + bp
-            } else {
-                spec.screen.penalty + bp
+            let fitness = match ran[k] {
+                Some(p) => p + bp,
+                None => spec.screen.graded(&screens[k], worst_run) + bp,
             };
             recs.push(CandidateRecord {
                 label: label.clone(),

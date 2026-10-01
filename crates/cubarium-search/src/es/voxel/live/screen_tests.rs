@@ -82,3 +82,41 @@ fn the_bands_pass_inside_and_fail_outside() {
         );
     }
 }
+
+/// The refused candidate's penalty is graded: zero distance inside the bands, growing with
+/// the log-distance outside each, and always above the worst candidate that ran.
+#[test]
+fn the_screen_penalty_grows_with_the_distance_outside_the_bands() {
+    let spec = ScreenSpec::default();
+    let mut s = rsf(
+        &FloraConfig::for_voxel_size(VOXEL_M),
+        &FaunaConfig::default(),
+        VOXEL_M,
+        &spec,
+    );
+    (s.r, s.s, s.f) = (0.1, 0.1, 20.0);
+    assert_eq!(s.distance(&spec), 0.0);
+    let graded = |s: &super::screen::Rsf| spec.graded(s, f64::NEG_INFINITY);
+    type Set = fn(&mut super::screen::Rsf, f64);
+    let sides: [(&str, Set, [f64; 4]); 5] = [
+        ("R high", |s, v| s.r = v, [0.31, 0.5, 1.0, 5.0]),
+        ("R low", |s, v| s.r = v, [0.019, 0.01, 0.001, 0.0]),
+        ("S high", |s, v| s.s = v, [0.21, 0.4, 1.0, 9.0]),
+        ("S low", |s, v| s.s = v, [0.019, 0.005, 1e-4, 0.0]),
+        ("F low", |s, v| s.f = v, [9.9, 5.0, 1.0, 0.0]),
+    ];
+    for (name, set, steps) in sides {
+        let mut x = s.clone();
+        let mut last = graded(&x);
+        for v in steps {
+            set(&mut x, v);
+            let g = graded(&x);
+            assert!(g > last, "{name} at {v}: {g} after {last}");
+            last = g;
+        }
+    }
+    // Above every candidate that ran, however bad.
+    (s.r, s.s, s.f) = (0.31, 0.1, 20.0);
+    assert!(spec.graded(&s, 1e4) > 1e4);
+    assert!(spec.graded(&s, 0.0) >= spec.base);
+}

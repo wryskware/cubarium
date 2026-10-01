@@ -11,11 +11,13 @@
 # with the litter, a seed bank's attrition follows its age limit.
 
 [screen]
-# The R/S/F pre-screen (audit §1.4): a candidate outside these takes `penalty` unrun.
+# The R/S/F pre-screen (audit §1.4): a candidate outside these takes, unrun,
+# max(base, worst run this generation + 1) + k x (its log-distance outside the bands).
 r = [0.02, 0.3]
 s = [0.02, 0.2]
 f_min = 10.0
-penalty = 200.0
+base = 200.0
+k = 10.0
 # The light-and-moisture factor on a plant's income, and the share of a field's edible
 # foliage a walker harvests in passing (invariants.py's 0.67 and 0.2).
 light_moisture = 0.67

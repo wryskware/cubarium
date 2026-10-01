@@ -21,7 +21,8 @@
 //! - **F** = `max_s (E / a) · v · w · harvest / need_walk` — a walker on the densest field.
 //!
 //! A world passes inside R `[0.02, 0.3]`, S `[0.02, 0.2]` and with F ≥ 10 (the audit's
-//! targets: one spot must run out, and walking must still feed); every number is a
+//! targets: one spot must run out, and walking must still feed); outside them a candidate
+//! takes a graded penalty unrun ([`ScreenSpec::graded`]). Every number is a
 //! [`ScreenSpec`] field, read from the search file's `[screen]` table.
 
 use cubarium_voxel_fauna::{FaunaConfig, Food, Founder};
@@ -38,8 +39,12 @@ pub struct ScreenSpec {
     pub s: [f64; 2],
     /// F's floor: the walker's feasibility.
     pub f_min: f64,
-    /// The fitness a candidate outside the bands takes, unrun.
-    pub penalty: f64,
+    /// A candidate outside the bands takes, unrun, `base + k × (its log-distance outside
+    /// the bands, summed over R, S and F)`: graded, so CMA has a way back. `base` is raised
+    /// past the worst candidate that ran in the same generation, so a refused candidate
+    /// always ranks below every run.
+    pub base: f64,
+    pub k: f64,
     /// Light and moisture's factor on a plant's income (invariants.py's 0.67).
     pub light_moisture: f64,
     /// The share of a field's edible foliage a walker takes in passing (0.2).
@@ -52,7 +57,8 @@ impl Default for ScreenSpec {
             r: [0.02, 0.3],
             s: [0.02, 0.2],
             f_min: 10.0,
-            penalty: 200.0,
+            base: 200.0,
+            k: 10.0,
             light_moisture: 0.67,
             harvest: 0.2,
         }
@@ -60,6 +66,12 @@ impl Default for ScreenSpec {
 }
 
 impl ScreenSpec {
+    /// A refused candidate's fitness ([`ScreenSpec::base`]): above `worst_run`, the worst
+    /// fitness of a candidate that ran this generation (minus infinity for none).
+    pub fn graded(&self, rsf: &Rsf, worst_run: f64) -> f64 {
+        self.base.max(worst_run + 1.0) + self.k * rsf.distance(self)
+    }
+
     /// The `[screen]` table of a search file, defaults for what it leaves out.
     pub fn from_rest(rest: &toml::Table) -> Result<ScreenSpec, String> {
         match rest.get("screen") {
@@ -114,6 +126,15 @@ impl Rsf {
             out.push(format!("F {:.1} below {}", self.f, spec.f_min));
         }
         out
+    }
+
+    /// The log-distance outside the bands, summed over R, S and F: zero inside them.
+    pub fn distance(&self, spec: &ScreenSpec) -> f64 {
+        let ln = |x: f64| x.max(1e-12).ln();
+        let band = |x: f64, lo: f64, hi: f64| (ln(lo) - ln(x)).max(0.0) + (ln(x) - ln(hi)).max(0.0);
+        band(self.r, spec.r[0], spec.r[1])
+            + band(self.s, spec.s[0], spec.s[1])
+            + (ln(spec.f_min) - ln(self.f)).max(0.0)
     }
 
     pub fn passes(&self, spec: &ScreenSpec) -> bool {
