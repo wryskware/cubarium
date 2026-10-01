@@ -1,6 +1,6 @@
 ---
 design_status: proposal
-last_reviewed: 2026-09-24
+last_reviewed: 2026-09-25
 decision_refs: []
 ---
 
@@ -9,7 +9,8 @@ decision_refs: []
 **For colour, this file overrides the species dossiers
 (`species-dossiers-2026-09-21.md`, D15) and Astra's prose
 (`design/animal-body-reimagining-2026-09-24.md`).** Those documents still bind for
-**parts, counts, shapes, surfaces and states**. Only their hexes are replaced. Where a
+**parts, counts, shapes, surfaces and states**, subject to the later selected-appearance
+notes and linked artbook picks. Where a
 dossier names a colour for a part, look the part up here instead. The terrain, sky and
 water palette stays as the art direction and `design/appearance.md` give it.
 
@@ -42,8 +43,16 @@ changes, change the other. Ramps run from the **base** (dark, saturated) to the 
 - bell `#B99BE6` with a cyan `#42C5F8` mouth;
 - beads magenta `#FF2AFC` with cyan seeds.
 
-The umbrellafrond, velvetpad, vaulttree and glowcap designs are still open (SIGNOFF);
-these are their current colours, not signed-off ones.
+**Later concept picks (2026-09-24):** the [artbook](../../art/gen/artbook/README.md)
+supersedes this table where its selected plant images differ. Bloomcrown keeps
+both crown alternatives, with hot pink and a pale pod preferred. Lanternberry
+returns to blue foliage instead of acid lime. Vaulttree uses dark teal foliage
+shelves with mint rims rather than emerald lobes. Glowcap has a purple spotted
+cap, cyan brim and underside, and cyan **fungal mycelium in the fallen wood**;
+the host wood has no teal veins of its own. Umbrellafrond retains teal foliage
+in a different frond form, and velvetpad's blue moss and buds remain provisional.
+Exact replacement hexes and renderer palette updates remain open. The table
+still describes the current voxel colour pass.
 
 ## Animals: colourway 1
 
@@ -60,9 +69,31 @@ beside it. The columns are **main / shadow / pale secondary / marking / accent**
 | littershredder, gold | `#FFD860` | `#B06A18` | `#FFF4C8` | `#5A3208` | sense dot `#FF2AFC` | alternating dark segment bands, pale underside |
 | **bellwing A, original** | bell `#2A0E4A` | — | vanes `#B99BE6` | — | rim `#FF2AFC`, vane leading edge `#42C5F8` | none; Wrysk: keep the original, don't recolour |
 
-### Kept alternates (colourway 2; a second deliverable, backlog §8)
+### Selected animal exceptions (2026-09-25)
 
-These come after colourway 1 is approved. Wrysk likes the two in bold.
+The [artbook](../../art/gen/artbook/index.html) records the exact selected images.
+These visual exceptions take precedence over the earlier table where they differ;
+they do not mean the renderer palette or body models have been updated.
+
+- **Capgnawer:** rose-mauve with layered bark-like markings and pale spots; all four
+  smooth sensor patches should be light pink, not red or dark magenta. Exact revised
+  sensor hex remains open.
+- **Seedporter:** keep the chosen moss-green image plus the explicitly retained
+  compact-head alternate. Orchid is an exploratory study, not a replacement.
+- **Frondgrazer:** coral/wine shield and pale underside retained; new stalk-tip
+  sensory lenses are dark plum with magenta rims.
+- **Littershredder:** gold/brown palette retained on the selected longer tapered body.
+- **Bellwing:** original bell and wing colours retained. Only the fine corkscrew
+  siphon changes: muted peach, to lean a little more yellow in the next refinement.
+  The vivid yellow and saturated orange trials were rejected. Exact target hex is open.
+- Painted **outer halos** around the selected assets are cleanup defects, not
+  intended body emission. Use actual alpha transparency for the cutouts.
+
+### Kept alternates (colourway 2; deferred backlog §8)
+
+Further alternate generation is deferred by Wrysk (2026-09-25). The existing orchid
+seedporter study is retained in the artbook as exploration. Wrysk previously liked
+the two proposals in bold; neither is a new primary selection.
 
 | animal | alternate | colours | markings |
 | --- | --- | --- | --- |

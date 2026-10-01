@@ -1,6 +1,6 @@
 ---
 design_status: proposal
-last_reviewed: 2026-09-24
+last_reviewed: 2026-09-25
 decision_refs: []
 ---
 
@@ -8,7 +8,9 @@ decision_refs: []
 
 > **Colour note (2026-09-24):** the hexes in this document are superseded by
 > `design/art-direction/species-colours-2026-09-24.md`. Parts, counts, shapes and
-> states here still bind.
+> states below are earlier proposals. The selected-appearance notes added in the
+> 2026-09-25 review and their linked images override conflicting visual details;
+> they do not imply implementation or changes to ecological roles.
 
 Astra's prose proposals for Wrysk's next Qwen exploration. Every option is open
 for rejection, combination or revision. Codes identify alternatives, not selections.
@@ -124,6 +126,11 @@ Matte #3A1A7A ridges articulate the arms. Show the waiting pose with the
 tail channel clearly visible and the capture arms poised around it.
 
 ## Chorister
+
+**Selected appearance (reviewed 2026-09-25):** [CH-A2 v3 violet stalker](../art/gen/artbook/chorister.png).
+Retain the accepted v3 six-limbed runner rather than reopening the A/C alternatives
+below. Violet countershading, pale belly/head, soft rosettes rather than bands,
+cyan jaw accent and magenta sensors follow the selected colourway.
 
 > A, leaning. needs some rework and reimagining. perhaps hexapod, or somewhat raptorial like C? not sure i like the smooth body.
 
@@ -304,6 +311,16 @@ falling beside the mantle. Broad matte surfaces and quiet flanks.
 
 ## Capgnawer
 
+**Selected appearance (2026-09-25):** [rose-mauve capgnawer](../art/gen/artbook/capgnawer-rose-bark.png).
+Six short legs support two full rounded mantle lobes with a central cleft,
+short pale fringe and pale spots. Keep the layered bark-like mantle texture in
+the original rose-mauve palette; the darker log-camouflage recolour was an experiment.
+The front mouth has six pale mandibles arranged as three stacked left/right pairs
+around a vertical opening. Four smooth finely faceted sensor patches flank it:
+large upper primaries and smaller lower secondaries, one of each per side. Keep
+them light pink. They are sensor patches, not egg-like bead clusters. This replaces
+the single rasping lip and original sensor treatment below. Outer halo needs cleanup.
+
 > torn between A and D. not sure it has any reason to fly though.
 
 **Body need.** A's rendered face and bristles became a familiar small mammal;
@@ -376,6 +393,12 @@ supported by its planted feet, approximately one large crown in size.
 
 ## Ripple-snail
 
+**Selected appearance (2026-09-25):** [organic azure dome](../art/gen/artbook/ripple-snail-organic.png).
+Retain RS-D2's open-front case as a matte grown blue shell with two shallow growth
+ridges, a pale mantle edge, dark foot and pink-tipped feeding palps. The earlier
+plastic-looking generated treatments were rejected; use this selected organic
+surface and silhouette when reconciling the detailed case construction below.
+
 > B or D. D is giving canoli squid, while B is giving sand dollar. might need some adjustments.
 
 **Body need.** B's ribbed dome reads well but risks becoming all shell and
@@ -446,6 +469,23 @@ whole tube. Granular texture gathers at the ends. Show the lobes extended
 in feeding and a cleared wet-rock trail behind the narrow rear opening.
 
 ## Seedporter
+
+**Selected appearance (2026-09-25):** [selected moss-green seedporter](../art/gen/artbook/seedporter.png).
+The exact chosen image has six limbs: two small fruit-handling arms near the chest,
+two larger arms supporting flank membranes, and two rear gripping feet, plus a long
+coiling prehensile tail. Use the pictured membrane attachments when reconciling
+the rig; neither earlier AB option below is an exact match. The head recalls an
+ancestral Grey, with large dark eyes, a projecting feeding muzzle and magenta cheek
+sensor marks. The chosen image retains a tall cranium and open mouth: do not silently
+replace it with subsequent head edits. Moss-green skin, pale underside and dark dorsal
+stripe remain the primary colourway.
+
+**Retained alternate:** [compact head and fuller muzzle](../art/gen/artbook/seedporter-compact-head-alt.png),
+explicitly retained later, has a broader skull, lateral lobes and a closed mouth.
+It is an alternate, not a replacement. Both require outer-halo cleanup. The
+[orchid colour study](../art/gen/artbook/seedporter-orchid-study.png) is exploratory;
+further colourway work is deferred. For future edits, use the user's named reference
+directly rather than chaining unaccepted iterations.
 
 > i would combine A and B. keep the alien monkey vibe but also give it skin flaps to glide with
 
@@ -523,6 +563,11 @@ mouth. Broad matte creases reveal where the gliding skin attaches.
 
 ## Umbrellafrond
 
+**Selected appearance (reviewed 2026-09-25):** [geometric fronds](../art/gen/artbook/umbrellafrond.png).
+Three regular, nearly geometric tiers of broad lacy teal fronds with cyan ribs
+and a violet stem supersede the drooping-strap experiments below. The ordered
+radial structure is intentional. See D10 in the species dossiers for the current note.
+
 > 3/5. i dont love the radial symmetry
 
 **Body need.** Equal fronds around each stem level made the rendered plant
@@ -597,6 +642,12 @@ tissue. Show the resting crown with the lower curtain shading damp soil,
 the upper curtain tilted outward and the planted stem fully visible.
 
 ## Velvetpad
+
+**Provisional pick (reviewed 2026-09-25):** [moss and round buds](../art/gen/artbook/velvetpad-provisional.png).
+A spreading violet colony has a purple perimeter at its expanding outer edge,
+irregular cobalt mossy tufts, cyan detail and round blue-to-cyan young buds.
+Wrysk retained the earlier contrasting moss treatment provisionally; smoother
+buds remain a refinement issue. The lamina alternatives below are not selected.
 
 > dunno how i feel about it. its a little odd looking. maybe it just looks too regular of a pattern
 
@@ -676,6 +727,14 @@ margins join further carpet at both sides of the crop.
 
 ## Vaulttree
 
+**Selected appearance (reviewed 2026-09-25):** [layered canopy and cyan drapes](../art/gen/artbook/vaulttree.png).
+An asymmetric plated violet trunk supports dark teal canopy shelves with mint
+rims, separated at different depths. Fine cyan tendrils reach far down the trunk.
+Use the exact selected image rather than the chamber crowns below. Knot-like
+attachments, excessive waving and atmospheric glow from rejected iterations are
+not design requirements; final tendril attachment and subtle breeze motion remain
+rendering refinements.
+
 > 3/5 stars. looks okay but just feels like one of those africa trees in the illustrations. would need improvement.
 
 **Body need.** Qwen flattened the separated crown into familiar spreading
@@ -753,6 +812,14 @@ Two separate #248CA8 drapes hang from the lowest limbs. Show the
 resting tree with branch tips visible above the pendant foliage masses.
 
 ## Glowcap
+
+**Selected appearance (reviewed 2026-09-25):** [spotted glowcap on alien log](../art/gen/artbook/glowcap-on-vaulttree.png).
+A broad purple mushroom cap carries flat dark spots (not holes), lilac/magenta
+accents, a cyan brim and underside, and narrow glowing side fissures. A violet stalk
+emerges from split violet alien wood. The cyan threads throughout the colonized log
+are glowing fungal mycelium, not the host tree's veins or a local stalk-only effect.
+The selected composition has one large mushroom on a short log; rejected multi-cap
+recompositions do not replace it. The saddle/open-seam crown proposals below are historical.
 
 > 3/5. the top side is just a fleshy pink.. not very interesting. they just read as regular mushrooms here.
 
