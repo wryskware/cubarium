@@ -165,6 +165,72 @@ pub struct Terrarium {
     /// ground it runs, graded into the worn heightfield with even banks.
     pub stream_width_m: f64,
     pub stream_depth_m: f64,
+    /// How the parts are drawn: the numbers `build` once hard-coded. Wavelength of the
+    /// ground's gentle relief, metres.
+    pub ground_relief_wavelength_m: f64,
+    /// The contrast of the crest's and the riser's fields (1: plain; above 1 pushes them
+    /// toward their ends).
+    pub crest_contrast: f64,
+    pub riser_contrast: f64,
+    /// A spire's shape: how much its depth axis is squashed, how many radii its flared
+    /// foot reaches, the exponent of its tip, how far apart two stand (a share of the
+    /// ring), how many radii it keeps clear of the lake, and how many radii it stands in
+    /// from the back wall.
+    pub spire_squash: f64,
+    pub spire_flare: f64,
+    pub spire_tip_exponent: f64,
+    pub spire_spacing_share: f64,
+    pub spire_lake_clearance: f64,
+    pub spire_back_radii: f64,
+    /// The lake is placed among this share of the ring's columns whose crest is nearest
+    /// middling, and the yard cleared in front of it blends back over this many voxels
+    /// beyond the lake's half-length.
+    pub lake_pick_share: f64,
+    pub yard_blend_voxels: u32,
+    /// Shelves: the gap between two and the clearance from the lake, metres; the most a
+    /// shelf's top tilts per column, voxels; the reach over which the massif blends up to
+    /// a shelf, metres; how much of a storey the massif rises on behind it; the extra
+    /// headroom the first hall is given over the grove's, metres; how much a shelf rises
+    /// toward the back per voxel of depth; and the exponent of its rounded tongue.
+    pub shelf_gap_m: f64,
+    pub shelf_lake_clear_m: f64,
+    pub shelf_tilt: f64,
+    pub shelf_blend_m: f64,
+    pub shelf_storey_share: f64,
+    pub first_hall_extra_m: f64,
+    pub shelf_rise: f64,
+    pub shelf_edge_exponent: f64,
+    /// The hardness below which the erosion run treats rock as soft (`0..=1`).
+    pub erosion_soft_hardness: f64,
+    /// Halls: how much of the headroom a bay's arch takes, how many voxels a wall flares
+    /// into the floor, how deep a hall goes in headrooms, how much its floor rises per
+    /// voxel of depth, and how much of the headroom the back wall rounds over.
+    pub hall_arch_share: f64,
+    pub hall_foot_flare: f64,
+    pub hall_depth_factor: f64,
+    pub hall_floor_rise: f64,
+    pub hall_back_round: f64,
+    /// Arches: the gap between two, metres; the range of a vault's exponent (round, flat
+    /// or pointed); the range a deck humps or sags by, voxels; the waver of the underside
+    /// and of the deck's widening, voxels; and how much the deck widens into its
+    /// abutments, voxels.
+    pub arch_gap_m: f64,
+    pub arch_vault_exponent: [f64; 2],
+    pub arch_hump: [f64; 2],
+    pub arch_waver: f64,
+    pub arch_widen: f64,
+    pub arch_widen_waver: f64,
+    /// The river: what a route pays per voxel it climbs, per voxel it drops over a lip,
+    /// and per voxel the ground beside it falls away; what a spring scores per visible
+    /// column and loses per voxel climbed; how much its bed falls per column (voxels); and
+    /// the columns between its extra one-voxel falls.
+    pub river_climb_cost: f64,
+    pub river_fall_cost: f64,
+    pub river_side_cost: f64,
+    pub river_visible_weight: f64,
+    pub river_climb_weight: f64,
+    pub river_bed_slope: f64,
+    pub river_drop_every: u32,
     /// The water it starts with and the weather after, as a staged recipe states it.
     pub water: Water,
 }
@@ -229,6 +295,44 @@ impl Terrarium {
         pool_depth_m: 0.25,
         stream_width_m: 0.75,
         stream_depth_m: 0.25,
+        ground_relief_wavelength_m: 3.0,
+        crest_contrast: 1.6,
+        riser_contrast: 1.3,
+        spire_squash: 0.85,
+        spire_flare: 1.6,
+        spire_tip_exponent: 0.7,
+        spire_spacing_share: 0.25,
+        spire_lake_clearance: 4.0,
+        spire_back_radii: 1.6,
+        lake_pick_share: 0.125,
+        yard_blend_voxels: 8,
+        shelf_gap_m: 1.0,
+        shelf_lake_clear_m: 1.0,
+        shelf_tilt: 0.1,
+        shelf_blend_m: 1.5,
+        shelf_storey_share: 0.75,
+        first_hall_extra_m: 0.5,
+        shelf_rise: 0.08,
+        shelf_edge_exponent: 1.5,
+        erosion_soft_hardness: 0.45,
+        hall_arch_share: 0.35,
+        hall_foot_flare: 3.0,
+        hall_depth_factor: 1.5,
+        hall_floor_rise: 0.1,
+        hall_back_round: 0.4,
+        arch_gap_m: 1.0,
+        arch_vault_exponent: [1.7, 2.8],
+        arch_hump: [-1.0, 2.5],
+        arch_waver: 1.5,
+        arch_widen: 2.0,
+        arch_widen_waver: 1.2,
+        river_climb_cost: 30.0,
+        river_fall_cost: 1.0,
+        river_side_cost: 6.0,
+        river_visible_weight: 0.3,
+        river_climb_weight: 3.0,
+        river_bed_slope: 0.2,
+        river_drop_every: 5,
         water: Water {
             // The stream no longer returns the sky's water, so the rain must; the climate
             // decides when (`[world.climate]`). A small sky: the level is set by the
@@ -301,6 +405,44 @@ impl Terrarium {
         pool_depth_m: 0.375,
         stream_width_m: 1.0,
         stream_depth_m: 0.25,
+        ground_relief_wavelength_m: 3.0,
+        crest_contrast: 1.6,
+        riser_contrast: 1.3,
+        spire_squash: 0.85,
+        spire_flare: 1.6,
+        spire_tip_exponent: 0.7,
+        spire_spacing_share: 0.25,
+        spire_lake_clearance: 4.0,
+        spire_back_radii: 1.6,
+        lake_pick_share: 0.125,
+        yard_blend_voxels: 8,
+        shelf_gap_m: 1.0,
+        shelf_lake_clear_m: 1.0,
+        shelf_tilt: 0.1,
+        shelf_blend_m: 1.5,
+        shelf_storey_share: 0.75,
+        first_hall_extra_m: 0.5,
+        shelf_rise: 0.08,
+        shelf_edge_exponent: 1.5,
+        erosion_soft_hardness: 0.45,
+        hall_arch_share: 0.35,
+        hall_foot_flare: 3.0,
+        hall_depth_factor: 1.5,
+        hall_floor_rise: 0.1,
+        hall_back_round: 0.4,
+        arch_gap_m: 1.0,
+        arch_vault_exponent: [1.7, 2.8],
+        arch_hump: [-1.0, 2.5],
+        arch_waver: 1.5,
+        arch_widen: 2.0,
+        arch_widen_waver: 1.2,
+        river_climb_cost: 30.0,
+        river_fall_cost: 1.0,
+        river_side_cost: 6.0,
+        river_visible_weight: 0.3,
+        river_climb_weight: 3.0,
+        river_bed_slope: 0.2,
+        river_drop_every: 5,
         water: Water {
             // The stream no longer returns the sky's water, so the rain must; the climate
             // decides when (`[world.climate]`). A small sky: the level is set by the
@@ -627,12 +769,12 @@ impl Build<'_> {
             .map(|s| {
                 let dx = (x - s.cx).rem_euclid(self.g.w as f64);
                 let dx = dx.min(self.g.w as f64 - dx);
-                let r = (dx * dx + ((z - s.cz) / 0.85).powi(2)).sqrt() / s.r;
+                let r = (dx * dx + ((z - s.cz) / self.t.spire_squash).powi(2)).sqrt() / s.r;
                 // A needle with a flared foot and a rounded tip.
-                if r >= 1.6 {
+                if r >= self.t.spire_flare {
                     0.0
                 } else {
-                    s.top * (1.0 - (r / 1.6).powf(0.7))
+                    s.top * (1.0 - (r / self.t.spire_flare).powf(self.t.spire_tip_exponent))
                 }
             })
             .fold(0.0f64, f64::max);
@@ -649,7 +791,7 @@ impl Build<'_> {
         let circ = w as f64 * vm;
         let (xm, zm) = ((x.rem_euclid(w) as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
         let around = (x - self.lake_x).rem_euclid(w).min((self.lake_x - x).rem_euclid(w));
-        let relief = ring_noise(xm, zm, circ, ring_cells(circ, 3.0), self.c.seed ^ STREAM ^ 0x47);
+        let relief = ring_noise(xm, zm, circ, ring_cells(circ, self.t.ground_relief_wavelength_m), self.c.seed ^ STREAM ^ 0x47);
         self.t.ground_m / vm
             + self.t.ground_fall * around as f64
             + self.t.ground_rise_m / vm * z as f64 / (d - 1).max(1) as f64
@@ -766,7 +908,7 @@ fn layout(b: &mut Build) -> Site {
     b.foot_y = b.v(t.ground_m) as f64;
     let foot_y = b.foot_y;
     let v = |m: f64| m / b.c.voxel_m;
-    b.crest = ring_field(b, foot_y + v(t.crest_m[0]), foot_y + v(t.crest_m[1]), t.crest_wavelength_m, 1.6, 0x43);
+    b.crest = ring_field(b, foot_y + v(t.crest_m[0]), foot_y + v(t.crest_m[1]), t.crest_wavelength_m, t.crest_contrast, 0x43);
     b.foot = ring_field(b, t.foot[0] * d, t.foot[1] * d, t.foot_wavelength_m, 1.0, 0x46);
     b.storey = ring_field(b, v(t.storey_m[0]), v(t.storey_m[1]), t.storey_wavelength_m, 1.0, 0x53);
     // The offset drifts through more than a storey: a terrace followed round the ring
@@ -774,18 +916,18 @@ fn layout(b: &mut Build) -> Site {
     let drift = (b.storey.iter().sum::<f64>() / b.storey.len() as f64) * t.drift;
     b.phase = ring_field(b, -drift, drift, t.drift_wavelength_m, 1.0, 0x50);
     b.tread = ring_field(b, t.tread[0], t.tread[1], t.texture_wavelength_m, 1.0, 0x54);
-    b.riser = ring_field(b, t.riser[0], t.riser[1], t.texture_wavelength_m, 1.3, 0x52);
+    b.riser = ring_field(b, t.riser[0], t.riser[1], t.texture_wavelength_m, t.riser_contrast, 0x52);
 
     // The lake's place: where the crest is middling, and a yard is cleared in front.
     let (lo, hi) = (foot_y + v(t.crest_m[0]), foot_y + v(t.crest_m[1]));
     let mid = (lo + hi) / 2.0;
     let mut order: Vec<usize> = (0..w as usize).collect();
     order.sort_by(|&a, &c| (b.crest[a] - mid).abs().total_cmp(&(b.crest[c] - mid).abs()));
-    let centre = order[b.rng.int(0, (order.len() / 8).max(1) as i64 - 1) as usize] as i64;
+    let centre = order[b.rng.int(0, ((order.len() as f64 * t.lake_pick_share) as usize).max(1) as i64 - 1) as usize] as i64;
     let len = b.draw(t.lake_m) as i64;
     let span = (centre - len / 2, centre + len / 2);
     let yard = t.yard * d;
-    let margin = (len / 2 + 8) as f64;
+    let margin = (len / 2 + i64::from(t.yard_blend_voxels)) as f64;
     for x in 0..w {
         let off = (x - centre).rem_euclid(w).min((centre - x).rem_euclid(w)) as f64;
         let blend = ((off - margin) / margin).clamp(0.0, 1.0);
@@ -801,10 +943,10 @@ fn layout(b: &mut Build) -> Site {
         let r = b.draw(t.spire_radius_m) as f64;
         // Clear of the lake and a quarter of the ring from any other spire.
         let far = |x: i64| {
-            lake_off(x) > 4 * r as i64
+            lake_off(x) as f64 > t.spire_lake_clearance * (r as i64) as f64
                 && b.spires.iter().all(|sp| {
                     let o = (x as f64 + 0.5 - sp.cx).rem_euclid(w as f64);
-                    o.min(w as f64 - o) > w as f64 / 4.0
+                    o.min(w as f64 - o) > w as f64 * t.spire_spacing_share
                 })
         };
         let cx = if s == 0 && far(0) {
@@ -818,7 +960,7 @@ fn layout(b: &mut Build) -> Site {
         let top = (b.draw(t.spire_top_m) as f64).min(h - 3.0);
         b.spires.push(Spire {
             cx: cx as f64 + 0.5,
-            cz: d - 1.6 * r - 1.0,
+            cz: d - t.spire_back_radii * r - 1.0,
             top,
             r,
         });
@@ -829,8 +971,8 @@ fn layout(b: &mut Build) -> Site {
     // slab above the level in front of its edge.
     b.lake_x = centre;
     let count = b.rng.int(t.shelves[0] as i64, t.shelves[1] as i64) as usize;
-    let clear = len / 2 + b.v(1.0) as i64;
-    let gap = b.v(1.0) as i64;
+    let clear = len / 2 + b.v(t.shelf_lake_clear_m) as i64;
+    let gap = b.v(t.shelf_gap_m) as i64;
     let mut taken = vec![(centre - clear, 2 * clear + 1)];
     for k in 0..count {
         let slen = b.draw(t.shelf_m) as i64;
@@ -845,26 +987,35 @@ fn layout(b: &mut Build) -> Site {
             fits[b.rng.int(0, fits.len() as i64 - 1) as usize]
         };
         // The first hall is a grove floor: headroom for the tallest trees.
-        let hall = if k == 0 { b.v(t.hall_m[1].max(t.grove_headroom_m + 0.5)) } else { b.draw(t.hall_m) };
+        let hall = if k == 0 { b.v(t.hall_m[1].max(t.grove_headroom_m + t.first_hall_extra_m)) } else { b.draw(t.hall_m) };
         let front = b.rng.range(t.shelf_front[0], t.shelf_front[1]) * d;
         let zf = (front - 1.0).max(0.0);
         let before = (x0..x0 + slen)
             .map(|x| b.terraced(x as f64 + 0.5, zf + 0.5).max(b.base_at(x, zf as i32)))
             .fold(0.0, f64::max);
         let top = (before + (hall + b.v(t.slab_m) + 1) as f64).min(h - 6.0);
-        let tilt = b.rng.range(-0.1, 0.1);
+        let tilt = b.rng.range(-t.shelf_tilt, t.shelf_tilt);
         // The massif rises on behind a shelf: it is one level of a stack, not a table.
         let storey = b.storey[(x0 + slen / 2).rem_euclid(w) as usize];
-        let reach = b.v(1.5) as f64;
+        let reach = b.v(t.shelf_blend_m) as f64;
         for dx in -(reach as i64)..slen + reach as i64 {
             let to_end = if dx < 0 { -dx as f64 } else if dx >= slen { (dx - slen + 1) as f64 } else { 0.0 };
             let blend = 1.0 - smoothstep(0.0, reach, to_end);
             let i = (x0 + dx).rem_euclid(w) as usize;
-            let want = (top + 0.75 * storey).min(h - 4.0);
+            let want = (top + t.shelf_storey_share * storey).min(h - 4.0);
             b.crest[i] = b.crest[i].max(b.crest[i] + (want - b.crest[i]).max(0.0) * blend);
         }
         taken.push((x0, slen));
-        b.shelves.push(Shelf { x0, len: slen, front, hall, top, tilt });
+        b.shelves.push(Shelf {
+            x0,
+            len: slen,
+            front,
+            hall,
+            top,
+            tilt,
+            rise: t.shelf_rise,
+            edge_exponent: t.shelf_edge_exponent,
+        });
     }
     Site { centre, span }
 }
@@ -922,7 +1073,7 @@ fn heightfield(b: &mut Build) {
         budget: Budget::default(),
     };
     let hardness = b.t.hardness;
-    crate::erosion::erode(&mut field, &b.t.erosion, 0.45, |_, _, _| hardness);
+    crate::erosion::erode(&mut field, &b.t.erosion, b.t.erosion_soft_hardness, |_, _, _| hardness);
     // The stream is routed over the worn ground and its trough graded into it here, not
     // before: erosion silts a cut trough up and wears its banks down under the bed.
     let mut surf: Vec<f64> = (0..n).map(|i| field.surface_m(i) / vm).collect();
@@ -1034,6 +1185,10 @@ struct Shelf {
     hall: i32,
     top: f64,
     tilt: f64,
+    /// How much it rises toward the back per voxel of depth, and the exponent of its
+    /// rounded tongue.
+    rise: f64,
+    edge_exponent: f64,
 }
 
 impl Shelf {
@@ -1049,7 +1204,7 @@ impl Shelf {
         let to_end = dx.min(self.len as f64 - dx);
         let r = (self.len as f64 / 4.0).clamp(1.0, 10.0);
         let u = smoothstep(0.0, r, to_end);
-        Some(self.front + (d - self.front) * (1.0 - u).powf(1.5))
+        Some(self.front + (d - self.front) * (1.0 - u).powf(self.edge_exponent))
     }
     /// The shelf's height at a point of the plan, zero off it: level, rising a little to
     /// the back.
@@ -1057,7 +1212,7 @@ impl Shelf {
         match self.edge(x, w, d) {
             Some(edge) if z >= edge => {
                 let dx = self.into(x, w).unwrap_or(0.0) - self.len as f64 / 2.0;
-                self.top + self.tilt * dx + 0.08 * (z - edge)
+                self.top + self.tilt * dx + self.rise * (z - edge)
             }
             _ => 0.0,
         }
@@ -1109,16 +1264,16 @@ fn halls(b: &mut Build) {
             let floor = if mouth > 0 { at(x, mouth - 1) } else { b.base[x.rem_euclid(w) as usize].round() as i32 };
             // A hall stands above the water: its floor is dry ground, not a flooded bowl.
             let floor = floor.max(b.water_y);
-            let arch = (hall * 0.35).min(bay / 2.0);
+            let arch = (hall * b.t.hall_arch_share).min(bay / 2.0);
             let to_side = into.min(bay - into);
             let head = hall - round_in(arch, to_side);
             // Every wall flares into the floor.
-            let foot = round_in(3.0, to_side).round() as i32;
-            let deep = ((1.5 * head) as i32).min(d - 4 - mouth);
+            let foot = round_in(b.t.hall_foot_flare, to_side).round() as i32;
+            let deep = ((b.t.hall_depth_factor * head) as i32).min(d - 4 - mouth);
             for z in mouth..mouth + deep {
-                let fl = floor + ((z - mouth) as f64 * 0.1) as i32;
+                let fl = floor + ((z - mouth) as f64 * b.t.hall_floor_rise) as i32;
                 let to_back = (mouth + deep - z) as f64 - 0.5;
-                let ceil = (floor as f64 + head - round_in(head * 0.4, to_back)) as i32;
+                let ceil = (floor as f64 + head - round_in(head * b.t.hall_back_round, to_back)) as i32;
                 let ceil = ceil.min(at(x, z) - slab);
                 for y in fl + 1 + foot..=ceil {
                     if b.g.solid(x, y, z) && b.g.tag(x, y, z) == Tag::Ground {
@@ -1182,7 +1337,7 @@ fn arches(b: &mut Build) {
         }
     }
     let mut made: Vec<(i64, i64)> = Vec::new();
-    let gap = b.v(1.0) as i64;
+    let gap = b.v(t.arch_gap_m) as i64;
     for _ in 0..count {
         let open: Vec<&(i64, i64, i32, i32)> = spans
             .iter()
@@ -1199,8 +1354,8 @@ fn arches(b: &mut Build) {
         let under = (top - deck) as f64;
         // No two arches alike: a round, flat or pointed vault, a deck that humps or sags,
         // a gentle waver on every edge, in steps two columns wide.
-        let p = b.rng.range(1.7, 2.8);
-        let hump = b.rng.range(-1.0, 2.5);
+        let p = b.rng.range(t.arch_vault_exponent[0], t.arch_vault_exponent[1]);
+        let hump = b.rng.range(t.arch_hump[0], t.arch_hump[1]);
         let phase: [f64; 3] = [b.rng.range(0.0, 6.3), b.rng.range(0.0, 6.3), b.rng.range(0.0, 6.3)];
         let waver = |x: i64, k: usize| {
             let u = (x & !1) as f64 / 7.0;
@@ -1209,10 +1364,10 @@ fn arches(b: &mut Build) {
         for x in xa..=xa + len {
             let v = 2.0 * (x - xa) as f64 / len as f64 - 1.0;
             let vault = 1.0 - (1.0 - v.abs().powf(p)).max(0.0).powf(1.0 / p);
-            let underside = under - clear as f64 * vault + 1.5 * waver(x, 0);
+            let underside = under - clear as f64 * vault + t.arch_waver * waver(x, 0);
             let top = top + (hump * (1.0 - v * v) + waver(x, 1)).round() as i32;
             // The deck widens into its abutments.
-            let deep = reach + (2.0 * v.abs().powi(4) + 1.2 * waver(x, 2)).round() as i32;
+            let deep = reach + (t.arch_widen * v.abs().powi(4) + t.arch_widen_waver * waver(x, 2)).round() as i32;
             for z in d - deep..d {
                 let ground = b.ground_at(x, z);
                 let lo = (underside.round() as i32).max(ground + 1);
@@ -1266,9 +1421,7 @@ fn route(b: &Build, top: &[f64]) -> Option<Vec<(i64, i32)>> {
     // Cheapest way down from every column, searched out from the water.
     // A voxel dropped over a lip costs about a column: the stream takes a ramp down where
     // there is one, and a fall only to save a long way round.
-    const CLIMB: f64 = 30.0;
-    const FALL: f64 = 1.0;
-    const SIDE: f64 = 6.0;
+    let (climb_cost, fall_cost, side_cost) = (b.t.river_climb_cost, b.t.river_fall_cost, b.t.river_side_cost);
     let mut cost = vec![f64::INFINITY; n];
     let mut next = vec![usize::MAX; n];
     let mut heap = std::collections::BinaryHeap::new();
@@ -1306,7 +1459,7 @@ fn route(b: &Build, top: &[f64]) -> Option<Vec<(i64, i32)>> {
                 .filter(|&&(_, sz)| (0..d).contains(&(az + sz)))
                 .map(|&(sx, sz)| (top[a] - 1.0 - top[col(ax + sx, az + sz)]).max(0.0))
                 .sum();
-            let ca = c + len + FALL * fall + CLIMB * climb + SIDE * side;
+            let ca = c + len + fall_cost * fall + climb_cost * climb + side_cost * side;
             if ca < cost[a] {
                 cost[a] = ca;
                 next[a] = i;
@@ -1362,7 +1515,7 @@ fn route(b: &Build, top: &[f64]) -> Option<Vec<(i64, i32)>> {
             .map(|p| (top[col(p[1].0, p[1].1)] - top[col(p[0].0, p[0].1)]).max(0.0))
             .sum();
         // No reward for distance: the long way round to the lake reads as the wrong way.
-        let score = drop + 0.3 * visible - 3.0 * climb;
+        let score = drop + b.t.river_visible_weight * visible - b.t.river_climb_weight * climb;
         if best.as_ref().is_none_or(|c| score > c.score) {
             best = Some(Course { path, score });
         }
@@ -1381,7 +1534,7 @@ fn trough(b: &Build, top: &[f64], course: &[(i64, i32)]) -> Vec<Option<f64>> {
     let col = |x: i64, z: i32| (z as i64 * w + x.rem_euclid(w)) as usize;
     let depth = b.t.stream_depth_m / b.c.voxel_m;
     let half = (b.t.stream_width_m / b.c.voxel_m / 2.0).max(1.0);
-    const SLOPE: f64 = 0.2;
+    let slope = b.t.river_bed_slope;
     let mut bed = Vec::with_capacity(course.len());
     for (k, &(x, z)) in course.iter().enumerate() {
         let under = top[col(x, z)] - depth;
@@ -1390,7 +1543,7 @@ fn trough(b: &Build, top: &[f64], course: &[(i64, i32)]) -> Vec<Option<f64>> {
             _ => {
                 let (px, pz) = course[k - 1];
                 let len = if px != x && pz != z { 1.4 } else { 1.0 };
-                under.min(bed[k - 1] - SLOPE * len).max(under - 1.0)
+                under.min(bed[k - 1] - slope * len).max(under - 1.0)
             }
         });
     }
@@ -1467,7 +1620,7 @@ fn river(b: &mut Build) -> Option<(u32, u32, u32)> {
         let here = top(&b.g, x, z);
         let lip = bed;
         bed = bed.min(here);
-        if k % 5 == 0 {
+        if k % b.t.river_drop_every as usize == 0 {
             bed = (bed - 1).max(here - 1).min(bed);
         }
         // Water only passes between cells that share a face: a diagonal step also cuts
