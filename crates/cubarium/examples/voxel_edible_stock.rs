@@ -40,9 +40,9 @@ use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
 use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium::voxel::scene;
-use cubarium_voxel::{Command as WorldCommand, VoxelView};
+use cubarium_voxel::VoxelView;
 use cubarium_voxel_fauna::{
-    ConeHit, Diet, Fauna, FaunaConfig, Founder, Manifest, Pose, RouteMap, Senses, SightMap,
+    ConeHit, Diet, Fauna, FaunaConfig, Founder, Manifest, Pose, RouteMap, SightMap,
     TICK_HZ, eye_origin_m, layer_columns, ray_direction_deg,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Species as Plant};
@@ -169,13 +169,7 @@ fn main() {
     } else {
         install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
     }
-    let mut senses = Senses::with_cue(fauna.config().cue);
-    senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
-    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut()
-            .apply(WorldCommand::SetOutlet { open: true });
-    }
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
 
     print_headers();
     let seeded_browser_faces: Vec<(u32, u32, u32)> = sim

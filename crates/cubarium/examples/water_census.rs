@@ -28,7 +28,6 @@ use std::time::Instant;
 use cubarium::voxel::{self, habitat, install_default_founders};
 use cubarium_voxel::profile::{self, Count, Phase, census};
 use cubarium_voxel::Command as WorldCommand;
-use cubarium_voxel_fauna::Senses;
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 /// The water leaves the host's `world` column sums (`voxel/mod.rs`, `WATER_PHASES`).
@@ -79,14 +78,8 @@ fn main() {
     );
     let (world, flora, mut fauna) = (founded.world, founded.flora, founded.fauna);
     install_default_founders(&mut fauna).expect("the built-in centres validate");
-    let mut senses = Senses::with_cue(fauna.config().cue);
-    senses.settle(&world.view(), &flora.view());
     let threads = cubarium_voxel::default_threads();
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses));
-    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut()
-            .apply(WorldCommand::SetOutlet { open: true });
-    }
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(threads));
     let c = sim.world().config().clone();
     println!(
         "world: {config}, {}x{}x{} at {} m, seed {}, {}; {threads} sim threads; \

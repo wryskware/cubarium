@@ -11,7 +11,7 @@
 //! untouched ([`still_water`] takes the config it is given by value).
 
 use cubarium_voxel::{Config, Landform, Preset, World};
-use cubarium_voxel_fauna::{Founder, Senses};
+use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_sim::found::{self, Founded};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
@@ -92,9 +92,7 @@ pub fn found_world(
         found::Seeds::from(base),
         false,
     );
-    let mut senses = Senses::with_cue(fauna.config().cue);
-    senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(
+    let sim = Sim::ambient(
         world,
         flora,
         fauna,
@@ -103,12 +101,7 @@ pub fn found_world(
             threads: 1,
             overlap: false,
         },
-        Some(senses),
     );
-    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut()
-            .apply(cubarium_voxel::Command::SetOutlet { open: true });
-    }
     let info = FoundInfo {
         seed,
         accepted,

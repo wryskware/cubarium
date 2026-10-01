@@ -479,6 +479,27 @@ impl Sim {
         }
     }
 
+    /// **The ambient assembly** of founded layers: the sense field settled against them as
+    /// they stand, the live schedule, and — under a closed water budget — the outlet
+    /// opened, because there it is the return flow into the atmosphere, not an export,
+    /// and a closed world without it never starts its cycle. What a founded world (the
+    /// host's, a live training world, a study's) runs as from its first tick.
+    pub fn ambient(
+        world: cubarium_voxel::World,
+        flora: Flora,
+        fauna: Fauna,
+        config: SimConfig,
+    ) -> Sim {
+        let mut senses = Senses::with_cue(fauna.config().cue);
+        senses.settle(&world.view(), &flora.view());
+        let mut sim = Sim::new(world, flora, fauna, config, Some(senses));
+        if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
+            sim.world_mut()
+                .apply(cubarium_voxel::Command::SetOutlet { open: true });
+        }
+        sim
+    }
+
     /// Build the layers and wire them into a [`Sim`] in [`ScheduleMode::Static`]: the static
     /// arena's entry point. Everything else is [`Sim::new`].
     ///
