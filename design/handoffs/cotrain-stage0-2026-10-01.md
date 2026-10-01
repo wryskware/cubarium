@@ -70,7 +70,7 @@ Build the registry proposal's §3–5 with these choices:
 - **The R/S/F screen:**
   - Port `design/7_Research/ecology-parameter-audit-2026-09-28/scripts/invariants.py`
     to Rust. It runs over the resolved parameters and the founding plan.
-  - A candidate outside R 0.02–0.3, S 0.02–0.2, or with F ≥ 10, takes a fixed failure
+  - A candidate outside R 0.02–0.3, S 0.02–0.2, or with F < 10 (audit §1.4: F ≫ 1), takes a failure
     penalty without a run. Record its R, S and F.
   - Measure where the defaults sit on the terrarium at ×30. If they fall outside the
     bands, report it. Don't widen the bands silently.

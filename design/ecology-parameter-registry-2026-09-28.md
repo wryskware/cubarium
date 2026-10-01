@@ -98,7 +98,7 @@ From the resolved parameters and the founding plan, compute three numbers (audit
 - **S:** standing food in reach ÷ need, per body turnover;
 - **F:** the walker's feasibility.
 
-A genome outside R 0.02–0.3, S 0.02–0.2 or F ≥ 10 scores as a failure without a run.
+A genome outside R 0.02–0.3, S 0.02–0.2 or with F < 10 scores as a failure without a run.
 Worlds where parking wins by arithmetic then never cost a simulation.
 
 ### 6. Trained controllers
