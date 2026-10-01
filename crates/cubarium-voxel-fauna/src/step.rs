@@ -12,8 +12,10 @@
 //!    to the gut** by the same fraction, and every `GUT_VOID_S` the gut is voided onto
 //!    the ground as litter (dung). Ages
 //!    advance here, so `age_ticks` is the number of maintenance payments it has made.
-//!    Then **growth**: the reserve pays for new structure at no more than
-//!    `growth_max_per_s`, scaled by how full it is, until `body_max` (package G).
+//!    A parasite rider then **drains** its host (`parasite_drain_of_host_basal` × the
+//!    host's basal upkeep, by the same pro-rata rule). Then **growth**: the reserve pays
+//!    for new structure at no more than `growth_max_per_s`, scaled by how full it is,
+//!    until `body_max` (package G); a rider grown to its detach size **drops off**.
 //! 3. **Cue field.** On due ticks, update emission, decay and diffusion after maintenance
 //!    and before any controller samples.
 //! 4. **Controllers** — the sampling point, explicit and shared. Every founder whose
@@ -35,11 +37,13 @@
 //!    the interval's motion and intake feedback. Every bite is **sated** (package G): it
 //!    asks in proportion to hunger, takes `E / (E + K)` of that from food holding `E`,
 //!    and never more than the reserve's room after yield, so a full animal takes nothing
-//!    and nothing eaten is respired as surplus.
+//!    and nothing eaten is respired as surplus. A rider does none of this: after the act
+//!    it is **carried** to its host's face and pose.
 //! 7. **Reproduction.** A clutch whose face is gone or drowned goes to carrion; every
 //!    body's surplus counter and refractory move; a gestating frondgrazer pays its
 //!    instalment into its escrow and gives birth at term; a littershredder in surplus
-//!    lays a clutch on the litter it stands on; and clutches at term hatch. Only bodies
+//!    lays a clutch on the litter it stands on; and clutches at term hatch, a dormant egg
+//!    at dusk only onto a host in reach (parasite hatchlings). Only bodies
 //!    that were alive at the start of the tick reproduce, so a newborn cannot itself
 //!    breed on the tick it appears.
 //! 8. **Death.** Starvation (`body < body_min`) or drowning (standing water deeper than
@@ -196,9 +200,11 @@ fn tick_inner(
             // upkeep, the controller stage and the act all read the same answer.
             circadian(fauna, clock_on, daylight);
             maintenance(fauna);
+            drain_riders(fauna);
             heal(fauna);
             egg_upkeep(fauna);
             grow(fauna);
+            drop_off_grown(fauna);
             void_guts(fauna, flora);
         });
         // Maintenance and age settle first. A due field update then reads the litter as
@@ -257,6 +263,7 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
         // As with a death: the body left the world, so its controller does too.
         fauna.controllers.take(a.id);
         fauna.book_removed(a);
+        fauna.free_riders(a);
     }
 }
 
@@ -273,37 +280,130 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
         return (0.0, 0.0);
     }
     let a = &mut fauna.animals[i];
+    let (out, from_body) = withdraw(a, want);
+    let paid = out.organic;
+    if !(paid > 0.0) {
+        return (0.0, 0.0);
+    }
+    // The mineral that organic matter held is shed to the gut, so a body's mineral stays
+    // in proportion to its tissue instead of banking for life; the energy leaves as heat.
+    a.gut.mineral += out.mineral;
+    book_respired(fauna, paid, kind);
+    fauna.ledger.heat_out += out.energy;
+    (paid, from_body)
+}
+
+/// **Organic matter out of a body**, the one pro-rata rule respiration and a parasite's
+/// drain share: from the reserve and then from the structure, with the mineral and energy
+/// it held at the body's own current density — the rule the plant layer's dead pools use,
+/// so a body half respired is the same stuff it was. A body taken down to nothing hands
+/// over every unit of its mineral and energy rather than keeping float dust. Returns the
+/// three currencies that left and how much organic matter came out of the structure.
+fn withdraw(a: &mut Animal, want: f64) -> (Taken, f64) {
+    if !(want > 0.0) {
+        return (Taken::default(), 0.0);
+    }
     let before = a.organic();
     let from_reserve = want.min(a.reserve);
     let from_body = (want - from_reserve).min(a.body);
     let paid = from_reserve + from_body;
     if !(paid > 0.0) {
-        return (0.0, 0.0);
+        return (Taken::default(), 0.0);
     }
     a.reserve -= from_reserve;
     a.body -= from_body;
-    // Energy leaves with the organic matter at the animal's own current density, which
-    // is the rule the plant layer's dead pools use: a body half respired is the same
-    // stuff it was. An animal respired down to nothing hands over every unit of its
-    // energy rather than keeping float dust.
-    let e = if paid >= before {
-        a.energy
-    } else {
-        (a.energy * (paid / before)).min(a.energy)
+    let share = |stock: f64| {
+        if paid >= before {
+            stock
+        } else {
+            (stock * (paid / before)).min(stock)
+        }
     };
+    let e = share(a.energy);
+    let m = share(a.mineral);
     a.energy -= e;
-    // The mineral that organic matter held is shed to the gut by the same fraction rule,
-    // so a body's mineral stays in proportion to its tissue instead of banking for life.
-    let m = if paid >= before {
-        a.mineral
-    } else {
-        (a.mineral * (paid / before)).min(a.mineral)
-    };
     a.mineral -= m;
-    a.gut.mineral += m;
-    book_respired(fauna, paid, kind);
-    fauna.ledger.heat_out += e;
-    (paid, from_body)
+    (
+        Taken {
+            organic: paid,
+            mineral: m,
+            energy: e,
+        },
+        from_body,
+    )
+}
+
+/// Step 2: **the parasites' drain** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`
+/// §3). Each rider takes `parasite_drain_of_host_basal` × its host's awake basal upkeep
+/// (`maintenance_per_s × body`, whatever the host's activity) out of the host by
+/// [`withdraw`]'s pro-rata rule, into its own reserve, mineral and energy. A transfer
+/// inside this layer, so no boundary flow moves; the host's structural share is its
+/// `Self` channel's loss, as an upkeep's is. Nothing protects the host: one drained below
+/// `body_min` starves as any other.
+fn drain_riders(fauna: &mut Fauna) {
+    let fraction = fauna.config.parasite_drain_of_host_basal;
+    if !(fraction > 0.0) {
+        return;
+    }
+    for r in 0..fauna.animals.len() {
+        let Some(hold) = fauna.animals[r].attached else {
+            continue;
+        };
+        let Ok(h) = fauna.animals.binary_search_by_key(&hold.host, |a| a.id) else {
+            continue;
+        };
+        let sc = body::effective_config(&fauna.config, &fauna.animals[h]);
+        let want = fraction * sc.maintenance_per_s * fauna.animals[h].body * DT;
+        let host = &mut fauna.animals[h];
+        let (taken, from_body) = withdraw(host, want);
+        if host.founder.is_some() && from_body > 0.0 {
+            host.founder_state.feedback.structural_loss += from_body;
+        }
+        let rider = &mut fauna.animals[r];
+        rider.reserve += taken.organic;
+        rider.mineral += taken.mineral;
+        rider.energy += taken.energy;
+    }
+}
+
+/// Step 2, after growth: **a rider at its detach size drops off** (§4) where its host
+/// stands — `parasite_detach_body_fraction` × its lineage's `body_max` — and is a free
+/// juvenile from here on.
+fn drop_off_grown(fauna: &mut Fauna) {
+    let fraction = fauna.config.parasite_detach_body_fraction;
+    for r in 0..fauna.animals.len() {
+        let Some(hold) = fauna.animals[r].attached else {
+            continue;
+        };
+        let line = fraction * body::effective_config(&fauna.config, &fauna.animals[r]).body_max;
+        if fauna.animals[r].body < line {
+            continue;
+        }
+        let Ok(h) = fauna.animals.binary_search_by_key(&hold.host, |a| a.id) else {
+            continue;
+        };
+        let host = fauna.animals[h];
+        crate::release(&mut fauna.animals[r], &host);
+        fauna.ledger.rider_dropoffs += 1;
+    }
+}
+
+/// After the act: **every rider is carried** to its host's place (§2) — the host's face,
+/// and the host's pose as its anchor on the host's back — so a rider crosses a seam, a
+/// ledge or a wall exactly as its host did.
+fn carry_riders(fauna: &mut Fauna) {
+    for r in 0..fauna.animals.len() {
+        let Some(hold) = fauna.animals[r].attached else {
+            continue;
+        };
+        let Ok(h) = fauna.animals.binary_search_by_key(&hold.host, |a| a.id) else {
+            continue;
+        };
+        let (site, pose) = (fauna.animals[h].site, fauna.animals[h].pose);
+        let rider = &mut fauna.animals[r];
+        rider.site = site;
+        rider.pose = pose;
+    }
 }
 
 /// One respiration on the boundary: the total and its one split, the same addend at the
@@ -583,7 +683,10 @@ fn controllers(
             // An asleep body's controller is not consulted (WX4).
             // WX4: a phase input for trained brains is the next training round's job; the
             // sensor manifest gains it there, not here.
-            a.state != State::Asleep && a.age_ticks % founder.manifest().cadence_ticks() == 0
+            // A rider has no controller of its own while it rides (parasite §2).
+            a.state != State::Asleep
+                && a.attached.is_none()
+                && a.age_ticks % founder.manifest().cadence_ticks() == 0
         })
         .map(|(i, _)| i)
         .collect();
@@ -1040,6 +1143,17 @@ fn act(
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     for i in 0..fauna.animals.len() {
+        // A rider has no motion, feeding or strike of its own (parasite §2): it is alive
+        // this tick and still, and is carried below.
+        if fauna.animals[i].attached.is_some() {
+            if let Some(founder) = fauna.animals[i].founder {
+                fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+            }
+            let a = &mut fauna.animals[i];
+            a.speed_m_s = 0.0;
+            a.still_ticks = a.still_ticks.saturating_add(1);
+            continue;
+        }
         let before = fauna.animals[i].pose;
         act_one(fauna, view, flora, plans, seed, tick, hits, i);
         // What the body did, for the senses of others (predation §2.2): its ground speed
@@ -1055,6 +1169,7 @@ fn act(
             a.still_ticks = a.still_ticks.saturating_add(1);
         }
     }
+    carry_riders(fauna);
 }
 
 /// One body's act (step 5).
@@ -1553,6 +1668,7 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     fail_gestation(fauna, j, &rule);
     let a = fauna.animals.remove(j);
     fauna.controllers.take(a.id);
+    fauna.free_riders(&a);
     let organic = a.organic() + a.gut.organic;
     let laid = bury_corpse(fauna, flora, &a, cause);
     if laid && matches!(cause, Departure::Killed { .. }) {
@@ -2750,13 +2866,61 @@ fn dormant_eggs(
                 tick,
             )
         {
-            fauna.clutches.remove(k);
-            let young = hatchling(fauna, &c, phys.core.body_min, c.organic, c.mineral, c.energy, v);
-            newborns.push(young);
-            continue;
+            // A hatchling needs a host (parasite §1): with none in reach the egg stays in
+            // the bank, its viability and footfall running on, and tries a later dusk.
+            if let Some(host) = host_for(fauna, newborns, &c, (ex, ez), ring) {
+                fauna.clutches.remove(k);
+                let (o, m, e) = (c.organic, c.mineral, c.energy);
+                let mut young = hatchling(fauna, &c, phys.core.body_min, o, m, e, v);
+                young.attached = Some(crate::Attachment { host: host.id });
+                young.site = host.site;
+                young.pose = host.pose;
+                fauna.ledger.riders_attached += 1;
+                newborns.push(young);
+                continue;
+            }
         }
         k += 1;
     }
+}
+
+/// **A hatching egg's host** (parasite §1): the nearest living animal not of the egg's own
+/// lineage, and not itself riding, within `parasite_attach_radius_m` of the egg's column
+/// centre (wrapped on the ring), carrying fewer than `parasite_max_per_host` riders —
+/// this tick's hatchlings counted. A tie goes to the lower id.
+fn host_for(
+    fauna: &Fauna,
+    newborns: &[Animal],
+    c: &crate::Clutch,
+    (ex, ez): (f64, f64),
+    ring: f64,
+) -> Option<Animal> {
+    let radius = fauna.config.parasite_attach_radius_m;
+    let most = fauna.config.parasite_max_per_host;
+    let riders = |id: u64| {
+        fauna
+            .animals
+            .iter()
+            .chain(newborns)
+            .filter(|a| a.attached == Some(crate::Attachment { host: id }))
+            .count()
+    };
+    let mut best: Option<(f64, Animal)> = None;
+    for a in &fauna.animals {
+        if a.founder == Some(c.lineage) || a.attached.is_some() {
+            continue;
+        }
+        let (dx, dz) = crate::pose::wrapped_delta(ex, ez, a.pose.x, a.pose.z, ring);
+        let d = (dx * dx + dz * dz).sqrt();
+        if d > radius || best.is_some_and(|(b, _)| d >= b) {
+            continue;
+        }
+        if riders(a.id) >= most as usize {
+            continue;
+        }
+        best = Some((d, *a));
+    }
+    best.map(|(_, a)| a)
 }
 
 /// The standing water over a body's feet, metres: the water on its face on the ground;
@@ -2782,6 +2946,13 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     for i in 0..fauna.animals.len() {
         let a = fauna.animals[i];
         let sc = body::effective_config(&fauna.config, &a);
+        // A rider is on its host's back, above the water its host wades: its fate there
+        // is its host's (parasite §2).
+        if a.attached.is_some() {
+            fauna.animals[i].mobility.submerged_ticks = 0;
+            drowning.push(false);
+            continue;
+        }
         let Some(founder) = a.founder else {
             drowning.push(
                 view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) > sc.drown_depth_m,
@@ -2838,6 +3009,10 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     }
     for (a, cause) in &dead {
         bury_corpse(fauna, flora, a, *cause);
+    }
+    // A host's riders are freed where it fell, whatever their size (parasite §5).
+    for (a, _) in &dead {
+        fauna.free_riders(a);
     }
 }
 

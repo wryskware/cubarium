@@ -109,6 +109,10 @@ pub fn is_prey_of(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool 
     let Some(h) = config.founder(hf).hunter else {
         return false;
     };
+    // A rider is no prey on its own and hunts nothing while it rides (parasite §2).
+    if prey.attached.is_some() || hunter.attached.is_some() {
+        return false;
+    }
     h.hunts(pf) && prey.body <= h.prey_max_ratio * hunter.body
 }
 

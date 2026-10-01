@@ -170,6 +170,20 @@ fn half_length(fauna: &Fauna, id: u64) -> f64 {
     0.5 * phys.body_at(a.body).length_m
 }
 
+/// Set a body's structure and reserve by hand, the organic difference booked as
+/// introduced or removed so the ledger still closes (`dung_tests`' `give_gut` pattern).
+fn set_stores(fauna: &mut Fauna, id: u64, body: f64, reserve: f64) {
+    let a = animal_mut(fauna, id);
+    let delta = (body + reserve) - a.organic();
+    a.body = body;
+    a.reserve = reserve;
+    if delta >= 0.0 {
+        fauna.ledger.introduced_organic_in += delta;
+    } else {
+        fauna.ledger.removed_organic_out -= delta;
+    }
+}
+
 /// A scene around one buried egg bank on a fast day.
 struct Scene {
     world: World,
@@ -277,7 +291,7 @@ fn the_four_parasite_knobs_are_serde_config_fields_with_the_briefs_defaults() {
         );
     }
     assert_eq!(c.parasite_max_per_host, 1);
-    assert_eq!(c.parasite_drain_of_host_basal, 0.01);
+    assert_eq!(c.parasite_drain_of_host_basal, 0.05);
     assert_eq!(c.parasite_detach_body_fraction, 0.24);
     // "About one prey body length": between the shredder's and the lanternjaw's own.
     let r = c.parasite_attach_radius_m;
@@ -595,7 +609,10 @@ fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
         a1.stored_organic() < a0.stored_organic(),
         "it pays its upkeep"
     );
-    assert!(a1.body <= a0.body, "and grows from nothing");
+    assert!(
+        a1.body - a0.body <= (a0.reserve - a1.reserve) * (1.0 + 1e-9),
+        "and grows from nothing: its structure came out of its own reserve"
+    );
     s.assert_closes("undrained");
 
     let (mut s, _host, rider) = ride(FaunaConfig {
@@ -634,9 +651,7 @@ fn a_drained_host_starves_as_usual() {
         ..config()
     });
     let min = s.fauna.config.founder(Founder::Browser).core.body_min;
-    let h = animal_mut(&mut s.fauna, host);
-    h.body = min * 1.001;
-    h.reserve = 0.0;
+    set_stores(&mut s.fauna, host, min * 1.001, 0.0);
     for _ in 0..2_000 {
         if s.fauna.view().animal(host).is_none() {
             break;
@@ -671,7 +686,8 @@ fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
     });
     let c = s.fauna.config;
     let line = c.parasite_detach_body_fraction * c.founder(Founder::Lanternjaw).core.body_max;
-    animal_mut(&mut s.fauna, rider).body = 0.98 * line;
+    let reserve = animal(&s.fauna, rider).reserve;
+    set_stores(&mut s.fauna, rider, 0.98 * line, reserve);
     s.steps(40);
     assert_eq!(
         animal(&s.fauna, rider).attached,
@@ -681,7 +697,8 @@ fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
     assert_eq!(s.fauna.ledger.rider_dropoffs, 0);
     assert_eq!(s.consults.load(Ordering::Relaxed), 0);
 
-    animal_mut(&mut s.fauna, rider).body = 1.001 * line;
+    let reserve = animal(&s.fauna, rider).reserve;
+    set_stores(&mut s.fauna, rider, 1.001 * line, reserve);
     let mut dropped = false;
     for _ in 0..3 {
         s.step();
@@ -745,9 +762,7 @@ fn a_hosts_departure_of_any_cause_frees_every_rider_on_the_spot() {
         match cause {
             Departure::Starved => {
                 let min = s.fauna.config.founder(Founder::Browser).core.body_min;
-                let h = animal_mut(&mut s.fauna, host);
-                h.body = 0.5 * min;
-                h.reserve = 0.0;
+                set_stores(&mut s.fauna, host, 0.5 * min, 0.0);
                 s.step();
             }
             Departure::Aged => {

@@ -682,6 +682,17 @@ pub struct Attachment {
     pub host: u64,
 }
 
+/// A rider lets go of `host` (parasite hatchlings §4, §5): it stands where the host
+/// stands, a free juvenile from this tick, and its controller — made at hatching, never
+/// consulted while it rode — starts from an empty interval and a rest.
+pub(crate) fn release(rider: &mut Animal, host: &Animal) {
+    rider.attached = None;
+    rider.site = host.site;
+    rider.pose = host.pose;
+    rider.founder_state.held = controller::Actions::REST;
+    rider.founder_state.feedback = IntervalFeedback::default();
+}
+
 /// The rate a wound heals, wound units a second (§2.4: 0.5 per 30 min).
 pub const WOUND_HEAL_PER_S: f64 = 0.5 / 1800.0;
 
@@ -1469,12 +1480,15 @@ pub struct FaunaConfig {
     pub parasite_attach_radius_m: f64,
     /// Riders one host can carry at once, count. Default 1.
     pub parasite_max_per_host: u32,
-    /// A rider's drain each tick, as a fraction of its host's basal upkeep
-    /// (`maintenance_per_s × body`), moved host → rider through the three-currency
-    /// pro-rata path. Default 0.01.
+    /// A rider's drain, as a fraction of its host's awake basal upkeep
+    /// (`maintenance_per_s × body`, organic units per second, whatever the host's activity),
+    /// moved host → rider each tick through the three-currency pro-rata path (reserve
+    /// first, then structure; mineral and energy at the host's own density). Default
+    /// 0.05: at the brief's 0.01 a hatchling's take (about 1.5e-5/s on a shipped grazer)
+    /// is below its own upkeep (about 2e-5/s), so no rider would ever reach drop-off.
     pub parasite_drain_of_host_basal: f64,
     /// A rider drops off when its body reaches this fraction of its lineage's adult
-    /// `body_max`. Default 0.24.
+    /// `body_max`, dimensionless within `(0, 1]`. Default 0.24.
     pub parasite_detach_body_fraction: f64,
 }
 
@@ -1501,7 +1515,7 @@ impl Default for FaunaConfig {
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
             parasite_max_per_host: 1,
-            parasite_drain_of_host_basal: 0.01,
+            parasite_drain_of_host_basal: 0.05,
             parasite_detach_body_fraction: 0.24,
         }
     }
@@ -1541,6 +1555,20 @@ impl FaunaConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        for (name, value) in [
+            ("parasite_attach_radius_m", self.parasite_attach_radius_m),
+            ("parasite_drain_of_host_basal", self.parasite_drain_of_host_basal),
+        ] {
+            if !(value.is_finite() && value >= 0.0) {
+                return Err(format!("{name} must be finite and nonnegative, not {value}"));
+            }
+        }
+        let detach = self.parasite_detach_body_fraction;
+        if !(detach.is_finite() && detach > 0.0 && detach <= 1.0) {
+            return Err(format!(
+                "parasite_detach_body_fraction must be within (0, 1], not {detach}"
+            ));
+        }
         if !(self.hatch_chance_per_dusk.is_finite()
             && (0.0..=1.0).contains(&self.hatch_chance_per_dusk))
         {
@@ -2593,8 +2621,9 @@ impl Fauna {
                 };
                 let before = self.animals.len();
                 let mut removed = Vec::new();
+                // A rider is not removed with its host: it is freed (parasite §5).
                 self.animals.retain(|a| {
-                    if a.site == site {
+                    if a.site == site && a.attached.is_none() {
                         removed.push(*a);
                         false
                     } else {
@@ -2606,6 +2635,7 @@ impl Fauna {
                     // and a table that only grows is a leak in a world that breeds.
                     self.controllers.take(a.id);
                     self.book_removed(&a);
+                    self.free_riders(&a);
                 }
                 self.animals.len() != before
             }
@@ -2826,6 +2856,20 @@ impl Fauna {
         self.ledger.removed_mineral_out += a.stored_mineral();
         self.ledger.removed_energy_out += a.stored_energy();
         self.book_departure(a, Departure::Removed);
+    }
+
+    /// A departed host's riders, all of them, whatever their size, let go where it last
+    /// stood (parasite hatchlings §5), booked `riders_freed`. Every path a body leaves the
+    /// world by calls this once the body is out of `animals`.
+    pub(crate) fn free_riders(&mut self, host: &Animal) {
+        for rider in self
+            .animals
+            .iter_mut()
+            .filter(|a| a.attached == Some(Attachment { host: host.id }))
+        {
+            release(rider, host);
+            self.ledger.riders_freed += 1;
+        }
     }
 
     /// The one place a departure's cause is counted, so the totals and the per-lineage

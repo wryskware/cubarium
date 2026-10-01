@@ -106,7 +106,10 @@ use crate::Fauna;
 /// speed on every [`crate::Animal`], dormant eggs on [`crate::Clutch`], the hunter,
 /// armour and agility in the config, the ledger's predation and egg counters and the
 /// `Killed` departures, and the layer's last daylight: refused, not migrated.
-pub const SCHEMA: u32 = 21;
+/// Schema 22 is **parasite hatchlings** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`):
+/// an [`crate::Animal`] carries the host it rides (`attached`), the config the four
+/// `parasite_*` knobs, and the ledger its rider counters: refused, not migrated.
+pub const SCHEMA: u32 = 22;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -137,6 +140,48 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
     Ok(env.fauna)
 }
 
+/// **Riders** (schema 22): every rider's host is present, is not of the rider's own
+/// lineage, does not itself ride, and carries no more than `parasite_max_per_host`
+/// riders — the conditions the hatching rule establishes and the drain and the carry
+/// read.
+fn riders(fauna: &Fauna) -> Result<(), String> {
+    let animals = &fauna.view().animals;
+    let most = fauna.config().parasite_max_per_host as usize;
+    for a in animals.iter() {
+        let Some(hold) = a.attached else { continue };
+        let host = animals
+            .binary_search_by_key(&hold.host, |h| h.id)
+            .ok()
+            .map(|j| &animals[j])
+            .ok_or_else(|| {
+                format!(
+                    "animal #{} rides host #{}, which is not here",
+                    a.id, hold.host
+                )
+            })?;
+        if host.founder == a.founder || host.founder == Some(crate::Founder::Lanternjaw) {
+            return Err(format!(
+                "animal #{} rides host #{}, a body of its own lineage",
+                a.id, host.id
+            ));
+        }
+        if host.attached.is_some() {
+            return Err(format!(
+                "animal #{} rides host #{}, itself a rider",
+                a.id, host.id
+            ));
+        }
+        let on = animals.iter().filter(|r| r.attached == Some(hold)).count();
+        if on > most {
+            return Err(format!(
+                "host #{} carries {on} riders, more than parasite_max_per_host {most}",
+                host.id
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// What a loaded layer has to satisfy beyond its schema tag and its config: the
 /// **state**, and not only the configuration (Astra R9.6).
 ///
@@ -161,6 +206,7 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
 /// what this is for, and a round trip of a live layer cannot fail it.
 fn validate(fauna: &Fauna) -> Result<(), String> {
     let v = fauna.view();
+    riders(fauna)?;
     let mut last: Option<u64> = None;
     for a in v.animals {
         for (field, value) in [
