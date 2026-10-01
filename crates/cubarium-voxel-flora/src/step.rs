@@ -71,7 +71,7 @@
 //! decomposition step of half the old stock, releases `1.0 · 0.5/2.0` = **0.25 of mineral
 //! immediately**. That is the inherited well-mixed-pool rule, it conserves every currency
 //! exactly, and it is pinned by
-//! `tests/round5b.rs::decomposition_delays_organic_matter_and_not_the_mineral_of_a_mixed_pool`
+//! `tests/glowcap.rs::decomposition_delays_organic_matter_and_not_the_mineral_of_a_mixed_pool`
 //! rather than changed.
 //!
 //! Dead wood keeps its energy, per §5: `e_v` per unit of it goes into
@@ -3001,21 +3001,16 @@ fn decompose_pool(
 
 // `seeds.rs`: the bank's checks, germination, attrition and every dispersal mode.
 
-/// The species' establishment predicate: wet enough for its roots, **aerated** enough for
-/// them, bright enough for its leaves, something to eat if it eats wood, and not already
-/// under water it cannot stand in.
+/// The germination predicate for every **birth a tick makes** — the bank's lottery and a
+/// runner's daughter: wet enough for its roots, **aerated** enough for them (the site's
+/// saturated fraction *now*, so an intolerant species is shut out of a waterlogged basin
+/// rather than merely doing badly there), bright enough for its leaves, something to eat
+/// if it eats wood, and not already under water it cannot stand in.
 ///
-/// The aeration bound reads the site's saturated fraction *now*, not a stress that a
-/// cohort has no way to carry. It is the half of correction 2 that makes saturation cost
-/// something on the way in: the intolerant species is shut out of the basin instead of
-/// merely doing badly there, which is what Chesson's test needs to have anywhere to bite.
-///
-/// It is also the one gate for every **birth a tick makes** — the bank's lottery and a
-/// runner's daughter — and so it reads the clock as well (WX3 round 4): a photosynthetic
-/// newborn waits for `daylight` above zero, because one that comes up in the dark has no
-/// income until dawn and a reserve sized for minutes. The public habitat predicates below
-/// ([`can_establish`] and the gates) stay about the site, not the hour: a host founding a
-/// world at night on a local clock still finds its habitat.
+/// It also reads the clock: a photosynthetic newborn waits for `daylight` above zero,
+/// because one that comes up in the dark has no income until dawn and a reserve sized for
+/// minutes. The public habitat predicates ([`establishment_gates`] and its forms) are about
+/// the site, not the hour: a host founding a world at night still finds its habitat.
 pub(crate) fn establishes(
     view: &VoxelView<'_>,
     sky: &mut Vec<(Site, f64)>,
@@ -3029,36 +3024,12 @@ pub(crate) fn establishes(
     }
     let visibility = sky_at(sky, view, site);
     let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
-    gates(view, site, sc, visibility, dead_wood, litter).passes()
+    establishment_gates_with_sky(view, site, sc, visibility, dead_wood, litter).passes()
 }
 
-/// The same predicate for a caller outside a tick — a harness picking founders, a
-/// presenter shading the sites a species could take — reading sky visibility straight off
-/// the view instead of off `step`'s cache. The cache is memoized geometry, so the two
-/// agree by construction, and there is exactly **one** germination predicate in the crate
-/// for anything to agree with.
-///
-/// It reads **no substrate**, because a `VoxelView` holds none: for a
-/// [`Trophic::Saprotroph`] species this therefore refuses every site, and the caller that
-/// means to ask about a fungus wants [`crate::FloraView::can_establish`], which supplies
-/// the dead wood out of the flora's own ground. Still one predicate: the substrate is an
-/// input to it, exactly as sky visibility is.
-///
-/// Package I had to replicate the private one line for line in `examples/two_producers.rs`
-/// to say which germination gate was shut, and the harness's own founder-selection
-/// predicate had drifted from it: it read the support voxel's own pore fraction and a
-/// binary saturation test where this reads the capacity-weighted mean and the saturated
-/// *fraction* over the whole root box, which on a slope reaches sideways into neighbouring
-/// columns.
-pub fn can_establish(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> bool {
-    establishment_gates(view, site, sc).passes()
-}
-
-/// What each gate of the predicate read at one site, and which of them passed:
-/// [`can_establish`] is `passes()` on this, so a caller that wants to know **why** a site
-/// is refused reads the same numbers the model refused it on (Astra R5.2 — a second
-/// approximate predicate in a harness is what package J deleted, and this is the thing to
-/// use instead).
+/// What each gate of the germination predicate read at one site, and which of them
+/// passed: [`Gates::passes`] is the predicate, so a caller that wants to know **why** a
+/// site is refused reads the same numbers the model refused it on.
 ///
 /// The reading is instantaneous: it describes the world at the tick it was taken and
 /// nothing else. A count of eligible sites is therefore a statement about *that* moment —
@@ -3153,54 +3124,23 @@ pub fn adult_light_cover(sc: &SpeciesConfig, sky_visibility: f64) -> f64 {
 }
 
 /// The gates at one site for one species, reading sky visibility straight off the view and
-/// the substrate as **nothing**. The one predicate, in the form that says which gate shut.
+/// the substrate as **nothing**, for a caller outside a tick (a harness picking founders, a
+/// presenter shading the sites a species could take).
 ///
-/// A `VoxelView` holds no ground stocks, so this is the form for the five plants; for a
-/// [`Trophic::Saprotroph`] it reports `substrate_ok: false` and refuses, which is what
-/// "there is no log here as far as I can see" means. [`establishment_gates_on_substrate`]
-/// is the same function with the reading supplied, and
-/// [`crate::FloraView::establishment_gates`] takes it off the flora's own ground.
+/// A `VoxelView` holds no ground stocks, so for a [`Trophic::Saprotroph`] this reports
+/// `substrate_ok: false` and refuses; [`crate::FloraView::establishment_gates`] reads the
+/// substrate off the flora's own ground.
 pub fn establishment_gates(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Gates {
-    establishment_gates_on_substrate(view, site, sc, 0.0, 0.0)
+    let sky_visibility = view.sky_visibility(site.x as i64, site.y, site.z);
+    establishment_gates_with_sky(view, site, sc, sky_visibility, 0.0, 0.0)
 }
 
-/// [`establishment_gates`] with the substrate of the species' mycelium box handed in —
-/// its dead wood and its litter, the two stocks a saprotroph eats, reported apart and
-/// gated on their sum: the substrate is an **input** to the one predicate, the way sky
-/// visibility is, and not a second predicate.
-pub fn establishment_gates_on_substrate(
-    view: &VoxelView<'_>,
-    site: Site,
-    sc: &SpeciesConfig,
-    dead_wood: f64,
-    litter: f64,
-) -> Gates {
-    let visibility = view.sky_visibility(site.x as i64, site.y, site.z);
-    gates(view, site, sc, visibility, dead_wood, litter)
-}
-
-/// [`establishment_gates_on_substrate`] with the geometric sky reading handed in by a
-/// caller that already has it. The **same** predicate, the same thresholds and the same
-/// readings of pore water, saturation, standing water and substrate — only the hemisphere
-/// ray's result is supplied, and it is exactly [`VoxelView::sky_visibility`].
-///
-/// A study sweeping one skyline for all six species caches one reading per site and shares
-/// it through [`crate::SkyCache`], so the gate fields and the verdict are identical to the
-/// uncached call and the ray is cast once per site instead of once per species.
+/// **The germination predicate**, gate by gate: every other entry point reads its sky
+/// visibility and substrate and calls this. `sky_visibility` is
+/// [`VoxelView::sky_visibility`] (or a cache of it: [`crate::SkyCache`], or a tick's
+/// memoized sky); `dead_wood` and `litter` are the species' mycelium box's two stocks,
+/// zero for a caller with no ground.
 pub fn establishment_gates_with_sky(
-    view: &VoxelView<'_>,
-    site: Site,
-    sc: &SpeciesConfig,
-    sky_visibility: f64,
-    dead_wood: f64,
-    litter: f64,
-) -> Gates {
-    gates(view, site, sc, sky_visibility, dead_wood, litter)
-}
-
-/// The same, for a caller that already has a sky reading — `step`'s memoized cache, which
-/// is the same geometry by construction.
-pub(crate) fn gates(
     view: &VoxelView<'_>,
     site: Site,
     sc: &SpeciesConfig,
@@ -3366,8 +3306,7 @@ mod tests {
         w
     }
 
-    /// `can_establish` is `Gates::passes()` and nothing else, so there is still exactly one
-    /// predicate in the crate — now in a form that says which gate shut. Read on a slab
+    /// The gates say which one shut. Read on a slab
     /// that passes everything, then on the three ways to fail it that a world can produce
     /// without touching a config: no soil in the root box, a saturated box, and standing
     /// water over the face.
@@ -3378,7 +3317,7 @@ mod tests {
         let site = Site { x: 1, y: 2, z: 0 };
         let view = world.view();
         let g = establishment_gates(&view, site, &sc);
-        assert!(g.passes() && can_establish(&view, site, &sc), "{g:?}");
+        assert!(g.passes(), "{g:?}");
         assert_eq!(g.soil_voxels, 6, "three columns of two soil rows: {g:?}");
         assert_eq!(
             (g.pore_ok, g.aeration_ok, g.depth_ok, g.light_ok),
@@ -3409,7 +3348,6 @@ mod tests {
         assert_eq!(g.soil_voxels, 0, "{g:?}");
         assert_eq!(g.mean_water, None);
         assert!(!g.pore_ok && g.aeration_ok, "{g:?}");
-        assert_eq!(g.passes(), can_establish(&view, site, &sc));
         assert!(!g.passes());
         drop(view);
 
@@ -3419,7 +3357,7 @@ mod tests {
         let g = establishment_gates(&view, site, &sc);
         assert!(g.pore_ok && !g.aeration_ok, "{g:?}");
         assert_eq!(g.saturated_fraction, 1.0);
-        assert_eq!(g.passes(), can_establish(&view, site, &sc));
+        assert!(!g.passes());
         drop(view);
 
         // Standing water deeper than the species tolerates: the depth gate shuts.
@@ -3433,7 +3371,7 @@ mod tests {
         let g = establishment_gates(&view, site, &sc);
         assert!(g.water_depth_m > sc.drown_depth_m && !g.depth_ok, "{g:?}");
         assert!(g.pore_ok && g.aeration_ok && g.light_ok, "{g:?}");
-        assert_eq!(g.passes(), can_establish(&view, site, &sc));
+        assert!(!g.passes());
     }
 
     /// One draw is one draw: the same world, site and tick give the same index, a

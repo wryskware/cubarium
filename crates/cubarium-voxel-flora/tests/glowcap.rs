@@ -1,9 +1,5 @@
-//! Round 5b: the **glowcap**, a saprotroph stand — what it earns, where it may start, and
-//! what it does to a log.
-//!
-//! Short function tests of the boundaries the round-5b brief states, and nothing else. No
-//! population claim, no carrying capacity, no viability: the `community` run in the
-//! experiment note is the only coupled observation, and it is an observation.
+//! The **glowcap**, a saprotroph stand — what it earns, where it may start, and what it
+//! does to a log. Short function tests; no population claim.
 //!
 //! Conventions are `round5a.rs`'s, so a fixture here reads the same way: `voxel_m` is 1 m,
 //! so a soil voxel holds `Material::Soil.pore_capacity()` = 0.35 m³ of pore water; soil is
@@ -110,7 +106,7 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
     }
 }
 
-/// The three residuals, as `round3.rs`, `round4.rs` and `round5a.rs` compute them. A
+/// The three residuals, as `life_cycle.rs`, `small_plant_births.rs` and `round5a.rs` compute them. A
 /// saprotroph's uptake is an internal transfer and adds no term to any of the three, which
 /// is the whole reason these still close with a fungus digesting.
 fn assert_residuals(flora: &Flora, when: &str) {
@@ -465,7 +461,7 @@ fn a_small_finite_log_empties_and_then_the_reserve_falls() {
 // -------------------------------------------------------------------- the gates
 
 /// **The substrate gate, and no light gate.** One world, two identical faces, a log under
-/// one of them: the predicate the model itself runs — `FloraView::can_establish`, which
+/// one of them: the predicate the model itself runs — `FloraView::establishment_gates`, which
 /// reads the dead wood off this layer's own ground — passes on the face with the log and
 /// refuses the other, and says which gate shut. The light gate is **open** on both,
 /// however dark, because a saprotroph does not eat light; the same faces refuse springturf
@@ -485,7 +481,7 @@ fn germination_needs_a_log_and_never_needs_light() {
     let without = flora
         .view()
         .establishment_gates(&view, at(4), Species::Glowcap);
-    assert!(with_log.passes() && flora.view().can_establish(&view, at(1), Species::Glowcap));
+    assert!(with_log.passes() && flora.view().establishment_gates(&view, at(1), Species::Glowcap).passes());
     assert!(
         !without.passes(),
         "a face with no log admitted a spore: {without:?}"
@@ -515,7 +511,7 @@ fn germination_needs_a_log_and_never_needs_light() {
     assert!(with_log.light_ok && without.light_ok);
     let sc = flora.config().species(Species::Glowcap);
     assert!(
-        !cubarium_voxel_flora::can_establish(&view, at(1), sc),
+        !cubarium_voxel_flora::establishment_gates(&view, at(1), sc).passes(),
         "no substrate, no pass"
     );
 
@@ -1642,7 +1638,7 @@ fn the_substrate_gate_passes_on_litter_with_no_dead_wood() {
         "litter alone shut the gate: {rich:?}"
     );
     assert!(
-        v.can_establish(&view, at(1), Species::Glowcap),
+        v.establishment_gates(&view, at(1), Species::Glowcap).passes(),
         "the predicate the tick runs disagrees with its own gates"
     );
     assert!(

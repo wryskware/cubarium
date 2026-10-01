@@ -39,7 +39,7 @@ use cubarium_voxel::{DT, VoxelView, World};
 use crate::step::{
     DOMAIN_ATTRITION, DOMAIN_CLONAL, DOMAIN_DISPERSAL, DOMAIN_GERMINATION, DOMAIN_OVERTOP,
     DOMAIN_RUNNER, DOMAIN_SPORES, DOMAIN_WATER, DOMAIN_WIND, Rng, add_litter_cap, die, establishes,
-    gates, mix, provisioned_slot, pull_mineral, standing_water_beside, substrate_pools_in_box,
+    establishment_gates_with_sky, mix, provisioned_slot, pull_mineral, standing_water_beside, substrate_pools_in_box,
 };
 use crate::{
     DeliveryReceipt, Dispersal, Flora, FloraConfig, FloraLedger, Gates, Ground, SeedCohort, Site,
@@ -280,7 +280,7 @@ pub(crate) fn schedule(flora: &mut Flora, site: Site) {
 /// Step 8: the sites due this tick — and on a shower's last tick every banked site — hold
 /// their germination lottery; then the due sites alone pay attrition and age.
 ///
-/// Germination first, as before (`tests/round3.rs`'s expiry boundary): a bin past its
+/// Germination first, as before (`tests/life_cycle.rs`'s expiry boundary): a bin past its
 /// `seed_max_age_s` at a check gets that check's lottery before it goes to litter.
 pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
     ensure_wheel(flora);
@@ -968,7 +968,7 @@ fn wind_target(
 /// opened, so a gate added to [`Gates`] is read here without a second list of them.
 fn ground_passes(view: &VoxelView<'_>, ground: &[Ground], site: Site, sc: &SpeciesConfig) -> bool {
     let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
-    let g = gates(view, site, sc, 1.0, dead_wood, litter);
+    let g = establishment_gates_with_sky(view, site, sc, 1.0, dead_wood, litter);
     Gates {
         light_ok: true,
         ..g
@@ -1068,7 +1068,7 @@ fn water_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::step::{DOMAIN_WIND, Rng, establishment_gates_on_substrate};
+    use crate::step::{DOMAIN_WIND, Rng, establishment_gates};
     use crate::{Dispersal, Flora, FloraConfig, Ground, SeedCohort, Site, Species, SpeciesConfig};
     use cubarium_voxel::DT;
     use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
@@ -1408,7 +1408,7 @@ mod tests {
                 Landing::Bank(site) => {
                     banked += 1;
                     assert_ne!(site, home);
-                    let g = establishment_gates_on_substrate(&view, site, &sc, 0.0, 0.0);
+                    let g = establishment_gates(&view, site, &sc);
                     assert!(
                         g.pore_ok && g.aeration_ok && g.depth_ok && g.standing_ok,
                         "a spore landed on {site:?}, which fails {g:?}"

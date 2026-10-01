@@ -29,7 +29,7 @@ use cubarium_voxel_flora::{
 // ------------------------------------------------------------------- fixtures
 
 /// A flat plain at 1 m voxels: every column solid to `top`, so every support face is
-/// `top` in open sky. `round5c.rs`'s fixture, with its water left out.
+/// `top` in open sky.
 fn plain(width: u32, top: u32, seed: u64) -> World {
     let mut w = World::empty(VoxelConfig {
         width,
@@ -163,7 +163,7 @@ fn blind(fauna: &mut Fauna, world: &World, x: i64, stores: StartingStores) -> u6
     id
 }
 
-/// The animal layer's three residuals, `round5c.rs`'s shape.
+/// The animal layer's three residuals.
 fn assert_fauna_residuals(fauna: &Fauna, when: &str) {
     let v = fauna.view();
     for (got, what) in [

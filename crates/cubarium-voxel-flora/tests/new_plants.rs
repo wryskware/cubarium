@@ -27,8 +27,7 @@
 //!   [`standing`] — nothing else here reads it, and the tests assert the germination
 //!   predicate, not the reader.
 //! - **The germination predicate carries the new gate:**
-//!   [`cubarium_voxel_flora::establishment_gates`]`(..).passes()` (and so
-//!   [`cubarium_voxel_flora::can_establish`]) refuses a species whose
+//!   [`cubarium_voxel_flora::establishment_gates`]`(..).passes()` refuses a species whose
 //!   `water_depth_min_m` the settled water on its site and its 4-neighbours does not
 //!   meet. The five existing gate fields keep their meaning; whether `Gates` grows a
 //!   field for the new gate is the implementer's call and is not read here.

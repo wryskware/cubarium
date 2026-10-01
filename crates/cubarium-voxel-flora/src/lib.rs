@@ -74,17 +74,15 @@ pub use layers::{
     Layer, LayerKind, MAX_FOLIAGE_LAYERS, MIN_LAYER_AREA_M2, Profile, StandLayer, disc_offset,
     trunk_offsets,
 };
-/// The germination predicate the model itself uses, for a caller outside a tick: a
-/// harness picking founder columns, a diagnosis of which gate is shut. There is one
-/// predicate, and this is it.
-pub use step::can_establish;
 pub use step::{UPKEEP_Q10, upkeep_factor};
-/// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
-/// `Gates::passes()` is exactly `can_establish`.
-pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
-/// The same predicate with the geometric sky reading supplied by a caller that already has
-/// it — the batch observation path, [`FloraView::establishment_gates_over`], where one ray
-/// per site is shared across species.
+/// The germination predicate the model itself uses, gate by gate, for a caller outside a
+/// tick (a harness picking founder columns, a diagnosis of which gate is shut):
+/// `Gates::passes()` is the predicate. `establishment_gates_with_sky` is the one function
+/// every form calls, for a caller that already has the sky reading and the substrate;
+/// `establishment_gates` reads the sky off the view and assumes no substrate; and
+/// [`FloraView::establishment_gates`] and [`FloraView::establishment_gates_over`] read the
+/// substrate off this layer's ground.
+pub use step::{Gates, establishment_gates};
 pub use step::{adult_light_cover, establishment_gates_with_sky};
 /// Where a falling stand's wood lands (package N's fall), for a diagnostic.
 pub use step::fall_line;
@@ -296,7 +294,7 @@ pub struct Stand {
     /// `nutrient_draw_max` rate cap and the `mineral / n_tissue` stock cap all read
     /// `Ground::mineral`, so a stand rich in mineral fixes **zero** on a bare pool at full
     /// light and full moisture and has to burn reserve to stand still
-    /// (`tests/round3.rs`, `a_bare_mineral_pool_stops_the_income_and_not_just_the_growth`
+    /// (`tests/life_cycle.rs`, `a_bare_mineral_pool_stops_the_income_and_not_just_the_growth`
     /// pins it). Moving `mineral / n_tissue` alone would not change that: the other two
     /// terms zero the income independently. When nutrient physiology matters, carbon
     /// fixation and maintenance have to be separated from mineral-funded tissue
@@ -820,7 +818,7 @@ pub struct SpeciesConfig {
     /// whose ages were within one tick and kept the **younger** age, which made
     /// `seed_max_age_s` the time since the bank's last delivery rather than a seed's
     /// lifetime: continuous arrivals, however small, retained old material for ever, and
-    /// `tests/round3.rs` blessed it. The second capped the count by merging the two
+    /// `tests/life_cycle.rs` blessed it. The second capped the count by merging the two
     /// **oldest** cohorts at the older age, which bounded the `Vec` but swept nearly every
     /// old deposit into one bucket that could then kill much younger material at the next
     /// expiry. Fixed bins do the bounding without either effect.
@@ -1469,7 +1467,7 @@ impl SpeciesConfig {
     /// bare moist ground and loses under a canopy" is **intended succession and untested**
     /// (Astra R7.3): round 4 measured neither half of it, and the numbers below encode the
     /// sentence rather than evidencing it. What is measured is the boundaries — a paid
-    /// birth, one income window, one failing neighbour (`tests/round4.rs`). The role as the
+    /// birth, one income window, one failing neighbour (`tests/small_plant_births.rs`). The role as the
     /// numbers state it: shallow roots that only see the support row, a light need above
     /// bloomcrown's, a moisture floor at the fraction drained soil actually settles to, a
     /// fast cheap body that turns income into packages quickly, and a maintenance bill that
@@ -1486,7 +1484,7 @@ impl SpeciesConfig {
     ///   `establish_water_min` 0.3 is the highest upland germination floor: a turf's
     ///   shallow roots see only the support row, so a seed waits for ground that holds a
     ///   third of drained soil's water there. That is **germination permission and not a
-    ///   positive newborn budget** (Astra R7.3; `tests/round4.rs`,
+    ///   positive newborn budget** (Astra R7.3; `tests/small_plant_births.rs`,
     ///   `springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_there`,
     ///   measures the newborn's deficit at the floor). Before package F the three were
     ///   pore fractions (0.25, 0.15, 0.45), which read drained soil as `μ ≈ 0.33`: every
@@ -1578,7 +1576,7 @@ impl SpeciesConfig {
     /// never read the support voxel's material: `root_box` collects the `Material::Soil`
     /// voxels of the box and the pore gate reads their capacity-weighted mean, so a rock
     /// support with one soil voxel inside `rooting_radius` already passes and a rock
-    /// support with none already fails on `pore_ok` (`tests/round4.rs`,
+    /// support with none already fails on `pore_ok` (`tests/small_plant_births.rs`,
     /// `a_paid_stonecushion_birth_on_a_rock_ledge_beside_a_soil_pocket`). Water is drawn
     /// only from those soil voxels, as it always was. The `rock_support` flag the round-4
     /// brief held in reserve — accept a rock face *provided* the root box holds soil — is
@@ -3781,10 +3779,10 @@ impl<'a> FloraView<'a> {
         step::substrate_pools_in_box(world, self.ground, from, sc).1
     }
 
-    /// The one establishment predicate for **any** species, gate by gate, with the
-    /// substrate read off this layer's own ground: [`can_establish`] cannot do that,
-    /// because a `VoxelView` holds no dead wood and no litter, so this is the form a
-    /// harness or a diagnosis wants once a saprotroph is in the world.
+    /// The germination predicate for **any** species, gate by gate, with the substrate
+    /// read off this layer's own ground (a `VoxelView` holds no dead wood and no litter),
+    /// so this is the form a harness or a diagnosis wants once a saprotroph is in the
+    /// world.
     pub fn establishment_gates(
         &self,
         world: &VoxelView<'_>,
@@ -3793,13 +3791,8 @@ impl<'a> FloraView<'a> {
     ) -> Gates {
         let sc = self.config.species(species);
         let (dead_wood, litter) = step::substrate_pools_in_box(world, self.ground, site, sc);
-        step::establishment_gates_on_substrate(world, site, sc, dead_wood, litter)
-    }
-
-    /// `passes()` on [`FloraView::establishment_gates`]: the predicate itself, for any
-    /// species, and the one the tick runs.
-    pub fn can_establish(&self, world: &VoxelView<'_>, site: Site, species: Species) -> bool {
-        self.establishment_gates(world, site, species).passes()
+        let sky_visibility = world.sky_visibility(site.x as i64, site.y, site.z);
+        step::establishment_gates_with_sky(world, site, sc, sky_visibility, dead_wood, litter)
     }
 
     /// [`FloraView::establishment_gates`] for a whole skyline at once, with the geometric

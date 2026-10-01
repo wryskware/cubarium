@@ -239,7 +239,7 @@ fn plant_founders(flora: &mut Flora, world: &World) -> usize {
             .iter()
             .copied()
             .filter(|&s| {
-                !taken.contains(&s) && flora.view().can_establish(&world.view(), s, species)
+                !taken.contains(&s) && flora.view().establishment_gates(&world.view(), s, species).passes()
             })
             .collect();
         let wood = FOUNDER_FRACTION * flora.config().species(species).wood_max;
@@ -269,7 +269,7 @@ fn introduce(fauna: &mut Fauna, flora: &Flora, world: &World, n: usize) -> usize
             world.view().material_at(i64::from(s.x), s.y, s.z) == Material::Soil
                 && flora
                     .view()
-                    .can_establish(&world.view(), s, Species::Springturf)
+                    .establishment_gates(&world.view(), s, Species::Springturf).passes()
         })
         .collect();
     let mut placed = 0;

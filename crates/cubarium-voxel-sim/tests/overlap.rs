@@ -108,7 +108,7 @@ fn rained_on() -> (World, Flora, Fauna) {
             .iter()
             .copied()
             .filter(|s| {
-                !taken.contains(s) && flora.view().can_establish(&world.view(), *s, species)
+                !taken.contains(s) && flora.view().establishment_gates(&world.view(), *s, species).passes()
             })
             .collect();
         let wood = 0.5 * flora.config().species(species).wood_max;

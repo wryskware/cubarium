@@ -1,15 +1,10 @@
 //! The ledger's **departure causes**: one short function test per way a body can leave
 //! the world, and the invariant that ties them back to `deaths`.
 //!
-//! This is instrumentation and nothing else — no rule about when a body dies is touched
-//! here, so every test asserts the split *of a death that already happened* and, where it
-//! matters, that the totals are unchanged. Conventions are `round5c.rs`'s: `voxel_m` is
-//! 1 m, the world is never stepped, and a test that needs a rate the placeholders do not
-//! give sets it in its own [`FaunaConfig`] and says why.
-//!
-//! The 2026-09-20 census could read 65 deaths and not one cause
-//! (`design/7_Research/voxel-census-2026-09-20.md`); these counters are what makes that
-//! readable, and `voxel_founder_autopsy` is what reads them.
+//! Every test asserts the split *of a death that already happened* and, where it matters,
+//! that the totals are unchanged. `voxel_m` is 1 m, the world is never stepped, and a
+//! test that needs a rate the placeholders do not give sets it in its own [`FaunaConfig`]
+//! and says why. `voxel_founder_autopsy` is what reads these counters.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_fauna::{

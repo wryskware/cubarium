@@ -7,7 +7,7 @@
 //! there is no arm, no control and no coexistence claim in this file. The study itself
 //! (`examples/replacement.rs`) is retired; version history keeps it.
 //!
-//! Conventions are `round5a.rs`/`round5b.rs`'s: `voxel_m` is 1 m, soil is wetted by adding
+//! Conventions are `round5a.rs`/`glowcap.rs`'s: `voxel_m` is 1 m, soil is wetted by adding
 //! free water to an air cell and converting it, and the **world is never stepped**, so a
 //! fixture's pore fraction is the condition it says it is and the only thing that moves
 //! anything is the plant layer.
@@ -19,7 +19,7 @@ use cubarium_voxel_flora::{
 
 // ------------------------------------------------------------------- fixtures
 
-/// `round5b.rs`'s `fill`: turn one air voxel into `material` holding exactly `pore` of that
+/// `glowcap.rs`'s `fill`: turn one air voxel into `material` holding exactly `pore` of that
 /// material's own pore capacity, by adding the water first and converting after.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
     let want = pore * material.pore_capacity() * w.config().voxel_volume();
@@ -46,7 +46,7 @@ fn empty_world(width: u32, depth: u32) -> World {
     })
 }
 
-/// `round5b.rs`'s strip: only the columns of `keep` are solid at all — bedrock at `y = 0`,
+/// `glowcap.rs`'s strip: only the columns of `keep` are solid at all — bedrock at `y = 0`,
 /// soil at `y = 1..=2` holding `pore` of soil's capacity — so every kept column's support
 /// face is `y = 2` in open sky and every other column has **none**, which is how a fixture
 /// pins a donor's dispersal candidates.
@@ -138,7 +138,7 @@ fn assert_residuals(flora: &Flora, when: &str) {
 }
 
 /// A config in which one species funds a whole package in a single tick and hops exactly one
-/// column — `round4.rs`'s `fast_donor` with the hop pinned, so a fixture can say **which**
+/// column — `small_plant_births.rs`'s `fast_donor` with the hop pinned, so a fixture can say **which**
 /// site a package lands on.
 fn fast_donor(config: &mut FloraConfig, species: Species) {
     let sc = config.species_mut(species);

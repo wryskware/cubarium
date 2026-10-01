@@ -7,7 +7,7 @@
 //! material and hands material back. Nothing about populations, viability or carrying
 //! capacity is asserted anywhere in this file, because the model says nothing about them.
 //!
-//! Conventions are `round3.rs`'s and `round4.rs`'s, so a fixture here reads the same way:
+//! Conventions are `life_cycle.rs`'s and `small_plant_births.rs`'s, so a fixture here reads the same way:
 //! `voxel_m` is 1 m, so a soil voxel holds `Material::Soil.pore_capacity()` = 0.35 m³ of
 //! pore water; soil is wetted by adding free water to an air cell and turning the cell to
 //! soil; and the world is **never stepped**, so the only thing that moves water is the
@@ -35,7 +35,7 @@ use cubarium_voxel_flora::{
 // ------------------------------------------------------------------- fixtures
 
 /// Turn one air voxel into `material` holding exactly `pore` of that material's own pore
-/// capacity, by adding the water first and converting after. `round3.rs`'s `fill`.
+/// capacity, by adding the water first and converting after. `life_cycle.rs`'s `fill`.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
     let want = pore * material.pore_capacity() * w.config().voxel_volume();
     if want > 0.0 {
@@ -80,7 +80,7 @@ fn void_column(w: &mut World, x: i64, z: u32) {
     );
 }
 
-/// `round4.rs`'s strip: only the columns of `keep` are solid at all — bedrock at `y = 0`,
+/// `small_plant_births.rs`'s strip: only the columns of `keep` are solid at all — bedrock at `y = 0`,
 /// soil at `y = 1..=2` holding `pore` of soil's capacity — so every kept column's support
 /// face is `y = 2` in open sky and every other column has none.
 fn pillars(width: u32, keep: &[i64], pore: f64) -> World {
@@ -108,7 +108,7 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
     }
 }
 
-/// The three residuals, as `round3.rs` and `round4.rs` compute them — now including the
+/// The three residuals, as `life_cycle.rs` and `small_plant_births.rs` compute them — now including the
 /// `consumed_*` and `deposited_*` boundary flows, since they are in the ledger's own
 /// expected totals.
 fn assert_residuals(flora: &Flora, when: &str) {

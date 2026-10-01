@@ -57,7 +57,7 @@ fn conditioned() -> (World, Flora, Fauna) {
             .iter()
             .copied()
             .filter(|s| {
-                !taken.contains(s) && flora.view().can_establish(&world.view(), *s, species)
+                !taken.contains(s) && flora.view().establishment_gates(&world.view(), *s, species).passes()
             })
             .collect();
         let wood = 0.5 * flora.config().species(species).wood_max;
@@ -83,7 +83,7 @@ fn conditioned() -> (World, Flora, Fauna) {
             world.view().material_at(i64::from(s.x), s.y, s.z) == Material::Soil
                 && flora
                     .view()
-                    .can_establish(&world.view(), *s, Species::Springturf)
+                    .establishment_gates(&world.view(), *s, Species::Springturf).passes()
         })
         .collect();
     for site in strided(&pool, GRAZERS) {

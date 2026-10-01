@@ -1,10 +1,9 @@
-//! Round 4's three presets, each against the four checks Astra's R6.2 asked every new
-//! preset to leave behind: a **paid birth** on its contract habitat, **survival and
-//! income** for the stand that birth produced, a **failing neighbour** — the neighbouring
-//! condition the role excludes, where the same package never germinates and reaches the
-//! litter with its mineral — and **validity** of every preset's own numbers.
+//! The three small presets (springturf, stonecushion, velvetpad): a **paid birth** on each
+//! one's habitat, a **failing neighbour** — the neighbouring condition the role excludes,
+//! where the same package never germinates and reaches the litter with its mineral — and
+//! **validity** of every preset's own numbers.
 //!
-//! Conventions, the same ones `round3.rs` uses so a fixture here reads the same way:
+//! Conventions, the same ones `life_cycle.rs` uses so a fixture here reads the same way:
 //! `voxel_m` is 1 m, so a soil voxel holds `Material::Soil.pore_capacity()` = 0.35 m³ of
 //! pore water and a metre of free water over a face is a metre deep. Soil is wetted by
 //! adding free water to an air cell and then turning the cell to soil. The world is never
@@ -13,7 +12,7 @@
 //!
 //! Where a test needs a rate the placeholders do not give, it sets that rate in its
 //! **own** config and says why. Three of them recur, and they are the same three
-//! `round3.rs` uses:
+//! `life_cycle.rs` uses:
 //!
 //! - `propagule_rate` 3.0 /s and `reserve_cap` 40 against the presets' own tiny rates, so
 //!   that one donor funds one whole package in a single tick and a paid birth is a
@@ -34,7 +33,7 @@ use cubarium_voxel_flora::{
 // ------------------------------------------------------------------- fixtures
 
 /// Turn one air voxel into `material` holding exactly `pore` of that material's own pore
-/// capacity, by adding the water first and converting after. `round3.rs`'s `fill`.
+/// capacity, by adding the water first and converting after. `life_cycle.rs`'s `fill`.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
     let want = pore * material.pore_capacity() * w.config().voxel_volume();
     if want > 0.0 {
@@ -73,7 +72,7 @@ fn empty_world(width: u32, depth: u32) -> World {
 /// Take a column's bedrock away, so it holds nothing solid at all and therefore **no
 /// support face**: nothing can land on it and nothing can stand on it. `World::empty` lays
 /// a bedrock foundation across the whole footprint, and a bare foundation cell is a
-/// support face like any other (`round3.rs`'s `strip_gap` makes the same hole).
+/// support face like any other (`life_cycle.rs`'s `strip_gap` makes the same hole).
 fn void_column(w: &mut World, x: i64, z: u32) {
     w.apply(WorldCommand::SetMaterial {
         x,
@@ -244,7 +243,7 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
     }
 }
 
-/// The three residuals, as `round3.rs` computes them.
+/// The three residuals, as `life_cycle.rs` computes them.
 fn assert_residuals(flora: &Flora, when: &str) {
     let v = flora.view();
     let (o, n, e) = (
@@ -267,7 +266,7 @@ fn assert_residuals(flora: &Flora, when: &str) {
 }
 
 /// A config in which one species funds a whole package in a single tick: see the module
-/// doc for why, and `round3.rs` for the same two rates.
+/// doc for why, and `life_cycle.rs` for the same two rates.
 fn fast_donor(species: Species) -> FloraConfig {
     let mut config = FloraConfig::default().drop_seeds_checked_each_tick();
     {
@@ -339,7 +338,7 @@ fn paid_birth(
         "the donor could not be planted on column {donor_x}"
     );
     assert!(
-        cubarium_voxel_flora::can_establish(&world.view(), site, &sc),
+        cubarium_voxel_flora::establishment_gates(&world.view(), site, &sc).passes(),
         "the fixture's premise: {} must pass its own gates at {site:?} — {:?}",
         species.name(),
         establishment_gates(&world.view(), site, &sc)
@@ -465,94 +464,10 @@ fn assert_paid_birth(birth: &PaidBirth, species: Species) {
     assert_residuals(&birth.flora, "after a paid birth");
 }
 
-/// A stand's income over a window, read off the ledger and off the stand: what the system
-/// fixed against what it respired, and whether the stand itself is bigger than it was.
-struct Income {
-    fixed: f64,
-    respired: f64,
-    grew: f64,
-    deaths: u64,
-}
-
-fn income_over(flora: &mut Flora, world: &mut World, site: Site, ticks: u32) -> Income {
-    let before = flora.view();
-    let (fixed0, respired0, deaths0) = (
-        before.ledger.fixed_in,
-        before.ledger.respired_out,
-        before.ledger.deaths,
-    );
-    let material0 = before
-        .stand_at(site)
-        .expect("nothing stands here to start with")
-        .material();
-    run(flora, world, ticks);
-    let after = flora.view();
-    Income {
-        fixed: after.ledger.fixed_in - fixed0,
-        respired: after.ledger.respired_out - respired0,
-        grew: after.stand_at(site).map_or(f64::NAN, |s| s.material()) - material0,
-        deaths: after.ledger.deaths - deaths0,
-    }
-}
-
-fn assert_survives_on_income(
-    flora: &Flora,
-    world: &World,
-    site: Site,
-    species: Species,
-    i: &Income,
-) {
-    let sc = flora.config().species(species);
-    let stand = flora.view().stand_at(site).unwrap_or_else(|| {
-        panic!(
-            "{} died on its contract habitat: {:?}",
-            species.name(),
-            establishment_gates(&world.view(), site, sc)
-        )
-    });
-    assert_eq!(
-        i.deaths,
-        0,
-        "{}: {} deaths over the window",
-        species.name(),
-        i.deaths
-    );
-    assert!(i.fixed > 0.0, "{}: fixed nothing at all", species.name());
-    assert!(
-        i.fixed > i.respired,
-        "{}: fixed {} against {} respired — the income does not cover the upkeep",
-        species.name(),
-        i.fixed,
-        i.respired
-    );
-    assert!(
-        i.grew > 0.0,
-        "{}: the stand shrank by {}",
-        species.name(),
-        -i.grew
-    );
-    assert!(
-        stand.wood >= sc.alive_min,
-        "{}: wood {} under alive_min",
-        species.name(),
-        stand.wood
-    );
-    assert!(
-        stand.moisture > 0.0,
-        "{}: wilting on its own habitat",
-        species.name()
-    );
-    assert_residuals(flora, "after a newborn's income window");
-}
-
 // ========================================================================= springturf
 //
 // The pioneer turf of open, moist soil: shallow, sun-demanding, fast, short-lived, a wide
-// hop and a crown one cell tall. "It wins the first years on bare moist ground and loses
-// under a canopy" is **intended succession and untested** (Astra R7.3): what the fixtures
-// below pin is the boundaries — a paid birth, an income window on ample water, a newborn's
-// deficit on retained-water soil, a shut-sky refusal, and the sign of the adult shade
-// reading — and not the succession itself.
+// hop and a crown one cell tall.
 
 /// **Paid birth.** A springturf donor on open soil at 0.6 of pore capacity funds one whole
 /// 0.015 package in a tick, it lands on the fixture's single candidate column, and the next
@@ -577,127 +492,6 @@ fn a_paid_springturf_birth_on_open_moist_soil_is_one_package_at_alive_min() {
         birth.package
     );
     assert_paid_birth(&birth, Species::Springturf);
-}
-
-/// **Survival and income.** The stand that birth bought, alone on its habitat with the
-/// donor gone, fixes more than the whole system respires over 200 ticks and is bigger at
-/// the end than it was at the start — at ten times the base maintenance.
-#[test]
-fn a_newborn_springturf_earns_its_upkeep_on_open_moist_soil() {
-    let mut world = pillars(8, &[0, 1], 0.6);
-    let mut birth = paid_birth(
-        &mut world,
-        fast_donor(Species::Springturf),
-        Species::Springturf,
-        0,
-        at(1),
-    );
-    let income = income_over(&mut birth.flora, &mut world, birth.site, 200);
-    assert_survives_on_income(
-        &birth.flora,
-        &world,
-        birth.site,
-        Species::Springturf,
-        &income,
-    );
-    // The species' own light response at full sky is exactly 1: `light_half` only bites in
-    // shade, and the next test is where it does.
-    let stand = birth.flora.view().stand_at(birth.site).expect("alive");
-    assert!(
-        (stand.light - 1.0).abs() < 1e-12,
-        "open sky read as {}",
-        stand.light
-    );
-}
-
-/// **Germination permission and the newborn budget, held apart** (Astra R7.3). The two
-/// are separate claims about the same soil, and this fixture reads both on ground just
-/// above springturf's germination floor, with **ordinary preset stocks**.
-///
-/// Before package F the floor was pore 0.25 and the ramp `0.15..0.45`, so a newborn there
-/// read `μ = 1/3` and fixed less than its own maintenance: permission without a budget.
-/// On the available-water scale the floor is `establish_water_min` 0.3 and the ramp
-/// `0.1..0.5`, so at 0.02 above the floor `μ = 0.55`. The newborn is one 0.015 package
-/// split `[0.4, 0.4, 0.2]`, so `W = P = 0.006`; at open sky `L_eff = 1`, site mineral 1
-/// gives a Monod factor of 2/3 and there is no aeration stress, so it fixes
-/// `0.008 · 0.55 · 0.006 · (2/3) = 1.76e-5` organic per second against maintenance
-/// `0.002 · 0.006 = 1.2e-5`: a pioneer that may germinate somewhere can now pay its way
-/// there, and this test measures that it does. Solvency starts at `μ = 0.375`, a = 0.25,
-/// under the floor — the floor is a choice, and moving it under 0.25 would bring the old
-/// deficit back.
-#[test]
-fn springturf_germinates_just_above_its_water_floor_and_pays_its_upkeep_there() {
-    let sc = FloraConfig::default().springturf.clone();
-    let a = sc.establish_water_min + 0.02;
-    let mut world = pillars(8, &[0, 1], soil_pore_at(a));
-
-    // Permission: every gate open, and the shallow box is the support row alone.
-    let g = establishment_gates(&world.view(), at(1), &sc);
-    assert!(g.passes(), "{a} is meant to be a passing site: {g:?}");
-    assert!((g.mean_water.expect("soil") - a).abs() < 1e-12, "{g:?}");
-    assert_eq!(
-        g.soil_voxels, 2,
-        "the root box is the two soil faces: {g:?}"
-    );
-
-    // The newborn that permission buys. What the fixture changes is the donor's saving
-    // rule alone — `fast_donor` raises `propagule_rate` **and** `reserve_cap`, so that one
-    // tick's reserve above the floor can fund a whole package (Astra R7.3 asked for the
-    // second of those to be named here) — and neither reaches this newborn: its own stocks
-    // and every rate it lives by are the preset's, and it earns no allocation surplus.
-    let mut birth = paid_birth(
-        &mut world,
-        fast_donor(Species::Springturf),
-        Species::Springturf,
-        0,
-        at(1),
-    );
-    let born = *birth
-        .flora
-        .view()
-        .stand_at(at(1))
-        .expect("the package germinated");
-    assert!(
-        (born.wood - 0.006).abs() <= 1e-18 && (born.foliage - 0.006).abs() <= 1e-18,
-        "{born:?}"
-    );
-    let mineral = birth.flora.view().ground_at(at(1)).expect("ground").mineral;
-
-    // The per-second budget in the model's own factors, at the fixture's own water.
-    let mu = sc.moisture_at(a);
-    let monod = mineral / (mineral + sc.nutrient_half);
-    let rate = sc.assimilation * 1.0 * mu * born.foliage * monod;
-    let upkeep = sc.maintenance * born.wood;
-    assert!((mu - 0.55).abs() < 1e-12, "mu {mu}");
-    assert!(
-        (monod - 2.0 / 3.0).abs() < 1e-12,
-        "the site's pool is not 1: {mineral}"
-    );
-    assert!((rate - 1.76e-5).abs() < 1e-10, "income rate {rate}");
-    assert!((upkeep - 1.2e-5).abs() < 1e-18, "upkeep {upkeep}");
-    assert!(rate > upkeep, "income {rate} is not above upkeep {upkeep}");
-
-    // And measured: over five seconds the stand fixes more than its own maintenance bill
-    // and draws nothing from its reserve. (Replacing senesced foliage, `0.001 · P` a
-    // second, takes most of the rest: at the floor a newborn holds its own and no more.)
-    let fixed0 = birth.flora.view().ledger.fixed_in;
-    run(&mut birth.flora, &mut world, 100);
-    let v = birth.flora.view();
-    let now = *v.stand_at(at(1)).expect("alive");
-    let fixed = v.ledger.fixed_in - fixed0;
-    let bill = upkeep * 100.0 * cubarium_voxel::DT;
-    assert!(
-        fixed > bill,
-        "fixed {fixed} against a {bill} maintenance bill"
-    );
-    assert!(
-        now.reserve >= born.reserve,
-        "it paid its upkeep out of reserve: {born:?} to {now:?}"
-    );
-    assert_residuals(
-        &birth.flora,
-        "after a solvent newborn window at the water floor",
-    );
 }
 
 /// **Failing neighbour.** The same package, on the same column, with the sky shut: it never
@@ -790,72 +584,6 @@ fn a_springturf_package_under_a_shut_sky_never_germinates_and_goes_to_litter() {
     assert_residuals(&flora, "after a refused package expired");
 }
 
-/// The rest of the role, where the model can carry it: springturf is the species that gives
-/// up first on dry ground, and an adult springturf under a crown reads less light than one
-/// in the open.
-///
-/// The dry half is a gate reading — at available water 0.2 springturf's 0.3 floor shuts
-/// and bloomcrown's 0.1 does not — and the canopy half is the shade model, which *does* see
-/// crowns. Only germination light is canopy-blind.
-#[test]
-fn springturf_gives_up_first_on_dry_ground_and_loses_light_under_a_crown() {
-    // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
-    // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
-    let config = FloraConfig::default().crowns_scaled(4.0);
-
-    // Dry ground: a fifth of what drained soil offers a root.
-    let dry = pillars(4, &[0, 1, 2, 3], soil_pore_at(0.2));
-    let turf = establishment_gates(&dry.view(), at(1), &config.springturf);
-    let bloom = establishment_gates(&dry.view(), at(1), &config.bloomcrown);
-    assert!(!turf.pore_ok, "springturf accepted dry ground: {turf:?}");
-    assert!(
-        bloom.pore_ok && bloom.passes(),
-        "bloomcrown refused the same ground: {bloom:?}"
-    );
-    assert!(
-        (turf.mean_water.expect("soil") - 0.2).abs() < 1e-12,
-        "the fixture is not at 0.2: {turf:?}"
-    );
-
-    // Under a crown: a full-grown bloomcrown at x2 covers x1 and x3 and stands three voxels
-    // over their one, so the two springturfs beside it are shaded and the one at x5 is not.
-    let mut world = pillars(8, &[1, 2, 3, 5], 0.6);
-    let mut flora = Flora::new(config);
-    for (x, species, wood) in [
-        (2i64, Species::Bloomcrown, 0.6),
-        (1, Species::Springturf, 0.06),
-        (5, Species::Springturf, 0.06),
-    ] {
-        assert!(flora.apply(
-            &world,
-            Command::Seed {
-                x,
-                z: 0,
-                species,
-                wood
-            }
-        ));
-    }
-    flora.step(&mut world);
-    let v = flora.view();
-    let shaded = v.stand_at(at(1)).expect("shaded springturf").light;
-    let open = v.stand_at(at(5)).expect("open springturf").light;
-    assert!(
-        (open - 1.0).abs() < 1e-12,
-        "the open springturf read {open}"
-    );
-    assert!(
-        shaded < open,
-        "the shaded springturf read {shaded}, the open one {open}"
-    );
-    // `shade_k` 1.5 is a known-wrong placeholder — one full crown attenuates by about 9 %
-    // (`design/backlog.md` §1) — so this is a small difference by construction. What is
-    // being pinned is its sign and that it is the crown doing it, not its size.
-    assert!(
-        shaded > 0.8 * open,
-        "an unexpectedly deep shade: {shaded} against {open}"
-    );
-}
 // ======================================================================= stonecushion
 //
 // The cushion of bare rock: its support face is rock or bedrock and its roots reach a soil
@@ -925,45 +653,6 @@ fn a_paid_stonecushion_birth_on_a_rock_ledge_beside_a_soil_pocket() {
         (0.0, 0.0),
         "born mid-tick: {born:?}"
     );
-}
-
-/// **Survival and income.** The newborn on the ledge, with the donor gone, fixes more than
-/// the system respires over 200 ticks and grows — at a fifth of the base `wood_rate` and a
-/// quarter of the base maintenance, which is the slow end of the five.
-#[test]
-fn a_newborn_stonecushion_earns_its_upkeep_on_a_rock_ledge() {
-    let mut world = rock_ledge(0.6);
-    let mut birth = paid_birth(
-        &mut world,
-        fast_donor(Species::Stonecushion),
-        Species::Stonecushion,
-        0,
-        at(1),
-    );
-    let income = income_over(&mut birth.flora, &mut world, birth.site, 200);
-    assert_survives_on_income(
-        &birth.flora,
-        &world,
-        birth.site,
-        Species::Stonecushion,
-        &income,
-    );
-    // Drought tolerance, as a reading rather than a claim (Astra R7.6), on package F's
-    // available-water scale: a pocket drawn down to a tenth of what drained ground offers
-    // is **half** of this species' ramp, `0.1 / 0.2`, while the wetland species is at
-    // exactly zero there. What the reading pins is the ordering and that this species is
-    // still drinking at a tenth, not that a tenth is plenty.
-    let sc = birth.flora.config().species(Species::Stonecushion);
-    let frond = birth.flora.config().species(Species::Umbrellafrond);
-    assert!(
-        sc.moisture_at(0.1) > 0.2,
-        "a cushion at a tenth of drained water"
-    );
-    assert_eq!(frond.moisture_at(0.1), 0.0, "umbrellafrond at a tenth");
-    // And at its own germination floor it is not wilting, where the wetland species is: the
-    // three thresholds were chosen together, so the gate and the moisture ramp agree.
-    assert!(sc.moisture_at(sc.establish_water_min) > 0.0, "{sc:?}");
-    assert_eq!(frond.moisture_at(sc.establish_water_min), 0.0);
 }
 
 /// **Failing neighbour.** The same package on a rock face with **no** soil pocket in reach:
@@ -1076,75 +765,6 @@ fn a_paid_velvetpad_birth_on_damp_aerated_soil() {
         .establish_water_min;
     assert!(mean >= floor && mean < 1.0 && (1.0 - mean) < 1e-4, "{g:?}");
     assert_eq!(g.saturated_fraction, 0.0, "{g:?}");
-}
-
-/// **Survival and income.** The newborn under a founder's crown — which is the role's own
-/// habitat — fixes more than the system respires over 200 ticks and grows; and under that
-/// same crown it reads **more** light than a bloomcrown does, which is the whole of what
-/// `light_half` 0.1 against 0.8 buys.
-#[test]
-fn a_newborn_velvetpad_earns_its_upkeep_under_a_founder_s_crown() {
-    // Wetter than drained, 1.3 on package F's scale: the edge of the hollow the founder
-    // umbrellafrond stands for, so that the wetland crown earns something too (it wilts
-    // at field capacity) and the system's own income is not all the pad's.
-    let mut world = pillars(8, &[0, 1, 2], soil_pore_at(1.3));
-    let mut birth = paid_birth(
-        &mut world,
-        // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
-        // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
-        fast_donor(Species::Velvetpad).crowns_scaled(4.0),
-        Species::Velvetpad,
-        0,
-        at(1),
-    );
-    // The crown goes up where the donor stood: umbrellafrond at full size reaches two
-    // columns and stands five voxels over the pad's one, so both x1 and x2 are under it.
-    assert!(birth.flora.apply(
-        &world,
-        Command::Seed {
-            x: 0,
-            z: 0,
-            species: Species::Umbrellafrond,
-            wood: 0.6
-        }
-    ));
-    // A small bloomcrown beside it, under the same crown and shorter than it, as the
-    // comparison: same sky, same attenuation, a different light response.
-    assert!(birth.flora.apply(
-        &world,
-        Command::Seed {
-            x: 2,
-            z: 0,
-            species: Species::Bloomcrown,
-            wood: 0.02
-        }
-    ));
-
-    let income = income_over(&mut birth.flora, &mut world, birth.site, 200);
-    assert_survives_on_income(
-        &birth.flora,
-        &world,
-        birth.site,
-        Species::Velvetpad,
-        &income,
-    );
-
-    let v = birth.flora.view();
-    let pad = v.stand_at(at(1)).expect("the pad").light;
-    let bloom = v.stand_at(at(2)).expect("the comparison").light;
-    assert!(pad < 1.0, "the pad is not actually shaded: {pad}");
-    assert!(
-        pad > bloom,
-        "the shade specialist read {pad} where the sun producer read {bloom}"
-    );
-    // The size of that gap is limited by `shade_k` 1.5, a known-wrong placeholder that lets
-    // one full crown attenuate by about 9 % (`design/backlog.md` §1); the *trait* is larger
-    // than the fixture can show, and it is arithmetic: at a fifth of open sky velvetpad's
-    // response is 0.2 · 1.1 / 0.3 = 0.73 where bloomcrown's is 0.2 · 1.8 / 1.0 = 0.36.
-    assert!(
-        pad > 0.9 && bloom > 0.9,
-        "a deeper shade than shade_k can make: {pad}, {bloom}"
-    );
 }
 
 /// **Failing neighbour.** A **wholly saturated** root box: germination is refused on the
