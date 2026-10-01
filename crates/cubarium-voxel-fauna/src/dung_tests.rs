@@ -3,7 +3,7 @@
 //! as introduced matter, so the layer's residuals stay closed) and call `assimilate` and
 //! `respire` itself.
 
-use super::{GUT_VOID_S, Respiration, assimilate, respire};
+use super::{Respiration, assimilate, respire};
 use crate::{
     Actions, Command, DT, Fauna, FaunaConfig, Founder, Scripted, SpeciesConfig, StartingStores,
 };
@@ -82,7 +82,7 @@ fn give_gut(fauna: &mut Fauna, i: usize, t: Taken) {
 }
 
 fn period() -> u64 {
-    (GUT_VOID_S / DT).round() as u64
+    (crate::LifeConfig::default().gut_void_s / DT).round() as u64
 }
 
 fn assert_fauna_closes(fauna: &Fauna, when: &str) {
@@ -113,7 +113,7 @@ fn assert_flora_closes(flora: &Flora, when: &str) {
     }
 }
 
-/// The gut is kept until the tick an animal's age reaches a multiple of `GUT_VOID_S`
+/// The gut is kept until the tick an animal's age reaches a multiple of `gut_void_s`
 /// (600 ticks at 20 Hz), not a tick earlier, and then lands whole as litter on the face
 /// the animal stands on.
 #[test]

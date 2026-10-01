@@ -1,10 +1,10 @@
 //! The heuristics' feed gate under the mass-scaled taste (mass round, 2026-09-29): taste's
 //! reference is `M_EMIT x mass_scale`, so at the shipped x30 a whole springturf or a
 //! starter litter tile tastes ~0.05. Both foragers feed on any food the mouth tastes
-//! (cue above FEED_GATE, 0.02) and not on none. No ticks.
+//! (cue above `feed_gate`, 0.02) and not on none. No ticks.
 
 use cubarium_voxel_fauna::{
-    BlindForager, BrowserForager, Controller, FEED_GATE, Founder, Response,
+    BlindForager, BrowserForager, Controller, Founder, TeacherConfig, Response,
 };
 
 fn tasting(founder: Founder, cue: f64) -> Vec<f64> {
@@ -26,7 +26,7 @@ fn feeds(c: &mut dyn Controller, founder: Founder, cue: f64) -> bool {
 
 #[test]
 fn both_foragers_feed_on_any_food_they_taste() {
-    assert_eq!(FEED_GATE, 0.02);
+    assert_eq!(TeacherConfig::default().feed_gate, 0.02);
     // The two grazing foragers; the lanternjaw's ambush feeds by its own rule.
     for founder in [Founder::Blind, Founder::Browser] {
         let mut c: Box<dyn Controller> = match founder {

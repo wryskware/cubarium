@@ -27,6 +27,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::TeacherConfig;
 use crate::manifest::{Founder, Manifest, Transfer};
 
 /// The three bounded local actions, in manifest order: forward effort, signed turn
@@ -346,39 +347,10 @@ fn module_slot(manifest: &Manifest, name: &str) -> crate::manifest::Module {
         .unwrap_or_else(|| panic!("manifest has no {name} module"))
 }
 
-// The teachers' escape reflex (contract v2, P5-A item 9). Heuristic internals, not model
-// numbers: they shape a teacher's behaviour and nothing in the world reads them.
-
-/// `Self.motor_delivery` below this is a refused motor: a wall, a drop past the climb,
-/// water past the wade depth, or the strip's edge.
-const MOTOR_REFUSED: f64 = 0.5;
-/// Controller samples an escape lasts once triggered: a full-effort turn, the first
-/// sample standing still and the rest creeping.
-const ESCAPE_SAMPLES: u32 = 3;
-/// Forward effort while turning away, after the first sample.
-const ESCAPE_CREEP: f64 = 0.3;
-/// The share of a sector's 15 rays that are clear on flat open ground: the two
-/// downward pitch rows (−40°, −20°) hit the floor and the other nine do not. More clear
-/// than that, by half a ray, means a downward ray found nothing within range ahead.
-const FLAT_CLEAR: f64 = 9.0 / 15.0;
-const HALF_RAY: f64 = 0.5 / 15.0;
-/// A forward sector whose only hits are the floor rows, reading this far away on
-/// average, is looking over an edge rather than at the ground ahead: the floor rows of
-/// an adult on flat ground read ≈0.83, a one-voxel step down ≈0.65 (walkable), a drop of
-/// two voxels ≈0.47.
-const DROP_PROXIMITY: f64 = 0.55;
-
-// The teachers' no-signal search (P5-C S3): a **correlated walk**. Heuristic internals,
-// backlog §1 placeholders: nothing in the world reads them.
-
-/// Samples a wander holds its heading, drawn uniformly from this range: 2–6 s at the
-/// 0.25 s cadence.
-const WANDER_HOLD: (u32, u32) = (8, 24);
-/// Samples a wander turn lasts, drawn uniformly from this range, at [`WANDER_TURN`]
-/// effort: a bounded random angle.
-const WANDER_TURN_SAMPLES: (u32, u32) = (1, 4);
-/// Turn effort while a wander turn runs.
-const WANDER_TURN: f64 = 0.8;
+// The teachers' reflexes (escape, correlated walk, feed gate, ambush) are the knobs of
+// [`TeacherConfig`](crate::TeacherConfig): heuristic internals, not model numbers — they
+// shape a teacher's behaviour, and the live animals run on them until a policy is
+// installed.
 
 /// A **correlated walk** for when a teacher has no signal: hold the heading for a random
 /// number of samples, then turn by a bounded random angle (a random number of samples at
@@ -407,8 +379,12 @@ impl Wander {
         lo + (self.next() % u64::from(hi - lo + 1)) as u32
     }
 
+    fn hold(&mut self, cfg: &TeacherConfig) -> u32 {
+        self.draw((cfg.wander_hold_min, cfg.wander_hold_max))
+    }
+
     /// Seed from the observation on the first call after a reset.
-    fn seed(&mut self, o: &[f64]) {
+    fn seed(&mut self, o: &[f64], cfg: &TeacherConfig) {
         if self.seeded {
             return;
         }
@@ -416,29 +392,29 @@ impl Wander {
         self.state = o.iter().fold(0x5EED_0F_A11C_E5u64, |h, v| {
             (h ^ v.to_bits()).wrapping_mul(0x0100_0000_01B3)
         });
-        self.hold = self.draw(WANDER_HOLD);
+        self.hold = self.hold(cfg);
     }
 
     /// This sample's wander turn effort.
-    fn turn(&mut self, o: &[f64]) -> f64 {
-        self.seed(o);
+    fn turn(&mut self, o: &[f64], cfg: &TeacherConfig) -> f64 {
+        self.seed(o, cfg);
         if self.turning > 0 {
             self.turning -= 1;
             if self.turning == 0 {
-                self.hold = self.draw(WANDER_HOLD);
+                self.hold = self.hold(cfg);
             }
-            return self.sign * WANDER_TURN;
+            return self.sign * cfg.wander_turn;
         }
         if self.hold > 0 {
             self.hold -= 1;
             return 0.0;
         }
         self.sign = if self.next() & 1 == 0 { 1.0 } else { -1.0 };
-        self.turning = self.draw(WANDER_TURN_SAMPLES) - 1;
+        self.turning = self.draw((cfg.wander_turn_samples_min, cfg.wander_turn_samples_max)) - 1;
         if self.turning == 0 {
-            self.hold = self.draw(WANDER_HOLD);
+            self.hold = self.hold(cfg);
         }
-        self.sign * WANDER_TURN
+        self.sign * cfg.wander_turn
     }
 
     /// Whichever way the walk last turned: the side an escape turns to when nothing else
@@ -448,35 +424,27 @@ impl Wander {
     }
 
     /// A block or a signal interrupts the walk: hold again afterwards.
-    fn interrupt(&mut self) {
+    fn interrupt(&mut self, cfg: &TeacherConfig) {
         self.turning = 0;
         if self.seeded {
-            self.hold = self.draw(WANDER_HOLD);
+            self.hold = self.hold(cfg);
         }
     }
 }
 
 /// The escape reflex both teachers share: returns `Some((forward, turn))` while an
 /// escape is running, arming it when `hazard` is seen.
-fn escape(escape: &mut u32, hazard: bool, turn: f64) -> Option<(f64, f64)> {
+fn escape(cfg: &TeacherConfig, escape: &mut u32, hazard: bool, turn: f64) -> Option<(f64, f64)> {
     if hazard {
-        *escape = ESCAPE_SAMPLES;
+        *escape = cfg.escape_samples;
         return Some((0.0, turn));
     }
     if *escape > 0 {
         *escape -= 1;
-        return Some((ESCAPE_CREEP, turn));
+        return Some((cfg.escape_creep, turn));
     }
     None
 }
-
-/// The heuristics' **feed gate**: they feed when the mouth's taste cue is above this.
-/// 0.02, "any food" (mass round, 2026-09-29): taste's reference is `M_EMIT x
-/// mass_scale`, so at the shipped x30 a whole springturf or a starter litter tile tastes
-/// ~0.05, and the old gates (0.2 shredder, 0.25 browser: ~2 min of a x30 body's need)
-/// passed no single stand. A bite still shrinks with the stock, and a parker leaves a
-/// stand that no longer tastes of food.
-pub const FEED_GATE: f64 = 0.02;
 
 /// Observation-only **blind foraging** heuristic: go up the litter cue's response and
 /// trend while they support it, feed when the mouth tastes litter, turn away from contact
@@ -499,13 +467,22 @@ pub struct BlindForager {
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     chem: crate::manifest::Module,
+    /// The reflexes' numbers ([`TeacherConfig`]).
+    cfg: TeacherConfig,
 }
 
 impl BlindForager {
-    /// The blind founder's heuristic, pre-indexed against its manifest.
+    /// The blind founder's heuristic, pre-indexed against its manifest, on the default
+    /// [`TeacherConfig`].
     pub fn new() -> BlindForager {
+        BlindForager::with_config(TeacherConfig::default())
+    }
+
+    /// The blind founder's heuristic on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
+    pub fn with_config(cfg: TeacherConfig) -> BlindForager {
         let manifest = Founder::Blind.manifest();
         BlindForager {
+            cfg,
             turn_bias: 1.0,
             wander: Wander::default(),
             escape: 0,
@@ -544,11 +521,14 @@ impl Controller for BlindForager {
                 feed: 0.0,
             });
         }
+        let cfg = self.cfg;
         let front_blocked = front > 0.5;
-        let forward = if front_blocked { 0.1 } else { 1.0 };
-        // Feed on any food the mouth tastes ([`FEED_GATE`]). Failed attempts off the
-        // stock are free — the gate costs nothing but keeps feeding honest.
-        let feed = if taste_valid > 0.5 && taste_resp > FEED_GATE {
+        let forward = if front_blocked { cfg.blocked_forward } else { 1.0 };
+        // Feed on any food the mouth tastes ([`TeacherConfig::feed_gate`], 0.02: "any
+        // food"; taste's reference is `emit_reference × mass_scale`, so at the shipped x30
+        // a whole springturf or a starter litter tile tastes ~0.05). Failed attempts off
+        // the stock are free — the gate costs nothing but keeps feeding honest.
+        let feed = if taste_valid > 0.5 && taste_resp > cfg.feed_gate {
             1.0
         } else {
             0.0
@@ -562,8 +542,8 @@ impl Controller for BlindForager {
         } else {
             self.wander.side()
         };
-        if let Some((forward, turn)) = escape(&mut self.escape, o[7] < MOTOR_REFUSED, away) {
-            self.wander.interrupt();
+        if let Some((forward, turn)) = escape(&cfg, &mut self.escape, o[7] < cfg.motor_refused, away) {
+            self.wander.interrupt(&cfg);
             return Response::Bounded(Actions {
                 forward,
                 turn,
@@ -573,25 +553,25 @@ impl Controller for BlindForager {
         let turn = if front_blocked {
             // A wall is a physical feature, not a target: turn away from the contacted
             // side, or fall back on the walk's last side.
-            self.wander.interrupt();
+            self.wander.interrupt(&cfg);
             if left > right {
                 -1.0
             } else if right > left {
                 1.0
             } else {
-                self.wander.side() * 0.8
+                self.wander.side() * cfg.blind_turn
             }
-        } else if chem_valid > 0.5 && chem_resp >= 0.02 {
-            self.wander.interrupt();
-            if chem_trend > 0.05 {
+        } else if chem_valid > 0.5 && chem_resp >= cfg.chem_response_gate {
+            self.wander.interrupt(&cfg);
+            if chem_trend > cfg.chem_trend_gate {
                 // A rising signal: hold the heading the body already faces.  The
                 // Stage-A arena deliberately starts aimed at the food; even the old
                 // small steering term bent that direct approach into a circle before
                 // the mouth could reach the patch.
                 0.0
-            } else if chem_trend < -0.05 {
+            } else if chem_trend < -cfg.chem_trend_gate {
                 // A falling signal: change course to a remembered new preference.
-                -self.turn_bias * 0.8
+                -self.turn_bias * cfg.blind_turn
             } else {
                 // The initial chemical sample has no temporal history, hence a flat
                 // trend.  It still means "continue this observable approach", not
@@ -600,7 +580,7 @@ impl Controller for BlindForager {
             }
         } else {
             // No signal: cover ground with a correlated walk (S3).
-            self.wander.turn(o)
+            self.wander.turn(o, &cfg)
         };
         Response::Bounded(Actions {
             forward,
@@ -639,13 +619,22 @@ pub struct BrowserForager {
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     cone: crate::manifest::Module,
+    /// The reflexes' numbers ([`TeacherConfig`]).
+    cfg: TeacherConfig,
 }
 
 impl BrowserForager {
-    /// The browser founder's heuristic, pre-indexed against its manifest.
+    /// The browser founder's heuristic, pre-indexed against its manifest, on the default
+    /// [`TeacherConfig`].
     pub fn new() -> BrowserForager {
+        BrowserForager::with_config(TeacherConfig::default())
+    }
+
+    /// The browser founder's heuristic on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
+    pub fn with_config(cfg: TeacherConfig) -> BrowserForager {
         let manifest = Founder::Browser.manifest();
         BrowserForager {
+            cfg,
             wander_bias: 1.0,
             wander_ticks: 0,
             escape: 0,
@@ -670,7 +659,8 @@ impl Controller for BrowserForager {
         let base = self.cone.offset;
         // Per sector, the foliage fraction sits at base + k*6 + 2.
         let frac = [o[base + 2], o[base + 8], o[base + 14]];
-        let feed = if taste_valid > 0.5 && taste_resp > FEED_GATE {
+        let cfg = self.cfg;
+        let feed = if taste_valid > 0.5 && taste_resp > cfg.feed_gate {
             1.0
         } else {
             0.0
@@ -678,10 +668,11 @@ impl Controller for BrowserForager {
         // The forward sector (s1) read against flat ground: its downward rows escaping,
         // or its only hits far below.
         let (clear, proximity) = (o[base + 6], o[base + 7]);
-        let drop = clear > FLAT_CLEAR + HALF_RAY
-            || (clear >= FLAT_CLEAR - HALF_RAY && proximity < DROP_PROXIMITY);
+        let drop = clear > cfg.flat_clear + cfg.half_ray
+            || (clear >= cfg.flat_clear - cfg.half_ray && proximity < cfg.drop_proximity);
         let away = self.wander_bias;
-        if let Some((forward, turn)) = escape(&mut self.escape, o[7] < MOTOR_REFUSED || drop, away)
+        if let Some((forward, turn)) =
+            escape(&cfg, &mut self.escape, o[7] < cfg.motor_refused || drop, away)
         {
             self.wander_ticks = 0;
             return Response::Bounded(Actions {
@@ -694,26 +685,29 @@ impl Controller for BrowserForager {
         let turn;
         // Gaze: turn toward the richest sector — sector 0 is −60° (left of forward), so
         // facing it needs a negative turn effort; sector 2 (+60°) needs positive.
-        if frac[0] > 0.02 || frac[1] > 0.02 || frac[2] > 0.02 {
+        if frac[0] > cfg.browser_sector_gate
+            || frac[1] > cfg.browser_sector_gate
+            || frac[2] > cfg.browser_sector_gate
+        {
             self.wander_ticks = 0;
             if frac[0] >= frac[1] && frac[0] >= frac[2] {
-                turn = -0.8;
+                turn = -cfg.browser_gaze_turn;
                 self.wander_bias = -1.0;
             } else if frac[2] > frac[1] {
-                turn = 0.8;
+                turn = cfg.browser_gaze_turn;
                 self.wander_bias = 1.0;
             } else {
                 turn = 0.0;
             }
         } else {
             self.wander_ticks += 1;
-            if self.wander_ticks >= 3 {
+            if self.wander_ticks >= cfg.browser_wander_flip {
                 self.wander_ticks = 0;
                 self.wander_bias = -self.wander_bias;
             }
-            turn = self.wander_bias * 0.6;
+            turn = self.wander_bias * cfg.browser_wander_turn;
         }
-        let forward = if front > 0.5 { 0.1 } else { 1.0 };
+        let forward = if front > 0.5 { cfg.blocked_forward } else { 1.0 };
         Response::Bounded(Actions {
             forward,
             turn,
@@ -734,19 +728,6 @@ impl Controller for BrowserForager {
 
 // The lanternjaw's ambush teacher (P1, predation §2.12's "ambush teacher"). Heuristic
 // internals: nothing in the world reads them.
-
-/// A centre-sector body this close (`body_proximity`, `1 − d / 2 m`) is inside or at the
-/// edge of the strike capsule of an adult (jaw 0.5 m + reach 0.6 m ahead of its centre).
-const STRIKE_PROXIMITY: f64 = 0.45;
-/// Forward effort while stalking a body: 0.07 × 0.6 m/s = 0.042 m/s, under 0.1 BL/s for
-/// every lanternjaw down to a hatchling, so a stalker stays still to its prey's eyes.
-const STALK: f64 = 0.07;
-/// A crown this near ahead (`foliage_proximity`, within about 0.8 m) is a waiting spot.
-const NEAR_CROWN: f64 = 0.6;
-/// Samples it waits at a spot with nothing in sight before it leaves: 60 s.
-const WAIT_SAMPLES: u32 = 240;
-/// Samples it walks off after a fruitless wait, not turning to foliage: 5 s.
-const LEAVE_SAMPLES: u32 = 20;
 
 /// What the ambush teacher is doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -785,13 +766,22 @@ pub struct LanternjawAmbush {
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     cone: crate::manifest::Module,
+    /// The reflexes' numbers ([`TeacherConfig`]).
+    cfg: TeacherConfig,
 }
 
 impl LanternjawAmbush {
-    /// The lanternjaw's heuristic, pre-indexed against its manifest.
+    /// The lanternjaw's heuristic, pre-indexed against its manifest, on the default
+    /// [`TeacherConfig`].
     pub fn new() -> LanternjawAmbush {
+        LanternjawAmbush::with_config(TeacherConfig::default())
+    }
+
+    /// The lanternjaw's heuristic on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
+    pub fn with_config(cfg: TeacherConfig) -> LanternjawAmbush {
         let manifest = Founder::Lanternjaw.manifest();
         LanternjawAmbush {
+            cfg,
             mode: Ambush::Seek,
             wait_left: 0,
             leave_left: 0,
@@ -827,6 +817,7 @@ impl Default for LanternjawAmbush {
 
 impl Controller for LanternjawAmbush {
     fn drive(&mut self, o: &[f64]) -> Response {
+        let cfg = self.cfg;
         let reserve = o[1];
         let front = o[self.contact.offset];
         let (taste_cue, taste_valid) = (o[self.taste.offset], o[self.taste.offset + 2]);
@@ -845,24 +836,25 @@ impl Controller for LanternjawAmbush {
         }
         // A body in sight: face it, and creep up on one ahead with feed held.
         if body.iter().any(|&b| b > 0.0) {
-            self.wait_left = WAIT_SAMPLES;
+            self.wait_left = cfg.wait_samples;
             if body[1] > 0.0 && body[1] >= body[0] && body[1] >= body[2] {
-                let forward = if body_near >= STRIKE_PROXIMITY || front > 0.5 {
+                let forward = if body_near >= cfg.strike_proximity || front > 0.5 {
                     0.0
                 } else {
-                    STALK
+                    cfg.stalk
                 };
                 return self.act(Ambush::Wait, forward, 0.0, 1.0);
             }
-            let turn = if body[0] >= body[2] { -0.4 } else { 0.4 };
+            let turn = if body[0] >= body[2] { -cfg.ambush_face_turn } else { cfg.ambush_face_turn };
             return self.act(Ambush::Wait, 0.0, turn, 1.0);
         }
         // The browser teacher's escape from a refused motor or a drop ahead.
         let (clear, proximity) = (o[base + 6], o[base + 7]);
-        let drop = clear > FLAT_CLEAR + HALF_RAY
-            || (clear >= FLAT_CLEAR - HALF_RAY && proximity < DROP_PROXIMITY);
+        let drop = clear > cfg.flat_clear + cfg.half_ray
+            || (clear >= cfg.flat_clear - cfg.half_ray && proximity < cfg.drop_proximity);
         let away = self.wander_bias;
-        if let Some((forward, turn)) = escape(&mut self.escape, o[7] < MOTOR_REFUSED || drop, away)
+        if let Some((forward, turn)) =
+            escape(&cfg, &mut self.escape, o[7] < cfg.motor_refused || drop, away)
         {
             return self.act(Ambush::Seek, forward, turn, 0.0);
         }
@@ -870,7 +862,7 @@ impl Controller for LanternjawAmbush {
             Ambush::Wait if self.wait_left > 0 => {
                 self.wait_left -= 1;
                 if self.wait_left == 0 {
-                    self.leave_left = LEAVE_SAMPLES;
+                    self.leave_left = cfg.leave_samples;
                     self.wander_bias = -self.wander_bias;
                     return self.act(Ambush::Leave, 1.0, self.wander_bias, 0.0);
                 }
@@ -878,39 +870,39 @@ impl Controller for LanternjawAmbush {
             }
             Ambush::Leave if self.leave_left > 0 => {
                 self.leave_left -= 1;
-                let forward = if front > 0.5 { 0.1 } else { 1.0 };
-                return self.act(Ambush::Leave, forward, 0.2 * self.wander_bias, 0.0);
+                let forward = if front > 0.5 { cfg.blocked_forward } else { 1.0 };
+                return self.act(Ambush::Leave, forward, cfg.ambush_leave_turn * self.wander_bias, 0.0);
             }
             _ => {}
         }
         // Seek a crown; stop beside one and wait there.
-        if foliage[1] > 0.02 && foliage_near >= NEAR_CROWN {
-            self.wait_left = WAIT_SAMPLES;
+        if foliage[1] > cfg.browser_sector_gate && foliage_near >= cfg.near_crown {
+            self.wait_left = cfg.wait_samples;
             return self.act(Ambush::Wait, 0.0, 0.0, 0.0);
         }
-        let forward = if front > 0.5 { 0.1 } else { 1.0 };
-        let turn = if foliage.iter().any(|&f| f > 0.02) {
+        let forward = if front > 0.5 { cfg.blocked_forward } else { 1.0 };
+        let turn = if foliage.iter().any(|&f| f > cfg.browser_sector_gate) {
             self.wander_ticks = 0;
             if foliage[0] >= foliage[1] && foliage[0] >= foliage[2] {
-                -0.8
+                -cfg.ambush_gaze_turn
             } else if foliage[2] > foliage[1] {
-                0.8
+                cfg.ambush_gaze_turn
             } else {
                 0.0
             }
         } else {
             self.wander_ticks += 1;
-            if self.wander_ticks >= 8 {
+            if self.wander_ticks >= cfg.ambush_wander_flip {
                 self.wander_ticks = 0;
                 self.wander_bias = -self.wander_bias;
             }
-            self.wander_bias * 0.4
+            self.wander_bias * cfg.ambush_wander_turn
         };
         self.act(Ambush::Seek, forward, turn, 0.0)
     }
 
     fn reset(&mut self) {
-        *self = LanternjawAmbush::new();
+        *self = LanternjawAmbush::with_config(self.cfg);
     }
 
     fn lure(&self) -> f64 {
@@ -924,8 +916,8 @@ mod tests {
     use crate::manifest::Founder;
 
     /// S3: with no signal the shredder's teacher walks a correlated walk — they hold their heading
-    /// for at least `WANDER_HOLD.0` samples between turns, a turn lasts at most
-    /// `WANDER_TURN_SAMPLES.1` samples, both signs occur, and two bodies with different
+    /// for at least `wander_hold_min` samples between turns, a turn lasts at most
+    /// `wander_turn_samples_max` samples, both signs occur, and two bodies with different
     /// senses walk different walks.
     #[test]
     fn the_no_signal_walk_holds_heading_between_bounded_turns() {
@@ -967,13 +959,13 @@ mod tests {
                 "{founder:?}: several turns in 400 samples"
             );
             assert!(
-                holds.iter().all(|&h| h >= WANDER_HOLD.0),
+                holds.iter().all(|&h| h >= TeacherConfig::default().wander_hold_min),
                 "{founder:?}: the heading is held between turns: {holds:?}"
             );
             assert!(
                 runs.iter()
                     .filter(|r| r.0)
-                    .all(|r| r.1 <= WANDER_TURN_SAMPLES.1),
+                    .all(|r| r.1 <= TeacherConfig::default().wander_turn_samples_max),
                 "{founder:?}: a turn is a bounded angle"
             );
             let turning = turns.iter().filter(|t| **t != 0.0).count();

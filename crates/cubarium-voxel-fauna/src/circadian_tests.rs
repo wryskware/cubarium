@@ -105,21 +105,21 @@ fn the_founders_have_their_activity_and_the_rest_state_costs_half() {
 #[test]
 fn an_activity_is_awake_in_its_own_phase_and_always_with_the_clock_off() {
     // Diurnal: awake above 0.3 daylight; nocturnal: below it.
-    assert!(Activity::Diurnal.awake(true, 1.0));
-    assert!(!Activity::Diurnal.awake(true, 0.0));
-    assert!(!Activity::Diurnal.awake(true, 0.29));
-    assert!(Activity::Diurnal.awake(true, 0.31));
-    assert!(Activity::Nocturnal.awake(true, 0.0));
-    assert!(!Activity::Nocturnal.awake(true, 1.0));
-    assert!(Activity::Nocturnal.awake(true, 0.29));
-    assert!(!Activity::Nocturnal.awake(true, 0.31));
+    assert!(Activity::Diurnal.awake(true, 1.0, &crate::LifeConfig::default()));
+    assert!(!Activity::Diurnal.awake(true, 0.0, &crate::LifeConfig::default()));
+    assert!(!Activity::Diurnal.awake(true, 0.29, &crate::LifeConfig::default()));
+    assert!(Activity::Diurnal.awake(true, 0.31, &crate::LifeConfig::default()));
+    assert!(Activity::Nocturnal.awake(true, 0.0, &crate::LifeConfig::default()));
+    assert!(!Activity::Nocturnal.awake(true, 1.0, &crate::LifeConfig::default()));
+    assert!(Activity::Nocturnal.awake(true, 0.29, &crate::LifeConfig::default()));
+    assert!(!Activity::Nocturnal.awake(true, 0.31, &crate::LifeConfig::default()));
     // Crepuscular: in the twilight of either end, not in full night or full day.
-    assert!(!Activity::Crepuscular.awake(true, 0.0));
-    assert!(!Activity::Crepuscular.awake(true, 1.0));
-    assert!(Activity::Crepuscular.awake(true, 0.5));
+    assert!(!Activity::Crepuscular.awake(true, 0.0, &crate::LifeConfig::default()));
+    assert!(!Activity::Crepuscular.awake(true, 1.0, &crate::LifeConfig::default()));
+    assert!(Activity::Crepuscular.awake(true, 0.5, &crate::LifeConfig::default()));
     // Always is always.
     for d in [0.0, 0.5, 1.0] {
-        assert!(Activity::Always.awake(true, d));
+        assert!(Activity::Always.awake(true, d, &crate::LifeConfig::default()));
     }
     // The clock off: everyone, whatever the number says.
     for a in [
@@ -129,7 +129,7 @@ fn an_activity_is_awake_in_its_own_phase_and_always_with_the_clock_off() {
         Activity::Always,
     ] {
         for d in [0.0, 0.5, 1.0] {
-            assert!(a.awake(false, d), "{a:?} sleeps with the clock off at {d}");
+            assert!(a.awake(false, d, &crate::LifeConfig::default()), "{a:?} sleeps with the clock off at {d}");
         }
     }
 }

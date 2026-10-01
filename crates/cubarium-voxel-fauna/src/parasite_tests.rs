@@ -92,7 +92,7 @@ fn fast_day() -> (World, u64) {
     for t in 1..=120u64 {
         probe.step();
         let now = probe.life_daylight();
-        if now < Activity::DAY_LINE && last >= Activity::DAY_LINE {
+        if now < crate::LifeConfig::default().day_line && last >= crate::LifeConfig::default().day_line {
             return (world, t);
         }
         last = now;

@@ -4,7 +4,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, DT, Material, World};
 use cubarium_voxel_fauna::{
-    Command, Departure, Fauna, FaunaConfig, Founder, Reproduction, StartingStores,
+    Command, Departure, Fauna, FaunaConfig, Founder, LifeConfig, Reproduction, StartingStores,
     draw_lifespan_ticks,
 };
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraConfig, Site};
@@ -166,7 +166,7 @@ fn founders_ages_at_death_are_spread_out() {
 fn the_draw_is_within_its_spread_and_differs_by_body() {
     let median = 1000.0 * DT; // 1000 ticks
     let newborn: Vec<u64> = (0..200)
-        .map(|id| draw_lifespan_ticks(median, id, 17, false))
+        .map(|id| draw_lifespan_ticks(&LifeConfig::default(), median, id, 17, false))
         .collect();
     assert!(
         newborn.iter().all(|&t| (800..=1200).contains(&t)),
@@ -179,7 +179,7 @@ fn the_draw_is_within_its_spread_and_differs_by_body() {
     d.dedup();
     assert!(d.len() > 150, "bodies draw their own");
     let arriving: Vec<u64> = (0..200)
-        .map(|id| draw_lifespan_ticks(median, id, 17, true))
+        .map(|id| draw_lifespan_ticks(&LifeConfig::default(), median, id, 17, true))
         .collect();
     assert!(
         arriving.iter().all(|&t| (400..=1200).contains(&t)),
@@ -187,7 +187,7 @@ fn the_draw_is_within_its_spread_and_differs_by_body() {
     );
     assert!(arriving.iter().any(|&t| t < 700) && arriving.iter().any(|&t| t > 900));
     assert_eq!(
-        draw_lifespan_ticks(0.0, 3, 17, false),
+        draw_lifespan_ticks(&LifeConfig::default(), 0.0, 3, 17, false),
         0,
         "no median, no lifespan"
     );

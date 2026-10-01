@@ -128,8 +128,8 @@ fn tick_inner(
     let dusk = clock_on
         && fauna
             .last_daylight
-            .is_some_and(|before| before >= crate::Activity::DAY_LINE)
-        && daylight < crate::Activity::DAY_LINE;
+            .is_some_and(|before| before >= fauna.config.life.day_line)
+        && daylight < fauna.config.life.day_line;
     fauna.last_daylight = Some(daylight);
 
     cubarium_voxel::voxel_phase!(FaunaStep, {
@@ -374,14 +374,12 @@ fn book_respired(fauna: &mut Fauna, paid: f64, kind: Respiration) {
     }
 }
 
-/// How often an animal voids its gut, seconds. Review-tunable placeholder.
-pub(crate) const GUT_VOID_S: f64 = 30.0;
-
-/// Step 2, last: every animal whose age is a multiple of [`GUT_VOID_S`] empties its gut
+/// Step 2, last: every animal whose age is a multiple of [`crate::LifeConfig::gut_void_s`]
+/// (30 s) empties its gut
 /// onto its own face as litter. Birth ticks stagger the voids; a gut holding only mineral
 /// goes straight to the soluble pool (the flora layer's zero-organic deposit rule).
 fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
-    let period = cubarium_voxel::ticks_at_least_one(GUT_VOID_S);
+    let period = cubarium_voxel::ticks_at_least_one(fauna.config.life.gut_void_s);
     for i in 0..fauna.animals.len() {
         let a = &mut fauna.animals[i];
         if a.age_ticks % period != 0 {
@@ -404,9 +402,10 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
 /// **A rest with a reason** (predation §2.8): the same state carries the [`Rest::Sleep`]
 /// and a carnivore's [`Rest::Satiated`] — down in any phase once its reserve is at
 /// `rest_at` of its cap, up again below `wake_at` (or by the hunger rule), at its
-/// `torpor_upkeep`. A body a hit woke stays up for [`crate::ALERT_S`]; a body mid-strike
+/// `torpor_upkeep`. A body a hit woke stays up for [`crate::PredationConfig::alert_s`]; a body mid-strike
 /// does not lie down, and a recovery is dropped by a rest that outlasts it.
 fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
+    let life = fauna.config.life;
     for i in 0..fauna.animals.len() {
         let Some(founder) = fauna.animals[i].founder else {
             continue;
@@ -433,7 +432,7 @@ fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
             None
         } else if satiated {
             Some(Rest::Satiated)
-        } else if !phys.active.awake(clock_on, daylight) && hungry < phys.wake_hunger {
+        } else if !phys.active.awake(clock_on, daylight, &life) && hungry < phys.wake_hunger {
             Some(Rest::Sleep)
         } else {
             None
@@ -489,17 +488,18 @@ fn maintenance(fauna: &mut Fauna) {
     }
 }
 
-/// Step 2: **healing** (predation §2.4). A wound heals at [`crate::WOUND_HEAL_PER_S`],
-/// each unit costing [`crate::HEAL_COST`] × its body out of the **reserve** alone: a body
+/// Step 2: **healing** (predation §2.4). A wound heals at [`crate::PredationConfig::wound_heal_per_s`],
+/// each unit costing [`crate::PredationConfig::heal_cost`] × its body out of the **reserve** alone: a body
 /// whose reserve cannot pay heals only as far as it can, and a starving one not at all.
 fn heal(fauna: &mut Fauna) {
+    let cfg = fauna.config.predation;
     for i in 0..fauna.animals.len() {
         let a = &fauna.animals[i];
         if !(a.wound > 0.0) || !(a.reserve > 0.0) || !(a.body > 0.0) {
             continue;
         }
-        let unit = crate::HEAL_COST * a.body;
-        let mut healed = a.wound.min(crate::WOUND_HEAL_PER_S * DT);
+        let unit = cfg.heal_cost * a.body;
+        let mut healed = a.wound.min(cfg.wound_heal_per_s * DT);
         if unit > 0.0 && healed * unit > a.reserve {
             healed = a.reserve / unit;
         }
@@ -518,16 +518,17 @@ fn heal(fauna: &mut Fauna) {
     }
 }
 
-/// Step 2: a **dormant egg's upkeep** (predation §2.13): [`crate::EGG_UPKEEP_PER_S`] of
+/// Step 2: a **dormant egg's upkeep** (predation §2.13): [`crate::PredationConfig::egg_upkeep_per_s`] of
 /// its own organic matter, respired with the energy at its own density; its mineral stays
 /// in the egg.
 fn egg_upkeep(fauna: &mut Fauna) {
+    let upkeep = fauna.config.predation.egg_upkeep_per_s;
     for k in 0..fauna.clutches.len() {
         let c = &mut fauna.clutches[k];
         if c.dormancy.is_none() || !(c.organic > 0.0) {
             continue;
         }
-        let paid = (crate::EGG_UPKEEP_PER_S * c.organic * DT).min(c.organic);
+        let paid = (upkeep * c.organic * DT).min(c.organic);
         let heat = pro_rata(c.energy, paid, c.organic);
         c.organic -= paid;
         c.energy -= heat;
@@ -677,7 +678,7 @@ fn controllers(
     };
     // The **predation** occupancy (bodies with volume, predation §2.2) is built only while
     // a hunter is in the world: the lanternjaw's own sight and a heuristic prey's look for
-    // a threat, out to `FLEE_SIGHT_M`. It becomes the cone's at contract v3 (P2).
+    // a threat, out to `flee_sight_m`. It becomes the cone's at contract v3 (P2).
     let hunters_here = fauna
         .animals
         .iter()
@@ -696,13 +697,13 @@ fn controllers(
             &fv,
             &fauna.view(),
             predators.iter().copied(),
-            Founder::Browser.manifest().cone_range_m.max(FLEE_SIGHT_M),
+            Founder::Browser.manifest().cone_range_m.max(fauna.config.predation.flee_sight_m),
         )
     });
     for i in due {
         let id = fauna.animals[i].id;
         let founder = fauna.animals[i].founder.expect("a due founder");
-        let manifest = founder.manifest();
+        let manifest = fauna.config.manifest(founder);
         // "Initial intake/loss/motion feedback is zero" (the plan's manifest rules).
         // The ticks before a body's *first* sampling are not an interval it acted in:
         // it held nothing, so there is nothing to report back about an action, and the
@@ -767,18 +768,11 @@ fn controllers(
     }
 }
 
-/// How far a sighted prey heuristic looks for a threat (predation §2.7, the grazer's 3 m).
-pub(crate) const FLEE_SIGHT_M: f64 = 3.0;
-/// The tremor, `[left + right]`, a blind prey heuristic flees (predation §2.7): a walking
-/// lanternjaw anywhere inside the 1.5 m radius (≥ 0.019), a walking grazer inside it, a
-/// walking shredder within about 0.7 m. A heuristic's number, not the model's.
-pub(crate) const FLEE_TREMOR: f64 = 0.015;
-
 /// **The flee rule** of the prey heuristics (predation §2.7), `None` when there is
 /// nothing to flee: the grazer turns away from the nearest threat it can see within 3 m
 /// ([`crate::kind_of`], so a still hunter beyond 0.5 m is not one), inside its field of
 /// view and not hidden by terrain or foliage; the blind shredder turns away from tremor
-/// above [`FLEE_TREMOR`]. Full forward, no feeding.
+/// above [`crate::PredationConfig::flee_tremor`]. Full forward, no feeding.
 fn flee(
     fauna: &Fauna,
     i: usize,
@@ -801,7 +795,7 @@ fn flee(
     };
     if founder.manifest().cone_range_m <= 0.0 {
         let [left, right] = fauna.view().tremor(view, a.id);
-        if left + right < FLEE_TREMOR {
+        if left + right < config.predation.flee_tremor {
             return None;
         }
         return Some(away(if left > right { 1.0 } else { -1.0 }));
@@ -820,7 +814,7 @@ fn flee(
         }
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
         let d = (dx * dx + dz * dz).sqrt();
-        if d > FLEE_SIGHT_M || nearest.is_some_and(|(n, _)| d >= n) {
+        if d > config.predation.flee_sight_m || nearest.is_some_and(|(n, _)| d >= n) {
             continue;
         }
         if crate::kind_of(config, a, o, d) != crate::BodyKind::Threat {
@@ -886,7 +880,7 @@ fn act(
         let (dx, dz) = crate::pose::wrapped_delta(before.x, before.z, a.pose.x, a.pose.z, ring);
         let speed = (dx * dx + dz * dz).sqrt() / DT;
         a.speed_m_s = if speed.is_finite() { speed } else { 0.0 };
-        if a.speed_m_s > crate::STILL_SPEED_BL_PER_S * length {
+        if a.speed_m_s > fauna.config.predation.still_speed_bl_per_s * length {
             a.still_ticks = 0;
         } else {
             a.still_ticks = a.still_ticks.saturating_add(1);
@@ -942,7 +936,7 @@ fn founder_act(
             a.age_ticks % founder.manifest().cadence_ticks() == 0,
         )
     };
-    let manifest = founder.manifest();
+    let manifest = fauna.config.manifest(founder);
     let phys = *fauna.config.founder(founder);
     let sc = phys.core;
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
@@ -966,12 +960,14 @@ fn founder_act(
             None => {}
         }
     }
-    // The speed cap (predation §2.4): × (1 − 0.5·wound), and half speed in a recovery.
+    // The speed cap (predation §2.4): × (1 − wound_slow·wound), and `recovery_speed`
+    // (half) in a recovery.
     {
+        let pc = &fauna.config.predation;
         let a = &fauna.animals[i];
-        let mut slow = (1.0 - 0.5 * a.wound).clamp(0.0, 1.0);
+        let mut slow = (1.0 - pc.wound_slow * a.wound).clamp(0.0, 1.0);
         if a.strike.is_some_and(|s| s.phase == StrikePhase::Recovery) {
-            slow *= 0.5;
+            slow *= pc.recovery_speed;
         }
         held.forward *= slow;
     }
@@ -1109,11 +1105,12 @@ fn founder_act(
     };
 }
 
-/// The jaw's point: the body's nose, half its length ahead of its centre.
-fn jaw_of(x: f64, z: f64, heading: f64, length_m: f64) -> (f64, f64) {
+/// The jaw's point: the body's nose, `jaw_forward_length_fraction` of its length ahead of
+/// its centre (half, for the lanternjaw).
+fn jaw_of(x: f64, z: f64, heading: f64, length_m: f64, forward_fraction: f64) -> (f64, f64) {
     (
-        x + 0.5 * length_m * heading.sin(),
-        z + 0.5 * length_m * heading.cos(),
+        x + forward_fraction * length_m * heading.sin(),
+        z + forward_fraction * length_m * heading.cos(),
     )
 }
 
@@ -1175,7 +1172,13 @@ fn prey_in_capsule(
         return None;
     }
     let ring = f64::from(view.config.width) * view.config.voxel_m;
-    let jaw = jaw_of(a.pose.x, a.pose.z, a.pose.heading_rad, geometry.length_m);
+    let jaw = jaw_of(
+        a.pose.x,
+        a.pose.z,
+        a.pose.heading_rad,
+        geometry.length_m,
+        h.jaw_forward_length_fraction,
+    );
     let reach = h.strike_reach_length_fraction * geometry.length_m;
     let tip = (
         jaw.0 + reach * a.pose.heading_rad.sin(),
@@ -1240,7 +1243,7 @@ fn strike_tick(
     }
     // One lunge tick: `strike_reach / lunge ticks` forward, turn held still.
     let geometry = phys.body_at(fauna.animals[i].body);
-    let manifest = founder.manifest();
+    let manifest = fauna.config.manifest(founder);
     let reach = h.strike_reach_length_fraction * geometry.length_m;
     let per_tick = reach / f64::from(crate::Hunter::ticks(h.lunge_s));
     let lunge = Actions {
@@ -1282,8 +1285,8 @@ fn strike_tick(
     // Contact: the jaw's sweep from where the lunge began to where it ended.
     let a = fauna.animals[i];
     let heading = a.pose.heading_rad;
-    let jaw_from = jaw_of(s.from_x, s.from_z, heading, geometry.length_m);
-    let jaw_to = jaw_of(a.pose.x, a.pose.z, heading, geometry.length_m);
+    let jaw_from = jaw_of(s.from_x, s.from_z, heading, geometry.length_m, h.jaw_forward_length_fraction);
+    let jaw_to = jaw_of(a.pose.x, a.pose.z, heading, geometry.length_m, h.jaw_forward_length_fraction);
     let prey = fauna
         .animals
         .binary_search_by_key(&s.prey, |p| p.id)
@@ -1299,7 +1302,7 @@ fn strike_tick(
             let from_rear = dx * fx + dz * fz < 0.0;
             let cap = pp.core.reserve_of(p.body);
             let condition = if cap > 0.0 { p.reserve / cap } else { 0.0 };
-            let chance = crate::dodge_chance(pp.agility, p.state, from_rear, condition);
+            let chance = crate::dodge_chance(&fauna.config.predation, pp.agility, p.state, from_rear, condition);
             if crate::dodges(chance, seed, a.id, p.id, tick) {
                 fauna.ledger.dodges_by_founder[founder.index()] += 1;
             } else {
@@ -1325,7 +1328,7 @@ fn strike_tick(
 }
 
 /// **One [`Hit`] applied** (predation §2.4, §2.5): the wound adds, the hit wakes the prey
-/// and keeps it up for [`crate::ALERT_S`], and a wound of 1 kills — the whole body to
+/// and keeps it up for [`crate::PredationConfig::alert_s`], and a wound of 1 kills — the whole body to
 /// carrion on its face, a carcass record on the pool, departed `Killed { by }`. A prey
 /// that is gone already is left alone: it dies once.
 pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Founder) {
@@ -1334,6 +1337,7 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
     };
     // A hit is counted where it lands: on a prey still alive.
     fauna.ledger.hits_by_founder[by.index()] += 1;
+    let alert_s = fauna.config.predation.alert_s;
     let a = &mut fauna.animals[j];
     if damage.is_finite() && damage > 0.0 {
         a.wound += damage;
@@ -1342,7 +1346,7 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
         a.state = State::Resting;
     }
     a.rest = None;
-    a.alert_ticks = u32::try_from(cubarium_voxel::ticks_at_least_one(crate::ALERT_S)).unwrap_or(u32::MAX);
+    a.alert_ticks = u32::try_from(cubarium_voxel::ticks_at_least_one(alert_s)).unwrap_or(u32::MAX);
     if a.wound >= 1.0 {
         kill(fauna, flora, j, Departure::Killed { by });
     }
@@ -1579,6 +1583,7 @@ fn climb_tick(
     held: Actions,
 ) {
     let founder = fauna.animals[i].founder.expect("a founder body");
+    let climb_speed_fraction = phys.climb_speed_fraction;
     let effort = held.forward.clamp(0.0, 1.0);
     let cost = phys.motor_respiration_per_s
         * fauna.animals[i].body
@@ -1586,7 +1591,7 @@ fn climb_tick(
         * phys.wall_climb_cost_factor
         * DT;
     let (motor_paid, motor_body) = respire(fauna, i, cost, Respiration::Motor);
-    let rate = 0.5 * effort * manifest.cruise_m_per_s;
+    let rate = climb_speed_fraction * effort * manifest.cruise_m_per_s;
     let a = &mut fauna.animals[i];
     let mut climb = a.mobility.climb.expect("a body on a face");
     let before = climb.progress_m;
@@ -2086,6 +2091,7 @@ fn newborn(
         energy: parcel.energy,
         age_ticks: 0,
         lifespan_ticks: crate::draw_lifespan_ticks(
+            &fauna.config.life,
             lifespan_median_s,
             id,
             crate::lifespan_salt(site, fauna.tick),
@@ -2097,7 +2103,7 @@ fn newborn(
         wound: 0.0,
         strike: None,
         rest: None,
-        still_ticks: crate::still_after_ticks(),
+        still_ticks: fauna.config.predation.still_after_ticks(),
         speed_m_s: 0.0,
         alert_ticks: 0,
         attached: None,
@@ -2195,7 +2201,7 @@ fn lay(
                 energy: e,
                 laid_tick,
                 lineage,
-                dormancy: Some(crate::Dormancy::draw(seed, serial, laid_tick)),
+                dormancy: Some(crate::Dormancy::draw(&fauna.config.predation, seed, serial, laid_tick)),
             });
             fauna.ledger.eggs_laid += 1;
         }
@@ -2337,11 +2343,11 @@ fn hatchling(
 }
 
 /// **The dormant egg bank's tick** (predation §2.13): each dormant egg hears the prey of
-/// its lineage that pass within 2 m loudly enough ([`crate::FOOTFALL_TREMOR_MIN`], the
+/// its lineage that pass within 2 m loudly enough ([`crate::PredationConfig::footfall_tremor_min`], the
 /// tremor rule); an egg whose viability has run out, or whose upkeep has taken it below a
 /// hatchling, dies to the litter of its face; and at **dusk** an egg whose footfall over
 /// the last clock-day has reached its threshold hatches, unless an adult of its lineage
-/// is within 4 m ([`crate::egg_hatches`]).
+/// is within `hatch_suppress_m` ([`crate::egg_hatches`]).
 fn dormant_eggs(
     fauna: &mut Fauna,
     view: &VoxelView<'_>,
@@ -2356,6 +2362,7 @@ fn dormant_eggs(
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let day_ticks = cubarium_voxel::ticks_at_least_one(view.config.day.length_min * 60.0);
+    let pc = fauna.config.predation;
     let mut k = 0;
     while k < fauna.clutches.len() {
         let c = fauna.clutches[k];
@@ -2390,8 +2397,8 @@ fn dormant_eggs(
             }
             let prey = phys.hunter.is_some_and(|h| h.hunts(f));
             if prey
-                && dist <= crate::FOOTFALL_RADIUS_M
-                && crate::tremor_of(a, dist) >= crate::FOOTFALL_TREMOR_MIN
+                && dist <= pc.footfall_radius_m
+                && crate::tremor_of(a, dist, pc.tremor_near_m) >= pc.footfall_tremor_min
             {
                 d.hear(a.id, tick);
             }
@@ -2399,7 +2406,7 @@ fn dormant_eggs(
         fauna.clutches[k].dormancy = Some(d);
         // The threshold gate, then the per-dusk draw (bet-hedging across dusks).
         if dusk
-            && crate::egg_hatches(d.threshold, d.footfall(tick, day_ticks), dusk, nearest_adult)
+            && crate::egg_hatches(&pc, d.threshold, d.footfall(tick, day_ticks), dusk, nearest_adult)
             && crate::hatch_draw(
                 fauna.config.hatch_chance_per_dusk,
                 view.config.seed,
