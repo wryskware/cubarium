@@ -24,6 +24,17 @@ the presenter can take them at runtime, or as a "restart the daemon with these s
 form that writes the launch line `scripts/run-cube.sh` uses. Until then this list is the
 spec. Add to it whenever a new knob lands.
 
+**Ecological numbers are the parameter registry** (package R1,
+`design/ecology-parameter-registry-2026-09-28.md`): every number of the voxel world's
+`Config`, the plants' `FloraConfig` and the animals' `FaunaConfig` is a row, keyed by its
+path. Set them in the config TOML's `[world]` / `[flora]` / `[fauna]` tables or with
+`--set PATH=VALUE` (`cubarium voxel`, `voxel_census set=`); an unknown path or a value
+outside its range is refused, and a run writes its resolved set as `params.toml` beside
+its output. The dump at the end of this section is generated — do not edit it by hand;
+`cargo run -p cubarium-voxel-sim --example params -- --backlog design/backlog.md`
+rewrites it. The table below lists only the knobs that are **not** registry rows yet:
+CLI flags, presentation, and the `const`s package R2 moves into the configs.
+
 | knob | where it lives today | live or restart | notes |
 | --- | --- | --- | --- |
 | foliage shoulder `CUBARIUM_FOLIAGE_FULL` (0.5..=1.0, ships 0.85; 0.95 recommended by G, on the cube since 2026-09-16) | env var, read once at first presenter build (`art_present/habitat.rs`) | restart | 1.0 vetoed (bare wood on ungrazed stands). Logged at startup when overridden; not in `/status`. |
@@ -40,43 +51,893 @@ spec. Add to it whenever a new knob lands.
 | voxel **water flow** placeholders: `FLOW_PER_SUBSTEP` (**0.5**, the fraction of a head difference one face passes in one substep — the largest value that cannot make a pair overshoot) and `HEAD_PASSES` (**4**, how many local passes carry head through submerged water per substep, so pressure reaches 16 cells a tick) | `crates/cubarium-voxel/src/water.rs` (2026-09-18, the local exchange) | restart | **Untuned, and the whole of the new flow rule.** They replaced the connected-region solver, which levelled every water body in one substep and was 45 % of the tick; the exchange relaxes toward the same answer instead (a U-tube in about a second, a ten-column roofed passage in a few). `water_substeps` **4** is unchanged and is the third number in the same rule. Measured effects of the change, statistically: the world holds the same water (217.379 against 217.365 m³ over `community 60`) and the soil the ecology reads is the same to three decimals, but ten times fewer cells hold free water (1,995 against 19,524 — fewer, deeper puddles instead of a film over everything, which moves `water_depth_m` on support faces), the world drains a little faster, and a **closed surcharged passage no longer settles flat**. All three are recorded in `design/7_Research/voxel-tick-profile-2026-09-18.md`. |
 | voxel **minimum spreading depth** placeholder: `MIN_SPREAD_DEPTH_M` (**1.25e-7 m**, 0.125 µm — free water shallower than this, in metres of depth in its own cell, makes no horizontal offer in the exchange; it still infiltrates, evaporates, falls and offers downward, and nothing is deleted) | `crates/cubarium-voxel/src/water.rs` (2026-09-22, package C) | restart | **Untuned; chosen from one census**, as the smallest decade past which the desktop world's forced shower stops getting steeply cheaper (shower step 20.9 -> 13.7 ms, proposals 303 k -> 171 k per tick; ten times the value gives 12.5 ms / 135 k, a hundred times 11.1 ms / 125 k). Pooled and pore water move by under 0.05 % at any of the three values. Ten times it fails `landform_composition`'s spring-route check, which counts invisible spray near the spring. |
 | voxel tick **thread count** `SimConfig::threads` / `[voxel] threads` (0 = `available_parallelism`; the plain `World::step`/`Fauna::step` outside the sim crate use `cubarium_voxel::default_threads()`, the same count, `step_with(1)` is serial) | `cubarium_voxel_sim::SimConfig`; `cubarium voxel --config`'s `threads` | restart | **Execution only — it reaches no rule, no number and no picture**, and the schedule's own test holds the soil and every animal's face fixed across 1, 4 and 16 threads. Untuned: the only evidence is the bench addendum in `design/7_Research/voxel-tick-profile-2026-09-18.md`, which on this desktop has the tick flat from 8 threads up (the parallel legs are the exchange's column scan and fauna `sense`, and `sense` has one animal per worker by then). The embedded target will want a different number and a GUI slider is the wrong shape for it — a launch-line field is. |
-| voxel world config (`cubarium_voxel::Config`: `width/height/depth`, `voxel_m`, `seed`, **`noise_seed`**, `rain_m_per_s`, `evaporation_m_per_s`, `water_substeps`, `spring_k_m2_per_s`, `aquifer_porosity`, `outlet_m3_per_s`, `free_transfer_cap`) | `crates/cubarium/voxel.example.toml` via `cubarium voxel --config` | restart, fresh world only (schema 2) | `noise_seed` (0 = derive from `seed`) re-draws the landform's final weak wobble alone and is the instrument for the terrain-coupling experiment. |
-| voxel flora config (`FloraConfig`: `shade_k_per_m2`, `decomposition`, `wood_decomposition`, `litter_energy_cap`, `initial_mineral`; `SpeciesConfig` per species: `alpha`, `wood_max`, `reserve_cap`, `maintenance`, `senescence`, `foliage_rate`, `wood_rate`, `build`, `dieback`, `alive_min`, `donor_min`, `donor_reserve_floor`, `propagule_rate`, `propagule_split`, `energy_density`, `reserve_share`, `reflush_below`, `assimilation`, `nutrient_half`, `nutrient_draw_max`, `light_half`, `rooting_depth`, `rooting_radius`, `wilt_pore`, `sat_pore`, `transpiration_m3_per_s`, `establish_pore_min`, `establish_light_min`, `drown_depth_m`, `hop`, `crown_height_voxels`, `crown_radius_voxels`, `n_tissue`, `seed_attrition_per_s`, `seed_max_age_s`, `saturated_pore`, `stress_rate_per_s`, `relax_rate_per_s`, `establish_saturated_max`; **voxel round 5a** adds `FloraConfig::carrion_decomposition`; **voxel round 5b** adds `SpeciesConfig::trophic`, `substrate_uptake_per_s`, `substrate_yield`, `establish_substrate_min` and `FloraConfig::glowcap`; **R9.3** adds `SpeciesConfig::substrate_reach_up_down`) | `FloraConfig::default()` in code; no TOML table yet (voxel round 2) | restart | Every value is an untuned placeholder. `bloomcrown.drown_depth_m` was 0.0 and is now 0.05 — a wrong placeholder, not a tuned one: any free water at all killed the species everywhere it rained. Still known-wrong: the canopy coefficient lets one full crown attenuate the light under it by only 9 %, so a canopy never closes (since 2026-09-22 the field is `shade_k_per_m2` **0.09375** = the old per-cell² `shade_k` 1.5 times one reference cell (0.25 m)², so the 0.25 m worlds are numerically unchanged and finer grids now shade by physical area); `umbrellafrond.wilt_pore` 0.3 and `establish_pore_min` 0.45 sit **above** soil's own `field_capacity` (0.25 of pore capacity), which is where every soil voxel settles under any rain the soil can absorb, so the wet species has `μ = 0` and no site to establish on anywhere that is not ponded. `maintenance`/`dieback`/`reserve_cap` put death hours away, so no short test reaches it at the defaults. Two meanings changed in voxel round 3b without any value changing: `propagule_rate` is the **gross rate a donor saves at, one recipient's worth per tick, into `Stand::parcel`** — not a per-recipient rate multiplied by the recipient count. A stand over `donor_min` asks for `propagule_rate · dt` every tick, is funded from its reserve above `donor_reserve_floor · reserve_cap · wood`, pays construction (`c_g`) on what it funds, and saves the rest; when the parcel holds one whole package (`alive_min / w_frac` = 0.05 net, 0.06 of reserve) that package lands on **one** drawn support face inside `hop`, occupied or not, never its own site, and the remainder keeps saving. At the placeholders 300 s of a donor's entire funded output buys one package, wherever `hop` reaches, so raising the rate raises only what a donor *asks* for — and `seed_cohorts_max` is the seed bank's **age resolution** (the arrival-bin width is `seed_max_age_s / seed_cohorts_max`) rather than a cohort count to enforce. Also known-wrong and not yet fixed: the canopy coefficient's 9 % single-crown attenuation is a current model choice, not evidence of a closed canopy or of a finite intercepted-light budget, and consumer carrying capacity must not be derived from total producer income until it is revisited. Voxel round 5a's `carrion_decomposition` 0.005 /s is a **new untuned placeholder** and nothing has measured it: it is five times `decomposition`, which is the whole of what it claims (a corpse goes faster than a leaf — an e-folding in 200 s against litter's 1,000 s and dead wood's 10,000 s), and no result in that round depends on its value. The carrion pool has **no energy cap**, unlike litter's `litter_energy_cap`: a deposit's energy comes from the depositing consumer's own books rather than from a species' `energy_density`, and a second cap knob with nothing measuring it was refused. |
-| voxel flora `SpeciesConfig::n_tissue` (ships **0.02** for both species) | `SpeciesConfig::v1_base()` in code (voxel round 3) | restart | Mineral nutrient per unit of organic matter a species builds. Growing `ΔO` draws `n_tissue · ΔO` from the site's mineral pool, and the pool caps income through `mineral / n_tissue`. An untuned placeholder: nobody has measured what tissue stoichiometry this world wants. **Corrected in round 3b (Astra R4.3):** the claim that 0.02 "makes the cap bite" was wrong arithmetic. At the defaults the stock cap `N / n_tissue` allows `50 · N` of income per tick while the `nutrient_draw_max` rate cap allows `f_max · N · dt` = `0.0005 · N`, so the rate cap is tighter by five orders of magnitude and the stock cap **cannot be the binding one for any positive `N`**; `n_tissue` sets the stoichiometry of the draw and the mineral density of tissue, not the ceiling on income. Two more statements of scope, neither of them a knob: `Stand::mineral` is an **inventory and not a reusable internal reserve** — income reads the *site's* pool through all three limits, so a mineral-rich stand on a bare pool fixes exactly zero at full light and moisture and burns reserve to stand still, and fixing that means separating carbon fixation and maintenance from mineral-funded construction rather than moving a number; and `FloraConfig::initial_mineral` is applied **lazily**, when a site first gets a `Ground`, so it provisions previously unrepresented ground and colonization imports booked mineral into the world. A fertility comparison wants a fixed per-site inventory laid down at creation instead, so that the total does not grow with how far the plants spread. |
-| voxel flora config (`FloraConfig`: `shade_k_per_m2`, `decomposition`, `wood_decomposition`, `litter_energy_cap`, `initial_mineral`; `SpeciesConfig` per species: `alpha`, `wood_max`, `reserve_cap`, `maintenance`, `senescence`, `foliage_rate`, `wood_rate`, `build`, `dieback`, `alive_min`, `donor_min`, `donor_reserve_floor`, `propagule_rate`, `propagule_split`, `energy_density`, `reserve_share`, `reflush_below`, `assimilation`, `nutrient_half`, `nutrient_draw_max`, `light_half`, `rooting_depth`, `rooting_radius`, `wilt_pore`, `sat_pore`, `transpiration_m3_per_s`, `establish_pore_min`, `establish_light_min`, `drown_depth_m`, `hop`, `crown_height_voxels`, `crown_radius_voxels`, `n_tissue`, `seed_attrition_per_s`, `seed_max_age_s`, `saturated_pore`, `stress_rate_per_s`, `relax_rate_per_s`, `establish_saturated_max`; **voxel round 5a** adds `FloraConfig::carrion_decomposition`; **voxel round 5b** adds `SpeciesConfig::trophic`, `substrate_uptake_per_s`, `substrate_yield`, `establish_substrate_min` and `FloraConfig::glowcap`; **package P** adds `FloraConfig::provision`) | `FloraConfig::default()` in code; no TOML table yet (voxel round 2) | restart | Every value is an untuned placeholder. `bloomcrown.drown_depth_m` was 0.0 and is now 0.05 — a wrong placeholder, not a tuned one: any free water at all killed the species everywhere it rained. Still known-wrong: the canopy coefficient lets one full crown attenuate the light under it by only 9 %, so a canopy never closes (since 2026-09-22 the field is `shade_k_per_m2` **0.09375** = the old per-cell² `shade_k` 1.5 times one reference cell (0.25 m)², so the 0.25 m worlds are numerically unchanged and finer grids now shade by physical area); `umbrellafrond.wilt_pore` 0.3 and `establish_pore_min` 0.45 sit **above** soil's own `field_capacity` (0.25 of pore capacity), which is where every soil voxel settles under any rain the soil can absorb, so the wet species has `μ = 0` and no site to establish on anywhere that is not ponded. `maintenance`/`dieback`/`reserve_cap` put death hours away, so no short test reaches it at the defaults. Two meanings changed in voxel round 3b without any value changing: `propagule_rate` is the **gross rate a donor saves at, one recipient's worth per tick, into `Stand::parcel`** — not a per-recipient rate multiplied by the recipient count. A stand over `donor_min` asks for `propagule_rate · dt` every tick, is funded from its reserve above `donor_reserve_floor · reserve_cap · wood`, pays construction (`c_g`) on what it funds, and saves the rest; when the parcel holds one whole package (`alive_min / w_frac` = 0.05 net, 0.06 of reserve) that package lands on **one** drawn support face inside `hop`, occupied or not, never its own site, and the remainder keeps saving. At the placeholders 300 s of a donor's entire funded output buys one package, wherever `hop` reaches, so raising the rate raises only what a donor *asks* for — and `seed_cohorts_max` is the seed bank's **age resolution** (the arrival-bin width is `seed_max_age_s / seed_cohorts_max`) rather than a cohort count to enforce. Also known-wrong and not yet fixed: the canopy coefficient's 9 % single-crown attenuation is a current model choice, not evidence of a closed canopy or of a finite intercepted-light budget, and consumer carrying capacity must not be derived from total producer income until it is revisited. Voxel round 5a's `carrion_decomposition` 0.005 /s is a **new untuned placeholder** and nothing has measured it: it is five times `decomposition`, which is the whole of what it claims (a corpse goes faster than a leaf — an e-folding in 200 s against litter's 1,000 s and dead wood's 10,000 s), and no result in that round depends on its value. The carrion pool has **no energy cap**, unlike litter's `litter_energy_cap`: a deposit's energy comes from the depositing consumer's own books rather than from a species' `energy_density`, and a second cap knob with nothing measuring it was refused. `FloraConfig::provision` (`Provision::Lazy` | `AtCreation`, ships `Lazy`) is **not** a tuned value and changes no rule: it says *when* `initial_mineral` is booked — on a site's first landing, or on every support face at creation through `Flora::in_world`, which is what a matched-fertility study needs (package P). |
-| voxel flora `SpeciesConfig::n_tissue` (ships **0.02** for both species) | `SpeciesConfig::v1_base()` in code (voxel round 3) | restart | Mineral nutrient per unit of organic matter a species builds. Growing `ΔO` draws `n_tissue · ΔO` from the site's mineral pool, and the pool caps income through `mineral / n_tissue`. An untuned placeholder: nobody has measured what tissue stoichiometry this world wants. **Corrected in round 3b (Astra R4.3):** the claim that 0.02 "makes the cap bite" was wrong arithmetic. At the defaults the stock cap `N / n_tissue` allows `50 · N` of income per tick while the `nutrient_draw_max` rate cap allows `f_max · N · dt` = `0.0005 · N`, so the rate cap is tighter by five orders of magnitude and the stock cap **cannot be the binding one for any positive `N`**; `n_tissue` sets the stoichiometry of the draw and the mineral density of tissue, not the ceiling on income. Two more statements of scope, neither of them a knob: `Stand::mineral` is an **inventory and not a reusable internal reserve** — income reads the *site's* pool through all three limits, so a mineral-rich stand on a bare pool fixes exactly zero at full light and moisture and burns reserve to stand still, and fixing that means separating carbon fixation and maintenance from mineral-funded construction rather than moving a number; and `FloraConfig::initial_mineral` is applied **lazily**, when a site first gets a `Ground`, so it provisions previously unrepresented ground and colonization imports booked mineral into the world. A fertility comparison wants a fixed per-site inventory laid down at creation instead, so that the total does not grow with how far the plants spread — which package P added as `FloraConfig::provision = Provision::AtCreation`, applied by `Flora::in_world` to every support face in one booking, with `Lazy` still the default and still the only behaviour anything else uses. |
-| voxel flora seed bank: `SpeciesConfig::seed_attrition_per_s` (ships **0.001** /s both species), `seed_max_age_s` (ships **600** s both species) and `seed_cohorts_max` (ships **4** both species) | `SpeciesConfig::v1_base()` in code (voxel round 3) | restart | How fast a dormant seed cohort bleeds into the site's litter, and how old a cohort may get before the rest of it falls whole. Untuned placeholders, and the same number for both species on purpose: nothing has measured a seed-longevity difference between them, so a difference here would be invented. Together with `propagule_rate` they set the equilibrium bank a fed site holds, which is what decides whether a species can ever re-establish. `seed_cohorts_max` is how many cohorts of one species a site may hold before a landing merges its two oldest into one at the older of their two ages: a bound by construction, added by package J because the age merge alone bounds nothing (package I's pulsing donor stacked one cohort per pulse, with `seed_max_age_s` as the only ceiling at about 6,000 per site). 4 is a placeholder for "a few", which is what `Ground::seeds`' own doc always claimed. **Replaced in round 3b (Astra R4.1):** the old rule merged cohorts whose ages were within one tick and kept the *younger* age, so `seed_max_age_s` measured the time since the bank's last delivery and arbitrarily small continuing arrivals retained old material for ever; the cohort cap then bounded the `Vec` by sweeping nearly every old deposit into one bucket that could kill much younger material at the next expiry. A cohort is now an **arrival bin** whose age runs from `bin_start_tick` and never decreases, `seed_cohorts_max` is the bank's **age resolution** — the bin width is `seed_max_age_s / seed_cohorts_max`, 150 s and 3,000 ticks at the placeholders, derived and not a knob of its own — and the count bound `seed_cohorts_max + 1` follows by construction. Visible effect at the placeholders: a continuously fed bank sawtooths, releasing a 150 s window of material to litter at once when its oldest bin turns 600 s, where before it released nothing at all. A smaller value is coarser and releases in bigger steps; a larger one is finer. |
-| voxel flora root-zone aeration: `SpeciesConfig::saturated_pore` (ships **0.95** both species), `stress_rate_per_s` (**0.2** /s bloomcrown, **0.01** /s umbrellafrond), `relax_rate_per_s` (**0.02** /s bloomcrown, **0.05** /s umbrellafrond), `establish_saturated_max` (**0.25** bloomcrown, **1.0** umbrellafrond) | `SpeciesConfig::bloomcrown()` / `umbrellafrond()` in code (voxel round 3) | restart | `saturated_pore` is the pore fraction at which a root voxel counts as having no air left; `establish_saturated_max` does double duty as the saturated root fraction above which a seed cohort of that species will not germinate **and** as the tolerance its waterlogging stress measures from, because a site a species may germinate on is a site it does not stress on; and the two rates are how fast `Stand::aeration_stress` closes the gap to the level that tolerance implies — `target = (f − establish_saturated_max) / (1 − establish_saturated_max)` clamped to `0..=1`, with income multiplied by `1 - stress`. Untuned placeholders whose only justification is the *direction* the sketch asks for — the sun producer is shut out of a quarter-waterlogged site and stresses ten times faster than it recovers; the wet producer has no aeration bound at all. Package J replaced package I's increment rule `stress += rate·dt·f − relax·dt·(1−f)`, which did not depend on `stress` and so made the pair of rates a **threshold** rather than a strength: every saturated fraction but the knife-edge `f* = relax / (rate + relax)` ramped to 0 or to 1, and `f*` was 0.0909 for bloomcrown — two saturated voxels of an eighteen-voxel root box pinned it at stress 1 forever, which is what stopped package I's experiment. First-order relaxation toward a target is a slope: nine of eighteen voxels is now a bloomcrown stress of exactly 1/3 and an income of 2/3 (`crates/cubarium-voxel-flora/tests/round3.rs`, `a_half_saturated_root_box_settles_at_an_interior_stress`). The number most likely to be wrong is now `establish_saturated_max`, because it alone sets *where* a species starts paying and how steeply; the rates only set how fast it gets there, and umbrellafrond's ceiling of 1.0 makes both of its own rates inert. **The trait contract, stated in round 3b (Astra R4.6):** one number doing double duty — the germination ceiling and the adult stress tolerance — is an *assumption*, because "can germinate here" does not imply "pays no stress here as an adult"; they are one number because nothing has measured them apart, and a role whose seedlings and adults differ needs them separated (two distinct hypotheses: a germination ceiling below the adult tolerance, or an adult response with an explicit subunit maximum or a funded cost of tolerance). Umbrellafrond's 1.0 makes it explicitly **saturation-immune**, which is a wetland-producer proxy and *not* the biosphere's moist-but-aerated understory role — that niche needs its own preset. Do not lower 1.0 slightly as a repair: for every tolerance below 1 a wholly saturated root box targets stress 1 and eventually takes all of that species' assimilation again, which is the failure package I measured. |
-| voxel flora **round-4 presets**: `SpeciesConfig::springturf()`, `stonecushion()`, `velvetpad()` — three new `FloraConfig` fields, and `Species` grows from two to five | `SpeciesConfig` in code (voxel round 4); no TOML table yet | restart | **Every number below is an untuned placeholder chosen to encode a stated role, and nothing in this round measured any of them.** The roles are the contracts of `design/handoffs/voxel-round4-presets-briefs-2026-09-17.md` and Astra's R6.1/R6.2, and each preset's doc comment carries the sentence its numbers are meant to encode. What round 4 *did* establish is that each of the three has one paid birth, one survival-and-income window and one failing neighbour on its own contract habitat (`crates/cubarium-voxel-flora/tests/round4.rs`), and that five presets can be in one world for 400 coupled seconds with every stand alive and the residuals at 1e-11 (`design/7_Research/voxel-round3-experiment-2026-09-16.md`, "Round 4"). It established **nothing** about habitat size, self-replacement or coexistence. The two round-3 presets' numbers are unchanged. |
-| springturf (the **pioneer turf of open, moist soil**): `rooting_depth` **1**, `rooting_radius` **1**, `light_half` **1.0**, `establish_light_min` **0.75**, `establish_pore_min` **0.25**, `wilt_pore` **0.15**, `sat_pore` **0.45**, `establish_saturated_max` **0.3**, `stress_rate_per_s` **0.2**, `relax_rate_per_s` **0.05**, `drown_depth_m` **0.03**, `wood_max` **0.06**, `alive_min` **0.006**, `donor_min` **0.03**, `maintenance` **0.002**, `foliage_rate` **0.02**, `wood_rate` **0.01**, `propagule_rate` **0.002**, `assimilation` **0.008**, `hop` **3**, `crown_height_voxels` **[0.5, 1.0]**, `crown_radius_voxels` **[0.5, 1.0]** | `SpeciesConfig::springturf()` in code (voxel round 4) | restart | The three water thresholds were chosen **together**: 0.25 is soil's own retained fraction, so it germinates on ordinary drained soil and no drier; 0.15 is twice bloomcrown's 0.08, so it is the species that gives up first on a dry ridge; 0.45 is just over the germination floor, because a shallow root box either has water in the top row or does not. Light is above bloomcrown's on both numbers. "Fast" is the small body (one package is 0.015, not 0.05), `donor_min` at half its own `wood_max`, and ten times the base growth and propagule rates — a funded donor fills a package in about 9 s against bloomcrown's 300. "Short-lived" is `maintenance` ten times the base: a springturf whose income stops burns its whole reserve in 250 s where bloomcrown waits 2,500. `assimilation` twice the base buys **faster growth, not survival** (corrected, Astra R7.6): at full foliage, full light and moisture, mineral 1 and no stress the *base* 0.004 already supplies `0.0053333 · W` /s against maintenance plus foliage replacement `0.0044 · W` /s, a 1.21× margin, so ten times the upkeep is solvent without the doubling; 0.008 takes the margin to 2.42× and is what funds the ten-times growth and propagule rates. The earlier claim that the preset starves on its own habitat without it was wrong arithmetic. **Known-wrong, or at least unresolved:** the role says "loses under a canopy", and the model cannot express that at germination — germination light is *geometric* sky visibility with no canopy in it, so only terrain shade shuts the light gate (Astra R6.2 lists canopy-sensitive germination as an explicit rule addition, and round 4 did not make it). The adult side works through the shade model. On the default generated world at 400 s, `establish_light_min` 0.75 is the **only** gate of the five presets with a large sole-cause count — 293 columns refused on light alone — which is the number to look at first if this species turns out to be too rare. |
-| stonecushion (the **cushion of bare rock with a soil pocket in reach**): `rooting_depth` **2**, `rooting_radius` **1**, `light_half` **0.3**, `establish_light_min` **0.4**, `establish_pore_min` **0.05**, `wilt_pore` **0.02**, `sat_pore` **0.35**, `establish_saturated_max` **0.4**, `stress_rate_per_s` **0.1**, `relax_rate_per_s` **0.02**, `drown_depth_m` **0.02**, `wood_max` **0.1**, `alive_min` **0.01**, `donor_min` **0.05**, `maintenance` **0.00005**, `senescence` **0.0003**, `foliage_rate` **0.0005**, `wood_rate` **0.0002**, `propagule_rate` **0.00005**, `hop` **1**, `crown_height_voxels` **[0.5, 0.5]**, `crown_radius_voxels` **[0.5, 1.0]** | `SpeciesConfig::stonecushion()` in code (voxel round 4) | restart | The lowest three water thresholds of the five, chosen together because the point of the role is that a little water is *enough*: it is at full moisture on a pocket the other four call dry. "Slow" is `wood_rate` a fifth of the base — a newborn needs about 11,500 s to fill `wood_max` 0.1 — held solvent by `maintenance` a quarter of the base. **No rule was added for the rock support and none was needed:** the gates never read the support voxel's material, `root_box` collects only `Material::Soil`, so a rock or bedrock face with one soil voxel inside `rooting_radius` already passes and one with none already fails on `pore_ok`, with water still drawn from soil alone. The `rock_support` flag the brief and Astra R6.2 held in reserve was therefore *not* introduced; adding it would only have been a way of switching that behaviour off for the other four. Measured both ways in `tests/round4.rs`. **Unresolved:** on the default world this preset is the most permissive of the five by a wide margin (1,720 of 3,072 columns eligible at introduction, 2,737 at 400 s) because `establish_pore_min` 0.05 refuses almost nothing, and the `RockWithAPocket` placement rule in the harness — not the preset — is what puts it on rock. Nothing stops a stonecushion cohort germinating on ordinary soil, and whether the role wants a substrate *requirement* rather than a tolerance is a rule question, not a value. |
-| velvetpad (the **moist, aerated understory pad**): `rooting_depth` **2**, `rooting_radius` **1**, `light_half` **0.1**, `establish_light_min` **0.05**, `establish_pore_min` **0.3**, `wilt_pore` **0.2**, `sat_pore` **0.6**, `establish_saturated_max` **0.6**, `stress_rate_per_s` **0.1**, `relax_rate_per_s` **0.05**, `drown_depth_m` **0.1**, `wood_max` **0.2**, `alive_min` **0.015**, `donor_min` **0.1**, `senescence` **0.0005**, `foliage_rate` **0.004**, `wood_rate` **0.002**, `propagule_rate` **0.0005**, `hop` **1**, `crown_height_voxels` **[0.5, 1.0]**, `crown_radius_voxels` **[1.0, 2.0]** | `SpeciesConfig::velvetpad()` in code (voxel round 4) | restart | The niche Astra's R4.6 separated from umbrellafrond's wetland, and the difference from it is one number: `establish_saturated_max` **0.6** against umbrellafrond's 1.0, so a wholly saturated root box refuses a velvetpad cohort and targets an adult's `aeration_stress` at 1. Waterlogging costs this species something, which is the whole of what "aerated" means here; umbrellafrond remains explicitly saturation-immune. `senescence` **half the base** is the other half of being a shade plant and is the number most likely to be questioned: at the base 0.001 the construction cost of replacing foliage, `(1 + c_g) · senescence · α`, needs `L_eff · μ` above **0.4875** to break even under stated conditions — full foliage (`P = α · W`), site mineral 1 so the Monod factor is 2/3, no aeration stress, no growth: `(0.0002 + 1.2·0.001·2) / (0.004·2·(2/3))` — which is not shade at all; at 0.0005 it needs **0.2625**, and with `light_half` 0.1 4 % of open sky gives `L_eff` 0.3143, so 4 % clears it only with `μ` at or above 0.835 (corrected from 0.45/0.26 and from "satisfied at 4 % of open sky", Astra R7.6: 4 % works there only with sufficient moisture). So "shade-tolerant" here is *two* placeholders acting together and not `light_half` alone. **Unresolved:** the shade it actually experiences is bounded by `shade_k` 1.5, which lets one full crown attenuate by about 9 % (the row above), so the advantage `light_half` 0.1 buys cannot be seen in a run yet — `tests/round4.rs` pins its sign, not its size. The `UnderACrown` founder placement lives in the harness and is an experiment condition; the model has no canopy term in germination. |
-| voxel flora **round-5b saprotroph mode**: `SpeciesConfig::trophic` (`Photo` for the five plants, **`Saprotroph`** for glowcap), `substrate_uptake_per_s` (**0.02** /s per unit of mycelium), `substrate_yield` (**0.4**), `establish_substrate_min` (**0.02**), `substrate_reach_up_down` (**1** row up and down, R9.3) — and `Species` grows from five to six | `SpeciesConfig::glowcap()` in code (voxel round 5b); no TOML table yet | restart | **Every number is an untuned placeholder and nothing in this round measured any of them.** The mode is the one thing that selects an income rule: a saprotroph takes `substrate_uptake_per_s · W · μ · dt` of organic matter from the dead-wood pools of its mycelium box, keeps `substrate_yield` of it as tissue and respires the rest at once, with no light income and no light gate. What the two rates *claim*, and the whole of it: `0.4 · 0.02 = 0.008 · W` per second of income against maintenance plus cap replacement `0.0026 · W`, a **3.08× margin** — solvent on a log, starving on a dry or an empty one. `establish_substrate_min` 0.02 is about one spore package's worth of wood (`alive_min / w_frac` = 0.025), so a log has to hold roughly what the stand it would feed is made of; below it the gate shuts, which is how a decomposer grove ends. **Known property, not tuned away:** the uptake is bounded by the rate and by the pools and **not** by what the stand can spend, unlike a plant's assimilation, so anything a fungus digests above its own demand is respired at once rather than left in the log. That makes `substrate_uptake_per_s` a number about **how fast a log disappears** and not only about how fast the fungus grows — in the 400 s `community` run the eight fungi took 1.936 of the 8.0 laid (24 %), which was 88 % of the logs' whole turnover against 12 % for `wood_decomposition`, while their tissue income of 0.774 was **nearly all spent** (maintenance ≈ 0.035, senesced caps replaced ≈ 0.43, parcels 0.231 gross, body +0.072), so the surplus term was small at that arm's mean moisture of 0.688. It is the first number to revisit when log turnover is the thing being measured. **A stated limitation:** the saturation ceiling is a *germination* ceiling only — a spore will not take a waterlogged log while the mycelium already in one pays nothing, because a saprotroph's uptake reads `μ` and not `1 − aeration_stress` — which is `establish_saturated_max`'s own documented germination-versus-adult assumption (Astra R4.6) pointing the other way for this species. And a saprotroph's moisture is read off the **soil voxels** of the same box every stand reads, so a glowcap on bare rock starves however much wood is on the rock. Measured in the 400 s `community` run: mean `aeration_stress` 0.292 across the eight fungi and **no income cost at all** for it. **`substrate_reach_up_down` is a rule decision of Astra's R9.3 and its value is a placeholder like the rest** (Fable, package Q): substrate access has a vertical reach of its own, symmetric one row up and one row down, independent of the soil-water root box — the box used to borrow `rooting_depth`'s downward-only geometry, so at `rooting_depth` 1 a spore one voxel above or below a full log had nothing in its box, which is what refused all three of the `community` run's landings. Raising `rooting_depth` instead would have moved the water too and repaired one direction only. Blind paid landing and germination-time selection are unchanged. **And the mineral budget (R9.1):** a saprotroph's new tissue is bounded by the mineral arriving with the wood plus the site pool, `(arrived + N) / n_tissue`, so a mineral-free log now funds no growth at all instead of building tissue whose `n_tissue` did not exist; unfunded income is respired where every other unspent unit is. |
-| glowcap (the **wood fungus of the decomposer grove**, a saprotroph and not a plant): `trophic` **Saprotroph**, `substrate_uptake_per_s` **0.02**, `substrate_yield` **0.4**, `establish_substrate_min` **0.02**, `assimilation` **0.0**, `establish_light_min` **0.0** (inert — there is no light gate), `light_half` 0.5 (inert), `rooting_depth` **1**, `rooting_radius` **1**, `wilt_pore` **0.1**, `sat_pore` **0.4**, `establish_pore_min` **0.1**, `establish_saturated_max` **0.5**, `stress_rate_per_s` 0.1 and `relax_rate_per_s` 0.05 (both inert on the income), `drown_depth_m` **0.05**, `transpiration_m3_per_s` **0.0**, `wood_max` **0.1**, `alive_min` **0.01**, `donor_min` **0.05**, `foliage_rate` **0.004**, `wood_rate` **0.002**, `propagule_rate` **0.0005**, `hop` **1**, `crown_height_voxels` **[0.5, 0.5]**, `crown_radius_voxels` **[0.5, 0.5]** | `SpeciesConfig::glowcap()` in code (voxel round 5b) | restart | `wood` is mycelium, `foliage` is fruiting caps, and the reserve is the reserve; death, dieback, senescence, the seed bank and the paid parcel are the five plants' own rules unchanged. The body is stonecushion's size with a fruiting body's reproduction — one 0.025 package is **60 s** of a fully funded donor, the fastest of the six — and `hop` 1 means a grove follows its log. `transpiration_m3_per_s` 0.0 is deliberate: it reads the moisture and takes no water away from the plants it lives among. One geometric consequence: a crown top of `y + 0.5` is the lowest of the six, so a glowcap shades nothing and everything shades it, which costs it nothing. What bounds a grove's spread at these placeholders is the **log and the box's geometry**, not the hop. On a *flat* fixture a recipient's mycelium box always overlaps its donor's, so every landing is over substrate while the log lasts (`crates/cubarium-voxel-flora/tests/round5b.rs` says so where it cannot test the alternative) — but on real terrain it does not: a package lands on the **highest support face** of a column inside the hop, and `rooting_depth` 1 makes the box that face's own `y` row, so a neighbour one voxel higher or lower has no wood in its box at all. The 400 s `community` run measured exactly that: three packages landed, all three refused by the substrate gate, zero glowcap establishments, and 3,039 of 3,072 skyline columns shut on substrate. The candidate repairs are rule decisions and not numbers — a box that reaches up as well as down, or a saprotroph dispersal rule that lands on the substrate rather than on the skyline — and a deeper `rooting_depth` is the one that is only a number and the least honest of the three. |
-| voxel **fauna** config (`FaunaConfig`, one `SpeciesConfig` per species; frondgrazer: `maintenance_per_s` **0.001** /s per unit body, `bite_per_s` **0.002** organic/s, `yield_fraction` **0.5**, `n_tissue` **0.05**, `body_max` **0.05**, `body_min` **0.005**, `birth_body` **0.03**, `birth_cost` **0.01**, `reserve_cap` **0.5** per unit body, `reach` **{horizontal 1, up 1}**, `climb` **1** voxel, `wade_depth_m` **0.05**, `drown_depth_m` **0.2**, `step_period_s` **1.0**, `sense_radius` **8** voxels, `energy_density` **2.0**) | `SpeciesConfig::frondgrazer()` in code (voxel round 5c); no TOML table yet | restart, fresh world only (the fauna snapshot is schema **2** — the per-plant ledger arrays widened with the glowcap merge — and refuses any other tag; its loader also refuses a state that cannot be true: a non-finite or negative stock, ids that are not sorted and unique, or a next-id counter that would reuse an id). The host's `w`/`l` stdin commands are **terrain only** and `l` is refused in place while any ecology state exists (Astra R9.6); a terrain snapshot is resumed with `--load PATH` at startup, which starts the ecology fresh on it | **Every number is an untuned placeholder and nothing in round 5c measured any of them.** They encode one sentence — a small ground browser that eats low foliage it can stand under, walks to the next patch, cannot climb a step taller than itself, wades a film and drowns in a pool — at the scale the round-4 presets already set: a springturf founder carries 0.06 of foliage, so a body of 0.05 and a mouth of 0.002 /s are the same order of magnitude, and `bite_per_s` is deliberately round 5a's own probe rate so the two are comparable. Four consequences of these values are known and none of them is a reason to move one yet. (1) **Excretion happens, and it is not `yield_fraction`'s business (Astra R9.2):** dung is the mineral a bite carries in excess of the tissue **actually placed**, so an animal at `body_max` with a full reserve — which places only what its own upkeep just freed — excretes most of a bite's mineral at the defaults, and the 400 s `grazed` run's 7.6e-6 of deposited mineral *is* that flux. The narrow true statement is that a **fresh founder's first bite** carries no excess: 0.05 of tissue mineral against a plant's own 0.02 leaves a young animal needing every unit the bite funds. Plant `n_tissue` is also not current foliage mineral density — respiration retains mineral — so a stand's tissue drifts richer than 0.02. All three cases are pinned in `crates/cubarium-voxel-fauna/tests/round5c.rs`. (2) **A birth every tick:** an adult pays `birth_cost` whenever `body >= birth_body` and the reserve allows, with no gestation, no refractory period and no mating system (stated in the crate doc), so a full reserve at `body_max` buys two newborns in two ticks and the only bound on the population is what a mouth can earn. (3) **`reach.up` 1 against a grown bloomcrown:** as in round 5a's probe, `crown_voxels` is 2 for a bloomcrown at founder wood, so a grazer eats it only from a face a voxel higher — a fact about where it stands and not about the species (Astra round 8), which is why the run reports bites by species. (4) **The walk is greedy and re-senses every tick:** it steps only onto an orthogonal neighbour face strictly closer to its target, so a pool or a wall stops it rather than being walked around, and two exactly equal patches make it dither on the keyed tie-break. `validate()` refuses only structure (finite nonnegative numbers, `body_min <= birth_body <= body_max`, `birth_cost >= body_min`, `yield_fraction <= 1`, `step_period_s > 0`), deliberately not plausibility. |
-| voxel **founder climb height** `FounderPhysiology::climb_m`: browser (frondgrazer) **0.25 m**, shredder (littershredder) **0.125 m** | `FounderPhysiology::frozen` in `crates/cubarium-voxel-fauna/src/body.rs` (2026-09-22, the founder step rule); no TOML table yet | restart, fresh world only (the fauna snapshot moved to schema **10** for it) | **Both are untuned placeholders and nothing measured either.** They are the whole of the step rule's authored input: how far up or down a founder may put its feet in one sub-step, converted to whole voxels once at the consumer by `climb_voxels` — the browser gets two voxels on `small` (0.125 m) and one on `default`/`wide` (0.25 m), the shredder one on all three. The browser's number is its own adult length; the shredder's is half that, on the reading that a ground feeder that can step as high as a browser is not a ground feeder. They live on the **physiology** and not on the `Manifest`, because manifest geometry is inside the trained-policy digest and the shipped centres must keep loading. Raising either one joins more of the terraced landscape into one walkable component (`design/7_Research/voxel-census-2026-09-20.md`, "Step rule, 2026-09-22") and makes more solids read as ground rather than wall at the contact receptor; lowering the browser's to 0 restores the level-component world package 0 measured. |
-| voxel **founder body geometry and anchor fractions** `FounderPhysiology::adult_length_m` / `adult_width_m` / `adult_height_m`: browser (frondgrazer) **0.375 / 0.1875 / 0.1875 m**, shredder (littershredder) **0.19 / 0.0625 / 0.0625 m**; `eye_height_fraction` **0.8**, `mouth_ceiling_fraction` **1.33**, `contact_height_fraction` **0.5**, `mouth_reach_length_fraction` **0.25** | `FounderPhysiology::frozen` in `crates/cubarium-voxel-fauna/src/body.rs` (2026-09-22, package 1b); no TOML table yet | restart, fresh world only (the fauna snapshot moved to schema **11** for them) | **Every one is an untuned placeholder.** The adult dimensions are the art ladder's (`design/art-direction/organism-scale-and-roster-2026-09-21.md`: 6 x 3 x 3 cells of 0.125 m for the browser), not a measurement; the four fractions are decisions §1/§2/§6's round numbers. A living body's dimensions are the adult's times `(body / body_max)^(1/3)`, so a newborn browser is 0.46 of adult length, and every anchor is a fraction of the living body. What each one moves: **height** sets the clearance a body needs (`ceil(height / voxel)`), the eye and the mouth ceiling, so it is three knobs at once; **width** sets the footprint disc and therefore the sub-step cap and the wall stand-off; **length** sets the horizontal mouth reach. `mouth_ceiling_fraction` 1.33 puts the adult browser's ceiling at 0.249375 m, a hair **under** one 0.25 m cell, so on `default` and `wide` the mouth takes the standing layer alone and a bloomcrown crown one cell up is out of reach — that is the succession story decisions §2 wants, and the basal rosette of the layers package is the answer to it, not a raised ceiling. They live on the **physiology** and not on the `Manifest`, whose `body_length_m`, `body_width_m` and `mouth_reach_up_voxels` are inside the trained-policy digest and are now the recorded contract only. The shipped centres were trained with the old eye and the old whole-voxel mouth and are due a retrain (package 5; `crates/cubarium/assets/policies/README.md`). |
 | voxel **ground-pool bulk density** `senses::POOL_BULK_DENSITY` (**80** organic units per m³): a litter / carrion / dead-wood pool of organic `m` on a face of area `A` occludes a cone ray only below `m / (A · 80)` over the face | `crates/cubarium-voxel-fauna/src/senses.rs` (2026-09-22, contract v2, P5-A, decision D3); recorded in the founder manifest's canonical text as `pool_density` | restart, fresh world only; **moves the manifest digest** (a trained centre is refused) | **Untuned placeholder.** Chosen so a reference litter tile (`M_EMIT` 0.05) is about 1 cm deep on a 0.25 m face and 4 cm on a 0.125 m one — a film to an eye, per decisions §6 ("a ground pool is not a wall"). Lower it and heaps start hiding the floor rows of the fan. |
 | voxel **founder cruise** `manifest::CRUISE_BODY_LENGTHS_PER_S` (**1.0** BL/s): browser **0.375 m/s**, shredder **0.19 m/s**, `forward_reference_m` = cruise × 0.25 s | `crates/cubarium-voxel-fauna/src/manifest.rs` (2026-09-22, contract v2, decision D2) | restart; **moves the manifest digest** | The standing rule (pace in body lengths), not a tuned number. `motor_respiration_per_s` is unchanged, so a metre costs two-thirds of what it did at 0.67 BL/s. |
 | voxel **heuristic teachers' escape reflex** (`controller.rs`): `MOTOR_REFUSED` **0.5** (motor_delivery below it is a refused motor), `ESCAPE_SAMPLES` **3**, `ESCAPE_CREEP` **0.3**, `DROP_PROXIMITY` **0.55** (forward sector's mean hit proximity with only the floor rows hitting), `FLAT_CLEAR` 9/15 ± half a ray | `crates/cubarium-voxel-fauna/src/controller.rs` (2026-09-22, P5-A item 9) | recompile | Teacher internals, not model numbers: nothing in the world reads them, but the clone and ES start from what these teachers do. The drop threshold sits between an adult's one-voxel step down (≈0.65, walkable) and a two-voxel drop (≈0.47). |
 | voxel **shredder teacher's correlated walk** (`controller.rs`, `Wander`; the browser keeps its flip-every-three-samples search): hold the heading `WANDER_HOLD` **8–24** samples (2–6 s), then turn `WANDER_TURN_SAMPLES` **1–4** samples at effort `WANDER_TURN` **0.8**, sign random, seeded from the body's first observation | `crates/cubarium-voxel-fauna/src/controller.rs` (2026-09-22, P5-C S3) | recompile | Teacher internals, placeholders: the shredder teacher's no-signal search in place of the flip-every-three-samples zig-zag, which covered ~7 m² in 4 min. |
 | voxel **shredder training production replay** (P5-C S1): `PRODUCTION_BUCKET_TICKS` **100** (a replay's litter deposits are summed per 100 ticks and handed in at the bucket's first tick) | `crates/cubarium-search/src/es/voxel/landscape.rs` | recompile | A fixture choice, not a rate: training only. |
-| voxel fauna **reproduction** placeholders (`SpeciesConfig::reproduction`, one `Reproduction` table per body kind; frondgrazer and the browser founder — the same animal — `mode` **Gestation**, `surplus_floor` **0.005**, `surplus_hold_s` **120** s, `gestation_s` **180** s, `gestation_loss_fraction` **0.25**, `birth_interval_s` **300** s; littershredder `mode` **Eggs**, `surplus_floor` **0.000625**, `surplus_hold_s` **120** s, `birth_interval_s` **300** s, `clutch_size` **1**, `egg_organic` **0.004**, `incubation_s` **300** s) | `Reproduction::LIVE_BIRTH_PLACEHOLDER` and `Reproduction::EGGS_PLACEHOLDER` in code (`crates/cubarium-voxel-fauna/src/lib.rs`, the 2026-09-21 reproduction round); no TOML table yet | restart, fresh world only (the fauna snapshot is schema **9**, which carries the escrow, the clutches and the reproduction counters and refuses schema 8) | **Every number is an untuned placeholder and nothing measured any of them**, chosen to encode Wrysk's sentence — "births after a sustained reserve surplus, one offspring at a time, with an interval" — at the scale the frozen physiology already sets, with no tuning loop. The frondgrazer's 0.015 eligibility is 60 % of the reserve a `body_max` body can hold, so it is a real surplus and not a full tank; its escrow fills at `0.01 / 180 s` = 5.6e-5 /s against a basal upkeep of 5e-5 /s, so gestating roughly doubles what the parent pays out; and hold + gestation + interval put at least 10 minutes between one parent's offspring, against the 7 minutes in which the replaced rule turned 8 browsers into 48. **`clutch_size` 1 is a consequence, not a preference:** the blind founder's frozen `body_min` 0.003125 and reserve ceiling `reserve_cap · body_max` = 0.00625 cannot pay for two eggs that could each hatch a viable juvenile, so raising it needs that physiology revisited — the rule itself is written for any count and the crate's tests exercise clutches of two. Nothing eats an egg yet; the `Clutch` record carries its site and its three currencies so a consumer can be added without changing what an egg is. |
-| `SpeciesConfig::validate()` / `FloraConfig::validate()` | code (voxel round 4); called from `Flora::new`, which panics, and `Flora::try_new`, which returns the message | restart | The list Astra's R6.2 named: a finite nonnegative `propagule_split` summing to one, a positive `w_frac`, `alive_min <= wood_max`, and finite nonnegative rates, thresholds and crown pairs. Deliberately **not** a plausibility check — the rows above are the values known to be wrong, and refusing them here would be tuning in a validator's clothes. When a `[flora]` TOML table lands, `try_new` is the entry point that should report rather than panic. |
-| voxel flora **layer profiles** `SpeciesConfig::profile` — the six live species' anatomy, staged by `wood / wood_max`: bands as fractions of crown height, radii as fractions of crown radius, foliage shares (summing to 1 per stage) and porosities, plus the stage `height_m_max` | `SpeciesConfig::bloomcrown()` / `umbrellafrond()` / `springturf()` / `stonecushion()` / `velvetpad()` / `glowcap()` in code (package 2, 2026-09-22); no TOML table yet | restart, fresh world only | **Every value is an authored placeholder and nothing has measured one.** They are `design/organism-anatomy-2026-09-21.md` §3's tables transcribed, with the corrections of `design/handoffs/voxel-organism-decisions-2026-09-21.md` §5 — the adult bloomcrown's basal rosette at share **0.25** for life, a woody seedling capped at **0.125 m** of physical crown height — and with velvetpad and stonecushion left as ordinary browser food (decisions §3). Shipped: **springturf** one Mat 0–1.0, r 1.0, p 0.3. **Velvetpad** one Mat 0–1.0, r 1.0, p 0.6. **Stonecushion** Foliage 0–0.6, r 1.0, share 0.7, p 0.2 · Foliage 0.6–1.0, r 0.6, share 0.3, p 0.2. **Glowcap** one Foliage 0–1.0, r 1.0, p 0.5. **Bloomcrown** seedling (≤ 0.2, height ≤ 0.125 m) Foliage 0–1.0, r 1.0, p 0.4 · juvenile (≤ 0.5) Trunk 0–0.4 r 0.15, Foliage 0–0.25 r 0.7 share 0.4 p 0.4, Foliage 0.5–1.0 r 1.0 share 0.6 p 0.3 · adult Trunk 0–0.5 r 0.15, Foliage 0–0.15 r 0.6 share **0.25** p 0.4, Foliage 0.55–1.0 r 1.0 share 0.75 p 0.3. **Umbrellafrond** seedling (≤ 0.15, height ≤ 0.125 m) Foliage 0–1.0 r 1.0 p 0.4 · juvenile (≤ 0.5) Trunk 0–0.5 r 0.15, Foliage 0.5–0.65 r 1.0 share 0.6 p 0.4, Foliage 0.85–1.0 r 0.6 share 0.4 p 0.5 · adult Trunk 0–0.4 r 0.2, Foliage 0.4–0.55 r 1.0 share 0.4 p 0.4, Foliage 0.65–0.8 r 0.8 share 0.35 p 0.4, Foliage 0.9–1.0 r 0.5 share 0.25 p 0.5. What they visibly do is measured in `design/7_Research/voxel-census-2026-09-20.md`, "Layers, 2026-09-22": reachable foliage at t = 0 rose 0.42 → 0.59 (small), 0.50 → 0.56 (default) and 0.49 → 0.59 (wide), all of it the new low tissue. **Porosity is a light property only** — the cone reads any foliage-bearing layer cell with stock as foliage — and it is the one thing about a single-layer species' shade that is not what it was before layers: the exponent gains a factor `(1 - p)`, so springturf, velvetpad and glowcap shade by `(1-p)` of what they did. Nothing else about the shade moved (`crates/cubarium-voxel-flora/tests/layers.rs`). The layer **count** ceiling is `MAX_FOLIAGE_LAYERS` = 4, a storage bound and not a design one, because `Stand` is `Copy`. |
-| voxel founder **assimilation yield per food class** `FounderPhysiology::yield_by_food`, in `Food::ALL` order (litter, cap tissue, carrion, foliage): shredder (littershredder) **0.5 / 0.5 / 0.5 / 0.5**, browser (frondgrazer) **0.5** for all four | `FounderPhysiology::frozen` in `crates/cubarium-voxel-fauna/src/body.rs` (2026-09-22, package 3); no TOML table yet | restart, fresh world only (the fauna snapshot moved to schema **12** for them) | **All three of the shredder's are authored placeholders and nothing has measured one** (decisions §3). They are two numbers wearing four hats: litter keeps the yield the shredder always had (0.5), cap tissue takes the browser's foliage yield (0.5) and carrion takes the litter yield until told otherwise, so naming them moved no number — what it bought is that a later decision can re-yield one food without touching the others. A browser never reaches three of its four and they are filled with its foliage yield rather than zero, so that adding a food to its diet cannot silently assimilate nothing. The **assimilation rule is unchanged**: `min(yield · organic, mineral / n_tissue)`, and at `n_tissue` 0.02 against litter's and carrion's 0.05 mineral fraction the mineral budget does not bind on those two, while against foliage's 0.02 it does — which is why the cap-tissue yield is, today, not the thing that decides what a cap is worth. Nothing about **what a food is worth in energy** is here: the energy follows the organic matter at the stock's own density, so a corpse is worth what its depositor's books handed over. |
 | voxel **startup acceptance bar** `habitat::ACCEPT_FOUNDER_HOURS` (**N = 1.0** founder-hour): a seeded world is accepted only if every founder-occupied walkable component holds reachable edible stock of at least `N · founders · upkeep`, upkeep = the lineage's adult basal maintenance `core.maintenance_per_s · core.body_max · 3600` (browser **0.18**, shredder **0.045** organic/h), and (shredder) a living litter-shedding stand or glowcap rooted in it | `crates/cubarium/src/voxel/habitat.rs` (2026-09-22, package 4; decisions §8) | restart, fresh world only | **An authored placeholder, not a measured bar.** Stock is organic matter as it stands, not assimilated; production per hour is reported beside it and not gated (package 6 needs it). At seed 1 every preset passes on its first try, so the bar has not yet refused anything on a shipped ring. |
 | voxel **dung** `GUT_VOID_S` (**30 s**) | `crates/cubarium-voxel-fauna/src/step.rs` (2026-09-24, Wrysk: animals poop) | restart, fresh world only (fauna snapshot schema **17**) | **An authored placeholder.** Every animal holds a `gut`: the `(1 − yield)` undigested share of each bite (with its energy), the mineral a bite brings beyond what its tissue needs, and the mineral respiration sheds with the organic matter it burns (same fraction rule as energy, so body mineral stays in proportion to tissue). Every `GUT_VOID_S` of age the gut is dropped on the animal's face as litter; a death puts it in the corpse. Supersedes row 61's note (1): excess mineral is no longer deposited per bite, and the undigested share is no longer respired. |
 | voxel **founding-loop bounds**: `HABITAT_TRIES` **8** (lake-gated worlds pre-rolled, seeded and judged before the best is kept), the opening shower's cap `SHOWER_CAP` **6000** ticks and the drain's cap `DRAIN_CAP` **2400** ticks | `crates/cubarium-voxel-sim/src/found.rs`, `crates/cubarium-voxel-sim/src/habitat.rs` (2026-09-22, package 4; moved out of the host by P5-B) | restart | Bounds, not rates: the drain stops on `World::settle`'s convergence and the shower when its allowance has fallen; the caps only end one that would not. Measured at seed 1: drain converges in 100 (`small`), 1,889 (`default`), 1,235 (`wide`) ticks. Each habitat try costs one pre-roll: 2,066 / 4,845 / 3,735 ticks on `small` / `default` / `wide`, 10–16 s on the desk. |
 | voxel **training-world fixture placeholders** (P5-B): the arena's `ARENA_BYSTANDERS` **2** bodies of the other lineage, arriving `StartingStores::HUNGRY`, kept `BYSTANDER_CLEARANCE` **9** squared standard columns (0.75 m) from the start and every patch; a shredder **cap** patch split **half** glowcap cap tissue, **half** the litter it fruits on; arena **carrion** laid at the arena litter's mineral fraction **0.02** and energy density **2.0**; the browser **seedling** patch a bloomcrown at **0.2 · `wood_max`** (the seedling stage's own bound); D11's body draw **uniform in structure** over `[body_min, body_max]` with **no reserve**; the landscape redraw stride `LANDSCAPE_REDRAW_STRIDE` **1000**; the mid-shower capture at the first tick the shower's allowance is **half** what it was after its first tick | `crates/cubarium-voxel-sim/src/arena.rs`, `crates/cubarium-search/src/es/voxel/{driver,landscape}.rs`, `crates/cubarium-voxel-sim/src/habitat.rs` (`pre_roll_capturing`) (2026-09-22, P5-B) | code only; training fixtures, not the live world | **Fixture choices, not rates, and nothing measured any of them.** The stocks per patch are the arena's old ones (litter tile 0.2, Stage-B patch 0.015 halved for the initial one, browser stand 0.06). The stride exists because consecutive seed bases kept each other's worlds under the live `base + 1` redraw (13 of 48 training foundings). |
 | pursuit stopping rule `--pursuit-stop {reach-envelope,half-space}` (ships `reach-envelope` since 2026-09-16) | `cubarium-search` only — `calibrate`, `precondition`, `factorial`, `es-population`, `apex-audit`; a `World` transient (`World::set_pursuit_stop`), never a `WorldConfig` field and never persisted | restart, fresh world only | **Not a knob for the viewer.** `half-space` exists to reproduce rows retained before the adoption and nothing else; the cube has no reason to run it, and a world saved under one rule is refused under the other (schema 17). List it here so the list is complete, not so it gets a slider. |
-| voxel flora **package N presets** (`design/handoffs/voxel-new-plants-2026-09-23.md`): `SpeciesConfig::vaulttree()`, `lanternberry()`, `siphonreed()` — three new `FloraConfig` fields, `Species` grows from six to nine (appended, indices 6–8) | `SpeciesConfig` in code (2026-09-23); no TOML table yet | restart | **Every number below is an untuned placeholder.** Crowns and anatomy are the brief's table and anatomy §3 (not knobs). |
-| vaulttree (canopy builder of deep aerated soil): `establish_light_min` **0.9**, `light_half` **0.6**, `rooting_depth` **6**, `rooting_radius` **2**, `establish_pore_min` **0.2**, `wilt_pore` **0.12**, `sat_pore` **0.5**, `establish_saturated_max` **0.2**, `stress_rate_per_s` **0.005**, `relax_rate_per_s` **0.02**, `drown_depth_m` **0.1**, `wood_max` **5.0**, `alive_min` **0.02**, `donor_min` **2.5**, `reserve_cap` **1.5**, `maintenance` **0.0001**, `senescence` **0.0005**, `foliage_rate` **0.001**, `wood_rate` **0.0003**, `propagule_rate` **0.0002**, `hop` **4**, `falls` **true** | `SpeciesConfig::vaulttree()` | restart | The gap gate is geometric sky only: a vault seed under a living crown in open terrain passes (canopy-aware germination is Astra R6.2, Wrysk's call). |
-| lanternberry (fruiting shrub of grove edges): `light_half` **0.4**, `establish_light_min` **0.35**, `rooting_depth` **3**, `establish_pore_min` **0.3**, `wilt_pore` **0.15**, `sat_pore` **0.6**, `establish_saturated_max` **0.5**, `drown_depth_m` **0.1**, `wood_max` **1.0**, `alive_min` **0.02**, `donor_min` **0.4**, `donor_reserve_floor` **0.7**, `propagule_rate` **0.0004**, `hop` **2**; adult foliage split at **0.45** of height (shares 3/14, 11/14) | `SpeciesConfig::lanternberry()` | restart | The split expresses the browse line: the lower skirt's top is 0.51 m on a full-grown shrub, inside the browser's 0.5 m band on both grids. |
-| siphonreed (emergent of shallow standing water): `water_depth_min_m` **0.1**, `drown_depth_m` **0.5**, `establish_saturated_max` **1.0**, `maintenance` **0.0004** (the aeration cost, 2× base), `light_half` **0.8**, `establish_light_min` **0.6**, `establish_pore_min` **0.45**, `wilt_pore` **0.3**, `sat_pore` **0.8**, `wood_max` **0.3**, `alive_min` **0.02**, `donor_min` **0.15**, `propagule_rate` **0.0003**, `hop` **1** | `SpeciesConfig::siphonreed()` | restart | Without standing water beside it the reed reads `μ = 0` (income stops, reserve pays upkeep, then dieback). |
 | voxel **standing-water reader** threshold `cubarium_voxel::STANDING_SUPPORT_FILL` (**0.5**: water above a cell counts as standing only while that cell is at least half full) | `crates/cubarium-voxel/src/world.rs` (package N) | restart | A reader over fills, not solver state: moving water deeper than half a cell reads as standing. |
 | voxel habitat seeder, package N rows of `PRODUCERS` (per m² / patch / cap): vaulttree **0.1 / 1 / 12** (placed first), siphonreed **4.0 / 6 / 64** (a reed bed over a narrow habitat), lanternberry **0.25 / 3 / 40** | `crates/cubarium/src/voxel/habitat.rs` | restart | Placed wherever their own gates pass; interim dossier colours in `voxel/stand.rs` (not a look decision). |
 | voxel **organism models** (package V, `design/handoffs/voxel-organism-models-2026-09-23.md`): `organisms = "models" \| "glyphs"` and `models_dir` (**assets/voxel-models**) in the voxel TOML; the bake's `VARIANTS` **3** per size step and `BINS` **5** animal size bins (newborn to adult, evenly spaced in length); a size step wherever the crown height crosses a **whole voxel** or the radius a **half voxel** | `crates/cubarium/src/voxel/mod.rs` (`VoxelConfig`), `scripts/blender/bake_voxel_models.py` | restart (keys); rebake + restart (bake constants) | **Placeholders.** Thinning keeps a foliage/drape cell iff 24 bits of a splitmix64 hash of `(stand id, offset, layer)` fall under the layer's `stock / capacity` (`model::keeps`); the variant is the same hash of the id mod the variant count. Wilt is quantised to **5** levels (`model::WILT_LEVELS`), a bloom opens at a parcel of **half** a package (`model::RIPE_AT`), a starving animal's body takes the wilt tint at **0.5** (`animal::STARVING_TINT`) and its accent `#7A2A78`. |
+
+<details><summary>The registry dump: every parameter path, value, unit and range</summary>
+
+<!-- registry dump: begin (cargo run -p cubarium-voxel-sim --example params -- --backlog design/backlog.md) -->
+
+**`world.*`** (85 rows)
+
+| path | value | unit | range | search | grade | provenance | what |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `world.width` | 128 | voxels | [1, inf) |  | - | structural | voxels along the strip (x wraps) |
+| `world.height` | 48 | voxels | [1, inf) |  | - | structural | voxels of vertical extent |
+| `world.depth` | 24 | voxels | [1, inf) |  | - | structural | voxels into the habitat |
+| `world.voxel_m` | 0.25 | m | (0, inf) |  | N | decision | edge length of one voxel |
+| `world.seed` | 1 | - | [0, inf) |  | - | structural | seed for every deterministic stream |
+| `world.noise_seed` | 0 | - | [0, inf) |  | - | structural | seed for the landform's final wobble alone (0: from `seed`) |
+| `world.water_substeps` | 4 | substeps per tick | [1, inf) |  | N | numerics | free-water solver substeps per tick |
+| `world.free_transfer_cap` | 0.0 | fraction of a cell per substep | [0, inf) |  | N | numerics | cap on one cell's free-water change per substep (0: none) |
+| `world.rain_m_per_s` | 0.0 | m/s | [0, inf) | 0.00001–0.0001 log | A | placeholder | R0: prescribed rain onto exposed tops (open budget) and the unit of a mode's rate_r0 |
+| `world.evaporation_m_per_s` | 0.0 | m/s | [0, inf) | 0.000001–0.00003 log | D | tuned | evaporation from exposed free-water surfaces |
+| `world.spring_k_m2_per_s` | 0.02 | m2/s | [0, inf) |  | C | placeholder | spring conductance from the aquifer: Q = k * max(head - h_spring, 0) |
+| `world.aquifer_porosity` | 0.35 | fraction of footprint | (0, inf) |  | B | derived | aquifer pore space per metre of head (>= soil's 0.35) |
+| `world.initial_aquifer_head_m` | 0.0 | m above y=0 | [0, inf) |  | C | tuned | water table at creation (0: a dry aquifer) |
+| `world.outlet_m3_per_s` | 0.05 | m3/s | [0, inf) |  | C | tuned | free water an open outlet exports |
+| `world.initial_atmosphere_m3` | 0.0 | m3 | [0, inf) |  | - | structural | water aloft at creation (closed budget) |
+| `world.reentry_m3_per_s` | 0.0 | m3/s | [0, inf) |  | C | tuned | closed budget: the stream returned at the spring cell |
+| `world.reentry_floor_head_m` | 0.0 | m above y=0 | [0, inf) |  | - | structural | water table at which the aquifer-fed stream stops |
+| `world.lake_drain_m2_per_s` | 0.0 | m3/s per m of head | [0, inf) |  | C | derived | lake floor joined to the aquifer: flow = k * (lake - table) |
+| `world.day.length_min` | 120.0 | min of sim time | (0, inf) |  | C | decision | one day and night (cycle); the 'day' the climate counts in |
+| `world.day.daylight` | 0.67 | fraction of the cycle | [0.05, 0.95] | 0.4–0.7 | B | decision | the share of the cycle the sun is up |
+| `world.day.start_hour` | 8.0 | h on the day's 24 h clock | [0, 24) |  | - | decision | where a fresh world starts |
+| `world.day.latitude` | (absent) | deg north | [-90, 90] |  | - | decision | local clock: the place whose sunrise the day follows |
+| `world.day.longitude` | (absent) | deg east | [-180, 180] |  | - | decision | local clock: the place's longitude |
+| `world.day.plant_night_factor` | 0.05 | fraction of the daytime rate | [0, 1] | yes | - | decision | plant maintenance and senescence in the dark (1: no night rule) |
+| `world.climate.weather_speed` | (absent) | x nature | (0, inf) | 1–12 log | C | decision | how much faster than nature the weather runs, when fixed ("auto" otherwise) |
+| `world.climate.temperature_c` | 26.0 | degC | [0, inf] |  | A | preset | mean air temperature |
+| `world.climate.diurnal_c` | 3.0 | degC | [0, inf] | 2–5 | A | preset | diurnal swing, +/- |
+| `world.climate.drift_sd_c` | 1.0 | degC | [0, inf] |  | B | preset | day-to-day drift's standard deviation |
+| `world.climate.drift_days` | 3.0 | days of nature | [0, inf] |  | B | preset | the drift's time scale |
+| `world.climate.fronts_per_day` | 0.1 | per day | [0, inf] |  | B | preset | cold fronts per day |
+| `world.climate.front_min_c` | 2.0 | degC | [0, inf] |  | B | preset | shallowest front |
+| `world.climate.front_max_c` | 4.0 | degC | [0, inf] |  | B | preset | deepest front |
+| `world.climate.front_onset_min` | 30.0 | min of nature | [0, inf] |  | B | preset | a front's cooling ramp |
+| `world.climate.front_recovery_days` | 0.3 | days of nature | [0, inf] |  | B | preset | a front's recovery |
+| `world.climate.front_window_min` | 30.0 | min of nature | [0, inf] |  | B | preset | F = 1 this long after a front arrives |
+| `world.climate.rain_cool_min` | 20.0 | min of nature | [0, inf] |  | B | preset | rain cooling's time constant |
+| `world.climate.capacity_share` | 0.03 | fraction of the world's water | (0, inf] | 0.01–0.1 log | A | preset | what the air holds at the mean temperature |
+| `world.climate.afternoon_width` | 0.08 | fraction of the cycle | [0, inf] |  | A | preset | the afternoon convection bump's width |
+| `world.climate.cooling_cap_c_per_h` | 3.0 | degC per sim hour | [0, inf] |  | N | numerics | cap on the cooling rate K |
+| `world.climate.dry_gap_min_s` | 300.0 | s | [0, inf] | 0–1800 | C | decision | shortest wait after an event before a natural start (0/0: off) |
+| `world.climate.dry_gap_max_s` | 900.0 | s | [0, inf] | 0–1800 | C | decision | longest wait after an event before a natural start |
+| `world.climate.fog_form_rh` | 0.9 | RH | [0, inf] |  | - | visual | fog forms at or above (visual only) |
+| `world.climate.fog_clear_rh` | 0.85 | RH | [0, inf] |  | - | visual | fog clears below (visual only) |
+| `world.climate.fog_span_rh` | 0.15 | RH | [0, inf] |  | - | visual | fog density span (visual only) |
+| `world.climate.fog_dawn_before` | 0.1 | fraction of the cycle | [0, inf] |  | - | visual | dawn window before sunrise (visual only) |
+| `world.climate.fog_dawn_after` | 0.06 | fraction of the cycle | [0, inf] |  | - | visual | dawn window after sunrise (visual only) |
+| `world.climate.fog_burn_after` | 0.1 | fraction of the cycle | [0, inf] |  | - | visual | fog burns off this far past sunrise (visual only) |
+| `world.climate.fog_cooling_c_per_h` | 0.5 | degC per sim hour | [0, inf] |  | - | visual | fog forms while the air cools faster (visual only) |
+| `world.climate.fog_form_min` | 10.0 | min of nature | [0, inf] |  | - | visual | fog's forming time (visual only) |
+| `world.climate.fog_clear_min` | 15.0 | min of nature | [0, inf] |  | - | visual | fog's clearing time (visual only) |
+| `world.climate.strike_mean_s` | 30.0 | s | [0, inf] |  | - | visual | mean lightning interval in a downpour (visual only) |
+| `world.climate.strike_min_s` | 10.0 | s | [0, inf] |  | - | visual | shortest lightning interval (visual only) |
+| `world.climate.strike_max_s` | 60.0 | s | [0, inf] |  | - | visual | longest lightning interval (visual only) |
+| `world.climate.storm_stream_gain` | 4.0 | x stream flow | [0, inf] |  | C | decision | stream swell at a downpour's peak (0: off) |
+| `world.climate.opening_min_s` | 60.0 | s | [0, inf] |  | N | preset | the host's opening rain falls at least this long |
+| `world.climate.drizzle.lambda_max_per_h` | 1.5 | events per sim hour | [0, inf] | 0.5–5 log | C | tuned | ceiling of the event hazard |
+| `world.climate.drizzle.rh50` | 0.98 | RH or moisture M | [-inf, inf] | 0.7–1.3 | C | tuned | humidity at which the hazard's logistic is half |
+| `world.climate.drizzle.width` | 0.03 | RH or moisture M | (0, inf] |  | N | tuned | the logistic's width |
+| `world.climate.drizzle.g_aft` | -0.8 | x afternoon bump | [-inf, inf] | 0.5–30 log | C | tuned | convective boost (1 + g_aft * A) |
+| `world.climate.drizzle.g_cool` | 1.0 | x cooling rate K | [-inf, inf] | 0–2 | C | tuned | hazard boost from cooling air |
+| `world.climate.drizzle.g_front` | 0.5 | x fresh-front flag | [-inf, inf] | 0–5 | C | tuned | hazard boost in a fresh front |
+| `world.climate.drizzle.rate_r0` | 0.1 | x R0 | [0, inf] | 0.05–4 log | A | tuned | the rate it rains at |
+| `world.climate.drizzle.stop_rh` | 0.8 | RH or moisture M | [0, inf] | 0.3–0.9 | C | tuned | the event ends when its reading falls to this |
+| `world.climate.drizzle.longest_min` | 90.0 | min of nature | (0, inf] | 10–120 log | B | tuned | or when it has rained this long |
+| `world.climate.drizzle.cool_c` | 0.5 | degC | [-inf, inf] |  | B | tuned | while it rains the air relaxes toward this much cooler |
+| `world.climate.shower.lambda_max_per_h` | 1.5 | events per sim hour | [0, inf] | 0.5–5 log | C | tuned | ceiling of the event hazard |
+| `world.climate.shower.rh50` | 1.0 | RH or moisture M | [-inf, inf] | 0.7–1.3 | C | tuned | humidity at which the hazard's logistic is half |
+| `world.climate.shower.width` | 0.08 | RH or moisture M | (0, inf] |  | N | tuned | the logistic's width |
+| `world.climate.shower.g_aft` | 4.0 | x afternoon bump | [-inf, inf] | 0.5–30 log | C | tuned | convective boost (1 + g_aft * A) |
+| `world.climate.shower.g_cool` | 0.25 | x cooling rate K | [-inf, inf] | 0–2 | C | tuned | hazard boost from cooling air |
+| `world.climate.shower.g_front` | 1.0 | x fresh-front flag | [-inf, inf] | 0–5 | C | tuned | hazard boost in a fresh front |
+| `world.climate.shower.rate_r0` | 1.0 | x R0 | [0, inf] | 0.05–4 log | A | tuned | the rate it rains at |
+| `world.climate.shower.stop_rh` | 0.7 | RH or moisture M | [0, inf] | 0.3–0.9 | C | tuned | the event ends when its reading falls to this |
+| `world.climate.shower.longest_min` | 30.0 | min of nature | (0, inf] | 10–120 log | B | tuned | or when it has rained this long |
+| `world.climate.shower.cool_c` | 1.5 | degC | [-inf, inf] |  | B | tuned | while it rains the air relaxes toward this much cooler |
+| `world.climate.downpour.lambda_max_per_h` | 1.0 | events per sim hour | [0, inf] | 0.5–5 log | C | tuned | ceiling of the event hazard |
+| `world.climate.downpour.rh50` | 1.13 | RH or moisture M | [-inf, inf] | 0.7–1.3 | C | tuned | humidity at which the hazard's logistic is half |
+| `world.climate.downpour.width` | 0.08 | RH or moisture M | (0, inf] |  | N | tuned | the logistic's width |
+| `world.climate.downpour.g_aft` | 20.0 | x afternoon bump | [-inf, inf] | 0.5–30 log | C | tuned | convective boost (1 + g_aft * A) |
+| `world.climate.downpour.g_cool` | 0.5 | x cooling rate K | [-inf, inf] | 0–2 | C | tuned | hazard boost from cooling air |
+| `world.climate.downpour.g_front` | 3.0 | x fresh-front flag | [-inf, inf] | 0–5 | C | tuned | hazard boost in a fresh front |
+| `world.climate.downpour.rate_r0` | 2.0 | x R0 | [0, inf] | 0.05–4 log | A | tuned | the rate it rains at |
+| `world.climate.downpour.stop_rh` | 0.5 | RH or moisture M | [0, inf] | 0.3–0.9 | C | tuned | the event ends when its reading falls to this |
+| `world.climate.downpour.longest_min` | 50.0 | min of nature | (0, inf] | 10–120 log | B | tuned | or when it has rained this long |
+| `world.climate.downpour.cool_c` | 3.0 | degC | [-inf, inf] |  | B | tuned | while it rains the air relaxes toward this much cooler |
+
+**`flora.*`** (565 rows)
+
+| path | value | unit | range | search | grade | provenance | what |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `flora.bloomcrown.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.bloomcrown.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.bloomcrown.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.bloomcrown.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.bloomcrown.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.bloomcrown.wood_max` | 0.6 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.bloomcrown.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.bloomcrown.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.bloomcrown.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.bloomcrown.foliage_rate` | 0.002 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.bloomcrown.wood_rate` | 0.001 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.bloomcrown.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.bloomcrown.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.bloomcrown.alive_min` | 0.02 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.bloomcrown.donor_min` | 0.3 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.bloomcrown.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.bloomcrown.propagule_rate` | 0.0004 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.bloomcrown.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.bloomcrown.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.bloomcrown.seed_attrition_per_s` | 0.00003472222222222222 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.bloomcrown.seed_max_age_s` | 28800.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.bloomcrown.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.bloomcrown.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.bloomcrown.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.bloomcrown.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.bloomcrown.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.bloomcrown.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.bloomcrown.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.bloomcrown.light_half` | 0.8 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.bloomcrown.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.bloomcrown.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.bloomcrown.wilt_water` | 0.05 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.bloomcrown.full_water` | 0.5 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.bloomcrown.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.bloomcrown.establish_water_min` | 0.1 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.bloomcrown.establish_light_min` | 0.6 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.bloomcrown.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.bloomcrown.stress_rate_per_s` | 0.2 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.bloomcrown.relax_rate_per_s` | 0.02 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.bloomcrown.establish_saturated_max` | 0.25 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.bloomcrown.drown_depth_m` | 0.05 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.bloomcrown.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.bloomcrown.hop` | 2 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.bloomcrown.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.bloomcrown.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.bloomcrown.seed_mass` | 2 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.bloomcrown.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.bloomcrown.crown_height_m.*` | 0.375, 1.0 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.bloomcrown.crown_radius_m.*` | 0.125, 0.3125 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.bloomcrown.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.bloomcrown.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.bloomcrown.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.bloomcrown.profile.*.wood_fraction_max` | 0.2, 0.5, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.bloomcrown.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.bloomcrown.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.4 … (14 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.bloomcrown.profile.*.layers.*.radius` | 1.0, 0.15, 0.7, 1.0 … (7 values) | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.bloomcrown.profile.*.layers.*.share` | 1.0, 0.0, 0.4, 0.6 … (7 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.bloomcrown.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.3 … (7 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.umbrellafrond.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.umbrellafrond.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.umbrellafrond.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.umbrellafrond.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.umbrellafrond.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.umbrellafrond.wood_max` | 0.6 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.umbrellafrond.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.umbrellafrond.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.umbrellafrond.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.umbrellafrond.foliage_rate` | 0.002 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.umbrellafrond.wood_rate` | 0.001 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.umbrellafrond.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.umbrellafrond.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.umbrellafrond.alive_min` | 0.02 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.umbrellafrond.donor_min` | 0.3 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.umbrellafrond.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.umbrellafrond.propagule_rate` | 0.0002 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.umbrellafrond.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.umbrellafrond.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.umbrellafrond.seed_attrition_per_s` | 0.00006944444444444444 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.umbrellafrond.seed_max_age_s` | 14400.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.umbrellafrond.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.umbrellafrond.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.umbrellafrond.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.umbrellafrond.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.umbrellafrond.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.umbrellafrond.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.umbrellafrond.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.umbrellafrond.light_half` | 0.15 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.umbrellafrond.rooting_depth` | 4 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.umbrellafrond.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.umbrellafrond.wilt_water` | 1.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.umbrellafrond.full_water` | 1.5 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.umbrellafrond.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.umbrellafrond.establish_water_min` | 1.2 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.umbrellafrond.establish_light_min` | 0.1 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.umbrellafrond.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.umbrellafrond.stress_rate_per_s` | 0.01 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.umbrellafrond.relax_rate_per_s` | 0.05 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.umbrellafrond.establish_saturated_max` | 1.0 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.umbrellafrond.drown_depth_m` | 0.5 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.umbrellafrond.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.umbrellafrond.hop` | 6 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.umbrellafrond.clonal_share` | 0.5 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.umbrellafrond.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.umbrellafrond.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.umbrellafrond.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.umbrellafrond.crown_height_m.*` | 1.0, 2.0 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.umbrellafrond.crown_radius_m.*` | 0.375, 0.75 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.umbrellafrond.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.umbrellafrond.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.umbrellafrond.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.umbrellafrond.profile.*.wood_fraction_max` | 0.15, 0.5, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.umbrellafrond.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.umbrellafrond.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.5 … (16 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.umbrellafrond.profile.*.layers.*.radius` | 1.0, 0.15, 1.0, 0.6 … (8 values) | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.umbrellafrond.profile.*.layers.*.share` | 1.0, 0.0, 0.6, 0.4 … (8 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.umbrellafrond.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.5 … (8 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.springturf.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.springturf.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.springturf.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.springturf.wood_max` | 0.06 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.springturf.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.springturf.maintenance` | 0.002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.springturf.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.springturf.foliage_rate` | 0.02 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.springturf.wood_rate` | 0.01 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.springturf.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.springturf.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.springturf.alive_min` | 0.006 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.springturf.donor_min` | 0.03 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.springturf.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.springturf.propagule_rate` | 0.002 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.springturf.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.springturf.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.springturf.seed_attrition_per_s` | 0.000023148148148148147 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.springturf.seed_max_age_s` | 43200.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.springturf.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.springturf.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.springturf.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.springturf.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.springturf.assimilation` | 0.008 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.springturf.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.springturf.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.springturf.light_half` | 1.0 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.springturf.rooting_depth` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.springturf.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.springturf.wilt_water` | 0.1 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.springturf.full_water` | 0.5 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.springturf.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.springturf.establish_water_min` | 0.3 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.springturf.establish_light_min` | 0.75 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.springturf.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.springturf.stress_rate_per_s` | 0.2 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.springturf.relax_rate_per_s` | 0.05 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.springturf.establish_saturated_max` | 0.3 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.springturf.drown_depth_m` | 0.03 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.springturf.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.springturf.hop` | 3 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.springturf.clonal_share` | 0.3 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.springturf.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.springturf.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.springturf.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.springturf.crown_height_m.*` | 0.125, 0.1875 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.springturf.crown_radius_m.*` | 0.125, 0.25 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.springturf.graze_refuge` | 0.3 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.springturf.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.springturf.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.springturf.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.springturf.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.springturf.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.springturf.profile.*.layers.*.radius` | 1.0 | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.springturf.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.springturf.profile.*.layers.*.porosity` | 0.3 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.stonecushion.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.stonecushion.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.stonecushion.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.stonecushion.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.stonecushion.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.stonecushion.wood_max` | 0.1 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.stonecushion.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.stonecushion.maintenance` | 0.00005 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.stonecushion.senescence` | 0.0003 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.stonecushion.foliage_rate` | 0.0005 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.stonecushion.wood_rate` | 0.0002 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.stonecushion.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.stonecushion.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.stonecushion.alive_min` | 0.01 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.stonecushion.donor_min` | 0.05 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.stonecushion.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.stonecushion.propagule_rate` | 0.00005 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.stonecushion.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.stonecushion.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.stonecushion.seed_attrition_per_s` | 0.000023148148148148147 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.stonecushion.seed_max_age_s` | 43200.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.stonecushion.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.stonecushion.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.stonecushion.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.stonecushion.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.stonecushion.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.stonecushion.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.stonecushion.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.stonecushion.light_half` | 0.3 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.stonecushion.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.stonecushion.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.stonecushion.wilt_water` | 0.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.stonecushion.full_water` | 0.2 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.stonecushion.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.stonecushion.establish_water_min` | 0.05 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.stonecushion.establish_light_min` | 0.4 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.stonecushion.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.stonecushion.stress_rate_per_s` | 0.1 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.stonecushion.relax_rate_per_s` | 0.02 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.stonecushion.establish_saturated_max` | 0.4 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.stonecushion.drown_depth_m` | 0.02 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.stonecushion.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.stonecushion.hop` | 1 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.stonecushion.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.stonecushion.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.stonecushion.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.stonecushion.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.stonecushion.crown_height_m.*` | 0.125, 0.1875 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.stonecushion.crown_radius_m.*` | 0.125, 0.15625 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.stonecushion.graze_refuge` | 0.4 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.stonecushion.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.stonecushion.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.stonecushion.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.stonecushion.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.stonecushion.profile.*.layers.*.band.*` | 0.0, 0.6, 0.6, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.stonecushion.profile.*.layers.*.radius` | 1.0, 0.6 | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.stonecushion.profile.*.layers.*.share` | 0.7, 0.3 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.stonecushion.profile.*.layers.*.porosity` | 0.2, 0.2 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.velvetpad.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.velvetpad.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.velvetpad.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.velvetpad.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.velvetpad.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.velvetpad.wood_max` | 0.2 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.velvetpad.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.velvetpad.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.velvetpad.senescence` | 0.0005 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.velvetpad.foliage_rate` | 0.004 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.velvetpad.wood_rate` | 0.002 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.velvetpad.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.velvetpad.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.velvetpad.alive_min` | 0.015 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.velvetpad.donor_min` | 0.1 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.velvetpad.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.velvetpad.propagule_rate` | 0.0005 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.velvetpad.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.velvetpad.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.velvetpad.seed_attrition_per_s` | 0.00009259259259259259 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.velvetpad.seed_max_age_s` | 10800.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.velvetpad.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.velvetpad.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.velvetpad.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.velvetpad.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.velvetpad.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.velvetpad.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.velvetpad.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.velvetpad.light_half` | 0.1 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.velvetpad.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.velvetpad.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.velvetpad.wilt_water` | 0.25 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.velvetpad.full_water` | 0.9 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.velvetpad.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.velvetpad.establish_water_min` | 0.4 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.velvetpad.establish_light_min` | 0.05 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.velvetpad.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.velvetpad.stress_rate_per_s` | 0.1 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.velvetpad.relax_rate_per_s` | 0.05 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.velvetpad.establish_saturated_max` | 0.6 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.velvetpad.drown_depth_m` | 0.1 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.velvetpad.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.velvetpad.hop` | 6 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.velvetpad.clonal_share` | 0.3 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.velvetpad.spore_tries` | 2 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.velvetpad.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.velvetpad.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.velvetpad.crown_height_m.*` | 0.125, 0.125 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.velvetpad.crown_radius_m.*` | 0.1875, 0.375 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.velvetpad.graze_refuge` | 0.3 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.velvetpad.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.velvetpad.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.velvetpad.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.velvetpad.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.velvetpad.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.velvetpad.profile.*.layers.*.radius` | 1.0 | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.velvetpad.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.velvetpad.profile.*.layers.*.porosity` | 0.6 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.glowcap.substrate_uptake_per_s` | 0.02 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.glowcap.substrate_yield` | 0.4 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.glowcap.establish_substrate_min` | 0.02 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.glowcap.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.glowcap.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.glowcap.wood_max` | 0.1 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.glowcap.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.glowcap.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.glowcap.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.glowcap.foliage_rate` | 0.004 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.glowcap.wood_rate` | 0.002 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.glowcap.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.glowcap.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.glowcap.alive_min` | 0.01 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.glowcap.donor_min` | 0.05 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.glowcap.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.glowcap.propagule_rate` | 0.0005 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.glowcap.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.glowcap.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.glowcap.seed_attrition_per_s` | 0.0001388888888888889 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.glowcap.seed_max_age_s` | 7200.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.glowcap.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.glowcap.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.glowcap.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.glowcap.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.glowcap.assimilation` | 0.0 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.glowcap.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.glowcap.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.glowcap.light_half` | 0.5 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.glowcap.rooting_depth` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.glowcap.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.glowcap.wilt_water` | 0.2 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.glowcap.full_water` | 0.9 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.glowcap.transpiration_m3_per_s` | 0.0 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.glowcap.establish_water_min` | 0.2 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.glowcap.establish_light_min` | 0.0 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.glowcap.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.glowcap.stress_rate_per_s` | 0.1 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.glowcap.relax_rate_per_s` | 0.05 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.glowcap.establish_saturated_max` | 0.5 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.glowcap.drown_depth_m` | 0.05 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.glowcap.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.glowcap.hop` | 6 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.glowcap.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.glowcap.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.glowcap.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.glowcap.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.glowcap.crown_height_m.*` | 0.125, 0.25 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.glowcap.crown_radius_m.*` | 0.0625, 0.0625 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.glowcap.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.glowcap.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.glowcap.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.glowcap.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.glowcap.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.glowcap.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.glowcap.profile.*.layers.*.radius` | 1.0 | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.glowcap.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.glowcap.profile.*.layers.*.porosity` | 0.5 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.vaulttree.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.vaulttree.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.vaulttree.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.vaulttree.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.vaulttree.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.vaulttree.wood_max` | 5.0 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.vaulttree.reserve_cap` | 1.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.vaulttree.maintenance` | 0.0001 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.vaulttree.senescence` | 0.0005 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.vaulttree.foliage_rate` | 0.001 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.vaulttree.wood_rate` | 0.0003 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.vaulttree.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.vaulttree.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.vaulttree.alive_min` | 0.02 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.vaulttree.donor_min` | 2.5 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.vaulttree.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.vaulttree.propagule_rate` | 0.0008 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.vaulttree.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.vaulttree.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.vaulttree.seed_attrition_per_s` | 0.000046296296296296294 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.vaulttree.seed_max_age_s` | 21600.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.vaulttree.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.vaulttree.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.vaulttree.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.vaulttree.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.vaulttree.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.vaulttree.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.vaulttree.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.vaulttree.light_half` | 0.6 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.vaulttree.rooting_depth` | 6 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.vaulttree.rooting_radius` | 2 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.vaulttree.wilt_water` | 0.1 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.vaulttree.full_water` | 0.5 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.vaulttree.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.vaulttree.establish_water_min` | 0.2 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.vaulttree.establish_light_min` | 0.9 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.vaulttree.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.vaulttree.stress_rate_per_s` | 0.005 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.vaulttree.relax_rate_per_s` | 0.02 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.vaulttree.establish_saturated_max` | 0.2 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.vaulttree.drown_depth_m` | 0.1 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.vaulttree.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.vaulttree.hop` | 4 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.vaulttree.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.vaulttree.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.vaulttree.seed_mass` | 4 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.vaulttree.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.vaulttree.crown_height_m.*` | 2.25, 3.5 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.vaulttree.crown_radius_m.*` | 0.625, 1.0 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.vaulttree.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.vaulttree.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.vaulttree.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.vaulttree.profile.*.wood_fraction_max` | 0.1, 0.4, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.vaulttree.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.vaulttree.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.6 … (14 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.vaulttree.profile.*.layers.*.radius` | 1.0, 0.15, 1.0, 0.15 … (7 values) | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.vaulttree.profile.*.layers.*.share` | 1.0, 0.0, 1.0, 0.0 … (7 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.vaulttree.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.0 … (7 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.lanternberry.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.lanternberry.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.lanternberry.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.lanternberry.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.lanternberry.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.lanternberry.wood_max` | 1.0 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.lanternberry.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.lanternberry.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.lanternberry.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.lanternberry.foliage_rate` | 0.002 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.lanternberry.wood_rate` | 0.001 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.lanternberry.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.lanternberry.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.lanternberry.alive_min` | 0.02 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.lanternberry.donor_min` | 0.4 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.lanternberry.donor_reserve_floor` | 0.7 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.lanternberry.propagule_rate` | 0.0012 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.lanternberry.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.lanternberry.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.lanternberry.seed_attrition_per_s` | 0.00003472222222222222 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.lanternberry.seed_max_age_s` | 28800.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.lanternberry.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.lanternberry.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.lanternberry.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.lanternberry.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.lanternberry.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.lanternberry.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.lanternberry.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.lanternberry.light_half` | 0.4 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.lanternberry.rooting_depth` | 3 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.lanternberry.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.lanternberry.wilt_water` | 0.1 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.lanternberry.full_water` | 0.5 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.lanternberry.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.lanternberry.establish_water_min` | 0.4 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.lanternberry.establish_light_min` | 0.35 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.lanternberry.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.lanternberry.stress_rate_per_s` | 0.1 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.lanternberry.relax_rate_per_s` | 0.05 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.lanternberry.establish_saturated_max` | 0.5 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.lanternberry.drown_depth_m` | 0.1 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.lanternberry.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.lanternberry.hop` | 2 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.lanternberry.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.lanternberry.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.lanternberry.seed_mass` | 3 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.lanternberry.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.lanternberry.crown_height_m.*` | 0.625, 1.125 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.lanternberry.crown_radius_m.*` | 0.25, 0.4375 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.lanternberry.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.lanternberry.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.lanternberry.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.lanternberry.profile.*.wood_fraction_max` | 0.2, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.lanternberry.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.lanternberry.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.3 … (8 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.lanternberry.profile.*.layers.*.radius` | 1.0, 0.4, 1.0, 1.0 | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.lanternberry.profile.*.layers.*.share` | 1.0, 0.0, 0.21428571428571427, 0.7857142857142857 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.lanternberry.profile.*.layers.*.porosity` | 0.5, 0.7, 0.5, 0.5 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.siphonreed.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.siphonreed.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
+| `flora.siphonreed.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
+| `flora.siphonreed.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
+| `flora.siphonreed.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.siphonreed.wood_max` | 0.3 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.siphonreed.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
+| `flora.siphonreed.maintenance` | 0.0004 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.siphonreed.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.siphonreed.foliage_rate` | 0.002 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.siphonreed.wood_rate` | 0.001 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
+| `flora.siphonreed.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
+| `flora.siphonreed.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
+| `flora.siphonreed.alive_min` | 0.02 | org-units | [0, inf) | yes | C | placeholder | W_min: a stand with less wood dies |
+| `flora.siphonreed.donor_min` | 0.15 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
+| `flora.siphonreed.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
+| `flora.siphonreed.propagule_rate` | 0.0003 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.siphonreed.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
+| `flora.siphonreed.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
+| `flora.siphonreed.seed_attrition_per_s` | 0.00002777777777777778 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.siphonreed.seed_max_age_s` | 36000.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.siphonreed.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
+| `flora.siphonreed.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.siphonreed.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
+| `flora.siphonreed.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.siphonreed.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
+| `flora.siphonreed.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
+| `flora.siphonreed.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
+| `flora.siphonreed.light_half` | 0.8 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.siphonreed.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.siphonreed.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
+| `flora.siphonreed.wilt_water` | 1.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.siphonreed.full_water` | 1.5 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.siphonreed.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
+| `flora.siphonreed.establish_water_min` | 1.2 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
+| `flora.siphonreed.establish_light_min` | 0.6 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
+| `flora.siphonreed.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
+| `flora.siphonreed.stress_rate_per_s` | 0.01 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
+| `flora.siphonreed.relax_rate_per_s` | 0.05 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
+| `flora.siphonreed.establish_saturated_max` | 1.0 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.siphonreed.drown_depth_m` | 0.5 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
+| `flora.siphonreed.water_depth_min_m` | 0.1 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
+| `flora.siphonreed.hop` | 6 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
+| `flora.siphonreed.clonal_share` | 0.7 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.siphonreed.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
+| `flora.siphonreed.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
+| `flora.siphonreed.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.siphonreed.crown_height_m.*` | 0.75, 1.5 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
+| `flora.siphonreed.crown_radius_m.*` | 0.0625, 0.125 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.siphonreed.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.siphonreed.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
+| `flora.siphonreed.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
+| `flora.siphonreed.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
+| `flora.siphonreed.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
+| `flora.siphonreed.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
+| `flora.siphonreed.profile.*.layers.*.radius` | 1.0 | fraction of crown radius | (0, 1] |  | C | placeholder | a layer's radius |
+| `flora.siphonreed.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
+| `flora.siphonreed.profile.*.layers.*.porosity` | 0.7 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
+| `flora.latticevine.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth |
+| `flora.latticevine.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box radius |
+| `flora.latticevine.transpiration_m3_per_s` | 0.00000006 | m3/s per reference face | [0, inf) |  | D | derived | water per full face |
+| `flora.latticevine.wilt_water` | 0.1 | available water | [0, inf) | yes | B | placeholder | mu = 0 at and below |
+| `flora.latticevine.full_water` | 0.5 | available water | [0, inf) | yes | B | placeholder | mu = 1 at and above |
+| `flora.latticevine.dry_water` | 0.15 | available water | [0, inf) | yes | C | placeholder | the root box is dry below |
+| `flora.latticevine.wet_water` | 0.4 | available water | [0, inf) | yes | C | placeholder | and wet again above |
+| `flora.latticevine.dry_spell_s` | 600.0 | s | [0, inf) | yes | C | placeholder | dry this long: dormant |
+| `flora.latticevine.wet_spell_s` | 300.0 | s | [0, inf) | yes | C | placeholder | wet this long: regreens |
+| `flora.latticevine.leaf_fall_s` | 60.0 | s | (0, inf) |  | C | placeholder | a dormant face drops its leaf over this |
+| `flora.latticevine.assimilation` | 0.00009 | organic/s per reference face | [0, inf) | yes | C | placeholder | income per full face in full light |
+| `flora.latticevine.underside_light` | 0.15 | fraction | [0, inf) | yes | B | placeholder | light factor on a downward face |
+| `flora.latticevine.leaf_mass` | 0.05 | org-units per reference face | (0, inf) | yes | C | placeholder | leaf tissue per full face |
+| `flora.latticevine.runner_mass` | 0.02 | org-units per reference face | [0, inf) | yes | C | placeholder | runner tissue per face |
+| `flora.latticevine.leaf_upkeep` | 0.00001 | organic/s per reference face | [0, inf) | yes | B | placeholder | leaf maintenance |
+| `flora.latticevine.wood_upkeep` | 0.000002 | organic/s per reference face | [0, inf) | yes | B | placeholder | runner maintenance |
+| `flora.latticevine.regrow_rate` | 0.002 | leafiness/s | [0, inf) | yes | B | placeholder | a face's releafing rate |
+| `flora.latticevine.spread_cost` | 0.05 | org-units per reference face | [0, inf) | yes | C | placeholder | a new face's cost (at least its runner) |
+| `flora.latticevine.spread_check_s` | 5.0 | s | (0, inf) |  | C | placeholder | how often a vine tries to spread |
+| `flora.latticevine.sister_cost` | 0.1 | org-units per reference face | [0, inf) | yes | C | placeholder | a sister vine's cost |
+| `flora.latticevine.sister_min_dist` | 4 | faces | [0, inf) | yes | C | placeholder | a sister roots at least this far along the cover |
+| `flora.latticevine.contest_threshold` | 0.2 | leafiness | [0, 1] | yes | C | placeholder | a face below this is contestable |
+| `flora.latticevine.contest_check_s` | 30.0 | s | (0, inf) |  | C | placeholder | the contest wheel's period |
+| `flora.latticevine.spur_reserve_min` | 0.005 | org-units per reference face | [0, inf) | yes | C | placeholder | reserve per face before a flowering cycle |
+| `flora.latticevine.spur_window_s` | 120.0 | s | [0, inf) | yes | C | placeholder | after a shower, a cycle may still start this long |
+| `flora.latticevine.spur_jitter_s` | 60.0 | s | [0, inf) |  | C | placeholder | spread of the per-face start delay |
+| `flora.latticevine.bud_s` | 60.0 | s | [0, inf) | yes | C | placeholder | bud phase |
+| `flora.latticevine.flower_s` | 120.0 | s | [0, inf) | yes | C | placeholder | flower phase |
+| `flora.latticevine.fruit_s` | 240.0 | s | [0, inf) | yes | C | placeholder | fruit phase |
+| `flora.latticevine.spent_s` | 60.0 | s | [0, inf) | yes | C | placeholder | spent phase |
+| `flora.latticevine.nectar` | 0.002 | org-units per reference face | [0, inf) | yes | C | placeholder | a flower's organic matter |
+| `flora.latticevine.fruit` | 0.005 | org-units per reference face | [0, inf) | yes | C | placeholder | a bead bunch's organic matter |
+| `flora.latticevine.energy_density` | 1.0 | energy per org-unit | [0, inf) |  | D | placeholder | vine tissue energy |
+| `flora.latticevine.founders` | 6 | vines | [0, inf) | yes | C | placeholder | founder vines rooted on a fresh world |
+| `flora.latticevine.founder_reserve` | 0.1 | org-units per reference face | [0, inf) | yes | C | placeholder | each founder's starting reserve |
+| `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
+| `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
+| `flora.wood_decomposition` | 0.0001 | /s | [0, inf) | yes | C | placeholder | k_w: dead-wood decomposition |
+| `flora.carrion_decomposition` | 0.00028 | /s | [0, inf) | yes | A | placeholder | k_c: carrion decomposition |
+| `flora.litter_energy_cap` | 2.0 | energy per org-unit | [0, inf) |  | C | placeholder | retained energy cap per unit of litter |
+| `flora.initial_mineral` | 1.0 | mineral per site | [0, inf) | yes | D | placeholder | mineral a site is provisioned with |
+| `flora.seed_check_s` | 30.0 | s | [0, inf) |  | N | numerics | how often a banked site is tested |
+| `flora.voxel_m` | 0.25 | m | (0, inf) |  | - | derived | the world's cell size, recorded (set from world.voxel_m) |
+
+**`fauna.*`** (201 rows)
+
+| path | value | unit | range | search | grade | provenance | what |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `fauna.frondgrazer.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
+| `fauna.frondgrazer.bite_per_s` | 0.06 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
+| `fauna.frondgrazer.bite_half_stock` | 0.15 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.frondgrazer.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.frondgrazer.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
+| `fauna.frondgrazer.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.frondgrazer.body_min` | 0.15 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.frondgrazer.birth_body` | 0.8999999999999999 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.frondgrazer.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
+| `fauna.frondgrazer.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–1.5 | A | placeholder | ceiling on new intake into the reserve |
+| `fauna.frondgrazer.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
+| `fauna.frondgrazer.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
+| `fauna.frondgrazer.lifespan_median_s` | 14400.0 | s | [0, inf) | 3600–57600 log | B | derived | median lifespan (0: none) |
+| `fauna.frondgrazer.reproduction.surplus_floor` | 0.15 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.frondgrazer.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
+| `fauna.frondgrazer.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
+| `fauna.frondgrazer.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.frondgrazer.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
+| `fauna.frondgrazer.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
+| `fauna.frondgrazer.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
+| `fauna.frondgrazer.reproduction.egg_organic` | 0.0 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.frondgrazer.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
+| `fauna.founders.littershredder.core.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
+| `fauna.founders.littershredder.core.bite_per_s` | 0.015 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
+| `fauna.founders.littershredder.core.bite_half_stock` | 0.0375 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.littershredder.core.body_max` | 0.375 | org-units | [0, inf) |  | D | placeholder | adult structure |
+| `fauna.founders.littershredder.core.growth_max_per_s` | 0.000102 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.littershredder.core.body_min` | 0.09375 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.littershredder.core.birth_body` | 0.375 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.littershredder.core.birth_cost` | 0.1875 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
+| `fauna.founders.littershredder.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–1.5 | A | placeholder | ceiling on new intake into the reserve |
+| `fauna.founders.littershredder.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
+| `fauna.founders.littershredder.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
+| `fauna.founders.littershredder.core.lifespan_median_s` | 14400.0 | s | [0, inf) | 3600–57600 log | B | derived | median lifespan (0: none) |
+| `fauna.founders.littershredder.core.reproduction.surplus_floor` | 0.01875 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.founders.littershredder.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
+| `fauna.founders.littershredder.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
+| `fauna.founders.littershredder.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.littershredder.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
+| `fauna.founders.littershredder.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
+| `fauna.founders.littershredder.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
+| `fauna.founders.littershredder.core.reproduction.egg_organic` | 0.12 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.littershredder.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
+| `fauna.founders.littershredder.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
+| `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured | deepest drop stepped |
+| `fauna.founders.littershredder.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
+| `fauna.founders.littershredder.wade_height_fraction` | 0.25 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
+| `fauna.founders.littershredder.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
+| `fauna.founders.littershredder.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
+| `fauna.founders.littershredder.adult_length_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
+| `fauna.founders.littershredder.adult_width_m` | 0.125 | m | (0, inf) | yes | N | decision, digest | adult body width |
+| `fauna.founders.littershredder.adult_height_m` | 0.125 | m | (0, inf) | yes | N | decision, digest | adult body height |
+| `fauna.founders.littershredder.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
+| `fauna.founders.littershredder.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
+| `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
+| `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
+| `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.littershredder.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.littershredder.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
+| `fauna.founders.littershredder.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
+| `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision | the org-unit mass scale the body was built at |
+| `fauna.founders.littershredder.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
+| `fauna.founders.littershredder.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
+| `fauna.founders.littershredder.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
+| `fauna.founders.littershredder.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
+| `fauna.founders.littershredder.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.littershredder.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
+| `fauna.founders.littershredder.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
+| `fauna.founders.littershredder.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
+| `fauna.founders.littershredder.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.littershredder.hunter.rest_at` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | satiated: rests at this reserve |
+| `fauna.founders.littershredder.hunter.torpor_upkeep` | (absent) | x basal upkeep | [0, inf) |  | - | placeholder | upkeep in the satiated rest |
+| `fauna.founders.littershredder.hunter.wake_at` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | wakes from the rest below this |
+| `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
+| `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
+| `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.frondgrazer.core.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
+| `fauna.founders.frondgrazer.core.bite_per_s` | 0.06 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
+| `fauna.founders.frondgrazer.core.bite_half_stock` | 0.15 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.founders.frondgrazer.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.frondgrazer.core.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
+| `fauna.founders.frondgrazer.core.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.frondgrazer.core.body_min` | 0.15 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.frondgrazer.core.birth_body` | 0.8999999999999999 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.frondgrazer.core.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
+| `fauna.founders.frondgrazer.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–1.5 | A | placeholder | ceiling on new intake into the reserve |
+| `fauna.founders.frondgrazer.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
+| `fauna.founders.frondgrazer.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
+| `fauna.founders.frondgrazer.core.lifespan_median_s` | 14400.0 | s | [0, inf) | 3600–57600 log | B | derived | median lifespan (0: none) |
+| `fauna.founders.frondgrazer.core.reproduction.surplus_floor` | 0.15 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.founders.frondgrazer.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
+| `fauna.founders.frondgrazer.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
+| `fauna.founders.frondgrazer.core.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.frondgrazer.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
+| `fauna.founders.frondgrazer.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
+| `fauna.founders.frondgrazer.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
+| `fauna.founders.frondgrazer.core.reproduction.egg_organic` | 0.0 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.frondgrazer.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
+| `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
+| `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured | deepest drop stepped |
+| `fauna.founders.frondgrazer.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
+| `fauna.founders.frondgrazer.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
+| `fauna.founders.frondgrazer.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
+| `fauna.founders.frondgrazer.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
+| `fauna.founders.frondgrazer.adult_length_m` | 0.75 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
+| `fauna.founders.frondgrazer.adult_width_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body width |
+| `fauna.founders.frondgrazer.adult_height_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body height |
+| `fauna.founders.frondgrazer.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
+| `fauna.founders.frondgrazer.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
+| `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
+| `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
+| `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.frondgrazer.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
+| `fauna.founders.frondgrazer.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
+| `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision | the org-unit mass scale the body was built at |
+| `fauna.founders.frondgrazer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
+| `fauna.founders.frondgrazer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
+| `fauna.founders.frondgrazer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
+| `fauna.founders.frondgrazer.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
+| `fauna.founders.frondgrazer.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.frondgrazer.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
+| `fauna.founders.frondgrazer.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
+| `fauna.founders.frondgrazer.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
+| `fauna.founders.frondgrazer.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.frondgrazer.hunter.rest_at` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | satiated: rests at this reserve |
+| `fauna.founders.frondgrazer.hunter.torpor_upkeep` | (absent) | x basal upkeep | [0, inf) |  | - | placeholder | upkeep in the satiated rest |
+| `fauna.founders.frondgrazer.hunter.wake_at` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | wakes from the rest below this |
+| `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
+| `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
+| `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.lanternjaw.core.maintenance_per_s` | 0.0002 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
+| `fauna.founders.lanternjaw.core.bite_per_s` | 0.042 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
+| `fauna.founders.lanternjaw.core.bite_half_stock` | 0.105 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.lanternjaw.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
+| `fauna.founders.lanternjaw.core.growth_max_per_s` | 0.00007500000000000001 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.lanternjaw.core.body_min` | 0.102 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.lanternjaw.core.birth_body` | 0.63 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.lanternjaw.core.birth_cost` | 0.15 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
+| `fauna.founders.lanternjaw.core.reserve_cap` | 1.0 | fraction of body | [0, inf) | 0.2–1.5 | A | placeholder | ceiling on new intake into the reserve |
+| `fauna.founders.lanternjaw.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
+| `fauna.founders.lanternjaw.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
+| `fauna.founders.lanternjaw.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–57600 log | B | derived | median lifespan (0: none) |
+| `fauna.founders.lanternjaw.core.reproduction.surplus_floor` | 0.375 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.founders.lanternjaw.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
+| `fauna.founders.lanternjaw.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
+| `fauna.founders.lanternjaw.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.lanternjaw.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
+| `fauna.founders.lanternjaw.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
+| `fauna.founders.lanternjaw.core.reproduction.clutch_size` | 3 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
+| `fauna.founders.lanternjaw.core.reproduction.egg_organic` | 0.15 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.lanternjaw.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
+| `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.0002 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
+| `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1 | B | measured | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured | deepest drop stepped |
+| `fauna.founders.lanternjaw.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
+| `fauna.founders.lanternjaw.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder | deepest water walked into |
+| `fauna.founders.lanternjaw.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision | water deeper than this is over it |
+| `fauna.founders.lanternjaw.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder | continuous time under water before it drowns |
+| `fauna.founders.lanternjaw.adult_length_m` | 1.0 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
+| `fauna.founders.lanternjaw.adult_width_m` | 0.25 | m | (0, inf) | yes | N | decision, digest | adult body width |
+| `fauna.founders.lanternjaw.adult_height_m` | 0.45 | m | (0, inf) | yes | N | decision, digest | adult body height |
+| `fauna.founders.lanternjaw.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
+| `fauna.founders.lanternjaw.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
+| `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
+| `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
+| `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.lanternjaw.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
+| `fauna.founders.lanternjaw.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
+| `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision | the org-unit mass scale the body was built at |
+| `fauna.founders.lanternjaw.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
+| `fauna.founders.lanternjaw.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
+| `fauna.founders.lanternjaw.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
+| `fauna.founders.lanternjaw.hunter.jaw_band_height_fraction` | 0.6 | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
+| `fauna.founders.lanternjaw.hunter.windup_s` | 0.15 | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.lanternjaw.hunter.lunge_s` | 0.25 | s | [0, inf) |  | - | placeholder | the lunge |
+| `fauna.founders.lanternjaw.hunter.recovery_s` | 3.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
+| `fauna.founders.lanternjaw.hunter.strike_cost_s` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
+| `fauna.founders.lanternjaw.hunter.lure_power` | 1.0 | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.lanternjaw.hunter.rest_at` | 0.9 | fraction of reserve cap | [0, 1] |  | - | placeholder | satiated: rests at this reserve |
+| `fauna.founders.lanternjaw.hunter.torpor_upkeep` | 0.25 | x basal upkeep | [0, inf) |  | - | placeholder | upkeep in the satiated rest |
+| `fauna.founders.lanternjaw.hunter.wake_at` | 0.5 | fraction of reserve cap | [0, 1] |  | - | placeholder | wakes from the rest below this |
+| `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
+| `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
+| `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.hatch_chance_per_dusk` | 0.3333333333333333 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
+| `fauna.parasite_attach_radius_m` | 0.75 | m | [0, inf) | 0.25–2 | N | placeholder | host search radius from a hatching egg |
+| `fauna.parasite_max_per_host` | 1 | count | [0, inf) | 0–4 | N | placeholder | riders one host carries (0: dormant eggs never hatch) |
+| `fauna.parasite_drain_of_host_basal` | 0.05 | x host basal upkeep | [0, inf) | 0.01–0.5 log | N | placeholder | a rider's take from its host |
+| `fauna.parasite_detach_body_fraction` | 0.24 | fraction of lineage body_max | (0, 1] | 0.15–0.5 | N | placeholder | a rider drops off at this size |
+
+<!-- registry dump: end -->
+
+</details>
 
 ## 2. Artwork pass
 
