@@ -7,7 +7,6 @@ use cubarium_voxel_fauna::Founder;
 use super::ecology::EcologyParams;
 use super::search::{Band, BandSpec, EvalSpec, Trace, evaluate, penalty};
 use super::variants::VariantTable;
-use super::world::training_config;
 use crate::es::tensor::initial_center_shape;
 use crate::es::voxel::{EpisodeDriver, TRAINED_LINEAGES};
 
@@ -149,7 +148,16 @@ fn unified_mode_with_no_lanternjaw_centre_runs_one_window() {
                 .then(|| VariantTable::antithetic(f, &centre(f), 3, 0.05, 0, 2).expect("valid"))
         })
         .collect();
-    let spec = EvalSpec::new(training_config(), 100, 100);
+    // A small still world of the training recipe, so the founding is quick.
+    let world = super::world::still_water(cubarium_voxel::Config {
+        width: 64,
+        height: 24,
+        depth: 8,
+        voxel_m: 0.25,
+        landform: cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::DEFAULT),
+        ..cubarium_voxel::Config::default()
+    });
+    let spec = EvalSpec::new(world, 100, 100);
     let e = evaluate(&EcologyParams::defaults(), 7, &drivers, &tables, &spec);
     assert_eq!(e.ticks, 100, "one whole window: {:?}", e.stopped);
     assert!(!e.body_scores.is_empty(), "the trained bodies were scored");
