@@ -382,11 +382,12 @@ fn lost_lineages(founded: &[usize], bodies: &[usize], eggs: &[usize]) -> usize {
         .count()
 }
 
-/// **A body's breeding progress**, 0 to 1: 1 while it gestates (its escrow open); 0
-/// below `birth_body`; otherwise its surplus ticks in the last hold
-/// (`reproduction.surplus_ticks`, what `advance_eligibility` keeps from the window) over the
-/// ticks the hold requires to begin ([`cubarium_voxel_fauna::Reproduction::hold_required`]),
-/// capped at 1.
+/// **A body's breeding progress**, 0 to 1: 1 while it gestates (its escrow open);
+/// otherwise half its reserve toward the surplus line (`min(1, reserve /
+/// surplus_reserve)`) plus half its hold (`reproduction.surplus_ticks`, what
+/// `advance_eligibility` keeps from the window, over the ticks the hold requires to
+/// begin, [`cubarium_voxel_fauna::Reproduction::hold_required`], capped at 1). A body below
+/// `birth_body` has only its reserve half: it cannot hold surplus yet.
 pub fn body_readiness(
     a: &cubarium_voxel_fauna::Animal,
     sc: &cubarium_voxel_fauna::SpeciesConfig,
@@ -394,11 +395,14 @@ pub fn body_readiness(
     if a.reproduction.escrow.is_some() {
         return 1.0;
     }
+    let line = sc.reproduction.surplus_reserve(sc);
+    let reserve = if line > 0.0 { (a.reserve / line).clamp(0.0, 1.0) } else { 1.0 };
     if a.body < sc.birth_body {
-        return 0.0;
+        return 0.5 * reserve;
     }
     let need = sc.reproduction.hold_required().max(1);
-    (a.reproduction.surplus_ticks as f64 / need as f64).min(1.0)
+    let hold = (a.reproduction.surplus_ticks as f64 / need as f64).min(1.0);
+    0.5 * reserve + 0.5 * hold
 }
 
 /// **The breeding term**, summed over the founded lineages held to breeding (not
