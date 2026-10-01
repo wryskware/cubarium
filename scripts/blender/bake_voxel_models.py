@@ -73,10 +73,17 @@ PLANT_ROLE = {"plum": "trunk", "violet": "trunk", "detritus": "trunk", "warm": "
               "magenta": "accent", "bark": None, "split": None, "rock": None,
               "water": None, "film": None, "grey": None}
 PLANT_ROLE_BY_SPECIES = {
-    # D1: the cap is the glowcap's tissue, its stalk the mycelium's stem.
-    "glowcap": {"violet": "foliage", "p2": "foliage"},
+    # D1: the cap is the glowcap's tissue, its stalk the mycelium's stem. The model pass
+    # (2026-10-01) paints the cap's magenta speckles as cap tissue, not an accent cell.
+    "glowcap": {"violet": "foliage", "p2": "foliage", "magenta": "foliage"},
     # D11: the teal filaments are the drape layer.
     "vaulttree": {"teal": "drape"},
+    # The lanterns' magenta seams are smaller than a voxel: drawn, not voxelized.
+    "lanternberry": {"magenta": None},
+    # The violet showing between the leaves is the clump's own (mat) tissue.
+    "springturf": {"violet": "foliage"},
+    # The pad and its raised lip are the mat itself.
+    "velvetpad": {"violet": "foliage", "plum": "foliage"},
 }
 # On an animal: magenta is the sense patch / inherited accent; everything else is body.
 ANIMAL_ROLE = {"magenta": "accent"}

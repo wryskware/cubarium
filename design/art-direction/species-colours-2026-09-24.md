@@ -1,6 +1,6 @@
 ---
 design_status: proposal
-last_reviewed: 2026-09-25
+last_reviewed: 2026-10-01
 decision_refs: []
 ---
 
@@ -24,17 +24,23 @@ Source: `crates/cubarium/src/voxel/colours.rs` (`recipe`). Keep the two in step:
 changes, change the other. Ramps run from the **base** (dark, saturated) to the **tip**
 (bright), and shadows lean toward deep indigo `#140A3C`, not black.
 
-| species | bark / stem (base → tip) | foliage (base → tip) | glint | other |
+**Sampled 2026-10-01 from the artbook pick** (model pass, MP-P;
+`design/handoffs/voxel-model-pass-2026-10-01.md`): each part's ramp is eyedropped from
+the selected image in `art/gen/artbook/` (bloomcrown pink; velvetpad provisional;
+glowcap the mushroom only). The bake material that carries each part is in brackets;
+`colours.rs` keys its per-part ramps by that name.
+
+| species | stem / trunk (base → tip) | foliage parts (base → tip) | glint | other |
 | --- | --- | --- | --- | --- |
-| bloomcrown | `#4A1250` → `#6E1E6A` | hot pink `#9A1080` → `#FF52D0` | `#FFE0F6` | core `#FFD2F2` (blush); bloom ripe `#FF8A3A` → `#FFE890`, unripe `#FFD2F2` |
-| umbrellafrond | `#241650` → `#3E2A7E` | sea-glass `#0A4A5E` → `#46F2D2` | `#C8FFF2` | ripe `#FF9B50` → `#FFE8A8` |
-| springturf | `#3A1A5A` → `#5A2E7A` | mint `#106A5A` → `#6AF7BE` | `#D8FFEC` | — |
-| stonecushion | root mat `#510B6D` | lilac-white `#7A5AC8` → `#EEE4FF` | — | — |
-| velvetpad | `#3A1A5A` → `#5A2E7A` | cobalt `#1C46B0` → `#2E6CE0` | cyan `#7CE8FF` | — |
-| glowcap | lilac stalk `#8A5AC0` → `#B99BE6` | luminous aqua `#2AE0B0` → `#7CFFDA` | `#F0FFF8` | lip glow cyan `#42C5F8` (ripe) / `#2A86B8` (fruiting) |
-| vaulttree | `#331242` → `#5A2670` | emerald `#0B4A3C` → `#5CE68E` | `#D6FFE2` | drape `#1E8AB8` → `#8CF6FF` (glowing) |
-| lanternberry | `#3A1A5A` → `#522A6E` | acid lime `#4E7E16` → `#CCFF52` | `#F2FFC0` | lantern ripe `#FF7A2A` → `#FFE6A0`, unripe `#6A2E72` |
-| siphonreed | — | celadon `#244E66` → `#C4EEDC` | `#FFC8F4` | head electric magenta `#FF40D2` |
+| bloomcrown | `#2E035F` → `#5C1EAF` [violet] | vanes hot pink `#8B0251` → `#FD48D1` [p2]; basal straps periwinkle `#5D55C2` → `#8582F3` [p0] | `#FDC6F2` | pod (core, glows) `#FED9F2` [p1]; orange tip (bloom) ripe `#FEAC42` → `#FEE6EB`, unripe = pod |
+| umbrellafrond | stem `#4D1378` → `#7823B4` [violet]; collars `#51176D` → `#7E2C9D` [plum] | fronds teal `#00696F` → `#029894` [p1]; ribs `#4DE0C4` → `#DCFDEE` [p2] | `#DCFDEE` | — |
+| springturf | — | tall rank `#037B7E` → `#48F5BE` [p2]; short rank `#023A47` → `#037B7E` [p0]; violet between `#20054E` → `#32166B` [violet] | `#A4FCDB` | — |
+| stonecushion | root mat `#390542` → `#561470` [detritus] | lobes `#7A4ED0` → `#DABBFD` [lilac]; pores cyan `#01B8EC` [p2] | `#F4E6FD` | — |
+| velvetpad | — | pad `#331D47` → `#48295E` [violet]; lip `#5F3D8D` → `#8F60B8` [plum]; moss cobalt `#1B296C` → `#3866DA` [p1]; buds `#4594F0` → `#75F1F8` [p2]; channels `#75F1F8` [teal] | `#75F1F8` | — |
+| glowcap | stalk `#554199` → `#35256D` [detritus] | cap `#4426A1` → `#764BD7` [violet]; dark spots `#291654` [p0]; pale spots `#B078EF` [lilac]; speckles `#F607FC` [magenta]; brim and underside `#2FB0E2` → `#3FF9FC` [p2] | `#B078EF` | lip glow `#3FF9FC` (ripe) / `#2FB0E2` (fruiting) |
+| vaulttree | lit plates `#7B46CA` → `#6C3EB9` [plum]; mid plates and limbs `#5F36A9` → `#4A2D8E` [violet]; dark plate `#01261F` [detritus] | shelves dark teal `#014C4D` → `#01696E` [p1]; rims mint `#50C5A9` → `#96F9DC` [p2] | `#96F9DC` | tendrils (drape) `#0197B1` → `#00CEEC` at the tips [teal] |
+| lanternberry | `#2E0944` → `#4E178C` [violet] | leaflets blue `#013793` → `#18ADFC` [p1] | `#53F1FD` | lantern ripe `#FDA243` → `#FDEC9D` (glows `#FDA243`), unripe deep plum `#370A49`; seams magenta (not voxelized) |
+| siphonreed | — | stems `#014B74` → `#23A6BC` [p1]; swollen shafts celadon `#57C5C9` → `#A5EED3` [lilac]; fan heads pink `#EB2189` → `#FD4FB6` [p2] | `#EEFCE5` | — |
 
 **Latticevine** keeps its dossier colours (D15; the tile set Wrysk liked):
 - foliage `#1E2798` / `#2B6AD0` / `#42C5F8`;
@@ -51,8 +57,8 @@ shelves with mint rims rather than emerald lobes. Glowcap has a purple spotted
 cap, cyan brim and underside, and cyan **fungal mycelium in the fallen wood**;
 the host wood has no teal veins of its own. Umbrellafrond retains teal foliage
 in a different frond form, and velvetpad's blue moss and buds remain provisional.
-Exact replacement hexes and renderer palette updates remain open. The table
-still describes the current voxel colour pass.
+The plant table above now carries hexes sampled from those picks
+(2026-10-01); it replaces the 2026-09-23 colour-pass plant hexes.
 
 ## Animals: colourway 1
 
