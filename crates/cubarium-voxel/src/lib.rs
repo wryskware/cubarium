@@ -66,6 +66,9 @@ pub use world_table::{expand_landform_preset, world_config_from_file, world_conf
 /// world, plant and animal layers.
 pub mod keyed;
 pub use keyed::{KeyedRng, mix, pro_rata, ticks_at_least_one, unit_from_bits};
+/// One organism budget kernel for plant stands, the latticevine and animals: income,
+/// upkeep from income then reserve, building at `1 + c_g`, the mineral fraction rule.
+pub mod organism;
 /// The overlapped tick's water lend: a read copy's water swapped in, and back.
 mod lend;
 pub use lend::WaterLend;
