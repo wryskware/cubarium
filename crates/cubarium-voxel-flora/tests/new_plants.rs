@@ -319,8 +319,8 @@ fn vaulttree_profile_is_the_anatomy_table() {
         1,
         &sc.profile[1],
         &[
-            trunk([0.0, 0.6], 0.15, None),
-            leaves(Foliage, [0.6, 1.0], 1.0, 1.0, 0.4),
+            trunk([0.0, 0.55], 0.15, None),
+            leaves(Foliage, [0.55, 1.0], 1.0, 1.0, 0.4),
         ],
     );
     assert_stage(
@@ -328,10 +328,10 @@ fn vaulttree_profile_is_the_anatomy_table() {
         2,
         &sc.profile[2],
         &[
-            trunk([0.0, 0.5], 0.15, None),
-            trunk([0.5, 0.7], 0.6, Some(0.85)),
-            leaves(Foliage, [0.7, 1.0], 1.0, 0.85, 0.45),
-            leaves(Drape, [0.35, 0.5], 0.7, 0.15, 0.9),
+            trunk([0.0, 0.45], 0.15, None),
+            trunk([0.45, 0.55], 0.6, Some(0.85)),
+            leaves(Foliage, [0.55, 1.0], 1.0, 0.85, 0.45),
+            leaves(Drape, [0.25, 0.55], 0.7, 0.15, 0.9),
         ],
     );
 }

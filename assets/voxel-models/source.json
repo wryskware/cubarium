@@ -377,7 +377,7 @@
               "kind": "Trunk",
               "band": [
                 0.0,
-                0.6
+                0.55
               ],
               "radius": 0.15,
               "share": 0.0,
@@ -386,7 +386,7 @@
             {
               "kind": "Foliage",
               "band": [
-                0.6,
+                0.55,
                 1.0
               ],
               "radius": 1.0,
@@ -403,7 +403,7 @@
               "kind": "Trunk",
               "band": [
                 0.0,
-                0.5
+                0.45
               ],
               "radius": 0.15,
               "share": 0.0,
@@ -412,8 +412,8 @@
             {
               "kind": "Trunk",
               "band": [
-                0.5,
-                0.7
+                0.45,
+                0.55
               ],
               "radius": 0.6,
               "share": 0.0,
@@ -422,8 +422,8 @@
             {
               "kind": "Drape",
               "band": [
-                0.35,
-                0.5
+                0.25,
+                0.55
               ],
               "radius": 0.7,
               "share": 0.15,
@@ -432,7 +432,7 @@
             {
               "kind": "Foliage",
               "band": [
-                0.7,
+                0.55,
                 1.0
               ],
               "radius": 1.0,
@@ -544,16 +544,24 @@
       "adult_length_m": 0.375,
       "adult_width_m": 0.125,
       "adult_height_m": 0.125,
-      "body_min": 0.003125,
-      "body_max": 0.0125
+      "body_min": 0.09375,
+      "body_max": 0.375
     },
     {
       "name": "frondgrazer",
       "adult_length_m": 0.75,
       "adult_width_m": 0.375,
       "adult_height_m": 0.375,
-      "body_min": 0.005,
-      "body_max": 0.05
+      "body_min": 0.15,
+      "body_max": 1.5
+    },
+    {
+      "name": "lanternjaw",
+      "adult_length_m": 1.0,
+      "adult_width_m": 0.25,
+      "adult_height_m": 0.45,
+      "body_min": 0.102,
+      "body_max": 1.05
     }
   ]
 }

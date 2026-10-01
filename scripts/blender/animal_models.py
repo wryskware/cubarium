@@ -257,11 +257,15 @@ def helix(p0, axis_len, turns, radius, wire, mat, seg=6, n=48, phase=0.0):
     tube(pts, wire, wire * 0.8, mat, seg=seg)
 
 
-# --- chorister · CH-A2 v3 violet stalker (1.4 x 0.35 m, shoulder 0.6 m, tail 0.8 m) ----------
+# --- chorister · CH-A2 v3 violet stalker (1.4 x 0.35 m, shoulder 0.95 m, tail 0.8 m) ---------
 #
 # Pick: art/gen/artbook/chorister.png, side view facing right. Measured off the pick at
-# 0.00322 m/px along the body and 0.00227 m/px up it (the pick's legs are longer than the
-# 0.6 m shoulder allows: the shoulder is kept, so the height is read 0.7x the length).
+# ~0.0016 m/px along the body and ~0.0018 m/px up it. Wrysk 2026-10-01: the shoulder
+# follows the pick, ~0.95 m (the dossier's 0.6 m squashed the pick's long legs): the body
+# and head keep their size and ride `CH_LIFT` higher on legs stretched by the same lift.
+
+CH_LIFT = 0.30  # m the body rides above the 0.6 m-shoulder blockout (withers 0.65 -> 0.95)
+
 
 def chorister():
     def body_zone(f, s, p):
@@ -277,6 +281,7 @@ def chorister():
         (-0.50, 0, 0.435, 0.095, 0.083, 0.083), (-0.73, 0, 0.456, 0.05, 0.048, 0.048),
         (-0.99, 0, 0.475, 0.028, 0.025, 0.025), (-1.21, 0, 0.48, 0.014, 0.012, 0.012),
         (-1.38, 0, 0.49, 0.003, 0.003, 0.003)]
+    spine = [(x, y, z + CH_LIFT, *rest) for x, y, z, *rest in spine]
     loft(spine, [c("a_main"), c("a_dark"), c("a_pale")], body_zone, nring=90, nseg=24)
     # rosettes: dark rings on the back and upper flanks, along the body and the tail root
     S = catmull([s[:5] for s in spine], 40)
@@ -292,19 +297,21 @@ def chorister():
             ell(p + n * 0.004, (rr * 0.45, rr * 0.36, 0.006), c("a_dark"), rot=rot)
     # head: a rounded skull, the two lilac crest lobes swept back over the neck, a large
     # magenta eye under them each side, the cyan muzzle at the front
-    ell((0.58, 0, 0.55), (0.15, 0.1, 0.11), c("a_main"), rot=ry(8))
+    ell((0.58, 0, 0.55 + CH_LIFT), (0.15, 0.1, 0.11), c("a_main"), rot=ry(8))
     for sy in (-1, 1):
-        ell((0.53, sy * 0.045, 0.63), (0.27, 0.055, 0.07), c("a_head"), rot=ry(17) @ rx(sy * 8))
-        ell((0.565, sy * 0.075, 0.55), (0.08, 0.022, 0.05), c("a_eye"), rot=ry(10))
-    ell((0.73, 0, 0.485), (0.08, 0.06, 0.042), c("a_glow"), rot=ry(8))
+        ell((0.53, sy * 0.045, 0.63 + CH_LIFT), (0.27, 0.055, 0.07), c("a_head"), rot=ry(17) @ rx(sy * 8))
+        ell((0.565, sy * 0.075, 0.55 + CH_LIFT), (0.08, 0.022, 0.05), c("a_eye"), rot=ry(10))
+    ell((0.73, 0, 0.485 + CH_LIFT), (0.08, 0.06, 0.042), c("a_glow"), rot=ry(8))
 
     def leg_zone(f, s, p):
         return 0 if f < 0.4 else 1
-    legs = [  # (x, y, z, r) from hip to the ankle; then the paw
+    legs = [  # (x, y, z, r) from hip to the ankle; then the paw. The 0.6 m blockout's
+        # legs, every height stretched so the hip meets the lifted body
         [(0.40, 0.08, 0.44, 0.085), (0.56, 0.14, 0.22, 0.045), (0.68, 0.15, 0.05, 0.032)],
         [(0.14, 0.09, 0.40, 0.085), (0.205, 0.15, 0.2, 0.045), (0.205, 0.16, 0.06, 0.032)],
         [(-0.50, 0.08, 0.40, 0.1), (-0.36, 0.14, 0.23, 0.055), (-0.66, 0.15, 0.07, 0.032)],
     ]
+    legs = [[(x, y, z * (leg[0][2] + CH_LIFT) / leg[0][2], r) for x, y, z, r in leg] for leg in legs]
     for leg in legs:
         for sy in (-1, 1):
             pts = [(x, sy * yy, z, r, r) for x, yy, z, r in leg]
@@ -656,7 +663,7 @@ def bellwing():
 # their adult bodies (`assets/voxel-models/source.json`); a specimen is built and baked at
 # its own (the bake's placeholder table), here as its built extent.
 REF = {
-    "chorister": (chorister, 1.4, 0.35, 0.6),
+    "chorister": (chorister, 1.4, 0.35, 0.95),
     "frondgrazer": (frondgrazer, 0.75, 0.375, 0.375),
     "littershredder": (littershredder, 0.375, 0.125, 0.125),
     "ripple-snail": (ripple_snail, 0.19, 0.19, 0.125),

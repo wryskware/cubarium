@@ -569,13 +569,17 @@ def umbrellafrond(x, y, h, r, layers, i, rng):
 
 
 # Vaulttree shelves from the artbook pick (vaulttree.png, 1024 x 1536): centre x and top
-# y of each canopy shelf in pick pixels, and its half-width. Read off the image.
+# y of each canopy shelf in pick pixels, and its half-width. Read off the image. The
+# pick's tree stands from y 1530 (ground) to y 15 (crown top); a shelf's height is its
+# pick height as a fraction of that (2026-10-01: the shelves span 0.55-1.0 of height,
+# the drape's bulk ends at ~0.25-0.35), as the profile's bands now are.
 VAULT_SHELVES = [
     (620, 15, 190), (790, 60, 170), (230, 90, 140), (160, 150, 105), (650, 205, 55),
     (330, 220, 60), (870, 270, 115), (270, 300, 75), (180, 380, 85), (640, 500, 70),
     (210, 520, 180), (800, 540, 160),
 ]
-VAULT_AXIS_PX, VAULT_HALF_PX, VAULT_LOW_PX = 512.0, 475.0, 540.0
+VAULT_AXIS_PX, VAULT_HALF_PX = 512.0, 475.0
+VAULT_GROUND_PX, VAULT_TOP_PX = 1530.0, 15.0
 
 
 def vault_shelf(c, rs, rng, drape_to=None):
@@ -598,7 +602,8 @@ def vault_shelf(c, rs, rng, drape_to=None):
         for _ in range(rng.randint(1, 2)):
             a, dd = rng.uniform(0, 2 * math.pi), rs * rng.uniform(0.35, 0.9)
             bx, by = cx + math.cos(a) * dd, cy + math.sin(a) * dd
-            z1 = rng.uniform(*drape_to)
+            # the pick's strands end in the lower part of the drape band (bulk ~0.25-0.35)
+            z1 = rng.uniform(drape_to[0], drape_to[0] + 0.4 * (drape_to[1] - drape_to[0]))
             for _ in range(rng.randint(2, 4)):
                 ox, oy = rng.uniform(-0.02, 0.02), rng.uniform(-0.02, 0.02)
                 cyl((bx + ox, by + oy, ztop - d * 0.8), (bx + ox, by + oy, z1 + rng.uniform(0, 0.12)), 0.006,
@@ -609,9 +614,9 @@ def vault_shelf(c, rs, rng, drape_to=None):
 def vaulttree(x, y, h, r, layers, i, rng):
     """Artbook pick (vaulttree.png): an asymmetric leaning trunk of twisted violet plates
     with one dark-teal plate, a leader and arching violet limbs, a canopy of separate
-    domed dark-teal shelves with mint rims at many heights (the pick's shelves, squeezed
-    into the profile's foliage band), long fine cyan tendrils (the drape) hanging from
-    the shelves down to the drape band."""
+    domed dark-teal shelves with mint rims at many heights (the pick's shelves at the
+    pick's heights, 0.55-1.0 of height, the profile's foliage band), long fine cyan
+    tendrils (the drape) hanging from the shelves down into the drape band."""
     if i == 0:  # seedling: one tiny shelf on a stub
         cyl((x, y, 0), (x, y, h * 0.7), 0.012, mat="violet", seg=5)
         vault_shelf((x, y, h), r * 0.7, rng)
@@ -637,14 +642,13 @@ def vaulttree(x, y, h, r, layers, i, rng):
         tube(pts, rt * (0.75 if mat != "detritus" else 0.6), rt * 0.45, mat, seg=8)
     tube([axis(zs * k / 4) for k in range(5)], rt * 0.8, rt * 0.55, "violet", seg=8)
     top = axis(zs)
-    # canopy: the pick's shelves mapped into the foliage band (all of them for the adult,
-    # the four highest for a juvenile)
+    # canopy: the pick's shelves at the pick's heights (all of them for the adult, the
+    # four highest for a juvenile); the foliage band 0.55-1.0 is the pick's shelf span
     za, zb = fol[1] * h, fol[2] * h
     shelves = VAULT_SHELVES if drape is not None else VAULT_SHELVES[:4]
     for k, (px, py, ph) in enumerate(shelves):
-        f = min(1.0, (py - 15) / (VAULT_LOW_PX - 15))
         rs = r * ph / VAULT_HALF_PX * (fol[3])
-        ztop = zb - f * (zb - za) * 0.75
+        ztop = max(za + rs * 0.42 * 1.1, h * (VAULT_GROUND_PX - py) / (VAULT_GROUND_PX - VAULT_TOP_PX))
         ox = (px - VAULT_AXIS_PX) / VAULT_HALF_PX * r
         oy = rng.uniform(-0.45, 0.45) * r
         ex = math.hypot(ox, oy) + rs - r
