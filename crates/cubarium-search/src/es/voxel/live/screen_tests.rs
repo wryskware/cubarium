@@ -22,9 +22,17 @@ fn the_screen_rejects_a_world_where_parking_wins_by_arithmetic() {
     turf.founder_cap = turf.founder_cap.max(10);
     let fauna = FaunaConfig::default();
     let s = rsf(&flora, &fauna, VOXEL_M, &spec);
-    assert!(s.r > 1.0, "a parked browser's regrowth in reach covers its need: R = {}", s.r);
+    assert!(
+        s.r > 1.0,
+        "a parked browser's regrowth in reach covers its need: R = {}",
+        s.r
+    );
     assert!(!s.passes(&spec), "{s:?}");
-    assert!(s.failures(&spec).iter().any(|f| f.starts_with('R')), "{:?}", s.failures(&spec));
+    assert!(
+        s.failures(&spec).iter().any(|f| f.starts_with('R')),
+        "{:?}",
+        s.failures(&spec)
+    );
 }
 
 /// All three are per unit of the browser's need: a browser twice as heavy halves R and S

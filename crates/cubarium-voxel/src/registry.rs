@@ -252,6 +252,55 @@ pub struct Alias {
     pub names: Vec<&'static str>,
 }
 
+/// **A derived field** (registry §4, `derive()`): `field` follows each of its `bases` by
+/// ratio, `field = field₀ · Π (base / base₀)^exponent`, where `₀` is the value before the
+/// genome. So a gene on a base moves the field with it — walking stays priced against
+/// upkeep — and a gene on the field itself multiplies on top (the factor the tie keeps:
+/// `motor_factor`). A `*` in `field` stands for one segment; each base names the same
+/// segments with its own `*`s, in order. A search frees a tie by its `name`, or every tie
+/// on a field by the field's path ([`crate::genome`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tie {
+    pub name: &'static str,
+    pub field: String,
+    pub bases: Vec<(String, f64)>,
+}
+
+impl Tie {
+    /// `field` follows `base` one for one.
+    pub fn new(name: &'static str, field: impl Into<String>, base: impl Into<String>) -> Tie {
+        Tie {
+            name,
+            field: field.into(),
+            bases: vec![(base.into(), 1.0)],
+        }
+    }
+    /// `field` follows `1 / base` (a rate and its time scale).
+    pub fn inverse(name: &'static str, field: impl Into<String>, base: impl Into<String>) -> Tie {
+        Tie {
+            name,
+            field: field.into(),
+            bases: vec![(base.into(), -1.0)],
+        }
+    }
+}
+
+/// **A named group** a search file may use (registry §3): `@name` as one path segment
+/// stands for any of a [`GroupKind::Segment`]'s members (`flora.@photo.foliage_rate`), and
+/// `@name` as a whole path for every glob of a [`GroupKind::Paths`] (`@bio_rate`). Groups
+/// of one name in several tables are one group.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Group {
+    pub name: &'static str,
+    pub kind: GroupKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum GroupKind {
+    Segment(Vec<String>),
+    Paths(Vec<String>),
+}
+
 /// One leaf of a [`Registry::dump`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct DumpLine {
@@ -275,6 +324,9 @@ pub struct Registry {
     /// fields). A leaf under one is set by its path like any other, once the variant it
     /// belongs to is the one in force.
     whole: Vec<String>,
+    /// The derived fields ([`Tie`]) and named groups ([`Group`]) a genome decodes with.
+    ties: Vec<Tie>,
+    groups: Vec<Group>,
     /// Rows without a `*`, by path; the rest are scanned.
     exact: std::collections::HashMap<String, usize>,
     wild: Vec<usize>,
@@ -301,7 +353,18 @@ impl Registry {
             .iter()
             .map(|a| a.pattern.split('.').map(str::to_string).collect())
             .collect();
-        Registry { root, rows, aliases, opaque, whole: Vec::new(), exact, wild, alias_segs }
+        Registry {
+            root,
+            rows,
+            aliases,
+            opaque,
+            whole: Vec::new(),
+            ties: Vec::new(),
+            groups: Vec::new(),
+            exact,
+            wild,
+            alias_segs,
+        }
     }
 
     /// The same table with `whole` subtrees: registered leaves that a TOML file or a set
@@ -310,6 +373,55 @@ impl Registry {
     pub fn with_whole(mut self, whole: Vec<String>) -> Registry {
         self.whole = whole;
         self
+    }
+
+    /// The same table with its derived fields.
+    pub fn with_ties(mut self, ties: Vec<Tie>) -> Registry {
+        self.ties = ties;
+        self
+    }
+
+    /// The same table with its named groups.
+    pub fn with_groups(mut self, groups: Vec<Group>) -> Registry {
+        self.groups = groups;
+        self
+    }
+
+    pub fn ties(&self) -> &[Tie] {
+        &self.ties
+    }
+
+    pub fn groups(&self) -> &[Group] {
+        &self.groups
+    }
+
+    /// Every numeric leaf as [`Registry::numeric_leaves`] lists it, and whether it is a
+    /// whole number in the config.
+    pub fn typed_leaves(&self, value: &Value) -> Vec<(String, f64, bool)> {
+        let mut out = Vec::new();
+        self.walk_typed(self.root.to_string(), value, &mut out);
+        out
+    }
+
+    fn walk_typed(&self, path: String, value: &Value, out: &mut Vec<(String, f64, bool)>) {
+        if self.is_opaque(&path) {
+            return;
+        }
+        match value {
+            Value::Integer(i) => out.push((self.display(&path), *i as f64, true)),
+            Value::Float(x) => out.push((self.display(&path), *x, false)),
+            Value::Array(items) => {
+                for (i, v) in items.iter().enumerate() {
+                    self.walk_typed(format!("{path}.{i}"), v, out);
+                }
+            }
+            Value::Table(t) => {
+                for (k, v) in t {
+                    self.walk_typed(format!("{path}.{k}"), v, out);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Whether `path` is exactly one of the whole-replaced subtrees.

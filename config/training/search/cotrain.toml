@@ -1,0 +1,183 @@
+# Stage 1 of co-training: the ecology search's genome
+# (design/handoffs/cotrain-stage0-2026-10-01.md §2; registry proposal §4).
+#
+# 40 multipliers, x1 = today's world. Each range reaches the knob's real-world baseline
+# (audit §6, parameters.tsv `real_world`), so the search can move there itself; the
+# baseline each was sized for is in its `what`. Not genes: the digest rows (mass scale,
+# body size, the eye and mouth anchors, cruise, cone, taste) - mass stays at x30.
+#
+# Derived fields follow their bases (fauna and flora `ties()`): walking and the mouth keep
+# their ratio to upkeep (`motor` and `intake` are those ratios), dead wood and carrion rot
+# with the litter, a seed bank's attrition follows its age limit.
+
+[screen]
+# The R/S/F pre-screen (audit §1.4): a candidate outside these takes `penalty` unrun.
+r = [0.02, 0.3]
+s = [0.02, 0.2]
+f_min = 10.0
+penalty = 200.0
+# The light-and-moisture factor on a plant's income, and the share of a field's edible
+# foliage a walker harvests in passing (invariants.py's 0.67 and 0.2).
+light_moisture = 0.67
+harvest = 0.2
+
+# --- Animals: one gene per lineage (littershredder, frondgrazer, lanternjaw). ---
+
+[[gene]]
+name = "upkeep"
+path = "fauna.founders.*.core.maintenance_per_s"
+tie = "each"
+range = [0.1, 4.0]
+what = "basal upkeep; real: browser x1 (the reference clock), shredder x0.14-0.4 (ectotherm)"
+
+[[gene]]
+name = "motor"
+path = "fauna.founders.*.motor_respiration_per_s"
+tie = "each"
+range = [0.5, 10.0]
+what = "walking cost / upkeep (motor_factor); real: mammal x1-2.5, shredder x3-8"
+
+[[gene]]
+name = "intake"
+path = "fauna.founders.*.core.bite_per_s"
+tie = "each"
+range = [0.05, 2.0]
+what = "max intake / upkeep (intake_factor); real: x0.1-0.25 (2-4x upkeep, not 16-40x)"
+
+[[gene]]
+name = "yield"
+path = "fauna.founders.*.yield_by_food.*"
+tie = "each"
+range = [0.1, 1.8]
+what = "assimilation yield; real: litter x0.1-0.6, browse x0.8-1.4, carrion x1.6-1.8"
+
+[[gene]]
+name = "breed_reserve"
+path = "fauna.founders.*.core.reproduction.surplus_floor"
+tie = "each"
+range = [0.25, 4.0]
+what = "the reserve margin a body breeds above; no real analog"
+
+[[gene]]
+name = "lifespan"
+path = "fauna.founders.*.core.lifespan_median_s"
+tie = "each"
+range = [0.25, 16.0]
+what = "median lifespan; real: x1.5-3.7 (wild median), x15 (maximum)"
+
+[[gene]]
+name = "gestation"
+path = ["fauna.founders.*.core.reproduction.gestation_s", "fauna.founders.*.core.reproduction.incubation_s"]
+tie = "each"
+range = [0.25, 32.0]
+what = "gestation and incubation; real: gestation x21-29, incubation x3-6"
+
+[[gene]]
+name = "maturity"
+path = "fauna.founders.*.core.growth_max_per_s"
+tie = "each"
+range = [0.05, 4.0]
+what = "growth to breeding size; real: x0.12-0.25 (maturity 4-8x fast)"
+
+# --- The biological clock (registry decision 2): neutral at x1. ---
+
+[[gene]]
+name = "K_bio"
+path = "@bio_rate"
+inverse = "@bio_time"
+range = [0.25, 4.0]
+what = "every biological rate faster, every life-history time shorter, together"
+
+# --- Plants: one gene per functional group (turf, mat, shrub, tree). ---
+
+[[gene]]
+name = "growth@turf"
+path = "flora.@turf.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
+
+[[gene]]
+name = "growth@mat"
+path = "flora.@mat.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
+
+[[gene]]
+name = "growth@shrub"
+path = "flora.@shrub.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
+
+[[gene]]
+name = "growth@tree"
+path = "flora.@tree.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
+
+[[gene]]
+name = "leaf_fall@turf"
+path = "flora.@turf.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate (1 / leaf life); real: herbs x0.25-0.8"
+
+[[gene]]
+name = "leaf_fall@mat"
+path = "flora.@mat.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate (1 / leaf life); real: mats x0.07-0.5"
+
+[[gene]]
+name = "leaf_fall@shrub"
+path = "flora.@shrub.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate (1 / leaf life); real: tropical shrubs x0.06-0.25"
+
+[[gene]]
+name = "leaf_fall@tree"
+path = "flora.@tree.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate (1 / leaf life); real: x0.06-0.25"
+
+[[gene]]
+name = "alpha@turf"
+path = "flora.@turf.alpha"
+range = [0.25, 2.0]
+what = "foliage per unit wood; real: herbs 1-2 (x0.5-1)"
+
+[[gene]]
+name = "alpha@mat"
+path = "flora.@mat.alpha"
+range = [0.25, 2.0]
+what = "foliage per unit wood; real: mats 1-2 (x0.5-1)"
+
+[[gene]]
+name = "alpha@shrub"
+path = "flora.@shrub.alpha"
+range = [0.05, 2.0]
+what = "foliage per unit wood; real: shrubs 0.2-0.5 (x0.1-0.25)"
+
+[[gene]]
+name = "alpha@tree"
+path = "flora.@tree.alpha"
+range = [0.005, 2.0]
+what = "foliage per unit wood; real: trees 0.02-0.1 (x0.01-0.05)"
+
+# --- The grazing defence and decomposition. ---
+
+[[gene]]
+name = "defence_onset"
+path = "flora.@photo.defence_per_bite"
+range = [0.25, 8.0]
+what = "defence rise per bite; real: on within minutes of grazing (x2-5)"
+
+[[gene]]
+name = "defence_relax"
+path = "flora.@photo.defence_half_life_s"
+range = [0.03, 4.0]
+what = "defence half-life; real: days-weeks by the clock (x0.04-0.4)"
+
+[[gene]]
+name = "decomposition"
+path = "flora.decomposition"
+range = [0.1, 4.0]
+what = "litter decay (dead wood and carrion follow); real: x0.1-0.38"

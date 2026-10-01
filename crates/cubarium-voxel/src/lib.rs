@@ -32,6 +32,7 @@ pub mod cpus;
 /// Hydraulic erosion on a heightfield. Generation only; geological time is iterations.
 pub mod erosion;
 pub mod generate;
+pub mod genome;
 /// Roofed void a body can stand inside: undercuts, galleries and shelves.
 pub mod hollows;
 /// The water a fresh world starts with: one inventory, poured into the geometry.

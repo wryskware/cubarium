@@ -4,7 +4,7 @@
 
 use cubarium_voxel_fauna::{FaunaConfig, Founder};
 
-use super::ecology::{EcologyParams, LINEAGE_PARAMS};
+use super::ecology::EcologyParams;
 use super::search::species_lost;
 
 fn scratch(name: &str) -> std::path::PathBuf {
@@ -18,14 +18,14 @@ fn scratch(name: &str) -> std::path::PathBuf {
 #[test]
 fn a_lineage_key_reaches_only_its_lineage() {
     let base = FaunaConfig::default();
-    let mut e = EcologyParams::defaults();
+    let mut e = EcologyParams::legacy();
     e.set("founder.yield_by_food@frondgrazer", 1.5)
         .expect("in range");
     e.set("founder.maintenance_per_s@littershredder", 2.0)
         .expect("in range");
     e.set("founder.lifespan_median_s@frondgrazer", 0.5)
         .expect("in range");
-    let c = e.fauna_config();
+    let c = e.fauna();
     let (b, s) = (Founder::Browser, Founder::Blind);
     assert_eq!(
         c.founder(b).yield_by_food[0],
@@ -50,7 +50,7 @@ fn a_lineage_key_reaches_only_its_lineage() {
     );
     // Shared and per-lineage multiply.
     e.set("founder.yield_by_food", 0.5).expect("in range");
-    let c = e.fauna_config();
+    let c = e.fauna();
     assert!(
         (c.founder(b).yield_by_food[0] - 0.75 * base.founder(b).yield_by_food[0]).abs() < 1e-15
     );
@@ -85,29 +85,6 @@ fn the_file_takes_an_optional_lineage_key_and_old_files_still_load() {
     let back = scratch("back.toml");
     e.save(&back, "round trip").expect("save");
     assert_eq!(EcologyParams::load(&back).expect("reload"), e);
-}
-
-/// The search runs on the shared plant parameters and one copy of each lineage parameter
-/// per lineage; zeros are the defaults.
-#[test]
-fn the_search_dimensions_split_the_lineage_parameters() {
-    let names = EcologyParams::search_names();
-    for p in LINEAGE_PARAMS {
-        assert!(!names.iter().any(|n| n == p), "{p} is split, not shared");
-        for f in crate::es::voxel::TRAINED_LINEAGES {
-            assert!(
-                names.contains(&format!("{p}@{}", f.name())),
-                "{p}@{}",
-                f.name()
-            );
-        }
-    }
-    let zeros = vec![0.0; names.len()];
-    assert_eq!(
-        EcologyParams::from_search_log(&zeros),
-        EcologyParams::defaults()
-    );
-    assert_eq!(EcologyParams::search_bounds().len(), names.len());
 }
 
 /// Tightened plant persistence: a species the default world kept counts as lost when the

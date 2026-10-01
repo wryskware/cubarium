@@ -2,10 +2,13 @@
 //! twins of a pair on neighbouring bodies; a newborn gets one when it appears, twin to its
 //! nearest neighbour's; each body's score counts only its own time in this window.
 //!
-//! The score keeps the frozen trainer's form so the numbers compare
-//! ([`crate::es::voxel::score`]): `(intake − motor)/body_ref + 0.25·survived`, with
-//! intake and motor read by the frozen driver's own [`BodyMeter`], and `survived` the share of the ticks the body could have lived in
-//! this window (from its assignment to the window's end) that it did.
+//! **The score is the body's net energy** (Wrysk 2026-10-01,
+//! `design/handoffs/cotrain-stage0-2026-10-01.md` §1): `(E_end − E_start + E_given) /
+//! body_ref`, with `E` the body's tissue, reserve and gestation escrow (organic units, the
+//! units intake is counted in), `E_given` what it passed to offspring in the window, and
+//! `E_end = 0` for a body that died in it — whatever killed it. Breeding is neither a cost
+//! nor a loss; starving loses the body, not only an empty reserve. Intake and motor are
+//! still read by the frozen driver's own [`BodyMeter`], for the readout.
 
 use std::time::Instant;
 
@@ -17,7 +20,10 @@ use super::ecology::EcologyParams;
 use super::readout::{self, Ctx, LineageStats, Pool, Scan};
 use super::variants::VariantTable;
 use super::world::FoundInfo;
-use crate::es::voxel::score::{BodyMeter, ScoreComponents};
+use crate::es::voxel::score::BodyMeter;
+
+/// The window both training CLIs default to, simulated minutes.
+pub const DEFAULT_WINDOW_MIN: f64 = 10.0;
 
 /// Simulated ticks in one minute.
 pub const TICKS_PER_MIN: u64 = 60 * cubarium_voxel_fauna::TICK_HZ as u64;
@@ -41,7 +47,7 @@ pub struct LiveWorld {
 pub struct BodyScore {
     pub founder: Founder,
     pub candidate: usize,
-    pub score: ScoreComponents,
+    pub score: NetEnergy,
     /// Whether the body was born inside the window.
     pub newborn: bool,
 }
@@ -63,6 +69,110 @@ pub struct WindowResult {
 pub struct Placed {
     pub id: u64,
     pub x_m: f64,
+}
+
+/// A body's energy: tissue, reserve and the gestation escrow it is filling (still its own
+/// until the birth), organic units.
+pub fn body_energy(a: &cubarium_voxel_fauna::Animal) -> f64 {
+    a.body + a.reserve + a.reproduction.escrow.map_or(0.0, |e| e.organic)
+}
+
+/// One body's score for one window and its parts, each over the lineage's
+/// `body_reference`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct NetEnergy {
+    /// `(E_end − E_start) / ref`, with `E_end = 0` for a death.
+    pub delta_normalized: f64,
+    /// `E_given / ref`.
+    pub given_normalized: f64,
+    /// Settled intake and paid motor over the window (readout only, not in the score).
+    pub intake_normalized: f64,
+    pub motor_loss_normalized: f64,
+    /// Whether it died in the window.
+    pub died: bool,
+    /// What the ES ranks by: `delta + given`.
+    pub score: f64,
+}
+
+impl NetEnergy {
+    /// The score from a window's measurements: `E` at the start and the end (the end of a
+    /// death is read as zero, whatever is passed), what it gave, and the intake and motor
+    /// it is reported beside.
+    pub fn of(
+        e_start: f64,
+        e_end: f64,
+        given: f64,
+        died: bool,
+        intake: f64,
+        motor: f64,
+        body_reference: f64,
+    ) -> NetEnergy {
+        assert!(e_start.is_finite() && e_end.is_finite() && given.is_finite());
+        assert!(body_reference.is_finite() && body_reference > 0.0);
+        let end = if died { 0.0 } else { e_end };
+        let delta_normalized = (end - e_start) / body_reference;
+        let given_normalized = given.max(0.0) / body_reference;
+        NetEnergy {
+            delta_normalized,
+            given_normalized,
+            intake_normalized: intake / body_reference,
+            motor_loss_normalized: motor / body_reference,
+            died,
+            score: delta_normalized + given_normalized,
+        }
+    }
+}
+
+/// One body's energy over a window: [`body_energy`] and its `given` counter when it was
+/// first seen and when it was last seen alive.
+#[derive(Clone, Copy, Debug)]
+pub struct EnergyMeter {
+    e_start: f64,
+    given_start: f64,
+    e_last: f64,
+    given_last: f64,
+    died: bool,
+}
+
+impl EnergyMeter {
+    pub fn new(a: &cubarium_voxel_fauna::Animal) -> EnergyMeter {
+        let e = body_energy(a);
+        EnergyMeter {
+            e_start: e,
+            given_start: a.reproduction.given,
+            e_last: e,
+            given_last: a.reproduction.given,
+            died: false,
+        }
+    }
+
+    /// Fold in one post-step reading of the living body.
+    pub fn observe(&mut self, a: &cubarium_voxel_fauna::Animal) {
+        self.e_last = body_energy(a);
+        self.given_last = a.reproduction.given;
+    }
+
+    /// It is gone.
+    pub fn die(&mut self) {
+        self.died = true;
+    }
+
+    pub fn died(&self) -> bool {
+        self.died
+    }
+
+    /// The window's score, with the intake and motor it is reported beside.
+    pub fn score(&self, intake: f64, motor: f64, body_reference: f64) -> NetEnergy {
+        NetEnergy::of(
+            self.e_start,
+            self.e_last,
+            self.given_last - self.given_start,
+            self.died,
+            intake,
+            motor,
+            body_reference,
+        )
+    }
 }
 
 /// **Twin placement.** Bodies sorted around the ring; each consecutive two share a pair,
@@ -121,6 +231,7 @@ struct Tracked {
     candidate: Option<usize>,
     newborn: bool,
     meter: BodyMeter,
+    energy: EnergyMeter,
     /// Ticks it could have lived here (assignment to window end) and did.
     possible: u64,
     alive_ticks: u64,
@@ -151,7 +262,7 @@ pub struct Window {
     counts: Vec<Vec<u32>>,
     assigned: Vec<Vec<(f64, usize)>>,
     stats: [LineageStats; Founder::COUNT],
-    newcomers: Vec<(u64, Founder, f64, BodyMeter)>,
+    newcomers: Vec<(u64, Founder, f64, BodyMeter, EnergyMeter)>,
 }
 
 impl Window {
@@ -194,12 +305,15 @@ impl Window {
             stats: Default::default(),
             newcomers: Vec::new(),
         };
-        let bodies: Vec<(u64, Founder, f64, BodyMeter)> = sim
+        let bodies: Vec<(u64, Founder, f64, BodyMeter, EnergyMeter)> = sim
             .fauna()
             .view()
             .animals
             .iter()
-            .filter_map(|a| a.founder.map(|f| (a.id, f, a.pose.x, BodyMeter::new(f, a))))
+            .filter_map(|a| {
+                a.founder
+                    .map(|f| (a.id, f, a.pose.x, BodyMeter::new(f, a), EnergyMeter::new(a)))
+            })
             .collect();
         for f in Founder::ALL {
             let fi = f.index();
@@ -227,6 +341,7 @@ impl Window {
                     candidate,
                     newborn: false,
                     meter: b.3.clone(),
+                    energy: b.4,
                     possible: ticks,
                     alive_ticks: 0,
                     alive: true,
@@ -258,13 +373,19 @@ impl Window {
             for a in fv.animals.iter() {
                 let Some(f) = a.founder else { continue };
                 let Some(&k) = self.index.get(&a.id) else {
-                    self.newcomers
-                        .push((a.id, f, a.pose.x, BodyMeter::new(f, a)));
+                    self.newcomers.push((
+                        a.id,
+                        f,
+                        a.pose.x,
+                        BodyMeter::new(f, a),
+                        EnergyMeter::new(a),
+                    ));
                     continue;
                 };
                 let b = &mut self.tracked[k];
                 b.seen = stamp;
                 let d = b.meter.observe(a);
+                b.energy.observe(a);
                 let len = self.phys[f.index()].body_at(a.body).length_m;
                 if len > 0.0 {
                     b.minute_bl += d.forward_m / len;
@@ -285,8 +406,9 @@ impl Window {
             .filter(|b| b.alive && b.seen != stamp)
         {
             b.alive = false;
+            b.energy.die();
         }
-        for (id, f, x, meter) in self.newcomers.drain(..) {
+        for (id, f, x, meter, energy) in self.newcomers.drain(..) {
             let fi = f.index();
             self.stats[fi].births += 1;
             let candidate = self.tables[fi].as_ref().map(|table| {
@@ -304,6 +426,7 @@ impl Window {
                 candidate,
                 newborn: true,
                 meter,
+                energy,
                 possible: self.ticks.saturating_sub(stamp),
                 alive_ticks: 0,
                 alive: true,
@@ -373,11 +496,9 @@ impl Window {
             if b.meter.intake < -1e-9 {
                 anomalies += 1;
             }
-            let survived = (b.alive_ticks as f64 / b.possible as f64).clamp(0.0, 1.0);
-            let score = ScoreComponents::of(
+            let score = b.energy.score(
                 b.meter.intake.max(0.0),
                 b.meter.motor.max(0.0),
-                survived,
                 b.founder.manifest().body_reference,
             );
             s.scored += 1;

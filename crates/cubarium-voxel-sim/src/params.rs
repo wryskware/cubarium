@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use cubarium_voxel::Config;
+use cubarium_voxel::genome::{Genome, SearchFile};
 use cubarium_voxel::registry::{self, DumpLine, Registry};
 use cubarium_voxel_fauna::FaunaConfig;
 use cubarium_voxel_flora::FloraConfig;
@@ -120,6 +121,38 @@ impl Params {
                 .map_err(|e| format!("[fauna]: {e}"))?;
         }
         Ok(())
+    }
+
+    /// Expand a search file over this set's plants and animals ([`Genome::expand`]):
+    /// `tie = "each"` split, every path, group and rule checked.
+    pub fn expand_genome(&self, file: SearchFile) -> Result<Genome, String> {
+        let flora = registry::to_value(&self.flora)?;
+        let fauna = registry::to_value(&self.fauna)?;
+        Genome::expand(
+            file,
+            &[
+                (cubarium_voxel_flora::registry(), &flora),
+                (cubarium_voxel_fauna::registry(), &fauna),
+            ],
+        )
+    }
+
+    /// Decode `genome` over this set's plants (as authored) and animals, then validate.
+    /// The world is not searched: a gene names a `flora.*` or `fauna.*` path.
+    pub fn apply_genome(&mut self, genome: &Genome) -> Result<(), String> {
+        let flora = registry::to_value(&self.flora)?;
+        let fauna = registry::to_value(&self.fauna)?;
+        let edits = genome.resolve(&[
+            (cubarium_voxel_flora::registry(), &flora),
+            (cubarium_voxel_fauna::registry(), &fauna),
+        ])?;
+        cubarium_voxel_flora::registry()
+            .apply(&mut self.flora, &edits[0])
+            .map_err(|e| format!("genome: {e}"))?;
+        cubarium_voxel_fauna::registry()
+            .apply(&mut self.fauna, &edits[1])
+            .map_err(|e| format!("genome: {e}"))?;
+        self.validate()
     }
 
     /// Every number inside its row's range, and each crate's cross-field rules.
@@ -236,4 +269,9 @@ fn with_seeds_masked(
         world.noise_seed = noise;
     }
     result
+}
+
+/// A search (or genome) file's text, expanded over the code defaults.
+pub fn load_genome(text: &str) -> Result<Genome, String> {
+    Params::defaults().expand_genome(SearchFile::parse(text)?)
 }

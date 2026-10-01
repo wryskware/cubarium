@@ -1,0 +1,107 @@
+# The ecology search's routed vector before R3, as a search file
+# (design/ecology-parameter-registry-2026-09-28.md §3: "today's vector becomes one such
+# file"). It reproduces the hand-written routing it replaced: 11 shared multipliers, and
+# five of them again per lineage (`<name>@<lineage>`), the two multiplying. Old
+# `[ecology]` files (config/training/ecology-tuned-*.toml) load through these names.
+#
+# The routing it reproduces kept the mouth, dead wood and carrion off the upkeep and the
+# litter rate, so those ties are free here; and it moved the mass scale, a digest row.
+
+retrain = true
+free = ["intake_follows_upkeep", "wood_decay_follows_litter", "carrion_decay_follows_litter"]
+
+[[gene]]
+name = "flora.foliage_rate"
+path = "flora.@photo.foliage_rate"
+range = [0.25, 4.0]
+what = "regrowth: every photosynthetic species' foliage_rate"
+
+[[gene]]
+name = "flora.senescence"
+path = "flora.@photo.senescence"
+range = [0.25, 4.0]
+what = "litterfall: every photosynthetic species' senescence"
+
+[[gene]]
+name = "flora.decomposition"
+path = "flora.decomposition"
+range = [0.25, 4.0]
+what = "litter decomposition rate"
+
+[[gene]]
+name = "founder.yield_by_food"
+path = "fauna.founders.*.yield_by_food.*"
+range = [0.25, 2.0]
+what = "bite yield: every founder's assimilation yield, every food class"
+
+[[gene]]
+name = "founder.reproduction.surplus_floor"
+path = "fauna.founders.*.core.reproduction.surplus_floor"
+range = [0.25, 4.0]
+what = "breeding reserve threshold: every founder's surplus floor"
+
+[[gene]]
+name = "founder.maintenance_per_s"
+path = "fauna.founders.*.core.maintenance_per_s"
+range = [0.25, 4.0]
+what = "animal upkeep (walking follows it)"
+
+[[gene]]
+name = "founder.lifespan_median_s"
+path = "fauna.founders.*.core.lifespan_median_s"
+range = [0.25, 4.0]
+what = "median lifespan, every body kind"
+
+[[gene]]
+name = "flora.defence_per_bite"
+path = "flora.*.defence_per_bite"
+range = [0.25, 4.0]
+what = "grazing defence rise per bite, every species"
+
+[[gene]]
+name = "flora.defence_half_life_s"
+path = "flora.*.defence_half_life_s"
+range = [0.25, 4.0]
+what = "grazing defence half-life, every species"
+
+[[gene]]
+name = "founder.motor_factor"
+path = "fauna.founders.*.motor_respiration_per_s"
+range = [0.5, 4.0]
+what = "walking cost as a multiple of upkeep, on the shipped ratio"
+
+[[gene]]
+name = "founder.mass_scale"
+path = "fauna.founders.*.mass_scale"
+range = [1.0, 1000.0]
+what = "animal org-unit mass: the nine absolute animal quantities"
+
+[[gene]]
+name = "founder.yield_by_food"
+path = "fauna.founders.*.yield_by_food.*"
+tie = "each"
+range = [0.25, 2.0]
+
+[[gene]]
+name = "founder.maintenance_per_s"
+path = "fauna.founders.*.core.maintenance_per_s"
+tie = "each"
+range = [0.25, 4.0]
+
+[[gene]]
+name = "founder.lifespan_median_s"
+path = "fauna.founders.*.core.lifespan_median_s"
+tie = "each"
+range = [0.25, 4.0]
+
+[[gene]]
+name = "founder.motor_factor"
+path = "fauna.founders.*.motor_respiration_per_s"
+tie = "each"
+range = [0.5, 4.0]
+
+[[gene]]
+name = "founder.mass_scale"
+path = "fauna.founders.*.mass_scale"
+tie = "each"
+range = [1.0, 1000.0]

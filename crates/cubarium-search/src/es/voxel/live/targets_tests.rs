@@ -44,7 +44,11 @@ fn the_band_scales_with_the_founding_count() {
     };
     let b = Band::for_founding(10, true, &spec);
     assert_eq!((b.lo, b.hi, b.peak), (20.0, 40.0, 60.0));
-    assert!(Band::for_founding(10, false, &spec).lanternjaw_share.is_none());
+    assert!(
+        Band::for_founding(10, false, &spec)
+            .lanternjaw_share
+            .is_none()
+    );
 }
 
 /// Every new part is zero inside its band and grows monotonically outside it.
@@ -130,7 +134,12 @@ fn centre(founder: Founder) -> Vec<f64> {
 fn unified_mode_with_no_lanternjaw_centre_runs_one_window() {
     let drivers: Vec<(Founder, EpisodeDriver)> = TRAINED_LINEAGES
         .iter()
-        .map(|&f| (f, EpisodeDriver::gru(&centre(f), f).expect("a valid centre")))
+        .map(|&f| {
+            (
+                f,
+                EpisodeDriver::gru(&centre(f), f).expect("a valid centre"),
+            )
+        })
         .collect();
     let tables: Vec<Option<VariantTable>> = Founder::ALL
         .iter()
@@ -145,7 +154,9 @@ fn unified_mode_with_no_lanternjaw_centre_runs_one_window() {
     assert_eq!(e.ticks, 100, "one whole window: {:?}", e.stopped);
     assert!(!e.body_scores.is_empty(), "the trained bodies were scored");
     assert!(
-        e.body_scores.iter().all(|b| TRAINED_LINEAGES.contains(&b.founder)),
+        e.body_scores
+            .iter()
+            .all(|b| TRAINED_LINEAGES.contains(&b.founder)),
         "only lineages with a centre are scored"
     );
     let lj = Founder::Lanternjaw.index();

@@ -30,6 +30,7 @@ use super::EpisodeDriver;
 
 pub mod ecology;
 pub mod readout;
+pub mod screen;
 pub mod search;
 pub mod trainer;
 pub mod variants;

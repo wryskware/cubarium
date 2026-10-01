@@ -7,7 +7,7 @@ use cubarium_voxel_fauna::{
 };
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraConfig, Site, Species};
 
-use super::ecology::{EcologyParams, PARAMS};
+use super::ecology::EcologyParams;
 use super::search::{Band, Trace, penalty};
 use crate::es::cma::Cma;
 use crate::es::voxel::controller::StationaryFeeding;
@@ -36,7 +36,7 @@ fn flat_world() -> World {
 }
 
 fn with(name: &str, v: f64) -> EcologyParams {
-    let mut e = EcologyParams::defaults();
+    let mut e = EcologyParams::legacy();
     e.set(name, v).expect("in range");
     e
 }
@@ -68,7 +68,7 @@ fn watered_world() -> World {
 /// One photosynthetic stand on watered flat soil; returns its site.
 fn planted(e: &EcologyParams, species: Species) -> (World, Flora, Site) {
     let world = watered_world();
-    let mut flora = Flora::new(e.flora_config(base_flora()));
+    let mut flora = Flora::new(e.flora(0.25));
     let wood = flora.view().config.species(species).wood_max * 0.5;
     assert!(flora.apply(
         &world,
@@ -100,7 +100,7 @@ fn foliage_rate_speeds_regrowth() {
     let regrown = |scale: f64| {
         let e = with("flora.foliage_rate", scale);
         let world = watered_world();
-        let mut flora = Flora::new(e.flora_config(base_flora().without_graze_refuge()));
+        let mut flora = Flora::new(e.flora(0.25).without_graze_refuge());
         let wood = flora.view().config.species(Species::Springturf).wood_max * 0.5;
         assert!(flora.apply(
             &world,
@@ -149,7 +149,7 @@ fn decomposition_rots_litter_faster() {
     let left = |scale: f64| {
         let e = with("flora.decomposition", scale);
         let mut world = flat_world();
-        let mut flora = Flora::new(e.flora_config(base_flora()));
+        let mut flora = Flora::new(e.flora(0.25));
         // A support voxel: the top soil cell.
         assert!(flora.deposit(
             Site { x: 3, y: 2, z: 3 },
@@ -177,8 +177,8 @@ fn yield_by_food_raises_assimilation() {
     let assimilated = |scale: f64| {
         let e = with("founder.yield_by_food", scale);
         let world = flat_world();
-        let mut flora = Flora::new(e.flora_config(base_flora()));
-        let mut fauna = Fauna::new(e.fauna_config());
+        let mut flora = Flora::new(e.flora(0.25));
+        let mut fauna = Fauna::new(e.fauna());
         assert!(fauna.apply(
             &world,
             FaunaCommand::IntroduceFounder {
@@ -219,8 +219,8 @@ fn yield_by_food_raises_assimilation() {
 #[test]
 fn surplus_floor_raises_the_breeding_threshold() {
     let (one, two) = (
-        with("founder.reproduction.surplus_floor", 1.0).fauna_config(),
-        with("founder.reproduction.surplus_floor", 2.0).fauna_config(),
+        with("founder.reproduction.surplus_floor", 1.0).fauna(),
+        with("founder.reproduction.surplus_floor", 2.0).fauna(),
     );
     for f in crate::es::voxel::TRAINED_LINEAGES {
         let (a, b) = (one.founder(f).core, two.founder(f).core);
@@ -237,8 +237,8 @@ fn maintenance_raises_upkeep() {
     let upkeep = |scale: f64| {
         let e = with("founder.maintenance_per_s", scale);
         let world = flat_world();
-        let mut flora = Flora::new(e.flora_config(base_flora()));
-        let mut fauna = Fauna::new(e.fauna_config());
+        let mut flora = Flora::new(e.flora(0.25));
+        let mut fauna = Fauna::new(e.fauna());
         assert!(fauna.apply(
             &world,
             FaunaCommand::IntroduceFounder {
@@ -267,15 +267,15 @@ fn maintenance_raises_upkeep() {
 /// The lifespan and defence parameters reach their layers.
 #[test]
 fn the_lifespan_and_defence_parameters_reach_their_layers() {
-    let f = with("founder.lifespan_median_s", 0.5).fauna_config();
+    let f = with("founder.lifespan_median_s", 0.5).fauna();
     for l in crate::es::voxel::TRAINED_LINEAGES {
         assert_eq!(
             f.founder(l).core.lifespan_median_s,
             0.5 * FaunaConfig::default().founder(l).core.lifespan_median_s
         );
     }
-    let fl = with("flora.defence_per_bite", 2.0).flora_config(base_flora());
-    let fh = with("flora.defence_half_life_s", 0.5).flora_config(base_flora());
+    let fl = with("flora.defence_per_bite", 2.0).flora(0.25);
+    let fh = with("flora.defence_half_life_s", 0.5).flora(0.25);
     for s in Species::ALL {
         assert_eq!(
             fl.species(s).defence_per_bite,
@@ -288,26 +288,26 @@ fn the_lifespan_and_defence_parameters_reach_their_layers() {
     }
 }
 
-/// The live app's defaults are unchanged: the default vector builds exactly the shipped
-/// configs, a tuned vector never writes back into them, and a log vector of zeros is the
-/// defaults.
+/// The live app's defaults are unchanged: the default ecology builds exactly the shipped
+/// configs, a tuned genome never writes back into them, and its search coordinates are
+/// clamped into the box.
 #[test]
 fn the_live_defaults_are_unchanged() {
     let e = EcologyParams::defaults();
-    assert_eq!(e.fauna_config(), FaunaConfig::default());
-    assert_eq!(e.flora_config(base_flora()), base_flora());
-    let tuned = EcologyParams::from_search_log(
-        &(0..EcologyParams::search_names().len())
+    assert_eq!(e.fauna(), FaunaConfig::default());
+    assert_eq!(e.flora(0.25), base_flora());
+    let g = EcologyParams::cotrain().genome().cloned().expect("a genome");
+    let tuned = g.from_search(
+        &(0..g.genes.len())
             .map(|i| 0.3 * ((i % 5) as f64 - 2.0))
             .collect::<Vec<_>>(),
     );
-    let _ = (tuned.fauna_config(), tuned.flora_config(base_flora()));
-    assert_eq!(FaunaConfig::default(), e.fauna_config());
-    assert_eq!(EcologyParams::from_log(&vec![0.0; PARAMS.len()]), e);
-    // Out-of-range log values are clamped to the parameter's range.
-    let wild = EcologyParams::from_log(&vec![9.0; PARAMS.len()]);
-    for (p, v) in PARAMS.iter().zip(wild.values()) {
-        assert!(*v <= p.max + 1e-12, "{} = {v}", p.name);
+    let _ = EcologyParams::Genome(tuned).fauna();
+    assert_eq!(FaunaConfig::default(), e.fauna());
+    assert_eq!(g.from_search(&g.to_search()), g);
+    let wild = g.from_search(&vec![9.0; g.genes.len()]);
+    for gene in &wild.genes {
+        assert!(gene.value <= gene.range.1 + 1e-12, "{} = {}", gene.name, gene.value);
     }
 }
 
@@ -316,6 +316,7 @@ fn trace_at(n: usize, moving: f64) -> Trace {
         horizon_min: 360.0,
         minutes: (1..=360).map(f64::from).collect(),
         animals: vec![n; 360],
+        lanternjaws: Vec::new(),
         browser_moving: moving,
         missing: 0,
         silent_lineages: 0,
@@ -327,7 +328,14 @@ fn trace_at(n: usize, moving: f64) -> Trace {
 /// missing lineage or species.
 #[test]
 fn the_penalty_is_zero_in_the_band_and_monotonic_outside() {
-    let band = Band::default();
+    let band = Band {
+        lo: 30.0,
+        hi: 80.0,
+        peak: 120.0,
+        moving_min: 0.30,
+        missing_cost: 10.0,
+        lanternjaw_share: None,
+    };
     for n in [30, 45, 80] {
         assert_eq!(penalty(&trace_at(n, 0.3), &band).total, 0.0, "n = {n}");
     }
@@ -385,6 +393,7 @@ fn a_short_trace_is_projected_on_its_last_hours_trend() {
         animals: (1..=180)
             .map(|m| (20.0 * (f64::from(m) * 2f64.ln() / 60.0).exp()) as usize)
             .collect(),
+        lanternjaws: Vec::new(),
         browser_moving: 0.3,
         missing: 0,
         silent_lineages: 0,

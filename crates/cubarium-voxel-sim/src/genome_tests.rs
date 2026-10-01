@@ -78,9 +78,16 @@ fn the_cotrain_search_is_twenty_to_forty_multipliers_around_today() {
     );
     for gene in &g.genes {
         let (lo, hi) = gene.range;
-        assert!(lo > 0.0 && lo <= 1.0 && hi >= 1.0, "{}: [{lo}, {hi}]", gene.name);
+        assert!(
+            lo > 0.0 && lo <= 1.0 && hi >= 1.0,
+            "{}: [{lo}, {hi}]",
+            gene.name
+        );
     }
-    assert!(!g.retrain, "stage 1 does not move a trained controller's digest");
+    assert!(
+        !g.retrain,
+        "stage 1 does not move a trained controller's digest"
+    );
 }
 
 /// A gene moves exactly the leaves its path matches, by its multiplier, and nothing else:
@@ -141,14 +148,23 @@ range = [0.25, 8.0]
     );
     let names = each.names();
     for f in Founder::ALL {
-        assert!(names.contains(&format!("lifespan@{}", f.name())), "{names:?}");
+        assert!(
+            names.contains(&format!("lifespan@{}", f.name())),
+            "{names:?}"
+        );
     }
     each.set("lifespan@lanternjaw", 3.0).expect("in range");
     let diff = changed(&d, &decoded(&each));
     assert_eq!(diff.len(), 1, "{diff:?}");
-    assert_eq!(diff[0].0, "fauna.founders.lanternjaw.core.lifespan_median_s");
+    assert_eq!(
+        diff[0].0,
+        "fauna.founders.lanternjaw.core.lifespan_median_s"
+    );
     assert!(close(diff[0].2, 3.0 * diff[0].1));
-    assert!(each.set("lifespan@lanternjaw", 9.0).is_err(), "outside the gene's range");
+    assert!(
+        each.set("lifespan@lanternjaw", 9.0).is_err(),
+        "outside the gene's range"
+    );
 }
 
 /// A derived field follows its base gene — walking and the mouth keep their ratio to
@@ -168,19 +184,41 @@ range = [0.25, 4.0]
 value = 2.0
 "#;
     let follows = decoded(&genome(upkeep));
-    assert!(close(motor(&follows, Founder::Browser), 2.0 * motor(&d, Founder::Browser)));
-    assert!(close(bite(&follows, Founder::Browser), 2.0 * bite(&d, Founder::Browser)));
+    assert!(close(
+        motor(&follows, Founder::Browser),
+        2.0 * motor(&d, Founder::Browser)
+    ));
+    assert!(close(
+        bite(&follows, Founder::Browser),
+        2.0 * bite(&d, Founder::Browser)
+    ));
     assert_eq!(motor(&follows, Founder::Blind), motor(&d, Founder::Blind));
 
     let freed = decoded(&genome(&format!(
         "free = [\"fauna.founders.frondgrazer.motor_respiration_per_s\"]\n{upkeep}"
     )));
-    assert_eq!(motor(&freed, Founder::Browser), motor(&d, Founder::Browser), "freed by path");
-    assert!(close(bite(&freed, Founder::Browser), 2.0 * bite(&d, Founder::Browser)));
+    assert_eq!(
+        motor(&freed, Founder::Browser),
+        motor(&d, Founder::Browser),
+        "freed by path"
+    );
+    assert!(close(
+        bite(&freed, Founder::Browser),
+        2.0 * bite(&d, Founder::Browser)
+    ));
 
-    let by_name = decoded(&genome(&format!("free = [\"intake_follows_upkeep\"]\n{upkeep}")));
-    assert_eq!(bite(&by_name, Founder::Browser), bite(&d, Founder::Browser), "freed by name");
-    assert!(close(motor(&by_name, Founder::Browser), 2.0 * motor(&d, Founder::Browser)));
+    let by_name = decoded(&genome(&format!(
+        "free = [\"intake_follows_upkeep\"]\n{upkeep}"
+    )));
+    assert_eq!(
+        bite(&by_name, Founder::Browser),
+        bite(&d, Founder::Browser),
+        "freed by name"
+    );
+    assert!(close(
+        motor(&by_name, Founder::Browser),
+        2.0 * motor(&d, Founder::Browser)
+    ));
 
     let on_top = decoded(&genome(&format!(
         r#"{upkeep}
@@ -191,7 +229,10 @@ range = [0.5, 10.0]
 value = 3.0
 "#
     )));
-    assert!(close(motor(&on_top, Founder::Browser), 6.0 * motor(&d, Founder::Browser)));
+    assert!(close(
+        motor(&on_top, Founder::Browser),
+        6.0 * motor(&d, Founder::Browser)
+    ));
 
     // The mass scale (a digest row, so only with `retrain`) carries the nine absolute
     // quantities with it, and the placeholder species follows the browser's body.
@@ -205,10 +246,19 @@ range = [0.1, 10.0]
 value = 2.0
 "#,
     ));
-    let (a, b) = (d.fauna.founder(Founder::Browser).core, heavy.fauna.founder(Founder::Browser).core);
+    let (a, b) = (
+        d.fauna.founder(Founder::Browser).core,
+        heavy.fauna.founder(Founder::Browser).core,
+    );
     assert!(close(b.body_max, 2.0 * a.body_max) && close(b.birth_cost, 2.0 * a.birth_cost));
-    assert!(close(heavy.fauna.frondgrazer.body_max, 2.0 * d.fauna.frondgrazer.body_max));
-    assert_eq!(b.maintenance_per_s, a.maintenance_per_s, "a per-unit rate stays");
+    assert!(close(
+        heavy.fauna.frondgrazer.body_max,
+        2.0 * d.fauna.frondgrazer.body_max
+    ));
+    assert_eq!(
+        b.maintenance_per_s, a.maintenance_per_s,
+        "a per-unit rate stays"
+    );
 
     // An inverse tie: a seed bank kept twice as long loses its seeds half as fast.
     let banked = decoded(&genome(
@@ -220,8 +270,14 @@ range = [0.25, 4.0]
 value = 2.0
 "#,
     ));
-    let (s0, s1) = (d.flora.species(Species::Springturf), banked.flora.species(Species::Springturf));
-    assert!(close(s1.seed_attrition_per_s, 0.5 * s0.seed_attrition_per_s));
+    let (s0, s1) = (
+        d.flora.species(Species::Springturf),
+        banked.flora.species(Species::Springturf),
+    );
+    assert!(close(
+        s1.seed_attrition_per_s,
+        0.5 * s0.seed_attrition_per_s
+    ));
 }
 
 /// The clock gene `K_bio` runs every biological process faster together: rates up,
@@ -234,15 +290,30 @@ fn the_clock_gene_speeds_rates_and_shortens_durations() {
     let (d, p) = (Params::defaults(), decoded(&g));
     for f in Founder::ALL {
         let (a, b) = (d.fauna.founder(f), p.fauna.founder(f));
-        assert!(close(b.core.maintenance_per_s, 2.0 * a.core.maintenance_per_s), "{f:?}");
-        assert!(close(b.motor_respiration_per_s, 2.0 * a.motor_respiration_per_s), "{f:?}");
-        assert!(close(b.core.lifespan_median_s, 0.5 * a.core.lifespan_median_s), "{f:?}");
+        assert!(
+            close(b.core.maintenance_per_s, 2.0 * a.core.maintenance_per_s),
+            "{f:?}"
+        );
+        assert!(
+            close(b.motor_respiration_per_s, 2.0 * a.motor_respiration_per_s),
+            "{f:?}"
+        );
+        assert!(
+            close(b.core.lifespan_median_s, 0.5 * a.core.lifespan_median_s),
+            "{f:?}"
+        );
     }
-    let (a, b) = (d.flora.species(Species::Bloomcrown), p.flora.species(Species::Bloomcrown));
+    let (a, b) = (
+        d.flora.species(Species::Bloomcrown),
+        p.flora.species(Species::Bloomcrown),
+    );
     assert!(close(b.foliage_rate, 2.0 * a.foliage_rate));
     assert!(close(b.defence_half_life_s, 0.5 * a.defence_half_life_s));
     assert!(close(p.flora.decomposition, 2.0 * d.flora.decomposition));
-    assert!(close(p.flora.wood_decomposition, 2.0 * d.flora.wood_decomposition));
+    assert!(close(
+        p.flora.wood_decomposition,
+        2.0 * d.flora.wood_decomposition
+    ));
 }
 
 /// An unknown path, group or key in a search file is an error that names it.
@@ -256,7 +327,10 @@ fn an_unknown_path_in_a_search_file_is_an_error() {
     ] {
         let text = format!("[[gene]]\nname = \"g\"\npath = \"{path}\"\nrange = [0.5, 2.0]\n");
         let err = load_genome(&text).expect_err(path);
-        assert!(err.contains(path) || err.contains("no_such") || err.contains("nowhere"), "{err}");
+        assert!(
+            err.contains(path) || err.contains("no_such") || err.contains("nowhere"),
+            "{err}"
+        );
     }
     let typo = "[[gene]]\nname = \"g\"\npath = \"flora.decomposition\"\nrnage = [0.5, 2.0]\n";
     assert!(load_genome(typo).is_err(), "an unknown key in a gene");

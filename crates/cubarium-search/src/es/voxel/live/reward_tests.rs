@@ -143,18 +143,31 @@ fn a_death_scores_below_an_idle_survivor_of_the_same_window() {
 fn breeding_does_not_lower_the_parents_score() {
     let arm = |can_lay: bool| {
         let mut cfg = FaunaConfig::default();
+        // Awake in both arms: a lighter reserve after laying must not decide whether the
+        // body sleeps, which would change its upkeep, not its intake or motor.
+        cfg.founders[Founder::Blind.index()].wake_hunger = 0.0;
         let rule = &mut cfg.founders[Founder::Blind.index()].core.reproduction;
         // A hold of one tick, so a full founder lays at once.
         rule.surplus_hold_s = 0.05;
         if !can_lay {
             rule.litter_min = 1e9;
         }
-        run(cfg, Founder::Blind, StartingStores::FULL, 0.5, fixed(0.0, 0.0), 120)
+        run(
+            cfg,
+            Founder::Blind,
+            StartingStores::FULL,
+            0.5,
+            fixed(0.0, 0.0),
+            120,
+        )
     };
     let (laid, kept) = (arm(true), arm(false));
     assert!(laid.given_normalized > 0.0, "the shredder laid: {laid:?}");
     assert_eq!(kept.given_normalized, 0.0);
-    assert!(laid.delta_normalized < kept.delta_normalized, "the clutch left the body");
+    assert!(
+        laid.delta_normalized < kept.delta_normalized,
+        "the clutch left the body"
+    );
     assert!(
         (laid.score - kept.score).abs() <= 1e-9 * kept.score.abs().max(1e-12),
         "breeding moved the score: {} vs {}",
@@ -168,8 +181,22 @@ fn breeding_does_not_lower_the_parents_score() {
 #[test]
 fn more_intake_raises_the_score() {
     let cfg = FaunaConfig::default();
-    let fed = run(cfg, Founder::Blind, StartingStores::HUNGRY, 0.5, fixed(0.0, 1.0), 200);
-    let unfed = run(cfg, Founder::Blind, StartingStores::HUNGRY, 0.5, fixed(0.0, 0.0), 200);
+    let fed = run(
+        cfg,
+        Founder::Blind,
+        StartingStores::HUNGRY,
+        0.5,
+        fixed(0.0, 1.0),
+        200,
+    );
+    let unfed = run(
+        cfg,
+        Founder::Blind,
+        StartingStores::HUNGRY,
+        0.5,
+        fixed(0.0, 0.0),
+        200,
+    );
     assert!(fed.score > unfed.score, "fed {fed:?} vs unfed {unfed:?}");
 }
 
@@ -178,9 +205,26 @@ fn more_intake_raises_the_score() {
 #[test]
 fn more_motor_lowers_the_score() {
     let cfg = FaunaConfig::default();
-    let walked = run(cfg, Founder::Browser, StartingStores::FULL, 0.0, fixed(1.0, 0.0), 200);
-    let stood = run(cfg, Founder::Browser, StartingStores::FULL, 0.0, fixed(0.0, 0.0), 200);
-    assert!(walked.score < stood.score, "walked {walked:?} vs stood {stood:?}");
+    let walked = run(
+        cfg,
+        Founder::Browser,
+        StartingStores::FULL,
+        0.0,
+        fixed(1.0, 0.0),
+        200,
+    );
+    let stood = run(
+        cfg,
+        Founder::Browser,
+        StartingStores::FULL,
+        0.0,
+        fixed(0.0, 0.0),
+        200,
+    );
+    assert!(
+        walked.score < stood.score,
+        "walked {walked:?} vs stood {stood:?}"
+    );
 }
 
 /// The score is the body's net energy over the reference, and a death zeroes the end.
