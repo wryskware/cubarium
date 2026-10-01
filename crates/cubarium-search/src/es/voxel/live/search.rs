@@ -76,6 +76,14 @@ pub struct BandSpec {
     /// birth stops paying for it: `missing_cost × (1 − min(1, readiness / this))`. The
     /// search file's `[targets] ready_target`.
     pub ready_target: f64,
+    /// Lineages exempt from the breeding term alone (persistence and share still apply):
+    /// the lanternjaw, whose own eggs cannot hatch before the next dusk. `[targets]
+    /// breed_exempt`.
+    pub breed_exempt: [bool; Founder::COUNT],
+    /// The weight on the moving-share term (`lively`, 0 to 1 before it), so a still
+    /// browser costs on the scale of a lineage that does not breed. `[targets]
+    /// lively_weight`.
+    pub lively_weight: f64,
 }
 
 impl BandSpec {
@@ -98,6 +106,25 @@ impl BandSpec {
                             .ok_or_else(|| format!("[targets] persist_only: no lineage {n:?}"))?;
                         self.persist_only[f.index()] = true;
                     }
+                }
+                "breed_exempt" => {
+                    let names = v.as_array().ok_or("breed_exempt is a list of lineages")?;
+                    self.breed_exempt = [false; Founder::COUNT];
+                    for n in names {
+                        let n = n.as_str().ok_or("breed_exempt names lineages")?;
+                        let f = Founder::ALL
+                            .into_iter()
+                            .find(|f| f.name() == n)
+                            .ok_or_else(|| format!("[targets] breed_exempt: no lineage {n:?}"))?;
+                        self.breed_exempt[f.index()] = true;
+                    }
+                }
+                "lively_weight" => {
+                    self.lively_weight = v
+                        .as_float()
+                        .or_else(|| v.as_integer().map(|i| i as f64))
+                        .filter(|x| *x >= 0.0 && x.is_finite())
+                        .ok_or("lively_weight is a number >= 0")?;
                 }
                 "ready_target" => {
                     let v = v
@@ -125,6 +152,8 @@ impl Default for BandSpec {
             lanternjaw_share: [0.05, 0.15],
             persist_only: [false; Founder::COUNT],
             ready_target: 0.5,
+            breed_exempt: [false; Founder::COUNT],
+            lively_weight: 10.0,
         }
     }
 }
@@ -139,6 +168,8 @@ pub struct Band {
     pub missing_cost: f64,
     /// `None` for a world founded without the lanternjaw.
     pub lanternjaw_share: Option<[f64; 2]>,
+    /// The weight on the moving-share term ([`BandSpec::lively_weight`]).
+    pub lively_weight: f64,
 }
 
 impl Band {
@@ -154,6 +185,7 @@ impl Band {
             missing_cost: spec.missing_cost,
             lanternjaw_share: (lanternjaw && !spec.persist_only[Founder::Lanternjaw.index()])
                 .then_some(spec.lanternjaw_share),
+            lively_weight: spec.lively_weight,
         }
     }
 }
@@ -239,7 +271,8 @@ pub fn penalty(t: &Trace, band: &Band) -> Penalty {
     };
     let peak_n = samples.iter().map(|s| s.1).fold(0.0, f64::max);
     let peak = (peak_n - band.peak).max(0.0) / band.peak;
-    let lively = (band.moving_min - t.browser_moving).max(0.0) / band.moving_min;
+    let lively =
+        band.lively_weight * (band.moving_min - t.browser_moving).max(0.0) / band.moving_min;
     let persist = band.missing_cost * (t.missing as f64 + t.silent_lineages);
     Penalty {
         bound,
@@ -375,8 +408,14 @@ fn eggs(sim: &cubarium_voxel_sim::Sim) -> Vec<usize> {
         .collect()
 }
 
+/// What each lineage was founded with: founder bodies plus founder eggs (the lanternjaw is
+/// founded as an egg bank, and its seeding counts no bodies).
+pub fn founded_lineages(founders: &[usize], eggs: &[usize]) -> Vec<usize> {
+    founders.iter().zip(eggs).map(|(b, e)| b + e).collect()
+}
+
 /// The lineages a world founded (bodies or clutches) that hold neither now.
-fn lost_lineages(founded: &[usize], bodies: &[usize], eggs: &[usize]) -> usize {
+pub fn lost_lineages(founded: &[usize], bodies: &[usize], eggs: &[usize]) -> usize {
     (0..Founder::COUNT)
         .filter(|&i| founded[i] > 0 && bodies[i] + eggs[i] == 0)
         .count()
@@ -418,7 +457,7 @@ pub fn breeding_shortfall(
     reached_second_half: bool,
 ) -> f64 {
     (0..Founder::COUNT)
-        .filter(|&i| founded[i] > 0 && !spec.persist_only[i])
+        .filter(|&i| founded[i] > 0 && !spec.persist_only[i] && !spec.breed_exempt[i])
         .map(|i| {
             if !reached_second_half || lost[i] {
                 1.0
@@ -469,7 +508,7 @@ impl EvalRun {
         let (mut sim, info) = world::found_world(&spec.world, base, spec.founders, params);
         super::install_centres(sim.fauna_mut(), drivers);
         sim.world_mut().set_water_every(spec.water_every);
-        let founded = info.founders.to_vec();
+        let founded = founded_lineages(&info.founders, &eggs(&sim));
         let lj = Founder::Lanternjaw.index();
         let animals0: usize = (0..Founder::COUNT).filter(|&i| i != lj).map(|i| founded[i]).sum();
         let band = Band::for_founding(animals0, founded[lj] > 0, &spec.band);
