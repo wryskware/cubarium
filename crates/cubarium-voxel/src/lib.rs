@@ -46,6 +46,7 @@ pub mod profile;
 /// What a landscape is made of, in metres, and which generator builds it.
 pub mod recipe;
 pub mod registry;
+mod world_rows;
 pub mod snapshot;
 /// The designed terrarium: a ring of tree and tower, built up from parts.
 pub mod terrarium;

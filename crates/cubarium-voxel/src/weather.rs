@@ -226,36 +226,6 @@ impl Default for DayClock {
 }
 
 impl DayClock {
-    pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.length_min.is_finite() && self.length_min > 0.0,
-            "day.length_min must be positive, not {}",
-            self.length_min
-        );
-        anyhow::ensure!(
-            (0.05..=0.95).contains(&self.daylight),
-            "day.daylight is the share of the day the sun is up, 0.05..=0.95, not {}",
-            self.daylight
-        );
-        anyhow::ensure!(
-            (0.0..24.0).contains(&self.start_hour),
-            "day.start_hour is an hour of the day, not {}",
-            self.start_hour
-        );
-        anyhow::ensure!(
-            (0.0..=1.0).contains(&self.plant_night_factor),
-            "day.plant_night_factor is a fraction of the daytime rate, 0..=1, not {}",
-            self.plant_night_factor
-        );
-        if let Some(lat) = self.latitude {
-            anyhow::ensure!((-90.0..=90.0).contains(&lat), "day.latitude {lat}");
-        }
-        if let Some(lon) = self.longitude {
-            anyhow::ensure!((-180.0..=180.0).contains(&lon), "day.longitude {lon}");
-        }
-        Ok(())
-    }
-
     /// Seconds in one of this clock's days: the unit the climate's per-day rates count.
     pub fn day_s(&self) -> f64 {
         match self.mode {
@@ -515,16 +485,6 @@ macro_rules! rain_keys {
             fn apply(&self, to: &mut RainParams) { $(if let Some(v) = self.$k { to.$k = v; })* }
             fn capture(from: &RainParams) -> RainSpec { RainSpec { $($k: Some(from.$k),)* } }
         }
-        impl RainParams {
-            fn check(&self, mode: &str) -> anyhow::Result<()> {
-                $(anyhow::ensure!(
-                    !self.$k.is_nan(),
-                    "climate.{mode}.{} is not a number",
-                    stringify!($k)
-                );)*
-                Ok(())
-            }
-        }
     };
 }
 rain_keys!(
@@ -763,23 +723,6 @@ macro_rules! climate_keys {
                 }
             }
         }
-        impl Climate {
-            fn check_keys(&self) -> anyhow::Result<()> {
-                if let WeatherSpeed::Fixed(x) = self.weather_speed {
-                    anyhow::ensure!(
-                        x.is_finite() && x > 0.0,
-                        "climate.weather_speed must be positive, not {x}"
-                    );
-                }
-                $(anyhow::ensure!(
-                    !self.$k.is_nan() && self.$k >= 0.0,
-                    "climate.{} must not be negative, not {}",
-                    stringify!($k),
-                    self.$k
-                );)*
-                Ok(())
-            }
-        }
     };
 }
 climate_keys!(
@@ -924,40 +867,6 @@ impl Climate {
                 cool_c: 3.0,
             },
         }
-    }
-
-    pub fn validate(&self) -> anyhow::Result<()> {
-        self.check_keys()?;
-        for (name, m) in [
-            ("drizzle", &self.drizzle),
-            ("shower", &self.shower),
-            ("downpour", &self.downpour),
-        ] {
-            m.check(name)?;
-            anyhow::ensure!(
-                m.lambda_max_per_h >= 0.0 && m.rate_r0 >= 0.0 && m.stop_rh >= 0.0,
-                "climate.{name}: the hazard, the rate and the stop RH are not negative"
-            );
-            anyhow::ensure!(
-                m.width > 0.0 && m.longest_min > 0.0,
-                "climate.{name}: the width and the longest duration are positive"
-            );
-        }
-        anyhow::ensure!(
-            self.capacity_share > 0.0,
-            "climate.capacity_share is positive"
-        );
-        anyhow::ensure!(
-            self.dry_gap_min_s <= self.dry_gap_max_s,
-            "climate.dry_gap_min_s cannot be longer than dry_gap_max_s: {} > {}",
-            self.dry_gap_min_s,
-            self.dry_gap_max_s
-        );
-        anyhow::ensure!(
-            self.front_min_c <= self.front_max_c && self.strike_min_s <= self.strike_max_s,
-            "climate: a range runs from its low end to its high end"
-        );
-        Ok(())
     }
 
     /// The climate as the model runs it on `day`: nature's time scales divided by the

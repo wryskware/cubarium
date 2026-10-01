@@ -161,7 +161,8 @@ pub fn round_trip<T: Serialize + DeserializeOwned + Clone>(reg: &Registry, cfg: 
     );
 }
 
-/// A value just outside `range` on each finite side, or NaN when it has none.
+/// A value just outside `range` on each finite side, NaN, and infinity unless the range
+/// closes on it.
 fn outside(range: &Range, whole: bool) -> Vec<f64> {
     let mut out = Vec::new();
     if range.lo.is_finite() {
@@ -184,7 +185,9 @@ fn outside(range: &Range, whole: bool) -> Vec<f64> {
     }
     if !whole {
         out.push(f64::NAN);
-        out.push(f64::INFINITY);
+        if !range.contains(f64::INFINITY) {
+            out.push(f64::INFINITY);
+        }
     }
     out
 }

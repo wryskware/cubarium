@@ -51,7 +51,8 @@ impl Scale {
     }
 }
 
-/// A row's valid interval. Every value must also be finite.
+/// A row's valid interval. NaN is never inside; an infinite end that is closed (`[0, inf]`)
+/// admits that infinity, an open one (`[0, inf)`) does not.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Range {
     pub lo: f64,
@@ -66,6 +67,14 @@ impl Range {
     /// `[lo, hi]`.
     pub const fn closed(lo: f64, hi: f64) -> Range {
         Range { lo, hi, lo_open: false, hi_open: false }
+    }
+    /// `[0, ∞]`: nonnegative, infinity allowed (the climate's keys, a certain hazard).
+    pub const fn nonneg_or_inf() -> Range {
+        Range { lo: 0.0, hi: f64::INFINITY, lo_open: false, hi_open: false }
+    }
+    /// `[-∞, ∞]`: any number but NaN.
+    pub const fn any_or_inf() -> Range {
+        Range { lo: f64::NEG_INFINITY, hi: f64::INFINITY, lo_open: false, hi_open: false }
     }
     /// `[0, ∞)`: finite and nonnegative, the common floor.
     pub const fn nonneg() -> Range {
@@ -96,9 +105,9 @@ impl Range {
         Range { hi_open: true, ..self }
     }
 
-    /// Whether `v` is finite and inside.
+    /// Whether `v` is inside (never NaN).
     pub fn contains(&self, v: f64) -> bool {
-        v.is_finite()
+        !v.is_nan()
             && (if self.lo_open { v > self.lo } else { v >= self.lo })
             && (if self.hi_open { v < self.hi } else { v <= self.hi })
     }
@@ -412,8 +421,8 @@ impl Registry {
         for (path, value) in sets {
             self.put(&mut tree, path, value.clone())?;
         }
-        let next: T = from_value(tree.clone())?;
-        // Range-check what was set, under the paths it was set at.
+        // Range-check what was set, under the paths it was set at, before the struct's
+        // own types see it (a -1 in a `u32` is a range refusal, not a serde one).
         for (path, _) in sets {
             let rel = self.relative(path)?;
             if let Some(v) = lookup(&tree, &rel) {
@@ -429,7 +438,7 @@ impl Registry {
                 }
             }
         }
-        *cfg = next;
+        *cfg = from_value(tree)?;
         Ok(())
     }
 
@@ -657,5 +666,7 @@ pub use toml;
 /// The world's table (`world.*`): `cubarium_voxel::Config`, its day clock and climate.
 pub fn world() -> &'static Registry {
     static TABLE: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| Registry::new("world", Vec::new(), Vec::new(), vec!["world.landform".into()]))
+    TABLE.get_or_init(|| {
+        Registry::new("world", crate::world_rows::rows(), Vec::new(), vec!["world.landform".into()])
+    })
 }

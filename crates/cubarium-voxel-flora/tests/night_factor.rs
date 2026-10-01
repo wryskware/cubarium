@@ -119,9 +119,12 @@ fn twilight_is_continuous() {
 #[test]
 fn a_factor_out_of_range_is_refused() {
     for f in [-0.1, 1.5, f64::NAN] {
-        let c = DayClock {
-            plant_night_factor: f,
-            ..DayClock::default()
+        let c = cubarium_voxel::Config {
+            day: DayClock {
+                plant_night_factor: f,
+                ..DayClock::default()
+            },
+            ..cubarium_voxel::Config::default()
         };
         assert!(c.validate().is_err(), "{f} accepted");
     }

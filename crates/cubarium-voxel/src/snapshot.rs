@@ -109,7 +109,7 @@ mod tests {
         let mut world = fixture();
         world.config.width = 0;
         let err = World::load(&world.save()).expect_err("a zero-width world is not a world");
-        assert!(format!("{err:#}").contains("dimensions"), "{err:#}");
+        assert!(format!("{err:#}").contains("world.width"), "{err:#}");
     }
 
     #[test]

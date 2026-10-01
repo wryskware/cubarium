@@ -133,22 +133,25 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Refuse a config no world can be built from: zero dimensions, a cell count that
-    /// does not fit a `usize`, a voxel size or aquifer porosity that is not positive and
-    /// finite, a rate that is negative or not finite, or fewer than one water substep.
+    /// Refuse a config no world can be built from: every number outside its row's range
+    /// in the parameter registry ([`crate::registry::world`]: zero dimensions, a voxel size
+    /// or porosity that is not positive, a negative rate, no water substep, a daylight
+    /// share outside 0.05..=0.95, ...), and the cross-field rules below — a cell count
+    /// that does not fit a `usize`, a range whose low end is above its high end.
     ///
     /// [`crate::World::new`] and [`crate::World::empty`] panic on a failure — building a
     /// world from nonsense is a programming error — and [`crate::World::load`] returns
     /// it, because a snapshot is input. Everything past this point may divide by a
     /// dimension and index with [`Config::index`] without checking again.
     pub fn validate(&self) -> anyhow::Result<()> {
-        ensure!(
-            self.width > 0 && self.height > 0 && self.depth > 0,
-            "a voxel world needs nonzero dimensions, not {}x{}x{}",
-            self.width,
-            self.height,
-            self.depth
-        );
+        // Seeds are any u64 and TOML's integers stop at i64::MAX; their row is [0, inf),
+        // which every u64 is in.
+        let mut table = self.clone();
+        table.seed = 0;
+        table.noise_seed = 0;
+        crate::registry::world()
+            .check(&table)
+            .map_err(anyhow::Error::msg)?;
         (self.width as usize)
             .checked_mul(self.height as usize)
             .and_then(|n| n.checked_mul(self.depth as usize))
@@ -158,37 +161,25 @@ impl Config {
                     self.width, self.height, self.depth
                 )
             })?;
-        for (name, value) in [
-            ("voxel_m", self.voxel_m),
-            ("aquifer_porosity", self.aquifer_porosity),
-        ] {
-            ensure!(
-                value.is_finite() && value > 0.0,
-                "{name} must be positive and finite, not {value}"
-            );
-        }
-        for (name, rate) in [
-            ("rain_m_per_s", self.rain_m_per_s),
-            ("evaporation_m_per_s", self.evaporation_m_per_s),
-            ("spring_k_m2_per_s", self.spring_k_m2_per_s),
-            ("outlet_m3_per_s", self.outlet_m3_per_s),
-            ("free_transfer_cap", self.free_transfer_cap),
-            ("reentry_floor_head_m", self.reentry_floor_head_m),
-            ("lake_drain_m2_per_s", self.lake_drain_m2_per_s),
-            ("initial_aquifer_head_m", self.initial_aquifer_head_m),
-            ("initial_atmosphere_m3", self.initial_atmosphere_m3),
-        ] {
-            ensure!(
-                rate.is_finite() && rate >= 0.0,
-                "{name} must be finite and not negative, not {rate}"
-            );
-        }
+        let c = &self.climate;
         ensure!(
-            self.water_substeps >= 1,
-            "water_substeps must be at least 1, not 0"
+            c.dry_gap_min_s <= c.dry_gap_max_s,
+            "world.climate.dry_gap_min_s cannot be longer than dry_gap_max_s: {} > {}",
+            c.dry_gap_min_s,
+            c.dry_gap_max_s
         );
-        self.day.validate().context("[world.day]")?;
-        self.climate.validate().context("[world.climate]")?;
+        ensure!(
+            c.front_min_c <= c.front_max_c,
+            "world.climate.front_min_c {} is above front_max_c {}",
+            c.front_min_c,
+            c.front_max_c
+        );
+        ensure!(
+            c.strike_min_s <= c.strike_max_s,
+            "world.climate.strike_min_s {} is above strike_max_s {}",
+            c.strike_min_s,
+            c.strike_max_s
+        );
         if let Landform::Staged(recipe) = &self.landform {
             recipe.validate().context("the staged landform recipe")?;
         }
