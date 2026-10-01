@@ -47,7 +47,13 @@ mod motor_tests;
 #[cfg(test)]
 mod movement_tests;
 #[cfg(test)]
+mod reward_tests;
+#[cfg(test)]
+mod screen_tests;
+#[cfg(test)]
 mod search_tests;
+#[cfg(test)]
+mod targets_tests;
 #[cfg(test)]
 mod tests;
 
