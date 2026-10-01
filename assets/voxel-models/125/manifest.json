@@ -1820,11 +1820,11 @@
    ]
   },
   "chorister": {
-   "bytes": 881,
+   "bytes": 811,
    "bins": [
     {
      "length_m": 1.4,
-     "cells": 158
+     "cells": 144
     }
    ]
   },

@@ -995,11 +995,11 @@
    ]
   },
   "chorister": {
-   "bytes": 302,
+   "bytes": 257,
    "bins": [
     {
      "length_m": 1.4,
-     "cells": 45
+     "cells": 36
     }
    ]
   },
