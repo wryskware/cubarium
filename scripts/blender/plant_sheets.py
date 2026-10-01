@@ -45,6 +45,25 @@ SHEET_COLOURS = {
     "umbrellafrond": {"bark": ("#4D1378", "#7823B4"), "leaf": ("#00696F", "#029894"),
                       "violet": ("#4D1378", "#7823B4"), "plum": ("#51176D", "#7E2C9D"),
                       "p1": ("#00696F", "#029894"), "p2": ("#4DE0C4", "#DCFDEE")},
+    "bloomcrown": {"bark": ("#2E035F", "#5C1EAF"), "leaf": ("#8B0251", "#FD48D1"),
+                   "violet": ("#2E035F", "#5C1EAF"), "p0": ("#5D55C2", "#8582F3"),
+                   "p2": ("#8B0251", "#FD48D1"), "p1": ("#FED9F2", "#FED9F2"), "ripe": "#FEAC42"},
+    "lanternberry": {"bark": ("#2E0944", "#4E178C"), "leaf": ("#013793", "#18ADFC"),
+                     "violet": ("#2E0944", "#4E178C"), "p1": ("#013793", "#18ADFC"), "ripe": "#FDA243"},
+    "siphonreed": {"leaf": ("#014B74", "#23A6BC"), "p1": ("#014B74", "#23A6BC"),
+                   "lilac": ("#57C5C9", "#A5EED3"), "p2": ("#EB2189", "#FD4FB6")},
+    "springturf": {"leaf": ("#037B7E", "#48F5BE"), "p2": ("#037B7E", "#48F5BE"),
+                   "p0": ("#023A47", "#037B7E"), "violet": ("#20054E", "#32166B")},
+    "stonecushion": {"bark": ("#390542", "#561470"), "leaf": ("#7A4ED0", "#DABBFD"),
+                     "lilac": ("#7A4ED0", "#DABBFD"), "p2": ("#01B8EC", "#01B8EC"),
+                     "detritus": ("#390542", "#561470")},
+    "velvetpad": {"leaf": ("#1B296C", "#3866DA"), "violet": ("#331D47", "#48295E"),
+                  "plum": ("#5F3D8D", "#8F60B8"), "p1": ("#1B296C", "#3866DA"),
+                  "p2": ("#4594F0", "#75F1F8"), "teal": ("#75F1F8", "#75F1F8")},
+    "glowcap": {"bark": ("#554199", "#35256D"), "leaf": ("#4426A1", "#764BD7"),
+                "detritus": ("#554199", "#35256D"), "violet": ("#4426A1", "#764BD7"),
+                "p0": ("#291654", "#291654"), "lilac": ("#B078EF", "#B078EF"),
+                "magenta": ("#F607FC", "#F607FC"), "p2": ("#2FB0E2", "#3FF9FC")},
 }
 
 # How each pick was drawn: (elevation deg, azimuth deg) of the view, and the pick file.
@@ -259,7 +278,11 @@ def main():
         clear()
         import random
         objs = B["build_plant"](name, h, r, si, prof[si], random.Random(f"{name}:0"), 0.125)
-        for ob in objs:
+        for ob in list(objs):
+            if role(ob.active_material.name) is None:  # scenery the world draws (rock, water)
+                bpy.data.objects.remove(ob, do_unlink=True)
+                objs.remove(ob)
+                continue
             paint(ob, name, h, role)
         fb = os.path.join(tmp, f"{name}-builder.png")
         frame(objs, elev, azim, fb)

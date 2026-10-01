@@ -332,67 +332,174 @@ class Collect:
 
 # --- plants ----------------------------------------------------------------------
 
+def turf_leaf(x, y, ang, lean, ln, w, z0, mat, rng):
+    """A springturf leaf: a broad strap rising from the crown, arching outward to a
+    ragged, slightly cupped tip."""
+    dx, dy = math.cos(ang), math.sin(ang)
+    p0 = (x + dx * w * 0.3, y + dy * w * 0.3, z0)
+    p1 = (x + dx * ln * lean * 0.35, y + dy * ln * lean * 0.35, z0 + ln * 0.75)
+    p2 = (x + dx * ln * lean, y + dy * ln * lean, z0 + ln * (0.85 + 0.1 * rng.random()))
+    path = bezier(p0, p1, p2, 6)
+    ribbon(path, [w * (0.8 + 0.25 * k / 5) for k in range(6)], mat, th=w * 0.25,
+           up=(dx, dy, 0))
+
+
 def springturf(x, y, h, r, layers, i, rng):
-    n = 7 if r < 0.2 else 11
-    rosette(x, y, 0.0, h, r, n, "p2", phase=rng.random())
-    rosette(x, y, 0.0, h * 0.6, r * 0.7, max(4, n - 4), "p0", phase=rng.random())
+    """Artbook pick (springturf.png): a low spreading clump; a back rank of tall broad
+    mint-teal straps fanning out to ragged pale tips (p2), a front rank of shorter dark
+    teal straps overlapping their bases (p0), violet showing deep between them."""
+    n_back = 7 if r < 0.2 else 11
+    ell((x, y, h * 0.12), (r * 0.45, r * 0.3, h * 0.18), "violet")
+    ph = rng.uniform(-0.1, 0.1)
+    for k in range(n_back):  # the tall rank, all round the crown
+        a = 2 * math.pi * k / n_back + ph
+        ln = h * rng.uniform(0.8, 1.0)
+        turf_leaf(x, y, a, r * 0.9 / ln, ln, r * 0.16, 0.0, "p2", rng)
+    n_front = max(4, n_back - 5)
+    for k in range(n_front):  # the short dark rank, outside the tall one's bases
+        a = 2 * math.pi * (k + 0.5) / n_front + ph
+        ln = h * 0.55
+        turf_leaf(x, y, a, r * 0.75 / ln, ln, r * 0.22, 0.0, "p0", rng)
 
 
 def velvetpad(x, y, h, r, layers, i, rng):
-    ell((x, y, h * 0.3), (r, r * 0.85, h * 0.45), "teal")
-    for _ in range(14):
-        a, d = rng.uniform(0, 2 * math.pi), r * math.sqrt(rng.random()) * 0.8
-        ell((x + math.cos(a) * d, y + math.sin(a) * d * 0.85, h * 0.65), (0.03, 0.03, 0.025), "teal")
+    """Artbook pick (velvetpad-provisional.png, provisional): a spreading violet pad with
+    a raised purple perimeter lip (plum), irregular cobalt moss tufts (p1) packed over
+    it, thin cyan branching channels between the tufts (teal), and smooth round
+    blue-to-cyan young buds (p2) in the channels. Built in the order the bake should
+    prefer where parts share a cell (the first part holding a cell's centre keeps it):
+    buds, moss, channels, lip, pad."""
+    zt = min(h, 0.11)
+    tufts = []
+    for _ in range(40):
+        a, d = rng.uniform(0, 2 * math.pi), r * 0.8 * math.sqrt(rng.random())
+        c = (x + math.cos(a) * d, y + math.sin(a) * d * 0.86)
+        if all(math.hypot(c[0] - t[0], c[1] - t[1]) > r * 0.3 for t in tufts):
+            tufts.append(c)
+    with Collect() as buds:
+        for _ in range(18):
+            a, d = rng.uniform(0, 2 * math.pi), r * 0.8 * math.sqrt(rng.random())
+            bx, by = x + math.cos(a) * d, y + math.sin(a) * d * 0.86
+            if any(math.hypot(bx - t[0], by - t[1]) < r * 0.14 for t in tufts):
+                continue
+            s = r * rng.uniform(0.04, 0.1)
+            revolve((bx, by, zt * 0.35), [(0.002, 0.0), (s, 0.0), (s, s * 0.5), (0.002, s * 0.55)], "p2", seg=12)
+    join(buds, "buds")
+    with Collect() as moss:
+        for cx, cy in tufts:
+            s = r * rng.uniform(0.2, 0.3)
+            ell((cx, cy, zt * 0.45), (s, s * rng.uniform(0.7, 1.0), zt * 0.5), "p1")
+    join(moss, "moss")
+    with Collect() as chans:  # channels: branching lines from the centre toward the lip
+        for dx, dy in ring_dirs(5, rng.random() * 6.3):
+            mid = (x + dx * r * 0.45 + rng.uniform(-0.1, 0.1) * r, y + dy * r * 0.4, zt * 0.36)
+            cyl((x, y, zt * 0.36), mid, 0.004, mat="teal", seg=4)
+            for sg in (-1, 1):
+                end = (mid[0] + (dx - sg * dy * 0.6) * r * 0.35, mid[1] + (dy + sg * dx * 0.6) * r * 0.3, zt * 0.36)
+                cyl(mid, end, 0.003, mat="teal", seg=4)
+    join(chans, "channels")
+    with Collect() as lip:  # the perimeter lip, a ring of overlapping lobes
+        for k in range(24):
+            a = 2 * math.pi * k / 24
+            ell((x + math.cos(a) * r * 0.92, y + math.sin(a) * r * 0.8, zt * 0.2),
+                (r * 0.12, r * 0.12, zt * 0.3), "plum")
+    join(lip, "lip")
+    ell((x, y, zt * 0.25), (r * 0.98, r * 0.86, zt * 0.36), "violet")  # the pad
 
 
 def stonecushion(x, y, h, r, layers, i, rng):
+    """Artbook pick (stonecushion.png): an alien mound of plump pale-lilac lobes (lilac),
+    a ring round the rock and a few on top, some lobes puckered round a cyan pore (p2),
+    over a dark magenta-violet root mat spreading on the rock (detritus)."""
     top = 0.25
     box((x, y, top / 2), (r * 2.6, r * 2.2, top), "rock")  # the rock lip it lives on
     (_, a0, b0, r0, _, _), (_, a1, b1, r1, _, _) = layers
-    ell((x, y, top), (r * r0, r * r0 * 0.9, h * b0), "lilac")
-    ell((x, y, top + h * a1 * 0.8), (r * r1, r * r1 * 0.9, h * (b1 - a1) * 1.4), "lilac")
+    with Collect() as mat:  # the root mat: branching dark strands over the rock
+        for dx, dy in ring_dirs(9, rng.random() * 6.3):
+            cyl((x + dx * r * 0.5, y + dy * r * 0.45, top + 0.006),
+                (x + dx * r * 1.1, y + dy * r * 0.95, top + 0.006), 0.012, 0.005, mat="detritus", seg=5)
+    join(mat, "rootmat")
+    lobes = []
+    n = 6
+    for k, (dx, dy) in enumerate(ring_dirs(n, rng.random() * 6.3)):
+        s = r * r0 * rng.uniform(0.42, 0.55)
+        lobes.append(((x + dx * r * r0 * 0.58, y + dy * r * r0 * 0.52, top + h * b0 * 0.4),
+                      (s * 1.25, s * 0.8, h * b0 * 0.42)))
+    for dx, dy in ring_dirs(2, rng.random() * 6.3):
+        s = r * r1 * 0.6
+        lobes.append(((x + dx * r * r1 * 0.3, y + dy * r * r1 * 0.3, top + h * (a1 + b1) * 0.45),
+                      (s * 1.2, s * 0.8, h * (b1 - a1) * 0.6)))
+    for k, (c, s) in enumerate(lobes):
+        # each lobe lies along the ring (tangential), as the pick's plump rolls do
+        ang = math.atan2(c[1] - y, c[0] - x) + math.pi / 2 + rng.uniform(-0.3, 0.3)
+        ell(c, s, "lilac", rot=Matrix.Rotation(ang, 4, "Z"))
+        if k % 3 == 0:  # a puckered pore on the lobe's upper side
+            ell((c[0], c[1], c[2] + s[2] * 0.85), (s[0] * 0.18, s[0] * 0.18, s[2] * 0.2), "p2")
 
 
-def glowcap_cap(x, y, z, h, r, scale=1.0):
-    """The saddle crown on a short stalk, cyan lip underneath."""
-    cyl((x, y, z), (x, y, z + h * 0.45), r * 0.35 * scale, mat="detritus")
-    ell((x, y, z + h * 0.7), (r * 1.5 * scale, r * 1.0 * scale, h * 0.28), "violet")
-    ell((x, y, z + h * 0.52), (r * 1.3 * scale, r * 0.85 * scale, h * 0.08), "p2")
+def glowcap_cap(x, y, z, h, r, scale=1.0, tilt=0.25):
+    """The selected glowcap (glowcap-on-vaulttree.png): a dark violet stalk (detritus),
+    a broad tilted purple cap (violet) with flat dark spots (p0), paler lilac spots
+    (lilac) and magenta speckles near the crown, and a cyan brim and underside (p2).
+    The cap is held to the crown radius."""
+    rc = r * 1.5 * scale
+    cap = Vector((x, y, z + h * 0.62))
+    rot = Matrix.Rotation(tilt, 4, "X")
+    tube([(x, y, z), (x + 0.005, y, z + h * 0.3), (x, y + 0.005, cap.z)], r * 0.36 * scale, r * 0.26 * scale,
+         "detritus", seg=8)
+    d = rc * 0.6
+    revolve(cap, [(rc * 0.98, 0.0), (rc * 0.7, d * 0.55), (0.02, d), (0.02, d * 0.85),
+                  (rc * 0.6, d * 0.35), (rc * 0.94, -0.004)], "violet", seg=20, rot=rot)
+    revolve(cap, [(rc * 0.3, d * 0.05), (rc * 0.99, -0.004), (rc * 1.0, -0.02), (rc * 0.3, d * 0.05 - 0.02)], "p2",
+            seg=20, rot=rot)
+    for (u, v, s, mat) in ((0.3, 0.6, 0.18, "p0"), (-0.4, 0.4, 0.14, "p0"), (0.1, -0.5, 0.15, "p0"),
+                           (-0.5, -0.3, 0.12, "lilac"), (0.55, 0.0, 0.1, "lilac"), (0.35, 0.3, 0.04, "magenta")):
+        rr = math.hypot(u, v) * 0.85
+        zs = d * (1 - rr) if rr > 0.7 else d * (1 - 0.45 * rr / 0.7)  # on the cap's outline
+        p = cap + rot @ Vector((u * rc * 0.85, v * rc * 0.85, zs))
+        ell(p, (s * rc, s * rc, 0.008), mat, rot=rot)
 
 
 def glowcap(x, y, h, r, layers, i, rng, log=None):
-    """log = (length_m, height_m) of the dead wood the colony grows on, or None."""
+    """log = (length_m, height_m) of the dead wood the colony grows on, or None (the log
+    and the mycelium in its split are world scenery, not the glowcap)."""
     z = 0.0
     if log is not None:
         length, dia = log
         cyl((x - length / 2, y, dia / 2), (x + length / 2, y, dia / 2), dia / 2, mat="bark", seg=12)
         box((x, y - dia * 0.3, dia * 0.55), (length * 0.8, dia * 0.08, dia * 0.2), "split")
         z = dia
-    glowcap_cap(x, y, z, h, r)
+    glowcap_cap(x, y, z, h, r, tilt=rng.uniform(0.15, 0.35))
     if log is not None and log[0] > 0.6:
         glowcap_cap(x + 0.18, y + 0.03, z, h * 0.7, r * 0.7)
-        ell((x - 0.14, y, z + 0.03), (0.025, 0.025, 0.03), "violet")  # button
 
 
 def bloomcrown(x, y, h, r, layers, i, rng):
-    if i == 0:
-        rosette(x, y, 0, h, r, 7, "p1", phase=rng.random())
+    """Artbook pick (bloomcrown-pink-preferred.png): a violet stem; a basal ring of
+    periwinkle straps with cyan tips (p0); a crown of ten hot-pink square vanes (p2)
+    flaring up and out round a pale blush pod (p1, the core) capped orange (warm, the
+    bloom). Each part in its profile band."""
+    if i == 0:  # seedling: a little ring of basal straps
+        rosette(x, y, 0, h, r, 7, "p0", phase=rng.random())
         return
-    for kind, a, b, rf, share, p in layers:
-        if kind == T:
-            cyl((x, y, 0), (x, y, b * h), max(rf * r, 0.014), mat="violet")
-        elif a == 0.0:  # basal rosette
-            rosette(x, y, 0, b * h, rf * r, 8, "p1", phase=rng.random())
-        else:  # crown of vanes around a core
-            za, zb = a * h, b * h
-            ell((x, y, za + 0.35 * (zb - za)), (0.28 * r, 0.28 * r, 0.25 * (zb - za)), "p1")
-            for dx, dy in ring_dirs(6, rng.random()):
-                strap((x + dx * r * 0.15, y + dy * r * 0.15, za + 0.1 * (zb - za)),
-                      (x + dx * r * rf, y + dy * r * rf, zb), 0.035, "p2")
-            if i == 2:
-                for dx, dy in ring_dirs(4, rng.random()):
-                    strap((x, y, za + 0.3 * (zb - za)), (x + dx * r * 0.5, y + dy * r * 0.5, zb * 0.97), 0.03, "p0")
-            ell((x, y, za + 0.55 * (zb - za)), (0.07 * r + 0.02, 0.07 * r + 0.02, 0.05), "warm")  # bloom
+    trunk = next(l for l in layers if l[0] == T)
+    basal = next(l for l in layers if l[0] == F and l[1] == 0.0)
+    crown = next(l for l in layers if l[0] == F and l[1] > 0.0)
+    za, zb = crown[1] * h, crown[2] * h
+    cyl((x, y, 0), (x, y, za + 0.25 * (zb - za)), max(trunk[3] * r * 0.55, 0.018),
+        max(trunk[3] * r * 0.45, 0.015), mat="violet", seg=8)
+    for dx, dy in ring_dirs(8, rng.random()):  # basal straps, flaring out of the stem foot
+        strap((x + dx * r * 0.08, y + dy * r * 0.08, 0.0),
+              (x + dx * basal[3] * r, y + dy * basal[3] * r, basal[2] * h), 0.035, "p0")
+    # pod and bloom
+    pc = (x, y, za + 0.42 * (zb - za))
+    ell(pc, (0.24 * r, 0.24 * r, 0.24 * (zb - za)), "p1")
+    ell((x, y, za + 0.64 * (zb - za)), (0.15 * r, 0.15 * r, 0.06 * (zb - za)), "warm")
+    for k, (dx, dy) in enumerate(ring_dirs(10, rng.random())):  # vanes
+        reach = crown[3] * r * (0.85 + 0.15 * ((k * 7) % 3) / 2)
+        top = zb - (zb - za) * 0.12 * ((k * 3) % 4) / 3
+        strap((x + dx * r * 0.12, y + dy * r * 0.12, za + 0.05 * (zb - za)),
+              (x + dx * reach, y + dy * reach, top), 0.04, "p2")
 
 
 def frond(x, y, ang, zb, za, rr, top=False, n=14):
@@ -558,30 +665,83 @@ def vaulttree(x, y, h, r, layers, i, rng):
 
 
 def lanternberry(x, y, h, r, layers, i, rng):
-    if i == 0:
+    """Artbook pick (lanternberry-blue.png): five violet stems fanning from one base,
+    paired blue leaflets (p1) up each stem from the trunk band and a leaf tuft at each
+    tip, a basal leaf tuft, and one deep-plum lantern (warm accent: plum closed, orange
+    inside when ripe) hanging from a hook under each stem tip; magenta seams on the
+    lanterns (not voxelized: smaller than a voxel)."""
+    if i == 0:  # seedling: a little tuft of blue leaflets
         rosette(x, y, 0, h, r, 7, "p1", phase=rng.random())
         return
-    fan = [(-0.85, 0.1), (-0.35, -0.2), (0.3, 0.25), (0.8, -0.1)]
-    for k, (fx, fy) in enumerate(fan):
-        tip = Vector((x + fx * r, y + fy * r, h * (0.88 + 0.12 * rng.random())))
-        base = Vector((x + fx * 0.04, y + fy * 0.04, 0))
-        cyl(base, tip, 0.02, 0.012, mat="violet")
-        for j in range(7):
-            p = base.lerp(tip, 0.3 + 0.1 * j)
-            side = 1 if j % 2 else -1
-            box((p.x + side * 0.03, p.y, p.z), (0.05, 0.03, 0.012), "p1")
-        cyl(tip, tip - Vector((0, 0, 0.04)), 0.006, mat="violet", seg=4)
-        ell(tip - Vector((0, 0, 0.075)), (0.03, 0.03, 0.04), "warm")
+    trunk = next(l for l in layers if l[0] == T)
+    zl = trunk[2] * h  # leaflets start above the bare-stem band
+    rot = rng.uniform(-0.3, 0.3)
+    fan = [(-0.85, 0.62), (-0.42, 0.88), (0.02, 1.0), (0.48, 0.84), (0.86, 0.6)]
+    for dx, dy in ring_dirs(7, rng.random()):  # basal tuft
+        ribbon(bezier((x, y, 0), (x + dx * r * 0.2, y + dy * r * 0.2, 0.06), (x + dx * r * 0.32, y + dy * r * 0.32, 0.1), 4),
+               [0.015, 0.03, 0.035, 0.01], "p1", th=0.008)
+    for k, (fx, fz) in enumerate(fan):
+        a = rot + fx * 0.35 + rng.uniform(-0.15, 0.15)
+        side = Vector((math.cos(a), math.sin(a), 0)) * fx
+        tip = Vector((x, y, 0)) + side * r * 0.92 + Vector((0, 0, h * fz * (0.94 + 0.06 * rng.random())))
+        base = Vector((x, y, 0)) + side * 0.02
+        path = bezier(base, base.lerp(tip, 0.5) + Vector((0, 0, h * 0.05)) - side * r * 0.15, tip, 8)
+        tube(path, 0.02, 0.011, "violet", seg=6)
+        with Collect() as leaves:
+            for j in range(2, 8):
+                p = path[j]
+                if p.z < zl:
+                    continue
+                t = (path[min(j + 1, 7)] - path[j - 1]).normalized()
+                n = t.cross(Vector((0, 0, 1))).normalized()
+                for sg in (-1, 1):
+                    e = p + (n * sg * 0.9 + t * 0.6).normalized() * 0.11
+                    ribbon([p, p.lerp(e, 0.5) + Vector((0, 0, 0.015)), e], [0.014, 0.045, 0.008], "p1", th=0.008)
+            for dd in ((-0.6, 0.0), (0.0, 0.0), (0.6, 0.0)):  # the tip tuft
+                e = tip + Vector((dd[0] * 0.08, 0, 0.13))
+                ribbon([tip, tip.lerp(e, 0.5), e], [0.014, 0.05, 0.008], "p1", th=0.008)
+        join(leaves, "leaves")
+        # the hook and its lantern, under the tip on the outer side
+        hook = path[6]
+        out = Vector((side.x, side.y, 0)).normalized() if side.length > 0.01 else Vector((1, 0, 0))
+        lp = hook + out * 0.06 - Vector((0, 0, 0.05))
+        tube([hook, hook + out * 0.05 + Vector((0, 0, 0.015)), lp + Vector((0, 0, 0.03))], 0.006, 0.005, "violet", seg=5)
+        ell(lp, (0.035, 0.035, 0.042), "warm")
+        for s in range(4):  # seams
+            ang = s * math.pi / 2
+            sv = Vector((math.cos(ang), math.sin(ang), 0)) * 0.036
+            cyl(lp + sv + Vector((0, 0, 0.03)), lp + sv * 1.15 - Vector((0, 0, 0.035)), 0.003, mat="magenta", seg=4)
 
 
 def siphonreed(x, y, h, r, layers, i, rng):
-    n = 3 if h < 1.0 else 5
+    """Artbook pick (siphonreed.png): four slim teal stems (p1) from one rooted base,
+    each swelling into a pale celadon upper shaft (lilac) under a rounded pink fan head
+    (p2); short blue roots (p1) splayed at the foot. Heights stagger as in the pick."""
+    n = 4 if h >= 0.9 else 3
+    heights = [1.0, 0.9, 0.82, 0.68][:n]
+    offs = [(-0.45, 0.2), (0.05, -0.15), (0.5, 0.25), (0.85, -0.2)][:n]
+    ph = rng.uniform(0, 2 * math.pi)
+    rot = Matrix.Rotation(ph, 3, "Z")
     for k in range(n):
-        a, d = rng.uniform(0, 2 * math.pi), r * math.sqrt(rng.random())
-        px, py = x + math.cos(a) * d, y + math.sin(a) * d
-        hh = h * rng.uniform(0.7, 1.0)
-        cyl((px, py, 0), (px, py, hh), 0.012, mat="p1", seg=6)
-        ell((px, py, hh + 0.015), (0.022, 0.022, 0.03), "p2")
+        o = rot @ Vector((offs[k][0] * r, offs[k][1] * r, 0))
+        hh = h * heights[k] * 0.93
+        base = Vector((x, y, 0)) + o * 0.3
+        top = Vector((x, y, hh)) + o
+        sw0 = base.lerp(top, 0.62)
+        cyl(base, sw0, 0.011, 0.009, mat="p1", seg=6)
+        # the swollen upper shaft
+        cyl(sw0, sw0.lerp(top, 0.25), 0.009, 0.03, mat="lilac", seg=8)
+        cyl(sw0.lerp(top, 0.25), sw0.lerp(top, 0.8), 0.03, 0.024, mat="lilac", seg=8)
+        cyl(sw0.lerp(top, 0.8), top, 0.024, 0.008, mat="lilac", seg=8)
+        # the fan head: three rounded lobes opening upward
+        hr = 0.075 * (0.7 + 0.3 * heights[k])
+        for la in (-0.7, 0.0, 0.7):
+            dv = rot @ Vector((math.sin(la), 0.0, 0.0))
+            c = top + Vector((dv.x * hr * 0.6, dv.y * hr * 0.6, hr * 0.45 - abs(la) * hr * 0.25))
+            ell(c, (hr * 0.55, hr * 0.45, hr * 0.32), "p2")
+    for dx, dy in ring_dirs(6, rng.random()):  # roots
+        tube([(x, y, 0.02), (x + dx * r * 0.5, y + dy * r * 0.5, 0.01), (x + dx * r * 0.9, y + dy * r * 0.9, 0.0)],
+             0.008, 0.004, "p1", seg=5)
     # the water it needs, flush with the ground (a pool edge)
     box((x, y, 0.03), (2 * r + 0.3, 2 * r + 0.25, 0.06), "water")
 
