@@ -39,7 +39,92 @@
 /// The survival term's fixed weight: `0.25 × survived_fraction`, as the tests plan fixes.
 pub const SURVIVAL_WEIGHT: f64 = 0.25;
 
+use cubarium_voxel_fauna::{Animal, Founder};
 use serde::{Deserialize, Serialize};
+
+/// **The per-body meter** both trainers score from: one body's own feedback accumulator
+/// (`founder_state.feedback`) read after every tick and summed into what the score and
+/// the diagnostics need. The frozen driver keeps one per acting body, the live window one
+/// per body of the world.
+///
+/// The accumulator is zeroed at a controller sampling, which the fauna makes on exactly
+/// the ticks where `age_ticks` is a multiple of the lineage's cadence, **before** that
+/// tick's motion and bite are added. So after such a tick it holds that tick alone, and
+/// otherwise it holds the previous reading plus this tick.
+#[derive(Clone, Debug)]
+pub struct BodyMeter {
+    cadence: u64,
+    /// The accumulator after the previous tick: intake, motor, attempted, delivered,
+    /// forward.
+    prev: [f64; 5],
+    /// Settled assimilated intake, organic.
+    pub intake: f64,
+    /// Paid motor respiration, organic.
+    pub motor: f64,
+    /// Forward distance delivered, metres.
+    pub walked_m: f64,
+    /// The share of `motor` paid for motion that was attempted and not delivered.
+    pub blocked_motor: f64,
+}
+
+/// One tick's increments, as [`BodyMeter::observe`] read them.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MeterTick {
+    pub intake: f64,
+    pub motor: f64,
+    pub forward_m: f64,
+}
+
+impl BodyMeter {
+    /// A meter on `founder`'s controller cadence, starting from `a`'s accumulator as it
+    /// stands now.
+    pub fn new(founder: Founder, a: &Animal) -> BodyMeter {
+        BodyMeter {
+            cadence: founder.manifest().cadence_ticks().max(1),
+            prev: Self::reading(a),
+            intake: 0.0,
+            motor: 0.0,
+            walked_m: 0.0,
+            blocked_motor: 0.0,
+        }
+    }
+
+    fn reading(a: &Animal) -> [f64; 5] {
+        let fb = a.founder_state.feedback;
+        [
+            fb.intake,
+            fb.motor_respiration,
+            fb.attempted_equivalent,
+            fb.delivered_equivalent,
+            fb.delivered_forward,
+        ]
+    }
+
+    /// Fold in one post-step reading of the living body; returns this tick's share.
+    pub fn observe(&mut self, a: &Animal) -> MeterTick {
+        let now = Self::reading(a);
+        let sampled = a.age_ticks.is_multiple_of(self.cadence);
+        let d: [f64; 5] = std::array::from_fn(|i| {
+            if sampled {
+                now[i]
+            } else {
+                now[i] - self.prev[i]
+            }
+        });
+        self.prev = now;
+        self.intake += d[0];
+        self.motor += d[1];
+        self.walked_m += d[4];
+        if d[2] > 0.0 {
+            self.blocked_motor += d[1] * ((d[2] - d[3]) / d[2]).clamp(0.0, 1.0);
+        }
+        MeterTick {
+            intake: d[0],
+            motor: d[1],
+            forward_m: d[4],
+        }
+    }
+}
 
 /// The score and its components for one episode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]

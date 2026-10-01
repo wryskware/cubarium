@@ -62,7 +62,7 @@ use serde::{Deserialize, Serialize};
 
 use super::controller::EpisodeDriver;
 use super::landscape::PreparedLandscape;
-use super::score::ScoreComponents;
+use super::score::{BodyMeter, ScoreComponents};
 use super::task::{self, DEPLETION_FRACTION, Prepared, PreparedArena};
 
 /// How often the shared cancellation flag and the deadline are read inside an episode.
@@ -718,7 +718,6 @@ fn patch_stock(founder: Founder, sim: &Sim, grid: ArenaGrid, site: Site) -> f64 
 /// One acting body, followed over the episode.
 struct Tracked {
     id: u64,
-    cadence: u64,
     phys: FounderPhysiology,
     samples: Arc<AtomicU64>,
     start_body: f64,
@@ -727,13 +726,7 @@ struct Tracked {
     last_organic: f64,
     last_energy: f64,
     last_pose: Pose,
-    /// The feedback accumulator as it stood after the previous tick: intake, motor,
-    /// attempted, delivered, forward.
-    prev: [f64; 5],
-    intake: f64,
-    motor: f64,
-    walked: f64,
-    blocked_motor: f64,
+    meter: BodyMeter,
     visited: FxHashSet<(i64, u32)>,
     near_ticks: u64,
     ticks_alive: u64,
@@ -745,36 +738,10 @@ struct Tracked {
 }
 
 impl Tracked {
-    /// Fold one post-step reading of the living body in.
-    ///
-    /// The feedback accumulator is zeroed at a controller sampling, which the fauna makes
-    /// on exactly the ticks where `age_ticks` is a multiple of the cadence, **before**
-    /// that tick's motion and bite are added. So after such a tick it holds that tick
-    /// alone, and otherwise it holds the previous reading plus this tick.
+    /// Fold one post-step reading of the living body in ([`BodyMeter::observe`] and the
+    /// episode's own diagnostics).
     fn observe(&mut self, a: &Animal, view: &cubarium_voxel::VoxelView<'_>) {
-        let fb = a.founder_state.feedback;
-        let now = [
-            fb.intake,
-            fb.motor_respiration,
-            fb.attempted_equivalent,
-            fb.delivered_equivalent,
-            fb.delivered_forward,
-        ];
-        let sampled = a.age_ticks.is_multiple_of(self.cadence);
-        let d: [f64; 5] = std::array::from_fn(|i| {
-            if sampled {
-                now[i]
-            } else {
-                now[i] - self.prev[i]
-            }
-        });
-        self.prev = now;
-        self.intake += d[0];
-        self.motor += d[1];
-        self.walked += d[4];
-        if d[2] > 0.0 {
-            self.blocked_motor += d[1] * ((d[2] - d[3]) / d[2]).clamp(0.0, 1.0);
-        }
+        self.meter.observe(a);
         let v = view.config.voxel_m;
         if let Some((cx, cz)) = a.pose.column(v, view.config.depth) {
             self.visited
@@ -803,15 +770,15 @@ impl Tracked {
             alive: self.alive,
             ticks_alive: self.ticks_alive,
             samples: self.samples.load(Ordering::Relaxed),
-            intake_organic: self.intake,
-            motor_organic: self.motor,
-            maintenance_organic: (self.intake
-                - self.motor
+            intake_organic: self.meter.intake,
+            motor_organic: self.meter.motor,
+            maintenance_organic: (self.meter.intake
+                - self.meter.motor
                 - (self.last_organic - self.start_organic))
                 .max(0.0),
-            walked_m: self.walked,
+            walked_m: self.meter.walked_m,
             unique_area_m2: self.visited.len() as f64 * cell_area,
-            blocked_motor_organic: self.blocked_motor,
+            blocked_motor_organic: self.meter.blocked_motor,
             near_drop_or_edge_ticks: self.near_ticks,
             death: self.death.clone(),
         }
@@ -907,7 +874,6 @@ fn drive(
         };
         tracked.push(Tracked {
             id,
-            cadence,
             phys,
             samples,
             start_body: a.body,
@@ -916,11 +882,7 @@ fn drive(
             last_organic: a.organic(),
             last_energy: a.energy,
             last_pose: a.pose,
-            prev: [0.0; 5],
-            intake: 0.0,
-            motor: 0.0,
-            walked: 0.0,
-            blocked_motor: 0.0,
+            meter: BodyMeter::new(founder, &a),
             visited: FxHashSet::default(),
             near_ticks: 0,
             ticks_alive: 0,
