@@ -1,0 +1,5 @@
+# name  host  path  log      (host: local | eidolon.local | aws:<ip>; paths relative to that host's home, or absolute)
+stage2-A        local          /home/wrysk/wryskware/cubarium/runs/stage2/A        /home/wrysk/wryskware/cubarium/runs/stage2/A.log
+stage2-hard-A   local          /home/wrysk/wryskware/cubarium/runs/stage2-hard/A   /home/wrysk/wryskware/cubarium/runs/stage2-hard/A.log
+stage1-A-flat   local          /home/wrysk/wryskware/cubarium/runs/stage1/A-flat   /home/wrysk/wryskware/cubarium/runs/stage1/A-flat.log
+eidolon-stage2-B eidolon.local cubarium-train/runs/stage2/B                        cubarium-train/runs/stage2/B.log
