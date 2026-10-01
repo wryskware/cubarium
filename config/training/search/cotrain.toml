@@ -37,6 +37,13 @@ ready_target = 0.5
 # --- Animals: one gene per lineage (littershredder, frondgrazer, lanternjaw). ---
 
 [[gene]]
+name = "starter_litter"
+path = "fauna.founding.starter_litter_organic"
+tie = "all"
+range = [0.25, 5.0]
+what = "leaf litter laid under each seeded shredder (0.2 = ~0.5 body at x30); founders die before finding litter"
+
+[[gene]]
 name = "upkeep"
 path = "fauna.founders.*.core.maintenance_per_s"
 tie = "each"
