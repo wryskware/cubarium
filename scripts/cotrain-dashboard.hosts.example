@@ -1,0 +1,5 @@
+# label  host  key=value...   (id=instance-id, launch=UTC ISO, ttl_h=hours until auto-terminate, expect=no to skip search/log flags)
+aws-1    aws:13.222.202.246  id=i-08f7fe7a530654f84  launch=2026-10-01T20:43:22Z  ttl_h=9
+aws-2    aws:54.152.70.185   id=i-0dc75947a3653eb6c  launch=2026-10-01T20:43:22Z  ttl_h=9
+eidolon  eidolon.local
+desktop  local  expect=no
