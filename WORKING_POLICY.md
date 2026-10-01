@@ -153,3 +153,16 @@ edit", so future workers must not start with them. The audit
   the same save. Don't found fresh and wait out the founders' lives.
 - **Long runs are soaks, off the critical path.** 8 seeds × 8 h on eidolon, overnight
   or per merge batch. A soak never blocks an edit.
+
+## Every number is a knob — Wrysk, 2026-10-01
+
+A large tuning pass over all parameters comes later, so don't tune new mechanisms to
+today's failing ecology. Give them plausible defaults instead. Write every ecological
+number as a tunable knob:
+- **Where it lives:** a named, serde-visible config field with a doc comment that gives
+  its unit and meaning.
+- **What's not allowed:** inline literals, and new `const`s for ecological numbers. Only
+  pure numerics stay `const`: tolerances, epsilons, cache sizes.
+- **Registry:** each new field gets a row in the parameter registry
+  (`design/ecology-parameter-registry-2026-09-28.md`; until R1 lands, the audit's
+  `parameters.tsv`).
