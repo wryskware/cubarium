@@ -114,6 +114,7 @@
 use cubarium_voxel::{Command as WorldCommand, DT, Material, Materials, VoxelView, World};
 
 use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic};
+use cubarium_voxel::organism::{Budget, settle_mineral, tissue_funded};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
 /// draws; the seed bank's and dispersal's are drawn in `seeds.rs`.
@@ -2285,9 +2286,9 @@ fn grow(
 struct Booked {
     fixed: f64,
     light: f64,
-    respired: [f64; 3],
+    respired: [f64; 2],
     respired_n: u8,
-    heat: [f64; 4],
+    heat: [f64; 3],
     heat_n: u8,
 }
 
@@ -2357,6 +2358,34 @@ fn slot_indices(ground: &[Ground], stands: &[Stand]) -> Vec<usize> {
     out
 }
 
+/// **Photosynthesis**, the income function of a stand and of the latticevine:
+/// `assimilation` per unit of lit foliage per second, times the day, the root's moisture
+/// ramp and whatever else limits it — aeration and the mineral Monod for a stand, the
+/// share of its water demand met for the vine. Organic units this tick.
+pub(crate) fn photosynthesis(
+    assimilation: f64,
+    lit_foliage: f64,
+    daylight: f64,
+    moisture: f64,
+    limit: f64,
+) -> f64 {
+    (assimilation * lit_foliage * daylight * moisture * limit * DT).max(0.0)
+}
+
+/// **Saprotrophy**, a fungus's income function: the dead wood and litter [`feed`] already
+/// took out of the pools for it. Its yield `gross` ([`yield_of`], pool by pool) is income;
+/// the rest is respired **at once** — it has left the pool and is not tissue — with the
+/// energy the income does not carry as heat. There is no demand cap: what the stand cannot
+/// spend is respired at the budget's close. Returns the income and the mineral that
+/// arrived with it.
+fn saprotrophy(substrate: Substrate, e_v: f64, book: &mut Booked) -> (f64, f64) {
+    let Substrate { taken, gross } = substrate;
+    let gross = gross.max(0.0).min(taken.organic);
+    book.respired((taken.organic - gross).max(0.0));
+    book.heat((taken.energy - e_v * gross).max(0.0));
+    (gross, taken.mineral)
+}
+
 /// §4.1–4.6 for one stand on its own site's ground `g`: the loop body of [`grow`]. Its
 /// ledger lines go into `book`. Returns whether the stand dies (§4.7).
 fn grow_stand(
@@ -2399,32 +2428,13 @@ fn grow_stand(
     };
     stand.aeration_stress = stress;
 
-    // ---- 4.1 potential income, 4.2 demands
+    // ---- 4.1 income, 4.2 demands
     //
-    // The mineral cap replaces v1's `.min(n0)`: income is organic matter, and what
-    // the pool limits is the *tissue* it can pay `n_tissue` per unit for, so the
-    // pool's own units bound `A` through `mineral / n_tissue`. The
-    // Michaelis-Menten and the `f_max` rate cap are unchanged.
-    //
-    // All three read the **site's** pool, and they gate the whole of `A` — including
-    // the part that pays maintenance. So a stand whose own tissue is rich in mineral
-    // still fixes nothing on a bare pool, which is stronger than "mineral caps new
-    // tissue" and is a stated limitation of this round rather than a physiological
-    // claim: `Stand::mineral` is an inventory, not a usable reserve (Astra R4.3, and
-    // the doc on that field). At the placeholders the `f_max` rate cap is the binding
-    // one by five orders of magnitude — `0.0005 · N` against the stock cap's
-    // `50 · N` — so moving `n_tissue` would not change which limit bites.
+    // Income and every demand read the **site's** mineral pool `N`. A photosynthetic
+    // stand's income is gated by it as a whole — the part that pays maintenance too — so
+    // a stand rich in its own mineral still fixes nothing on a bare pool: `Stand::mineral`
+    // is an inventory, not a usable reserve.
     let n0 = g.mineral;
-    let monod = if n0 + sc.nutrient_half > 0.0 {
-        n0 / (n0 + sc.nutrient_half)
-    } else {
-        0.0
-    };
-    let mineral_cap = if sc.n_tissue > 0.0 {
-        n0 / sc.n_tissue
-    } else {
-        f64::INFINITY
-    };
     let p_cap = sc.alpha * w0;
     let q_max = sc.reserve_cap * w0;
     // Maintenance alone follows the temperature; growth respiration does not. A
@@ -2438,120 +2448,62 @@ fn grow_stand(
     let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * DT);
     let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * DT);
     let d_q = (q_max - q0).max(0.0);
-    let build = 1.0 + sc.build;
-    // The income, by trophic mode. Everything below this is one set of rules.
     let (a, arrived_mineral) = match sc.trophic {
         Trophic::Photo => {
-            // WX3: income is the light response times the day. Maintenance and
-            // respiration below do not care what time it is.
-            let a_pot = (sc.assimilation * l_eff * daylight * mu * (1.0 - stress) * p0 * monod * DT)
+            let monod = if n0 + sc.nutrient_half > 0.0 {
+                n0 / (n0 + sc.nutrient_half)
+            } else {
+                0.0
+            };
+            // Capped by the pool's draw rate, by the tissue the pool can pay `n_tissue`
+            // for, and by what the stand can spend: light not captured is never fixed,
+            // so there is nothing to respire.
+            let a = photosynthesis(sc.assimilation, l_eff * p0, daylight, mu, (1.0 - stress) * monod)
                 .min(sc.nutrient_draw_max * n0 * DT)
-                .min(mineral_cap)
-                .max(0.0);
-            // Capped by what the stand can actually spend: light not captured is
-            // simply never fixed, so there is nothing to respire.
-            let a = a_pot.min(m + build * (d_p + d_w) + d_q);
+                .min(tissue_funded(n0, sc.n_tissue))
+                .max(0.0)
+                .min(m + (1.0 + sc.build) * (d_p + d_w) + d_q);
             book.fixed = a;
             book.light = e_v * a;
             (a, 0.0)
         }
-        // A saprotroph's income is the dead wood and litter step 5b already took out
-        // of the pools for it. `substrate_yield` of it is income and the rest is
-        // respired **at once**: it has left the pool and it is not tissue, so it
-        // cannot be left unaccounted the way an uncaptured photon is, and there is no
-        // demand cap here for the same reason — anything the stand cannot spend falls
-        // through to the leftover `rem` below and is respired there.
-        //
-        // The tissue was computed pool by pool in [`feed`] ([`yield_of`]), because the
-        // two pools carry their own energy per unit; here it is only spent. It is
-        // bounded again by `taken.organic` against float dust, and the energy bound it
-        // already obeys per pool keeps `taken.energy - e_v · gross` non-negative.
-        Trophic::Saprotroph => {
-            let Substrate { taken, gross } = substrate;
-            let gross = gross.max(0.0).min(taken.organic);
-            let waste = (taken.organic - gross).max(0.0);
-            book.respired(waste);
-            book.heat((taken.energy - e_v * gross).max(0.0));
-            (gross, taken.mineral)
-        }
+        Trophic::Saprotroph => saprotrophy(substrate, e_v, book),
     };
 
-    // ---- 4.3 maintenance from income first, then reserve
-    let paid_a = a.min(m);
-    let mut rem = a - paid_a;
-    let short = m - paid_a;
-    let paid_q = stand.reserve.min(short);
-    stand.reserve -= paid_q;
-    let unpaid = short - paid_q;
-    // Both are respiration: the organic matter leaves the system as heat, and no
-    // mineral moves. `paid_a` was never tissue, and the mineral of the reserve
-    // `paid_q` burned stays in the stand — what is still standing keeps its mineral.
-    book.respired(paid_a + paid_q);
-    book.heat(e_v * (paid_a + paid_q));
-
-    // ---- 4.4a the mineral budget, **before** a unit of tissue is allocated
+    // ---- 4.3 maintenance from income first, then reserve; 4.4a the mineral budget
     //
-    // Astra R9.1. The mineral used to be netted against the tissue *after* it was
-    // built, which capped the **debit** and not the growth: a moist half-grown glowcap
-    // on an energy-bearing, mineral-free log with a bare site pool still grew
-    // `5e-6` of wood whose `1e-7` of mineral did not exist, so the tissue it built
-    // held less than `n_tissue` and the promise that `n_tissue` is the density of what
-    // is built was only true for the five plants. The budget now comes first and
-    // bounds what may be built at all.
-    //
-    // What is spendable this tick is what **arrived** with the income plus what the
-    // site's pool can give up: `arrived_mineral` — the mineral that came out of the
-    // log with the wood, zero for a `Photo` stand — plus the pool `n0` itself. The
-    // pool is the bound a plant's own draw obeys: §4.2's stock cap `N / n_tissue` is
-    // exactly `N` of mineral read in tissue units, and `nutrient_draw_max` bounds
-    // **assimilation**, which a saprotroph does not do. A *rate* cap on a fungal pool
-    // draw is a rule decision and a `design/backlog.md` row, not one this round
-    // invents.
-    //
-    // For a `Photo` stand this cap is provably non-binding and is written once for
-    // both modes rather than branched: §4.2 caps `A` by `mineral_cap = N / n_tissue`
-    // and every unit built costs at least one unit of `rem <= A`, so
-    // `n_tissue · built <= N` already. For a saprotroph it is the whole of R9.1.
-    let mineral_budget = arrived_mineral + n0.max(0.0);
-    let mut tissue_left = if sc.n_tissue > 0.0 {
-        (mineral_budget / sc.n_tissue).max(0.0)
-    } else {
-        f64::INFINITY
-    };
+    // What may be built this tick is what the mineral that **arrived** with the income
+    // (a saprotroph's, out of the log) plus the site's pool can pay `n_tissue` for. For a
+    // photosynthetic stand §4.2's cap on `A` already keeps it so; for a saprotroph it is
+    // the whole bound. The mineral of the reserve that maintenance burns stays in the
+    // stand.
+    let mut budget = Budget::new(a, tissue_funded(arrived_mineral + n0.max(0.0), sc.n_tissue));
+    let unpaid = budget.upkeep(&mut stand.reserve, m).unpaid;
 
     // ---- 4.4 growth: reserve share, foliage, wood, then the rest to reserve
     //
-    // Every increment is floored at zero as well as capped by its demand **and by the
-    // mineral budget left**. Unfunded income is not held anywhere: it falls through to
-    // the leftover `rem` below and is respired there, with its energy as heat, which
-    // is where a capped income has always gone. The caps above already keep `rem`
-    // non-negative in exact arithmetic; in f64 a `rem - build * (rem / build)` can
-    // land a few ulps below it, and a negative "growth" would take a stock down
-    // instead of up.
-    let dq_s = (sc.reserve_share * rem).min(d_q).min(tissue_left).max(0.0);
-    rem -= dq_s;
-    tissue_left -= dq_s;
+    // Income nothing funds is respired at the close, with its energy as heat.
+    let dq_s = budget.store((sc.reserve_share * budget.income).min(d_q));
     stand.reserve += dq_s;
 
-    let dp_a = (rem / build).min(d_p).min(tissue_left).max(0.0);
-    rem -= build * dp_a;
-    tissue_left -= dp_a;
-    // WX3: a photosynthetic stand reflushes from its reserve only as far as the day lets
-    // the new leaves earn. In the dark they would earn nothing and senesce before dawn,
-    // and the reserve they cost is what pays the night's maintenance.
+    let dp_a = budget.build(d_p, sc.build);
+    // A photosynthetic stand reflushes from its reserve only as far as the day lets the
+    // new leaves earn: in the dark they would senesce before dawn, and the reserve they
+    // cost is what pays the night's maintenance. The reflush is reserve turned into
+    // foliage, so its mineral is already in the stand.
     let flush_light = match sc.trophic {
         Trophic::Photo => daylight,
         Trophic::Saprotroph => 1.0,
     };
     let dp_q = if p0 < sc.reflush_below * p_cap {
-        (stand.reserve / build)
-            .min((d_p - dp_a) * flush_light)
-            .min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0))
-            .max(0.0)
+        budget.build_from(
+            &mut stand.reserve,
+            ((d_p - dp_a) * flush_light).min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0)),
+            sc.build,
+        )
     } else {
         0.0
     };
-    stand.reserve -= build * dp_q;
     stand.foliage += dp_a + dp_q;
     // Where the new foliage goes: **bottom-up to each layer's capacity**, in
     // profile order, which is what makes a browsed plant refill its floor tissue
@@ -2565,47 +2517,24 @@ fn grow_stand(
         stand.settle_layers(n);
     }
 
-    let dw = (rem / build).min(d_w).min(tissue_left).max(0.0);
-    rem -= build * dw;
-    tissue_left -= dw;
+    let dw = budget.build(d_w, sc.build);
     stand.wood += dw;
 
-    let dq_r = rem.min((d_q - dq_s).max(0.0)).min(tissue_left).max(0.0);
+    let dq_r = budget.store((d_q - dq_s).max(0.0));
     stand.reserve += dq_r;
-    rem -= dq_r;
-    // The leftover itself: never respire a negative residue. With the §4.2 cap on
-    // `A` this is float residue only.
-    let rem = rem.max(0.0);
-    // Construction respiration on every unit built, whichever stock paid for it, and
-    // the leftover of a capped income: organic matter out of the system, energy to
-    // heat, no mineral.
-    let respired = sc.build * (dp_a + dp_q + dw) + rem;
+    // Maintenance paid, construction on every unit built and the unfunded income: organic
+    // matter out of the system, its energy as heat, no mineral.
+    let respired = budget.close();
     book.respired(respired);
     book.heat(e_v * respired);
 
-    // New tissue built out of this tick's income draws `n_tissue` per unit from the
-    // site's pool. The reflush `dp_q` is not new tissue — it is reserve turned into
-    // foliage — so its mineral is already in the stand and is not drawn again. This is
-    // now a **settlement** of §4.4a's budget and not a cap of its own: `need` is at
-    // most `mineral_budget` by construction, so the draw below is always fully funded
-    // and the `min`s are float insurance. Only this stand draws on this site.
-    let built = dq_s + dp_a + dw + dq_r;
-    let need = (sc.n_tissue * built).max(0.0);
-    // A saprotroph's mineral arrives **with the wood**, at the log's own density, and
-    // is netted against what the tissue it built actually needs: the excess is released
-    // to the site's pool and a shortfall is drawn from the pool the budget counted.
-    // Mineral only ever moves between stocks, so both directions conserve it exactly.
-    // A `Photo` stand has no arrival and this is the draw it always was.
-    stand.mineral += arrived_mineral;
-    if arrived_mineral > need {
-        let release = (arrived_mineral - need).min(stand.mineral.max(0.0));
-        stand.mineral -= release;
-        g.mineral += release;
-    } else {
-        let draw = (need - arrived_mineral).min(g.mineral.max(0.0));
-        g.mineral -= draw;
-        stand.mineral += draw;
-    }
+    // The tissue built out of this tick's income settles its mineral: `n_tissue` per
+    // unit, met from what arrived with the income first, the excess released to the
+    // site's pool and a shortfall drawn from it. Only this stand draws on this site.
+    let need = (sc.n_tissue * (dq_s + dp_a + dw + dq_r)).max(0.0);
+    let settled = settle_mineral(arrived_mineral, need, g.mineral);
+    stand.mineral += arrived_mineral - settled.released + settled.drawn;
+    g.mineral += settled.released - settled.drawn;
 
     // ---- 4.5 senescence
     let shed = (sc.senescence * night * stand.foliage * DT).min(stand.foliage);
