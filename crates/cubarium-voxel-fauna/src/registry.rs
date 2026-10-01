@@ -72,6 +72,8 @@ fn species_rows() -> Vec<Row> {
             .evolve().grade("D").prov("derived"),
         r("reproduction.egg_organic", "org-units per egg", nonneg, "one egg; at least the lineage's body_min")
             .evolve().grade("D"),
+        r("reproduction.litter_min", "organic units", nonneg, "litter an egg-layer's face must hold (more than this) for it to lay")
+            .search(0.0, 0.2),
         r("reproduction.incubation_s", "s", nonneg, "a clutch incubates this long").search(60.0, 6000.0).log().grade("B"),
     ]
 }

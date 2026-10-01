@@ -818,6 +818,10 @@ pub struct Reproduction {
     /// unbroken hold.
     #[serde(default = "default_surplus_share")]
     pub surplus_share: f64,
+    /// An egg-layer that lays in litter (not [`Reproduction::dormant`]) needs the litter on
+    /// its face to exceed this, organic units: 0, "any litter at all".
+    #[serde(default)]
+    pub litter_min: f64,
 }
 
 fn default_surplus_share() -> f64 {
@@ -930,6 +934,7 @@ impl Reproduction {
         incubation_s: 0.0,
         dormant: false,
         surplus_share: SURPLUS_SHARE,
+        litter_min: 0.0,
     };
 
     /// The littershredder's egg placeholders.
@@ -959,6 +964,7 @@ impl Reproduction {
         incubation_s: 300.0,
         dormant: false,
         surplus_share: SURPLUS_SHARE,
+        litter_min: 0.0,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13): a clutch of 3 buried eggs laid
@@ -979,6 +985,7 @@ impl Reproduction {
         incubation_s: 0.0,
         dormant: true,
         surplus_share: SURPLUS_SHARE,
+        litter_min: 0.0,
     };
 
     /// What one offspring package costs the parent's reserve: a gestation's `birth_cost`

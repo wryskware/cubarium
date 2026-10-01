@@ -2161,7 +2161,7 @@ fn lay(
     let site = fauna.animals[i].site;
     // A dormant egg is buried in soil or litter (predation §2.13); the shredder lays in
     // the litter it lives in.
-    if !rule.dormant && !flora.view().ground_at(site).is_some_and(|g| g.litter > 0.0) {
+    if !rule.dormant && !flora.view().ground_at(site).is_some_and(|g| g.litter > rule.litter_min) {
         return;
     }
     let cost = rule.package_cost(sc);
