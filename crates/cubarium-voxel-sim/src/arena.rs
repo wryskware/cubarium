@@ -50,11 +50,12 @@
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, Pose, Senses};
 use cubarium_voxel_flora::{
-    Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, Species as Plant,
+    Command as FloraCommand, Deposit, DepositKind, Flora, Site, Species as Plant,
     Taken, Trophic,
 };
 
 use crate::Sim;
+use crate::found::LayerConfig;
 
 /// Arena width in voxels; `x` wraps.
 pub const ARENA_WIDTH: u32 = 32;
@@ -384,27 +385,6 @@ pub struct Arena {
     fauna_config: FaunaConfig,
 }
 
-/// **The layers an arena is built on**: its plant config (already at the grid's cell
-/// size) and its animal config. [`ArenaLayers::live`] is the shipped world's — graze
-/// refuge and defence on — and a trainer that applies an ecology vector passes that
-/// vector's configs instead (audit round step 5,
-/// `design/handoffs/voxel-audit-round-2026-09-28.md` §5).
-#[derive(Clone, Debug, PartialEq)]
-pub struct ArenaLayers {
-    pub flora: FloraConfig,
-    pub fauna: FaunaConfig,
-}
-
-impl ArenaLayers {
-    /// The shipped layers on `grid`.
-    pub fn live(grid: ArenaGrid) -> ArenaLayers {
-        ArenaLayers {
-            flora: FloraConfig::for_voxel_size(grid.voxel_m()),
-            fauna: FaunaConfig::default(),
-        }
-    }
-}
-
 /// The hour of the day a layout's clock starts at, drawn from its seed apart from the
 /// layout's own draws (so the layout is what it always was): uniform over the day, so
 /// about a third of the layouts begin at night under the shipped 67 % daylight.
@@ -484,69 +464,38 @@ impl SuccessorBand {
 }
 
 impl Arena {
-    /// Build the frozen arena for `founder` from `layout_seed`, and place one idle founder
-    /// body off the food. The world is not stepped: the pond is a direct `AddWater` and the
-    /// ground is direct `SetMaterial`, so there is no settling cost and nothing to freeze
-    /// afterwards.
-    pub fn build(founder: Founder, layout_seed: u64) -> Arena {
-        Self::build_on(founder, layout_seed, ArenaGrid::Standard)
-    }
-
-    /// [`Arena::build`] on `grid`: the same layout, laid on 0.25 m or 0.125 m cells.
-    pub fn build_on(founder: Founder, layout_seed: u64, grid: ArenaGrid) -> Arena {
-        Self::build_on_with(founder, layout_seed, grid, ArenaLayers::live(grid))
-    }
-
-    /// [`Arena::build_on`] on the caller's `layers` (an ecology vector's configs).
-    pub fn build_on_with(
+    /// Build the frozen arena for `founder` from `layout_seed` on `grid`, its plant and
+    /// animal layers from `layers` (the config in force, its plants already at
+    /// `grid`'s cell size), and place one idle founder body off the food. The world is not
+    /// stepped: the pond is a direct `AddWater` and the ground is direct `SetMaterial`, so
+    /// there is no settling cost and nothing to freeze afterwards.
+    pub fn build(
         founder: Founder,
         layout_seed: u64,
         grid: ArenaGrid,
-        layers: ArenaLayers,
+        layers: LayerConfig,
     ) -> Arena {
         Self::build_kind(founder, layout_seed, LayoutKind::StageA, None, grid, layers).0
     }
 
-    /// Build Stage B with the successor in `band` ([`SuccessorBand`]).
-    pub fn build_reacquisition_in(
-        founder: Founder,
-        layout_seed: u64,
-        band: SuccessorBand,
-    ) -> ReacquisitionArena {
-        Self::build_reacquisition_on(founder, layout_seed, band, ArenaGrid::Standard)
-    }
-
-    /// [`Arena::build_reacquisition_in`] on `grid`.
-    pub fn build_reacquisition_on(
+    /// Build Stage B's smallest real continuation task, the successor in `band`
+    /// ([`SuccessorBand`]): one reachable finite patch and one distinct successor. Both
+    /// use the normal flora deposits, fauna feeding and static sensory field; this type
+    /// only records which physical sites form the two patches for an evaluator after the
+    /// controller has acted.
+    pub fn build_reacquisition(
         founder: Founder,
         layout_seed: u64,
         band: SuccessorBand,
         grid: ArenaGrid,
-    ) -> ReacquisitionArena {
-        Self::build_reacquisition_on_with(founder, layout_seed, band, grid, ArenaLayers::live(grid))
-    }
-
-    /// [`Arena::build_reacquisition_on`] on the caller's `layers`.
-    pub fn build_reacquisition_on_with(
-        founder: Founder,
-        layout_seed: u64,
-        band: SuccessorBand,
-        grid: ArenaGrid,
-        layers: ArenaLayers,
+        layers: LayerConfig,
     ) -> ReacquisitionArena {
         Self::build_reacquisition_kind(founder, layout_seed, band, None, grid, layers)
     }
 
-    /// Build Stage B's smallest real continuation task: one reachable finite patch and
-    /// one distinct successor. Both use the normal flora deposits, fauna feeding and
-    /// static sensory field; this type only records which physical sites form the two
-    /// patches for an evaluator after the controller has acted.
-    pub fn build_reacquisition(founder: Founder, layout_seed: u64) -> ReacquisitionArena {
-        Self::build_reacquisition_in(founder, layout_seed, SuccessorBand::Landed)
-    }
-
-    /// Build the same Stage-B layout and start position as [`Self::build_reacquisition`],
-    /// but set the signed turn from the founder's heading to its initial patch exactly.
+    /// Build the same landed Stage-B layout and start position as
+    /// [`Self::build_reacquisition`] on the standard grid, but set the signed turn from
+    /// the founder's heading to its initial patch exactly.
     ///
     /// This is a fixture-only diagnostic seam for the balanced blind offset sweep. The
     /// heading changes the body's honest observations; the target and requested angle
@@ -555,6 +504,7 @@ impl Arena {
         founder: Founder,
         layout_seed: u64,
         turn_to_initial_rad: f64,
+        layers: LayerConfig,
     ) -> ReacquisitionArena {
         assert!(
             turn_to_initial_rad.is_finite(),
@@ -566,7 +516,7 @@ impl Arena {
             SuccessorBand::Landed,
             Some(turn_to_initial_rad),
             ArenaGrid::Standard,
-            ArenaLayers::live(ArenaGrid::Standard),
+            layers,
         )
     }
 
@@ -576,7 +526,7 @@ impl Arena {
         band: SuccessorBand,
         start_turn_override: Option<f64>,
         grid: ArenaGrid,
-        layers: ArenaLayers,
+        layers: LayerConfig,
     ) -> ReacquisitionArena {
         let (arena, initial_patch) = Self::build_kind(
             founder,
@@ -611,7 +561,7 @@ impl Arena {
         kind: LayoutKind,
         start_turn_override: Option<f64>,
         grid: ArenaGrid,
-        layers: ArenaLayers,
+        layers: LayerConfig,
     ) -> (Arena, Option<Site>) {
         let scale = grid.scale();
         let ground_y = grid.ground_y();
@@ -1170,6 +1120,28 @@ mod tests {
     use crate::{ScheduleMode, SimConfig};
 
     use cubarium_voxel_fauna::{Actions, Controller, Response, Scripted};
+    use cubarium_voxel_flora::FloraConfig;
+
+    /// The shipped layers on `grid`: the code defaults' plants and animals.
+    fn shipped(grid: ArenaGrid) -> LayerConfig {
+        LayerConfig::new(&crate::params::Params::defaults(), grid.voxel_m())
+    }
+
+    /// Stage A on the standard grid and the shipped layers.
+    fn build(founder: Founder, layout_seed: u64) -> Arena {
+        Arena::build(founder, layout_seed, ArenaGrid::Standard, shipped(ArenaGrid::Standard))
+    }
+
+    /// Landed Stage B on the standard grid and the shipped layers.
+    fn reacquisition(founder: Founder, layout_seed: u64) -> ReacquisitionArena {
+        Arena::build_reacquisition(
+            founder,
+            layout_seed,
+            SuccessorBand::Landed,
+            ArenaGrid::Standard,
+            shipped(ArenaGrid::Standard),
+        )
+    }
 
     const SEEDS: [u64; 4] = [1, 2, 3, 95];
     const STAGE_A_SEEDS: [u64; 12] = [1, 2, 4, 5, 6, 8, 9, 10, 13, 14, 17, 18];
@@ -1182,8 +1154,8 @@ mod tests {
     fn the_rebuilt_arena_lays_every_kind_on_both_grids_with_bystanders() {
         for founder in ARENA_FOUNDERS {
             for seed in [1u64, 6, 20] {
-                let standard = Arena::build(founder, seed);
-                let fine = Arena::build_on(founder, seed, ArenaGrid::Fine);
+                let standard = build(founder, seed);
+                let fine = Arena::build(founder, seed, ArenaGrid::Fine, shipped(ArenaGrid::Fine));
                 assert_eq!(standard.resource_kinds, fine.resource_kinds);
                 for (s, f) in standard.resources.iter().zip(&fine.resources) {
                     assert_eq!((2 * s.x, 2 * s.z), (f.x, f.z), "{founder:?} seed {seed}");
@@ -1223,7 +1195,7 @@ mod tests {
     fn resource_sites_are_unique_across_seeds() {
         for seed in SEEDS {
             for founder in ARENA_FOUNDERS {
-                let arena = Arena::build(founder, seed);
+                let arena = build(founder, seed);
                 let mut sorted = arena.resources.clone();
                 sorted.sort();
                 let n = sorted.len();
@@ -1247,7 +1219,7 @@ mod tests {
     fn the_arena_is_the_frozen_size_with_finite_food() {
         for seed in SEEDS {
             for founder in ARENA_FOUNDERS {
-                let arena = Arena::build(founder, seed);
+                let arena = build(founder, seed);
                 let c = arena.world.config();
                 assert_eq!((c.width, c.height, c.depth, c.voxel_m), (32, 16, 12, 0.25));
                 assert!(!arena.resources.is_empty(), "{founder:?} seed {seed}");
@@ -1283,7 +1255,7 @@ mod tests {
         let mut browser_errors: Vec<f64> = Vec::new();
         for seed in STAGE_A_SEEDS {
             for founder in ARENA_FOUNDERS {
-                let arena = Arena::build(founder, seed);
+                let arena = build(founder, seed);
                 let animal = arena
                     .animal_id
                     .and_then(|id| arena.fauna.view().animal(id))
@@ -1358,8 +1330,8 @@ mod tests {
     fn the_start_heading_is_deterministic_per_seed() {
         for seed in STAGE_A_SEEDS {
             for founder in ARENA_FOUNDERS {
-                let a = Arena::build(founder, seed).animal_pose().expect("placed");
-                let b = Arena::build(founder, seed).animal_pose().expect("placed");
+                let a = build(founder, seed).animal_pose().expect("placed");
+                let b = build(founder, seed).animal_pose().expect("placed");
                 assert_eq!(a.heading_rad, b.heading_rad, "{founder:?} seed {seed}");
                 assert!(a.heading_rad.is_finite());
             }
@@ -1373,8 +1345,8 @@ mod tests {
     fn reacquisition_layouts_are_two_finite_deterministic_patches() {
         for seed in REACQUISITION_SEEDS {
             for founder in ARENA_FOUNDERS {
-                let mut stage = Arena::build_reacquisition(founder, seed);
-                let again = Arena::build_reacquisition(founder, seed);
+                let mut stage = reacquisition(founder, seed);
+                let again = reacquisition(founder, seed);
                 assert_eq!(stage.arena.resources, again.arena.resources);
                 assert_eq!(stage.initial_patch, again.initial_patch);
                 assert_eq!(stage.successor_patch, again.successor_patch);
@@ -1432,7 +1404,7 @@ mod tests {
     #[test]
     fn the_stage_b_initial_patch_is_half_the_successor() {
         for founder in ARENA_FOUNDERS {
-            let stage = Arena::build_reacquisition(founder, 6);
+            let stage = reacquisition(founder, 6);
             // The patches are sized in the placeholder body's bites (mass 1).
             let config = cubarium_voxel_fauna::FaunaConfig::placeholder();
             let bite_per_s = config.founder(founder).core.bite_per_s;
@@ -1451,7 +1423,7 @@ mod tests {
             // (`tests/arena_band.rs` sweeps every layout, both grids and both ends of the
             // body sizes).
             // And Stage A's tiles are deliberately not that: they cannot deplete.
-            let a = Arena::build(founder, 6);
+            let a = build(founder, 6);
             let tile = a.patch_stock(a.resources[0]);
             if founder == Founder::Blind {
                 assert!(
@@ -1469,7 +1441,7 @@ mod tests {
     fn reacquisition_placement_is_safe_across_a_broad_seed_sample() {
         for seed in 0..256 {
             for founder in ARENA_FOUNDERS {
-                let stage = Arena::build_reacquisition(founder, seed);
+                let stage = reacquisition(founder, seed);
                 assert_eq!(stage.arena.resources.len(), 2, "{founder:?} seed {seed}");
                 assert!(
                     patch_stock(&stage.arena, stage.initial_patch) > 0.0,
@@ -1493,7 +1465,7 @@ mod tests {
     /// foliage — not a count, so an empty-to-less-empty stand shuffle cannot satisfy it.
     #[test]
     fn a_static_arena_advances_time_and_freezes_the_world() {
-        let arena = Arena::build(Founder::Browser, 7);
+        let arena = build(Founder::Browser, 7);
         let before_material = arena.world.view().material.to_vec();
         let before_free = arena.world.view().free.to_vec();
         let before_stands: Vec<_> = arena
@@ -1593,14 +1565,14 @@ mod tests {
     /// The finite stock is real and earnable through the production withdrawals.
     #[test]
     fn the_finite_food_is_actually_takeable() {
-        let mut arena = Arena::build(Founder::Blind, 1);
+        let mut arena = build(Founder::Blind, 1);
         let site = arena.resources[0];
         let before = arena.resource_stock();
         let taken = arena.take(site, 0.05).expect("litter off the tile");
         assert!(taken.organic > 0.0);
         assert!(arena.resource_stock() < before);
 
-        let mut browser = Arena::build(Founder::Browser, 1);
+        let mut browser = build(Founder::Browser, 1);
         let site = browser.resources[0];
         let before = browser.resource_stock();
         let taken = browser.take(site, 0.01).expect("foliage off the stand");
@@ -1613,7 +1585,7 @@ mod tests {
     /// remains chemically and mechanically present; no fixture-only target marker exists.
     #[test]
     fn reacquisition_depletion_updates_the_real_resource_and_sensory_sources() {
-        let mut stage = Arena::build_reacquisition(Founder::Blind, 17);
+        let mut stage = reacquisition(Founder::Blind, 17);
         let initial = stage.initial_patch;
         let successor = stage.successor_patch;
         let before = stage.arena.resource_stock();
@@ -1632,7 +1604,7 @@ mod tests {
             initial,
         );
 
-        let stage = Arena::build_reacquisition(Founder::Blind, 17);
+        let stage = reacquisition(Founder::Blind, 17);
         let prepared = stage.arena.prepare_senses();
         let successor_obs = first_sample_of_a_founder_on_the_tile(
             stage
@@ -1690,7 +1662,7 @@ mod tests {
     /// a stand through the same real withdrawals. No special arena path exists.
     #[test]
     fn a_controller_driven_founder_moves_and_feeds_through_the_static_schedule() {
-        let arena = Arena::build(Founder::Browser, 11);
+        let arena = build(Founder::Browser, 11);
         let resources = arena.resources.clone();
         // The first stand whose stock the band reaches (a stripped crown is not food).
         let stand_site = arena
@@ -1915,7 +1887,7 @@ mod tests {
         let mut browser_immediate = 0usize;
         for seed in STAGE_A_SEEDS {
             for founder in ARENA_FOUNDERS {
-                let arena = Arena::build(founder, seed);
+                let arena = build(founder, seed);
                 let id = arena.animal_id.expect("the Stage A founder is placed");
                 match founder {
                     Founder::Lanternjaw => unreachable!("no lanternjaw arena"),
@@ -1929,7 +1901,7 @@ mod tests {
                     }
                     Founder::Browser => {
                         // The first sample, with only edible foliage standing.
-                        let mut edible = Arena::build(founder, seed);
+                        let mut edible = build(founder, seed);
                         strip_inedible_foliage(&mut edible, false);
                         let first = first_sample_of_built_founder(
                             edible.into_sim(SimConfig::with_threads(1)),
@@ -2041,7 +2013,7 @@ mod tests {
     /// has no field at all.
     #[test]
     fn the_static_tick_samples_the_settled_field() {
-        let arena = Arena::build(Founder::Blind, 1);
+        let arena = build(Founder::Blind, 1);
         let site = arena.resources[0];
         let sim = arena.into_sim(SimConfig::with_threads(1));
         assert!(
@@ -2078,7 +2050,7 @@ mod tests {
     /// trend stores are cleared on the way in, so the first sample's trend is zero.
     #[test]
     fn a_prepared_field_is_reused_on_the_first_sampling() {
-        let arena = Arena::build(Founder::Blind, 1);
+        let arena = build(Founder::Blind, 1);
         let site = arena.resources[0];
         // Settle once through the same API the search fixture caches.
         let prepared = arena.prepare_senses();
@@ -2105,7 +2077,7 @@ mod tests {
 
         for founder in ARENA_FOUNDERS {
             let t0 = Instant::now();
-            let arena = Arena::build(founder, 1);
+            let arena = build(founder, 1);
             let build = t0.elapsed();
 
             // An explicit settle, so the update count and the per-update cost are on
@@ -2188,7 +2160,7 @@ mod tests {
     /// are at night.
     #[test]
     fn the_arena_is_the_live_world_with_a_night() {
-        let arena = Arena::build(Founder::Browser, 1);
+        let arena = build(Founder::Browser, 1);
         let live = FloraConfig::for_voxel_size(arena.grid.voxel_m());
         assert_eq!(arena.flora.config(), &live, "the shipped plant layer");
         for s in cubarium_voxel_flora::Species::ALL {
@@ -2206,7 +2178,7 @@ mod tests {
         );
         let (mut night, mut day) = (0, 0);
         for seed in 0..24 {
-            let a = Arena::build(Founder::Browser, seed);
+            let a = build(Founder::Browser, seed);
             let (rise, set) = a.world.config().day.cycle_rise_set();
             let p = a.world.day_phase();
             if p < rise || p > set {
@@ -2232,16 +2204,16 @@ mod tests {
             .maintenance_per_s *= 2.0;
         let mut flora = FloraConfig::for_voxel_size(grid.voxel_m());
         flora.decomposition *= 3.0;
-        let layers = ArenaLayers {
+        let layers = LayerConfig {
             flora: flora.clone(),
             fauna,
         };
-        let mut a = Arena::build_on_with(Founder::Browser, 1, grid, layers.clone());
+        let mut a = Arena::build(Founder::Browser, 1, grid, layers.clone());
         assert_eq!(a.flora.config(), &flora);
         assert_eq!(a.fauna.config(), &fauna);
         a.refound(cubarium_voxel_fauna::StartingStores::HUNGRY);
         assert_eq!(a.fauna.config(), &fauna, "refound keeps the layers");
-        let b = Arena::build_reacquisition_on_with(
+        let b = Arena::build_reacquisition(
             Founder::Browser,
             1,
             SuccessorBand::Landed,
@@ -2251,6 +2223,5 @@ mod tests {
         .into_arena();
         assert_eq!(b.flora.config(), &flora);
         assert_eq!(b.fauna.config(), &fauna);
-        assert_eq!(ArenaLayers::live(grid).fauna, FaunaConfig::default());
     }
 }

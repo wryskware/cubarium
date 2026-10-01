@@ -180,7 +180,7 @@ fn main() {
         .find_map(|a| a.parse::<f64>().ok())
         .unwrap_or(6.0);
     // `preset=<small|default|wide>` is the **landscape arm**: the world `cubarium voxel`
-    // builds with no TOML for that preset, through `voxel::ambient_habitat`, instead of the
+    // builds with no TOML for that preset, through `voxel::found`, instead of the
     // authored fixture this file used to be the only reader of.
     let preset: Option<&'static cubarium_voxel::Preset> = args
         .iter()
@@ -245,17 +245,18 @@ fn main() {
 /// The `preset=` arm: exactly what `cubarium voxel` does with no TOML for this preset —
 /// the recipe's own extents and cell size, the recipe's own water (`World::new` writes
 /// the cycle onto the config), the lake gate over `LAKE_SEED_TRIES` draws through
-/// [`cubarium::voxel::ambient_habitat`], and the plant layer scaled to the cell size the
+/// [`cubarium::voxel::found`], and the plant layer scaled to the cell size the
 /// way the host scales it. Read-only: nothing here changes a rule or a constant.
 fn run_preset(preset: &cubarium_voxel::Preset, seed_base: u64, coupled: bool, hours: f64) {
     let world_cfg = preset.config();
     // The host's founding loop: lake gate, pre-roll with the opening shower, seeding and
     // the acceptance check. The world comes back **already seeded**.
-    let founded = cubarium::voxel::ambient_habitat(
+    let founded = cubarium::voxel::found(
         &world_cfg,
-        seed_base,
-        FloraConfig::for_voxel_size,
+        &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), world_cfg.voxel_m),
         habitat::FOUNDER_COUNTS,
+        cubarium::voxel::Seeds::from(seed_base),
+        false,
     );
     let world = founded.world;
     let lake = cubarium_voxel::hydrate::lake(&world);

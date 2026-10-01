@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use cubarium_voxel::Config;
 use cubarium_voxel_fauna::FaunaConfig;
 use cubarium_voxel_flora::FloraConfig;
-use cubarium_voxel_sim::{ArenaGrid, ArenaLayers, arena_start_hour};
+use cubarium_voxel_sim::{LayerConfig, arena_start_hour};
 
 use super::live::ecology::EcologyParams;
 
@@ -52,25 +52,20 @@ pub fn training_fauna_config() -> FaunaConfig {
     training().1
 }
 
-/// An arena's layers on `grid` under `e`.
-pub fn arena_layers_for(e: &EcologyParams, grid: ArenaGrid) -> ArenaLayers {
-    ArenaLayers {
-        flora: e.flora_config(FloraConfig::for_voxel_size(grid.voxel_m())),
+/// **The training worlds' fixture config** under `e` at cell size `voxel_m`: the shipped
+/// plant layer scaled to the cell and then moved by the vector, and the vector's animal
+/// config. Every training world's layers — a frozen arena's, a frozen landscape's and a
+/// live world's — are this.
+pub fn layers_for(e: &EcologyParams, voxel_m: f64) -> LayerConfig {
+    LayerConfig {
+        flora: e.flora_config(FloraConfig::for_voxel_size(voxel_m)),
         fauna: e.fauna_config(),
     }
 }
 
-/// An arena's layers on `grid` under the training ecology.
-pub fn arena_layers(grid: ArenaGrid) -> ArenaLayers {
-    arena_layers_for(training_ecology(), grid)
-}
-
-/// A landscape's `(plant, animal)` configs at cell size `voxel_m` under `e`.
-pub fn landscape_layers_for(e: &EcologyParams, voxel_m: f64) -> (FloraConfig, FaunaConfig) {
-    (
-        e.flora_config(FloraConfig::for_voxel_size(voxel_m)),
-        e.fauna_config(),
-    )
+/// [`layers_for`] under the training ecology.
+pub fn layers(voxel_m: f64) -> LayerConfig {
+    layers_for(training_ecology(), voxel_m)
 }
 
 /// A landscape's world config: the preset's, its day starting at the hour drawn from

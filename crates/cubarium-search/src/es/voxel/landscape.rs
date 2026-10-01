@@ -3,7 +3,7 @@
 //! founder the seeder placed acting.
 //!
 //! - **D5, whole worlds, not crops.** A [`Landscape`] is what the moved founding loop
-//!   ([`cubarium_voxel_sim::found::found_a_landscape`]) returns for a preset and a seed —
+//!   ([`cubarium_voxel_sim::found::found`]) returns for a preset and a seed —
 //!   the live lake gate, pre-roll, seeding and acceptance, redrawn on a refusal — so the
 //!   water, the cue and the walking boundaries are the world's own.
 //! - **D6, frozen water, two states.** The world the seeder planted on (after the
@@ -130,33 +130,22 @@ pub struct Landscape {
 
 impl Landscape {
     /// Found `preset` from `seed_base` through the live founding loop
-    /// ([`found::found_a_landscape`]: lake gate, pre-roll, seeding and acceptance with
+    /// ([`found::found`]: lake gate, pre-roll, seeding and acceptance with
     /// the live bounds, plant layer and animal config), drawing `seed_base` first and
     /// [`LANDSCAPE_REDRAW_STRIDE`] apart after a refusal.
     pub fn found(preset: &str, seed_base: u64) -> Result<Landscape, String> {
         // The live world, at an hour of the day drawn from the seed base (audit round
         // step 5): the preset's day clock and the training ecology's layers.
         let cfg = super::training_world::landscape_config(preset, seed_base)?;
-        let mut next = seed_base;
-        let founded = found::found_a_landscape(
+        let founded = found::found(
             &cfg,
-            None,
-            found::LAKE_SEED_TRIES,
-            found::HABITAT_TRIES,
-            move || {
-                let seed = next;
-                next = next.wrapping_add(LANDSCAPE_REDRAW_STRIDE);
-                seed
-            },
-            |w: &World| {
-                let (flora, fauna) = super::training_world::landscape_layers_for(
-                    super::training_world::training_ecology(),
-                    w.config().voxel_m,
-                );
-                (Flora::new(flora), Fauna::new(fauna))
-            },
+            &super::training_world::layers(cfg.voxel_m),
             habitat::NO_EGG_BANK,
-            |s: &habitat::Seeded| s.acceptance.accepted,
+            found::Seeds::Counting {
+                base: seed_base,
+                stride: LANDSCAPE_REDRAW_STRIDE,
+            },
+            true,
         );
         Ok(Landscape::from_founded(preset, seed_base, founded))
     }

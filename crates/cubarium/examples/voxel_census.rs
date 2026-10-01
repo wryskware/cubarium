@@ -283,12 +283,7 @@ fn main() {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
         introduce_into(&world, &flora, &mut fauna);
-        let mut senses = Senses::with_cue(fauna.config().cue);
-        senses.settle(&world.view(), &flora.view());
-        if world.config().closed_water_budget && !world.outlet_open() {
-            world.apply(WorldCommand::SetOutlet { open: true });
-        }
-        let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
         run(&mut sim, hours, 0, save.as_ref(), &timing);
         return;
     }
@@ -341,12 +336,12 @@ fn main() {
         // comes back already seeded.
         let params = resolve(arm_config);
         let arm_config = params.world.clone();
-        let founded = cubarium::voxel::ambient_habitat_with(
+        let founded = cubarium::voxel::found(
             &arm_config,
-            seed_base,
-            |v| params.flora.clone().rescaled_to(v),
-            params.fauna.clone(),
+            &cubarium::voxel::LayerConfig::new(&params, arm_config.voxel_m),
             founder_counts,
+            cubarium::voxel::Seeds::from(seed_base),
+            false,
         );
         let (world, flora, mut fauna, seeded) =
             (founded.world, founded.flora, founded.fauna, founded.seeded);
@@ -382,15 +377,7 @@ fn main() {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
         introduce_into(&world, &flora, &mut fauna);
-        let mut senses = Senses::with_cue(fauna.config().cue);
-        senses.settle(&world.view(), &flora.view());
-        let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
-        // The host opens a closed world's outlet after the layers are built and before
-        // the first tick; under a closed budget it is the return flow, not an export.
-        if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-            sim.world_mut()
-                .apply(WorldCommand::SetOutlet { open: true });
-        }
+        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
         run(&mut sim, hours, 0, save.as_ref(), &timing);
         return;
     }
@@ -689,7 +676,7 @@ fn load_run(
         std::fs::read(dir.join(name))
             .unwrap_or_else(|e| panic!("load: {}: {e}", dir.join(name).display()))
     };
-    let mut world = World::load(&read("world.bin")).unwrap_or_else(|e| panic!("load world: {e:#}"));
+    let world = World::load(&read("world.bin")).unwrap_or_else(|e| panic!("load world: {e:#}"));
     let flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin"))
         .unwrap_or_else(|e| panic!("load flora: {e:#}"));
     let mut fauna = Fauna::load(&read("fauna.bin")).unwrap_or_else(|e| panic!("load fauna: {e:#}"));
@@ -713,12 +700,7 @@ fn load_run(
     } else {
         install_founders_with(&mut fauna, policies).expect("the founder centres validate");
     }
-    let mut senses = Senses::with_cue(fauna.config().cue);
-    senses.settle(&world.view(), &flora.view());
-    if world.config().closed_water_budget && !world.outlet_open() {
-        world.apply(WorldCommand::SetOutlet { open: true });
-    }
-    let sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    let sim = Sim::ambient(world, flora, fauna, SimConfig::default());
     (sim, minute)
 }
 

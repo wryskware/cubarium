@@ -11,8 +11,7 @@
 //! untouched ([`still_water`] takes the config it is given by value).
 
 use cubarium_voxel::{Config, Landform, Preset, World};
-use cubarium_voxel_fauna::{Fauna, Founder, Senses};
-use cubarium_voxel_flora::{Flora, FloraConfig};
+use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_sim::found::{self, Founded};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
@@ -76,9 +75,6 @@ pub fn found_world(
     founder_counts: [usize; Founder::COUNT],
     ecology: &EcologyParams,
 ) -> (Sim, FoundInfo) {
-    let fauna_cfg = ecology.fauna_config();
-    let flora_of = |voxel_m: f64| ecology.flora_config(FloraConfig::for_voxel_size(voxel_m));
-    let mut next = base;
     let Founded {
         world,
         flora,
@@ -89,28 +85,14 @@ pub fn found_world(
         habitat_rejected,
         accepted,
         ..
-    } = found::found_a_habitat(
+    } = found::found(
         cfg,
-        None,
-        found::LAKE_SEED_TRIES,
-        found::HABITAT_TRIES,
-        move || {
-            let s = next;
-            next = next.wrapping_add(1);
-            s
-        },
-        |w: &World| {
-            (
-                Flora::new(flora_of(w.config().voxel_m)),
-                Fauna::new(fauna_cfg.clone()),
-            )
-        },
+        &crate::es::voxel::training_world::layers_for(ecology, cfg.voxel_m),
         founder_counts,
-        |s| s.acceptance.accepted,
+        found::Seeds::from(base),
+        false,
     );
-    let mut senses = Senses::with_cue(fauna.config().cue);
-    senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(
+    let sim = Sim::ambient(
         world,
         flora,
         fauna,
@@ -119,12 +101,7 @@ pub fn found_world(
             threads: 1,
             overlap: false,
         },
-        Some(senses),
     );
-    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut()
-            .apply(cubarium_voxel::Command::SetOutlet { open: true });
-    }
     let info = FoundInfo {
         seed,
         accepted,

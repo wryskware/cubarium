@@ -224,7 +224,7 @@ fn main() {
         // Exactly what `cubarium voxel` does with no TOML, for this preset: the recipe's
         // own extents, cell size and water, the lake gate, the pre-roll with its opening
         // shower, the seeding and the acceptance check, redrawn on a refusal — through
-        // `voxel::ambient_habitat`, which returns the world **already seeded**.
+        // `voxel::found`, which returns the world **already seeded**.
         // `still`: the live-training world's water (`live::world::still_water`): no
         // river re-entry, spring seep or lake drain, no tier pools asked for.
         let world_cfg = if args.iter().any(|a| a == "still") {
@@ -232,18 +232,16 @@ fn main() {
         } else {
             preset.config()
         };
-        let founded = cubarium::voxel::ambient_habitat(
+        let mut layers = cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), world_cfg.voxel_m);
+        if lollipop {
+            layers.flora = layers.flora.one_layer_species();
+        }
+        let founded = cubarium::voxel::found(
             &world_cfg,
-            seed_base,
-            |v| {
-                let flora_cfg = FloraConfig::for_voxel_size(v);
-                if lollipop {
-                    flora_cfg.one_layer_species()
-                } else {
-                    flora_cfg
-                }
-            },
+            &layers,
             counts,
+            cubarium::voxel::Seeds::from(seed_base),
+            false,
         );
         let world = founded.world;
         let lake = cubarium_voxel::hydrate::lake(&world);

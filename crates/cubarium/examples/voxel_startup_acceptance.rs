@@ -4,7 +4,7 @@
 //! cargo run --release -p cubarium --example voxel_startup_acceptance -- small default wide [seed=N]
 //! ```
 //!
-//! The founding loop is the host's own (`cubarium::voxel::ambient_habitat`: lake gate,
+//! The founding loop is the host's own (`cubarium::voxel::found`: lake gate,
 //! pre-roll with the opening shower, seeding, the acceptance check, redrawn on a
 //! refusal), from seed base 1 as the census arms use, or `seed=N`. The loop says why it refused each
 //! try on stderr; this prints what it kept, as CSV blocks on stdout:
@@ -23,7 +23,7 @@ use std::time::Instant;
 use cubarium::voxel::habitat;
 use cubarium_voxel::World;
 use cubarium_voxel_fauna::Founder;
-use cubarium_voxel_flora::{FloraConfig, Species};
+use cubarium_voxel_flora::Species;
 
 /// The founding loop's first draw unless `seed=N` names another.
 const SEED_BASE: u64 = 1;
@@ -55,11 +55,12 @@ fn main() {
             .unwrap_or_else(|| panic!("no landform preset is called {name:?}"));
         let cfg = preset.config();
         let t = Instant::now();
-        let founded = cubarium::voxel::ambient_habitat(
+        let founded = cubarium::voxel::found(
             &cfg,
-            seed_base,
-            FloraConfig::for_voxel_size,
+            &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), cfg.voxel_m),
             habitat::FOUNDER_COUNTS,
+            cubarium::voxel::Seeds::from(seed_base),
+            false,
         );
         let founding_s = t.elapsed().as_secs_f64();
         // One pre-roll of the kept seed on its own, timed: what a try costs in startup.

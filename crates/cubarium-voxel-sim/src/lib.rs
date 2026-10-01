@@ -75,7 +75,7 @@ mod introduce_tests;
 pub mod scene;
 pub use arena::{
     ARENA_BYSTANDERS, ARENA_FOUNDERS, ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, ArenaGrid,
-    ArenaLayers, arena_start_hour,
+    arena_start_hour,
     BROWSER_FOLIAGE_PER_STAND, FOUNDER_START, GROUND_Y, PatchKind, Placement,
     REACQUISITION_INITIAL_PATCH_FRACTION, REACQUISITION_LITTER_PER_PATCH, ReacquisitionArena,
     SuccessorBand, edible_stock, populate,
@@ -84,6 +84,7 @@ pub use arena::{
 /// Re-exported so a caller holding an [`Arena`] can name its patch sites without
 /// depending on the plant layer directly.
 pub use cubarium_voxel_flora::Site;
+pub use found::{LayerConfig, Seeds};
 
 /// The sensory state as a bevy resource: the litter field and the per-body trend stores.
 ///
@@ -476,6 +477,27 @@ impl Sim {
             ecs,
             mode: ScheduleMode::Live,
         }
+    }
+
+    /// **The ambient assembly** of founded layers: the sense field settled against them as
+    /// they stand, the live schedule, and — under a closed water budget — the outlet
+    /// opened, because there it is the return flow into the atmosphere, not an export,
+    /// and a closed world without it never starts its cycle. What a founded world (the
+    /// host's, a live training world, a study's) runs as from its first tick.
+    pub fn ambient(
+        world: cubarium_voxel::World,
+        flora: Flora,
+        fauna: Fauna,
+        config: SimConfig,
+    ) -> Sim {
+        let mut senses = Senses::with_cue(fauna.config().cue);
+        senses.settle(&world.view(), &flora.view());
+        let mut sim = Sim::new(world, flora, fauna, config, Some(senses));
+        if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
+            sim.world_mut()
+                .apply(cubarium_voxel::Command::SetOutlet { open: true });
+        }
+        sim
     }
 
     /// Build the layers and wire them into a [`Sim`] in [`ScheduleMode::Static`]: the static

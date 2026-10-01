@@ -29,9 +29,7 @@ use cubarium::sink::gpu::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::voxel::model::ModelLibrary;
 use cubarium::voxel::project::Projection;
 use cubarium::voxel::{Lighting, OrganismLook, VoxelConfig, install_founders_with};
-use cubarium_voxel::Command as WorldCommand;
-use cubarium_voxel_fauna::{Departure, Founder, Senses, TICK_HZ};
-use cubarium_voxel_flora::FloraConfig;
+use cubarium_voxel_fauna::{Departure, Founder, TICK_HZ};
 use cubarium_voxel_sim::{Sim, SimConfig, habitat};
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -45,11 +43,13 @@ struct Events {
 
 fn found(preset: &str, seed: u64, introduce: usize) -> Result<Sim> {
     let preset = cubarium_voxel::Preset::find(preset).context("no such preset")?;
-    let f = cubarium::voxel::ambient_habitat(
-        &preset.config(),
-        seed,
-        FloraConfig::for_voxel_size,
+    let cfg = preset.config();
+    let f = cubarium::voxel::found(
+        &cfg,
+        &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), cfg.voxel_m),
         habitat::FOUNDER_COUNTS,
+        cubarium::voxel::Seeds::from(seed),
+        false,
     );
     let (world, flora, mut fauna) = (f.world, f.flora, f.fauna);
     install_founders_with(&mut fauna, &[])?;
@@ -57,13 +57,7 @@ fn found(preset: &str, seed: u64, introduce: usize) -> Result<Sim> {
         Ok(ids) => eprintln!("introduced {} adult lanternjaws", ids.len()),
         Err(why) => bail!("introduce refused: {why}"),
     }
-    let mut senses = Senses::with_cue(fauna.config().cue);
-    senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
-    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut().apply(WorldCommand::SetOutlet { open: true });
-    }
-    Ok(sim)
+    Ok(Sim::ambient(world, flora, fauna, SimConfig::default()))
 }
 
 /// Read the three events' first ticks off the ledger, as they happen.

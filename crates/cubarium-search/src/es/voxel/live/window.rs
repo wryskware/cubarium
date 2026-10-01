@@ -4,13 +4,12 @@
 //!
 //! The score keeps the frozen trainer's form so the numbers compare
 //! ([`crate::es::voxel::score`]): `(intake − motor)/body_ref + 0.25·survived`, with
-//! intake and motor read off the body's own feedback accumulator exactly as the frozen
-//! driver reads them, and `survived` the share of the ticks the body could have lived in
+//! intake and motor read by the frozen driver's own [`BodyMeter`], and `survived` the share of the ticks the body could have lived in
 //! this window (from its assignment to the window's end) that it did.
 
 use std::time::Instant;
 
-use cubarium_voxel_fauna::{Animal, Founder};
+use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_sim::Sim;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -18,7 +17,7 @@ use super::ecology::EcologyParams;
 use super::readout::{self, Ctx, LineageStats, Pool, Scan};
 use super::variants::VariantTable;
 use super::world::FoundInfo;
-use crate::es::voxel::score::ScoreComponents;
+use crate::es::voxel::score::{BodyMeter, ScoreComponents};
 
 /// Simulated ticks in one minute.
 pub const TICKS_PER_MIN: u64 = 60 * cubarium_voxel_fauna::TICK_HZ as u64;
@@ -121,11 +120,7 @@ struct Tracked {
     founder: Founder,
     candidate: Option<usize>,
     newborn: bool,
-    cadence: u64,
-    /// The feedback accumulator after the previous tick: intake, motor, delivered forward.
-    prev: [f64; 3],
-    intake: f64,
-    motor: f64,
+    meter: BodyMeter,
     /// Ticks it could have lived here (assignment to window end) and did.
     possible: u64,
     alive_ticks: u64,
@@ -135,11 +130,6 @@ struct Tracked {
     visited: FxHashSet<u32>,
     minute_bl: f64,
     minute_ticks: u64,
-}
-
-fn feedback(a: &Animal) -> [f64; 3] {
-    let fb = a.founder_state.feedback;
-    [fb.intake, fb.motor_respiration, fb.delivered_forward]
 }
 
 /// One window in progress on one world: [`Window::begin`], [`Window::step`] once per
@@ -155,14 +145,13 @@ pub struct Window {
     ring_m: f64,
     cell_area: f64,
     phys: Vec<cubarium_voxel_fauna::FounderPhysiology>,
-    cadence: Vec<u64>,
     deaths_start: [[u64; cubarium_voxel_fauna::Departure::COUNT]; Founder::COUNT],
     tracked: Vec<Tracked>,
     index: FxHashMap<u64, usize>,
     counts: Vec<Vec<u32>>,
     assigned: Vec<Vec<(f64, usize)>>,
     stats: [LineageStats; Founder::COUNT],
-    newcomers: Vec<(u64, Founder, f64, [f64; 3])>,
+    newcomers: Vec<(u64, Founder, f64, BodyMeter)>,
 }
 
 impl Window {
@@ -197,10 +186,6 @@ impl Window {
                 .iter()
                 .map(|f| *sim.fauna().config().founder(*f))
                 .collect(),
-            cadence: Founder::ALL
-                .iter()
-                .map(|f| f.manifest().cadence_ticks().max(1))
-                .collect(),
             deaths_start: sim.fauna().view().ledger.deaths_by_founder_cause,
             tracked: Vec::new(),
             index: FxHashMap::default(),
@@ -209,12 +194,12 @@ impl Window {
             stats: Default::default(),
             newcomers: Vec::new(),
         };
-        let bodies: Vec<(u64, Founder, f64, [f64; 3])> = sim
+        let bodies: Vec<(u64, Founder, f64, BodyMeter)> = sim
             .fauna()
             .view()
             .animals
             .iter()
-            .filter_map(|a| a.founder.map(|f| (a.id, f, a.pose.x, feedback(a))))
+            .filter_map(|a| a.founder.map(|f| (a.id, f, a.pose.x, BodyMeter::new(f, a))))
             .collect();
         for f in Founder::ALL {
             let fi = f.index();
@@ -241,10 +226,7 @@ impl Window {
                     founder: f,
                     candidate,
                     newborn: false,
-                    cadence: w.cadence[fi],
-                    prev: b.3,
-                    intake: 0.0,
-                    motor: 0.0,
+                    meter: b.3.clone(),
                     possible: ticks,
                     alive_ticks: 0,
                     alive: true,
@@ -276,26 +258,18 @@ impl Window {
             for a in fv.animals.iter() {
                 let Some(f) = a.founder else { continue };
                 let Some(&k) = self.index.get(&a.id) else {
-                    self.newcomers.push((a.id, f, a.pose.x, feedback(a)));
+                    self.newcomers
+                        .push((a.id, f, a.pose.x, BodyMeter::new(f, a)));
                     continue;
                 };
                 let b = &mut self.tracked[k];
                 b.seen = stamp;
-                let now = feedback(a);
-                let sampled = a.age_ticks.is_multiple_of(b.cadence);
-                let d: [f64; 3] =
-                    std::array::from_fn(|i| if sampled { now[i] } else { now[i] - b.prev[i] });
-                b.prev = now;
-                b.intake += d[0];
-                b.motor += d[1];
+                let d = b.meter.observe(a);
                 let len = self.phys[f.index()].body_at(a.body).length_m;
                 if len > 0.0 {
-                    b.minute_bl += d[2] / len;
+                    b.minute_bl += d.forward_m / len;
                 }
-                {
-                    let s = &mut self.stats[f.index()];
-                    s.walked_m += d[2];
-                }
+                self.stats[f.index()].walked_m += d.forward_m;
                 b.minute_ticks += 1;
                 b.alive_ticks += 1;
                 b.x_m = a.pose.x;
@@ -312,8 +286,7 @@ impl Window {
         {
             b.alive = false;
         }
-        for k in 0..self.newcomers.len() {
-            let (id, f, x, fb) = self.newcomers[k];
+        for (id, f, x, meter) in self.newcomers.drain(..) {
             let fi = f.index();
             self.stats[fi].births += 1;
             let candidate = self.tables[fi].as_ref().map(|table| {
@@ -330,10 +303,7 @@ impl Window {
                 founder: f,
                 candidate,
                 newborn: true,
-                cadence: self.cadence[fi],
-                prev: fb,
-                intake: 0.0,
-                motor: 0.0,
+                meter,
                 possible: self.ticks.saturating_sub(stamp),
                 alive_ticks: 0,
                 alive: true,
@@ -395,18 +365,18 @@ impl Window {
             let s = &mut self.stats[b.founder.index()];
             s.body_ticks += b.alive_ticks;
             s.unique_m2 += b.visited.len() as f64 * self.cell_area;
-            s.intake += b.intake;
+            s.intake += b.meter.intake;
             s.walked_bl += b.minute_bl;
             let (Some(c), true) = (b.candidate, b.possible > 0) else {
                 continue;
             };
-            if b.intake < -1e-9 {
+            if b.meter.intake < -1e-9 {
                 anomalies += 1;
             }
             let survived = (b.alive_ticks as f64 / b.possible as f64).clamp(0.0, 1.0);
             let score = ScoreComponents::of(
-                b.intake.max(0.0),
-                b.motor.max(0.0),
+                b.meter.intake.max(0.0),
+                b.meter.motor.max(0.0),
                 survived,
                 b.founder.manifest().body_reference,
             );

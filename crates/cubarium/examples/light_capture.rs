@@ -12,7 +12,7 @@
 //! ```
 //!
 //! The world is founded exactly as the live run founds one from a seed
-//! (`ambient_habitat`), stepped `--ticks` more, and then every variant is drawn from that
+//! (`cubarium::voxel::found`), stepped `--ticks` more, and then every variant is drawn from that
 //! one state, so two pictures differ only by what they were asked to differ by.
 //! `--state DIR` saves that state on the first run and loads it on the next, so a second
 //! build (main, say) draws the same world. Each `--set` line replaces that top-level key
@@ -40,10 +40,10 @@ use anyhow::{Context, Result, bail};
 use cubarium::sink::GpuTargetKind;
 use cubarium::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::voxel::project::Projection;
-use cubarium::voxel::{VoxelConfig, ambient_habitat, habitat};
+use cubarium::voxel::{LayerConfig, Seeds, VoxelConfig, found as found_habitat, habitat, params_of};
 use cubarium_voxel::World;
 use cubarium_voxel_fauna::Fauna;
-use cubarium_voxel_flora::{Flora, FloraConfig};
+use cubarium_voxel_flora::Flora;
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 struct Args {
@@ -185,11 +185,13 @@ fn found(a: &Args, cfg: &VoxelConfig) -> Result<(World, Flora, Fauna)> {
         return Ok((world, flora, fauna));
     }
     let started = Instant::now();
-    let founded = ambient_habitat(
+    let params = params_of(cfg, &[])?;
+    let founded = found_habitat(
         &cfg.world,
-        a.seed,
-        FloraConfig::for_voxel_size,
+        &LayerConfig::new(&params, cfg.world.voxel_m),
         habitat::FOUNDER_COUNTS,
+        Seeds::from(a.seed),
+        false,
     );
     eprintln!(
         "light_capture: founded seed {} in {:.1} s ({} stands)",

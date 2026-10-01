@@ -4,7 +4,8 @@
 //! reflexes was built on the default `TeacherConfig`.
 
 use cubarium_voxel_fauna::{FaunaConfig, Founder, Pose};
-use cubarium_voxel_sim::{Arena, ArenaGrid, ArenaLayers, SimConfig};
+use cubarium_voxel_sim::params::Params;
+use cubarium_voxel_sim::{Arena, ArenaGrid, LayerConfig, SimConfig};
 
 use super::install_centres;
 use crate::es::voxel::controller::{EpisodeDriver, VoxelControl};
@@ -13,9 +14,9 @@ use crate::es::voxel::controller::{EpisodeDriver, VoxelControl};
 /// heuristic centre installed through [`install_centres`] on a layer of `fauna`.
 fn walk(fauna: FaunaConfig) -> Vec<Pose> {
     let grid = ArenaGrid::Standard;
-    let mut layers = ArenaLayers::live(grid);
+    let mut layers = LayerConfig::new(&Params::defaults(), grid.voxel_m());
     layers.fauna = fauna;
-    let arena = Arena::build_on_with(Founder::Blind, 1, grid, layers);
+    let arena = Arena::build(Founder::Blind, 1, grid, layers);
     let id = arena.animal_id.expect("the arena placed its founder");
     let mut sim = arena.into_sim(SimConfig::with_threads(1));
     let driver = EpisodeDriver::control(VoxelControl::Heuristic, Founder::Blind);

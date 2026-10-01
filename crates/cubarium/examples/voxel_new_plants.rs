@@ -25,9 +25,8 @@ use std::collections::BTreeSet;
 
 use cubarium::voxel::habitat;
 use cubarium::voxel::install_default_founders;
-use cubarium_voxel::Command as WorldCommand;
-use cubarium_voxel_fauna::{Senses, TICK_HZ};
-use cubarium_voxel_flora::{FloraConfig, Site, Species, fall_line};
+use cubarium_voxel_fauna::TICK_HZ;
+use cubarium_voxel_flora::{Site, Species, fall_line};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 fn main() {
@@ -45,11 +44,13 @@ fn main() {
         .collect();
     marks.sort_unstable();
 
-    let founded = cubarium::voxel::ambient_habitat(
-        &preset.config(),
-        seed,
-        FloraConfig::for_voxel_size,
+    let cfg = preset.config();
+    let founded = cubarium::voxel::found(
+        &cfg,
+        &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), cfg.voxel_m),
         habitat::FOUNDER_COUNTS,
+        cubarium::voxel::Seeds::from(seed),
+        false,
     );
     let (world, flora, mut fauna, seeded) =
         (founded.world, founded.flora, founded.fauna, founded.seeded);
@@ -61,13 +62,7 @@ fn main() {
         if founded.accepted { "accepted" } else { "NOT accepted" }
     );
     install_default_founders(&mut fauna).expect("the built-in centres validate");
-    let mut senses = Senses::with_cue(fauna.config().cue);
-    senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses));
-    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut()
-            .apply(WorldCommand::SetOutlet { open: true });
-    }
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(threads));
 
     let tag = format!("{},{}", preset.name, seed);
     println!(
