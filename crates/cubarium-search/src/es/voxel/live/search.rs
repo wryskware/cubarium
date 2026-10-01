@@ -1473,6 +1473,8 @@ pub fn check(
                 header.push(format!("{}.{}", l.name(), d.name()));
             }
             header.push(format!("{}.moving_share", l.name()));
+            header.push(format!("{}.readiness", l.name()));
+            header.push(format!("{}.reserve_fraction", l.name()));
             header.push(format!("{}.pace_bl_per_s", l.name()));
             for c in ["intake_per_body_h", "walked_m_per_body_h", "nn_m"] {
                 header.push(format!("{}.{c}", l.name()));
@@ -1531,6 +1533,18 @@ pub fn check(
                         f64::NAN
                     }
                 ));
+                // Breeding readiness and reserve over cap, means over the living bodies
+                // now.
+                let fauna = sim.fauna();
+                let core = fauna.config().founder(l).core;
+                let (mut rd, mut rf, mut n) = (0.0, 0.0, 0.0);
+                for a in fauna.view().animals.iter().filter(|a| a.founder == Some(l)) {
+                    rd += body_readiness(a, &core);
+                    rf += a.reserve / core.reserve_of(a.body).max(1e-300);
+                    n += 1.0;
+                }
+                row.push(format!("{:.4}", if n > 0.0 { rd / n } else { f64::NAN }));
+                row.push(format!("{:.4}", if n > 0.0 { rf / n } else { f64::NAN }));
                 row.push(format!(
                     "{:.4}",
                     get(&format!("{}.pace_bl_per_s", l.name()))
