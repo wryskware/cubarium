@@ -132,38 +132,161 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
 /// The inherited sense patch on any body, and a plant's magenta accent.
 const SENSE: Rgb = 0xFF_2AFC;
 
-/// A founder cell's colours. `band` is the cell's height in the body (the back is
-/// lit, the belly dark); `accent` is a sense patch or eye.
+/// A founder cell's colours. `band` is the cell's height in the body; `accent` is a sense
+/// patch or eye, which flashes [`CROPPING_FLASH`] while the animal crops.
+///
+/// The frondgrazer and littershredder paint each part slot of their model
+/// (`scripts/blender/animal_models.py`) in its ramp from [`FRONDGRAZER`] and
+/// [`LITTERSHREDDER`], sampled from the artbook picks.
 pub fn animal(founder: Founder, material: u8, band: u8, accent: bool, cropping: bool) -> Swatch {
-    let t = f32::from(band.min(BANDS - 1)) / f32::from(BANDS - 1);
-    let (belly, back, eye) = match founder {
-        // Frondgrazer: a coral shell over a maroon belly, cyan eyes.
-        Founder::Browser => (0xA2_2A4A, 0xFF_8A6E, 0x5F_F0FF),
-        // Littershredder: a gold segmented back, magenta feelers (dossier D4's pixel).
-        Founder::Blind => (0xB0_6A18, 0xFF_D860, SENSE),
-        // Lanternjaw (interim, stage 1: its body plan is open): a dark teal carapace, an
-        // ember jaw. No model is baked for it, so this serves a future bake only.
-        Founder::Lanternjaw => (0x14_2A2E, 0x30_5A58, 0xFF_5A3C),
-    };
-    if accent {
-        let c = if cropping { CROPPING_FLASH } else { eye };
+    if accent && cropping {
         return Swatch {
-            shadow: c,
-            body: c,
+            shadow: CROPPING_FLASH,
+            body: CROPPING_FLASH,
             glint: 0xFF_FFFF,
         };
     }
-    // The bake's pale cutting edge (`lilac`) stays pale, and its dark legs (`violet`)
-    // stay dark, on any body.
-    let body = if material == model::named_index("lilac") {
-        0xFF_E0CC
-    } else if material == model::named_index("violet") {
-        lerp(belly, INK, 0.45)
-    } else {
-        lerp(belly, back, t)
-    };
-    // A model body is drawn with the plain block glyph, which paints every face in the
-    // `shadow` slot: the body colour goes there too.
+    match founder {
+        Founder::Browser => coat_swatch(FRONDGRAZER, material, band),
+        Founder::Blind => coat_swatch(LITTERSHREDDER, material, band),
+        // Lanternjaw (interim, stage 1: its body plan is open): a dark teal carapace, an
+        // ember jaw. No model is baked for it, so this serves a future bake only.
+        Founder::Lanternjaw => {
+            if accent {
+                return block(0xFF_5A3C);
+            }
+            let t = f32::from(band.min(BANDS - 1)) / f32::from(BANDS - 1);
+            block(lerp(0x14_2A2E, 0x30_5A58, t))
+        }
+    }
+}
+
+/// An unsimulated specimen's cell colours (`voxel_specimens`; the manifest's `specimens`),
+/// by its name, or `None` for a name with no coat.
+pub fn specimen(name: &str, material: u8, band: u8) -> Option<Swatch> {
+    specimen_coat(name).map(|coat| coat_swatch(coat, material, band))
+}
+
+/// The coat of a specimen by its manifest name.
+pub fn specimen_coat(name: &str) -> Option<Coat> {
+    Some(match name {
+        "chorister" => CHORISTER,
+        "ripple-snail" => RIPPLE_SNAIL,
+        "capgnawer" => CAPGNAWER,
+        "seedporter" => SEEDPORTER,
+        "bellwing" => BELLWING,
+        _ => return None,
+    })
+}
+
+/// One animal's colours: per model part slot (a [`model::PALETTE`] name), its ramp
+/// `(low, high)` by the cell's height band (belly → back, base → tip). The first entry is
+/// the fallback for a slot the coat lacks. Every hex is **sampled 2026-10-01 from the
+/// artbook pick** (`art/gen/artbook/`; `scripts/blender/animal_models.py` `COATS` is the
+/// same table), and is in `design/art-direction/species-colours-2026-09-24.md`.
+pub type Coat = &'static [(&'static str, Rgb, Rgb)];
+
+/// Coral saddle shield: shield, hoof band, belly skirt, wine saddles, legs and neck,
+/// hooves, scoop lining, stalk-eye lens and rim, shoulder sensor spots.
+pub const FRONDGRAZER: Coat = &[
+    ("a_main", 0xEE_7156, 0xFB_8162),
+    ("a_dark", 0x58_342D, 0x5D_3B31),
+    ("a_pale", 0xBB_7A5E, 0xDF_9F7D),
+    ("a_mark", 0x87_2935, 0x90_2C3A),
+    ("a_limb", 0x9B_4341, 0xD9_6862),
+    ("a_foot", 0xC0_927C, 0xCA_9B86),
+    ("a_head", 0xFE_D3AC, 0xFE_D3AC),
+    ("a_eye", 0x30_0919, 0x4E_162B),
+    ("a_glow", 0xEE_699E, 0xF3_70A2),
+    ("magenta", 0xC8_3C66, 0xD8_456F),
+];
+/// Long tapered crawler: gold plates, brown bands, pale underside / legs / feelers, claws,
+/// knee joints, the sensor spot.
+pub const LITTERSHREDDER: Coat = &[
+    ("a_main", 0xF4_AD31, 0xFE_D24E),
+    ("a_dark", 0x5A_2D10, 0x69_3819),
+    ("a_pale", 0xE6_C690, 0xFE_EEC0),
+    ("a_foot", 0x6D_3101, 0xE5_A537),
+    ("a_limb", 0xC0_6F0E, 0xC0_6F0E),
+    ("magenta", 0xA3_0E57, 0xA3_0E57),
+];
+/// Violet stalker: flank, dark back, pale countershade, rosettes, legs, claws, crest
+/// lobes, the magenta eye, the cyan muzzle.
+pub const CHORISTER: Coat = &[
+    ("a_main", 0x6C_55D3, 0x6C_55D5),
+    ("a_dark", 0x31_2675, 0x24_1B56),
+    ("a_pale", 0xB9_A8E2, 0xB9_A8E2),
+    ("a_mark", 0x26_1F5B, 0x26_1F5B),
+    ("a_limb", 0x30_256E, 0x6C_55D5),
+    ("a_foot", 0x2A_2061, 0x34_2878),
+    ("a_head", 0xB7_AAE1, 0xEB_DDFC),
+    ("a_eye", 0xD7_0FE3, 0xFD_22FE),
+    ("a_glow", 0x55_C5FB, 0x52_C4FC),
+];
+/// Organic azure dome: shell, dark foot, pale mantle edge, growth-ridge grooves, palp
+/// stalks, pink palp tips, the dark front opening.
+pub const RIPPLE_SNAIL: Coat = &[
+    ("a_main", 0x41_6EE4, 0x50_81F2),
+    ("a_dark", 0x1B_234C, 0x25_2D5A),
+    ("a_pale", 0x7F_A1F4, 0x96_B5FC),
+    ("a_mark", 0x17_2B6B, 0x17_2B6B),
+    ("a_limb", 0x5E_75CE, 0x5F_5BB9),
+    ("a_glow", 0xFC_56CE, 0xFC_57D0),
+    ("a_head", 0x0A_0D2A, 0x0A_0D2A),
+];
+/// Rose-mauve bark mantle: mantle, bark streaks, fringe, pale spots, body and legs, toes,
+/// mandibles, the mouth slit, the light pink sensor patches.
+pub const CAPGNAWER: Coat = &[
+    ("a_main", 0x9C_607A, 0xA7_6982),
+    ("a_mark", 0x6B_4E63, 0x78_596E),
+    ("a_pale", 0xEF_A8C1, 0xF8_D6EC),
+    ("a_glow", 0xE3_BCF8, 0xEC_CAFB),
+    ("a_limb", 0xB4_768E, 0xB7_778F),
+    ("a_foot", 0xBD_92BF, 0xF0_D1F0),
+    ("a_head", 0xBB_95BB, 0xF5_E5F4),
+    ("a_dark", 0x01_0000, 0x01_0000),
+    ("magenta", 0xFA_B6E4, 0xFE_C7EF),
+];
+/// Moss-green glider: skin, the open mouth, pale underside and face, dorsal stripe,
+/// claws, eyes, flank membranes, the carried fruit, the cheek sensor dots.
+pub const SEEDPORTER: Coat = &[
+    ("a_main", 0x5C_6A28, 0x88_9335),
+    ("a_dark", 0x36_1D13, 0x36_1D13),
+    ("a_pale", 0xBE_B55E, 0xEA_DE97),
+    ("a_mark", 0x21_361D, 0x2D_441F),
+    ("a_foot", 0x19_1817, 0x30_321A),
+    ("a_eye", 0x0C_0707, 0x0C_0707),
+    ("a_membrane", 0xDB_DA7B, 0xED_EAA5),
+    ("a_fruit", 0x80_2B51, 0xD6_658A),
+    ("magenta", 0xB5_376A, 0xC1_3E7B),
+];
+/// Bellwing in its original colours: plum bell (lighter toward the mouth), lilac wings,
+/// cyan leading edges, mauve wing roots, the muted peach tendril, the magenta rim.
+pub const BELLWING: Coat = &[
+    ("a_main", 0x5E_1764, 0x2E_0D3E),
+    ("a_membrane", 0xA5_80F2, 0xC1_9BFC),
+    ("a_glow", 0x5A_BCEF, 0x95_E7FC),
+    ("a_limb", 0x9C_547D, 0x9C_547D),
+    ("a_tendril", 0xEE_B4A7, 0xF1_C4B9),
+    ("magenta", 0xC0_099E, 0xE2_0CAF),
+];
+
+/// A model cell of `coat` in its slot's ramp at its height band.
+fn coat_swatch(coat: Coat, material: u8, band: u8) -> Swatch {
+    let t = f32::from(band.min(BANDS - 1)) / f32::from(BANDS - 1);
+    let name = model::PALETTE.get(usize::from(material)).map(|(n, _)| *n);
+    let (_, lo, hi) = coat
+        .iter()
+        .find(|(slot, _, _)| Some(*slot) == name)
+        .or(coat.first())
+        .copied()
+        .unwrap_or(("", INK, INK));
+    block(lerp(lo, hi, t))
+}
+
+/// A model body is drawn with the plain block glyph, which paints every face in the
+/// `shadow` slot: the body colour goes there too.
+fn block(body: Rgb) -> Swatch {
     Swatch {
         shadow: body,
         body,

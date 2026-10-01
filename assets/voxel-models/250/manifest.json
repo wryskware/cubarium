@@ -12,7 +12,19 @@
   "teal",
   "magenta",
   "warm",
-  "starved"
+  "starved",
+  "a_main",
+  "a_dark",
+  "a_pale",
+  "a_mark",
+  "a_limb",
+  "a_foot",
+  "a_head",
+  "a_eye",
+  "a_glow",
+  "a_membrane",
+  "a_fruit",
+  "a_tendril"
  ],
  "variants": 3,
  "bins": 5,
@@ -958,7 +970,7 @@
    ]
   },
   "frondgrazer": {
-   "bytes": 359,
+   "bytes": 405,
    "bins": [
     {
      "length_m": 0.3481,
@@ -966,21 +978,33 @@
     },
     {
      "length_m": 0.4486,
-     "cells": 5
+     "cells": 4
     },
     {
      "length_m": 0.5491,
-     "cells": 10
+     "cells": 11
     },
     {
      "length_m": 0.6495,
-     "cells": 12
+     "cells": 15
     },
     {
      "length_m": 0.75,
-     "cells": 14
+     "cells": 17
+    }
+   ]
+  },
+  "chorister": {
+   "bytes": 242,
+   "bins": [
+    {
+     "length_m": 1.4,
+     "cells": 33
     }
    ]
   }
+ },
+ "specimens": {
+  "chorister": "chorister.cvm"
  }
 }

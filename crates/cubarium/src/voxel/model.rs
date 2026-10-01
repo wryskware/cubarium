@@ -432,7 +432,12 @@ impl<'a> Reader<'a> {
 /// cell's `material` indexes. The hex values are the builders' own reference colours
 /// (brief §3); the presenter paints from [`super::colours`], by species and height, and
 /// uses the material only to tell a part's shades apart.
-pub const PALETTE: [(&str, u32); 11] = [
+///
+/// The `a_*` names are the animals' **part slots** (model pass MP-A,
+/// `scripts/blender/animal_models.py`): what each slot is, and its colour, is per animal
+/// ([`super::colours::animal`], [`super::colours::specimen`]); the hex here is only a
+/// reference (the frondgrazer's, where it has the slot).
+pub const PALETTE: [(&str, u32); 23] = [
     ("plum", 0x002A_0E4A),
     ("violet", 0x003A_1A7A),
     ("detritus", 0x0051_0B6D),
@@ -444,6 +449,18 @@ pub const PALETTE: [(&str, u32); 11] = [
     ("magenta", 0x00FF_2AFC),
     ("warm", 0x00FF_9B50),
     ("starved", 0x007A_2A78),
+    ("a_main", 0x00EE_7156),
+    ("a_dark", 0x0058_342D),
+    ("a_pale", 0x00DF_9F7D),
+    ("a_mark", 0x0087_2935),
+    ("a_limb", 0x00D9_6862),
+    ("a_foot", 0x00C0_927C),
+    ("a_head", 0x00FE_D3AC),
+    ("a_eye", 0x0030_0919),
+    ("a_glow", 0x00F3_70A2),
+    ("a_membrane", 0x00DB_DA7B),
+    ("a_fruit", 0x00D6_658A),
+    ("a_tendril", 0x00EE_B4A7),
 ];
 
 /// The index of a palette name.
