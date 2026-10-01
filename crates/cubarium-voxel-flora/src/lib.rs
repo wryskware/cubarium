@@ -2594,15 +2594,13 @@ impl FloraConfig {
         self
     }
 
-    /// Every species' seeds **dropped** within its round-3b `hop` — no wind, spores, water
-    /// or runners — and every banked site tested **every tick**: the seed bank as it was
-    /// before package S, apart from whole seeds and the lifetimes.
+    /// Every species' seeds **dropped** within its `hop` — no wind, spores, water or
+    /// runners — every banked site tested **every tick**, and a passing bank sprouting at
+    /// the check that finds it passing, with no arming check.
     ///
     /// For a **fixture whose subject is not dispersal or the bank's clock** — an
-    /// establishment gate, a birth's stoichiometry, the lottery's weights — written when a
-    /// landing on a passing site germinated on the next tick and a spore landed where a
-    /// seed did — and a passing bank sprouts at the check that finds it passing, without
-    /// package SM's arming check. Not a shipped configuration; nothing in the tick uses it.
+    /// establishment gate, a birth's stoichiometry, the lottery's weights. Not a shipped
+    /// configuration; nothing in the tick uses it.
     pub fn drop_seeds_checked_each_tick(mut self) -> FloraConfig {
         let scale = (0.25 / self.voxel_m).max(1.0);
         for species in Species::ALL {
@@ -2622,22 +2620,8 @@ impl FloraConfig {
     }
 
     /// Every species with **no grazing refuge** (`graze_refuge` 0): a stand can be
-    /// withdrawn to nothing, as before package G.
-    ///
-    /// For the frozen training arenas, whose finite patches are seeded crowns trimmed to a
-    /// fixed stock with the ordinary withdrawal and eaten down to nothing by policies
-    /// trained before the refuge existed; the retrain decides whether its arenas keep a
-    /// floor. Not a shipped configuration: the live world's plants keep theirs.
-    /// Every species with **no induced grazing defence**: for the frozen training arenas,
-    /// whose finite patches are settled by the fixture's own withdrawal and whose
-    /// policies were trained before the defence existed. Not a shipped configuration.
-    pub fn without_defence(mut self) -> FloraConfig {
-        for species in Species::ALL {
-            self.species_mut(species).defence_per_bite = 0.0;
-        }
-        self
-    }
-
+    /// withdrawn to nothing. For a fixture whose patches are eaten down to nothing. Not a
+    /// shipped configuration: the live world's plants keep theirs.
     pub fn without_graze_refuge(mut self) -> FloraConfig {
         for species in Species::ALL {
             self.species_mut(species).graze_refuge = 0.0;
@@ -2645,13 +2629,13 @@ impl FloraConfig {
         self
     }
 
-    /// Every species' seed back to **one minimum package** at the rate that paid for one,
-    /// and no woody seedling coming up through ground cover: the seed as it was before
-    /// package SU (`propagule_rate` divided by the `seed_mass` it was scaled by).
+    /// Every species' seed back to **one minimum package** at the rate that paid for one
+    /// (`propagule_rate` divided by `seed_mass`), and no woody seedling coming up through
+    /// ground cover.
     ///
-    /// For a **fixture whose subject is a package's arithmetic or the lottery's**, written
-    /// when one seed was exactly the material of a stand at `alive_min` and a covered site
-    /// was closed. Not a shipped configuration; nothing in the tick uses it.
+    /// For a **fixture whose subject is a package's arithmetic or the lottery's**: one seed
+    /// is exactly the material of a stand at `alive_min`. Not a shipped configuration;
+    /// nothing in the tick uses it.
     pub fn minimum_seeds(mut self) -> FloraConfig {
         for species in Species::ALL {
             let sc = self.species_mut(species);
@@ -2665,10 +2649,8 @@ impl FloraConfig {
     /// Every crown — both ranges and each stage's seedling ceiling — multiplied by `k`.
     ///
     /// For a **fixture on a coarse grid** whose subject is a rule and not a plant's
-    /// size: the 1 m-cell fixtures were written when crowns were stated in 0.25 m
-    /// reference cells and read as cells, so a 1 m fixture's crowns were four times the
-    /// ladder. `crowns_scaled(4.0)` states that geometry in metres now crowns are metres
-    /// (package L). Not a shipped configuration; nothing in the tick uses it.
+    /// size: `crowns_scaled(4.0)` gives a 1 m-cell fixture the crowns, in cells, that a
+    /// 0.25 m grid has. Not a shipped configuration; nothing in the tick uses it.
     pub fn crowns_scaled(mut self, k: f64) -> FloraConfig {
         for species in Species::ALL {
             let sc = self.species_mut(species);

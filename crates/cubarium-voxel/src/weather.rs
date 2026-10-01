@@ -2,10 +2,8 @@
 //! (`design/handoffs/voxel-weather-2026-09-24.md`).
 //!
 //! **The top of this file is the pinned seam between the simulation and the renderer.**
-//! The weather model (package WX1, below the seam) fills [`WeatherView`] from the world's
-//! weather state; the presenter (package WX2) draws from it and from nothing else about
-//! the weather. [`WeatherView::legacy`] is the pre-WX1 view, kept for callers that still
-//! build one by hand.
+//! The weather model (below the seam) fills [`WeatherView`] from the world's weather
+//! state; the presenter draws from it and from nothing else about the weather.
 //!
 //! The model is one lumped air store with a temperature: a day clock
 //! ([`DayClock`]), a climate ([`Climate`]) whose temperature sets how much water the air
@@ -93,35 +91,6 @@ impl WeatherView {
         sun_elevation: 1.221_730_5,
         last_strike: None,
     };
-
-    /// The view before the weather model exists: the shower store alone. A shower is
-    /// falling at `rain_m_per_s` whenever one is; relative humidity and cloud cover read
-    /// the store against 3 % of the world's water (the proposal's default capacity).
-    /// Replaced by WX1.
-    pub fn legacy(
-        atmosphere_m3: f64,
-        expected_total_m3: f64,
-        raining: bool,
-        rain_m_per_s: f64,
-    ) -> WeatherView {
-        let capacity = 0.03 * expected_total_m3;
-        let rh = if capacity > 0.0 {
-            (atmosphere_m3 / capacity) as f32
-        } else {
-            0.0
-        };
-        WeatherView {
-            rh,
-            mode: if raining {
-                RainMode::Shower
-            } else {
-                RainMode::Clear
-            },
-            rain_m_per_s: if raining { rain_m_per_s as f32 } else { 0.0 },
-            cloud_cover: ((rh - 0.4) / 0.6).clamp(0.0, 1.0),
-            ..WeatherView::CLEAR_NOON
-        }
-    }
 }
 
 impl Default for WeatherView {
