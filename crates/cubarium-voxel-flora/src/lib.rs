@@ -2376,10 +2376,12 @@ impl FloraConfig {
         }
     }
 
-    /// Every preset through [`SpeciesConfig::validate`], plus the shared rates, with the
-    /// species named in the message. [`Flora::new`] calls this, so a config that cannot
-    /// produce a living stand is refused where it enters rather than as a `NaN` in a ledger
-    /// ten thousand ticks later.
+    /// Every number inside its row's range in the parameter registry ([`registry`]), and
+    /// the cross-field rules (the anatomy, the propagule split, `alive_min <= wood_max`,
+    /// the latticevine's thresholds), with the path named in the message. [`Flora::new`]
+    /// calls this, so a config that cannot produce a living stand is refused where it
+    /// enters rather than as a `NaN` in a ledger ten thousand ticks later. **Not** a
+    /// plausibility check.
     pub fn validate(&self) -> Result<(), String> {
         registry().check(self)?;
         registry::cross_rules(self)

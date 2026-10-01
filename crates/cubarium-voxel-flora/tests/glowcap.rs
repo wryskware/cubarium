@@ -719,7 +719,7 @@ fn a_dead_wood_deposit_joins_the_pool_and_decomposes_at_the_wood_rate() {
 /// `substrate_yield` on a saprotroph. A species with no income is exactly what a frozen
 /// fixture wants, and `assimilation` 0 has always been allowed on a plant for the same
 /// reason; a validator that refused it would be a plausibility check
-/// ([`SpeciesConfig::validate`]'s own doc says it is not one).
+/// (`FloraConfig::validate`'s own doc says it is not one).
 #[test]
 fn validate_covers_the_three_new_fields() {
     let config = config();

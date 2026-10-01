@@ -895,7 +895,7 @@ fn a_velvetpad_package_on_a_wholly_saturated_box_is_refused_and_an_adult_there_s
 }
 // =========================================================================== validity
 
-/// **Validity.** Every one of the five presets passes [`SpeciesConfig::validate`], and the
+/// **Validity.** Every preset passes `FloraConfig::validate`, and the
 /// four ways a preset can be silently unable to produce a living stand are each refused with
 /// the species and the field named: a split that does not sum to one, `alive_min` over
 /// `wood_max`, a zero wood fraction, and a non-finite rate.
