@@ -235,7 +235,20 @@ pub fn ambient_habitat(
     flora_config: impl Fn(f64) -> FloraConfig,
     founder_counts: [usize; Founder::COUNT],
 ) -> Founded {
-    ambient(cfg, base, flora_config, founder_counts, false)
+    ambient(cfg, base, flora_config, FaunaConfig::default(), founder_counts, false)
+}
+
+/// [`ambient_habitat`] with the animal layer built from `fauna` instead of the default:
+/// the arm of a run whose parameter set moved an animal number
+/// ([`crate::params::Params`]).
+pub fn ambient_habitat_with(
+    cfg: &cubarium_voxel::Config,
+    base: u64,
+    flora_config: impl Fn(f64) -> FloraConfig,
+    fauna: FaunaConfig,
+    founder_counts: [usize; Founder::COUNT],
+) -> Founded {
+    ambient(cfg, base, flora_config, fauna, founder_counts, false)
 }
 
 /// [`ambient_habitat`] keeping the kept try's mid-shower world ([`found_a_landscape`]):
@@ -247,13 +260,14 @@ pub fn ambient_landscape(
     flora_config: impl Fn(f64) -> FloraConfig,
     founder_counts: [usize; Founder::COUNT],
 ) -> Founded {
-    ambient(cfg, base, flora_config, founder_counts, true)
+    ambient(cfg, base, flora_config, FaunaConfig::default(), founder_counts, true)
 }
 
 fn ambient(
     cfg: &cubarium_voxel::Config,
     base: u64,
     flora_config: impl Fn(f64) -> FloraConfig,
+    fauna: FaunaConfig,
     founder_counts: [usize; Founder::COUNT],
     keep_mid_shower: bool,
 ) -> Founded {
@@ -271,7 +285,7 @@ fn ambient(
         |w: &World| {
             (
                 Flora::new(flora_config(w.config().voxel_m)),
-                Fauna::new(FaunaConfig::default()),
+                Fauna::new(fauna.clone()),
             )
         },
         founder_counts,

@@ -122,3 +122,16 @@ water_substeps = 4
 # pools. The `a M3` and `r M3` stdin commands still add water by hand at run time.
 [world.landform]
 preset = "default"
+
+# Plant and animal parameters, by their path in the parameter registry
+# (design/ecology-parameter-registry-2026-09-28.md). Every number of the plant and animal
+# configs has a path; `cargo run -p cubarium-voxel-sim --example params` lists them with
+# their units and ranges, and `--set PATH=VALUE` on the command line goes over this file.
+# An unknown path, or a value outside its row's range, is refused. A run that writes a
+# state directory or PNG captures leaves its resolved set there as `params.toml`.
+#
+# [flora.springturf]
+# foliage_rate = 0.0005
+#
+# [fauna.founders.frondgrazer.core]
+# maintenance_per_s = 0.002

@@ -99,9 +99,16 @@ pub enum Command {
 #[derive(Parser, Debug, Clone)]
 pub struct Voxel {
     /// TOML presentation and world config; missing fields take defaults, unknown fields
-    /// are errors. See `crates/cubarium/voxel.example.toml`.
+    /// are errors. See `crates/cubarium/voxel.example.toml`. Its `[flora]` and `[fauna]`
+    /// tables set plant and animal parameters by registry path.
     #[arg(long)]
     pub config: Option<PathBuf>,
+    /// Set one parameter by its registry path, over the config file:
+    /// `--set fauna.founders.frondgrazer.core.maintenance_per_s=0.002`. Repeatable; an
+    /// unknown path or a value outside its row's range is refused. `cargo run -p
+    /// cubarium-voxel-sim --example params` lists every path.
+    #[arg(long = "set", value_name = "PATH=VALUE")]
+    pub set: Vec<String>,
     /// Where frames go. The minifb preview is absent on purpose: it refuses ring rasters.
     #[arg(long, value_enum, default_value_t = VoxelSinkArg::Web)]
     pub sink: VoxelSinkArg,

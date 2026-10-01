@@ -55,7 +55,7 @@ pub mod vine;
 // `cubarium-voxel-sim` since P5-B, so the search crate founds the worlds this host founds;
 // every name is re-exported here unchanged.
 pub use cubarium_voxel_sim::found::{
-    Founded, HABITAT_TRIES, LAKE_SEED_TRIES, ambient_habitat, found_a_habitat,
+    Founded, HABITAT_TRIES, LAKE_SEED_TRIES, ambient_habitat, ambient_habitat_with, found_a_habitat,
     generate_with_a_lake,
 };
 pub use cubarium_voxel_sim::{habitat, scene};
@@ -78,6 +78,7 @@ use cubarium_voxel_fauna::{
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
 };
+use cubarium_voxel_sim::params::{Layers, Params};
 use cubarium_voxel_sim::{Arena, Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
@@ -188,6 +189,14 @@ pub struct VoxelConfig {
     /// cells so organisms retain their physical size with more cells of visual detail.
     #[serde(deserialize_with = "ambient_world_config")]
     pub world: cubarium_voxel::Config,
+    /// `[flora]`: plant parameters by registry path over the defaults
+    /// (`cubarium_voxel_sim::params`), e.g. `[flora.springturf] foliage_rate = 0.0004`.
+    #[serde(skip_serializing_if = "toml::Table::is_empty")]
+    pub flora: toml::Table,
+    /// `[fauna]`: animal parameters by registry path, e.g.
+    /// `[fauna.founders.frondgrazer.core] maintenance_per_s = 0.002`.
+    #[serde(skip_serializing_if = "toml::Table::is_empty")]
+    pub fauna: toml::Table,
 }
 
 impl Default for VoxelConfig {
@@ -215,8 +224,37 @@ impl Default for VoxelConfig {
             world: cubarium_voxel::Preset::find("default")
                 .expect("the shipped presets include `default`")
                 .config(),
+            flora: toml::Table::new(),
+            fauna: toml::Table::new(),
         }
     }
+}
+
+/// **The run's resolved parameter set** (package R1,
+/// `design/ecology-parameter-registry-2026-09-28.md`): the config's `[world]`, then its
+/// `[flora]` and `[fauna]` tables, then `--set`, every layer validated against the
+/// parameter registry. A fresh world's plants and animals are built from it.
+pub fn resolve_params(args: &Voxel, cfg: &VoxelConfig) -> Result<Params> {
+    let mut file = toml::Table::new();
+    if !cfg.flora.is_empty() {
+        file.insert("flora".into(), toml::Value::Table(cfg.flora.clone()));
+    }
+    if !cfg.fauna.is_empty() {
+        file.insert("fauna".into(), toml::Value::Table(cfg.fauna.clone()));
+    }
+    let base = Params {
+        world: cfg.world.clone(),
+        ..Params::defaults()
+    };
+    Params::resolve_over(
+        base,
+        &Layers {
+            file: Some(file),
+            genome: None,
+            sets: args.set.clone(),
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("the parameter set: {e}"))
 }
 
 /// `lighting` in the config: the GPU renderer's lighting tier.
@@ -860,7 +898,8 @@ fn load_or_create_world(
             return Ok((world, label, resumed, layers));
         }
         None => {
-            let world_cfg = cfg.world.clone();
+            let params = resolve_params(args, cfg)?;
+            let world_cfg = params.world.clone();
             match args.scene {
                 VoxelSceneArg::Authored => {
                     (scene::authored(world_cfg), "authored".to_string(), false)
@@ -885,8 +924,8 @@ fn load_or_create_world(
                             random_seed,
                             |w: &World| {
                                 (
-                                    Flora::new(FloraConfig::for_voxel_size(w.config().voxel_m)),
-                                    Fauna::new(FaunaConfig::default()),
+                                    Flora::new(params.flora.clone().rescaled_to(w.config().voxel_m)),
+                                    Fauna::new(params.fauna.clone()),
                                 )
                             },
                             args.founder_counts(),
@@ -1068,6 +1107,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         Some(path) => format!("the `[world]` in {}", path.display()),
         None => "the built-in world defaults".to_string(),
     })?;
+    let params = resolve_params(args, &cfg)?;
+    cfg.world = params.world.clone();
     if args.textures {
         cfg.textures = true;
     }
@@ -1194,8 +1235,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 Some(StartLayers::Restored(flora, fauna)) => (flora, fauna, None),
                 None => {
                     let mut flora =
-                        Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
-                    let mut fauna = Fauna::new(FaunaConfig::default());
+                        Flora::new(params.flora.clone().rescaled_to(world.config().voxel_m));
+                    let mut fauna = Fauna::new(params.fauna.clone());
                     let seeded = (!args.empty).then(|| {
                         let pre = habitat::pre_roll(&mut world, !resumed);
                         habitat::seed_pre_rolled(
@@ -1501,6 +1542,18 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     };
     if let Some(s) = snapshots.as_mut() {
         s.placement = placed;
+    }
+    // The resolved parameter set, beside what this run writes: its state directory, or
+    // the PNG captures. A run that writes nothing has nowhere to put it.
+    let params_dir = snapshots
+        .as_ref()
+        .map(|s| s.dir.clone())
+        .or_else(|| (args.sink == VoxelSinkArg::Png).then(|| args.out.clone()));
+    if let Some(dir) = params_dir {
+        match params.write_beside(&dir) {
+            Ok(path) => eprintln!("cubarium voxel: parameters in {}", path.display()),
+            Err(e) => eprintln!("cubarium voxel: could not write the parameter set: {e}"),
+        }
     }
 
     while !ctl.quit {
@@ -3648,6 +3701,7 @@ mod tests {
         let cfg = VoxelConfig::default();
         let args = |state: &Path| crate::cli::Voxel {
             config: None,
+            set: Vec::new(),
             sink: crate::cli::VoxelSinkArg::Web,
             scene: crate::cli::VoxelSceneArg::Generated,
             seed: Some(1),
@@ -3727,6 +3781,50 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// The config's `[flora]` / `[fauna]` tables and `--set` reach the run's parameter set
+    /// in that order, an unknown path is refused by name, and the set is what a fresh
+    /// world's layers are built from (package R1).
+    #[test]
+    fn the_config_tables_and_set_reach_the_parameter_set() {
+        use clap::Parser;
+        let voxel = |args: &[&str]| -> crate::cli::Voxel {
+            let mut line = vec!["cubarium", "voxel"];
+            line.extend(args.iter().copied());
+            match crate::cli::Cli::parse_from(line).command {
+                crate::cli::Command::Voxel(v) => v,
+                other => panic!("expected a voxel command, got {other:?}"),
+            }
+        };
+        let cfg: VoxelConfig = toml::from_str(
+            "[world]\nwidth = 64\n\
+             [fauna.founders.frondgrazer.core]\nmaintenance_per_s = 0.002\n\
+             [flora.springturf]\nfoliage_rate = 0.0005\n",
+        )
+        .expect("a config with parameter tables");
+        let p = resolve_params(&voxel(&[]), &cfg).expect("the file's tables");
+        assert_eq!(p.fauna.founder(Founder::Browser).core.maintenance_per_s, 0.002);
+        assert_eq!(p.flora.springturf.foliage_rate, 0.0005);
+        assert_eq!(p.world.width, 64);
+        let p = resolve_params(
+            &voxel(&[
+                "--set",
+                "fauna.founders.frondgrazer.core.maintenance_per_s=0.003",
+                "--set",
+                "world.climate.dry_gap_min_s=100",
+            ]),
+            &cfg,
+        )
+        .expect("--set over the file");
+        assert_eq!(p.fauna.founder(Founder::Browser).core.maintenance_per_s, 0.003);
+        assert_eq!(p.world.climate.dry_gap_min_s, 100.0);
+        let e = resolve_params(&voxel(&["--set", "fauna.nope=1"]), &cfg)
+            .expect_err("an unknown path");
+        assert!(format!("{e:#}").contains("fauna.nope"), "{e:#}");
+        let bad: VoxelConfig = toml::from_str("[flora.springturf]\nnope = 1\n").unwrap();
+        let e = resolve_params(&voxel(&[]), &bad).expect_err("an unknown file path");
+        assert!(format!("{e:#}").contains("flora.springturf.nope"), "{e:#}");
+    }
+
     /// A config file whose `[world]` no world can be built from is an error, not a panic:
     /// `World::new` asserts, so the run validates first.
     #[test]
@@ -3737,7 +3835,7 @@ mod tests {
             .world
             .validate()
             .expect_err("a zero dimension must be refused");
-        assert!(format!("{err}").contains("nonzero dimensions"), "{err}");
+        assert!(format!("{err}").contains("world.depth"), "{err}");
 
         let bad: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.0\n").unwrap();
         assert!(bad.world.validate().is_err());
@@ -4447,6 +4545,7 @@ mod tests {
         let cfg = VoxelConfig::default();
         let make_args = |seed: Option<u64>| Voxel {
             config: None,
+            set: Vec::new(),
             sink: VoxelSinkArg::Web,
             scene: VoxelSceneArg::Generated,
             seed,
@@ -4502,6 +4601,7 @@ mod tests {
         let cfg = VoxelConfig::default();
         let base_args = Voxel {
             config: None,
+            set: Vec::new(),
             sink: VoxelSinkArg::Web,
             scene: VoxelSceneArg::Generated,
             seed: None,

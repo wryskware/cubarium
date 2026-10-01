@@ -51,6 +51,13 @@
 //! cargo run --release -p cubarium --example voxel_census -- 8 preset=small seed=1 heuristic eggbank=off
 //! ```
 //!
+//! `set=PATH=VALUE` (repeatable) sets one parameter by its registry path over the arm's
+//! world and the default plant and animal configs
+//! (`design/ecology-parameter-registry-2026-09-28.md`; `cargo run -p cubarium-voxel-sim
+//! --example params` lists every path). The run's resolved set is written as
+//! `params.toml` into the `save=` directory, and to `params=<file>` when given — beside
+//! the CSV the run's stdout is redirected to.
+//!
 //! `gap=off` turns the climate's dry gap off on a `preset=` or `config=` arm.
 //! `--weather-log FILE` writes one CSV row per rain event that ends during the run (start
 //! and end tick, mode, cause, RH, °C and day phase at the start, seconds since the
@@ -73,9 +80,10 @@ use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium::voxel::scene;
 use cubarium_voxel::{Command as WorldCommand, World};
 use cubarium_voxel_fauna::{
-    Departure, Fauna, FaunaConfig, Founder, Senses, Species as Beast, TICK_HZ,
+    Departure, Fauna, Founder, Senses, Species as Beast, TICK_HZ,
 };
-use cubarium_voxel_flora::{Flora, FloraConfig, Species as Plant};
+use cubarium_voxel_flora::{Flora, Species as Plant};
+use cubarium_voxel_sim::params::{Layers, Params};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 /// One simulated minute, in ticks: 60 s at the fixed tick rate.
@@ -177,7 +185,47 @@ fn main() {
             ),
     };
     let save = SaveAt::from_args(&args);
+    // `set=PATH=VALUE`: the parameter layers over each arm's world and the default plant
+    // and animal configs; the resolved set goes beside the run's output.
+    let sets: Vec<String> = args
+        .iter()
+        .filter_map(|a| a.strip_prefix("set=").map(str::to_string))
+        .collect();
+    let params_file = args.iter().find_map(|a| a.strip_prefix("params="));
+    let resolve = |world: cubarium_voxel::Config| -> Params {
+        let params = Params::resolve_over(
+            Params {
+                world,
+                ..Params::defaults()
+            },
+            &Layers {
+                sets: sets.clone(),
+                ..Layers::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("the parameter set: {e}"));
+        let mut written = Vec::new();
+        if let Some(s) = &save {
+            written.push(params.write_beside(&s.dir).map(|p| p.display().to_string()));
+        }
+        if let Some(file) = params_file {
+            written.push(
+                params
+                    .to_toml()
+                    .and_then(|t| std::fs::write(file, t).map_err(|e| e.to_string()))
+                    .map(|()| file.to_string()),
+            );
+        }
+        for w in written {
+            match w {
+                Ok(path) => eprintln!("parameters in {path}"),
+                Err(e) => eprintln!("could not write the parameter set: {e}"),
+            }
+        }
+        params
+    };
     if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("load=")) {
+        assert!(sets.is_empty(), "set= is refused beside load=: the saved layers carry their own");
         let (mut sim, minute0) = load_run(std::path::Path::new(dir), &args, heuristic, &policies);
         run(&mut sim, hours, minute0, save.as_ref(), &timing);
         return;
@@ -213,8 +261,9 @@ fn main() {
     if let Some(path) = args.iter().find_map(|a| a.strip_prefix("world=")) {
         let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("world {path}: {e}"));
         let mut world = World::load(&bytes).unwrap_or_else(|e| panic!("load world: {e:#}"));
-        let mut flora = Flora::new(FloraConfig::for_voxel_size(world.config().voxel_m));
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let params = resolve(world.config().clone());
+        let mut flora = Flora::new(params.flora_for_world());
+        let mut fauna = Fauna::new(params.fauna.clone());
         let pre = habitat::pre_roll(&mut world, false);
         let seeded =
             habitat::seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, founder_counts());
@@ -290,10 +339,13 @@ fn main() {
         // The host's founding loop, verbatim: lake gate, pre-roll with the opening
         // shower, seeding and the acceptance check, redrawn on a refusal. The world
         // comes back already seeded.
-        let founded = cubarium::voxel::ambient_habitat(
+        let params = resolve(arm_config);
+        let arm_config = params.world.clone();
+        let founded = cubarium::voxel::ambient_habitat_with(
             &arm_config,
             seed_base,
-            FloraConfig::for_voxel_size,
+            |v| params.flora.clone().rescaled_to(v),
+            params.fauna.clone(),
             founder_counts,
         );
         let (world, flora, mut fauna, seeded) =
@@ -342,11 +394,12 @@ fn main() {
         run(&mut sim, hours, 0, save.as_ref(), &timing);
         return;
     }
+    let params = resolve(cfg.world.clone());
     let mut world = if generated {
         // The closed budget's water is the retired flora study's: the shower rate it ran on,
         // the aquifer charged a metre above the basin floor, and the outlet open — which
         // in a closed world is the return flow into the atmosphere, not an export.
-        let mut world_cfg = cfg.world.clone();
+        let mut world_cfg = params.world.clone();
         if closed {
             let dry = VoxelConfig::default().world;
             let basin_floor_m = World::new(dry.clone())
@@ -371,7 +424,7 @@ fn main() {
             !closed,
             "the closed budget is measured on the generated world"
         );
-        scene::authored(cfg.world.clone())
+        scene::authored(params.world.clone())
     };
     eprintln!(
         "scene: {} world, {} water budget",
@@ -379,8 +432,8 @@ fn main() {
         if closed { "closed" } else { "open" }
     );
 
-    let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut flora = Flora::new(params.flora.clone());
+    let mut fauna = Fauna::new(params.fauna.clone());
     let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);
     eprintln!(
         "seeded: stands={} logs={} litter_tiles={} founders={:?} animals={}",
