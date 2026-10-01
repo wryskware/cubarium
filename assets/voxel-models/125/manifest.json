@@ -1770,7 +1770,7 @@
    ]
   },
   "littershredder": {
-   "bytes": 204,
+   "bytes": 229,
    "bins": [
     {
      "length_m": 0.2362,
@@ -1827,9 +1827,49 @@
      "cells": 142
     }
    ]
+  },
+  "ripple-snail": {
+   "bytes": 80,
+   "bins": [
+    {
+     "length_m": 0.19,
+     "cells": 6
+    }
+   ]
+  },
+  "capgnawer": {
+   "bytes": 125,
+   "bins": [
+    {
+     "length_m": 0.25,
+     "cells": 12
+    }
+   ]
+  },
+  "seedporter": {
+   "bytes": 254,
+   "bins": [
+    {
+     "length_m": 0.2,
+     "cells": 34
+    }
+   ]
+  },
+  "bellwing": {
+   "bytes": 132,
+   "bins": [
+    {
+     "length_m": 0.05,
+     "cells": 12
+    }
+   ]
   }
  },
  "specimens": {
-  "chorister": "chorister.cvm"
+  "chorister": "chorister.cvm",
+  "ripple-snail": "ripple-snail.cvm",
+  "capgnawer": "capgnawer.cvm",
+  "seedporter": "seedporter.cvm",
+  "bellwing": "bellwing.cvm"
  }
 }

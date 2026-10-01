@@ -205,6 +205,10 @@ fn nearest(values: impl Iterator<Item = f64>, want: f64) -> Option<usize> {
 pub struct ModelLibrary {
     plants: [Option<PlantModel>; Species::COUNT],
     animals: [Option<AnimalModel>; Founder::COUNT],
+    /// The unsimulated animals (model pass MP-A: chorister, ripple-snail, ...), by their
+    /// manifest name: one adult bin each, drawn only where a caller places them
+    /// (`examples/voxel_specimens.rs`). Not founders, and not in the simulation.
+    specimens: std::collections::BTreeMap<String, AnimalModel>,
     /// The voxel size the models were baked at, when loaded from disk. A world of another
     /// size draws the glyphs instead: a model is so many cells, not so many metres.
     voxel_m: Option<f64>,
@@ -227,6 +231,20 @@ impl ModelLibrary {
         self.animals[founder.index()].as_ref()
     }
 
+    pub fn insert_specimen(&mut self, name: &str, model: AnimalModel) {
+        self.specimens.insert(name.to_string(), model);
+    }
+
+    /// An unsimulated animal's model by its manifest name (`"ripple-snail"`).
+    pub fn specimen(&self, name: &str) -> Option<&AnimalModel> {
+        self.specimens.get(name)
+    }
+
+    /// Every specimen's name, in name order.
+    pub fn specimen_names(&self) -> impl Iterator<Item = &str> {
+        self.specimens.keys().map(String::as_str)
+    }
+
     /// The voxel size this library was baked at, if it says.
     pub fn voxel_m(&self) -> Option<f64> {
         self.voxel_m
@@ -238,9 +256,11 @@ impl ModelLibrary {
         self.voxel_m.is_none_or(|v| (v - voxel_m).abs() <= 1e-9)
     }
 
-    /// How many species and founders have a model.
+    /// How many species, founders and specimens have a model.
     pub fn len(&self) -> usize {
-        self.plants.iter().flatten().count() + self.animals.iter().flatten().count()
+        self.plants.iter().flatten().count()
+            + self.animals.iter().flatten().count()
+            + self.specimens.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -290,6 +310,14 @@ impl ModelLibrary {
                 Parsed::Plant(_) => bail!("{file} is a plant model, listed as a founder"),
             }
         }
+        for (name, file) in &manifest.specimens {
+            let bytes = std::fs::read(dir.join(file))
+                .with_context(|| format!("reading {}", dir.join(file).display()))?;
+            match parse(&bytes).with_context(|| format!("parsing {file}"))? {
+                Parsed::Animal(m) => lib.insert_specimen(name, m),
+                Parsed::Plant(_) => bail!("{file} is a plant model, listed as a specimen"),
+            }
+        }
         Ok(lib)
     }
 }
@@ -308,6 +336,9 @@ struct Manifest {
     species: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     founders: std::collections::BTreeMap<String, String>,
+    /// The unsimulated animals, name → file.
+    #[serde(default)]
+    specimens: std::collections::BTreeMap<String, String>,
 }
 
 enum Parsed {
@@ -870,6 +901,45 @@ mod non_finite {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One animal file, one bin of one cell in `material`, as the bake writes a specimen.
+    fn one_bin_animal(material: &str, length_m: f64) -> Vec<u8> {
+        let mut b = b"CVM1".to_vec();
+        b.extend_from_slice(&[1, 1, material.len() as u8]);
+        b.extend_from_slice(material.as_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&length_m.to_le_bytes());
+        b.extend_from_slice(&0.1f64.to_le_bytes());
+        b.push(1);
+        b.extend_from_slice(&1u32.to_le_bytes());
+        b.extend_from_slice(&[0, 1, 0, 0, 0x00]);
+        b
+    }
+
+    #[test]
+    fn specimens_load_by_name_beside_the_founders() {
+        let root = std::env::temp_dir().join(format!("cubarium-specimens-{}", std::process::id()));
+        let dir = root.join(voxel_dir(0.125));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ripple-snail.cvm"), one_bin_animal("a_main", 0.19)).unwrap();
+        std::fs::write(dir.join("grazer.cvm"), one_bin_animal("a_mark", 0.75)).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            r#"{"voxel_m": 0.125, "founders": {"frondgrazer": "grazer.cvm"},
+                "specimens": {"ripple-snail": "ripple-snail.cvm"}}"#,
+        )
+        .unwrap();
+        let lib = ModelLibrary::load(&root, 0.125).unwrap();
+        let snail = lib.specimen("ripple-snail").expect("the specimen, by name");
+        let cells = snail.select(f64::INFINITY).unwrap();
+        assert_eq!(cells[0].material, named_index("a_main"));
+        assert_eq!(cells[0].offset, [0, 1, 0]);
+        assert!(lib.specimen("chorister").is_none(), "an unlisted name has no model");
+        assert!(lib.animal(Founder::Browser).is_some(), "the founder still loads");
+        assert_eq!(lib.specimen_names().collect::<Vec<_>>(), ["ripple-snail"]);
+        assert_eq!(lib.len(), 2);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn a_tag_round_trips_its_byte() {

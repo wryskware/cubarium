@@ -46,7 +46,7 @@ use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
 use crate::present::srgb_linear;
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::{Lighting, VoxelConfig};
-use crate::voxel::animal::{AnimalPart, Animals};
+use crate::voxel::animal::{AnimalPart, Animals, Specimen};
 use crate::voxel::sleep;
 use crate::voxel::{appearance, colours};
 use crate::voxel::model::{ModelLibrary, Tag};
@@ -82,6 +82,8 @@ pub struct VoxelGpuSinkOptions {
     /// ([`crate::voxel::textures::load_layers`]): a preview of a few candidate species over
     /// the repository's full set.
     pub textures_under: Option<PathBuf>,
+    /// Unsimulated animals drawn from the models' `specimens` (`voxel_specimens` only).
+    pub specimens: Vec<Specimen>,
 }
 
 impl Default for VoxelGpuSinkOptions {
@@ -92,6 +94,7 @@ impl Default for VoxelGpuSinkOptions {
             roof_from_texture: true,
             models: None,
             textures_under: None,
+            specimens: Vec::new(),
         }
     }
 }
@@ -191,13 +194,16 @@ impl VoxelGpuSink {
             gpu,
             renderer,
             target,
-            packer: Packer::new(
-                &params,
-                options.models.clone(),
-                textures.vine_on,
-                species,
-                Emission::of(cfg),
-            ),
+            packer: Packer {
+                specimens: options.specimens.clone(),
+                ..Packer::new(
+                    &params,
+                    options.models.clone(),
+                    textures.vine_on,
+                    species,
+                    Emission::of(cfg),
+                )
+            },
             capture: options.capture,
             water_hz: cfg.light.water_hz,
             water_smooth: cfg.light.water_smooth,
@@ -677,6 +683,8 @@ struct Packer {
     animals: Animals,
     /// The baked voxel models, or `None` for the dev-mode glyphs.
     models: Option<Arc<ModelLibrary>>,
+    /// Unsimulated animals drawn from the models' `specimens` (`voxel_specimens` only).
+    specimens: Vec<Specimen>,
     /// GPU style slots, in the order they were first needed this tick, with the texture
     /// role each draws with (`ROLE_*`) and its species face slots.
     styles: Vec<StyleKey>,
@@ -798,6 +806,7 @@ impl Packer {
             vine_tiles: tiles,
             animals,
             models,
+            specimens: Vec::new(),
             styles: Vec::new(),
             species,
             slot_of: Vec::new(),
@@ -846,6 +855,7 @@ impl Packer {
             Some(lib) => {
                 self.stands.rebuild_with(view, flora, lib);
                 self.animals.rebuild_with(view, Some(fauna), lib);
+                self.animals.stamp_specimens(view, lib, &self.specimens);
             }
             None => {
                 self.stands.rebuild(view, flora);

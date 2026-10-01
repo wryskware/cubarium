@@ -54,10 +54,30 @@ in a different frond form, and velvetpad's blue moss and buds remain provisional
 Exact replacement hexes and renderer palette updates remain open. The table
 still describes the current voxel colour pass.
 
-## Animals: colourway 1
+## Animals: sampled 2026-10-01 from the artbook pick
 
-Source: `runs/animal-bodies-2026-09-24/README.md`, v2 and v3 sections, and the renders
-beside it. The columns are **main / shadow / pale secondary / marking / accent**.
+Model pass MP-A (`design/handoffs/voxel-model-pass-2026-10-01.md`). Every hex is
+**sampled 2026-10-01 from the artbook pick** (`art/gen/artbook/`, the README's selected
+image): a median of a 9 x 9 pixel patch, or single pixels on thin parts. Each part is a
+ramp **low → high** (belly → back, base → tip) by the cell's height in the model. The
+renderer's copy is `crates/cubarium/src/voxel/colours.rs` (`FRONDGRAZER`, `LITTERSHREDDER`
+for `animal()`; `CHORISTER` … `BELLWING` for `specimen()`), the builders' copy
+`scripts/blender/animal_models.py` `COATS`, by the same part slots (`a_main` …).
+
+| animal (pick) | main | shadow / dark | pale | marking | limbs, feet | accents and other parts |
+| --- | --- | --- | --- | --- | --- | --- |
+| chorister (`chorister.png`) | flank `#6C55D3` → `#6C55D5` | back `#312675` → `#241B56` | countershade `#B9A8E2` | rosettes `#261F5B` | legs `#30256E` → `#6C55D5`, claws `#2A2061` → `#342878` | crest lobes `#B7AAE1` → `#EBDDFC`, eye `#D70FE3` → `#FD22FE`, muzzle `#55C5FB` → `#52C4FC` |
+| ripple-snail (`ripple-snail-organic.png`) | shell `#416EE4` → `#5081F2` | foot `#1B234C` → `#252D5A` | mantle edge `#7FA1F4` → `#96B5FC` | ridge grooves `#172B6B` | palps `#5E75CE` → `#5F5BB9` | palp tips `#FC56CE` → `#FC57D0`, front opening `#0A0D2A` |
+| capgnawer (`capgnawer-rose-bark.png`) | mantle `#9C607A` → `#A76982` | mouth `#010000` | fringe `#EFA8C1` → `#F8D6EC` | bark streaks `#6B4E63` → `#78596E`, spots `#E3BCF8` → `#ECCAFB` | body, legs `#B4768E` → `#B7778F`, toes `#BD92BF` → `#F0D1F0` | mandibles `#BB95BB` → `#F5E5F4`, sensor patches (light pink) lower `#FAB6E4` → upper `#FEC7EF` |
+| seedporter (`seedporter.png`) | skin `#5C6A28` → `#889335` | open mouth `#361D13` | underside, face `#BEB55E` → `#EADE97` | dorsal stripe `#21361D` → `#2D441F` | claws `#191817` → `#30321A` | eyes `#0C0707`, membranes `#DBDA7B` → `#EDEAA5`, fruit `#802B51` → `#D6658A`, cheek dots `#B5376A` → `#C13E7B` |
+| frondgrazer (`frondgrazer.png`) | shield `#EE7156` → `#FB8162` | hoof band `#58342D` → `#5D3B31` | belly skirt `#BB7A5E` → `#DF9F7D` | saddles `#872935` → `#902C3A` | legs, neck `#9B4341` → `#D96862`, hooves `#C0927C` → `#CA9B86` | scoop lining `#FED3AC`, stalk-eye lens `#300919` → `#4E162B`, rim `#EE699E` → `#F370A2`, sensor spots `#C83C66` → `#D8456F` |
+| littershredder (`littershredder.png`) | plates `#F4AD31` → `#FED24E` | bands `#5A2D10` → `#693819` | underside, legs, feelers `#E6C690` → `#FEEEC0` | — | knees `#C06F0E`, claws `#6D3101` → `#E5A537` | sensor spot `#A30E57` |
+| **bellwing** (`bellwing.png`), original colours | bell `#5E1764` (mouth) → `#2E0D3E` (crown) | — | wings `#A580F2` → `#C19BFC` | — | wing roots `#9C547D` | rim and underside `#C0099E` → `#E20CAF`, leading edges `#5ABCEF` → `#95E7FC`, tendril (muted peach, not yet shifted yellower) `#EEB4A7` → `#F1C4B9` |
+
+### Colourway 1 (2026-09-24, superseded for colour by the sampled table above)
+
+Source: `runs/animal-bodies-2026-09-24/README.md`, v2 and v3 sections. The columns are
+**main / shadow / pale secondary / marking / accent**.
 
 | animal | main | shadow | pale | marking | accent | markings |
 | --- | --- | --- | --- | --- | --- | --- |

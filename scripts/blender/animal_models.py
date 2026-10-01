@@ -387,13 +387,282 @@ def frondgrazer():
         ell((0.515, sy * 0.162, 0.472), (0.012, 0.012, 0.012), c("a_eye"))
 
 
+# --- littershredder · long tapered crawler (0.375 x 0.125 x 0.125 m) -----------------------
+#
+# Pick: art/gen/artbook/littershredder.png (the second, tapered version), side view facing
+# left: a blunt plough, six banded plates and a tail cone, seven leg pairs, two feelers,
+# one magenta spot on the second plate. 0.00051 m/px along, 0.00044 m/px up.
+
+def littershredder():
+    kx, kz = 0.00051, 0.00044
+
+    def X(px):
+        return (392 - px) * kx
+
+    def Z(py):
+        return (380 - py) * kz
+    # the plough: a blunt wedge, low at its front lip and highest at its rear
+    plough = [(30, 315, 335, 0.03), (60, 270, 338, 0.045), (110, 190, 340, 0.055), (170, 120, 336, 0.06),
+              (230, 98, 330, 0.0625), (285, 108, 322, 0.06)]
+    loft([(X(px), 0.0, (Z(t) + Z(b)) / 2, w, (Z(t) - Z(b)) / 2) for px, t, b, w in plough],
+         [c("a_main")], lambda f, s, p: 0, nring=40, nseg=20)
+    # the plates: gold, each with a brown band across its rear third, tapering to the tail
+    plates = [(330, 112, 316, 0.06), (430, 135, 313, 0.057), (525, 155, 310, 0.052),
+              (622, 182, 305, 0.046), (692, 210, 297, 0.038), (735, 232, 288, 0.03)]
+    lx = 0.032
+    for px, t, b, w in plates:
+        zc, rzz = (Z(t) + Z(b)) / 2, (Z(t) - Z(b)) / 2
+        ell((X(px) + 0.1 * lx, 0, zc), (0.9 * lx, w, rzz), c("a_main"))
+        ell((X(px) - 0.55 * lx, 0, zc), (0.45 * lx, w * 0.93, rzz * 0.93), c("a_dark"))
+    cyl((X(745), 0, Z(258)), (X(768), 0, Z(250)), 0.012, 0.002, mat=c("a_main"), seg=10)   # tail cone
+    # the pale underside the plates overlap
+    ell((X(470), 0, 0.026), (0.13, 0.04, 0.014), c("a_pale"))
+    # seven pairs of short legs: pale, a gold knee, a hooked claw
+    for px in (160, 230, 300, 395, 495, 590, 690):
+        x0 = X(px)
+        for sy in (-1, 1):
+            hip = (x0, sy * 0.035, 0.028)
+            knee = (x0 + 0.005, sy * 0.056, 0.018)
+            ankle = (x0 + 0.009, sy * 0.06, 0.009)
+            tube([hip, knee], 0.0075, 0.007, c("a_pale"), seg=8)
+            ell(knee, (0.007, 0.007, 0.007), c("a_limb"))
+            tube([knee, ankle], 0.0068, 0.006, c("a_pale"), seg=8)
+            tube([ankle, (x0 + 0.006, sy * 0.061, 0.0)], 0.0055, 0.0015, c("a_foot"), seg=6)
+    # two pale feelers curling down from under the plough's lip
+    for sy in (-1, 1):
+        tube([(X(70), sy * 0.012, Z(330)), (X(45), sy * 0.016, Z(352)), (X(32), sy * 0.018, Z(372)),
+              (X(38), sy * 0.018, Z(384))], 0.004, 0.0025, c("a_pale"), seg=6)
+    # one magenta sensor spot on the second plate, near its top
+    ell((X(307), 0.0, Z(118)), (0.008, 0.006, 0.004), c("magenta"))
+
+
+# --- ripple-snail · organic azure dome (0.19 x 0.19 x 0.125 m) -----------------------------
+#
+# Pick: art/gen/artbook/ripple-snail-organic.png, 3/4 view facing right: a matte dome with
+# two shallow growth ridges, a pale wavy mantle edge, a dark spreading foot, an open front
+# with two pink-tipped palps. 0.00035 m/px.
+
+def ripple_snail():
+    # the dark foot, spreading under the shell and trailing behind it
+    ell((-0.03, 0, 0.009), (0.12, 0.104, 0.011), c("a_dark"))
+    ell((-0.115, 0.015, 0.006), (0.04, 0.07, 0.007), c("a_dark"))
+    ell((-0.07, -0.08, 0.005), (0.04, 0.035, 0.006), c("a_dark"))
+    # the pale mantle edge: a flared, wavy skirt under the shell's rim
+    ell((-0.008, 0, 0.037), (0.1, 0.096, 0.01), c("a_pale"))
+    for k in range(26):
+        a = 2 * math.pi * k / 26
+        ell((-0.008 + 0.1 * math.cos(a), 0.096 * math.sin(a), 0.034 + 0.005 * math.sin(3 * a)),
+            (0.012, 0.02, 0.0045), c("a_pale"), rot=rz(math.degrees(a)))
+    # the dome, and its two growth ridges (grooves) near the top
+    ell((-0.012, 0, 0.045), (0.088, 0.084, 0.078), c("a_main"))
+    for zf in (0.62, 0.88):
+        rr = math.sqrt(1 - zf ** 2)
+        z = 0.045 + 0.078 * zf
+        for k in range(28):
+            a0, a1 = 2 * math.pi * k / 28, 2 * math.pi * (k + 1) / 28
+            cyl((-0.012 + 0.0885 * rr * math.cos(a0), 0.0845 * rr * math.sin(a0), z),
+                (-0.012 + 0.0885 * rr * math.cos(a1), 0.0845 * rr * math.sin(a1), z), 0.0028,
+                mat=c("a_mark"), seg=6)
+    # the open front: a dark opening under the rim, two palps reaching forward and down
+    ell((0.076, 0, 0.033), (0.016, 0.034, 0.011), c("a_head"))
+    for sy, reach in ((-1, 1.0), (1, 0.85)):
+        root = (0.07, sy * 0.014, 0.034)
+        mid = (0.095, sy * 0.024 * reach, 0.022)
+        tip = (0.112 * reach + 0.012 * (1 - reach), sy * 0.03, 0.011)
+        tube([root, mid, tip], 0.0065, 0.006, c("a_limb"), seg=8)
+        ell(tip, (0.014, 0.009, 0.0075), c("a_glow"), rot=rz(sy * 18))
+
+
+# --- capgnawer · rose-mauve bark mantle (0.25 x 0.21 x 0.19 m) ------------------------------
+#
+# Pick: art/gen/artbook/capgnawer-rose-bark.png, front view a little to one side: two full
+# rounded mantle lobes with a central cleft, bark streaks, pale spots and a short pale
+# fringe; under the cleft six mandibles in three stacked pairs round a vertical mouth, four
+# light pink sensor patches (large upper, small lower); six stout legs on pale toes.
+
+def capgnawer():
+    for sy in (-1, 1):
+        cy, cz = sy * 0.058, 0.085
+        start = len(L.ORG)
+
+        def zone(f, s, p):
+            # bark streaks: fine wavy bands running down the lobe from the cleft
+            u = 110 * p.x + 12 * s + 2.5 * math.sin(70 * p.z + 40 * p.x)
+            return 1 if math.sin(u) > 0.6 and s > -0.2 else 0
+        stations = [(x, cy, cz, 0.08 * w, 0.09 * w, 0.02) for x, w in
+                    ((0.125, 0.25), (0.11, 0.7), (0.07, 0.95), (0.0, 1.0), (-0.07, 0.95), (-0.11, 0.7),
+                     (-0.125, 0.25))]
+        loft(stations, [c("a_main"), c("a_mark")], zone, nring=110, nseg=64)
+        # pale spots, scattered over the lobe
+        for k in range(14):
+            a = 0.35 + 2.4 * ((k * 0.618) % 1.0)          # up the lobe, cleft to outer edge
+            x = 0.1 * (((k * 0.382) % 1.0) * 2 - 1)
+            w = math.sqrt(max(0.0, 1 - (x / 0.125) ** 2))
+            p = Vector((x, cy + sy * 0.08 * w * math.cos(a), cz + 0.09 * w * math.sin(a)))
+            r = 0.006 if k % 3 else 0.009
+            ell(p, (r, r, r * 0.6), c("a_glow"))
+        # the short pale fringe round the lobe's outer and front edges
+        for k in range(90):
+            a = 2 * math.pi * k / 90
+            ex, ey = 0.122 * math.cos(a), 0.08 * math.sin(a)
+            if sy * ey < -0.035:
+                continue                                    # the cleft side has none
+            root = Vector((ex, cy + ey, cz - 0.004))
+            out = Vector((math.cos(a), math.sin(a), 0)).normalized()
+            cyl(root, root + out * 0.016 + Vector((0, 0, -0.01)), 0.003, 0.0012, mat=c("a_pale"), seg=4)
+        # tilt the lobe outward about its inner edge, so the cleft stays high
+        pivot = Matrix.Translation((0, sy * 0.005, cz))
+        tilt = pivot @ rx(-sy * 16) @ pivot.inverted()
+        for ob in L.ORG[start:]:
+            ob.data.transform(tilt)
+    ell((0.0, 0, 0.065), (0.11, 0.09, 0.055), c("a_limb"))           # the body under the mantle
+    # the face under the cleft
+    ell((0.105, 0, 0.062), (0.035, 0.05, 0.035), c("a_limb"))
+    box((0.139, 0, 0.063), (0.006, 0.005, 0.042), c("a_dark"))       # the vertical mouth
+    for z in (0.078, 0.064, 0.05):
+        for s2 in (-1, 1):
+            ell((0.138, s2 * 0.009, z), (0.008, 0.007, 0.0065), c("a_head"))
+    for s2 in (-1, 1):
+        ell((0.13, s2 * 0.032, 0.078), (0.007, 0.012, 0.011), c("magenta"))
+        ell((0.133, s2 * 0.027, 0.048), (0.005, 0.007, 0.007), c("magenta"))
+    # six short stout legs, four pale toes each
+    for px in (0.07, -0.01, -0.09):
+        for s2 in (-1, 1):
+            foot = (px + 0.012, s2 * 0.105, 0.016)
+            tube([(px, s2 * 0.06, 0.05), (px + 0.006, s2 * 0.09, 0.03), foot], 0.022, 0.018, c("a_limb"), seg=10)
+            for t in range(4):
+                ell((px + 0.03, s2 * 0.105 + (t - 1.5) * 0.009, 0.007), (0.009, 0.0055, 0.007), c("a_foot"))
+
+
+# --- seedporter · moss-green glider, the selected image (upright, as pictured) ---------------
+#
+# Pick: art/gen/artbook/seedporter.png (not the compact-head alternate or the orchid study),
+# front view: tall cranium, large dark eyes, open mouth, magenta cheek dots, a dorsal
+# stripe; six limbs (small fruit-handling arms holding a fruit at the chest, larger arms
+# carrying the flank membranes, rear gripping feet) and a long coiled prehensile tail.
+# Built in the pick's own pose and proportions: 0.00128 m/px (0.5 m head to pelvis).
+
+def seedporter():
+    k = 0.00128
+
+    def P(px, py, x=0.0):
+        return Vector((x, (px - 250) * k, (760 - py) * k))
+    hy = (235 - 250) * k
+    # head: the tall cranium, a pale lower face and muzzle, the open mouth, the eyes
+    ell(P(235, 115, 0.0), (0.07, 0.079, 0.092), c("a_main"))
+    ell(P(248, 205, 0.02), (0.05, 0.058, 0.045), c("a_pale"))
+    ell(P(255, 215, 0.05), (0.025, 0.032, 0.023), c("a_pale"))
+    ell(P(255, 233, 0.07), (0.008, 0.018, 0.008), c("a_dark"))
+    for ex, sl in ((218, 1), (285, -1)):
+        ell(P(ex, 180, 0.05), (0.012, 0.028, 0.02), c("a_eye"), rot=rx(sl * 20))
+        for d in range(3):  # three cheek dots under each eye
+            ell(P(ex - 9 + d * 6, 197 + d * 2, 0.058), (0.003, 0.003, 0.003), c("magenta"))
+    stripe = [Vector((0.065 * math.cos(a), hy, P(235, 115).z + 0.095 * math.sin(a)))
+              for a in (math.radians(d) for d in (70, 90, 110, 140, 170))]
+    tube(stripe, 0.008, 0.008, c("a_mark"), seg=6)
+    # neck and torso: green back and sides, pale front
+    tube([P(240, 250), P(235, 285)], 0.024, 0.026, c("a_main"), seg=10)
+    ell(P(225, 320, -0.005), (0.045, 0.058, 0.07), c("a_main"))
+    ell(P(225, 320, 0.012), (0.036, 0.048, 0.062), c("a_pale"))
+    ell(P(232, 392, -0.005), (0.04, 0.046, 0.065), c("a_main"))
+    ell(P(232, 392, 0.01), (0.032, 0.036, 0.058), c("a_pale"))
+    tube([P(238, 260, -0.035), P(228, 330, -0.042), P(235, 420, -0.036)], 0.009, 0.009, c("a_mark"), seg=6)
+    # the small fruit-handling arms, and the fruit held at the chest
+    for sh, el_, hand in (((200, 258), (150, 300), (176, 274)), ((262, 268), (215, 300), (192, 282))):
+        tube([P(*sh, 0.01), P(*el_, 0.045), P(*hand, 0.075)], 0.01, 0.008, c("a_main"), seg=8)
+    ell(P(184, 272, 0.085), (0.026, 0.026, 0.028), c("a_fruit"))
+    # the big arms, the membranes they carry down to the flanks, the hands' claws
+    arms = {
+        -1: ([(175, 240), (100, 165), (60, 95)], [(60, 95), (100, 165), (175, 240), (180, 325), (110, 305), (38, 215)],
+             [((60, 95), (28, 50)), ((60, 95), (55, 40)), ((60, 95), (88, 45)), ((60, 95), (18, 95))]),
+        1: ([(295, 248), (385, 262), (450, 190)], [(450, 190), (385, 262), (295, 248), (290, 335), (330, 405),
+                                                   (415, 370), (448, 300)],
+            [((450, 190), (482, 150)), ((450, 190), (500, 170)), ((450, 190), (505, 205)), ((450, 190), (470, 238))]),
+    }
+    for _, (arm, mem, claws) in arms.items():
+        tube([P(*q, 0.005) for q in arm], 0.015, 0.011, c("a_main"), seg=8)
+        sheet([tuple(P(*q, -0.012)) for q in mem], c("a_membrane"), th=0.005)
+        for a, b in claws:
+            tube([P(*a, 0.005), P(*b, 0.01)], 0.006, 0.002, c("a_foot"), seg=5)
+    # the rear gripping feet
+    for leg, claws in (([(190, 410), (140, 370), (150, 450), (165, 482)], [(150, 505), (172, 512), (190, 500)]),
+                       ([(265, 432), (310, 495), (330, 540), (335, 575)], [(325, 610), (348, 607), (362, 590)])):
+        tube([P(*q, 0.01) for q in leg], 0.024, 0.012, c("a_main"), seg=8)
+        for q in claws:
+            tube([P(*leg[-1], 0.012), P(*q, 0.015)], 0.006, 0.002, c("a_foot"), seg=5)
+    # the long prehensile tail, coiling at its end, its dorsal stripe on the outside
+    tail = [(250, 445), (266, 525), (282, 610), (260, 690), (205, 738), (130, 742), (68, 700), (52, 630),
+            (82, 572), (135, 556), (172, 588), (165, 632), (130, 645), (112, 618)]
+    pts = [P(*q, -0.02) for q in catmull(tail, 60)]
+    n = len(pts)
+    for i in range(n - 1):
+        r = 0.022 + (0.006 - 0.022) * i / (n - 1)
+        cyl(pts[i], pts[i + 1], r, r, mat=c("a_main"), seg=8)
+    centre = P(118, 640, -0.02)
+    for i in range(18, n - 1):
+        r = 0.022 + (0.006 - 0.022) * i / (n - 1)
+        o = [(p - centre).normalized() * r * 0.75 for p in (pts[i], pts[i + 1])]
+        cyl(pts[i] + o[0], pts[i + 1] + o[1], r * 0.45, r * 0.45, mat=c("a_mark"), seg=6)
+    # the pale underside of the tail, on the inside of the coil
+    for i in range(18, n - 1, 2):
+        r = 0.022 + (0.006 - 0.022) * i / (n - 1)
+        ell(pts[i] - (pts[i] - centre).normalized() * r * 0.6, (r * 0.5, r * 0.5, r * 0.5), c("a_pale"))
+
+
+# --- bellwing · BW-A with the thin corkscrew tendril (wingspan 0.375 m) ---------------------
+#
+# Pick: art/gen/artbook/bellwing.png, front view: the hanging plum bell with its magenta
+# rim and underside, four lilac wings (a larger upper and a smaller lower pair) with cyan
+# leading edges on mauve roots, and the fine muted-peach tendril ending in a 3D corkscrew.
+# Original colours. 0.000556 m/px (wingspan 0.375 m); the tendril's tip on z = 0.
+
+def bellwing():
+    k = 0.000556
+
+    def P(px, py, x=0.0):
+        return Vector((x, (px - 385) * k, (745 - py) * k))
+    rim_z = P(0, 540).z
+
+    def bell_zone(f, s, p):
+        return 1 if p.z < rim_z else 0
+    prof = [(232, 4), (242, 40), (262, 70), (300, 82), (360, 90), (420, 98), (480, 112), (515, 132),
+            (545, 155), (572, 160), (590, 150)]
+    loft([(0.0, 0.0, P(0, py).z, r * k, r * k) for py, r in prof], [c("a_main"), c("magenta")], bell_zone,
+         nring=50, nseg=28)
+    # wings: root (px), tip (px), front (+x) or back pair, which side leads
+    wings = [((300, 258), (40, 30), 0.012, 1), ((470, 285), (705, 150), 0.012, 1),
+             ((300, 292), (90, 382), -0.012, -1), ((470, 320), (615, 440), -0.012, -1)]
+    for root, tip, x, lead in wings:
+        R, T = P(*root, x), P(*tip, x)
+        d = T - R
+        n = Vector((0, -d.z, d.y)).normalized()
+        if n.z * lead < 0:
+            n = -n
+        w = 0.17 * d.length
+        lead_pts = [R + d * t + n * w * math.sin(math.pi * t) ** 0.8 for t in (i / 12 for i in range(13))]
+        trail_pts = [R + d * t - n * 0.55 * w * math.sin(math.pi * t) for t in (i / 12 for i in range(11, 0, -1))]
+        sheet([tuple(p) for p in lead_pts + trail_pts], c("a_membrane"), th=0.003)
+        tube(lead_pts[1:], 0.0035, 0.0025, c("a_glow"), seg=6)
+        ell(R, (0.016, 0.018, 0.016), c("a_limb"))
+    # the tendril: out of the bell's mouth, then a spindly corkscrew to its tip
+    tube([P(385, 500), P(382, 560), P(392, 600)], 0.0025, 0.0022, c("a_tendril"), seg=6)
+    top = P(392, 600)
+    helix((top.x, top.y - 0.008, top.z), top.z, 3.2, 0.008, 0.002, c("a_tendril"), phase=0.0)
+
+
 # --- the table ------------------------------------------------------------------------------
 
 # name: (builder, reference length, width, height in metres). The founders' references are
-# their adult bodies (`assets/voxel-models/source.json`); a specimen is baked at its own.
+# their adult bodies (`assets/voxel-models/source.json`); a specimen is built and baked at
+# its own (the bake's placeholder table), here as its built extent.
 REF = {
     "chorister": (chorister, 1.4, 0.35, 0.6),
     "frondgrazer": (frondgrazer, 0.75, 0.375, 0.375),
+    "littershredder": (littershredder, 0.375, 0.125, 0.125),
+    "ripple-snail": (ripple_snail, 0.19, 0.19, 0.125),
+    "capgnawer": (capgnawer, 0.25, 0.21, 0.19),
+    "seedporter": (seedporter, 0.2, 0.63, 0.94),
+    "bellwing": (bellwing, 0.05, 0.375, 0.4),
 }
 
 

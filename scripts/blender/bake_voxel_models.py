@@ -96,7 +96,7 @@ ANIMAL_ROLE = {slot: "accent" for slot in A.ACCENTS}
 #   capgnawer     0.25 x 0.21 x 0.19                 reimagining §Capgnawer 0.25 x 0.19; width off the pick
 #   seedporter    upright as pictured: 0.5 head to pelvis, 0.62 across the arms, 0.92 tall
 #                 with the coiled tail               reimagining §Seedporter 0.5 x 0.25 body; pick proportions
-#   bellwing      0.375 wingspan, 0.31 tall with the tendril   roster 2 x 3 v (D14: wingspan 3 v)
+#   bellwing      0.375 wingspan, 0.4 tall with the tendril (0.31 without)   roster 2 x 3 v, D14 wingspan 3 v
 SPECIMENS = ["chorister", "ripple-snail", "capgnawer", "seedporter", "bellwing"]
 
 KIND = {"Foliage": L.F, "Trunk": L.T, "Drape": L.D, "Mat": L.MAT}
@@ -398,9 +398,10 @@ def voxelize_animal(objs, vox):
                         slot = face_slot[index]
                         if animal_role(slot) is None:
                             continue
-                        # inside: the material of the face nearest the centre; outside,
-                        # within half a voxel of the surface: the same, nearest first
-                        d = -1.0 / (1.0 + dist) if (c - loc).dot(nor) < 0 else dist
+                        # inside: the part the centre is deepest in (a thin tendril through
+                        # a bell does not take the bell's cell), in the material of its face
+                        # nearest the centre; outside, within half a voxel: nearest first
+                        d = -1.0 - dist if (c - loc).dot(nor) < 0 else dist
                         if d <= half and d < best_d:
                             best, best_d = slot, d
                     if best is not None:
