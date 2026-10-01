@@ -1593,6 +1593,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 missing_cost,
                 lanternjaw_share: [share_lo, share_hi],
                 persist_only: [false; cubarium_voxel_fauna::Founder::COUNT],
+                ..Default::default()
             }
             .with_targets(&genome.rest)?;
             if let Some(list) = persist_only {

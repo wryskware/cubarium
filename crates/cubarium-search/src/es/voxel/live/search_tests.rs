@@ -319,7 +319,7 @@ fn trace_at(n: usize, moving: f64) -> Trace {
         lanternjaws: Vec::new(),
         browser_moving: moving,
         missing: 0,
-        silent_lineages: 0,
+        silent_lineages: 0.0,
     }
 }
 
@@ -366,7 +366,7 @@ fn the_penalty_is_zero_in_the_band_and_monotonic_outside() {
     assert!(penalty(&gone, &band).total > p(299, 0.0));
     // A lineage that stopped breeding in the second half costs as much as a lost one.
     let mut silent = trace_at(50, 0.3);
-    silent.silent_lineages = 1;
+    silent.silent_lineages = 1.0;
     assert_eq!(penalty(&silent, &band).total, band.missing_cost);
     // A trace that stopped early carries its last count to the horizon.
     let mut short = trace_at(200, 0.3);
@@ -396,7 +396,7 @@ fn a_short_trace_is_projected_on_its_last_hours_trend() {
         lanternjaws: Vec::new(),
         browser_moving: 0.3,
         missing: 0,
-        silent_lineages: 0,
+        silent_lineages: 0.0,
     };
     let end = *growing.animals.last().unwrap();
     super::search::project(&mut growing, 360.0);

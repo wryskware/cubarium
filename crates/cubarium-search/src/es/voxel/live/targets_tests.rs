@@ -5,7 +5,7 @@
 use cubarium_voxel_fauna::Founder;
 
 use super::ecology::EcologyParams;
-use super::search::{Band, BandSpec, EvalSpec, Trace, evaluate, penalty, silent_lineages};
+use super::search::{Band, BandSpec, EvalSpec, Trace, breeding_shortfall, evaluate, penalty};
 use super::variants::VariantTable;
 use crate::es::tensor::initial_center_shape;
 use crate::es::voxel::{EpisodeDriver, TRAINED_LINEAGES};
@@ -25,7 +25,7 @@ fn trace(n: usize, lj: usize) -> Trace {
         lanternjaws: vec![lj; 120],
         browser_moving: 0.4,
         missing: 0,
-        silent_lineages: 0,
+        silent_lineages: 0.0,
     }
 }
 
@@ -109,7 +109,7 @@ fn each_part_is_zero_inside_its_band_and_monotonic_outside() {
         let mut gone = trace(40, 4);
         gone.missing = k;
         let mut silent = trace(40, 4);
-        silent.silent_lineages = k;
+        silent.silent_lineages = k as f64;
         assert_eq!(penalty(&gone, &b).persist, k as f64 * b.missing_cost);
         assert_eq!(penalty(&silent, &b).persist, k as f64 * b.missing_cost);
     }
@@ -181,7 +181,9 @@ fn unified_mode_with_no_lanternjaw_centre_runs_one_window() {
 /// the lineage; without it, both apply.
 #[test]
 fn a_persist_only_lineage_of_eggs_takes_no_share_or_breeding_penalty() {
-    let rest: toml::Table = "[targets]\npersist_only = [\"lanternjaw\"]\n".parse().unwrap();
+    let rest: toml::Table = "[targets]\npersist_only = [\"lanternjaw\"]\n"
+        .parse()
+        .unwrap();
     let held = BandSpec::default().with_targets(&rest).expect("valid");
     let lj = Founder::Lanternjaw.index();
     assert!(held.persist_only[lj]);
@@ -191,16 +193,26 @@ fn a_persist_only_lineage_of_eggs_takes_no_share_or_breeding_penalty() {
     let b = Band::for_founding(16, true, &held);
     let eggs_only = trace(30, 0);
     assert_eq!(penalty(&eggs_only, &b).share, 0.0);
-    assert_eq!(silent_lineages(&founded, &late, &held.persist_only, true), 0);
+    let lost = [false; 3];
+    let ready = [0.0; 3];
+    assert_eq!(
+        breeding_shortfall(&founded, &late, &lost, &ready, &held, true),
+        0.0
+    );
     let mut t = eggs_only.clone();
-    t.silent_lineages = silent_lineages(&founded, &late, &held.persist_only, true);
+    t.silent_lineages = breeding_shortfall(&founded, &late, &lost, &ready, &held, true);
     assert_eq!(penalty(&t, &b).total, 0.0, "{:?}", penalty(&t, &b));
     // Switched off: the same world pays for both.
     let open = BandSpec::default();
     let b = Band::for_founding(16, true, &open);
     assert!(penalty(&eggs_only, &b).share > 0.0);
-    assert_eq!(silent_lineages(&founded, &late, &open.persist_only, true), 1);
-    assert!(BandSpec::default()
-        .with_targets(&"[targets]\npersist_only = [\"nobody\"]\n".parse().unwrap())
-        .is_err());
+    assert_eq!(
+        breeding_shortfall(&founded, &late, &lost, &ready, &open, true),
+        1.0
+    );
+    assert!(
+        BandSpec::default()
+            .with_targets(&"[targets]\npersist_only = [\"nobody\"]\n".parse().unwrap())
+            .is_err()
+    );
 }

@@ -72,6 +72,10 @@ pub struct BandSpec {
     /// Stage 1 holds the lanternjaw so, whose egg bank first hatches at the first dusk
     /// (~60 min on the terrarium's 2 h day). The search file's `[targets] persist_only`.
     pub persist_only: [bool; Founder::COUNT],
+    /// The second-half readiness ([`body_readiness`]) at which a lineage with no late
+    /// birth stops paying for it: `missing_cost × (1 − min(1, readiness / this))`. The
+    /// search file's `[targets] ready_target`.
+    pub ready_target: f64,
 }
 
 impl BandSpec {
@@ -95,6 +99,14 @@ impl BandSpec {
                         self.persist_only[f.index()] = true;
                     }
                 }
+                "ready_target" => {
+                    let v = v
+                        .as_float()
+                        .or_else(|| v.as_integer().map(|i| i as f64))
+                        .filter(|x| *x > 0.0 && x.is_finite())
+                        .ok_or("ready_target is a positive number")?;
+                    self.ready_target = v;
+                }
                 other => return Err(format!("unknown key `{other}` in [targets]")),
             }
         }
@@ -112,6 +124,7 @@ impl Default for BandSpec {
             missing_cost: 10.0,
             lanternjaw_share: [0.05, 0.15],
             persist_only: [false; Founder::COUNT],
+            ready_target: 0.5,
         }
     }
 }
@@ -160,10 +173,12 @@ pub struct Trace {
     pub browser_moving: f64,
     /// Lineages and plant species (present at the start) absent at the end.
     pub missing: usize,
-    /// Lineages with no birth in the second half of what was run: the stop-breeding
-    /// bound, refused as hard as a loss (`missing_cost` each).
+    /// The breeding shortfall, summed over the lineages held to breeding
+    /// ([`breeding_shortfall`]): 1 for a lineage lost or with no late birth and no
+    /// readiness, graded below that by its readiness, 0 with late births. Costs
+    /// `missing_cost` per unit.
     #[serde(default)]
-    pub silent_lineages: usize,
+    pub silent_lineages: f64,
 }
 
 /// The penalty and its parts.
@@ -225,7 +240,7 @@ pub fn penalty(t: &Trace, band: &Band) -> Penalty {
     let peak_n = samples.iter().map(|s| s.1).fold(0.0, f64::max);
     let peak = (peak_n - band.peak).max(0.0) / band.peak;
     let lively = (band.moving_min - t.browser_moving).max(0.0) / band.moving_min;
-    let persist = band.missing_cost * (t.missing + t.silent_lineages) as f64;
+    let persist = band.missing_cost * (t.missing as f64 + t.silent_lineages);
     Penalty {
         bound,
         peak,
@@ -343,6 +358,8 @@ pub struct Evaluation {
     pub founded: Vec<usize>,
     /// Births per lineage in the second half of what was run.
     pub late_births: Vec<u64>,
+    /// Second-half mean breeding readiness per lineage ([`body_readiness`]).
+    pub readiness: Vec<f64>,
     pub ticks: u64,
     pub wall_s: f64,
     #[serde(skip)]
@@ -365,18 +382,49 @@ fn lost_lineages(founded: &[usize], bodies: &[usize], eggs: &[usize]) -> usize {
         .count()
 }
 
-/// Founded lineages held to breeding (not `persist_only`) with no birth in the second
-/// half; a world stopped before the second half is judged silent on all of them.
-pub fn silent_lineages(
+/// **A body's breeding progress**, 0 to 1: 1 while it gestates (its escrow open); 0
+/// below `birth_body`; otherwise its surplus ticks in the last hold
+/// (`reproduction.surplus_ticks`, what `advance_eligibility` keeps from the window) over the
+/// ticks the hold requires to begin ([`cubarium_voxel_fauna::Reproduction::hold_required`]),
+/// capped at 1.
+pub fn body_readiness(
+    a: &cubarium_voxel_fauna::Animal,
+    sc: &cubarium_voxel_fauna::SpeciesConfig,
+) -> f64 {
+    if a.reproduction.escrow.is_some() {
+        return 1.0;
+    }
+    if a.body < sc.birth_body {
+        return 0.0;
+    }
+    let need = sc.reproduction.hold_required().max(1);
+    (a.reproduction.surplus_ticks as f64 / need as f64).min(1.0)
+}
+
+/// **The breeding term**, summed over the founded lineages held to breeding (not
+/// `persist_only`): 0 for one with late births; 1 for one `lost`, or for every one when the
+/// world stopped before its second half; otherwise `1 − min(1, readiness / ready_target)`
+/// with `readiness` its second-half mean ([`body_readiness`]).
+pub fn breeding_shortfall(
     founded: &[usize],
     late_births: &[u64],
-    persist_only: &[bool; Founder::COUNT],
+    lost: &[bool],
+    readiness: &[f64],
+    spec: &BandSpec,
     reached_second_half: bool,
-) -> usize {
+) -> f64 {
     (0..Founder::COUNT)
-        .filter(|&i| founded[i] > 0 && !persist_only[i])
-        .filter(|&i| !reached_second_half || late_births[i] == 0)
-        .count()
+        .filter(|&i| founded[i] > 0 && !spec.persist_only[i])
+        .map(|i| {
+            if !reached_second_half || lost[i] {
+                1.0
+            } else if late_births[i] > 0 {
+                0.0
+            } else {
+                1.0 - (readiness[i] / spec.ready_target).min(1.0)
+            }
+        })
+        .sum()
 }
 
 /// **One candidate world in progress**: founded, then stepped one window at a time
@@ -394,6 +442,8 @@ pub struct EvalRun {
     trace: Trace,
     moving: [u64; 4],
     late_births: Vec<u64>,
+    /// Second-half readiness: its sum and samples per lineage.
+    readiness: Vec<(f64, u64)>,
     readouts: Vec<Vec<(String, super::readout::Pool, f64)>>,
     body_scores: Vec<BodyScore>,
     stopped: Option<String>,
@@ -436,6 +486,7 @@ impl EvalRun {
             trace,
             moving: [0; 4],
             late_births: vec![0; Founder::COUNT],
+            readiness: vec![(0.0, 0); Founder::COUNT],
             readouts: Vec::new(),
             body_scores: Vec::new(),
             stopped: None,
@@ -482,6 +533,15 @@ impl EvalRun {
                 self.trace.minutes.push((self.elapsed / TICKS_PER_MIN) as f64);
                 self.trace.animals.push(total);
                 self.trace.lanternjaws.push(pop[lj]);
+                if self.elapsed > half_ticks {
+                    let fauna = self.sim.fauna();
+                    for a in fauna.view().animals.iter() {
+                        let Some(f) = a.founder else { continue };
+                        let r = &mut self.readiness[f.index()];
+                        r.0 += body_readiness(a, &fauna.config().founder(f).core);
+                        r.1 += 1;
+                    }
+                }
                 if total > spec.abort_animals {
                     halt = Some(format!(
                         "{total} animals at minute {}",
@@ -527,12 +587,17 @@ impl EvalRun {
             mut trace,
             moving,
             late_births,
+            readiness,
             readouts,
             body_scores,
             stopped,
             elapsed,
             ..
         } = self;
+        let readiness: Vec<f64> = readiness
+            .iter()
+            .map(|(sum, n)| if *n > 0 { sum / *n as f64 } else { 0.0 })
+            .collect();
         let [late_moving, late_minutes, all_moving, all_minutes] = moving;
         trace.browser_moving = if late_minutes > 0 {
             late_moving as f64 / late_minutes as f64
@@ -554,10 +619,15 @@ impl EvalRun {
             spec.score_horizon_ticks.max(spec.horizon_ticks) as f64 / TICKS_PER_MIN as f64;
         let projected_from_min = (trace.minutes.last().copied().unwrap_or(0.0) < score_min)
             .then(|| project(&mut trace, score_min));
-        trace.silent_lineages = silent_lineages(
+        let lost: Vec<bool> = (0..Founder::COUNT)
+            .map(|i| founded[i] > 0 && pop[i] + eggs_end[i] == 0)
+            .collect();
+        trace.silent_lineages = breeding_shortfall(
             &founded,
             &late_births,
-            &spec.band.persist_only,
+            &lost,
+            &readiness,
+            &spec.band,
             elapsed > spec.horizon_ticks / 2,
         );
         let penalty = penalty(&trace, &band);
@@ -599,6 +669,7 @@ impl EvalRun {
             eggs_end,
             founded,
             late_births,
+            readiness,
             ticks: elapsed,
             wall_s: started.elapsed().as_secs_f64(),
             body_scores,

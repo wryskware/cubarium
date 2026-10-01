@@ -38,6 +38,8 @@ pub mod window;
 pub mod world;
 
 #[cfg(test)]
+mod breeding_tests;
+#[cfg(test)]
 mod knob_wiring_tests;
 #[cfg(test)]
 mod lineage_params_tests;
