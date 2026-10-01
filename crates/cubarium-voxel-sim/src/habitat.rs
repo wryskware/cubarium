@@ -116,26 +116,6 @@ const BROWSERS: usize = 8;
 /// `founder_counts[Founder::Lanternjaw]` is this count of **clutches**, not bodies.
 const FOUNDING_CLUTCHES: usize = 3;
 
-/// Leaf litter laid under each littershredder, in organic-matter units.
-///
-/// A fresh world has **no litter at all** — litterfall is senescence, and nothing has
-/// senesced before the first tick — so a blind litter feeder placed on bare soil would
-/// start with nothing to smell and nothing to eat. This is the same move the glowcap
-/// grove already makes with its log: lay the substrate the founder's own gate needs. At
-/// 0.2 the tile saturates the cue's emission term (`min(litter / 0.05, 1)`) exactly as a
-/// Stage-A arena tile does, so the founder starts on a signal it has actually been seen
-/// to follow. It is a dev-scene starter, not a claim about a standing litter layer.
-const LITTER_ORGANIC: f64 = 0.2;
-/// Mineral and retained-energy densities of that starter litter: a plant tissue's order
-/// of magnitude, and the litter energy cap. The same pair the frozen arena deposits at.
-const LITTER_MINERAL_FRACTION: f64 = 0.02;
-const LITTER_ENERGY_DENSITY: f64 = 2.0;
-
-/// **N**, the acceptance bar: a lineage's component must hold at least this many
-/// founder-hours of adult basal upkeep in reachable edible stock for every founder
-/// placed in it (decisions §8). An authored placeholder, `design/backlog.md` §1.
-pub const ACCEPT_FOUNDER_HOURS: f64 = 1.0;
-
 /// What the startup pre-roll did before anything was seeded.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PreRollReport {
@@ -198,6 +178,10 @@ pub struct LineageVerdict {
     /// Adult basal upkeep per founder per hour, as the founding gate judges it
     /// ([`founding_upkeep_per_hour`]: a x1 body's).
     pub upkeep_per_h: f64,
+    /// The acceptance bar this verdict was judged against: founder-hours of upkeep a
+    /// component's stock must cover per founder
+    /// ([`cubarium_voxel_fauna::FoundingConfig::accept_founder_hours`]).
+    pub accept_hours: f64,
     /// Every component holding at least one of this lineage's founders.
     pub components: Vec<ComponentVerdict>,
     /// Founders standing on no face of the lineage's route map at all.
@@ -246,7 +230,7 @@ impl Acceptance {
                     c.component,
                     c.food.stock,
                     c.founders,
-                    ACCEPT_FOUNDER_HOURS * l.upkeep_per_h * c.founders as f64,
+                    l.accept_hours * l.upkeep_per_h * c.founders as f64,
                     if founder == Founder::Blind && c.food.producers == 0 {
                         " and has no living producer"
                     } else {
@@ -677,7 +661,7 @@ pub fn seed_pre_rolled(
     seeded.vines = flora.seed_vine_founders(world);
 
     // The two **sensed founder lineages**, which is what walks this habitat now. Both
-    // arrive grown with half a reserve ([`FOUNDER_ARRIVAL`]): room to eat, and a body's
+    // arrive grown with half a reserve ([`founder_arrival`]): room to eat, and a body's
     // worth of buffer to find food with at the shipped mass.
     // The seeder installs each lineage's own observation-only heuristic through the
     // fauna layer's ordinary controller boundary, and registers it as that lineage's
@@ -704,7 +688,8 @@ pub fn seed_pre_rolled(
     // too, and it is counted.
     let blind = *fauna.config().founder(Founder::Blind);
     let blind_room = blind.adult_body().headroom_voxels(world.config().voxel_m);
-    let blind_need = ACCEPT_FOUNDER_HOURS * founding_upkeep_per_hour(&blind);
+    let founding = fauna.config().founding;
+    let blind_need = founding.accept_founder_hours * founding_upkeep_per_hour(&blind);
     let (blind_map, blind_food) =
         lineage_food(&world.view(), &flora.view(), &blind, Founder::Blind);
     let pool: Vec<Site> = {
@@ -734,7 +719,7 @@ pub fn seed_pre_rolled(
         |s| blind_map.component_of(s),
         |c, k| {
             let stock = blind_food.get(&c).map_or(0.0, |f| f.stock);
-            stock + k as f64 * LITTER_ORGANIC >= blind_need * k as f64
+            stock + k as f64 * founding.starter_litter_organic >= blind_need * k as f64
         },
     );
     for (k, site) in chosen.into_iter().enumerate() {
@@ -742,9 +727,9 @@ pub fn seed_pre_rolled(
             site,
             Deposit {
                 kind: DepositKind::Litter,
-                organic: LITTER_ORGANIC,
-                mineral: LITTER_ORGANIC * LITTER_MINERAL_FRACTION,
-                energy: LITTER_ORGANIC * LITTER_ENERGY_DENSITY,
+                organic: founding.starter_litter_organic,
+                mineral: founding.starter_litter_organic * founding.starter_litter_mineral_fraction,
+                energy: founding.starter_litter_organic * founding.starter_litter_energy_density,
             },
         ) {
             continue;
@@ -764,7 +749,7 @@ pub fn seed_pre_rolled(
     // walkable route to a second stand. There is no foodless fallback: a lineage with
     // nowhere to live is a shortfall in `Seeded` and nothing is placed (plan §5).
     let browser = *fauna.config().founder(Founder::Browser);
-    let browser_need = ACCEPT_FOUNDER_HOURS * founding_upkeep_per_hour(&browser);
+    let browser_need = founding.accept_founder_hours * founding_upkeep_per_hour(&browser);
     let browser_map = RouteMap::for_founder(&world.view(), &browser);
     let browser_food = food_on(&browser_map, &world.view(), &flora.view(), Founder::Browser);
     let mut meadow = browser_faces_on(&browser_map, &browser_food, &world.view(), &flora.view());
@@ -977,9 +962,11 @@ pub fn accept(
         } else {
             wanted[founder.index()]
         };
+        let accept_hours = fauna.config().founding.accept_founder_hours;
         let mut v = LineageVerdict {
             wanted: wanted_bodies,
             upkeep_per_h: u,
+            accept_hours,
             ..LineageVerdict::default()
         };
         let mut count: BTreeMap<usize, usize> = BTreeMap::new();
@@ -993,7 +980,7 @@ pub fn accept(
         let mut worst = f64::INFINITY;
         for (c, n) in count {
             let f = food.get(&c).copied().unwrap_or_default();
-            let need = ACCEPT_FOUNDER_HOURS * u * n as f64;
+            let need = accept_hours * u * n as f64;
             let habitable =
                 f.stock >= need && (founder != Founder::Blind || f.producers > 0);
             worst = worst.min(if u > 0.0 { f.stock / (u * n as f64) } else { f64::INFINITY });
@@ -1028,19 +1015,21 @@ pub fn accept(
 /// them. Introduced bodies get theirs from [`introduce_founder`], out of the same
 /// recipes.
 pub fn install_heuristics(fauna: &mut Fauna) {
+    // The reflexes run on the layer's own numbers ([`cubarium_voxel_fauna::TeacherConfig`]).
+    let cfg = fauna.config().teachers;
     fauna.set_founder_factory(
         Founder::Blind,
-        Arc::new(|| -> Box<dyn Controller> { Box::new(BlindForager::new()) }),
+        Arc::new(move || -> Box<dyn Controller> { Box::new(BlindForager::with_config(cfg)) }),
     );
     fauna.set_founder_factory(
         Founder::Browser,
-        Arc::new(|| -> Box<dyn Controller> { Box::new(BrowserForager::new()) }),
+        Arc::new(move || -> Box<dyn Controller> { Box::new(BrowserForager::with_config(cfg)) }),
     );
     // The lanternjaw's ambush teacher (predation §2.12): it has no trained centre, so
     // this drives every one of them, hatched or introduced.
     fauna.set_founder_factory(
         Founder::Lanternjaw,
-        Arc::new(|| -> Box<dyn Controller> { Box::new(LanternjawAmbush::new()) }),
+        Arc::new(move || -> Box<dyn Controller> { Box::new(LanternjawAmbush::with_config(cfg)) }),
     );
 }
 
@@ -1105,7 +1094,7 @@ pub fn introduce_lanternjaws(
         .hunter
         .map_or(0.5, |h| h.wake_at);
     let stores = StartingStores {
-        body: 1.0,
+        body: fauna.config().founding.arrival_body,
         reserve: wake_at,
     };
     let mut ids = Vec::new();
@@ -1196,13 +1185,16 @@ pub fn reinstall_heuristics(fauna: &mut Fauna) {
 /// 2026-09-29). At the shipped x30 mass the old half-grown, empty arrival (the arenas'
 /// `StartingStores::HUNGRY`) starved founders on the terrarium before they settled; a
 /// full reserve would leave no appetite (hunger 0, and asleep at its lineage's night).
-/// Half a reserve is hunger 0.5: awake, eating, with the whole body as buffer.
-pub const FOUNDER_ARRIVAL: StartingStores = StartingStores {
-    body: 1.0,
-    reserve: 0.5,
-};
+/// Half a reserve is hunger 0.5: awake, eating, with the whole body as buffer. The numbers
+/// are [`cubarium_voxel_fauna::FoundingConfig::arrival_body`] and `arrival_reserve`.
+pub fn founder_arrival(founding: &cubarium_voxel_fauna::FoundingConfig) -> StartingStores {
+    StartingStores {
+        body: founding.arrival_body,
+        reserve: founding.arrival_reserve,
+    }
+}
 
-/// One founder body on a support face, arriving as [`FOUNDER_ARRIVAL`], with its own
+/// One founder body on a support face, arriving as [`founder_arrival`], with its own
 /// heuristic installed. Returns whether the layer accepted it.
 fn introduce_founder(
     world: &World,
@@ -1216,7 +1208,7 @@ fn introduce_founder(
         FaunaCommand::IntroduceFounderOnFace {
             site,
             founder,
-            stores: FOUNDER_ARRIVAL,
+            stores: founder_arrival(&fauna.config().founding),
             heading_rad,
         },
     ) {
@@ -1877,7 +1869,7 @@ mod tests {
         );
         let (_, food) = lineage_food(&world.view(), &flora.view(), &phys, Founder::Browser);
         let stock: f64 = food.values().map(|f| f.stock).sum();
-        let fits = (stock / (ACCEPT_FOUNDER_HOURS * u)).floor() as usize;
+        let fits = (stock / (cubarium_voxel_fauna::FoundingConfig::default().accept_founder_hours * u)).floor() as usize;
         assert!(fits >= 1, "the fixture feeds at least one founder: {stock} vs {u}");
 
         let with = |n: usize| {
@@ -1900,22 +1892,23 @@ mod tests {
         );
 
         // The shredder: litter on the ground and nothing alive to renew it.
+        let founding = cubarium_voxel_fauna::FoundingConfig::default();
         let mut bare = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
         let at_site = Site { x: 4, y: 2, z: 2 };
         assert!(bare.deposit(
             at_site,
             Deposit {
                 kind: DepositKind::Litter,
-                organic: LITTER_ORGANIC,
-                mineral: LITTER_ORGANIC * LITTER_MINERAL_FRACTION,
-                energy: LITTER_ORGANIC * LITTER_ENERGY_DENSITY,
+                organic: founding.starter_litter_organic,
+                mineral: founding.starter_litter_organic * founding.starter_litter_mineral_fraction,
+                energy: founding.starter_litter_organic * founding.starter_litter_energy_density,
             },
         ));
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         introduce(&mut fauna, &world, Founder::Blind, at_site);
         let got = accept(&world, &bare, &fauna, [1, 0, 0]);
         let v = &got.lineages[Founder::Blind.index()];
-        assert!(v.components[0].food.stock >= LITTER_ORGANIC - 1e-12, "{got:?}");
+        assert!(v.components[0].food.stock >= founding.starter_litter_organic - 1e-12, "{got:?}");
         assert!(!v.accepted && !got.accepted, "litter with no producer: {got:?}");
         plant(&mut bare, &world, 12, 2, Species::Springturf, 0.8);
         let got = accept(&world, &bare, &fauna, [1, 0, 0]);
@@ -2515,7 +2508,7 @@ mod tests {
         );
     }
 
-    /// Founders arrive grown with half a reserve ([`FOUNDER_ARRIVAL`]): at the shipped
+    /// Founders arrive grown with half a reserve ([`founder_arrival`]): at the shipped
     /// mass a half-grown, empty founder starved on the terrarium before it had settled
     /// (x30, 60 min: 5-7 of 8 browsers dead by minute 30), and a full one would have no
     /// appetite. Half a reserve is hunger 0.5, awake by day or night.
@@ -2534,7 +2527,8 @@ mod tests {
                 "{founder:?}: half a reserve"
             );
         }
-        assert_eq!(FOUNDER_ARRIVAL.body, 1.0);
-        assert_eq!(FOUNDER_ARRIVAL.reserve, 0.5);
+        let arrival = founder_arrival(&cubarium_voxel_fauna::FoundingConfig::default());
+        assert_eq!(arrival.body, 1.0);
+        assert_eq!(arrival.reserve, 0.5);
     }
 }
