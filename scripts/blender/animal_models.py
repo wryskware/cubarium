@@ -300,10 +300,9 @@ def chorister():
 
     def leg_zone(f, s, p):
         return 0 if f < 0.4 else 1
-    legs = [  # (x, y, z, r) from hip to the ankle; then the paw. The middle pair sits halfway
-        # between the front and rear pairs, at the hip and at the foot (Wrysk 2026-10-01)
+    legs = [  # (x, y, z, r) from hip to the ankle; then the paw
         [(0.40, 0.08, 0.44, 0.085), (0.56, 0.14, 0.22, 0.045), (0.68, 0.15, 0.05, 0.032)],
-        [(-0.05, 0.09, 0.40, 0.085), (0.015, 0.15, 0.2, 0.045), (0.015, 0.16, 0.06, 0.032)],
+        [(0.14, 0.09, 0.40, 0.085), (0.205, 0.15, 0.2, 0.045), (0.205, 0.16, 0.06, 0.032)],
         [(-0.50, 0.08, 0.40, 0.1), (-0.36, 0.14, 0.23, 0.055), (-0.66, 0.15, 0.07, 0.032)],
     ]
     for leg in legs:
