@@ -48,16 +48,12 @@ const SETTLE_CAP: u32 = 600;
 /// chain, short enough to cost nothing anybody waits for.
 const STREAM_WATCH_TICKS: u32 = 200;
 
-/// Mixed starting sizes establish low growth, middle-height clumps and occasional
-/// canopy anchors. These are actual wood stores, not cosmetic scale multipliers.
-const FOUNDER_FRACTIONS: [f64; 5] = [0.30, 0.42, 0.55, 0.70, 0.85];
-
-/// Dead wood laid under each glowcap: twice the fungus's `establish_substrate_min`, enough
-/// for one grove to establish and spread along its log.
-const LOG_ORGANIC: f64 = 0.4;
-
-/// The five producers, how many founders per **square metre of habitat they can actually
-/// live in**, the size of one colony, and the cap a world puts on any one species.
+/// The five producers in **placement order**. How many founders each gets per **square
+/// metre of habitat it can actually live in**, the size of one colony and the cap a world
+/// puts on it are the species' own `founder_per_m2`, `founder_colony` and `founder_cap`
+/// ([`SpeciesConfig`]); a founder's starting wood, the dead wood under a glowcap, the
+/// patch spacing and the canopy-shade proxy are `FloraConfig::founder_*`. All are knobs
+/// in the plant registry (`flora.*`); this is only the order, which is structure.
 ///
 /// The rates are the stage-1 scene's own counts read off the ring they were chosen on --
 /// 128 x 24 at 0.25 m is 192 m² -- so a `default` ring looks as it did while a wider one
@@ -71,29 +67,16 @@ const LOG_ORGANIC: f64 = 0.4;
 /// standing-water gate finds (a dense rate over a narrow habitat: a reed bed), the
 /// lanternberry in small groups. Their rates and caps are placeholders
 /// (`design/backlog.md` §1).
-const PRODUCERS: [(Species, f64, usize, usize); 8] = [
-    (Species::Vaulttree, 0.1, 1, 12),
-    (Species::Bloomcrown, 0.25, 3, 64),
-    (Species::Umbrellafrond, 0.15, 3, 40),
-    (Species::Siphonreed, 4.0, 6, 64),
-    (Species::Springturf, 0.6, 6, 160),
-    (Species::Velvetpad, 0.4, 6, 120),
-    (Species::Stonecushion, 0.2, 3, 64),
-    (Species::Lanternberry, 0.25, 3, 40),
+const PRODUCERS: [Species; 8] = [
+    Species::Vaulttree,
+    Species::Bloomcrown,
+    Species::Umbrellafrond,
+    Species::Siphonreed,
+    Species::Springturf,
+    Species::Velvetpad,
+    Species::Stonecushion,
+    Species::Lanternberry,
 ];
-
-/// The decomposer grove, on the same terms.
-const GLOWCAPS: (f64, usize, usize) = (0.15, 3, 40);
-
-/// Least distance between two patch centres, metres. Colonies grow out from their own
-/// anchor, so this is what keeps gaps and transition zones between them.
-const PATCH_SPACING_M: f64 = 1.5;
-
-/// How much of a site's sky a crown standing over it takes away. A **placement** proxy
-/// and not the light model: the flora layer computes real shading every tick, and what
-/// this does is stop the seeder from planting a second founder in a spot the first one
-/// has just put in shade (plan §5: "recheck light suitability as canopies are placed").
-const CANOPY_SHADE: f64 = 0.6;
 
 /// The height a body steps between neighbouring support faces, metres — the same bound
 /// `cubarium_voxel::walk::around_the_ring` asks the generator to keep, so a colony grows
@@ -541,7 +524,12 @@ pub fn seed_pre_rolled(
     };
     let area = world.config().cell_area();
     let rise = (STEP_M / world.config().voxel_m).floor().max(1.0) as u32;
-    let spacing = (PATCH_SPACING_M / world.config().voxel_m).round().max(1.0) as u32;
+    let founding = flora.config().clone();
+    let spacing = (founding.founder_patch_spacing_m / world.config().voxel_m)
+        .round()
+        .max(1.0) as u32;
+    let fractions = founding.founder_wood_fractions;
+    let log_organic = founding.founder_log_organic;
     let width = world.config().width;
     let voxel_m = world.config().voxel_m;
     let mut taken: Vec<Site> = Vec::new();
@@ -552,8 +540,13 @@ pub fn seed_pre_rolled(
     // plus its adult-upkeep check — a seed gate alone does not establish that a founder
     // can keep itself standing — and the terrain-sector proxy only decides which species
     // *prefers* a site it is already allowed to live on.
-    for (species, per_m2, patch_size, cap) in PRODUCERS {
+    for species in PRODUCERS {
         let sc = flora.config().species(species).clone();
+        let (per_m2, patch_size, cap) = (
+            sc.founder_per_m2,
+            sc.founder_colony as usize,
+            sc.founder_cap as usize,
+        );
         let mut pool: Vec<Site> = Vec::new();
         {
             let view = world.view();
@@ -595,7 +588,7 @@ pub fn seed_pre_rolled(
             if sky[k] < sc.establish_light_min || adult_light_cover(&sc, sky[k]) < 1.0 {
                 continue;
             }
-            let wood = FOUNDER_FRACTIONS[i % FOUNDER_FRACTIONS.len()] * wood_max;
+            let wood = fractions[i % fractions.len()] * wood_max;
             if flora.apply(
                 world,
                 FloraCommand::SeedOnFace {
@@ -607,7 +600,7 @@ pub fn seed_pre_rolled(
                 taken.push(site);
                 seeded.stands += 1;
                 seeded.stands_by_species[species.index()] += 1;
-                shade_under(sites, &mut sky, site, &sc, wood, width, voxel_m);
+                shade_under(sites, &mut sky, site, &sc, wood, width, voxel_m, founding.founder_canopy_shade);
             }
         }
     }
@@ -626,7 +619,7 @@ pub fn seed_pre_rolled(
             }
             // The substrate is the log this seeder is about to lay, so the gate is asked
             // with it in hand; everything else is read off the world as it stands.
-            let gates = establishment_gates_with_sky(&view, *site, &sc, sky[i], LOG_ORGANIC, 0.0);
+            let gates = establishment_gates_with_sky(&view, *site, &sc, sky[i], log_organic, 0.0);
             if gates.passes()
                 && view.material_at(i64::from(site.x), site.y, site.z) == Material::Soil
             {
@@ -637,7 +630,11 @@ pub fn seed_pre_rolled(
             }
         }
     }
-    let (per_m2, patch_size, cap) = GLOWCAPS;
+    let (per_m2, patch_size, cap) = (
+        sc.founder_per_m2,
+        sc.founder_colony as usize,
+        sc.founder_cap as usize,
+    );
     let want = ((pool.len() as f64 * area * per_m2).round() as usize)
         .min(cap)
         .min(pool.len());
@@ -649,15 +646,15 @@ pub fn seed_pre_rolled(
             site,
             Deposit {
                 kind: DepositKind::DeadWood,
-                organic: LOG_ORGANIC,
-                mineral: sc.n_tissue * LOG_ORGANIC,
-                energy: sc.energy_density * LOG_ORGANIC,
+                organic: log_organic,
+                mineral: sc.n_tissue * log_organic,
+                energy: sc.energy_density * log_organic,
             },
         ) {
             continue;
         }
         seeded.logs += 1;
-        let wood = FOUNDER_FRACTIONS[i % FOUNDER_FRACTIONS.len()] * sc.wood_max;
+        let wood = fractions[i % fractions.len()] * sc.wood_max;
         if flora.apply(
             world,
             FloraCommand::SeedOnFace {
@@ -1377,7 +1374,13 @@ fn prefers(view: &VoxelView<'_>, site: Site, highest_y: u32) -> Species {
     }
 }
 
-/// Take the sky away from every site a new crown stands over. See [`CANOPY_SHADE`].
+/// Take `shade` of the sky away from every site a new crown stands over: how much of a
+/// site's sky a crown over it removes is `FloraConfig::founder_canopy_shade`. A
+/// **placement** proxy and not the light model: the flora layer computes real shading
+/// every tick, and what this does is stop the seeder from planting a second founder in a
+/// spot the first one has just put in shade (plan §5: "recheck light suitability as
+/// canopies are placed").
+#[allow(clippy::too_many_arguments)]
 fn shade_under(
     sites: &[Site],
     sky: &mut [f64],
@@ -1386,6 +1389,7 @@ fn shade_under(
     wood: f64,
     width: u32,
     voxel_m: f64,
+    shade: f64,
 ) {
     let radius = sc.crown_radius(wood, voxel_m).max(0.0);
     let top = at.y + sc.crown_voxels(wood, voxel_m);
@@ -1396,7 +1400,7 @@ fn shade_under(
         let dx = f64::from(wrapped(s.x, at.x, width));
         let dz = f64::from(s.z.abs_diff(at.z));
         if dx * dx + dz * dz <= radius * radius {
-            sky[i] *= 1.0 - CANOPY_SHADE;
+            sky[i] *= 1.0 - shade;
         }
     }
 }
