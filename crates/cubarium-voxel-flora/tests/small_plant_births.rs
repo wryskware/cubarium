@@ -912,8 +912,6 @@ fn every_preset_validates_and_a_broken_clone_does_not() {
     );
     for species in Species::ALL {
         let sc = config.species(species);
-        sc.validate(species.name())
-            .unwrap_or_else(|e| panic!("a shipped preset is invalid: {e}"));
         // The two properties the validator exists for, stated on every preset: a split that
         // conserves organic matter, and a package that builds a stand which is alive.
         let [w, p, q] = sc.propagule_split;

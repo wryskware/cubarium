@@ -724,10 +724,6 @@ fn a_dead_wood_deposit_joins_the_pool_and_decomposes_at_the_wood_rate() {
 fn validate_covers_the_three_new_fields() {
     let config = config();
     config.validate().expect("the shipped config");
-    config
-        .glowcap
-        .validate("glowcap")
-        .expect("the shipped glowcap");
     assert_eq!(config.glowcap.trophic, Trophic::Saprotroph);
     for species in Species::ALL {
         let sc = config.species(species);

@@ -51,6 +51,10 @@ pub fn coverage<T: Serialize>(reg: &Registry, cfgs: &[&T]) {
     let mut leaves = Vec::new();
     for cfg in cfgs {
         leaves.extend(registered_leaves(reg, *cfg));
+        // serde_json writes an infinity as null, so the TOML walk's leaves are added: a
+        // stage threshold of `inf` is still a number that needs a row.
+        let tree = cubarium_voxel::registry::to_value(*cfg).expect("toml");
+        leaves.extend(reg.numeric_leaves(&tree));
     }
     for (path, _) in &leaves {
         if reg.row_for(path).is_none() {

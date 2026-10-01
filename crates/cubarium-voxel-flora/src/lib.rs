@@ -2059,261 +2059,6 @@ impl SpeciesConfig {
             ..SpeciesConfig::v1_base()
         }
     }
-
-    /// Whether this preset can produce a living stand at all, checked where the numbers
-    /// enter the system rather than where they first go wrong: a finite nonnegative split
-    /// summing to one, a positive wood fraction, `alive_min <= wood_max`, and finite rates.
-    ///
-    /// `name` is only for the message. The checks are the ones a *silent* failure would
-    /// otherwise produce: a split that does not sum to one moves organic matter into or out
-    /// of the system at every germination; a zero `w_frac` makes
-    /// [`crate::SpeciesConfig::propagule_rate`]'s package size infinite, so the species can
-    /// never germinate and never says why; `alive_min > wood_max` makes every newborn die
-    /// on its first growth tick; a non-finite rate turns one stand's stocks into `NaN` and
-    /// then the whole ledger.
-    ///
-    /// It is deliberately **not** a plausibility check. Nothing here says a rate is a good
-    /// one, and nothing here refuses a preset that starves: `design/backlog.md` §1 lists
-    /// the values that are known to be wrong, and a validator that refused them would be a
-    /// tuning rule wearing a validator's clothes.
-    pub fn validate(&self, name: &str) -> Result<(), String> {
-        let fail = |what: &str| Err(format!("{name}: {what}"));
-
-        // The anatomy, before anything else reads it: a stand's layer stocks are binned
-        // against this the moment it is created, so a malformed profile is a world that
-        // cannot conserve its own foliage rather than a number that looks odd later.
-        if self.profile.is_empty() {
-            return fail("profile is empty: every species states its anatomy");
-        }
-        let mut previous = 0.0f64;
-        for (i, stage) in self.profile.iter().enumerate() {
-            if !(stage.wood_fraction_max >= previous) {
-                return fail(&format!(
-                    "profile stage {i} threshold {} is below stage {}'s {previous}: the stages                      are read in order",
-                    stage.wood_fraction_max,
-                    i.saturating_sub(1)
-                ));
-            }
-            previous = stage.wood_fraction_max;
-            if stage.layers.is_empty() {
-                return fail(&format!("profile stage {i} has no layers"));
-            }
-            if stage.foliage_layer_count() > MAX_FOLIAGE_LAYERS {
-                return fail(&format!(
-                    "profile stage {i} has {} foliage layers, over the {MAX_FOLIAGE_LAYERS} a                      stand can hold stocks for",
-                    stage.foliage_layer_count()
-                ));
-            }
-            let mut share = 0.0;
-            for (j, layer) in stage.layers.iter().enumerate() {
-                let [lo, hi] = layer.band;
-                if !(lo.is_finite() && hi.is_finite() && lo >= 0.0 && hi <= 1.0 && hi > lo) {
-                    return fail(&format!(
-                        "profile stage {i} layer {j} band {:?} is not a rising interval inside                          [0, 1] of the crown height",
-                        layer.band
-                    ));
-                }
-                if !(layer.radius.is_finite() && layer.radius > 0.0 && layer.radius <= 1.0) {
-                    return fail(&format!(
-                        "profile stage {i} layer {j} radius is {}, not a fraction of the crown                          radius in (0, 1]",
-                        layer.radius
-                    ));
-                }
-                if !(layer.porosity.is_finite() && (0.0..=1.0).contains(&layer.porosity)) {
-                    return fail(&format!(
-                        "profile stage {i} layer {j} porosity is {}, not in [0, 1]",
-                        layer.porosity
-                    ));
-                }
-                if layer.kind.bears_foliage() {
-                    if !(layer.share.is_finite() && layer.share >= 0.0) {
-                        return fail(&format!(
-                            "profile stage {i} layer {j} share is {}, not finite and \
-                             nonnegative",
-                            layer.share
-                        ));
-                    }
-                    share += layer.share;
-                } else if layer.share != 0.0 {
-                    return fail(&format!(
-                        "profile stage {i} layer {j} is a trunk holding a share of {}: structure                          is not foliage",
-                        layer.share
-                    ));
-                }
-            }
-            if (share - 1.0).abs() > 1e-12 {
-                return fail(&format!(
-                    "profile stage {i} foliage shares sum to {share}, not one: a stand's layers                      would not sum to its foliage"
-                ));
-            }
-            if let Some(cap) = stage.height_m_max {
-                if !(cap.is_finite() && cap > 0.0) {
-                    return fail(&format!(
-                        "profile stage {i} height_m_max is {cap}, not finite and positive"
-                    ));
-                }
-            }
-        }
-        if !(self
-            .profile
-            .last()
-            .expect("a non-empty profile")
-            .wood_fraction_max
-            >= 1.0)
-        {
-            return fail("the last profile stage must catch a full-grown stand (threshold >= 1)");
-        }
-
-        let [w_frac, p_frac, q_frac] = self.propagule_split;
-        for (label, v) in [("w_frac", w_frac), ("p_frac", p_frac), ("q_frac", q_frac)] {
-            if !v.is_finite() || v < 0.0 {
-                return fail(&format!(
-                    "propagule_split {label} is {v}, not finite and nonnegative"
-                ));
-            }
-        }
-        let sum = w_frac + p_frac + q_frac;
-        if (sum - 1.0).abs() > 1e-12 {
-            return fail(&format!(
-                "propagule_split {:?} sums to {sum}, not one — a germination would create or \
-                 destroy organic matter",
-                self.propagule_split
-            ));
-        }
-        if !(w_frac > 0.0) {
-            return fail(&format!(
-                "propagule_split w_frac is {w_frac}: a species that puts nothing into wood has \
-                 no package size and can never germinate"
-            ));
-        }
-        if !(self.wood_max > 0.0 && self.wood_max.is_finite()) {
-            return fail(&format!(
-                "wood_max is {}, not finite and positive",
-                self.wood_max
-            ));
-        }
-        if !(self.alive_min.is_finite() && self.alive_min >= 0.0) {
-            return fail(&format!(
-                "alive_min is {}, not finite and nonnegative",
-                self.alive_min
-            ));
-        }
-        if self.alive_min > self.wood_max {
-            return fail(&format!(
-                "alive_min {} is over wood_max {}: every newborn would die on its first growth \
-                 tick",
-                self.alive_min, self.wood_max
-            ));
-        }
-
-        // A yield over one would build more tissue than the substrate it came out of held,
-        // which creates organic matter inside the system with no boundary flow to name it.
-        // Checked as a bound and not as a rate because it is a fraction, and checked for
-        // every species — the field is inert on a `Photo` preset, and a wrong value there
-        // is still a wrong value waiting for a `trophic` switch.
-        if !(self.substrate_yield.is_finite()
-            && self.substrate_yield >= 0.0
-            && self.substrate_yield <= 1.0)
-        {
-            return fail(&format!(
-                "substrate_yield is {}, not a fraction in 0..=1 — a yield over one would \
-                 build tissue out of nothing",
-                self.substrate_yield
-            ));
-        }
-
-        // Every scalar the tick multiplies a stock by. A `NaN` or an infinity in any of
-        // them reaches the ledger within one step, and none of them has a meaning below
-        // zero — a negative rate would run a flow backwards past its own `min` guard.
-        let rates: [(&str, f64); 28] = [
-            ("substrate_uptake_per_s", self.substrate_uptake_per_s),
-            ("establish_substrate_min", self.establish_substrate_min),
-            ("alpha", self.alpha),
-            ("reserve_cap", self.reserve_cap),
-            ("maintenance", self.maintenance),
-            ("senescence", self.senescence),
-            ("foliage_rate", self.foliage_rate),
-            ("wood_rate", self.wood_rate),
-            ("build", self.build),
-            ("dieback", self.dieback),
-            ("donor_min", self.donor_min),
-            ("donor_reserve_floor", self.donor_reserve_floor),
-            ("propagule_rate", self.propagule_rate),
-            ("energy_density", self.energy_density),
-            ("seed_attrition_per_s", self.seed_attrition_per_s),
-            ("seed_max_age_s", self.seed_max_age_s),
-            ("n_tissue", self.n_tissue),
-            ("reserve_share", self.reserve_share),
-            ("reflush_below", self.reflush_below),
-            ("assimilation", self.assimilation),
-            ("nutrient_half", self.nutrient_half),
-            ("nutrient_draw_max", self.nutrient_draw_max),
-            ("light_half", self.light_half),
-            ("transpiration_m3_per_s", self.transpiration_m3_per_s),
-            ("stress_rate_per_s", self.stress_rate_per_s),
-            ("relax_rate_per_s", self.relax_rate_per_s),
-            ("drown_depth_m", self.drown_depth_m),
-            ("water_depth_min_m", self.water_depth_min_m),
-        ];
-        for (label, v) in rates {
-            if !v.is_finite() || v < 0.0 {
-                return fail(&format!("{label} is {v}, not finite and nonnegative"));
-            }
-        }
-        // A share of the packages, so a probability.
-        if !(0.0..=1.0).contains(&self.clonal_share) {
-            return fail(&format!(
-                "clonal_share is {}, not a share in 0..=1",
-                self.clonal_share
-            ));
-        }
-        // A chance per check, so a probability too.
-        if !(0.0..=1.0).contains(&self.overtop_per_check) {
-            return fail(&format!(
-                "overtop_per_check is {}, not a chance in 0..=1",
-                self.overtop_per_check
-            ));
-        }
-        if self.seed_mass == 0 {
-            return fail("seed_mass is 0: a seed is at least one minimum package");
-        }
-        if self.spore_tries == 0 {
-            return fail("spore_tries is 0: a spore rain tries at least one face");
-        }
-        // The water and aeration thresholds and the crown geometry: fractions and lengths,
-        // read as bounds rather than multiplied by a stock, so only finiteness is checked.
-        let bounds: [(&str, f64); 7] = [
-            ("wilt_water", self.wilt_water),
-            ("full_water", self.full_water),
-            ("establish_water_min", self.establish_water_min),
-            ("establish_light_min", self.establish_light_min),
-            ("saturated_pore", self.saturated_pore),
-            ("establish_saturated_max", self.establish_saturated_max),
-            ("alive_min", self.alive_min),
-        ];
-        for (label, v) in bounds {
-            if !v.is_finite() {
-                return fail(&format!("{label} is {v}, not finite"));
-            }
-        }
-        for (label, pair) in [
-            ("crown_height_m", self.crown_height_m),
-            ("crown_radius_m", self.crown_radius_m),
-        ] {
-            if !pair.iter().all(|v| v.is_finite() && *v >= 0.0) {
-                return fail(&format!("{label} is {pair:?}, not finite and nonnegative"));
-            }
-        }
-        // A refuge is a share of the foliage: zero is no refuge, and one would be a plant
-        // no mouth could ever take anything from.
-        if !(self.graze_refuge >= 0.0 && self.graze_refuge < 1.0) {
-            return fail(&format!(
-                "graze_refuge is {}, not a fraction in [0, 1)",
-                self.graze_refuge
-            ));
-        }
-        Ok(())
-    }
 }
 
 impl Default for SpeciesConfig {
@@ -2480,36 +2225,32 @@ impl FloraConfig {
     /// historical defaults, as do invalid sizes (which the world config rejects at its
     /// own input boundary).
     pub fn for_voxel_size(voxel_m: f64) -> FloraConfig {
-        const REFERENCE_VOXEL_M: f64 = 0.25;
+        FloraConfig::default().rescaled_to(voxel_m)
+    }
 
-        let mut config = FloraConfig::default();
+    /// This config, authored on the reference 0.25 m voxel, expressed for `voxel_m`: the
+    /// cell size recorded, and on a finer grid every row the parameter registry tags with
+    /// a voxel scale multiplied by it ([`registry`]: each species' root box, mycelium
+    /// reach and hop by `0.25 / voxel_m`, rounded and never below one voxel; the
+    /// latticevine's per-face amounts by the face's area against the reference face's).
+    /// Reference-sized and coarser grids keep the authored geometry, as do invalid sizes
+    /// (which the world config rejects at its own input boundary).
+    pub fn rescaled_to(mut self, voxel_m: f64) -> FloraConfig {
+        const REFERENCE_VOXEL_M: f64 = 0.25;
         if !voxel_m.is_finite() || !(voxel_m > 0.0) {
-            return config;
+            return self;
         }
         // The cell size is recorded whatever it is, because a metre rule has to be
         // converted on a coarse grid too; only the authored *voxel* geometry is left
         // alone at or above the reference size.
-        config.voxel_m = voxel_m;
+        self.voxel_m = voxel_m;
         if voxel_m >= REFERENCE_VOXEL_M {
-            return config;
+            return self;
         }
-        let scale = REFERENCE_VOXEL_M / voxel_m;
-        for species in Species::ALL {
-            let sc = config.species_mut(species);
-            sc.rooting_depth = scaled_voxel_distance(sc.rooting_depth, scale);
-            sc.rooting_radius = scaled_voxel_distance(sc.rooting_radius, scale);
-            sc.substrate_reach_up_down = scaled_voxel_distance(sc.substrate_reach_up_down, scale);
-            sc.hop = scaled_voxel_distance(sc.hop, scale);
-            // The crown is in metres and needs no rescale: it is the same
-            // physical plant on every grid.
-        }
-        // The latticevine's root box, like a stand's; and a face is `1 / scale²` of the
-        // reference face's area, so every per-face amount shrinks with it.
-        let vc = &mut config.latticevine;
-        vc.rooting_depth = scaled_voxel_distance(vc.rooting_depth, scale);
-        vc.rooting_radius = scaled_voxel_distance(vc.rooting_radius, scale);
-        vc.scale_face_area(1.0 / (scale * scale));
-        config
+        registry()
+            .rescale(&mut self, REFERENCE_VOXEL_M / voxel_m)
+            .expect("every scale-tagged flora field rescales");
+        self
     }
 
     /// Every species reduced to **one** `[0, 1.0]` foliage layer at the full crown
@@ -2551,7 +2292,7 @@ impl FloraConfig {
                 species,
                 Species::Umbrellafrond | Species::Velvetpad | Species::Glowcap | Species::Siphonreed
             ) {
-                sc.hop = scaled_voxel_distance(1, scale);
+                sc.hop = (scale.round() as u32).max(1);
             }
         }
         self.seed_check_s = DT;
@@ -2640,34 +2381,9 @@ impl FloraConfig {
     /// produce a living stand is refused where it enters rather than as a `NaN` in a ledger
     /// ten thousand ticks later.
     pub fn validate(&self) -> Result<(), String> {
-        for species in Species::ALL {
-            self.species(species).validate(species.name())?;
-        }
-        self.latticevine.validate()?;
-        for (label, v) in [
-            ("shade_k_per_m2", self.shade_k_per_m2),
-            ("decomposition", self.decomposition),
-            ("wood_decomposition", self.wood_decomposition),
-            ("carrion_decomposition", self.carrion_decomposition),
-            ("litter_energy_cap", self.litter_energy_cap),
-            ("initial_mineral", self.initial_mineral),
-            ("seed_check_s", self.seed_check_s),
-        ] {
-            if !v.is_finite() || v < 0.0 {
-                return Err(format!("flora: {label} is {v}, not finite and nonnegative"));
-            }
-        }
-        Ok(())
+        registry().check(self)?;
+        registry::cross_rules(self)
     }
-}
-
-fn scaled_voxel_distance(distance: u32, scale: f64) -> u32 {
-    if distance == 0 {
-        return 0;
-    }
-    (f64::from(distance) * scale)
-        .round()
-        .clamp(1.0, f64::from(u32::MAX)) as u32
 }
 
 #[cfg(test)]
@@ -2712,7 +2428,7 @@ mod voxel_scale_tests {
         // A half-size face is a quarter of the area: every per-face amount is a quarter.
         assert_eq!(va.leaf_mass, vb.leaf_mass / 4.0);
         assert_eq!(va.transpiration_m3_per_s, vb.transpiration_m3_per_s / 4.0);
-        va.scale_face_area(4.0);
+        *va = vb.clone();
         // The recorded cell size is not authored geometry: it is the world's, and it
         // is what a rule written in metres is converted with
         // ([`SpeciesConfig::crown_height`]).

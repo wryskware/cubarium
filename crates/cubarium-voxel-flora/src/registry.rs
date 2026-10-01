@@ -1,11 +1,304 @@
 //! The plant layer's parameter table (`flora.*`, package R1): one row per numeric field of
-//! [`crate::FloraConfig`], mounted per species. The generic code is
-//! [`cubarium_voxel::registry`].
+//! [`crate::FloraConfig`], the [`crate::SpeciesConfig`] rows mounted once per species, the
+//! latticevine's ([`crate::VineConfig`]) and the layer-wide ones. Units, grades, provenance
+//! and search ranges are the audit's `parameters.tsv` where it has a row. The generic
+//! code is [`cubarium_voxel::registry`].
+//!
+//! The **scale tags** are the voxel rescale ([`crate::FloraConfig::rescaled_to`]): each
+//! species' root box, mycelium reach and hop are distances counted in reference voxels
+//! (`Scale::Length`), and the latticevine's per-face amounts follow a face's area
+//! (`Scale::Area`). Everything else is a rate, a fraction or metres and stays.
 
-use cubarium_voxel::registry::Registry;
+use cubarium_voxel::registry::{Alias, Range, Registry, Row, Scale};
+
+use crate::{FloraConfig, MAX_FOLIAGE_LAYERS, Species, SpeciesConfig, VineConfig};
 
 /// The plant layer's table.
 pub fn registry() -> &'static Registry {
     static TABLE: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| Registry::new("flora", Vec::new(), Vec::new(), Vec::new()))
+    TABLE.get_or_init(|| {
+        Registry::new(
+            "flora",
+            rows(),
+            vec![Alias {
+                pattern: "flora.*.propagule_split".into(),
+                names: vec!["w_frac", "p_frac", "q_frac"],
+            }],
+            Vec::new(),
+        )
+    })
+}
+
+fn r(path: &str, unit: &'static str, range: Range, what: &'static str) -> Row {
+    Row::new(path.to_string(), unit, range, what)
+}
+
+/// [`SpeciesConfig`]'s rows, relative to `flora.<species>`.
+fn species_rows() -> Vec<Row> {
+    let nonneg = Range::nonneg();
+    let fraction = Range::fraction();
+    // Read only as bounds by the old validator, which asked of them only finiteness.
+    let finite = Range::any();
+    vec![
+        r("substrate_uptake_per_s", "organic/s per unit mycelium", nonneg, "saprotroph: dead wood and litter withdrawn")
+            .evolve().log().grade("C"),
+        r("substrate_yield", "fraction", fraction, "saprotroph: share of the substrate taken that becomes tissue")
+            .search(0.2, 0.7).grade("A"),
+        r("establish_substrate_min", "org-units", nonneg, "saprotroph: substrate a spore cohort needs in its box").grade("C"),
+        r("substrate_reach_up_down", "reference voxels (0.25 m)", nonneg, "saprotroph: the mycelium box's vertical reach")
+            .scale(Scale::Length).evolve().grade("C"),
+        r("alpha", "foliage per unit wood", nonneg, "foliage cap P_cap = alpha * W").search(0.05, 3.0).log().grade("D"),
+        r("wood_max", "org-units", Range::positive(), "the most living wood one stand holds").evolve().log().grade("D"),
+        r("reserve_cap", "reserve per unit wood", nonneg, "Q_max = q_cap * W").search(0.1, 2.0).log().grade("B"),
+        r("maintenance", "/s per unit wood", nonneg, "wood upkeep m_w").evolve().log().grade("B"),
+        r("senescence", "/s of foliage", nonneg, "leaf fall m_p, to litter").evolve().log().grade("B"),
+        r("foliage_rate", "organic/s per unit wood", nonneg, "foliage regrowth cap r_p").evolve().log().grade("D"),
+        r("wood_rate", "/s per unit wood", nonneg, "wood growth cap r_w").evolve().log().grade("C"),
+        r("build", "fraction", nonneg, "construction respiration c_g: a unit built costs 1 + c_g")
+            .search(0.1, 0.5).log().grade("A"),
+        r("dieback", "wood per unit unpaid upkeep", nonneg, "kappa: wood lost per unit maintenance not paid")
+            .search(0.3, 3.0).log().grade("C"),
+        r("alive_min", "org-units", nonneg, "W_min: a stand with less wood dies").evolve().grade("C"),
+        r("donor_min", "org-units of wood", nonneg, "wood needed before sending propagules").grade("C"),
+        r("donor_reserve_floor", "fraction of Q_max", nonneg, "reserve a donor keeps back").search(0.0, 0.9).grade("C"),
+        r("propagule_rate", "organic/s gross", nonneg, "reserve set aside for seed per second").evolve().log().grade("D"),
+        r("propagule_split.*", "fraction", nonneg, "how a landed package splits into wood, foliage and reserve (sums to 1)")
+            .search(0.1, 0.8).grade("C"),
+        r("energy_density", "energy per org-unit", nonneg, "e_v of plant tissue").grade("D"),
+        r("seed_attrition_per_s", "/s", nonneg, "a banked seed's death rate").grade("C").prov("derived"),
+        r("seed_max_age_s", "s", nonneg, "dormancy: a bin older than this falls to litter").evolve().log().grade("B"),
+        r("seed_cohorts_max", "bins", Range::at_least(1.0), "the bank's age resolution").grade("N").prov("numerics"),
+        r("n_tissue", "mineral per org-unit", nonneg, "stoichiometry of built tissue").search(0.005, 0.05).log().grade("B"),
+        r("reserve_share", "fraction", nonneg, "share of a tick's surplus to the reserve first").search(0.0, 0.6).grade("C"),
+        r("reflush_below", "fraction of P_cap", nonneg, "reserve funds foliage only below this").search(0.0, 1.0).grade("C"),
+        r("assimilation", "organic/s per unit foliage", nonneg, "g: gross fixation at full light and moisture")
+            .evolve().log().grade("B"),
+        r("nutrient_half", "mineral units", nonneg, "K_N: mineral half-saturation").search(0.1, 2.0).log().grade("C"),
+        r("nutrient_draw_max", "/s per unit site mineral", nonneg, "f_max: rate cap on income from the site's mineral")
+            .search(0.003, 0.1).log().grade("D"),
+        r("light_half", "fraction of open sky", nonneg, "light response half-saturation").search(0.05, 1.5).grade("B"),
+        r("rooting_depth", "reference voxels (0.25 m)", nonneg, "root box depth below the support")
+            .scale(Scale::Length).evolve().grade("C"),
+        r("rooting_radius", "reference voxels (0.25 m)", nonneg, "root box half-width")
+            .scale(Scale::Length).grade("C"),
+        r("wilt_water", "available water (0 wp, 1 fc)", finite, "mu = 0 at and below").evolve().grade("B").prov("measured"),
+        r("full_water", "available water", finite, "mu = 1 at and above").evolve().grade("B").prov("measured"),
+        r("transpiration_m3_per_s", "m3/s per unit foliage at mu = 1", nonneg, "water drawn from the root box")
+            .grade("D").prov("measured"),
+        r("establish_water_min", "available water", finite, "germination moisture gate").evolve().grade("B"),
+        r("establish_light_min", "sky visibility", finite, "germination light gate").evolve().grade("C"),
+        r("saturated_pore", "pore fraction of capacity", finite, "a root voxel at or above this is saturated")
+            .search(0.8, 1.0).grade("B"),
+        r("stress_rate_per_s", "/s fraction of gap", nonneg, "aeration stress rise").search(0.001, 0.2).log().grade("D"),
+        r("relax_rate_per_s", "/s fraction of gap", nonneg, "aeration stress recovery").evolve().grade("B"),
+        r("establish_saturated_max", "fraction of root box saturated", finite, "germination ceiling and adult stress onset")
+            .evolve().grade("C"),
+        r("drown_depth_m", "m of water", nonneg, "standing water over the support that kills the stand")
+            .evolve().grade("D").prov("tuned"),
+        r("water_depth_min_m", "m of settled standing water", nonneg, "needed on or beside the site").evolve().grade("B"),
+        r("hop", "reference voxels (0.25 m)", nonneg, "dispersal radius / wind kernel scale")
+            .scale(Scale::Length).evolve().log().grade("D"),
+        r("clonal_share", "fraction of packages", fraction, "runner/rhizome share").search(0.0, 1.0).grade("C").prov("tuned"),
+        r("spore_tries", "tries", Range::at_least(1.0), "a spore package's landing attempts").evolve().grade("C").prov("tuned"),
+        r("seed_mass", "minimum packages", Range::at_least(1.0), "seed size and lottery weight").evolve().grade("D"),
+        r("overtop_per_check", "probability per check", fraction, "a woody seedling comes up through a ground cover")
+            .evolve().grade("C").prov("tuned"),
+        r("crown_height_m.*", "m", nonneg, "crown top above the support [min, max]").evolve().grade("B"),
+        r("crown_radius_m.*", "m", nonneg, "crown half-width [min, max]").evolve().grade("B"),
+        r("graze_refuge", "fraction of each layer's capacity", Range::closed(0.0, 1.0).open_hi(), "foliage no bite can take")
+            .search(0.0, 0.6).grade("B"),
+        r("defence_per_bite", "fraction toward 1 per bite", fraction, "induced defence rise")
+            .evolve().log().grade("D").prov("measured"),
+        r("defence_half_life_s", "s (<= 0: no decay)", finite, "induced defence half-life once grazing stops")
+            .evolve().log().grade("D"),
+        r("profile.*.wood_fraction_max", "fraction of wood_max (inf: the last stage)", Range::nonneg_or_inf(), "a stage applies up to this wood fraction")
+            .evolve().grade("C"),
+        r("profile.*.height_m_max", "m", Range::positive(), "a stage's crown-height ceiling (a capped seedling)")
+            .optional().evolve().grade("B"),
+        r("profile.*.layers.*.band.*", "fraction of crown height", Range::fraction(), "a layer's band [bottom, top]")
+            .evolve().grade("C"),
+        r("profile.*.layers.*.radius", "fraction of crown radius", Range::closed(0.0, 1.0).open_lo(), "a layer's radius")
+            .grade("C"),
+        r("profile.*.layers.*.share", "fraction of the stage's foliage", nonneg, "a foliage layer's share (a trunk's is 0)")
+            .evolve().grade("C"),
+        r("profile.*.layers.*.porosity", "fraction transmitted", Range::fraction(), "light a layer lets through")
+            .evolve().grade("C"),
+    ]
+}
+
+/// [`VineConfig`]'s rows, relative to `flora.latticevine`.
+fn vine_rows() -> Vec<Row> {
+    let nonneg = Range::nonneg();
+    let positive = Range::positive();
+    let area = Scale::Area;
+    vec![
+        r("rooting_depth", "reference voxels (0.25 m)", nonneg, "root box depth").scale(Scale::Length).evolve().grade("C"),
+        r("rooting_radius", "reference voxels (0.25 m)", nonneg, "root box radius").scale(Scale::Length).evolve().grade("C"),
+        r("transpiration_m3_per_s", "m3/s per reference face", nonneg, "water per full face").scale(area).grade("D").prov("derived"),
+        r("wilt_water", "available water", nonneg, "mu = 0 at and below").evolve().grade("B"),
+        r("full_water", "available water", nonneg, "mu = 1 at and above").evolve().grade("B"),
+        r("dry_water", "available water", nonneg, "the root box is dry below").evolve().grade("C"),
+        r("wet_water", "available water", nonneg, "and wet again above").evolve().grade("C"),
+        r("dry_spell_s", "s", nonneg, "dry this long: dormant").evolve().grade("C"),
+        r("wet_spell_s", "s", nonneg, "wet this long: regreens").evolve().grade("C"),
+        r("leaf_fall_s", "s", positive, "a dormant face drops its leaf over this").grade("C"),
+        r("assimilation", "organic/s per reference face", nonneg, "income per full face in full light")
+            .scale(area).evolve().log().grade("C"),
+        r("underside_light", "fraction", nonneg, "light factor on a downward face").evolve().grade("B"),
+        r("leaf_mass", "org-units per reference face", positive, "leaf tissue per full face").scale(area).evolve().grade("C"),
+        r("runner_mass", "org-units per reference face", nonneg, "runner tissue per face").scale(area).evolve().grade("C"),
+        r("leaf_upkeep", "organic/s per reference face", nonneg, "leaf maintenance").scale(area).evolve().grade("B"),
+        r("wood_upkeep", "organic/s per reference face", nonneg, "runner maintenance").scale(area).evolve().grade("B"),
+        r("regrow_rate", "leafiness/s", nonneg, "a face's releafing rate").evolve().grade("B"),
+        r("spread_cost", "org-units per reference face", nonneg, "a new face's cost (at least its runner)")
+            .scale(area).evolve().grade("C"),
+        r("spread_check_s", "s", positive, "how often a vine tries to spread").grade("C"),
+        r("sister_cost", "org-units per reference face", nonneg, "a sister vine's cost").scale(area).evolve().grade("C"),
+        r("sister_min_dist", "faces", nonneg, "a sister roots at least this far along the cover").evolve().grade("C"),
+        r("contest_threshold", "leafiness", Range::fraction(), "a face below this is contestable").evolve().grade("C"),
+        r("contest_check_s", "s", positive, "the contest wheel's period").grade("C"),
+        r("spur_reserve_min", "org-units per reference face", nonneg, "reserve per face before a flowering cycle")
+            .scale(area).evolve().grade("C"),
+        r("spur_window_s", "s", nonneg, "after a shower, a cycle may still start this long").evolve().grade("C"),
+        r("spur_jitter_s", "s", nonneg, "spread of the per-face start delay").grade("C"),
+        r("bud_s", "s", nonneg, "bud phase").evolve().grade("C"),
+        r("flower_s", "s", nonneg, "flower phase").evolve().grade("C"),
+        r("fruit_s", "s", nonneg, "fruit phase").evolve().grade("C"),
+        r("spent_s", "s", nonneg, "spent phase").evolve().grade("C"),
+        r("nectar", "org-units per reference face", nonneg, "a flower's organic matter").scale(area).evolve().grade("C"),
+        r("fruit", "org-units per reference face", nonneg, "a bead bunch's organic matter").scale(area).evolve().grade("C"),
+        r("energy_density", "energy per org-unit", nonneg, "vine tissue energy").grade("D"),
+        r("founders", "vines", nonneg, "founder vines rooted on a fresh world").evolve().grade("C"),
+        r("founder_reserve", "org-units per reference face", nonneg, "each founder's starting reserve")
+            .scale(area).evolve().grade("C"),
+    ]
+}
+
+fn rows() -> Vec<Row> {
+    let mut rows = Vec::new();
+    for s in Species::ALL {
+        let at = format!("flora.{}", s.name());
+        rows.extend(species_rows().into_iter().map(|row| row.under(&at)));
+    }
+    rows.extend(vine_rows().into_iter().map(|row| row.under("flora.latticevine")));
+    let nonneg = Range::nonneg();
+    rows.extend([
+        r("flora.shade_k_per_m2", "m2 per org-unit", nonneg, "canopy attenuation per square metre").evolve().log().grade("D").prov("derived"),
+        r("flora.decomposition", "/s", nonneg, "k_d: litter decomposition").evolve().log().grade("B"),
+        r("flora.wood_decomposition", "/s", nonneg, "k_w: dead-wood decomposition").evolve().log().grade("C"),
+        r("flora.carrion_decomposition", "/s", nonneg, "k_c: carrion decomposition").evolve().log().grade("A"),
+        r("flora.litter_energy_cap", "energy per org-unit", nonneg, "retained energy cap per unit of litter").grade("C"),
+        r("flora.initial_mineral", "mineral per site", nonneg, "mineral a site is provisioned with").evolve().log().grade("D"),
+        r("flora.seed_check_s", "s", nonneg, "how often a banked site is tested").grade("N").prov("numerics"),
+        r("flora.voxel_m", "m", Range::positive(), "the world's cell size, recorded (set from world.voxel_m)").prov("derived"),
+    ]);
+    rows
+}
+
+/// The cross-field rules no single row can state: the anatomy, the propagule split, a
+/// newborn that is alive, the latticevine's water and spread thresholds.
+pub(crate) fn cross_rules(c: &FloraConfig) -> Result<(), String> {
+    for s in Species::ALL {
+        species_rules(&format!("flora.{}", s.name()), c.species(s))?;
+    }
+    vine_rules(&c.latticevine)
+}
+
+fn species_rules(at: &str, sc: &SpeciesConfig) -> Result<(), String> {
+    let fail = |what: String| Err(format!("{at}: {what}"));
+    // The anatomy, before anything else reads it: a stand's layer stocks are binned
+    // against this the moment it is created, so a malformed profile is a world that
+    // cannot conserve its own foliage rather than a number that looks odd later.
+    if sc.profile.is_empty() {
+        return fail("profile is empty: every species states its anatomy".into());
+    }
+    let mut previous = 0.0f64;
+    for (i, stage) in sc.profile.iter().enumerate() {
+        if stage.wood_fraction_max < previous {
+            return fail(format!(
+                "profile stage {i} threshold {} is below stage {}'s {previous}: the stages \
+                 are read in order",
+                stage.wood_fraction_max,
+                i.saturating_sub(1)
+            ));
+        }
+        previous = stage.wood_fraction_max;
+        if stage.layers.is_empty() {
+            return fail(format!("profile stage {i} has no layers"));
+        }
+        if stage.foliage_layer_count() > MAX_FOLIAGE_LAYERS {
+            return fail(format!(
+                "profile stage {i} has {} foliage layers, over the {MAX_FOLIAGE_LAYERS} a \
+                 stand can hold stocks for",
+                stage.foliage_layer_count()
+            ));
+        }
+        let mut share = 0.0;
+        for (j, layer) in stage.layers.iter().enumerate() {
+            let [lo, hi] = layer.band;
+            if hi <= lo {
+                return fail(format!(
+                    "profile stage {i} layer {j} band {:?} is not a rising interval of the \
+                     crown height",
+                    layer.band
+                ));
+            }
+            if layer.kind.bears_foliage() {
+                share += layer.share;
+            } else if layer.share != 0.0 {
+                return fail(format!(
+                    "profile stage {i} layer {j} is a trunk holding a share of {}: structure \
+                     is not foliage",
+                    layer.share
+                ));
+            }
+        }
+        if (share - 1.0).abs() > 1e-12 {
+            return fail(format!(
+                "profile stage {i} foliage shares sum to {share}, not one: a stand's layers \
+                 would not sum to its foliage"
+            ));
+        }
+    }
+    if sc.profile.last().expect("a non-empty profile").wood_fraction_max < 1.0 {
+        return fail("the last profile stage must catch a full-grown stand (threshold >= 1)".into());
+    }
+    let [w_frac, p_frac, q_frac] = sc.propagule_split;
+    let sum = w_frac + p_frac + q_frac;
+    if (sum - 1.0).abs() > 1e-12 {
+        return fail(format!(
+            "propagule_split {:?} sums to {sum}, not one: a germination would create or \
+             destroy organic matter",
+            sc.propagule_split
+        ));
+    }
+    if !(w_frac > 0.0) {
+        return fail(format!(
+            "propagule_split w_frac is {w_frac}: a species that puts nothing into wood has no \
+             package size and can never germinate"
+        ));
+    }
+    if sc.alive_min > sc.wood_max {
+        return fail(format!(
+            "alive_min {} is over wood_max {}: every newborn would die on its first growth tick",
+            sc.alive_min, sc.wood_max
+        ));
+    }
+    Ok(())
+}
+
+fn vine_rules(vc: &VineConfig) -> Result<(), String> {
+    if vc.wet_water <= vc.dry_water {
+        return Err(format!(
+            "flora.latticevine: wet_water {} must be above dry_water {}",
+            vc.wet_water, vc.dry_water
+        ));
+    }
+    if vc.spread_cost < vc.runner_mass {
+        return Err(format!(
+            "flora.latticevine: spread_cost {} cannot pay the runner_mass {} it builds",
+            vc.spread_cost, vc.runner_mass
+        ));
+    }
+    Ok(())
 }
