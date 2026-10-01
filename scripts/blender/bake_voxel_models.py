@@ -71,7 +71,9 @@ PALETTE = ["plum", "violet", "detritus", "lilac", "p0", "p1", "p2", "teal", "mag
            "warm", "starved",
            # the animals' part slots (model pass MP-A; their colours are per animal)
            "a_main", "a_dark", "a_pale", "a_mark", "a_limb", "a_foot", "a_head", "a_eye",
-           "a_glow", "a_membrane", "a_fruit", "a_tendril"]
+           "a_glow", "a_membrane", "a_fruit", "a_tendril",
+           # the lanternjaw's lure orbs (an accent: `animal_models.ACCENTS`)
+           "a_lure"]
 
 # What each builder material is on a plant: trunk, foliage, drape, accent, or None
 # (scenery). Anything unlisted is foliage.
