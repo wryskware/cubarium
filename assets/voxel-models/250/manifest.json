@@ -1004,11 +1004,11 @@
    ]
   },
   "ripple-snail": {
-   "bytes": 53,
+   "bytes": 41,
    "bins": [
     {
      "length_m": 0.19,
-     "cells": 2
+     "cells": 1
     }
    ]
   },
