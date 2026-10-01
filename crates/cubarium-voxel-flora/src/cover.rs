@@ -939,10 +939,6 @@ impl VineConfig {
     }
 }
 
-/// `period` seconds as whole ticks, at least one.
-fn period_ticks(seconds: f64) -> u64 {
-    ((seconds / DT).round() as u64).max(1)
-}
 
 /// The site a face's litter lands on: the first solid under its front voxel, which is a
 /// support face by construction; `fallback` when there is none.
@@ -1334,11 +1330,11 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
     }
 
     // ---- 2. one pass over the faces
-    let window = period_ticks(vc.spur_window_s);
+    let window = cubarium_voxel::ticks_at_least_one(vc.spur_window_s);
     let in_window = cover
         .shower_end_tick
         .is_some_and(|t| tick.saturating_sub(t) <= window);
-    let wheel = period_ticks(vc.contest_check_s);
+    let wheel = cubarium_voxel::ticks_at_least_one(vc.contest_check_s);
     let wheel_slot = tick % wheel;
     let fall = DT / vc.leaf_fall_s;
     let mut litter: Vec<(Site, f64)> = Vec::new();
@@ -1520,7 +1516,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World) {
     flush_litter(config, ground, ledger, &mut litter);
 
     // ---- 5. spread and sisters, for the vines due on the spread wheel
-    let spread_period = period_ticks(vc.spread_check_s);
+    let spread_period = cubarium_voxel::ticks_at_least_one(vc.spread_check_s);
     let due: Vec<VineId> = cover
         .vines
         .iter()

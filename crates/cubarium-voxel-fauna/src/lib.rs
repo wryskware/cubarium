@@ -1076,18 +1076,9 @@ impl Reproduction {
         self.package_cost(sc) + self.surplus_floor
     }
 
-    /// Whole ticks, never below one, for a duration in seconds.
-    fn ticks(seconds: f64) -> u64 {
-        let t = (seconds * f64::from(TICK_HZ)).round();
-        if !t.is_finite() || t < 1.0 {
-            1
-        } else {
-            t as u64
-        }
-    }
 
     pub fn hold_ticks(&self) -> u64 {
-        Reproduction::ticks(self.surplus_hold_s)
+        cubarium_voxel::ticks_at_least_one(self.surplus_hold_s)
     }
 
     /// The ticks in surplus within the last hold that let a body begin:
@@ -1103,15 +1094,15 @@ impl Reproduction {
     }
 
     pub fn gestation_ticks(&self) -> u64 {
-        Reproduction::ticks(self.gestation_s)
+        cubarium_voxel::ticks_at_least_one(self.gestation_s)
     }
 
     pub fn interval_ticks(&self) -> u64 {
-        Reproduction::ticks(self.birth_interval_s)
+        cubarium_voxel::ticks_at_least_one(self.birth_interval_s)
     }
 
     pub fn incubation_ticks(&self) -> u64 {
-        Reproduction::ticks(self.incubation_s)
+        cubarium_voxel::ticks_at_least_one(self.incubation_s)
     }
 
     /// Structural refusals only, in [`SpeciesConfig::validate`]'s shape: finite
@@ -1746,20 +1737,17 @@ pub fn draw_lifespan_ticks(median_s: f64, id: u64, salt: u64, arriving: bool) ->
         return 0;
     }
     let unit = |k: u64| {
-        let mut z = id.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        let z = id.wrapping_mul(0x9E37_79B9_7F4A_7C15)
             ^ salt.rotate_left(29)
             ^ k.wrapping_mul(0xD1B5_4A32_D192_ED03)
             ^ 0x11FE_5BA2_A6ED_0001;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^= z >> 31;
-        (z >> 11) as f64 / (1u64 << 53) as f64
+        cubarium_voxel::unit_from_bits(cubarium_voxel::mix(z))
     };
     let mut span = median_s * (0.8 + 0.4 * unit(1));
     if arriving {
         span *= 0.5 + 0.5 * unit(2);
     }
-    ((span / DT).round() as u64).max(1)
+    cubarium_voxel::ticks_at_least_one(span)
 }
 
 /// The per-body salt a lifespan draw mixes with the id: where and when the body appeared.

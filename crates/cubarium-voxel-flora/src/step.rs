@@ -130,44 +130,7 @@ pub(crate) const DOMAIN_RUNNER: u64 = 8;
 pub(crate) const DOMAIN_ATTRITION: u64 = 9;
 pub(crate) const DOMAIN_OVERTOP: u64 = 10;
 
-/// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
-/// draw rather than seeded from stored state: the same world, the same place and the same
-/// tick always produce the same numbers, and nothing about iteration or storage order can
-/// reach them. No clock and no thread state, like the core generator's own stream.
-pub(crate) struct Rng(u64);
-
-impl Rng {
-    pub(crate) fn keyed(domain: u64, a: u64, b: u64, c: u64) -> Rng {
-        let mut state = 0u64;
-        for part in [domain, a, b, c] {
-            state = mix(state ^ part);
-        }
-        Rng(state)
-    }
-
-    pub(crate) fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        mix(self.0)
-    }
-
-    /// A uniform draw in `[0, 1)`: the top 53 bits, so every value is an exact `f64`.
-    pub(crate) fn unit(&mut self) -> f64 {
-        (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
-    }
-
-    /// A uniform index below `n`, which must be positive. Modulo, whose bias against
-    /// `2^64` is 1e-18 for the handful of candidates anything here draws among.
-    pub(crate) fn below(&mut self, n: usize) -> usize {
-        (self.next_u64() % n as u64) as usize
-    }
-}
-
-/// splitmix64's finalizer: the avalanche that makes neighbouring keys independent.
-pub(crate) fn mix(mut z: u64) -> u64 {
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
+pub(crate) use cubarium_voxel::{KeyedRng as Rng, mix};
 
 pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
     // A plan an overlapped tick left unsettled is applied first, so the ledger still
@@ -2707,7 +2670,7 @@ pub(crate) fn pull_mineral(stand: &mut Stand, before: f64, moved: f64) -> f64 {
     let out = if moved >= before {
         stand.mineral
     } else {
-        (stand.mineral * (moved / before)).min(stand.mineral)
+        cubarium_voxel::pro_rata(stand.mineral, moved, before)
     };
     stand.mineral -= out;
     out
@@ -2732,11 +2695,7 @@ pub(crate) fn die(
     let sc = config.species(stand.species);
     let e_v = sc.energy_density;
     let organic = stand.material();
-    let wood_mineral = if organic > 0.0 {
-        (stand.mineral * (stand.wood / organic)).min(stand.mineral)
-    } else {
-        0.0
-    };
+    let wood_mineral = cubarium_voxel::pro_rata(stand.mineral, stand.wood, organic);
     let wood_energy = e_v * stand.wood;
     let line = if sc.falls {
         fall_line(config, view, stand)

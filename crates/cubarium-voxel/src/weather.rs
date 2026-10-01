@@ -172,14 +172,11 @@ const TAG_STRIKE_COLUMN: u64 = 16;
 
 /// A uniform draw in `[0, 1)` from the weather stream.
 pub(crate) fn draw(seed: u64, key: u64, tag: u64) -> f64 {
-    let mut z = WEATHER_STREAM
+    let z = WEATHER_STREAM
         ^ seed.wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ key.wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
         ^ tag.wrapping_mul(0x1656_67B1_9E37_79F9);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^= z >> 31;
-    (z >> 11) as f64 / (1u64 << 53) as f64
+    crate::unit_from_bits(crate::mix(z))
 }
 
 /// A standard normal draw (Box–Muller over two stream draws).

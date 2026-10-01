@@ -59,6 +59,10 @@ pub mod weather;
 pub mod world;
 pub mod world_table;
 pub use world_table::{expand_landform_preset, world_config_from_file, world_config_from_table};
+/// The keyed splitmix stream, seconds to ticks and the pro-rata share, shared by the
+/// world, plant and animal layers.
+pub mod keyed;
+pub use keyed::{KeyedRng, mix, pro_rata, ticks_at_least_one, unit_from_bits};
 /// The overlapped tick's water lend: a read copy's water swapped in, and back.
 mod lend;
 pub use lend::WaterLend;

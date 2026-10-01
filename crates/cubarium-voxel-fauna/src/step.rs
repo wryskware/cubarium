@@ -103,42 +103,8 @@ enum Respiration {
     Heal,
 }
 
-/// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
-/// draw rather than seeded from stored state. The flora layer's `Rng`, field for field, so
-/// the two layers draw the same way; it is small enough that sharing it through a public
-/// API would be a worse dependency than writing it twice.
-pub(crate) struct Rng(u64);
-
-impl Rng {
-    pub(crate) fn keyed(domain: u64, a: u64, b: u64, c: u64) -> Rng {
-        let mut state = 0u64;
-        for part in [domain, a, b, c] {
-            state = mix(state ^ part);
-        }
-        Rng(state)
-    }
-
-    pub(crate) fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        mix(self.0)
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        (self.next_u64() % n as u64) as usize
-    }
-
-    /// A uniform draw on `[0, 1)`.
-    pub(crate) fn unit(&mut self) -> f64 {
-        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
-    }
-}
-
-/// splitmix64's finalizer: the avalanche that makes neighbouring keys independent.
-fn mix(mut z: u64) -> u64 {
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
+pub(crate) use cubarium_voxel::KeyedRng as Rng;
+use cubarium_voxel::pro_rata;
 
 /// What one animal sensed this tick, from the pre-bite snapshot of the plant layer.
 struct Plan {
@@ -316,7 +282,7 @@ fn withdraw(a: &mut Animal, want: f64) -> (Taken, f64) {
         if paid >= before {
             stock
         } else {
-            (stock * (paid / before)).min(stock)
+            pro_rata(stock, paid, before)
         }
     };
     let e = share(a.energy);
@@ -331,6 +297,22 @@ fn withdraw(a: &mut Animal, want: f64) -> (Taken, f64) {
         },
         from_body,
     )
+}
+
+/// `organic` out of the reserve, which must hold it, with the mineral and energy at the
+/// body's own density: a gestation instalment's and a clutch's one pro-rata rule.
+fn take_from_reserve(a: &mut Animal, organic: f64) -> Taken {
+    let before = a.organic();
+    let mineral = pro_rata(a.mineral, organic, before);
+    let energy = pro_rata(a.energy, organic, before);
+    a.reserve -= organic;
+    a.mineral -= mineral;
+    a.energy -= energy;
+    Taken {
+        organic,
+        mineral,
+        energy,
+    }
 }
 
 /// Step 2: **the parasites' drain** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`
@@ -427,7 +409,7 @@ pub(crate) const GUT_VOID_S: f64 = 30.0;
 /// onto its own face as litter. Birth ticks stagger the voids; a gut holding only mineral
 /// goes straight to the soluble pool (the flora layer's zero-organic deposit rule).
 fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
-    let period = ((GUT_VOID_S / DT).round() as u64).max(1);
+    let period = cubarium_voxel::ticks_at_least_one(GUT_VOID_S);
     for i in 0..fauna.animals.len() {
         let a = &mut fauna.animals[i];
         if a.age_ticks % period != 0 {
@@ -574,7 +556,7 @@ fn egg_upkeep(fauna: &mut Fauna) {
             continue;
         }
         let paid = (crate::EGG_UPKEEP_PER_S * c.organic * DT).min(c.organic);
-        let heat = (c.energy * (paid / c.organic)).min(c.energy);
+        let heat = pro_rata(c.energy, paid, c.organic);
         c.organic -= paid;
         c.energy -= heat;
         book_respired(fauna, paid, Respiration::Maintenance);
@@ -1654,7 +1636,7 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
         a.state = State::Resting;
     }
     a.rest = None;
-    a.alert_ticks = ((crate::ALERT_S / DT).round() as u32).max(1);
+    a.alert_ticks = u32::try_from(cubarium_voxel::ticks_at_least_one(crate::ALERT_S)).unwrap_or(u32::MAX);
     if a.wound >= 1.0 {
         kill(fauna, flora, j, Departure::Killed { by });
     }
@@ -2209,12 +2191,7 @@ fn assimilate(
     let placed = to_reserve;
 
     // Energy: the density of what was eaten, so nothing is created for any food.
-    let kept_energy = if t.organic > 0.0 {
-        t.energy * (placed / t.organic)
-    } else {
-        0.0
-    };
-    let kept_energy = kept_energy.min(t.energy);
+    let kept_energy = pro_rata(t.energy, placed, t.organic);
     a.energy += kept_energy;
     let egested_energy = if t.organic > 0.0 {
         (t.energy * (egested / t.organic)).min(t.energy - kept_energy)
@@ -2455,21 +2432,11 @@ fn gestate(
             return None;
         }
         let a = &mut fauna.animals[i];
-        let before = a.organic();
-        let f = if before > 0.0 {
-            (want / before).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let mineral = (a.mineral * f).min(a.mineral);
-        let energy = (a.energy * f).min(a.energy);
-        a.reserve -= want;
-        a.mineral -= mineral;
-        a.energy -= energy;
+        let paid = take_from_reserve(a, want);
         let e = a.reproduction.escrow.as_mut().expect("an open escrow");
-        e.organic += want;
-        e.mineral += mineral;
-        e.energy += energy;
+        e.organic += paid.organic;
+        e.mineral += paid.mineral;
+        e.energy += paid.energy;
     }
     let e = fauna.animals[i]
         .reproduction
@@ -2492,10 +2459,36 @@ fn gestate(
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
     let (site, species, pose, founder) = (a.site, a.species, a.pose, a.founder);
+    let parcel = Taken {
+        organic: e.organic,
+        mineral: e.mineral,
+        energy: e.energy,
+    };
+    Some(newborn(
+        fauna,
+        (species, founder),
+        (site, pose),
+        sc.body_min,
+        parcel,
+        sc.lifespan_median_s,
+    ))
+}
+
+/// A newborn out of a paid `parcel`: a `body_min` juvenile with the rest of the parcel's
+/// organic matter as its reserve and all of its mineral and energy, booked born. The one
+/// construction a gestation's term and an egg's hatching share.
+fn newborn(
+    fauna: &mut Fauna,
+    (species, founder): (crate::Species, Option<crate::Founder>),
+    (site, pose): (Site, crate::Pose),
+    body_min: f64,
+    parcel: Taken,
+    lifespan_median_s: f64,
+) -> Animal {
     let id = fauna.ledger.births;
     fauna.ledger.births += 1;
     fauna.ledger.born += 1;
-    Some(Animal {
+    Animal {
         id,
         species,
         site,
@@ -2503,13 +2496,13 @@ fn gestate(
         founder,
         founder_state: crate::FounderState::default(),
         reproduction: crate::ReproductionState::default(),
-        body: sc.body_min,
-        reserve: e.organic - sc.body_min,
-        mineral: e.mineral,
-        energy: e.energy,
+        body: body_min,
+        reserve: parcel.organic - body_min,
+        mineral: parcel.mineral,
+        energy: parcel.energy,
         age_ticks: 0,
         lifespan_ticks: crate::draw_lifespan_ticks(
-            sc.lifespan_median_s,
+            lifespan_median_s,
             id,
             crate::lifespan_salt(site, fauna.tick),
             false,
@@ -2524,7 +2517,7 @@ fn gestate(
         speed_m_s: 0.0,
         alert_ticks: 0,
         attached: None,
-    })
+    }
 }
 
 /// An interrupted gestation: the loss fraction of the escrowed organic matter is
@@ -2537,17 +2530,9 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
     };
     fauna.ledger.gestations_failed += 1;
     let lost = (e.organic * rule.gestation_loss_fraction).clamp(0.0, e.organic);
-    let heat = if e.organic > 0.0 {
-        (e.energy * (lost / e.organic)).min(e.energy)
-    } else {
-        0.0
-    };
+    let heat = pro_rata(e.energy, lost, e.organic);
     // The lost share's mineral is shed to the gut, as every respiration sheds it.
-    let shed = if e.organic > 0.0 {
-        (e.mineral * (lost / e.organic)).min(e.mineral)
-    } else {
-        0.0
-    };
+    let shed = pro_rata(e.mineral, lost, e.organic);
     let a = &mut fauna.animals[i];
     a.reserve += e.organic - lost;
     a.mineral += e.mineral - shed;
@@ -2594,17 +2579,9 @@ fn lay(
     if !(cost > 0.0) || a.reserve < cost {
         return;
     }
-    let before = a.organic();
-    let f = if before > 0.0 {
-        (cost / before).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let mineral = (a.mineral * f).min(a.mineral);
-    let energy = (a.energy * f).min(a.energy);
-    a.reserve -= cost;
-    a.mineral -= mineral;
-    a.energy -= energy;
+    let Taken {
+        mineral, energy, ..
+    } = take_from_reserve(a, cost);
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
@@ -2757,42 +2734,22 @@ fn hatchling(
     e: f64,
     voxel_m: f64,
 ) -> Animal {
-    let sc = fauna.config.founder(c.lineage).core;
-    let id = fauna.ledger.births;
-    fauna.ledger.births += 1;
-    fauna.ledger.born += 1;
+    let lifespan_median_s = fauna.config.founder(c.lineage).core.lifespan_median_s;
     fauna.ledger.hatched += 1;
     fauna.ledger.eggs_hatched_by_founder[c.lineage.index()] += 1;
-    Animal {
-        id,
-        species: crate::Species::Frondgrazer,
-        site: c.site,
-        pose: crate::Pose::at_site(c.site, voxel_m),
-        founder: Some(c.lineage),
-        founder_state: crate::FounderState::default(),
-        reproduction: crate::ReproductionState::default(),
-        body: body_min,
-        reserve: o - body_min,
+    let parcel = Taken {
+        organic: o,
         mineral: m,
         energy: e,
-        age_ticks: 0,
-        lifespan_ticks: crate::draw_lifespan_ticks(
-            sc.lifespan_median_s,
-            id,
-            crate::lifespan_salt(c.site, fauna.tick),
-            false,
-        ),
-        gut: Taken::default(),
-        state: State::Resting,
-        mobility: crate::Mobility::default(),
-        wound: 0.0,
-        strike: None,
-        rest: None,
-        still_ticks: crate::still_after_ticks(),
-        speed_m_s: 0.0,
-        alert_ticks: 0,
-        attached: None,
-    }
+    };
+    newborn(
+        fauna,
+        (crate::Species::Frondgrazer, Some(c.lineage)),
+        (c.site, crate::Pose::at_site(c.site, voxel_m)),
+        body_min,
+        parcel,
+        lifespan_median_s,
+    )
 }
 
 /// **The dormant egg bank's tick** (predation §2.13): each dormant egg hears the prey of
@@ -2814,7 +2771,7 @@ fn dormant_eggs(
     let tick = fauna.tick;
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
-    let day_ticks = ((view.config.day.length_min * 60.0 / DT).round() as u64).max(1);
+    let day_ticks = cubarium_voxel::ticks_at_least_one(view.config.day.length_min * 60.0);
     let mut k = 0;
     while k < fauna.clutches.len() {
         let c = fauna.clutches[k];

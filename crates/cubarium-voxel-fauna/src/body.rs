@@ -387,12 +387,7 @@ impl Hunter {
 
     /// Whole ticks for a phase, never below one.
     pub fn ticks(seconds: f64) -> u32 {
-        let t = (seconds * f64::from(cubarium_voxel::TICK_HZ)).round();
-        if !t.is_finite() || t < 1.0 {
-            1
-        } else {
-            t as u32
-        }
+        u32::try_from(cubarium_voxel::ticks_at_least_one(seconds)).unwrap_or(u32::MAX)
     }
 }
 

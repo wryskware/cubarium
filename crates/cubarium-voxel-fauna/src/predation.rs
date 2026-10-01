@@ -275,7 +275,7 @@ impl Dormancy {
         // Log-uniform over [6, 24] h: 12 h × 2^u, u uniform on [-1, 1].
         let u = 2.0 * rng.unit() - 1.0;
         let span_s = 12.0 * 3600.0 * 2f64.powf(u);
-        let ticks = ((span_s / DT).round() as u64).max(1);
+        let ticks = cubarium_voxel::ticks_at_least_one(span_s);
         Dormancy {
             threshold,
             viable_until_tick: tick.saturating_add(ticks),

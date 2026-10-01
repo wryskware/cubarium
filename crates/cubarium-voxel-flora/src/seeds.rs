@@ -49,12 +49,7 @@ use crate::{
 /// How many ticks apart a banked site's checks are: [`FloraConfig::seed_check_s`] in
 /// whole ticks, at least one.
 pub(crate) fn check_period(config: &FloraConfig) -> u64 {
-    let ticks = (config.seed_check_s / DT).round();
-    if ticks.is_finite() && ticks >= 1.0 {
-        ticks as u64
-    } else {
-        1
-    }
+    cubarium_voxel::ticks_at_least_one(config.seed_check_s)
 }
 
 /// A wind seed's tries at a column with a support face before the donor keeps its package

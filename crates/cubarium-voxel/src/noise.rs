@@ -60,12 +60,10 @@ pub fn resolved_octaves(ladder: &Ladder, min_wavelength_m: f64) -> u32 {
 
 /// splitmix64 over a lattice point and a stream seed. No clock, no thread state.
 fn hash2(ix: i64, iz: i64, seed: u64) -> u64 {
-    let mut z = seed
+    let z = seed
         ^ (ix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ (iz as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
+    crate::mix(z)
 }
 
 /// Unit gradient at a lattice point.
