@@ -42,6 +42,8 @@ mod knob_wiring_tests;
 #[cfg(test)]
 mod lineage_params_tests;
 #[cfg(test)]
+mod lockstep_tests;
+#[cfg(test)]
 mod mass_tests;
 #[cfg(test)]
 mod motor_tests;
