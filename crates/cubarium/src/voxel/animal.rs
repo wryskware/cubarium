@@ -46,6 +46,21 @@ use super::idle;
 use super::sleep;
 use super::stand::{Cell, Style, wilted};
 
+/// How many rows a rider is drawn above its own site: its host's drawn height in cells
+/// (a founder host's body height rounded up, the interim block's one row otherwise).
+/// `None` when the host is not in the view.
+fn rider_lift(fauna: &FaunaView<'_>, host: u64, voxel_m: f64) -> Option<u32> {
+    let host = fauna.animal(host)?;
+    let Some(founder) = host.founder else {
+        return Some(1);
+    };
+    if !(voxel_m > 0.0) {
+        return None;
+    }
+    let height = fauna.config.founder(founder).body_at(host.body).height_m;
+    Some(((height / voxel_m).ceil() as u32).max(1))
+}
+
 /// The cells of `animal`'s founder model at its body's length, if the library has one.
 fn model_cells<'l>(
     lib: &'l ModelLibrary,
@@ -963,6 +978,26 @@ impl Animals {
         // animals on one face paint the same cells and the later id wins; which of two
         // identical interim blocks won is not a visible fact.
         for animal in fauna.animals {
+            // A parasite hatchling riding its host (interim, stage 1: plain voxels, no
+            // final look): its own small box, lifted onto the host's back.
+            if let Some(lift) = animal
+                .attached
+                .and_then(|hold| rider_lift(&fauna, hold.host, c.voxel_m))
+            {
+                let style = self.styles.len().min(u16::MAX as usize) as u16;
+                if usize::from(style) != self.styles.len() {
+                    break;
+                }
+                self.styles.push(animal_style(animal));
+                for (cell, part, _) in cells_of_local(animal, fauna.config, style, c.voxel_m) {
+                    let on_back = Cell {
+                        y: cell.y + lift,
+                        ..cell
+                    };
+                    self.place(view, on_back, part);
+                }
+                continue;
+            }
             let weight = self.sleep_weight(animal);
             let idling = self.idle_weight(animal);
             if let Some(cells) = lib.and_then(|lib| model_cells(lib, fauna.config, animal)) {

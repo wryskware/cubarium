@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_specimens -- OUT.png [--glyphs] [--wilt W]
-//!     [--gpu [--px N] [--textures DIR | --textures-only DIR] [--lit]]
+//!     [--gpu [--px N] [--textures DIR | --textures-only DIR] [--lit]] [--rider]
 //! ```
 //!
 //! `--gpu` draws the same strip with the GPU renderer instead (headless), at `--px`
@@ -18,6 +18,9 @@
 //! adult and ripe. Both founders stand at the end, facing each way. Every stand is drawn at full
 //! moisture (or at `--wilt W`, a moisture of `1 − W`), with full foliage. The picture is
 //! written at 2× nearest, the panel's own upscale.
+//!
+//! `--rider` puts a parasite lanternjaw hatchling on the first grazer's back (its interim
+//! plain-voxel look, `design/handoffs/voxel-predation-parasite-2026-10-01.md`).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,7 +35,9 @@ use cubarium::voxel::{Lighting, OrganismLook, VoxelConfig};
 use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Config, Material, World};
-use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, StartingStores};
+use cubarium_voxel_fauna::{
+    Attachment, Command as FaunaCommand, Fauna, FaunaConfig, FaunaView, Founder, StartingStores,
+};
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, FloraView, Species};
 
 /// Voxels between one specimen's crown edge and the next one's.
@@ -47,11 +52,13 @@ fn main() -> Result<()> {
     let mut textures: Option<PathBuf> = None;
     let mut layered = false;
     let mut lit = false;
+    let mut rider = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
             "--lit" => lit = true,
+            "--rider" => rider = true,
             "--gpu" => gpu = true,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
@@ -157,6 +164,45 @@ fn main() -> Result<()> {
         }
     }
 
+    // A hatchling riding the first grazer: placed beside it, then attached in the view
+    // drawn (the view is the presenter's whole input).
+    let mut animals = fauna.view().animals.to_vec();
+    if rider {
+        let x = animal_x[0];
+        let young = StartingStores {
+            body: 0.1,
+            reserve: 0.5,
+        };
+        if !fauna.apply(
+            &world,
+            FaunaCommand::IntroduceFounder {
+                x,
+                z: 3,
+                founder: Founder::Lanternjaw,
+                stores: young,
+                heading_rad: 1.5708,
+            },
+        ) {
+            bail!("could not place a hatchling at x={x}");
+        }
+        animals = fauna.view().animals.to_vec();
+        let host = *animals
+            .iter()
+            .find(|a| a.founder == Some(Founder::Browser))
+            .context("a grazer")?;
+        let r = animals
+            .iter_mut()
+            .find(|a| a.founder == Some(Founder::Lanternjaw))
+            .context("the hatchling")?;
+        r.attached = Some(Attachment { host: host.id });
+        r.site = host.site;
+        r.pose = host.pose;
+    }
+    let fauna_view = FaunaView {
+        animals: &animals,
+        ..fauna.view()
+    };
+
     // Every stand healthy (or at the asked wilt), full of foliage, and the ripe copies
     // with a whole package in their parcel.
     let view = flora.view();
@@ -213,14 +259,14 @@ fn main() -> Result<()> {
             },
         )?;
         anyhow::ensure!(
-            sink.stage_view(&world.view(), view, fauna.view()),
+            sink.stage_view(&world.view(), view, fauna_view),
             "no staging buffer"
         );
         // The lit tier's sky plane is computed off this thread.
         while sink.light_pending() {
             std::thread::sleep(std::time::Duration::from_millis(5));
             anyhow::ensure!(
-                sink.stage_view(&world.view(), view, fauna.view()),
+                sink.stage_view(&world.view(), view, fauna_view),
                 "no staging buffer"
             );
         }
@@ -256,7 +302,7 @@ fn main() -> Result<()> {
         proj,
     )
     .with_models(models)
-    .draw_with_fauna(&world.view(), view, Some(fauna.view()), &mut canvas);
+    .draw_with_fauna(&world.view(), view, Some(fauna_view), &mut canvas);
     canvas.encode_raster(&mut raster);
 
     let (w, h) = (u32::from(proj.raster_w), u32::from(proj.raster_h));

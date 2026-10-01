@@ -930,6 +930,9 @@ fn print_header() {
         }
     }
     header.push_str(",carrion,carcasses,dormant_eggs,eggs_died,eggs_buried");
+    // Parasite hatchlings: riders on a host now, then cumulative riders attached,
+    // drop-offs at the detach size and riders freed by their host's departure.
+    header.push_str(",riders_now,riders_attached,rider_dropoffs,riders_freed");
     println!("{header}");
 }
 
@@ -1126,6 +1129,11 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     row.push(dormant.to_string());
     row.push(l.eggs_died.to_string());
     row.push(l.eggs_buried.to_string());
+    let riders = a.animals.iter().filter(|b| b.attached.is_some()).count();
+    row.push(riders.to_string());
+    row.push(l.riders_attached.to_string());
+    row.push(l.rider_dropoffs.to_string());
+    row.push(l.riders_freed.to_string());
     println!("{}", row.join(","));
 }
 
