@@ -48,12 +48,23 @@ host_ip() {
 }
 
 ensure_key() {
-	if ! aws_ ec2 describe-key-pairs --key-names "$KEY_NAME" >/dev/null 2>&1; then
+	local err tmp
+	# Create the pair only when AWS says it is absent: any other failure (an expired login) must
+	# not touch the key file, or the private half of a live pair is lost.
+	if ! err=$(aws_ ec2 describe-key-pairs --key-names "$KEY_NAME" 2>&1 >/dev/null); then
+		case "$err" in
+		*InvalidKeyPair.NotFound*) ;;
+		*) echo "cannot check key pair $KEY_NAME: $err" >&2; exit 1 ;;
+		esac
+		[ -s "$KEY_FILE" ] && { echo "$KEY_FILE exists but AWS has no pair $KEY_NAME; move the file aside and rerun" >&2; exit 1; }
 		mkdir -p "$(dirname "$KEY_FILE")"
-		aws_ ec2 create-key-pair --key-name "$KEY_NAME" --query KeyMaterial --output text >"$KEY_FILE"
-		chmod 600 "$KEY_FILE"
+		tmp=$(mktemp "$KEY_FILE.XXXX")
+		aws_ ec2 create-key-pair --key-name "$KEY_NAME" --query KeyMaterial --output text >"$tmp" ||
+			{ rm -f "$tmp"; exit 1; }
+		chmod 600 "$tmp"
+		mv "$tmp" "$KEY_FILE"
 	fi
-	[ -f "$KEY_FILE" ] || { echo "key pair $KEY_NAME exists in AWS but $KEY_FILE is missing; delete the AWS key pair and rerun" >&2; exit 1; }
+	[ -s "$KEY_FILE" ] || { echo "key pair $KEY_NAME exists in AWS but $KEY_FILE is missing or empty; delete the AWS key pair and rerun" >&2; exit 1; }
 }
 
 ensure_sg() {

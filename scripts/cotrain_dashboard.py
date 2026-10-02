@@ -240,7 +240,8 @@ def parse_window_line(line):
         name = seg.split()[0]
         kv = {k: float(v) for k, v in KV_RE.findall(seg)}
         lin[name] = dict(n=kv.get("n"), twin=kv.get("twin"), pair=kv.get("pair"),
-                         ratio=kv.get("ratio"), rms=kv.get("rms"))
+                         ratio=kv.get("ratio"), rms=kv.get("rms"),
+                         mov=kv.get("mov"), nov=kv.get("nov"), cur=kv.get("cur"))
     return dict(g=int(g), w=int(w), step=int(step), wall=float(wall), worlds=int(worlds), lin=lin)
 
 
@@ -857,6 +858,13 @@ DATA.runs.forEach((r,ri)=>{
       {xTitle:'generation (windows as fractions)',zero:true});
     chart(wide,'Lock-step: twin / pair ratio (signal-to-noise)',
       LINS.map(n=>wl(n,'ratio',{pointRadius:0})).filter(d=>d.data.some(p=>p.y!=null)),
+      {xTitle:'generation (windows as fractions)',zero:true});
+    const has = k=>W.some(w=>LINS.some(n=>(w.lin[n]||{})[k]!=null));
+    if(has('mov')) chart(wide,'Lock-step: moving share per window (all variants)',
+      LINS.map(n=>wl(n,'mov',{pointRadius:0})).filter(d=>d.data.some(p=>p.y!=null)),
+      {xTitle:'generation (windows as fractions)',zero:true});
+    if(has('nov')) chart(wide,'Lock-step: curiosity novelty per window (1 = fresh ground at cruise all window)',
+      LINS.map(n=>wl(n,'nov',{pointRadius:0})).filter(d=>d.data.some(p=>p.y!=null)),
       {xTitle:'generation (windows as fractions)',zero:true});
     chart(wide,'Lock-step: worlds alive',
       [ds('worlds','#4fb3d9',W.map(w=>({x:wx(w),y:w.worlds})),{pointRadius:0,borderWidth:2})],
