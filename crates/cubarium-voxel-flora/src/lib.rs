@@ -1865,6 +1865,10 @@ impl SpeciesConfig {
     ///   with a soil pocket inside the box reads that pocket's water and is not bare.
     ///   `transpiration_m3_per_s` **0.0** — it reads the moisture and withdraws nothing, so
     ///   a fungus takes no water away from the plants it lives among.
+    /// - **The dark** (2026-10-01): a cave floor or the face under an overhang is the one
+    ///   exception to the two rules above. There the cave damp stands in for soil water and
+    ///   the seep for wood (`dark_*`, [`SpeciesConfig::darkness`]), so a bare dark rock
+    ///   face is habitat and a lit one is not.
     /// - **Small and cheap.** `wood_max` 0.1, `alive_min` 0.01, `donor_min` 0.05 —
     ///   stonecushion's body; `foliage_rate` 0.004 and `wood_rate` 0.002 are twice the base,
     ///   a mycelium that fills a log fairly quickly; `propagule_rate` 0.0005 is two and a
