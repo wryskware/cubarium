@@ -590,6 +590,51 @@ impl Glow {
     }
 }
 
+/// The glow volume split by candle curve: one grid for the steady emitters (curve 0:
+/// every non-glowcap emitter, and every glowcap with the candle off) and one for each
+/// candle curve's lips at full brightness. A grid is spread again only when its own
+/// emitters or the terrain change; each tick the candle's gains mix them
+/// ([`GlowSet::mix`]): `steady + Σ gain_k · curve_k`, which is the one-grid build at
+/// those gains up to float rounding, since the spread is linear in its sources.
+pub(crate) struct GlowSet {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) key: u64,
+}
+
+impl GlowSet {
+    pub(crate) fn new(width: u32, height: u32, depth: u32) -> GlowSet {
+        let _ = (width, height, depth);
+        todo!()
+    }
+
+    /// The terrain moved: every grid spreads again at its next update.
+    pub(crate) fn set_terrain(&mut self, config: &Config, material: &[Material]) {
+        let _ = (config, material);
+        todo!()
+    }
+
+    /// This tick's emitters, each a voxel, its candle curve (0 steady) and its emissive
+    /// colour at full brightness. Spreads the grids whose emitters or terrain moved and
+    /// returns how many it spread.
+    pub(crate) fn update(
+        &mut self,
+        emitters: impl Iterator<Item = ((u32, u32, u32), u8, [f32; 3])>,
+        gain: f32,
+        reach: u32,
+    ) -> usize {
+        let _ = (emitters, gain, reach);
+        todo!()
+    }
+
+    /// Mix the grids at the curves' gains (`gains[k]` for curve `k`; `gains[0]` unused)
+    /// into [`GlowSet::bytes`], bumping [`GlowSet::key`] when a byte changed. Returns
+    /// whether one did.
+    pub(crate) fn mix(&mut self, gains: &[f32]) -> bool {
+        let _ = gains;
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,6 +771,63 @@ mod tests {
     /// The ground under a crown is dimmed by exactly the layers whose discs are drawn
     /// above it, as the shade model multiplies them; the crown's own cells and anything
     /// outside its disc are not; two crowns over one column multiply.
+    /// The per-curve grids mixed at a tick's gains are the one-grid build at those gains,
+    /// to a byte; and a tick whose emitters and terrain did not move spreads nothing,
+    /// whatever the gains do.
+    #[test]
+    fn the_curve_grids_mix_to_the_one_grid_build_and_spread_only_on_change() {
+        let c = Config {
+            width: 32,
+            height: 8,
+            depth: 12,
+            ..Config::default()
+        };
+        let material: Vec<Material> = (0..c.width * c.height * c.depth)
+            .map(|i| {
+                let x = i % c.width;
+                if (12..16).contains(&x) { Material::Rock } else { Material::Air }
+            })
+            .collect();
+        let emitters: Vec<((u32, u32, u32), u8, [f32; 3])> = vec![
+            ((6, 4, 6), 0, [0.05, 0.56, 0.94]),
+            ((7, 4, 6), 3, [0.9, 0.6, 0.1]),
+            ((8, 2, 5), 3, [0.9, 0.6, 0.1]),
+            ((20, 1, 2), 1, [0.4, 0.9, 0.2]),
+            ((21, 1, 3), 0, [0.2, 0.2, 0.7]),
+            ((22, 6, 9), 16, [0.7, 0.3, 0.6]),
+        ];
+        let mut set = GlowSet::new(c.width, c.height, c.depth);
+        set.set_terrain(&c, &material);
+        let mut one = Glow::new(c.width, c.height, c.depth);
+        one.set_terrain(&c, &material);
+        let check = |set: &GlowSet, one: &mut Glow, gains: &[f32]| {
+            let scaled = emitters
+                .iter()
+                .map(|&(v, k, rgb)| (v, rgb.map(|x| x * if k == 0 { 1.0 } else { gains[usize::from(k)] })));
+            one.build(scaled, 0.5, 3);
+            for (i, (a, b)) in set.bytes.iter().zip(&one.bytes).enumerate() {
+                assert!(a.abs_diff(*b) <= 1, "byte {i}: mixed {a}, built {b}");
+            }
+        };
+        let mut gains = vec![1.0f32; 17];
+        assert_eq!(set.update(emitters.iter().copied(), 0.5, 3), 4, "steady and curves 1, 3, 16");
+        set.mix(&gains);
+        check(&set, &mut one, &gains);
+        for (k, g) in gains.iter_mut().enumerate() {
+            *g = 0.25 + 0.04 * k as f32;
+        }
+        assert_eq!(set.update(emitters.iter().copied(), 0.5, 3), 0, "nothing moved");
+        let key = set.key;
+        assert!(set.mix(&gains), "the candle moved the light");
+        assert_ne!(set.key, key);
+        check(&set, &mut one, &gains);
+        assert!(!set.mix(&gains), "the same gains, the same bytes");
+        // One curve's emitter moves: only its grid spreads.
+        let mut moved = emitters.clone();
+        moved[3].0 = (19, 1, 2);
+        assert_eq!(set.update(moved.iter().copied(), 0.5, 3), 1);
+    }
+
     #[test]
     fn the_canopy_plane_attenuates_straight_down_by_the_models_layers() {
         let c = Config {

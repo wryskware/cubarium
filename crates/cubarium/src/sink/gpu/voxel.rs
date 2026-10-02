@@ -38,7 +38,7 @@ use anyhow::{Context, Result, bail};
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, POSE_ENTRIES, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
-    PLANE_SKY, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
+    PLANE_CANOPY, PLANE_SKY, PLANE_STYLES, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, Materials, VoxelView, World};
 use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
@@ -64,6 +64,12 @@ use super::target::{GpuTarget, GpuTargetKind};
 
 // The texel's six entry bits, the renderer's uniform array and the pose's own table agree.
 const _: () = assert!(sleep::POSE_ENTRIES == POSE_ENTRIES && POSE_ENTRIES <= 64);
+
+/// The pack oracle: the change-only pack held to the full one (tests and
+/// `examples/pack_oracle.rs`).
+#[path = "oracle.rs"]
+#[doc(hidden)]
+pub mod oracle;
 
 /// The knobs `cubarium voxel --sink gpu` takes.
 #[derive(Clone, Debug)]
@@ -749,6 +755,17 @@ struct Packer {
     /// The fill's scratch: the slot of each `(base slot, curve)` pair a candle cell took,
     /// `u16::MAX` for none yet.
     candle_slots: Vec<u16>,
+    /// Whether a tick packs only what changed (the live pack) or everything (the oracle
+    /// the change-only pack is held to).
+    incremental: bool,
+}
+
+/// One texel as the shader resolves it: its material, part, glyph and water bytes, and
+/// what its fourth byte means — a style slot's contents and candle curve, or a raw byte.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Resolved {
+    Styled([u8; 3], VoxelStyle, u8),
+    Raw([u8; 4]),
 }
 
 /// The lit tier's emitters ([`crate::voxel::LightConfig`]'s `emission`, `glow`,
@@ -841,6 +858,7 @@ impl Packer {
             candle: (p.lit && emission.on && emission.candle.on()).then_some(emission.candle),
             candle_class: Vec::new(),
             candle_slots: vec![u16::MAX; MAX_STYLES * (usize::from(candle::CLASSES) + 1)],
+            incremental: true,
             animals,
             models,
             specimens: Vec::new(),
@@ -870,6 +888,54 @@ impl Packer {
                 emitters: Vec::new(),
             }),
         }
+    }
+
+    /// This packer packs every tick in full: the oracle.
+    fn full_only(mut self) -> Packer {
+        self.incremental = false;
+        self
+    }
+
+    /// Ease the film marks on this clock instead of the wall clock (`None`: the wall
+    /// clock), so two packers fed the same ticks draw the same film.
+    fn set_film_now(&mut self, now: Option<Instant>) {
+        let _ = now;
+        todo!()
+    }
+
+    /// The packed texels, texture order: what the images hold once every owed brick is up.
+    fn master(&self) -> &[VoxelTexel] {
+        todo!()
+    }
+
+    /// Texel `i` of [`Packer::master`] as the shader resolves it.
+    fn resolved(&self, i: usize) -> Resolved {
+        let _ = i;
+        todo!()
+    }
+
+    /// The style table and emission curves as the GPU should hold them.
+    fn style_table(&self, styles: &mut [VoxelStyle], curves: &mut [u8; MAX_STYLES]) {
+        let _ = (styles, curves);
+        todo!()
+    }
+
+    /// Styles given a slot since the packer was made.
+    fn styles_made(&self) -> u64 {
+        todo!()
+    }
+
+    /// The planes as this packer holds them: roof, glyphs, sky, canopy, glow (the last
+    /// three empty in the flat tier).
+    fn planes(&self) -> (&[u8], &[u8], &[u8], &[u8], &[u8]) {
+        let light = self.light.as_ref();
+        (
+            &self.roof,
+            &self.glyphs,
+            light.map_or(&[][..], |l| &l.sky[..]),
+            light.map_or(&[][..], |l| &l.canopy_plane[..]),
+            light.map_or(&[][..], |l| &l.glow.bytes[..]),
+        )
     }
 
     /// Whether the lit tier's sky plane is still being computed for the terrain last
@@ -1633,8 +1699,9 @@ mod tests {
     //! the GPU reads, through the two alternating staging buffers and the slow planes'
     //! keys, across the edits that move what a pack keeps between ticks.
 
+    use super::oracle::{Frame, PackOracle};
     use super::*;
-    use cubarium_gpu::voxel::SlowPlanes;
+    use cubarium_gpu::voxel::{BrickOwed, Carried, SlowPlanes, apply_upload};
     use cubarium_voxel::{Command, Config};
     use cubarium_voxel_fauna::{Command as FaunaCommand, FaunaConfig};
     use cubarium_voxel_flora::{Command as FloraCommand, FloraConfig, Species};
@@ -1762,10 +1829,15 @@ mod tests {
             }
         }
 
-        /// As `VoxelRenderer::stage` hands it over: the styles zeroed first. The flat
-        /// tier's pack has no sky or canopy plane.
-        fn staging(&mut self, write: [bool; SLOW_PLANES]) -> VoxelStaging<'_> {
-            self.styles.fill(VoxelStyle::default());
+        /// As `VoxelRenderer::stage` hands it over. The flat tier's pack has no sky,
+        /// canopy or glow plane.
+        fn staging<'a>(
+            &'a mut self,
+            write: [bool; SLOW_PLANES],
+            owed: &'a mut BrickOwed,
+            carried: &'a mut Carried,
+        ) -> VoxelStaging<'a> {
+            *carried = Carried::default();
             VoxelStaging {
                 voxels: &mut self.voxels,
                 roof: &mut self.roof,
@@ -1777,16 +1849,20 @@ mod tests {
                 poses: &mut self.poses,
                 emit_curves: &mut self.emit_curves,
                 write,
+                owed,
+                carried,
             }
         }
     }
 
     /// The renderer's side of a pack and an upload, without a device: two buffers
-    /// alternating, and the images holding whatever the slow planes' keys say was copied.
+    /// alternating, the owed bricks, and the images holding whatever was copied.
     struct Rig {
         params: VoxelParams,
         packer: Packer,
         slow: SlowPlanes,
+        owed: BrickOwed,
+        carried: [Carried; 2],
         buffers: [Planes; 2],
         images: Planes,
         ticks: usize,
@@ -1810,6 +1886,8 @@ mod tests {
                     Emission::OFF,
                 ),
                 slow: SlowPlanes::new(2),
+                owed: BrickOwed::new(c.width, c.height, c.depth),
+                carried: Default::default(),
                 buffers: [Planes::junk(&params), Planes::junk(&params)],
                 images: Planes::junk(&params),
                 params,
@@ -1817,7 +1895,8 @@ mod tests {
             }
         }
 
-        /// Pack and upload one tick, and hold the images to the reference pack.
+        /// Pack and upload one tick, and hold the images to the reference pack, each
+        /// texel with its style resolved through its own table.
         fn tick(&mut self, world: &World, flora: &Flora, fauna: &Fauna, what: &str) {
             let p = self.params;
             let view = world.view();
@@ -1830,12 +1909,22 @@ mod tests {
                 p.width,
                 p.height,
                 p.depth,
-                self.buffers[b].staging(write),
+                self.buffers[b].staging(write, &mut self.owed, &mut self.carried[b]),
             );
             let copy = self.slow.upload(b);
+            self.owed.taken(&self.carried[b]);
             let buffer = &self.buffers[b];
-            self.images.voxels.clone_from(&buffer.voxels);
-            self.images.styles.clone_from(&buffer.styles);
+            apply_upload(
+                &buffer.voxels,
+                &self.carried[b],
+                p.width,
+                p.height,
+                p.depth,
+                &mut self.images.voxels,
+            );
+            if copy[PLANE_STYLES] {
+                self.images.styles.clone_from(&buffer.styles);
+            }
             if copy[PLANE_ROOF] {
                 self.images.roof.clone_from(&buffer.roof);
             }
@@ -1844,22 +1933,24 @@ mod tests {
             }
 
             let mut want = Planes::junk(&p);
-            reference(&view, flora, fauna, &p, want.staging([true; SLOW_PLANES]));
-            let differ =
-                |a: &[VoxelTexel], b: &[VoxelTexel]| a.iter().zip(b).position(|(a, b)| a != b);
-            if let Some(i) = differ(&self.images.voxels, &want.voxels) {
-                panic!(
-                    "{what}: voxel texel {i} is {:?}, the old pack wrote {:?}",
-                    self.images.voxels[i], want.voxels[i]
+            let (mut owed, mut carried) = (BrickOwed::new(p.width, p.height, p.depth), Carried::default());
+            reference(&view, flora, fauna, &p, want.staging([true; SLOW_PLANES], &mut owed, &mut carried));
+            // The style a texel draws with, when it draws with one: a faceless animal cell
+            // (glyph 0) and a plain voxel read none.
+            let style = |t: VoxelTexel, styles: &[VoxelStyle]| {
+                let styled = t.part() != PART_NONE && !(t.part() == PART_ANIMAL_INTERIM && t.glyph() == 0);
+                styled.then(|| styles[usize::from(t.style())])
+            };
+            for (i, (got, want_t)) in self.images.voxels.iter().zip(&want.voxels).enumerate() {
+                assert!(
+                    got.0[..3] == want_t.0[..3]
+                        && style(*got, &self.images.styles) == style(*want_t, &want.styles),
+                    "{what}: voxel texel {i} is {got:?}, the old pack wrote {want_t:?}"
                 );
             }
             assert!(
                 self.images.roof == want.roof,
                 "{what}: the roof table differs"
-            );
-            assert!(
-                self.images.styles == want.styles,
-                "{what}: the style table differs"
             );
             assert!(
                 self.images.glyphs == want.glyphs,
@@ -2083,5 +2174,233 @@ mod tests {
         let full = load_textures(&VoxelConfig { textures: true, ..cfg.clone() }, None, &params);
         assert!(full.vine_on && full.mask() != 0);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---- the change-only pack against the full pack ----
+
+    /// An oracle on the fixture world: the flat tier with the stands' plain vine cells, or
+    /// the lit tier with the vine's tile layer, emission and a running candle.
+    fn oracle(c: &Config, lit: bool) -> PackOracle {
+        let mut cfg = VoxelConfig {
+            world: c.clone(),
+            lighting: if lit { Lighting::Lit } else { Lighting::Flat },
+            ..VoxelConfig::default()
+        };
+        cfg.light.candle_min = 0.25;
+        cfg.light.candle_period_s = 2.0;
+        let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
+        let params = params_of(&cfg, proj, true);
+        let emission = if lit { Emission::of(&cfg) } else { Emission::OFF };
+        PackOracle::new(params, None, lit, SpeciesFaces::default(), emission)
+    }
+
+    /// Wait out both packs' first sky planes, so the lit tier's comparison is whole.
+    fn settle(o: &mut PackOracle, world: &World, flora: &Flora, fauna: &Fauna) {
+        for _ in 0..400 {
+            o.tick(&world.view(), flora.view(), fauna.view(), 0.0, Frame::Now)
+                .unwrap_or_else(|e| panic!("settling: {e}"));
+            if !o.light_pending() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the sky planes never arrived");
+    }
+
+    fn site(world: &World, x: i64, z: u32) -> cubarium_voxel_flora::Site {
+        let v = world.view();
+        let y = (0..v.config.height)
+            .rev()
+            .find(|&y| v.material_at(x, y, z).is_solid())
+            .expect("a column with ground");
+        cubarium_voxel_flora::Site {
+            x: x.rem_euclid(i64::from(v.config.width)) as u32,
+            y,
+            z,
+        }
+    }
+
+    fn seed(flora: &mut Flora, world: &World, x: i64, z: u32, species: Species, of_max: f64) {
+        let wood = flora.config().species(species).wood_max * of_max;
+        assert!(
+            flora.apply(world, FloraCommand::Seed { x, z, species, wood }),
+            "a support face for the {species:?} at ({x}, {z})"
+        );
+    }
+
+    fn vine_face(x: u32, y: u32, z: u32, spur: cubarium_voxel_flora::SpurPhase) -> FaceDraw {
+        FaceDraw {
+            face: cubarium_voxel_flora::Face::new(x, y, z, cubarium_voxel_flora::FaceDir::NegX),
+            owner: 1,
+            leafiness: 0.9,
+            rooted: false,
+            dormant: false,
+            spur,
+        }
+    }
+
+    /// The scripted sequence, both tiers: after **every** tick the change-only pack draws
+    /// what the full pack draws. An animal walks; a stand is born, grows a stage and dies;
+    /// a carcass appears and decays to remains; the vine spreads a face and flowers; a
+    /// shower falls and the water flows; the terrain is edited; a glowcap appears and dies;
+    /// and the plants live their own lives (`Flora::step`) throughout.
+    fn scripted(lit: bool) {
+        use cubarium_voxel_flora::{Carcass, Deposit, DepositKind, SpurPhase};
+        let c = config();
+        let mut o = oracle(&c, lit);
+        let mut world = world(&c);
+        let mut plants = flora(&world, &[(1, 1, Species::Umbrellafrond, 1.0), (26, 3, Species::Umbrellafrond, 0.4)]);
+        let mut beast = grazer(&world, 3, 1);
+        settle(&mut o, &world, &plants, &beast);
+        let tier = if lit { "lit" } else { "flat" };
+        let v = c.voxel_volume();
+        for t in 0..64u32 {
+            match t {
+                4 => seed(&mut plants, &world, 14, 2, Species::Bloomcrown, 0.3),
+                8 => o.set_cover_draws(Some(vec![vine_face(8, 3, 1, SpurPhase::Bare)])),
+                12 => seed(&mut plants, &world, 22, 4, Species::Glowcap, 0.6),
+                14 => {
+                    let at = site(&world, 18, 4);
+                    plants.lay_carcass(at, Carcass { lineage: 0, heading_rad: 0.0, organic: 1.0 });
+                    plants.deposit(at, Deposit { kind: DepositKind::Carrion, organic: 0.8, mineral: 0.0, energy: 0.0 });
+                }
+                18 => o.set_cover_draws(Some(vec![
+                    vine_face(8, 3, 1, SpurPhase::Bare),
+                    vine_face(8, 4, 1, SpurPhase::Bare),
+                ])),
+                24 => {
+                    assert!(plants.apply(&world, FloraCommand::Clear { x: 14, z: 2 }));
+                    seed(&mut plants, &world, 14, 2, Species::Bloomcrown, 1.0);
+                }
+                28 => o.set_cover_draws(Some(vec![
+                    vine_face(8, 3, 1, SpurPhase::Bare),
+                    vine_face(8, 4, 1, SpurPhase::Flower),
+                ])),
+                30 => {
+                    for x in 0..4 {
+                        set(&mut world, x, 11, 2, Material::Rock);
+                    }
+                }
+                34 => {
+                    // Decayed: the same pool now under the remains fraction of the body.
+                    let at = site(&world, 18, 4);
+                    plants.lay_carcass(at, Carcass { lineage: 0, heading_rad: 0.0, organic: 40.0 });
+                }
+                44 => assert!(plants.apply(&world, FloraCommand::Clear { x: 14, z: 2 })),
+                50 => assert!(plants.apply(&world, FloraCommand::Clear { x: 22, z: 4 })),
+                _ => {}
+            }
+            // A shower over the pool and the bump, then the water's own step.
+            if (10..40).contains(&t) {
+                for x in [2i64, 10, 16] {
+                    world.apply(Command::AddWater { x, y: 12, z: t % c.depth, volume_m3: v * 0.3 });
+                }
+            }
+            world.step_with(1);
+            plants.step(&mut world);
+            // The grazer walks a voxel every other tick.
+            beast = grazer(&world, 3 + i64::from(t / 2), 1);
+            let candle_s = f64::from(t) * 0.05;
+            o.tick(&world.view(), plants.view(), beast.view(), candle_s, Frame::Now)
+                .unwrap_or_else(|e| panic!("{tier}, scripted tick {t}: {e}"));
+        }
+    }
+
+    #[test]
+    fn the_change_only_pack_draws_what_the_full_pack_draws_flat() {
+        scripted(false);
+    }
+
+    #[test]
+    fn the_change_only_pack_draws_what_the_full_pack_draws_lit() {
+        scripted(true);
+    }
+
+    /// The staging ring: a pack overwritten before any frame took it, a frame still on the
+    /// GPU while the next tick packs into the other buffer, and a frame displaced before
+    /// it ran — after each upload the images hold exactly that pack, and it draws what the
+    /// full pack draws.
+    #[test]
+    fn every_buffer_uploads_what_it_owes_through_skips_and_displacements() {
+        let c = config();
+        let mut o = oracle(&c, false);
+        let mut world = world(&c);
+        let mut plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0), (1, 1, Species::Umbrellafrond, 1.0)]);
+        let frames = [
+            Frame::Now,
+            Frame::Unrecorded,
+            Frame::Unrecorded,
+            Frame::Now,
+            Frame::InFlight,
+            Frame::InFlight,
+            Frame::Now,
+            Frame::InFlight,
+            Frame::Now,
+            Frame::InFlight,
+            Frame::Unrecorded,
+            Frame::Now,
+        ];
+        let v = c.voxel_volume();
+        for (t, &frame) in frames.iter().enumerate() {
+            world.apply(Command::AddWater { x: 3 + t as i64, y: 10, z: 2, volume_m3: v * 0.5 });
+            world.step_with(1);
+            plants.step(&mut world);
+            let beast = grazer(&world, 2 + t as i64, 1);
+            o.tick(&world.view(), plants.view(), beast.view(), 0.0, frame)
+                .unwrap_or_else(|e| panic!("tick {t} ({frame:?}): {e}"));
+            if t == 7 || t == 9 {
+                // The frame just recorded is displaced before it runs.
+                o.discard();
+            }
+        }
+    }
+
+    /// Plants living their lives churn styles every tick: hundreds more over time than
+    /// the table holds, a few at once. No slot runs out, and a slot freed and taken by a
+    /// new style leaves no texel drawing the old one (the oracle sees every texel).
+    #[test]
+    fn styles_churning_over_time_never_exhaust_the_table_or_leave_a_stale_texel() {
+        let c = config();
+        let mut o = oracle(&c, false);
+        let mut world = world(&c);
+        let stands = [
+            (1i64, 1u32, Species::Umbrellafrond, 0.5),
+            (12, 1, Species::Bloomcrown, 0.5),
+            (16, 4, Species::Bloomcrown, 0.8),
+            (24, 3, Species::Umbrellafrond, 0.4),
+            (29, 0, Species::Umbrellafrond, 0.7),
+        ];
+        let mut plants = flora(&world, &stands);
+        let none = Fauna::new(FaunaConfig::default());
+        for t in 0..400 {
+            world.step_with(1);
+            plants.step(&mut world);
+            o.tick(&world.view(), plants.view(), none.view(), 0.0, Frame::Now)
+                .unwrap_or_else(|e| panic!("tick {t}: {e}"));
+        }
+        assert!(
+            o.styles_made() > MAX_STYLES as u64,
+            "the plants churned only {} styles",
+            o.styles_made()
+        );
+    }
+
+    /// A tick where nothing changed uploads nothing: no brick and no plane.
+    #[test]
+    fn a_tick_where_nothing_changed_uploads_nothing() {
+        let c = config();
+        let mut o = oracle(&c, false);
+        let world = world(&c);
+        let plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0)]);
+        let beast = grazer(&world, 4, 1);
+        let tick = |o: &mut PackOracle| {
+            o.tick(&world.view(), plants.view(), beast.view(), 0.0, Frame::Now).unwrap()
+        };
+        let first = tick(&mut o);
+        assert_eq!(first.bricks, None, "the first pack carries the whole volume");
+        tick(&mut o);
+        let still = tick(&mut o);
+        assert_eq!(still.bricks, Some(0), "nothing changed, no brick");
+        assert_eq!(still.copied, [false; SLOW_PLANES], "and no plane");
     }
 }
