@@ -4,9 +4,10 @@
 
 The Blender builders the voxel bake (`bake_voxel_models.py`) takes its animals from: the
 three simulated founders (frondgrazer, littershredder, and the lanternjaw, added
-2026-10-01 from its pick) and six unsimulated specimens
+2026-10-01 from its pick) and nine unsimulated specimens
 (chorister, ripple-snail, capgnawer, seedporter, bellwing, and the loftstrider, added
-2026-10-01 from its pick). Each moves its signed-off
+2026-10-01 from its pick; the seedporter's stand, ground and glide poses, 2026-10-01, the
+pick's own pose being its climbing one). Each moves its signed-off
 blockout (`animal_bodies_r2.py`: CH v3, RS-D2 v2, CG-D2 v2, SP-AB2, FG/LT v2, BW-A) to
 its pick in `art/gen/artbook/` (README table; `design/handoffs/voxel-model-pass-2026-10-01.md`).
 Blockout fidelity: primitives, tubes and lofts, every part, count, proportion and colour
@@ -1186,9 +1187,9 @@ REF = {
     "ripple-snail": (ripple_snail, 0.19, 0.19, 0.125),
     "capgnawer": (capgnawer, 0.25, 0.21, 0.19),
     "seedporter": (seedporter, 0.2, 0.63, 0.94),
-    "seedporter-stand": (seedporter_stand, 0.4, 0.42, 0.97),
-    "seedporter-ground": (seedporter_ground, 0.92, 0.32, 0.46),
-    "seedporter-glide": (seedporter_glide, 1.2, 0.86, 0.26),
+    "seedporter-stand": (seedporter_stand, 0.31, 0.37, 1.04),
+    "seedporter-ground": (seedporter_ground, 1.14, 0.31, 0.67),
+    "seedporter-glide": (seedporter_glide, 1.24, 0.76, 0.35),
     "bellwing": (bellwing, 0.05, 0.375, 0.4),
     "lanternjaw": (lanternjaw, 1.0, 0.25, 0.45),
     "loftstrider": (loftstrider, 2.2, 2.4, 3.4),

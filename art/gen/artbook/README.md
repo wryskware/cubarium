@@ -1,4 +1,4 @@
-# Cubarium artbook — concept picks, 2026-09-24–25 (lanternjaw and loftstrider 2026-10-01)
+# Cubarium artbook — concept picks, 2026-09-24–25 (lanternjaw, loftstrider and seedporter poses 2026-10-01)
 
 [Open the visual artbook](index.html).
 
@@ -13,6 +13,7 @@ These are Wrysk's selected visual references, retained alternatives and terrain 
 - All terrain stays candidate material for a later detailed rendering pass. Litter needs further arrangements and densities using our plants' foliage. Further animal colourway exploration is deferred.
 - Lanternjaw: where the image and the model differ (tail fork, fangs, razor blades), the model is the reference.
 - Loftstrider: the image does not keep the sixes (legs, eyes, tusks, fronds) or the mixed frond sizes; the model is the reference.
+- Seedporter poses: the images attach the membranes to the flanks or hips and the small arms near the shoulders; the models (membranes wrist to knee, small arms the middle pair) are the reference. The outer glow is unwanted (Wrysk) and needs cleanup.
 - Reconcile rigging, exact counts, growth states and material palettes later. These picks do not imply engine changes.
 
 ## Plants
@@ -37,7 +38,10 @@ These are Wrysk's selected visual references, retained alternatives and terrain 
 | Chorister CH-A2 v3 | [violet stalker](chorister.png) | Accepted. |
 | Ripple-snail RS-D2 | [organic azure dome](ripple-snail-organic.png) | Selected concept; matte grown shell with two shallow growth ridges, pale mantle edge, dark foot and pink-tipped feeding palps. |
 | Capgnawer CG-D2 | [rose-mauve bark mantle](capgnawer-rose-bark.png) | Selected concept; rounded twin mantle with layered bark texture, six mandibles in three vertical pairs, and two rows of smooth pink sensor patches on each side (larger upper, smaller lower). Keep the patches light pink. |
-| Seedporter | [selected moss-green design](seedporter.png) | Selected exact tall-headed, open-mouthed image; six limbs, a small fruit-handling pair, larger membrane-bearing arms, rear gripping feet and a coiled prehensile tail. Keep the pictured proportions as the selected reference. Outer halo needs cleanup. |
+| Seedporter | [selected moss-green design](seedporter.png) | Selected exact tall-headed, open-mouthed image; six limbs, a small fruit-handling pair, larger membrane-bearing arms, rear gripping feet and a coiled prehensile tail. Keep the pictured proportions as the selected reference. Its model (`seedporter()`) is the climbing pose (Wrysk 2026-10-01); the three poses below share its body. Outer halo needs cleanup. |
+| Seedporter, standing | [perched, eating](seedporter-stand.png) | Selected 2026-10-01 as the standing pose: a Qwen 2.1 edit of the selected image (Wrysk's pick of `SP-stand-3001-b3`; b2 was also circled). Perched upright on a branch, crouched, the big arms down to the perch, the membranes folded, the small arms holding the fruit to its mouth, the tail hanging below the perch. **Anatomy is Wrysk's, not the image's:** the membranes run from the big arms' wrists to the hind knees, and the small arms are the middle pair. The model (`scripts/blender/animal_models.py` `seedporter_stand()`, z = 0 under its feet, its tail below) is the reference. The selected image above is the climbing pose. Opaque background with an outer glow. |
+| Seedporter, on the ground | [walking on all fours](seedporter-ground.png) | Selected 2026-10-01 as the ground pose (`SP-ground-side-3001-b2`; b3 and `SP-ground-34-3001-b1` were also circled). On all fours with the big arms as front legs, the membranes hanging along its flanks, the fruit held at the chest, the tail curling up behind. The model (`seedporter_ground()`) is the reference: membranes wrist to knee, a thinner tail, the hind legs set back. Opaque background with an outer glow. |
+| Seedporter, gliding | [membranes spread, from behind](seedporter-glide.png) | Selected 2026-10-01 as the gliding pose (`SP-glide-back-3001-b3`; `SP-glide-back-b1`, `SP-glide-top-b1` and `SP-glide-side-b1` were also circled). Level and belly down, the big arms spread forward with the membranes taut, the tail straight behind. The model (`seedporter_glide()`) is the reference: the membranes reach the knees, the knees spread out, the small arms hold the fruit under the chest. Opaque background. |
 | Seedporter | [compact-head alternate](seedporter-compact-head-alt.png) | Explicitly retained alternate: broader compact head, substantial muzzle and closed mouth, with lateral skull lobes. Does not replace the selected image. Outer halo needs cleanup. |
 | Frondgrazer | [coral saddle shield](frondgrazer.png) | Selected; six short legs, continuous double-raised saddle shield, folded neck and transverse cropping scoop. Two stalk-tip sensors have dark plum lenses and magenta rims; shoulder patches remain. Outer halo needs cleanup. |
 | Littershredder | [longer tapered crawler](littershredder.png) | Selected second version (the longer, tapered one); golden overlapping plates, brown bands, pale legs and feelers, single magenta spot. The later less-tapered variant was not selected. Exact segment count needs model reconciliation. Outer halo needs cleanup. |

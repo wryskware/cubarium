@@ -169,7 +169,8 @@ pub fn specimen_coat(name: &str) -> Option<Coat> {
         "chorister" => CHORISTER,
         "ripple-snail" => RIPPLE_SNAIL,
         "capgnawer" => CAPGNAWER,
-        "seedporter" => SEEDPORTER,
+        // the climbing pose (the pick's), and the same body perched, on all fours, gliding
+        "seedporter" | "seedporter-stand" | "seedporter-ground" | "seedporter-glide" => SEEDPORTER,
         "bellwing" => BELLWING,
         "loftstrider" => LOFTSTRIDER,
         _ => return None,

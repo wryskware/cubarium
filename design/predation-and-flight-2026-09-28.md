@@ -380,6 +380,9 @@ or dead, a face uncovered) it takes off, or drops to the ground if it can't pay.
   at `glide_ratio` 2.5 (horizontal : vertical), speed 3 BL/s, steered by `turn`. It lands
   on the first support face, crown or covered face it meets. Cost 1.2 × basal.
 - So a seedporter climbs one grove's tree and glides to the next; the SP-B pattern.
+- Models for these modes exist (2026-10-01; the reimagining doc's §Seedporter): specimens
+  `seedporter` (climbing), `seedporter-stand` (perched), `seedporter-ground` (walking) and
+  `seedporter-glide`. F3's presenter picks one by mode; nothing does yet.
 
 ### 3.6 Senses in 3D
 

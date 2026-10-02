@@ -148,3 +148,22 @@ specimen). His counts, which the image does not keep:
 
 The voxel colours are more vibrant to match the image. The fronds are mixed sizes: 100, 75
 and 60 %, each twice ("lets do mixed").
+
+## Seedporter poses (Wrysk, 2026-10-01)
+
+Final: four models of the one seedporter. The existing model is the **climbing** pose
+("we can keep the existing one as the climbing model"). Three new poses were picked from
+Qwen 2.1 edits of the artbook image (`art/gen/runs/2026-10-01-seedporter-poses/`, his
+annotated sheet `sheet-seedporter-poses-annotated.png`):
+
+- **Standing** (`artbook/seedporter-stand.png`): perched upright, eating. Ground level is
+  under its feet and the tail hangs below it.
+- **On the ground** (`artbook/seedporter-ground.png`): on all fours. "tail could be
+  thinner on the ground model and hind legs move one voxel back."
+- **Gliding** (`artbook/seedporter-glide.png`): level, the membranes spread.
+
+His anatomy, which the images do not keep: "wing flaps should connect from the knees of
+the hind legs to the wrists of the fore arms. the small arms are the middle pair." The
+images' outer glow is unwanted ("none should really have that stupid outter glow") but
+stays for now. Built on one rig in `scripts/blender/animal_models.py` and baked as
+specimens `seedporter-stand`, `seedporter-ground` and `seedporter-glide`.
