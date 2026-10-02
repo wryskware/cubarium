@@ -1,0 +1,50 @@
+# C2 arm, 2026-10-02: twice the calibrated weights (frondgrazer 162, littershredder 54)
+# Brain curiosity: each training lineage's novelty term in the brains' window score
+# (design/handoffs/brain-curiosity-2026-10-02.md, Wrysk 2026-10-02).
+#
+#   score = delta + given + weight × novelty
+#
+# Novelty is ground new to the body: cells of `cell_bl` adult body lengths; entering a cell
+# earns 1 − f, f its familiarity (1 while there, halving every `memory_min` minutes after
+# leaving); a window's earnings over the cells a straight walk at the lineage's cruise
+# would enter. About 0–1.
+#
+# Training knobs only (`--curiosity` on voxel-ecology-search and voxel-live-train; the
+# check measures novelty on these cells). Not world knobs, not ecology-search genes.
+#
+#   weight      body references a window at novelty 1 is worth (>= 0; 0 = no curiosity)
+#   memory_min  familiarity half-life after leaving a cell, minutes (> 0)
+#   cell_bl     cell side, adult body lengths (> 0)
+#
+# Weights calibrated 2026-10-02 so that weight × sd(novelty) = share × sd(delta + given),
+# both within-world sds over the scored bodies, averaged over the 6 windows of a unified
+# smoke (terrarium, lockstep-g15 centres and mean, --brain-pairs 8, λ 2, 2 seeds, 1 h,
+# 10 min windows, curiosity off):
+#   frondgrazer     sdE 2.97  sdN 0.0183  share 0.5  -> 81   (mean novelty 0.035)
+#   littershredder  sdE 3.61  sdN 0.0395  share 0.3  -> 27   (mean novelty 0.032)
+# Novelty is low today (~0.03), so a weight is large; recalibrate if the brains start
+# roaming and sd(novelty) grows.
+
+[frondgrazer]
+weight = 162.0
+memory_min = 30.0
+cell_bl = 1.0
+
+[littershredder]
+weight = 54.0
+memory_min = 30.0
+cell_bl = 1.0
+
+# An ambusher with no trained brain yet: share 0.
+[lanternjaw]
+weight = 0.0
+memory_min = 30.0
+cell_bl = 1.0
+
+# Seedporter: not on main yet (the roster worktree adds it). Extremely high curiosity,
+# Wrysk 2026-10-02: share >= 2 of sd(delta + given) per sd(novelty). Whoever merges the
+# roster calibrates and fills it in.
+# [seedporter]
+# weight = ?        # share >= 2
+# memory_min = 30.0
+# cell_bl = 1.0

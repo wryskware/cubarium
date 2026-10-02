@@ -1,0 +1,305 @@
+# Ecology search mean after generation 9. Training only.
+[[gene]]
+name = "starter_litter"
+path = ["fauna.founding.starter_litter_organic"]
+range = [0.25, 5.0]
+value = 0.6616058425929003
+what = "leaf litter laid under each seeded shredder (0.2 = ~0.5 body at x30); founders die before finding litter"
+
+[[gene]]
+name = "upkeep@littershredder"
+path = ["fauna.founders.littershredder.core.maintenance_per_s"]
+range = [0.1, 4.0]
+value = 0.8977441433600694
+what = "basal upkeep; real: browser x1 (the reference clock), shredder x0.14-0.4 (ectotherm)"
+
+[[gene]]
+name = "upkeep@frondgrazer"
+path = ["fauna.founders.frondgrazer.core.maintenance_per_s"]
+range = [0.1, 4.0]
+value = 1.0191603202046027
+what = "basal upkeep; real: browser x1 (the reference clock), shredder x0.14-0.4 (ectotherm)"
+
+[[gene]]
+name = "upkeep@lanternjaw"
+path = ["fauna.founders.lanternjaw.core.maintenance_per_s"]
+range = [0.1, 4.0]
+value = 1.5949305310907398
+what = "basal upkeep; real: browser x1 (the reference clock), shredder x0.14-0.4 (ectotherm)"
+
+[[gene]]
+name = "motor@littershredder"
+path = ["fauna.founders.littershredder.motor_respiration_per_s"]
+range = [0.5, 10.0]
+value = 0.8528113672739409
+what = "walking cost / upkeep (motor_factor); real: mammal x1-2.5, shredder x3-8"
+
+[[gene]]
+name = "motor@frondgrazer"
+path = ["fauna.founders.frondgrazer.motor_respiration_per_s"]
+range = [0.5, 10.0]
+value = 1.2732236855028216
+what = "walking cost / upkeep (motor_factor); real: mammal x1-2.5, shredder x3-8"
+
+[[gene]]
+name = "motor@lanternjaw"
+path = ["fauna.founders.lanternjaw.motor_respiration_per_s"]
+range = [0.5, 10.0]
+value = 1.2709779349707864
+what = "walking cost / upkeep (motor_factor); real: mammal x1-2.5, shredder x3-8"
+
+[[gene]]
+name = "intake@littershredder"
+path = ["fauna.founders.littershredder.core.bite_per_s"]
+range = [0.05, 2.0]
+value = 1.1712660665909391
+what = "max intake / upkeep (intake_factor); real: x0.1-0.25 (2-4x upkeep, not 16-40x)"
+
+[[gene]]
+name = "intake@frondgrazer"
+path = ["fauna.founders.frondgrazer.core.bite_per_s"]
+range = [0.05, 2.0]
+value = 1.7166080503021268
+what = "max intake / upkeep (intake_factor); real: x0.1-0.25 (2-4x upkeep, not 16-40x)"
+
+[[gene]]
+name = "intake@lanternjaw"
+path = ["fauna.founders.lanternjaw.core.bite_per_s"]
+range = [0.05, 2.0]
+value = 0.6096156954612247
+what = "max intake / upkeep (intake_factor); real: x0.1-0.25 (2-4x upkeep, not 16-40x)"
+
+[[gene]]
+name = "yield@littershredder"
+path = ["fauna.founders.littershredder.yield_by_food.*"]
+range = [0.1, 1.8]
+value = 0.9563037209447218
+what = "assimilation yield; real: litter x0.1-0.6, browse x0.8-1.4, carrion x1.6-1.8"
+
+[[gene]]
+name = "yield@frondgrazer"
+path = ["fauna.founders.frondgrazer.yield_by_food.*"]
+range = [0.1, 1.8]
+value = 0.6729563450516955
+what = "assimilation yield; real: litter x0.1-0.6, browse x0.8-1.4, carrion x1.6-1.8"
+
+[[gene]]
+name = "yield@lanternjaw"
+path = ["fauna.founders.lanternjaw.yield_by_food.*"]
+range = [0.1, 1.8]
+value = 0.9381063114603535
+what = "assimilation yield; real: litter x0.1-0.6, browse x0.8-1.4, carrion x1.6-1.8"
+
+[[gene]]
+name = "breed_reserve@littershredder"
+path = ["fauna.founders.littershredder.core.reproduction.surplus_floor"]
+range = [0.25, 4.0]
+value = 1.3397870698820904
+what = "the reserve margin a body breeds above; no real analog"
+
+[[gene]]
+name = "breed_reserve@frondgrazer"
+path = ["fauna.founders.frondgrazer.core.reproduction.surplus_floor"]
+range = [0.25, 4.0]
+value = 1.0141692233156818
+what = "the reserve margin a body breeds above; no real analog"
+
+[[gene]]
+name = "breed_reserve@lanternjaw"
+path = ["fauna.founders.lanternjaw.core.reproduction.surplus_floor"]
+range = [0.25, 4.0]
+value = 0.7669768129292874
+what = "the reserve margin a body breeds above; no real analog"
+
+[[gene]]
+name = "lifespan@littershredder"
+path = ["fauna.founders.littershredder.core.lifespan_median_s"]
+range = [0.25, 16.0]
+value = 1.2385061891617806
+what = "median lifespan; real: x1.5-3.7 (wild median), x15 (maximum)"
+
+[[gene]]
+name = "lifespan@frondgrazer"
+path = ["fauna.founders.frondgrazer.core.lifespan_median_s"]
+range = [0.25, 16.0]
+value = 1.5673474229067186
+what = "median lifespan; real: x1.5-3.7 (wild median), x15 (maximum)"
+
+[[gene]]
+name = "lifespan@lanternjaw"
+path = ["fauna.founders.lanternjaw.core.lifespan_median_s"]
+range = [0.25, 16.0]
+value = 0.5527175416532514
+what = "median lifespan; real: x1.5-3.7 (wild median), x15 (maximum)"
+
+[[gene]]
+name = "gestation@littershredder"
+path = ["fauna.founders.littershredder.core.reproduction.gestation_s", "fauna.founders.littershredder.core.reproduction.incubation_s"]
+range = [0.25, 32.0]
+value = 0.8657260030710949
+what = "gestation and incubation; real: gestation x21-29, incubation x3-6"
+
+[[gene]]
+name = "gestation@frondgrazer"
+path = ["fauna.founders.frondgrazer.core.reproduction.gestation_s", "fauna.founders.frondgrazer.core.reproduction.incubation_s"]
+range = [0.25, 32.0]
+value = 0.767696737814927
+what = "gestation and incubation; real: gestation x21-29, incubation x3-6"
+
+[[gene]]
+name = "gestation@lanternjaw"
+path = ["fauna.founders.lanternjaw.core.reproduction.gestation_s", "fauna.founders.lanternjaw.core.reproduction.incubation_s"]
+range = [0.25, 32.0]
+value = 0.9298044630937166
+what = "gestation and incubation; real: gestation x21-29, incubation x3-6"
+
+[[gene]]
+name = "maturity@littershredder"
+path = ["fauna.founders.littershredder.core.growth_max_per_s"]
+range = [0.05, 4.0]
+value = 0.6953318114118221
+what = "growth to breeding size; real: x0.12-0.25 (maturity 4-8x fast)"
+
+[[gene]]
+name = "maturity@frondgrazer"
+path = ["fauna.founders.frondgrazer.core.growth_max_per_s"]
+range = [0.05, 4.0]
+value = 0.6592175922843257
+what = "growth to breeding size; real: x0.12-0.25 (maturity 4-8x fast)"
+
+[[gene]]
+name = "maturity@lanternjaw"
+path = ["fauna.founders.lanternjaw.core.growth_max_per_s"]
+range = [0.05, 4.0]
+value = 0.8188915083231095
+what = "growth to breeding size; real: x0.12-0.25 (maturity 4-8x fast)"
+
+[[gene]]
+inverse = ["flora.*.seed_max_age_s", "flora.*.defence_half_life_s", "flora.latticevine.dry_spell_s", "flora.latticevine.wet_spell_s", "flora.latticevine.bud_s", "flora.latticevine.flower_s", "flora.latticevine.fruit_s", "flora.latticevine.spent_s", "fauna.founders.*.core.lifespan_median_s", "fauna.founders.*.core.reproduction.surplus_hold_s", "fauna.founders.*.core.reproduction.gestation_s", "fauna.founders.*.core.reproduction.birth_interval_s", "fauna.founders.*.core.reproduction.incubation_s", "fauna.predation.egg_viability_median_s"]
+name = "K_bio"
+path = ["flora.*.foliage_rate", "flora.*.wood_rate", "flora.*.assimilation", "flora.*.maintenance", "flora.*.senescence", "flora.*.propagule_rate", "flora.*.substrate_uptake_per_s", "flora.decomposition", "flora.latticevine.leaf_upkeep", "flora.latticevine.wood_upkeep", "flora.latticevine.regrow_rate", "fauna.founders.*.core.maintenance_per_s", "fauna.founders.*.core.growth_max_per_s", "fauna.predation.wound_heal_per_s", "fauna.predation.egg_upkeep_per_s"]
+range = [0.25, 4.0]
+value = 1.6396050372662203
+what = "every biological rate faster, every life-history time shorter, together"
+
+[[gene]]
+name = "growth@turf"
+path = ["flora.@turf.foliage_rate"]
+range = [0.1, 4.0]
+value = 0.20692399104740583
+what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
+
+[[gene]]
+name = "growth@mat"
+path = ["flora.@mat.foliage_rate"]
+range = [0.1, 4.0]
+value = 0.9311238573095686
+what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
+
+[[gene]]
+name = "growth@shrub"
+path = ["flora.@shrub.foliage_rate"]
+range = [0.1, 4.0]
+value = 0.486610864929959
+what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
+
+[[gene]]
+name = "growth@tree"
+path = ["flora.@tree.foliage_rate"]
+range = [0.1, 4.0]
+value = 0.8762993574557794
+what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
+
+[[gene]]
+name = "leaf_fall@turf"
+path = ["flora.@turf.senescence"]
+range = [0.05, 4.0]
+value = 0.9503744922463314
+what = "leaf fall rate (1 / leaf life); real: herbs x0.25-0.8"
+
+[[gene]]
+name = "leaf_fall@mat"
+path = ["flora.@mat.senescence"]
+range = [0.05, 4.0]
+value = 0.7084374485257511
+what = "leaf fall rate (1 / leaf life); real: mats x0.07-0.5"
+
+[[gene]]
+name = "leaf_fall@shrub"
+path = ["flora.@shrub.senescence"]
+range = [0.05, 4.0]
+value = 1.0936804583758604
+what = "leaf fall rate (1 / leaf life); real: tropical shrubs x0.06-0.25"
+
+[[gene]]
+name = "leaf_fall@tree"
+path = ["flora.@tree.senescence"]
+range = [0.05, 4.0]
+value = 1.155043113412524
+what = "leaf fall rate (1 / leaf life); real: x0.06-0.25"
+
+[[gene]]
+name = "alpha@turf"
+path = ["flora.@turf.alpha"]
+range = [0.25, 2.0]
+value = 0.6426381101739899
+what = "foliage per unit wood; real: herbs 1-2 (x0.5-1)"
+
+[[gene]]
+name = "alpha@mat"
+path = ["flora.@mat.alpha"]
+range = [0.25, 2.0]
+value = 2.0
+what = "foliage per unit wood; real: mats 1-2 (x0.5-1)"
+
+[[gene]]
+name = "alpha@shrub"
+path = ["flora.@shrub.alpha"]
+range = [0.05, 2.0]
+value = 1.597339693439258
+what = "foliage per unit wood; real: shrubs 0.2-0.5 (x0.1-0.25)"
+
+[[gene]]
+name = "alpha@tree"
+path = ["flora.@tree.alpha"]
+range = [0.005, 2.0]
+value = 0.41299097511205984
+what = "foliage per unit wood; real: trees 0.02-0.1 (x0.01-0.05)"
+
+[[gene]]
+name = "defence_onset"
+path = ["flora.@photo.defence_per_bite"]
+range = [0.25, 8.0]
+value = 0.991733519963021
+what = "defence rise per bite; real: on within minutes of grazing (x2-5)"
+
+[[gene]]
+name = "defence_relax"
+path = ["flora.@photo.defence_half_life_s"]
+range = [0.03, 4.0]
+value = 0.60007932990861
+what = "defence half-life; real: days-weeks by the clock (x0.04-0.4)"
+
+[[gene]]
+name = "decomposition"
+path = ["flora.decomposition"]
+range = [0.1, 4.0]
+value = 0.419978179942441
+what = "litter decay (dead wood and carrion follow); real: x0.1-0.38"
+
+[screen]
+base = 200.0
+f_min = 10.0
+harvest = 0.2
+k = 10.0
+k_soft = 5.0
+light_moisture = 0.67
+r = [0.02, 0.3]
+run_margin = 2.0
+s = [0.02, 0.2]
+
+[targets]
+breed_exempt = ["lanternjaw"]
+lively_weight = 10.0
+persist_only = []
+ready_target = 0.5

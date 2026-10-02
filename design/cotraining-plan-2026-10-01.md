@@ -159,3 +159,40 @@ Watch it with `./scripts/run-voxel.sh --config config/desktop/terrarium.toml --p
 config/training/cotrain-2026-10-01/lockstep-g15-mean.toml --founder-policy
 browser=config/training/cotrain-2026-10-01/lockstep-g15-centre-frondgrazer.json
 --founder-policy littershredder=config/training/cotrain-2026-10-01/lockstep-g15-centre-littershredder.json`.
+
+## Result, 2026-10-02: curiosity lock step
+
+**What ran.** Both runs use curiosity (`config/training/curiosity.toml`, brief
+`design/handoffs/brain-curiosity-2026-10-02.md`) on the build with the crag fix and wall slide
+(6e69e7b2). Both warm-start from the g15 mean and centres, with σ0 0.10, 16 brain pairs, and a
+wall at 10:00.
+- **C1** ran on the desktop with the calibrated weights, for 14 generations.
+- **C2** ran on eidolon with 2× weights (`curiosity-x2.toml`), for 10 generations.
+
+**Gate:** seeds 9–16 × 2 h. Each cell is summed over the 8 worlds and shows
+alive / births / worlds with a late birth / moving share.
+
+| arm | ecology | brains | shredders | browsers |
+|---|---|---|---|---|
+| defaults | defaults | round 2 | 61 / 16 / 7 / 0.74 | 24 / 6 / 1 / 0.73 |
+| A15 | g15 | g15 | 94 / 60 / 8 / 0.32 | 33 / 13 / 3 / 0.38 |
+| C1 | C1 | C1 | 34 / 41 / 8 / 0.28 | 100 / 78 / 8 / 0.33 |
+| X12 | C1 | C2 | 50 / 53 / 8 / 0.43 | 57 / 29 / 7 / 0.90 |
+| X21 | C2 | C1 | 103 / 80 / 8 / 0.41 | 51 / 41 / 6 / 0.38 |
+| C2 | C2 | C2 | 110 / 81 / 8 / 0.51 | 41 / 17 / 8 / 0.62 |
+
+**Reading the gate**
+- **The crag fix alone** (A15 against last night's A) lifts movement from 0.20 to 0.35. It
+  costs browser breeding, which drops to 3 of 8 worlds.
+- **The ecology sets the shredder–browser balance.** C2's ecology carries about 105 shredders
+  with either set of brains. C1's ecology favours browsers.
+- **The curiosity weight sets browser movement.** The 2× brains move 0.62–0.90, and the
+  calibrated brains move 0.33–0.38. That movement costs the 2× brains browser births.
+- **Still failing:**
+  - Springturf is lost in 1–2 of 8 worlds in every trained arm.
+  - Lanternjaws never establish, with at most 5 alive and no late births.
+- **Most balanced:** X21, C2's ecology with C1's brains. Every trained lineage moves above
+  0.38 and has more than 50 alive, but browsers miss a late birth in 2 worlds.
+
+The files are in `config/training/curiosity-2026-10-02/` (training only; the live defaults are
+unchanged). Raw CSVs are under `runs/gate-curio/`.
