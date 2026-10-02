@@ -709,6 +709,15 @@ pub fn seed_pre_rolled(
                             && wettest[*i] <= 0.0
                             && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
                             && has_headroom(&view, i64::from(s.x), s.y, s.z, room)
+                            // Its span fits on the face, with room to take off: a fifth of
+                            // its band clear overhead.
+                            && cubarium_voxel_fauna::flyer_fits_on_face(
+                                &view,
+                                &phys,
+                                phys.core.body_max,
+                                *s,
+                                0.2 * phys.flight.map_or(0.0, |f| f.band_max_m),
+                            )
                             && near_nectar(&view, &sources, *s, reach)
                     })
                     .map(|(_, s)| s)

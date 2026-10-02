@@ -296,8 +296,9 @@ pub struct TeacherConfig {
     /// Forward effort while it wanders with nothing in sight.
     #[serde(default = "bw_wander_forward")]
     pub bellwing_wander_forward: f64,
-    /// Going to rest: cover overhead closer than this (`Self.ceiling`, a fraction of the
-    /// band) is an underside to rise into; otherwise it comes down onto what is below.
+    /// Cover overhead closer than this (`Air.overhead`, a fraction of the band) is low: going
+    /// to rest it rises into it (an underside), otherwise it comes down onto what is
+    /// below; searching it never climbs toward it; taking off under it, it goes out level.
     #[serde(default = "bw_roost_ceiling")]
     pub bellwing_roost_ceiling: f64,
 }

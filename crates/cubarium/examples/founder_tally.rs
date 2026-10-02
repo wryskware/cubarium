@@ -17,6 +17,14 @@
 //! stock summed over every site) and the film site count are printed at t = 0, every 15
 //! minutes and at the end, with the plant layer's film consumed.
 //!
+//! An optional `bellwings=N` (F1's measure) does the same for the bellwing: its founding
+//! count on the asked seed, so `bellwings=0` is the no-bellwing control on the same world.
+//! The run then prints a `bellwing:` census line — body-hours, the shares of body-ticks
+//! airborne / perched awake / asleep, assimilated intake and flight cost per body-hour,
+//! sips per hour by source, landings by perch kind, takeoffs and drops, the sheltered share
+//! of perched body-ticks in downpours — and a `bloomcrown:` line (seed output: propagule
+//! organic funded and seeds landed, stands, nectar standing) and the wall time per tick.
+//!
 //! At t = 0 it reports the roster R1 check: the glowcap caps standing (count and stock)
 //! and the foliage standing in a loftstrider's mouth band over each stand's support face
 //! (the adult band, `mouth_floor..mouth_ceiling × height`).
@@ -34,9 +42,21 @@ fn main() {
         .map_or("config/desktop/terrarium.toml", String::as_str);
     let ticks: u64 = args.get(2).map_or(2000, |a| a.parse().expect("TICKS"));
     let seed: u64 = args.get(3).map_or(1, |a| a.parse().expect("SEED"));
-    let snails: Option<usize> = args
-        .get(4)
-        .map(|a| a.strip_prefix("snails=").expect("snails=N").parse().expect("snails=N"));
+    let mut snails: Option<usize> = None;
+    let mut bellwings: Option<usize> = None;
+    // `trace=S`: every S seconds, one line per bellwing (a diagnostic).
+    let mut trace: Option<u64> = None;
+    for a in args.iter().skip(4) {
+        if let Some(n) = a.strip_prefix("snails=") {
+            snails = Some(n.parse().expect("snails=N"));
+        } else if let Some(n) = a.strip_prefix("bellwings=") {
+            bellwings = Some(n.parse().expect("bellwings=N"));
+        } else if let Some(n) = a.strip_prefix("trace=") {
+            trace = Some(n.parse().expect("trace=SECONDS"));
+        } else {
+            panic!("unknown argument {a}");
+        }
+    }
     cubarium_voxel::set_thread_override(1);
     let cfg = load_config(std::path::Path::new(path)).expect("config");
     let params = params_of(&cfg, &[]).expect("params");
@@ -45,11 +65,15 @@ fn main() {
     if let Some(n) = snails {
         counts[Founder::RippleSnail.index()] = n;
     }
+    if let Some(n) = bellwings {
+        counts[Founder::Bellwing.index()] = n;
+    }
+    let asked = snails.is_some() || bellwings.is_some();
     let founded = found(
         &world_cfg,
         &LayerConfig::new(&params, world_cfg.voxel_m),
         counts,
-        if snails.is_some() { Seeds::Asked(seed) } else { Seeds::from(seed) },
+        if asked { Seeds::Asked(seed) } else { Seeds::from(seed) },
         false,
     );
     eprintln!(
@@ -77,8 +101,74 @@ fn main() {
     let mut seen: HashSet<u64> = sim.fauna().view().animals.iter().map(|a| a.id).collect();
     let mut born = [0u64; Founder::COUNT];
     let quarter = 15 * 60 * u64::from(cubarium_voxel::TICK_HZ);
+    let bw = Founder::Bellwing;
+    let band = params.fauna.founder(bw).flight.map_or(2.5, |f| f.band_max_m);
+    // Bellwing body-ticks: aloft, perched awake, asleep; perched in a downpour, sheltered.
+    let (mut aloft, mut perched, mut asleep, mut pour_perched, mut pour_sheltered) =
+        (0u64, 0u64, 0u64, 0u64, 0u64);
+    let started = std::time::Instant::now();
     for tick in 1..=ticks {
         sim.step();
+        if let Some(every) = trace {
+            if tick % (every * u64::from(cubarium_voxel::TICK_HZ)) == 0 {
+                let fv = sim.flora().view();
+                let v = sim.world().config().voxel_m;
+                let ring = f64::from(sim.world().config().width) * v;
+                for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(bw)) {
+                    let near = fv
+                        .stands
+                        .iter()
+                        .filter(|s| s.nectar > 0.0)
+                        .map(|s| {
+                            let dx = ((f64::from(s.site.x) + 0.5) * v - a.pose.x).rem_euclid(ring);
+                            let dx = dx.min(ring - dx);
+                            let dz = (f64::from(s.site.z) + 0.5) * v - a.pose.z;
+                            (dx * dx + dz * dz).sqrt()
+                        })
+                        .fold(f64::INFINITY, f64::min);
+                    println!(
+                        "trace t={} id={} x={:.2} z={:.2} y={:.2} over={:.2} mode={:?} perch={:?} state={:?} held=({:.2},{:.2},{:.2}) lift={:.2} reserve={:.5} body={:.5} bloom_m={:.2}",
+                        tick / u64::from(cubarium_voxel::TICK_HZ),
+                        a.id,
+                        a.pose.x,
+                        a.pose.z,
+                        a.pose.y_m,
+                        a.pose.y_m - (f64::from(a.site.y) + 1.0) * v,
+                        a.mobility.mode,
+                        a.mobility.perch.map(|p| p.kind),
+                        a.state,
+                        a.founder_state.held.forward,
+                        a.founder_state.held.turn,
+                        a.founder_state.held.feed,
+                        a.founder_state.lift,
+                        a.reserve,
+                        a.body,
+                        near
+                    );
+                }
+            }
+        }
+        {
+            let view = sim.world().view();
+            let fv = sim.flora().view();
+            let downpour = view.weather.mode == cubarium_voxel::weather::RainMode::Downpour;
+            for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(bw)) {
+                use cubarium_voxel_fauna::MobilityMode;
+                if a.state == cubarium_voxel_fauna::State::Asleep {
+                    asleep += 1;
+                } else if a.mobility.mode == MobilityMode::Perched {
+                    perched += 1;
+                } else {
+                    aloft += 1;
+                }
+                if downpour && a.mobility.mode == MobilityMode::Perched {
+                    pour_perched += 1;
+                    if cubarium_voxel_fauna::flyer_sheltered(&view, &fv, a, band) {
+                        pour_sheltered += 1;
+                    }
+                }
+            }
+        }
         if tick % quarter == 0 {
             let v = sim.fauna().view();
             let alive: Vec<String> = Founder::ALL
@@ -100,8 +190,50 @@ fn main() {
             }
         }
     }
+    let wall = started.elapsed().as_secs_f64();
     let view = sim.fauna().view();
     let l = view.ledger;
+    {
+        let hz = f64::from(cubarium_voxel::TICK_HZ);
+        let body_ticks = (aloft + perched + asleep) as f64;
+        let body_h = body_ticks / hz / 3600.0;
+        let share = |n: u64| if body_ticks > 0.0 { n as f64 / body_ticks } else { 0.0 };
+        let per_bh = |x: f64| if body_h > 0.0 { x / body_h } else { 0.0 };
+        let landings: Vec<String> = cubarium_voxel_fauna::PerchKind::ALL
+            .iter()
+            .map(|k| format!("{}={}", k.name(), l.landings_by_perch[k.index()]))
+            .collect();
+        println!(
+            "bellwing: body_h={:.3} aloft={:.3} perched={:.3} asleep={:.3} intake_per_bh={:.6} flight_cost_per_bh={:.6} sips_per_bh=[stand={:.1} vine={:.1}] landings=[{}] takeoffs={} drops={} downpour_perched_ticks={} sheltered={:.3}",
+            body_h,
+            share(aloft),
+            share(perched),
+            share(asleep),
+            per_bh(l.assimilated_by_founder[bw.index()]),
+            per_bh(l.respired_flight_out),
+            per_bh(l.sips_by_bloom[0] as f64),
+            per_bh(l.sips_by_bloom[1] as f64),
+            landings.join(" "),
+            l.takeoffs,
+            l.drops,
+            pour_perched,
+            if pour_perched > 0 { pour_sheltered as f64 / pour_perched as f64 } else { f64::NAN },
+        );
+        let fv = sim.flora().view();
+        let b = cubarium_voxel_flora::Species::Bloomcrown;
+        let stands: Vec<_> = fv.stands.iter().filter(|s| s.species == b).collect();
+        println!(
+            "bloomcrown: propagule_funded={:.6} seeds_landed={} seeds_germinated={} stands={} adults={} wood={:.4} nectar_standing={:.6}",
+            fv.ledger.propagule_funded[b.index()],
+            fv.ledger.seeds_landed[b.index()],
+            fv.ledger.seeds_germinated[b.index()],
+            stands.len(),
+            stands.iter().filter(|s| s.profile_stage >= 1).count(),
+            stands.iter().map(|s| s.wood).sum::<f64>(),
+            stands.iter().map(|s| s.nectar).sum::<f64>(),
+        );
+        println!("step_cost: wall_s={wall:.1} ms_per_tick={:.4}", 1000.0 * wall / ticks as f64);
+    }
     for f in Founder::ALL {
         let alive = view.animals.iter().filter(|a| a.founder == Some(f)).count();
         let deaths: Vec<String> = Departure::ALL

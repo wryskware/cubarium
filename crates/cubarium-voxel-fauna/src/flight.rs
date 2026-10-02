@@ -204,6 +204,13 @@ fn roof_over(view: &VoxelView<'_>, shape: Shape, x: f64, z: f64, top: f64, look_
     best
 }
 
+/// The clear height over the body's top across its whole disc to the first solid, looking
+/// at most `cap` up (`cap` when nothing is there).
+pub(crate) fn overhead_clear(view: &VoxelView<'_>, shape: Shape, x: f64, z: f64, base: f64, cap: f64) -> f64 {
+    let top = base + shape.h;
+    roof_over(view, shape, x, z, top, cap).map_or(cap, |(bottom, _)| (bottom - top).clamp(0.0, cap))
+}
+
 /// The clear height over the base in the centre's column, to the first solid or water
 /// cell, looking at most `cap` up (`cap` when nothing is there).
 pub(crate) fn clear_height(view: &VoxelView<'_>, x: f64, z: f64, base: f64, cap: f64) -> f64 {
@@ -327,6 +334,19 @@ pub(crate) fn perch_holds(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, 
                 && view.is_solid(i64::from(x), ry, z)
         }
     }
+}
+
+/// **Room for a flyer on a face** (F1, founding and `IntroduceFounder*`): its disc fits on
+/// the top of the support face `site` (centred on the face), with at least `headroom_m`
+/// clear over its top across the disc.
+pub fn flyer_fits_on_face(view: &VoxelView<'_>, phys: &FounderPhysiology, body: f64, site: Site, headroom_m: f64) -> bool {
+    let Some(flight) = phys.flight else {
+        return false;
+    };
+    let v = view.config.voxel_m;
+    let shape = Shape::of(phys, &flight, body);
+    let (x, z, y) = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v, surface_m(site.y, v));
+    !blocked(view, shape, x, z, y) && overhead_clear(view, shape, x, z, y, headroom_m) >= headroom_m
 }
 
 /// Put a flyer perched on the top of the support face `site` (an introduced or a newborn

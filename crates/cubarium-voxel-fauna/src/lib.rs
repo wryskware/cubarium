@@ -78,7 +78,7 @@ pub use manifest::{
 };
 pub use knobs::{CueConfig, FoundingConfig, LifeConfig, PredationConfig, TeacherConfig};
 pub use pose::Pose;
-pub use flight::flyer_sheltered;
+pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
 
@@ -2573,6 +2573,13 @@ impl Fauna {
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
                     return false;
                 };
+                // A flyer is refused where its disc does not fit on the face (F1).
+                let phys = self.config.founder(founder);
+                if phys.flight.is_some()
+                    && !flight::flyer_fits_on_face(&world.view(), phys, body, site, 0.0)
+                {
+                    return false;
+                }
                 self.introduce_body(
                     world,
                     site,
@@ -2602,6 +2609,13 @@ impl Fauna {
                 let Some((body, reserve)) = stores.resolve(&core) else {
                     return false;
                 };
+                // A flyer is refused where its disc does not fit on the face (F1).
+                let phys = self.config.founder(founder);
+                if phys.flight.is_some()
+                    && !flight::flyer_fits_on_face(&world.view(), phys, body, site, 0.0)
+                {
+                    return false;
+                }
                 self.introduce_body(
                     world,
                     site,

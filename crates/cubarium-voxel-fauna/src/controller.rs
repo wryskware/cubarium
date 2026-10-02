@@ -874,7 +874,9 @@ impl Controller for HoverSip {
         let s = self.selfm.offset;
         let (reserve, delivery, altitude, ceiling) = (o[s + 1], o[s + 7], o[s + 8], o[s + 9]);
         let perched = o[self.air.offset] > 0.5;
-        let downpour = o[self.air.offset + 2] > 0.5;
+        let hanging = o[self.air.offset + 1] > 0.5;
+        let overhead = o[self.air.offset + 2];
+        let downpour = o[self.air.offset + 4] > 0.5;
         let taste = if o[self.taste.offset + 2] > 0.5 { o[self.taste.offset] } else { 0.0 };
         let f = self.fan.offset;
         let bloom = [o[f + 2], o[f + 10], o[f + 18]];
@@ -884,9 +886,12 @@ impl Controller for HoverSip {
         } else if reserve < cfg.bellwing_hungry_at {
             self.resting = false;
         }
-        let hold = |alt: f64| (cfg.bellwing_altitude_gain * (cfg.bellwing_cruise_altitude - alt)).clamp(-1.0, 1.0);
-        // Hanging under something: so little clear height that rising would hang it again.
-        let hanging = perched && ceiling < 0.05;
+        // Hold the search height, never climbing into cover close overhead (it would hang
+        // there): it goes around.
+        let hold = |alt: f64| {
+            let lift = (cfg.bellwing_altitude_gain * (cfg.bellwing_cruise_altitude - alt)).clamp(-1.0, 1.0);
+            if overhead < cfg.bellwing_roost_ceiling { lift.min(0.0) } else { lift }
+        };
 
         // A bloom at the mouth: sip.
         if taste > cfg.feed_gate && !self.resting {
@@ -895,7 +900,7 @@ impl Controller for HoverSip {
         }
         // A downpour: down regardless; keep going while the sky is open overhead.
         if downpour {
-            if perched || ceiling < 1.0 {
+            if perched || ceiling < 1.0 || overhead < 1.0 {
                 return self.act(0.0, 0.0, 0.0, -1.0);
             }
             let turn = self.wander.turn(o, &cfg);
@@ -905,16 +910,18 @@ impl Controller for HoverSip {
             if self.resting {
                 return self.act(0.0, 0.0, 0.0, 0.0);
             }
-            // Take off: drop from an underside, else lift.
+            // Take off: drop from an underside; out from under low cover; else up.
             return if hanging {
                 self.act(1.0, 0.0, 0.0, -1.0)
+            } else if overhead < cfg.bellwing_roost_ceiling {
+                self.act(1.0, 0.0, 0.0, 0.0)
             } else {
                 self.act(0.0, 0.0, 0.0, 1.0)
             };
         }
         // Aloft and full: go to rest.
         if self.resting {
-            let lift = if ceiling < cfg.bellwing_roost_ceiling { 1.0 } else { -1.0 };
+            let lift = if overhead < cfg.bellwing_roost_ceiling { 1.0 } else { -1.0 };
             return self.act(0.0, 0.0, 0.0, lift);
         }
         // Blocked (a wall, the ceiling over lower ground): turn away and climb a little.

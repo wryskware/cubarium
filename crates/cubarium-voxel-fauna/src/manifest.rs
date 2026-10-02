@@ -554,21 +554,23 @@ const MODULE_FLYER_SELF: Module = Module {
     channels: &FLYER_SELF_CHANNELS,
 };
 
-/// A flyer's state in the air: perched (1) or aloft (0), the rain rate over the flight's
-/// `R₀` (capped at 1), and whether a downpour is falling.
-const AIR_CHANNELS: [&str; 3] = ["perched", "rain", "downpour"];
+/// A flyer's state in the air: perched (1) or aloft (0); hanging (perched under an
+/// underside); `overhead`, the clear height over the body's top across its whole span to
+/// the first solid, over the band (capped at 1); the rain rate over the flight's `R₀`
+/// (capped at 1); and whether a downpour is falling.
+const AIR_CHANNELS: [&str; 5] = ["perched", "hanging", "overhead", "rain", "downpour"];
 
 const MODULE_AIR: Module = Module {
     name: "Air",
     offset: 10,
-    width: 3,
+    width: 5,
     channels: &AIR_CHANNELS,
 };
 
 /// A flyer's mouth: the nearest bloom's nectar in reach.
 const MODULE_FLYER_TASTE: Module = Module {
     name: "Taste(1)",
-    offset: 13,
+    offset: 15,
     width: 3,
     channels: &TASTE1_CHANNELS,
 };
@@ -605,7 +607,7 @@ const FAN3_CHANNELS: [&str; 25] = [
 /// −80 … +40, 4 m, with a `bloom` class beside foliage and bodies.
 const MODULE_FAN3: Module = Module {
     name: "Fan(3, bloom/foliage/body)",
-    offset: 16,
+    offset: 18,
     width: 25,
     channels: &FAN3_CHANNELS,
 };
@@ -1091,7 +1093,7 @@ impl Manifest {
     /// The bellwing (F1): its own 4-action manifest (`forward`, `turn`, `feed`, `lift`)
     /// and the flyer's layout — `Self` with `altitude` and `ceiling`, `Air`, a nectar
     /// `Taste(1)`, and the downward fan (pitches −80, −50, −20, +10, +40, range 4 m, the
-    /// three sectors) with a `bloom` class (predation-and-flight §3.6). 41 inputs.
+    /// three sectors) with a `bloom` class (predation-and-flight §3.6). 43 inputs.
     pub fn bellwing() -> Manifest {
         let a = anchors(Founder::Bellwing);
         let r = SelfReferences::of(Founder::Bellwing);

@@ -2626,7 +2626,8 @@ pub(crate) fn observation(
 /// layout): `Self` as every lineage's, plus `altitude` (the base's height over the support
 /// face below, over `band_max_m`) and `ceiling` (the clear height over the base to the
 /// first solid or water cell in its column, over `band_max_m`, capped at 1); `Air`
-/// (perched, the rain rate over the flight's `R₀`, a downpour); `Taste(1)`, the nearest
+/// (perched, hanging, the clear height over its whole span, the rain rate over the
+/// flight's `R₀`, a downpour); `Taste(1)`, the nearest
 /// bloom's nectar in the mouth's reach; and the downward fan, sector by sector, with
 /// `bloom` beside foliage and bodies. Without a prepared occupancy (a diagnostic) it
 /// builds its own window.
@@ -2665,16 +2666,25 @@ fn flyer_observation(
     }
 
     let am = module(manifest, "Air");
+    let shape = crate::flight::Shape::of(phys, flight, a.body);
     obs[am.offset] = f64::from(a.mobility.mode == crate::MobilityMode::Perched);
+    obs[am.offset + 1] = f64::from(
+        a.mobility.mode == crate::MobilityMode::Perched
+            && a.mobility.perch.is_some_and(|p| p.kind == crate::PerchKind::Underside),
+    );
+    if band > 0.0 {
+        obs[am.offset + 2] = clamp01(
+            crate::flight::overhead_clear(view, shape, a.pose.x, a.pose.z, a.pose.y_m, band) / band,
+        );
+    }
     if flight.shower_rain_reference_m_per_s > 0.0 {
-        obs[am.offset + 1] =
+        obs[am.offset + 3] =
             clamp01(f64::from(view.weather.rain_m_per_s) / flight.shower_rain_reference_m_per_s);
     }
-    obs[am.offset + 2] =
+    obs[am.offset + 4] =
         f64::from(view.weather.mode == cubarium_voxel::weather::RainMode::Downpour);
 
     let tm = module(manifest, "Taste(1)");
-    let shape = crate::flight::Shape::of(phys, flight, a.body);
     let reach = shape.r + body.mouth_reach_m;
     if let Some((_, stock)) =
         crate::flight::bloom_in_reach(view, fv, crate::flight::mouth_point(a, shape), reach)

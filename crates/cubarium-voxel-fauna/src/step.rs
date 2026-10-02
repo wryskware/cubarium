@@ -1167,7 +1167,7 @@ fn founder_act(
 /// 2. **Forced down**: in a downpour, or sleepy (its lineage's rest hour and not hungry),
 ///    a flyer aloft descends (`lift` −1, steering as it likes) and a perched one cannot
 ///    take off. Asleep it does nothing else (it sleeps only perched).
-/// 3. **Perched**: `lift` up (down, or `forward`, from an underside) takes off, paying
+/// 3. **Perched**: `lift` up (down from an underside) or `forward` takes off, paying
 ///    `takeoff_s` of flight out of the reserve; otherwise it may turn where it is, and sip.
 /// 4. **Aloft**: it pays `(factor − 1) ×` basal for the second beyond the upkeep it has
 ///    paid (`factor` the hover's at forward 0, the cruise's at full forward, linear
@@ -1250,7 +1250,7 @@ fn flyer_act(
         let kind = fauna.animals[i].mobility.perch.map_or(PerchKind::Face, |p| p.kind);
         let wants = match kind {
             PerchKind::Underside => lift < 0.0 || forward > 0.0,
-            _ => lift > 0.0,
+            _ => lift > 0.0 || forward > 0.0,
         };
         if wants && !grounded && can_pay(&fauna.animals[i]) {
             flyer_takeoff(fauna, i, takeoff_cost);
