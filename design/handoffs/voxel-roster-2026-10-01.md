@@ -30,8 +30,8 @@ founder, one package at a time, in one worktree (one fauna worker at a time).
 |---|---|---|
 | R0 | Groundwork: species as data | below |
 | R1 | Capgnawer + loftstrider (walkers, existing food), shredder loses caps | written when R0 lands |
+| R2b | Ripple-snail (glassfilm R2a already merged) | below |
 | F1 | Flight substrate + bellwing | `voxel-flight-2026-09-28.md` F1 (worktree overridden to this one) |
-| R2 | Ripple-snail + its wet-surface film producer | written when R1 lands |
 | F3 | Seedporter: climb, glide, lanternberry fruit, gut seeds | `voxel-flight-2026-09-28.md` F3 outline |
 | R3 | Chorister: pack, den, live birth, provisioning, territory | `predation-and-flight-2026-09-28.md` §2.10, §2.14 |
 
@@ -334,15 +334,120 @@ Commit your own paths only. Stop every background shell before you return.
 - **Measure:** 8 seeds × 60 min (WORKING_POLICY "Verification runs"), not 4 h. Presets:
   the desktop terrarium and the Tachyon voxel config. The MP4 stays.
 
-## Brief R2b (outline; written in full when R1 lands): the ripple-snail
+## Brief R2b: the ripple-snail (runs after R1, before F1)
 
-- **Food:** `Food::Film` from `take_film`. Diet `[Film]`.
-- **Body:** 0.19 m, 3:1 long to tall, slow (cruise about 0.3 BL/s).
-- **Senses:** the blind layout with `Chem(film)`; `Wet` already exists.
-- **Water-bound:** never drowns. It refuses a step whose destination has no standing
-  water within `water_margin_m`.
-- **Eggs:** laid on a face with film.
-- **Prey list:** on none yet.
-- **Founding:** on film sites.
-- **Presenter:** an interim film tint on submerged support faces, named interim until
-  Wrysk picks a colour. A grazed trail shows as less tint.
+**Objective.** A slow, water-bound film grazer on glassfilm (R2a, merged ff7ad6dc),
+driven by a heuristic, drawn with its baked specimen model. The film is visible, so a
+grazed trail shows.
+
+**R2b is a model-rule change.** A separate test pass comes first, then the implementer.
+
+### Decisions (Fable; implement, don't revisit)
+
+Looks are in `animal-body-reimagining-2026-09-24.md` §Ripple-snail; ecology in
+`animal-body-candidates-2026-09-23.md` §Ripple snail.
+
+**Lineage**
+
+- `Founder::RippleSnail`, named `ripple-snail` (the specimen key, so the presenter
+  fallback finds it), with role `film_grazer`.
+
+**Food**
+
+- A new `Food::Film`, taken with `Flora::take_film` from the ground pool at the
+  standing face.
+- Diet is `[Film]`.
+- Film yield equals the browser's foliage yield: fresh tissue, not detritus.
+
+**Body**
+
+- **Adult size:** 0.19 × 0.19 × 0.063 m (3:1 long to tall).
+- **Pace:** cruise 0.3 BL/s.
+- **Template:** the shredder. Rates scale by body volume exactly as R1's capgnawer does,
+  with the shredder's reproduction mode and timings.
+
+**Senses**
+
+- The shredder's blind layout, the same width. Its `Chem` reads a **film** field whose
+  sources are the film stock per site (`FloraView::film_sites`), built as R1's fungal
+  field is. That makes it a manifest of its own, `ripple-snail`.
+- `Wet` is already in the layout.
+
+**Heuristic**
+
+- The blind forager on its own `Chem`.
+
+**Aquatic**
+
+- A physiology flag `aquatic` (true for the snail only), plus the knob `water_margin_m`
+  (0.25).
+- An aquatic body never drowns and pays no wade penalty.
+- It refuses a step whose destination support face has no standing water within
+  `water_margin_m`, the way a wall refuses one.
+
+**Eggs**
+
+- Laid on a face holding film. This is a physiology field for the egg site:
+  `litter | film`, where the shredder and capgnawer stay `litter`.
+
+**Prey**
+
+- On no hunter's list.
+
+**Film in the world**
+
+- A flora knob `seed_film_at_founding` (default **false**, so co-training worlds don't
+  change). When it is true, the founding calls `seed_film`.
+- The live presets set it true.
+
+**Founding**
+
+- `founding_site = "at_food"` on film sites.
+- The code default is 0. The live presets found 8 (desktop and voidrunner terrarium,
+  desktop `voxel.toml`) and 6 (Tachyon) when the world has film sites. A shortfall is
+  reported, not fixed.
+
+**Presenter**
+
+- Draw film as floor marks. `PART_FLOOR_MARK` exists in `cubarium-gpu/src/voxel.rs`,
+  but nothing emits it yet.
+- Each film site gets a mark on its support face. Its colour is an interim green-gold,
+  the "thin green-gold coating" of `theoretical-biosphere-2026-09-16.md`, named
+  `FILM_INTERIM` in `colours.rs`. Its strength follows `film / capacity`, so a grazed
+  trail shows as less tint and nothing pops (fade on the frame clock).
+- If floor marks don't render without shader work, stop and report; R2b does no shader
+  work.
+
+### Tests first (separate worker; short function tests, ≤ 200 ticks)
+
+- A snail on a submerged film site takes film, the books close, and the film pool
+  falls.
+- It never takes litter or foliage.
+- It doesn't drown after `drown_after_s` under water, where a shredder in the same
+  place does.
+- It refuses a step onto dry ground beyond `water_margin_m`, and accepts one within the
+  margin.
+- Its `Chem` rises toward film and reads 0 where there is none.
+- Its eggs go only on a film face.
+- With `seed_film_at_founding` false, a founded world has no film. With it true, the
+  world has film and a preset count of 8 founds snails on film sites.
+- A live snail draws with its specimen model, and a film site emits a floor mark whose
+  strength follows its stock.
+
+### Measure (after the implementer)
+
+Run 8 seeds × 60 min on the desktop terrarium with heuristics. Report:
+
+- **Snails:** alive at 15, 30 and 60 min, bites, births and deaths by cause.
+- **Film:** total film with snails against a no-snail control.
+
+Then one headless GPU capture showing snails and film, as absolute paths.
+
+### Return (≤ 40 lines)
+
+- Commits.
+- The table.
+- Capture paths.
+- Anything undecided.
+
+Commit your own paths only. Stop every background shell before you return.
