@@ -38,6 +38,9 @@
 //!    dead wood and carrion respire their organic matter out of the system and release
 //!    their mineral to the site's pool at the same fraction; each pool's energy leaves as
 //!    heat at its own current density.
+//!    Then, once per simulated second, **glassfilm** (`film.rs`): growth from light on
+//!    the site's mineral, upkeep, death to the site's own litter where dry or too deep,
+//!    and spread to less-filmed wet neighbours. Its sky and canopy are read in step 4.
 //! 8. **The seed bank** (`seeds.rs`). A bank holds **whole seeds**, and a banked site is
 //!    tested only on its own slow, staggered check (every 30 s) and on the tick a shower
 //!    ends: a lottery among the species with at least one seed that pass the predicate,
@@ -199,7 +202,17 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         cubarium_voxel::voxel_phase!(Drown, { drown(flora, world, threads) });
 
         let climate = Climate::of(world, flora.config.upkeep_q10);
-        let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world, threads) });
+        // On a film tick the light phase also reads the sky and canopy over every site
+        // holding glassfilm (`film.rs`).
+        let film_tick = crate::film::is_film_tick(flora.tick);
+        let film_sites = if film_tick {
+            crate::film::receivers(flora)
+        } else {
+            Vec::new()
+        };
+        let (light, film_open) = cubarium_voxel::voxel_phase!(Light, {
+            light_per_stand(flora, world, &film_sites, threads)
+        });
         let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
         let world = target.world();
         let substrate =
@@ -209,6 +222,13 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         });
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world, climate) });
         cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
+        if film_tick {
+            let open: Vec<(Site, f64)> = film_sites.into_iter().zip(film_open).collect();
+            // Timed with decomposition: the profile has no phase of its own for it.
+            cubarium_voxel::voxel_phase!(Decompose, {
+                crate::film::step(flora, world, &open, climate.daylight)
+            });
+        }
         cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world) });
         cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world) });
         // Growth, dieback, deaths, falls and germinations have all happened: the cached
@@ -326,10 +346,14 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
             // `(0.4, 0.012, 0.9)` on a face the terrain then took away left residuals of
             // −0.4, −0.012 and −0.9, and so did a deposit made directly on an unsupported
             // site, which `Flora::deposit` promises to book out here.
-            ledger.removed_organic_out += g.litter + g.dead_wood + g.carrion;
-            ledger.removed_mineral_out +=
-                g.mineral + g.litter_mineral + g.dead_wood_mineral + g.carrion_mineral;
-            ledger.removed_energy_out += g.litter_energy + g.dead_wood_energy + g.carrion_energy;
+            ledger.removed_organic_out += g.litter + g.dead_wood + g.carrion + g.film;
+            ledger.removed_mineral_out += g.mineral
+                + g.litter_mineral
+                + g.dead_wood_mineral
+                + g.carrion_mineral
+                + g.film_mineral;
+            ledger.removed_energy_out +=
+                g.litter_energy + g.dead_wood_energy + g.carrion_energy + g.film_energy;
             // The seed bank goes out with the ground it sat on: a cohort whose support
             // face is gone has nowhere to germinate, and it is booked as removed rather
             // than dropped.
@@ -381,14 +405,26 @@ pub(crate) fn sky_all(
     stands: &[Stand],
     threads: usize,
 ) -> Vec<f64> {
-    let mut open = vec![0.0; stands.len()];
+    sky_sites(cache, view, stands.len(), |i| stands[i].site, threads)
+}
+
+/// [`sky_all`] over any ascending list of `n` sites, `site(i)` the `i`-th.
+pub(crate) fn sky_sites(
+    cache: &mut Vec<(Site, f64)>,
+    view: &VoxelView<'_>,
+    n: usize,
+    site: impl Fn(usize) -> Site + Sync,
+    threads: usize,
+) -> Vec<f64> {
+    let mut open = vec![0.0; n];
     let mut missing: Vec<usize> = Vec::new();
     let mut k = 0;
-    for (i, s) in stands.iter().enumerate() {
-        while k < cache.len() && cache[k].0 < s.site {
+    for i in 0..n {
+        let s = site(i);
+        while k < cache.len() && cache[k].0 < s {
             k += 1;
         }
-        if k < cache.len() && cache[k].0 == s.site {
+        if k < cache.len() && cache[k].0 == s {
             open[i] = cache[k].1;
         } else {
             missing.push(i);
@@ -409,7 +445,7 @@ pub(crate) fn sky_all(
         || (),
         |r, _| {
             r.map(|m| {
-                let site = stands[missing[m]].site;
+                let site = site(missing[m]);
                 view.sky_visibility(site.x as i64, site.y, site.z)
             })
             .collect::<Vec<f64>>()
@@ -420,15 +456,15 @@ pub(crate) fn sky_all(
     cache.reserve(old.len() + missing.len());
     let mut fresh = missing.iter().zip(&values).peekable();
     for entry in old {
-        while let Some((&i, &v)) = fresh.next_if(|(i, _)| stands[**i].site < entry.0) {
+        while let Some((&i, &v)) = fresh.next_if(|(i, _)| site(**i) < entry.0) {
             open[i] = v;
-            cache.push((stands[i].site, v));
+            cache.push((site(i), v));
         }
         cache.push(entry);
     }
     for (&i, &v) in fresh {
         open[i] = v;
-        cache.push((stands[i].site, v));
+        cache.push((site(i), v));
     }
     open
 }
@@ -542,7 +578,12 @@ pub(crate) fn insert_sorted(stands: &mut Vec<Stand>, mut born: Vec<Stand>) {
 /// band top is the crown top the old model compared, its radius is the crown radius, its
 /// stock is the whole of `P`, its weight is one, and its area is the crown's. The
 /// authored porosity is the only new factor (`tests/layers.rs`).
-fn light_per_stand(flora: &mut Flora, world: &World, threads: usize) -> Vec<f64> {
+fn light_per_stand(
+    flora: &mut Flora,
+    world: &World,
+    film: &[Site],
+    threads: usize,
+) -> (Vec<f64>, Vec<f64>) {
     let Flora {
         config,
         stands,
@@ -659,14 +700,53 @@ fn light_per_stand(flora: &mut Flora, world: &World, threads: usize) -> Vec<f64>
         let l = if weighed > 0.0 { l / weighed } else { open };
         light_response(config.species(stand.species), l)
     };
-    for_chunks(
+    let lit = for_chunks(
         stands.len(),
         threads,
         &mut Vec::new(),
         || (),
         |r, _| r.map(receive).collect::<Vec<f64>>(),
     )
-    .concat()
+    .concat();
+    // Glassfilm (`film.rs`): the open sky over each film site times what every foliage
+    // layer above the face and over it lets through, the same sweep a stand's layer gets.
+    // The film lies on the face: a layer shades it when its top is above `site.y`.
+    if film.is_empty() {
+        return (lit, Vec::new());
+    }
+    let film_sky = sky_sites(sky, &view, film.len(), |i| film[i], threads);
+    let film_open = film
+        .iter()
+        .zip(film_sky)
+        .map(|(site, open)| {
+            let (x, z, top) = (site.x as f64, site.z as f64, site.y as f64);
+            let mut here = open;
+            for c in index.near(*site) {
+                if c.top <= top {
+                    continue;
+                }
+                let sx = wrapped_delta(c.x, x, width);
+                let sz = c.z - z;
+                if sx * sx + sz * sz > c.radius * c.radius {
+                    continue;
+                }
+                let (from, to) = span[c.j as usize];
+                for above in &layers[from as usize..to as usize] {
+                    if above.top <= top {
+                        continue;
+                    }
+                    let dx = wrapped_delta(above.x, x, width);
+                    let dz = above.z - z;
+                    if dx * dx + dz * dz > above.radius * above.radius {
+                        continue;
+                    }
+                    here *= above.attenuation;
+                }
+            }
+            here
+        })
+        .collect();
+    (lit, film_open)
 }
 
 /// Columns per side of one [`ShadeIndex`] bucket.
@@ -3654,7 +3734,7 @@ mod tests {
             let mut reference = flora.clone();
             let full = light_full_sweep(&mut reference, &world);
             for threads in [1, 4] {
-                let bucketed = light_per_stand(&mut flora.clone(), &world, threads);
+                let bucketed = light_per_stand(&mut flora.clone(), &world, &[], threads).0;
                 assert_eq!(bucketed, full, "{width}x{depth}, {threads} threads");
             }
             assert!(
