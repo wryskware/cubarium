@@ -1053,7 +1053,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1012 rows)
+**`fauna.*`** (1041 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1177,6 +1177,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.littershredder.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.littershredder.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.littershredder.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1277,6 +1280,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.frondgrazer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.frondgrazer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.frondgrazer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1377,6 +1383,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.lanternjaw.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.lanternjaw.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.lanternjaw.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1477,6 +1486,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.capgnawer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.capgnawer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.capgnawer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.capgnawer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1577,6 +1589,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.loftstrider.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.loftstrider.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.loftstrider.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1677,6 +1692,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.ripple-snail.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.ripple-snail.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.ripple-snail.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.ripple-snail.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1777,6 +1795,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.bellwing.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.bellwing.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.bellwing.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1877,35 +1898,38 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.seedporter.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.seedporter.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.seedporter.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.chorister.core.maintenance_per_s` | 0.0002 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
-| `fauna.founders.chorister.core.bite_per_s` | 0.042 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
+| `fauna.founders.chorister.core.maintenance_per_s` | 0.0004 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
+| `fauna.founders.chorister.core.bite_per_s` | 0.10975999999999998 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
 | `fauna.founders.chorister.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.chorister.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
-| `fauna.founders.chorister.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.chorister.core.growth_max_per_s` | 0.00007500000000000001 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
-| `fauna.founders.chorister.core.body_min` | 0.102 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
-| `fauna.founders.chorister.core.birth_body` | 0.63 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
-| `fauna.founders.chorister.core.birth_cost` | 0.15 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
+| `fauna.founders.chorister.core.body_max` | 2.7439999999999998 | org-units | [0, inf) |  | D | placeholder | adult structure |
+| `fauna.founders.chorister.core.growth_max_per_s` | 0.00019599999999999997 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.chorister.core.body_min` | 0.26655999999999996 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.chorister.core.birth_body` | 1.6463999999999996 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.chorister.core.birth_cost` | 0.5331199999999999 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.chorister.core.reserve_cap` | 1.0 | fraction of body | [0, inf) | 0.2–1.5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.chorister.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.chorister.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.chorister.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–57600 log | B | derived | median lifespan (0: none) |
-| `fauna.founders.chorister.core.reproduction.surplus_floor` | 0.375 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.founders.chorister.core.reproduction.surplus_floor` | 0.2744 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.chorister.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.chorister.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.chorister.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.chorister.core.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
 | `fauna.founders.chorister.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.chorister.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
-| `fauna.founders.chorister.core.reproduction.clutch_size` | 3 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
-| `fauna.founders.chorister.core.reproduction.egg_organic` | 0.15 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.chorister.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
+| `fauna.founders.chorister.core.reproduction.egg_organic` | 0.0 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
 | `fauna.founders.chorister.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.chorister.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
-| `fauna.founders.chorister.motor_respiration_per_s` | 0.0002 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.chorister.step_up_m` | 0.45 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
-| `fauna.founders.chorister.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
+| `fauna.founders.chorister.motor_respiration_per_s` | 0.0004 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
+| `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.chorister.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.chorister.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
 | `fauna.founders.chorister.cruise_body_lengths_per_s` | 0.6 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
@@ -1913,9 +1937,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
 | `fauna.founders.chorister.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
 | `fauna.founders.chorister.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder, digest | continuous time under water before it drowns |
-| `fauna.founders.chorister.adult_length_m` | 1.0 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
-| `fauna.founders.chorister.adult_width_m` | 0.25 | m | (0, inf) | yes | N | decision, digest | adult body width |
-| `fauna.founders.chorister.adult_height_m` | 0.45 | m | (0, inf) | yes | N | decision, digest | adult body height |
+| `fauna.founders.chorister.adult_length_m` | 1.4 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
+| `fauna.founders.chorister.adult_width_m` | 0.35 | m | (0, inf) | yes | N | decision, digest | adult body width |
+| `fauna.founders.chorister.adult_height_m` | 0.6 | m | (0, inf) | yes | N | decision, digest | adult body height |
 | `fauna.founders.chorister.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
 | `fauna.founders.chorister.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
 | `fauna.founders.chorister.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
@@ -1941,7 +1965,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.hunter.lunge_s` | 0.25 | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.chorister.hunter.recovery_s` | 3.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.chorister.hunter.strike_cost_s` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
-| `fauna.founders.chorister.hunter.lure_power` | 1.0 | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.chorister.hunter.lure_power` | 0.0 | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
 | `fauna.founders.chorister.hunter.rest_at` | 0.9 | fraction of reserve cap | [0, 1] |  | - | placeholder | satiated: rests at this reserve |
 | `fauna.founders.chorister.hunter.torpor_upkeep` | 0.25 | x basal upkeep | [0, inf) |  | - | placeholder | upkeep in the satiated rest |
 | `fauna.founders.chorister.hunter.wake_at` | 0.5 | fraction of reserve cap | [0, 1] |  | - | placeholder | wakes from the rest below this |
@@ -1977,6 +2001,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.chase_give_up_s` | 20.0 | s | [0, inf) |  | - | decision | a chase is dropped after this |
 | `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.chorister.pack.call_s` | 1.0 | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.chorister.pack.den_search_m` | 8.0 | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.chorister.pack.follow_radius_m` | 3.0 | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
+| `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.chorister.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.chorister.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2006,6 +2033,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.predation.recovery_speed` | 0.5 | x speed | [0, 1] | 0.1–1 | - | decision | a strike's recovery is walked at this fraction of the speed |
 | `fauna.predation.flee_sight_m` | 3.0 | m | [0, inf) | 1–8 | - | decision | how far a sighted prey heuristic looks for a threat |
 | `fauna.predation.flee_tremor` | 0.015 | tremor units | [0, inf) | 0.001–0.1 log | - | placeholder | the tremor a blind prey heuristic flees |
+| `fauna.predation.carcass_yield_radius_m` | 3.0 | m | [0, inf) | 1–6 | - | decision | a feeding lanternjaw leaves its carcass to a body that hunts it this near |
+| `fauna.predation.threat_clear_m` | 5.0 | m | [0, inf) | 2–10 | - | decision | a yielding lanternjaw walks away until no body that hunts it is this near |
 | `fauna.life.day_line` | 0.3 | daylight 0..1 | [0, 1] | 0.05–0.6 | C | placeholder | daylight a diurnal body wakes above and a nocturnal one sleeps above |
 | `fauna.life.twilight_lo` | 0.05 | daylight 0..1 | [0, 1] |  | N | placeholder | lower edge of the twilight band (crepuscular rhythm, unused today) |
 | `fauna.life.twilight_hi` | 0.95 | daylight 0..1 | [0, 1] |  | N | placeholder | upper edge of the twilight band (crepuscular rhythm, unused today) |
