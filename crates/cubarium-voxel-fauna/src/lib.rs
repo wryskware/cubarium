@@ -903,6 +903,10 @@ pub struct PackRecord {
     /// gone. Pups eat at it too when it is within [`Pack::den_radius_m`] of the den.
     #[serde(default)]
     pub feast: Option<Site>,
+    /// The last target the pack gave up on (late, spent, or into another territory): not
+    /// taken again until the pack has taken another.
+    #[serde(default)]
+    pub abandoned: Option<u64>,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -2894,6 +2898,7 @@ impl Fauna {
             chase_since_tick: 0,
             target_site: None,
             feast: None,
+            abandoned: None,
         });
         Some(id)
     }

@@ -1484,7 +1484,25 @@ fn found_packs(
     let view = world.view();
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
-    let dry = |s: &Site| view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0;
+    // A face its body can stand on and walk off: dry, and its footprint disc's columns
+    // all clear over it for the body's height. (A standable face checks only its own
+    // column; a disc straddling a low roof beside it is refused every step, which would
+    // found a pack it can never leave.)
+    let body = phys.adult_body();
+    let room = body.headroom_voxels(v);
+    let reach = ((body.footprint_radius() - 0.5 * v) / v).ceil().max(0.0) as i64;
+    let wet = |s: &Site| view.water_depth_m(i64::from(s.x), s.y, s.z) > 0.0;
+    let dry = |s: &Site| {
+        !wet(s)
+            && (-reach..=reach).all(|dx| {
+                (-reach..=reach).all(|dz| {
+                    let z = i64::from(s.z) + dz;
+                    z < 0
+                        || z >= i64::from(view.config.depth)
+                        || has_headroom(&view, i64::from(s.x) + dx, s.y, z as u32, room)
+                })
+            })
+    };
     let faces: Vec<(Site, usize)> = map
         .faces
         .iter()
@@ -1522,14 +1540,14 @@ fn found_packs(
         .faces
         .iter()
         .zip(&map.components)
-        .filter(|(f, _)| dry(f))
+        .filter(|(f, _)| !wet(f))
         .map(|(f, c)| (*f, *c))
         .collect();
     // Where the pack stands for a den `d` from a founding point of component `comp`: the
     // den itself when it is in that component, else the face of that component nearest
     // it within `den_radius_m` (less a voxel), else nowhere.
     let stand_for = |d: (Site, usize), comp: usize| -> Option<Site> {
-        if d.1 == comp {
+        if d.1 == comp && dry(&d.0) {
             return Some(d.0);
         }
         faces

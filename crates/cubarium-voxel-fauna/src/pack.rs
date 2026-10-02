@@ -439,9 +439,13 @@ pub(crate) fn steer(
             }
         }
         if !keep {
+            let alive = target.is_some();
             if let Some(p) = fauna.pack_mut(own) {
                 p.target = None;
                 p.target_site = None;
+                if alive {
+                    p.abandoned = Some(tid);
+                }
             }
         }
     }
@@ -465,7 +469,11 @@ pub(crate) fn steer(
                     continue;
                 }
                 let (dx, dz, d) = delta(&a, o.pose.x, o.pose.z, ring);
-                if d > sight || dx * fx + dz * fz < 0.0 || best.is_some_and(|(b, _, _)| d >= b) {
+                if d > sight
+                    || dx * fx + dz * fz < 0.0
+                    || best.is_some_and(|(b, _, _)| d >= b)
+                    || fauna.pack(own).and_then(|p| p.abandoned) == Some(o.id)
+                {
                     continue;
                 }
                 if !crate::predation::is_prey_in_window(&fauna.config, &a, o, window)
@@ -480,11 +488,21 @@ pub(crate) fn steer(
                     p.target = Some(tid);
                     p.chase_since_tick = now;
                     p.target_site = Some(site);
+                    p.abandoned = None;
                 }
                 fauna.ledger.pack_chases += 1;
                 call(fauna, i);
             }
         }
+    }
+
+    // Its motor was refused over the last interval (a wall, a ledge, a pocket): its own
+    // heuristic's escape backs it off and turns it this sampling.
+    let fb = a.founder_state.feedback;
+    if fb.attempted_equivalent > 1e-12
+        && fb.delivered_equivalent / fb.attempted_equivalent < fauna.config.teachers.motor_refused
+    {
+        return Some(clamp(fauna, held));
     }
 
     // The chase: the adult nearest the target drives straight at it; the others go to
