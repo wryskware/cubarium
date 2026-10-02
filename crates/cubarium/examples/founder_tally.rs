@@ -11,6 +11,12 @@
 //! Every 15 simulated minutes it prints the living count per lineage (`alive@<min>`), and
 //! the line per lineage carries its own bites by food (roster R1's measure).
 //!
+//! An optional fourth argument `snails=N` (roster R2b's measure) sets the ripple-snail's
+//! founding count and founds the asked seed itself (no redraw on a refused habitat), so a
+//! `snails=0` control runs on the same world as `snails=8`. The film total (glassfilm
+//! stock summed over every site) and the film site count are printed at t = 0, every 15
+//! minutes and at the end, with the plant layer's film consumed.
+//!
 //! At t = 0 it reports the roster R1 check: the glowcap caps standing (count and stock)
 //! and the foliage standing in a loftstrider's mouth band over each stand's support face
 //! (the adult band, `mouth_floor..mouth_ceiling × height`).
@@ -28,15 +34,22 @@ fn main() {
         .map_or("config/desktop/terrarium.toml", String::as_str);
     let ticks: u64 = args.get(2).map_or(2000, |a| a.parse().expect("TICKS"));
     let seed: u64 = args.get(3).map_or(1, |a| a.parse().expect("SEED"));
+    let snails: Option<usize> = args
+        .get(4)
+        .map(|a| a.strip_prefix("snails=").expect("snails=N").parse().expect("snails=N"));
     cubarium_voxel::set_thread_override(1);
     let cfg = load_config(std::path::Path::new(path)).expect("config");
     let params = params_of(&cfg, &[]).expect("params");
     let world_cfg = params.world.clone();
+    let mut counts = founding(&params);
+    if let Some(n) = snails {
+        counts[Founder::RippleSnail.index()] = n;
+    }
     let founded = found(
         &world_cfg,
         &LayerConfig::new(&params, world_cfg.voxel_m),
-        founding(&params),
-        Seeds::from(seed),
+        counts,
+        if snails.is_some() { Seeds::Asked(seed) } else { Seeds::from(seed) },
         false,
     );
     eprintln!(
@@ -44,8 +57,13 @@ fn main() {
         founded.seed, founded.accepted, founded.seeded.founders
     );
     println!(
-        "founded: bodies {:?} founding_eggs {} litter_tiles {}",
-        founded.seeded.founders, founded.seeded.founding_eggs, founded.seeded.litter_tiles
+        "founded: seed {} bodies {:?} shortfall {:?} founding_eggs {} litter_tiles {} film_sites {}",
+        founded.seed,
+        founded.seeded.founders,
+        founded.seeded.shortfall,
+        founded.seeded.founding_eggs,
+        founded.seeded.litter_tiles,
+        founded.seeded.film_sites
     );
     let mut sim = Sim::ambient(
         founded.world,
@@ -55,6 +73,7 @@ fn main() {
     );
     sim.set_overlap(false);
     t0_report(&sim, &params);
+    println!("film@0 {}", film_line(&sim));
     let mut seen: HashSet<u64> = sim.fauna().view().animals.iter().map(|a| a.id).collect();
     let mut born = [0u64; Founder::COUNT];
     let quarter = 15 * 60 * u64::from(cubarium_voxel::TICK_HZ);
@@ -69,7 +88,9 @@ fn main() {
                     format!("{}={n}", f.name())
                 })
                 .collect();
-            println!("alive@{} {}", tick / (60 * u64::from(cubarium_voxel::TICK_HZ)), alive.join(" "));
+            let minute = tick / (60 * u64::from(cubarium_voxel::TICK_HZ));
+            println!("alive@{minute} {}", alive.join(" "));
+            println!("film@{minute} {}", film_line(&sim));
         }
         for a in sim.fauna().view().animals {
             if seen.insert(a.id) {
@@ -122,6 +143,20 @@ fn main() {
     );
 }
 
+/// The film total, its site count and what the plant layer booked consumed.
+fn film_line(sim: &Sim) -> String {
+    let fv = sim.flora().view();
+    let (mut total, mut sites) = (0.0, 0usize);
+    for (_, film) in fv.film_sites() {
+        total += film;
+        sites += 1;
+    }
+    format!(
+        "film_total={total:.6} film_sites={sites} film_consumed={:.6}",
+        fv.ledger.film_consumed
+    )
+}
+
 fn founding(params: &cubarium_voxel_sim::params::Params) -> [usize; Founder::COUNT] {
     params.fauna.founder_counts()
 }
@@ -159,7 +194,10 @@ fn t0_report(sim: &Sim, params: &cubarium_voxel_sim::params::Params) {
         }
     }
     for a in sim.fauna().view().animals {
-        if matches!(a.founder, Some(Founder::Capgnawer | Founder::Loftstrider)) {
+        if matches!(
+            a.founder,
+            Some(Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail)
+        ) {
             println!(
                 "t0: {} id={} site=({}, {}, {}) heading={:.2}",
                 a.founder.map_or("", |f| f.name()),
