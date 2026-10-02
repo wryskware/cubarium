@@ -33,7 +33,7 @@ founder, one package at a time, in one worktree (one fauna worker at a time).
 | R2b | Ripple-snail (glassfilm R2a already merged) | below |
 | F1 | Flight substrate + bellwing | `voxel-flight-2026-09-28.md` F1 (worktree overridden to this one) |
 | F3 | Seedporter: climb, glide, lanternberry fruit, gut seeds | `voxel-flight-2026-09-28.md` F3 outline |
-| R3 | Chorister: pack, den, live birth, provisioning, territory | `predation-and-flight-2026-09-28.md` §2.10, §2.14 |
+| R3 | Chorister: pack, den, live birth, provisioning, territory | below |
 
 ---
 
@@ -442,6 +442,147 @@ Run 8 seeds × 60 min on the desktop terrarium with heuristics. Report:
 - **Film:** total film with snails against a no-snail control.
 
 Then one headless GPU capture showing snails and film, as absolute paths.
+
+### Return (≤ 40 lines)
+
+- Commits.
+- The table.
+- Capture paths.
+- Anything undecided.
+
+Commit your own paths only. Stop every background shell before you return.
+
+---
+
+## Brief R3: the chorister (after F3)
+
+**Objective.** Choristers live as packs in the bigger worlds. Each pack has a den, one
+breeder, provisioned pups and a territory. They hunt alone or as a pack and push
+lanternjaws off carcasses. Everything runs on a scripted pack heuristic (D17 option 1).
+The spec is `predation-and-flight-2026-09-28.md` §2.10 and §2.14 (agreed by Wrysk) and
+`organism-large-animals-2026-09-23.md` §5.
+
+**R3 is a model-rule change.** A separate test pass comes first, then the implementer.
+Commit before the measure.
+
+### Decisions (Fable; implement, don't revisit)
+
+**Lineage and body**
+
+- `Founder::Chorister`, named `chorister`, with role `pack_hunter`.
+- **Body:** 1.4 × 0.35 × 0.6 m. The 0.8 m tail is geometry only.
+- **Template:** the lanternjaw's hunter table and strike machinery, with no lure.
+  - Stocks and rates scale by body volume (r = 1.4·0.35·0.6 / 1.0·0.25·0.45 ≈ 2.61), as
+    in R1.
+  - Specific upkeep is 2× the lanternjaw's (§2.14: "a higher upkeep"), as a knob.
+- **Activity:** diurnal, so the lanternjaw keeps the night.
+- **Diet:** `[Carrion]`, eaten from its own kills as the lanternjaw does.
+
+**Prey and threats**
+
+- The chorister hunts the frondgrazer, the loftstrider and the lanternjaw (§2.14:
+  "may kill them").
+- It is therefore a threat to each of them, and the lanternjaw's existing threat
+  reading makes it leave a carcass.
+- **The pack seam:** the size window measures prey against the **summed body of
+  packmates within `pack_radius_m`** (knob, 6 m), so only a pack can take a
+  loftstrider. Wounds from several attackers already add (§2.10).
+
+**Pack**
+
+- An animal carries a `pack` id.
+- **Founding mode `pack`:** `founding_count` counts packs, and `pack_size` (knob, 4)
+  counts adults per pack. The first adult is the breeder.
+- **Succession:** when the breeder dies, the oldest adult in the pack breeds.
+
+**Den**
+
+- At founding, the breeder picks a covered site (solid within `den_cover_m` overhead,
+  knob 3 m) near the founding point.
+- Adults rest and sleep within `den_radius_m` (knob, 4 m).
+
+**Breeding**
+
+- Only the breeder conceives, with live birth (gestation).
+- A litter holds 2 to `litter_size_max` young (knob, 4), only on the ordinary sustained
+  surplus gate, and at most once per `litter_interval_s` (knob, 3 clock-days).
+
+**Pups**
+
+- Pups stay within `den_radius_m` and can't strike until `independence_age_s` (knob,
+  1 clock-day). After that they join the pack.
+- **Provisioning:** an adult at the den whose reserve is above
+  `provision_reserve_fraction` (knob, 0.6) passes reserve to the hungriest pup there.
+  The transfer runs at `provision_rate_per_s` with efficiency `provision_efficiency`
+  (0.7); the loss is respired, and the books close.
+- Pups also eat at the pack's carcasses.
+
+**Territory**
+
+- A pack's heuristic never paths into another pack's `territory_radius_m` (knob, 10 m)
+  around its den. A 32 m world founds one pack.
+
+**Heuristic, a scripted pack tactic**
+
+- Any member that sees prey inside the pack's window makes it the pack target.
+- The nearest member drives; the others flank to points `flank_offset_m` either side of
+  the target.
+- Each member strikes from inside its capsule.
+- A chase is dropped after `chase_give_up_s` (knob, 20 s), or when a member's reserve
+  falls under `chase_reserve_floor` (knob). The steep motor cost above cruise does the
+  rest.
+- Alone, it hunts like the lanternjaw, without a lure.
+- After a kill the pack eats, then returns to the den.
+
+**Call**
+
+- A `calling` flag is set on a member for `call_s` (knob, 1 s) when the pack target
+  changes or a member strikes. It is saved and readable by the presenter.
+- The cyan flash is owed to art: no glow is drawn in R3. The manifest's `Call` module
+  stays P2's.
+
+**Founding counts**
+
+- The code default is 0.
+- Desktop and voidrunner terrarium, and desktop `voxel.toml`: 1 pack.
+- Tachyon: 0 (Wrysk: bigger worlds only).
+- `--introduce chorister:N` introduces N packs.
+
+**Presenter**
+
+- The specimen model through R0's fallback, one pose. Pups are drawn at their body
+  scale.
+
+### Tests first (separate worker; short function tests, ≤ 200 ticks)
+
+- **Founding:** a preset with 1 pack founds `pack_size` choristers with one pack id and
+  a breeder, the den covered. The code default and Tachyon found none.
+- **Size window:** a lone chorister doesn't take a loftstrider; with packmates inside
+  `pack_radius_m` it does. Two choristers' wounds add.
+- **Threat:** a lanternjaw sees a chorister as a threat and leaves a carcass it
+  approaches. A chorister can kill a lanternjaw.
+- **Breeding:** only the breeder conceives. A litter is 2 to `litter_size_max`, and
+  none comes before the interval.
+- **Provisioning:** an adult at the den with reserve above the fraction feeds a pup at
+  0.7 efficiency, and both ledgers close.
+- **Pups:** a pup inside its independence age makes no strike and stays within
+  `den_radius_m`.
+- **Territory:** with two packs, neither pack's members enter the other's territory.
+- **Succession:** the breeder dies and the oldest adult breeds.
+- **Snapshot:** a round trip keeps the pack, den, breeder and calling state.
+- **Presenter:** a live chorister draws with its specimen model.
+
+### Measure
+
+Run 8 seeds × 60 min on the desktop terrarium with heuristics. Report:
+
+- choristers alive at 15, 30 and 60 min;
+- hunts started and kills by prey, with the success rate (§2.14 aims for 15–25 %; report
+  it, don't tune);
+- pups born;
+- lanternjaws displaced from carcasses.
+
+Then one headless capture of a pack.
 
 ### Return (≤ 40 lines)
 
