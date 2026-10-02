@@ -249,6 +249,9 @@ pub struct Seeded {
     pub acceptance: Acceptance,
     /// Latticevine founders rooted.
     pub vines: usize,
+    /// Glowcap founders placed on dark faces with no log laid
+    /// (`SpeciesConfig::dark_founder_share`); also counted in `stands`.
+    pub dark_glowcaps: usize,
     /// Founder stands planted, by [`Species::index`].
     pub stands_by_species: [usize; Species::COUNT],
     /// Lanternjaw eggs the founding bank buried ([`bury_founding_clutches`]).
@@ -506,6 +509,8 @@ pub fn seed_pre_rolled(
             .map(|s| view.sky_visibility(i64::from(s.x), s.y, s.z))
             .collect()
     };
+    // Terrain sky alone, before any crown placed below shades it: what darkness reads.
+    let terrain_sky = sky.clone();
     let area = world.config().cell_area();
     let rise = (STEP_M / world.config().voxel_m).floor().max(1.0) as u32;
     let founding = flora.config().clone();
@@ -593,8 +598,15 @@ pub fn seed_pre_rolled(
     // no dead wood at all, so the log is the habitat and glowcap's own substrate gate
     // could not pass before it is laid — which is why the deposit is booked first and the
     // seed is offered only where it went in.
+    //
+    // Since the dark habitat (`design/handoffs/plants-glowcap-vine-2026-10-01.md` B) a
+    // glowcap also lives on the seep of a dark face with nothing on it: the habitat is
+    // both sets of faces, and `dark_founder_share` of the founders go to the darkest
+    // faces that pass with **no** substrate, with no log laid. The gates read the terrain
+    // sky, which is what darkness is defined on.
     let sc = flora.config().species(Species::Glowcap).clone();
     let mut pool: Vec<Site> = Vec::new();
+    let mut dark_pool: Vec<(Site, f64)> = Vec::new();
     {
         let view = world.view();
         for (i, site) in sites.iter().enumerate() {
@@ -603,14 +615,24 @@ pub fn seed_pre_rolled(
             }
             // The substrate is the log this seeder is about to lay, so the gate is asked
             // with it in hand; everything else is read off the world as it stands.
-            let gates = establishment_gates_with_sky(&view, *site, &sc, sky[i], log_organic, 0.0);
-            if gates.passes()
-                && view.material_at(i64::from(site.x), site.y, site.z) == Material::Soil
-            {
+            let gates =
+                establishment_gates_with_sky(&view, *site, &sc, terrain_sky[i], log_organic, 0.0);
+            let on_log = gates.passes()
+                && view.material_at(i64::from(site.x), site.y, site.z) == Material::Soil;
+            // A dark face passes with nothing on it at all.
+            let bare = establishment_gates_with_sky(&view, *site, &sc, terrain_sky[i], 0.0, 0.0);
+            let dark = sc.dark_founder_share > 0.0 && bare.passes();
+            if on_log || dark {
                 seeded.eligible_by_species[Species::Glowcap.index()] += 1;
-                if !taken.contains(site) {
-                    pool.push(*site);
-                }
+            }
+            if taken.contains(site) {
+                continue;
+            }
+            if on_log {
+                pool.push(*site);
+            }
+            if dark {
+                dark_pool.push((*site, bare.darkness));
             }
         }
     }
@@ -619,9 +641,34 @@ pub fn seed_pre_rolled(
         sc.founder_colony as usize,
         sc.founder_cap as usize,
     );
-    let want = ((pool.len() as f64 * area * per_m2).round() as usize)
-        .min(cap)
-        .min(pool.len());
+    let habitat = seeded.eligible_by_species[Species::Glowcap.index()];
+    let want = ((habitat as f64 * area * per_m2).round() as usize).min(cap);
+    // The darkest first; ties in the pool's own low-to-high order.
+    dark_pool.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let dark_pool: Vec<Site> = dark_pool.into_iter().map(|d| d.0).collect();
+    let dark_want = ((sc.dark_founder_share.clamp(0.0, 1.0) * want as f64).round() as usize)
+        .min(dark_pool.len());
+    for (i, site) in colonies(&dark_pool, dark_want, patch_size, spacing, width, rise)
+        .into_iter()
+        .enumerate()
+    {
+        let wood = fractions[i % fractions.len()] * sc.wood_max;
+        if flora.apply(
+            world,
+            FloraCommand::SeedOnFace {
+                site,
+                species: Species::Glowcap,
+                wood,
+            },
+        ) {
+            taken.push(site);
+            seeded.stands += 1;
+            seeded.dark_glowcaps += 1;
+            seeded.stands_by_species[Species::Glowcap.index()] += 1;
+        }
+    }
+    pool.retain(|s| !taken.contains(s));
+    let want = want.saturating_sub(seeded.dark_glowcaps).min(pool.len());
     for (i, site) in colonies(&pool, want, patch_size, spacing, width, rise)
         .into_iter()
         .enumerate()

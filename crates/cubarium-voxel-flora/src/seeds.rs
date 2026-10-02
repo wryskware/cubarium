@@ -958,13 +958,24 @@ fn wind_target(
 /// — a spore rain falls in the shade too. Written as the predicate with the light gate
 /// opened, so a gate added to [`Gates`] is read here without a second list of them.
 fn ground_passes(view: &VoxelView<'_>, ground: &[Ground], site: Site, sc: &SpeciesConfig) -> bool {
+    ground_gates(view, ground, site, sc).passes()
+}
+
+/// [`ground_passes`]'s reading. A species with a dark habitat reads the site's real sky,
+/// because its darkness opens gates; every other species reads open sky, as it always
+/// has, since its light gate is opened anyway.
+fn ground_gates(view: &VoxelView<'_>, ground: &[Ground], site: Site, sc: &SpeciesConfig) -> Gates {
     let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
-    let g = establishment_gates_with_sky(view, site, sc, 1.0, dead_wood, litter);
+    let sky = if sc.dark_sky_max > 0.0 {
+        view.sky_visibility(site.x as i64, site.y, site.z)
+    } else {
+        1.0
+    };
+    let g = establishment_gates_with_sky(view, site, sc, sky, dead_wood, litter);
     Gates {
         light_ok: true,
         ..g
     }
-    .passes()
 }
 
 /// **Spores**: up to [`SpeciesConfig::spore_tries`] columns drawn uniformly within `hop` — a spore
@@ -980,6 +991,9 @@ fn spore_target(
     home_index: u64,
     tick: u64,
 ) -> Landing {
+    if sc.dark_spore_bias > 0.0 && sc.dark_sky_max > 0.0 {
+        return dark_spore_target(view, ground, sc, home, world_seed, home_index, tick);
+    }
     let c = view.config;
     let hop = sc.hop as i64;
     let span = (2 * hop + 1) as usize;
@@ -1004,6 +1018,76 @@ fn spore_target(
         }
     }
     last.map_or(Landing::Retry, Landing::Lost)
+}
+
+/// **Spores that favour the dark** ([`SpeciesConfig::dark_spore_bias`] above 0): the same
+/// column draws as [`spore_target`], but every try's candidates are gathered before one is
+/// picked, each weighed by its darkness. A column's highest support face weighs
+/// `1 + bias · darkness`; a support face **under a roof** in the same column — a cave or
+/// overhang floor, which the undarkened rain never reaches — weighs `bias · darkness`,
+/// when it is dark at all and within `hop` rows of the donor's own face. Only candidates
+/// whose ground passes ([`ground_passes`]) are weighed; one is drawn from the same keyed
+/// stream. With none, the rain is litter on the last highest face tried, as before.
+fn dark_spore_target(
+    view: &VoxelView<'_>,
+    ground: &[Ground],
+    sc: &SpeciesConfig,
+    home: Site,
+    world_seed: u64,
+    home_index: u64,
+    tick: u64,
+) -> Landing {
+    let c = view.config;
+    let hop = sc.hop as i64;
+    let span = (2 * hop + 1) as usize;
+    let bias = sc.dark_spore_bias;
+    let mut rng = Rng::keyed(DOMAIN_SPORES, world_seed, home_index, tick);
+    let mut last = None;
+    let mut weighed: Vec<(Site, f64)> = Vec::new();
+    for _ in 0..sc.spore_tries.max(1) {
+        let dx = rng.below(span) as i64 - hop;
+        let dz = rng.below(span) as i64 - hop;
+        let z = home.z as i64 + dz;
+        if (dx, dz) == (0, 0) || z < 0 || z >= c.depth as i64 {
+            continue;
+        }
+        let (x, z) = (home.x as i64 + dx, z as u32);
+        let Some(top) = highest_support(view, x, z) else {
+            continue;
+        };
+        if top != home {
+            last = Some(top);
+            let g = ground_gates(view, ground, top, sc);
+            if g.passes() {
+                weighed.push((top, 1.0 + bias * g.darkness));
+            }
+        }
+        for y in view.supports_in_column(x, z) {
+            if y >= top.y || (i64::from(y) - i64::from(home.y)).abs() > hop {
+                continue;
+            }
+            let site = Site { x: top.x, y, z };
+            if site == home {
+                continue;
+            }
+            let g = ground_gates(view, ground, site, sc);
+            if g.darkness > 0.0 && g.passes() {
+                weighed.push((site, bias * g.darkness));
+            }
+        }
+    }
+    let total: f64 = weighed.iter().map(|w| w.1).sum();
+    if !(total > 0.0) {
+        return last.map_or(Landing::Retry, Landing::Lost);
+    }
+    let mut pick = rng.unit() * total;
+    for &(site, w) in &weighed {
+        if pick < w {
+            return Landing::Bank(site);
+        }
+        pick -= w;
+    }
+    Landing::Bank(weighed[weighed.len() - 1].0)
 }
 
 /// A standing-water margin for this species: settled standing water on the face or beside

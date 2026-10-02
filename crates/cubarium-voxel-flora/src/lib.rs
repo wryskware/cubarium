@@ -1190,8 +1190,22 @@ impl SpeciesConfig {
     /// 0 at and above `dark_sky_max`, 1 at and below `dark_sky_full`, linear between.
     /// Always 0 when `dark_sky_max` is 0 (no dark habitat).
     pub fn darkness(&self, sky: f64) -> f64 {
-        let _ = sky;
-        0.0
+        if !(self.dark_sky_max > 0.0) {
+            return 0.0;
+        }
+        1.0 - crate::step::ramp(sky, self.dark_sky_full, self.dark_sky_max)
+    }
+
+    /// The available water a root box reads once the cave damp is in it: at least
+    /// `dark_damp · darkness`, even for a box with no soil (`mean` `None`). Unchanged —
+    /// the same `Option`, to the bit — where there is no damp.
+    pub fn damp_available(&self, mean: Option<f64>, darkness: f64) -> Option<f64> {
+        let damp = self.dark_damp * darkness;
+        if damp > 0.0 {
+            Some(mean.map_or(damp, |m| m.max(damp)))
+        } else {
+            mean
+        }
     }
 
     /// `μ` at root-box available water `a`: zero at and below `wilt_water`, one at and
@@ -2629,7 +2643,8 @@ mod voxel_scale_tests {
 /// Organic matter is not a closed stock — it enters from light and leaves as respiration
 /// — so it has two named boundary flows, [`FloraLedger::fixed_in`] and
 /// [`FloraLedger::respired_out`]. Mineral **is** closed: the only way in or out is a
-/// `Seed`, a new site's `initial_mineral`, or a removal.
+/// `Seed`, a new site's `initial_mineral`, a removal, or a dark site's seep
+/// (`seep_mineral_in`, which arrives with its organic matter).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FloraLedger {
     /// Energy fixed from light: `e_v · A`, the energy side of `fixed_in`.
@@ -2763,20 +2778,20 @@ pub struct FloraLedger {
 
 impl FloraLedger {
     pub fn expected_organic(&self) -> f64 {
-        self.seeded_organic_in + self.fixed_in + self.deposited_organic_in
+        self.seeded_organic_in + self.fixed_in + self.deposited_organic_in + self.seep_organic_in
             - self.respired_out
             - self.removed_organic_out
             - self.consumed_organic_out
     }
 
     pub fn expected_mineral(&self) -> f64 {
-        self.seeded_mineral_in + self.deposited_mineral_in
+        self.seeded_mineral_in + self.deposited_mineral_in + self.seep_mineral_in
             - self.removed_mineral_out
             - self.consumed_mineral_out
     }
 
     pub fn expected_energy(&self) -> f64 {
-        self.seeded_energy_in + self.light_in + self.deposited_energy_in
+        self.seeded_energy_in + self.light_in + self.deposited_energy_in + self.seep_energy_in
             - self.heat_out
             - self.removed_energy_out
             - self.consumed_energy_out
