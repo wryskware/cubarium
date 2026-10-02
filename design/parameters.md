@@ -980,7 +980,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.founder_patch_spacing_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | founding: least distance between two patch centres |
 | `flora.voxel_m` | 0.25 | m | (0, inf) |  | - | derived | the world's cell size, recorded (set from world.voxel_m) |
 
-**`fauna.*`** (292 rows)
+**`fauna.*`** (293 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1229,6 +1229,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.life.lifespan_draw_min` | 0.8 | x median | (0, inf) | 0.5–1 | C | placeholder | lowest multiple of the median a lifespan draw takes |
 | `fauna.life.lifespan_draw_span` | 0.4 | x median | [0, inf) | 0–1 | C | placeholder | width of the lifespan draw, in medians |
 | `fauna.life.arriving_share_min` | 0.5 | fraction | [0, 1] |  | N | placeholder | an arriving body keeps a uniform [this, 1) share of a draw |
+| `fauna.life.wall_friction` | 0.0 | fraction | [0, 1] | 0–1 | - | placeholder | share of a walk's along-wall component a wall takes away (0 slides freely, 1 stops) |
 | `fauna.cue.emit_reference` | 0.05 | organic units | (0, inf) |  | C | placeholder | detritus stock at which a source emits at full strength; the taste reference |
 | `fauna.cue.half_life_s` | 2.0 | s | (0, inf) | 0.5–60 log | C | placeholder | cue half-life |
 | `fauna.cue.diffuse_fraction` | 0.4 | fraction per update | [0, 1] | 0.05–0.9 | C | placeholder | convex nearest-neighbour diffusion mix |

@@ -832,6 +832,17 @@ pub(crate) fn resolve_motion(
                     *standing_y = ny;
                     moved += actual;
                 }
+                moved += wall_slide(
+                    view,
+                    pose,
+                    standing_y,
+                    dir,
+                    (left - lo) * (1.0 - wall_friction.clamp(0.0, 1.0)),
+                    r,
+                    wade_depth_m,
+                    headroom,
+                    step_limits,
+                );
                 break;
             }
         }
@@ -843,6 +854,59 @@ pub(crate) fn resolve_motion(
         delivered_turn: dyaw,
         blocked,
     }
+}
+
+/// **Wall slide** (crag fix 4): after a refused sub-step has pressed the body up to the
+/// obstruction, the rest of the request, `budget` metres (already scaled by
+/// `1 − wall_friction`), goes along the wall instead of being lost. Voxel walls are
+/// axis-aligned, so the heading's two axis components are the candidate tangents: the
+/// larger is tried first and the first one that advances at all takes the slide, swept
+/// in sub-steps of at most `r` until it is spent or refused. A head-on walk has no
+/// tangential component and does not move. The return is the slide's distance projected
+/// onto the heading — the forward progress it delivered.
+#[allow(clippy::too_many_arguments)]
+fn wall_slide(
+    view: &VoxelView<'_>,
+    pose: &mut crate::Pose,
+    standing_y: &mut u32,
+    (fx, fz): (f64, f64),
+    budget: f64,
+    r: f64,
+    wade_depth_m: f64,
+    headroom: u32,
+    step_limits: StepLimits,
+) -> f64 {
+    if budget <= 1e-12 {
+        return 0.0;
+    }
+    let mut axes = [((fx.signum(), 0.0), fx.abs()), ((0.0, fz.signum()), fz.abs())];
+    if axes[1].1 > axes[0].1 {
+        axes.swap(0, 1);
+    }
+    for (axis, share) in axes {
+        let mut left = budget * share;
+        if left <= 1e-12 {
+            continue;
+        }
+        let mut slid = 0.0;
+        while left > 1e-12 {
+            let step = left.min(r);
+            let Some(actual) =
+                step_advance(view, pose, standing_y, axis, step, r, wade_depth_m, headroom, step_limits)
+            else {
+                break;
+            };
+            slid += actual;
+            left -= step;
+            if actual < step - 1e-9 {
+                break;
+            }
+        }
+        if slid > 0.0 {
+            return slid * share;
+        }
+    }
+    0.0
 }
 
 /// One bounded sub-step. `Some(actual)` hands back the distance actually covered — a
