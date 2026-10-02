@@ -375,6 +375,15 @@ pub fn route_components(
     cubarium_voxel::walk::components_linked(&cells, c.width, rule.step.mutual(), &links)
 }
 
+/// The faces a lineage's founders may be placed on: standable for its adult body, the
+/// body's disc clear of solid over its headroom there, and in the **largest** walkable
+/// component of such faces under the lineage's route rule (fix 2,
+/// `design/handoffs/browser-stuck-in-crags-2026-10-01.md`).
+pub fn founding_faces(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> Vec<Site> {
+    let _ = (view, phys);
+    todo!("founding_faces: tests first")
+}
+
 /// One lineage's **route map** over a world: every face its adult body can stand on,
 /// the walkable component of each under the lineage's climb, and the mouth columns a body
 /// standing there could cover at any heading.
