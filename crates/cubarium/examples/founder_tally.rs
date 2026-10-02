@@ -120,6 +120,7 @@ fn main() {
     sim.set_overlap(false);
     t0_report(&sim, &params);
     println!("film@0 {}", film_line(&sim));
+    println!("fruit@0 {}", fruit_line(&sim));
     let mut seen: HashSet<u64> = sim.fauna().view().animals.iter().map(|a| a.id).collect();
     let mut born = [0u64; Founder::COUNT];
     let quarter = 15 * 60 * u64::from(cubarium_voxel::TICK_HZ);
@@ -262,6 +263,7 @@ fn main() {
             let minute = tick / (60 * u64::from(cubarium_voxel::TICK_HZ));
             println!("alive@{minute} {}", alive.join(" "));
             println!("film@{minute} {}", film_line(&sim));
+            println!("fruit@{minute} {}", fruit_line(&sim));
         }
         for a in sim.fauna().view().animals {
             if seen.insert(a.id) {
@@ -385,6 +387,22 @@ fn main() {
         "births={} deaths={} hatched={}",
         l.births, l.deaths, l.hatched
     );
+}
+
+/// F3: the lanternberries (adults, fruiting) and the fruit hanging on stands and vines,
+/// and the daylight.
+fn fruit_line(sim: &Sim) -> String {
+    let fv = sim.flora().view();
+    let lb = cubarium_voxel_flora::Species::Lanternberry;
+    let adults = fv.stands.iter().filter(|s| s.species == lb && s.profile_stage >= 1).count();
+    let fruiting = fv.stands.iter().filter(|s| s.fruit > 0.0).count();
+    let stand_fruit: f64 = fv.stands.iter().map(|s| s.fruit).sum();
+    let vine_faces = fv.cover.faces().iter().filter(|c| c.fruit > 0.0).count();
+    let vine_fruit: f64 = fv.cover.faces().iter().map(|c| c.fruit).sum();
+    format!(
+        "lanternberry_adults={adults} fruiting_stands={fruiting} stand_fruit={stand_fruit:.4} vine_faces_in_fruit={vine_faces} vine_fruit={vine_fruit:.4} daylight={:.2}",
+        sim.world().life_daylight()
+    )
 }
 
 /// The film total, its site count and what the plant layer booked consumed.

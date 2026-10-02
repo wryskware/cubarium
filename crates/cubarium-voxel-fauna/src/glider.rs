@@ -526,6 +526,7 @@ fn glide_tick(
         a.pose.y_m = top;
         a.site = site;
         set_mode(a, MobilityMode::Ground, None, false);
+        settle(view, a, phys);
         landed = true;
         fauna.ledger.landings_by_perch[PerchKind::Face.index()] += 1;
     } else {
@@ -556,6 +557,44 @@ fn glide_tick(
     } else {
         State::Walking
     };
+}
+
+/// A glider come down on the ground stands where a walker can: when its footprint overlaps
+/// solid over its face (it came down beside a ledge or in a slot), it steps to the nearest
+/// point within two radii, in eight directions, where the footprint is clear over a face
+/// at the same height; with none it stays (a walker's own rules then apply).
+fn settle(view: &VoxelView<'_>, a: &mut Animal, phys: &crate::FounderPhysiology) {
+    let c = view.config;
+    let v = c.voxel_m;
+    let g = phys.body_at(a.body);
+    let r = g.footprint_radius();
+    let headroom = g.headroom_voxels(v);
+    let y = a.site.y;
+    let rows = y + 1..=(y + headroom).min(c.height - 1);
+    if body::disc_clear(view, a.pose.x, a.pose.z, r, rows.clone()) {
+        return;
+    }
+    let ring = f64::from(c.width) * v;
+    for k in 1..=8 {
+        let d = 0.25 * r * f64::from(k);
+        for j in 0..8 {
+            let t = f64::from(j) * std::f64::consts::FRAC_PI_4;
+            let (x, z) = ((a.pose.x + d * t.sin()).rem_euclid(ring), a.pose.z + d * t.cos());
+            if !(z > r && z < f64::from(c.depth) * v - r) {
+                continue;
+            }
+            let Some((top, site)) = floor_at(view, x, z, a.pose.y_m) else {
+                continue;
+            };
+            if site.y == y && body::disc_clear(view, x, z, r, rows.clone()) {
+                a.pose.x = x;
+                a.pose.z = z;
+                a.pose.y_m = top;
+                a.site = site;
+                return;
+            }
+        }
+    }
 }
 
 /// One climbing tick: up or down a stem or a vine face.
