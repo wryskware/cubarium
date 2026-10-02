@@ -824,9 +824,11 @@ def ribbon(path, widths, side, mat, th=0.02):
     return L.mk("ribbon", bm, mat)
 
 
-# The fronds' size, from the root: 1 as the reference draws them; Wrysk asked to see them
-# smaller (`LS_FROND=0.75` in the environment).
-LS_FROND = float(os.environ.get("LS_FROND", "1"))
+# The fronds' sizes, from the root, one per frond going round (k = 0..5 at 30 + 60 k
+# degrees): 1 as the reference draws them. Wrysk asked to see them smaller, then mixed.
+# `LS_FROND=0.75` (all alike) or `LS_FROND=1,0.75,0.6,0.75,1,0.6` in the environment.
+LS_FROND = [float(v) for v in os.environ.get("LS_FROND", "1").split(",")]
+LS_FROND = LS_FROND * 6 if len(LS_FROND) == 1 else LS_FROND
 
 
 def loftstrider():
@@ -854,9 +856,10 @@ def loftstrider():
         # frond: rises from the rim, arcs outward and droops, its edges frilled cyan
         prof = [(0.22, 2.76), (0.36, 3.02), (0.56, 3.27), (0.82, 3.37), (1.04, 3.27), (1.17, 3.03),
                 (1.2, 2.78), (1.14, 2.6)]
-        prof = [(0.22 + (r - 0.22) * LS_FROND, 2.76 + (z - 2.76) * LS_FROND) for r, z in prof]
+        fs = LS_FROND[k]
+        prof = [(0.22 + (r - 0.22) * fs, 2.76 + (z - 2.76) * fs) for r, z in prof]
         path = [(r * cb, r * sb, z) for r, z in catmull(prof, 16)]
-        widths = [0.07 + 0.3 * LS_FROND * math.sin(math.pi * min(1.0, t / 15 * 1.12)) for t in range(16)]
+        widths = [0.07 + 0.3 * fs * math.sin(math.pi * min(1.0, t / 15 * 1.12)) for t in range(16)]
         side = Vector((-sb, cb, 0))
         ribbon(path, widths, side, c("a_membrane"), th=0.035)
         for sgn in (-1, 1):
