@@ -670,7 +670,7 @@ def bellwing():
 # high, dark joints, dark claw tips; six overlapping back plates over a dark body. The tail
 # forks close to the body (Wrysk: the image only draws a second end beside the first) and the
 # two branches arch forward side by side, each ending in a holder of three claws around a
-# large cyan lure orb. Wrysk's changes to the image (2026-10-01): the tails climb higher and reach
+# cyan lure orb. Wrysk's changes to the image (2026-10-01): the tails climb higher and reach
 # further, the orbs hanging over and in front of the face; the body tapers and turns up into
 # the tail early; the fangs are larger and vertical, a pale column in front of the face; the
 # striking arms end in pale razor blades. Sizes are the founder's adult body (source.json):
@@ -678,12 +678,17 @@ def bellwing():
 # it). The tails' arch tops out near 0.6 m (5 voxels), above the 0.45 m height, so the curl
 # reads.
 
+# The orbs' cell column: 3 = one cell behind the fangs (Wrysk 2026-10-01), 2 = two cells
+# behind (the variant he asked to see). `LJ_ORB_CELL=2` in the environment picks it.
+LJ_ORB_CELL = int(os.environ.get("LJ_ORB_CELL", "3"))
+
+
 def lanternjaw():
     # Voxel placement (the bake anchors the origin on a cell centre: cell (i, j, k) centres at
     # x = 0.125 i, y = 0.125 j, z = 0.125 k + 0.0625). The fangs contain the two centres of
-    # cell column (4, 0, 0..1), the razor blades (4, +-2, 0), each orb (4, +-1, 3..4) in the
-    # top row with its top, front and sides open, so the face, the blades and the lures show
-    # at 0.125 m, the lures from every heading (from behind, over the tail).
+    # cell column (4, 0, 0..1), the razor blades (4, +-2, 0), each orb the one cell
+    # (LJ_ORB_CELL, +-1, 3) under the tail tip with its front and sides open. The two tail branches run
+    # on the cell rows y = +-0.125, thin enough that the row between them stays empty.
     def body_zone(f, s, p):
         return 0 if (p.x > 0.24 and s > -0.2) else 1    # violet helmet; the rest dark under plates
     body = [  # x, y, z centre, half-width, half-height up, down; tapering, the rear turning up
@@ -735,24 +740,25 @@ def lanternjaw():
             jointed([(hx, sy * 0.12, 0.12), (hx + dx * 0.5, sy * 0.29, 0.28), (hx + dx, sy * 0.38, 0.11),
                      (hx + dx * 1.15, sy * 0.43, 0.0)], 0.046, 0.034, 0.032)
 
+    ox = 0.125 * LJ_ORB_CELL  # the orbs' cell column (x of its centre)
     # tail: the rear turns up into one thick segment that forks at once; the two branches
     # climb, arch high over the back and come down in front, the orbs hanging over the face
     seg_tail([(-0.33, 0, 0.25), (-0.36, 0, 0.31)], 0.062, 0.058)
     for sy in (-1, 1):
-        path = [(-0.36, sy * 0.03, 0.31), (-0.38, sy * 0.07, 0.40), (-0.34, sy * 0.09, 0.49),
-                (-0.24, sy * 0.10, 0.53), (-0.10, sy * 0.10, 0.555), (0.06, sy * 0.10, 0.56),
-                (0.20, sy * 0.10, 0.565), (0.31, sy * 0.105, 0.57), (0.385, sy * 0.11, 0.57)]
+        path = [(-0.36, sy * 0.03, 0.31), (-0.38, sy * 0.08, 0.40), (-0.34, sy * 0.11, 0.49),
+                (-0.24, sy * 0.125, 0.53), (-0.10, sy * 0.125, 0.555), (0.06, sy * 0.125, 0.56),
+                (0.20 * ox / 0.375, sy * 0.125, 0.56), (ox - 0.075, sy * 0.125, 0.56), (ox - 0.015, sy * 0.125, 0.55)]
         seg_tail(catmull(path, 12), 0.056, 0.04)
-        # the lure holder: a short forward segment, three claws gripping the back half of a
-        # large cyan orb held out over the face, level with the top of the arch
+        # the lure holder: a short down-turned segment, three claws gripping the top half of
+        # the cyan orb that hangs under the tail tip, over the face
         end = path[-1]
-        hold = (0.43, sy * 0.115, 0.56)
-        cyl(end, hold, 0.034, 0.03, mat=c("a_mark"), seg=10)
-        orb = Vector((0.505, sy * 0.12, 0.50))
-        ell(tuple(orb), (0.1,) * 3, c("a_lure"))
-        for ang in (90, 210, 330):  # the claws grip the orb's back half only
+        hold = (ox, sy * 0.125, 0.515)
+        cyl(end, hold, 0.032, 0.028, mat=c("a_mark"), seg=10)
+        orb = Vector((ox, sy * 0.125, 0.4375))
+        ell(tuple(orb), (0.06,) * 3, c("a_lure"))
+        for ang in (90, 210, 330):  # the claws grip the orb's top half only
             a = math.radians(ang)
-            tip = orb + Vector((-0.06, math.cos(a) * 0.075, math.sin(a) * 0.075))
+            tip = orb + Vector((math.cos(a) * 0.045, math.sin(a) * 0.045, 0.03))
             cyl(hold, tuple(tip), 0.012, 0.003, mat=c("a_mark"), seg=6)
 
 
