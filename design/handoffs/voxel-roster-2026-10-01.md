@@ -710,3 +710,17 @@ Then one headless capture of a pack.
 - Anything undecided.
 
 Commit your own paths only. Stop every background shell before you return.
+
+---
+
+## Owed (small, after F1; not tuning)
+
+- **The `Chem(film)` field uses the old reference.** It emits `min(film / emit_reference, 1)`,
+  so a film site emits only about 0.06–0.12. It should use the snail's `taste_reference`
+  rule, which 764964e6 applied to taste only. This is the same units fix.
+- **`taste_reference` is fixed at 0.125 m.** The snail's value (6.25e-3) assumes a
+  0.125 m site. Derive it from `film_capacity_per_m2 × cell area` at load time instead.
+- **Ecology, for the tuning pass:** snails feed (about 12k bites an hour) but half starve
+  by 60 min with no births: small bites on thin film. That is `bite_half_stock` against
+  film density, and the tuning pass sets it. The loftstrider drowns in 4 of 7 seeds
+  (wade 0.85 m, under water at 1.5 m). Every lineage starves on the defaults.
