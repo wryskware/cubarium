@@ -261,6 +261,9 @@ fn founder_rows() -> Vec<Row> {
         r("pack.chase_give_up_s", "s", nonneg, "a chase is dropped after this").optional().prov("decision"),
         r("pack.chase_reserve_floor", "fraction of reserve cap", fraction, "a chase is dropped when a member's reserve falls under this").optional(),
         r("pack.call_s", "s", nonneg, "a member calls this long after the target changes or it strikes").optional().prov("decision"),
+        r("pack.den_search_m", "m", nonneg, "the breeder looks for a covered den within this of the founding point").optional().prov("decision"),
+        r("pack.follow_radius_m", "m", nonneg, "an idle adult walks back to within this of the breeder").optional(),
+        r("pack.home_give_up_s", "s", nonneg, "an adult wanting rest walks home this long, then rests where it is").optional(),
         // The counter-strike seam (`Counter`): unused, `None` for every lineage.
         r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
         r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),
@@ -331,6 +334,8 @@ fn knob_rows() -> Vec<Row> {
         p("recovery_speed", "x speed", fraction, "a strike's recovery is walked at this fraction of the speed").search(0.1, 1.0).prov("decision"),
         p("flee_sight_m", "m", nonneg, "how far a sighted prey heuristic looks for a threat").search(1.0, 8.0).prov("decision"),
         p("flee_tremor", "tremor units", nonneg, "the tremor a blind prey heuristic flees").search(1e-3, 0.1).log(),
+        p("carcass_yield_radius_m", "m", nonneg, "a feeding lanternjaw leaves its carcass to a body that hunts it this near").search(1.0, 6.0).prov("decision"),
+        p("threat_clear_m", "m", nonneg, "a yielding lanternjaw walks away until no body that hunts it is this near").search(2.0, 10.0).prov("decision"),
     ]);
 
     // `fauna.life.*`.

@@ -1210,8 +1210,8 @@ impl Manifest {
     /// The chorister (roster R3): the lanternjaw's layout on its own anchors and `Self`
     /// references, **without the lure** (Brief R3: the lanternjaw's strike machinery, no
     /// lure). Interim until P2.
-    // R3 stub: the lanternjaw's manifest with the walkers' three actions, on the
-    // chorister's (stub) physiology.
+    // The lanternjaw's manifest with the walkers' three actions, on the chorister's
+    // physiology.
     pub fn chorister() -> Manifest {
         let a = anchors(Founder::Chorister);
         let r = SelfReferences::of(Founder::Chorister);

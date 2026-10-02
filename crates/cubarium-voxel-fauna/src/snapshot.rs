@@ -26,7 +26,10 @@ use crate::Fauna;
 // `Glider::roost_search_m`, the glider ledger lines).
 // 32: R3 (tests-first stubs) — the chorister lineage, `FounderPhysiology::pack`,
 // `Founding::Pack`, `Animal::pack`, `Fauna::packs`, the provisioning ledger lines.
-pub const SCHEMA: u32 = 32;
+// 33: R3 — the chorister lives: its physiology, the pack tactic's state on
+// `PackRecord`, `Animal::{homing_ticks, yielding}`, `Escrow::young`, the pack and yield
+// ledger lines, `PredationConfig::{carcass_yield_radius_m, threat_clear_m}`.
+pub const SCHEMA: u32 = 33;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -349,6 +352,8 @@ mod tests {
             last_bloom: None,
             gut_seeds: crate::GutSeedLots::default(),
             pack: None,
+            homing_ticks: 0,
+            yielding: false,
         }
     }
 

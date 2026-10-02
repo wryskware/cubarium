@@ -77,6 +77,18 @@ pub struct Hit {
 /// structure is inside the hunter's size window, which follows the hunter's own body; a
 /// glider only on the ground.
 pub fn is_prey_of(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool {
+    is_prey_in_window(config, hunter, prey, hunter.body)
+}
+
+/// [`is_prey_of`] with the size window measured against `window_body` in place of the
+/// hunter's own body: the pack seam (roster R3), where a pack member's window is the
+/// summed body of its adult packmates nearby (`crate::pack::window_body`).
+pub(crate) fn is_prey_in_window(
+    config: &FaunaConfig,
+    hunter: &Animal,
+    prey: &Animal,
+    window_body: f64,
+) -> bool {
     let (Some(hf), Some(pf)) = (hunter.founder, prey.founder) else {
         return false;
     };
@@ -92,7 +104,7 @@ pub fn is_prey_of(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool 
     if config.founder(pf).glider.is_some() && prey.mobility.mode != crate::MobilityMode::Ground {
         return false;
     }
-    h.hunts(pf) && prey.body <= h.prey_max_ratio * hunter.body
+    h.hunts(pf) && prey.body <= h.prey_max_ratio * window_body
 }
 
 /// Whether a body has moved faster than `still_speed_bl_per_s` within the last

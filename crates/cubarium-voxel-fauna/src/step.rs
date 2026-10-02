@@ -88,6 +88,10 @@ enum Respiration {
     Hunt,
     /// Healing a wound (predation §2.4).
     Heal,
+    /// The provisioning loss (roster R3): the share of what an adult passes a pup that the
+    /// pup does not receive. Only in `respired_out`; the ledger's provisioning lines carry
+    /// the split.
+    Provision,
 }
 
 pub(crate) use cubarium_voxel::KeyedRng as Rng;
@@ -159,7 +163,7 @@ fn tick_inner(
         cubarium_voxel::voxel_phase!(FaunaMaintenance, {
             // WX4: who is asleep this tick is settled before anything is paid, so the
             // upkeep, the controller stage and the act all read the same answer.
-            circadian(fauna, clock_on, daylight);
+            circadian(fauna, &view, clock_on, daylight);
             maintenance(fauna);
             drain_riders(fauna);
             heal(fauna);
@@ -168,6 +172,8 @@ fn tick_inner(
             drop_off_grown(fauna);
             void_guts(fauna, flora);
             glider::void_gut_seeds(fauna, flora);
+            // R3: calls, pups' independence, succession and provisioning.
+            crate::pack::upkeep(fauna, &view);
         });
         // Maintenance and age settle first. A due field update then reads the litter as
         // it stands after the previous tick's feeding, before this tick's controllers.
@@ -297,7 +303,7 @@ fn withdraw(a: &mut Animal, want: f64) -> (Taken, f64) {
 
 /// `organic` out of the reserve, which must hold it, with the mineral and energy at the
 /// body's own density: a gestation instalment's and a clutch's one pro-rata rule.
-fn take_from_reserve(a: &mut Animal, organic: f64) -> Taken {
+pub(crate) fn take_from_reserve(a: &mut Animal, organic: f64) -> Taken {
     let before = a.organic();
     let mineral = pro_rata(a.mineral, organic, before);
     let energy = pro_rata(a.energy, organic, before);
@@ -395,7 +401,17 @@ fn book_respired(fauna: &mut Fauna, paid: f64, kind: Respiration) {
         Respiration::Gestation => fauna.ledger.respired_gestation_out += paid,
         Respiration::Hunt => fauna.ledger.respired_hunt_out += paid,
         Respiration::Heal => fauna.ledger.respired_heal_out += paid,
+        Respiration::Provision => {}
     }
+}
+
+/// The provisioning loss (roster R3, [`crate::pack`]): `organic` respired and `energy`
+/// out as heat.
+pub(crate) fn book_provision_loss(fauna: &mut Fauna, organic: f64, energy: f64) {
+    if organic > 0.0 {
+        book_respired(fauna, organic, Respiration::Provision);
+    }
+    fauna.ledger.heat_out += energy;
 }
 
 /// Step 2, last: every animal whose age is a multiple of [`crate::LifeConfig::gut_void_s`]
@@ -428,8 +444,10 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
 /// `rest_at` of its cap, up again below `wake_at` (or by the hunger rule), at its
 /// `torpor_upkeep`. A body a hit woke stays up for [`crate::PredationConfig::alert_s`]; a body mid-strike
 /// does not lie down, and a recovery is dropped by a rest that outlasts it.
-fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
+fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: f64) {
     let life = fauna.config.life;
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
     for i in 0..fauna.animals.len() {
         let Some(founder) = fauna.animals[i].founder else {
             continue;
@@ -463,6 +481,16 @@ fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
             Some(Rest::Sleep)
         } else {
             None
+        };
+        // R3: a pack adult under its pack heuristic rests and sleeps at its den; away from
+        // it, it stays awake and its tactic walks it home (for at most `home_give_up_s`).
+        let rest = match rest {
+            Some(_) if crate::pack::must_walk_home(fauna, i, v, ring) => None,
+            Some(r) => Some(r),
+            None => {
+                fauna.animals[i].homing_ticks = 0;
+                None
+            }
         };
         let a = &mut fauna.animals[i];
         a.alert_ticks = a.alert_ticks.saturating_sub(1);
@@ -807,6 +835,26 @@ fn controllers(
                 actions = roost;
             }
         }
+        // R3: the lanternjaw's carcass yield (its heuristic only), and the chorister's
+        // scripted pack tactic.
+        if driven && hunters_here {
+            let at_carcass = fauna.controllers.at_carcass(id);
+            if at_carcass || fauna.animals[i].yielding {
+                let ring = f64::from(view.config.width) * view.config.voxel_m;
+                if let Some(away) = crate::pack::carcass_yield(fauna, i, ring, at_carcass) {
+                    actions = away;
+                    lure = 0.0;
+                }
+            }
+        }
+        if driven && fauna.controllers.pack_tactic(id) {
+            if let Some(tactic) =
+                crate::pack::steer(fauna, i, view, &fv, sky.clock_on, sky.daylight, actions)
+            {
+                actions = tactic;
+                lure = 0.0;
+            }
+        }
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;
         a.founder_state.lure = if lure.is_finite() { lure.clamp(0.0, 1.0) } else { 0.0 };
@@ -1142,8 +1190,10 @@ fn founder_act(
     if due && held.feed > 0.0 {
         // A carnivore's `feed` is a strike when a prey is in its capsule (predation
         // §2.3), and a mouthful of carrion otherwise.
+        // R3: a pup's strike is refused, whatever its controller asks.
+        let pup = fauna.animals[i].pack.is_some_and(|m| m.pup);
         let target = match phys.hunter {
-            Some(h) if fauna.animals[i].strike.is_none() => {
+            Some(h) if fauna.animals[i].strike.is_none() && !pup => {
                 prey_in_capsule(fauna, i, view, &geometry, &h)
             }
             _ => None,
@@ -1160,6 +1210,8 @@ fn founder_act(
             });
             a.state = State::Resting;
             fauna.ledger.strikes_by_founder[founder.index()] += 1;
+            // R3: a pack member calls as it strikes.
+            crate::pack::call(fauna, i);
             return;
         }
         fed = founder_feed(fauna, i, view, flora, &manifest, &geometry, &sc, held.feed);
@@ -1514,11 +1566,13 @@ fn prey_in_capsule(
         jaw.0 + reach * a.pose.heading_rad.sin(),
         jaw.1 + reach * a.pose.heading_rad.cos(),
     );
+    // The pack seam (R3): a pack member's window is its nearby adult packmates' body.
+    let window = crate::pack::window_body(fauna, i, ring);
     let mut best: Option<(f64, u64)> = None;
     for o in &fauna.animals {
         if o.id == a.id
             || o.mobility.climb.is_some()
-            || !crate::is_prey_of(&fauna.config, a, o)
+            || !crate::predation::is_prey_in_window(&fauna.config, a, o, window)
             || !meets_capsule(&fauna.config, view, a, geometry, h, jaw, tip, o)
         {
             continue;
@@ -2257,9 +2311,7 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
         advance_eligibility(fauna, i, &sc, &rule);
         match rule.mode {
             crate::BirthMode::Gestation => {
-                if let Some(newborn) = gestate(fauna, i, &sc, &rule) {
-                    newborns.push(newborn);
-                }
+                gestate(fauna, i, &sc, &rule, view.config.seed, &mut newborns);
             }
             crate::BirthMode::Eggs => lay(fauna, i, flora, &sc, &rule, view.config.seed),
         }
@@ -2321,26 +2373,37 @@ fn gestate(
     i: usize,
     sc: &SpeciesConfig,
     rule: &crate::Reproduction,
-) -> Option<Animal> {
+    seed: u64,
+    newborns: &mut Vec<Animal>,
+) {
     let a = &fauna.animals[i];
     if a.reproduction.escrow.is_none() {
         if !rule.hold_met(&a.reproduction) {
-            return None;
+            return;
         }
-        fauna.animals[i].reproduction.escrow = Some(crate::Escrow::default());
+        // R3: a pack lineage's litter — only its pack's breeder conceives, no sooner than
+        // `litter_interval_s` after its last litter, 2 to `litter_size_max` young.
+        let young = match litter_size(fauna, i, sc, rule, seed) {
+            Litter::One => 1,
+            Litter::Of(n) => n,
+            Litter::Not => return,
+        };
+        fauna.animals[i].reproduction.escrow = Some(crate::Escrow {
+            young,
+            ..crate::Escrow::default()
+        });
         fauna.ledger.gestations_opened += 1;
     }
     let n = rule.gestation_ticks();
-    let paid = fauna.animals[i]
-        .reproduction
-        .escrow
-        .expect("an open escrow")
-        .ticks;
+    let (paid, young) = {
+        let e = fauna.animals[i].reproduction.escrow.expect("an open escrow");
+        (e.ticks, e.young.max(1))
+    };
     let k = paid + 1;
     // The instalment is the distance to this tick's **cumulative target**, so the
     // instalments sum to `birth_cost` exactly however the division rounds, and the last
     // one closes whatever the earlier ones left.
-    let target = rule.package_cost(sc) * (k as f64 / n as f64);
+    let target = rule.package_cost(sc) * f64::from(young) * (k as f64 / n as f64);
     let want = target
         - fauna.animals[i]
             .reproduction
@@ -2353,7 +2416,7 @@ fn gestate(
         // reserve at zero cannot pay anything. Nothing is part-paid.
         if fauna.animals[i].reserve < want {
             fail_gestation(fauna, i, rule);
-            return None;
+            return;
         }
         let a = &mut fauna.animals[i];
         let paid = take_from_reserve(a, want);
@@ -2369,7 +2432,7 @@ fn gestate(
         .expect("an open escrow");
     e.ticks = k;
     if k < n {
-        return None;
+        return;
     }
     // Term. The escrow becomes the newborn, whole: this is the same parcel the parent
     // paid for, so nothing is clamped and nothing is rounded away.
@@ -2383,20 +2446,111 @@ fn gestate(
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
     a.reproduction.given += e.organic;
-    let (site, species, pose, founder) = (a.site, a.species, a.pose, a.founder);
-    let parcel = Taken {
+    let (site, species, pose, founder, pack) = (a.site, a.species, a.pose, a.founder, a.pack);
+    // A litter's parcel is split evenly; the last young takes what division left, so the
+    // parcels sum to the escrow exactly.
+    let young = e.young.max(1);
+    let mut left = Taken {
         organic: e.organic,
         mineral: e.mineral,
         energy: e.energy,
     };
-    Some(newborn(
-        fauna,
-        (species, founder),
-        (site, pose),
-        sc.body_min,
-        parcel,
-        sc.lifespan_median_s,
-    ))
+    for k in 0..young {
+        let share = if k + 1 == young {
+            left
+        } else {
+            let f = 1.0 / f64::from(young);
+            Taken {
+                organic: e.organic * f,
+                mineral: e.mineral * f,
+                energy: e.energy * f,
+            }
+        };
+        left.organic -= share.organic;
+        left.mineral -= share.mineral;
+        left.energy -= share.energy;
+        let mut n = newborn(
+            fauna,
+            (species, founder),
+            (site, pose),
+            sc.body_min,
+            share,
+            sc.lifespan_median_s,
+        );
+        // Born into the parent's pack, a pup.
+        if let Some(m) = pack {
+            n.pack = Some(crate::PackMember {
+                pack: m.pack,
+                pup: true,
+                calling_ticks: 0,
+            });
+        }
+        newborns.push(n);
+    }
+    if let Some(m) = pack {
+        let tick = fauna.tick;
+        if let Some(p) = fauna.pack_mut(m.pack) {
+            p.last_litter_tick = Some(tick);
+        }
+        fauna.ledger.litters += 1;
+        fauna.ledger.pups_born += u64::from(young);
+    }
+}
+
+/// What a gestating lineage's next conception carries (roster R3).
+enum Litter {
+    /// Not a pack lineage: one young, the ordinary rule.
+    One,
+    /// A pack breeder's litter of this many.
+    Of(u32),
+    /// A pack lineage that does not conceive now: not its pack's breeder, inside the
+    /// litter interval, or a reserve that cannot fund the smallest litter.
+    Not,
+}
+
+/// Stream key for the litter-size draw.
+const DOMAIN_LITTER: u64 = 0x11_77E2;
+
+/// R3: a pack lineage's conception rule. Only the pack's breeder conceives, and no
+/// sooner than `litter_interval_s` after its last litter. The litter is drawn uniform on
+/// 2..=`litter_size_max` (keyed by the world seed, the breeder and the tick), and is
+/// never more young than its reserve above the surplus floor funds; with too little for
+/// two, it waits.
+fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reproduction, seed: u64) -> Litter {
+    let a = &fauna.animals[i];
+    let Some(t) = a.founder.and_then(|f| fauna.config.founder(f).pack) else {
+        return Litter::One;
+    };
+    let Some(m) = a.pack.filter(|m| !m.pup) else {
+        return Litter::Not;
+    };
+    let Some(record) = fauna.pack(m.pack) else {
+        return Litter::Not;
+    };
+    if record.breeder != Some(a.id) {
+        return Litter::Not;
+    }
+    if let Some(last) = record.last_litter_tick {
+        if fauna.tick.saturating_sub(last) < cubarium_voxel::ticks_at_least_one(t.litter_interval_s) {
+            return Litter::Not;
+        }
+    }
+    let hi = t.litter_size_max.max(1);
+    let lo = hi.min(2);
+    let mut rng = Rng::keyed(DOMAIN_LITTER, seed, a.id, fauna.tick);
+    let drawn = lo + (rng.unit() * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo)) as u32;
+    let package = rule.package_cost(sc);
+    let funds = if package > 0.0 {
+        ((a.reserve - rule.surplus_floor) / package).floor().max(0.0)
+    } else {
+        f64::from(hi)
+    };
+    let n = drawn.min(funds.min(f64::from(u32::MAX)) as u32);
+    if n < lo {
+        Litter::Not
+    } else {
+        Litter::Of(n)
+    }
 }
 
 /// A newborn out of a paid `parcel`: a `body_min` juvenile with the rest of the parcel's
@@ -2446,6 +2600,8 @@ fn newborn(
         last_bloom: None,
         gut_seeds: crate::GutSeedLots::default(),
         pack: None,
+        homing_ticks: 0,
+        yielding: false,
     }
 }
 

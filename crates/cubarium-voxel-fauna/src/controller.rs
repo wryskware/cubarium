@@ -104,6 +104,23 @@ pub trait Controller: Send + Sync {
     fn flees(&self) -> bool {
         false
     }
+
+    /// Whether the tick applies the **scripted pack tactic** (roster R3) to this
+    /// controller's body: the chorister's heuristic says yes, and nothing else does. The
+    /// tactic reads the pack (den, target, packmates) and overrides the held actions as the
+    /// flee rule does; a trained policy or a test's scripted control is left as it is.
+    fn pack_tactic(&self) -> bool {
+        false
+    }
+
+    /// Whether this controller's body is **at a carcass** after its last [`drive`]: eating
+    /// carrion at its mouth. The lanternjaw's heuristic answers it, and the tick's carcass
+    /// yield (roster R3) reads it; every other controller answers `false`.
+    ///
+    /// [`drive`]: Controller::drive
+    fn at_carcass(&self) -> bool {
+        false
+    }
 }
 
 /// The shared action adapter: transfer, clamp, deadband — in that order, identically
@@ -216,6 +233,22 @@ impl FounderControllers {
             .binary_search_by_key(&id, |e| e.0)
             .ok()
             .is_some_and(|at| self.entries[at].1.flees())
+    }
+
+    /// Whether a body's controller opts into the pack tactic ([`Controller::pack_tactic`]).
+    pub fn pack_tactic(&self, id: u64) -> bool {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .is_some_and(|at| self.entries[at].1.pack_tactic())
+    }
+
+    /// Whether a body's controller is at a carcass ([`Controller::at_carcass`]).
+    pub fn at_carcass(&self, id: u64) -> bool {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .is_some_and(|at| self.entries[at].1.at_carcass())
     }
 
     /// Whether this body has a controller.
@@ -505,10 +538,9 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         Founder::Bellwing => Box::new(HoverSip::with_config(teachers)),
         // F3: the seedporter's fruit forager (the body climbs, perches and glides).
         Founder::Seedporter => Box::new(FruitForager::with_config(teachers)),
-        // R3 stub: the lanternjaw's ambush on the chorister. R3 builds the scripted pack
-        // heuristic (Brief R3: drive and flank, give up, return to the den, keep out of
-        // other packs' territories; pups stay at the den).
-        Founder::Chorister => Box::new(LanternjawAmbush::with_config(teachers)),
+        // R3: the chorister's pack hunter — the lanternjaw's ambush without a lure, under
+        // the step's scripted pack tactic (`crate::pack`).
+        Founder::Chorister => Box::new(PackHunter::with_config(teachers)),
     }
 }
 
@@ -1122,6 +1154,10 @@ pub struct LanternjawAmbush {
     wander_ticks: u32,
     escape: u32,
     lure: f64,
+    /// Whether its last answer was eating carrion at its mouth ([`Controller::at_carcass`]).
+    eating: bool,
+    /// Whether it lights a lure at all (the chorister's does not).
+    lit: bool,
     /// `Self.reserve` at which it stops eating and hunting: the physiology's own
     /// `rest_at`, where the tick's satiated rest takes it (an adult's `Self.reserve` is
     /// its fraction of its cap).
@@ -1142,7 +1178,14 @@ impl LanternjawAmbush {
 
     /// The lanternjaw's heuristic on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
     pub fn with_config(cfg: TeacherConfig) -> LanternjawAmbush {
-        let manifest = Founder::Lanternjaw.manifest();
+        LanternjawAmbush::for_founder(Founder::Lanternjaw, cfg)
+    }
+
+    /// The ambush on `founder`'s manifest (the lanternjaw's layout) and satiation line,
+    /// its lure lit only for a hunter whose table pays one.
+    fn for_founder(founder: Founder, cfg: TeacherConfig) -> LanternjawAmbush {
+        let manifest = founder.manifest();
+        let hunter = crate::FounderPhysiology::frozen(founder).hunter;
         LanternjawAmbush {
             cfg,
             mode: Ambush::Seek,
@@ -1152,9 +1195,9 @@ impl LanternjawAmbush {
             wander_ticks: 0,
             escape: 0,
             lure: 0.0,
-            sated: crate::FounderPhysiology::frozen(Founder::Lanternjaw)
-                .hunter
-                .map_or(1.0, |h| h.rest_at),
+            eating: false,
+            lit: hunter.is_some_and(|h| h.lure_power > 0.0),
+            sated: hunter.map_or(1.0, |h| h.rest_at),
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
             cone: module_slot(&manifest, "Cone(3, foliage/body)"),
@@ -1163,7 +1206,8 @@ impl LanternjawAmbush {
 
     fn act(&mut self, mode: Ambush, forward: f64, turn: f64, feed: f64) -> Response {
         self.mode = mode;
-        self.lure = if mode == Ambush::Wait { 1.0 } else { 0.0 };
+        self.lure = if mode == Ambush::Wait && self.lit { 1.0 } else { 0.0 };
+        self.eating = mode == Ambush::Idle && feed > 0.0;
         Response::Bounded(Actions {
             forward,
             turn,
@@ -1265,11 +1309,53 @@ impl Controller for LanternjawAmbush {
     }
 
     fn reset(&mut self) {
+        let lit = self.lit;
+        let sated = self.sated;
         *self = LanternjawAmbush::with_config(self.cfg);
+        self.lit = lit;
+        self.sated = sated;
     }
 
     fn lure(&self) -> f64 {
         self.lure
+    }
+
+    fn at_carcass(&self) -> bool {
+        self.eating
+    }
+}
+
+/// **The chorister's heuristic** (roster R3, Brief R3 "Heuristic"): the lanternjaw's
+/// ambush without a lure — alone it hunts like the lanternjaw — under the step's scripted
+/// **pack tactic** ([`Controller::pack_tactic`], `crate::pack`), which reads the pack and
+/// overrides it: drive and flank a pack target, give a chase up, eat the kill, walk home
+/// to rest, keep the pack together, never path into another pack's territory, and keep a
+/// pup at its den. Observation-only itself, as every heuristic is.
+#[derive(Clone, Debug)]
+pub struct PackHunter {
+    ambush: LanternjawAmbush,
+}
+
+impl PackHunter {
+    /// The chorister's heuristic on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
+    pub fn with_config(cfg: TeacherConfig) -> PackHunter {
+        PackHunter {
+            ambush: LanternjawAmbush::for_founder(Founder::Chorister, cfg),
+        }
+    }
+}
+
+impl Controller for PackHunter {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        self.ambush.drive(o)
+    }
+
+    fn reset(&mut self) {
+        self.ambush.reset();
+    }
+
+    fn pack_tactic(&self) -> bool {
+        true
     }
 }
 

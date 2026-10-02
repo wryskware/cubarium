@@ -440,7 +440,6 @@ pub struct FounderPhysiology {
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
-    // R3 stub: declared with the brief's numbers on the chorister, read by nothing.
     #[serde(default)]
     pub pack: Option<Pack>,
 }
@@ -487,6 +486,16 @@ pub struct Pack {
     /// A member's `calling` flag stays set this long after the pack target changes or it
     /// strikes, seconds. 1.
     pub call_s: f64,
+    /// The breeder looks for its covered den within this of the founding point, metres
+    /// (Fable: 8). With none covered there, the face with the most solid over it; with
+    /// none of those, the founding point.
+    pub den_search_m: f64,
+    /// An idle adult that is not the breeder walks back to within this of the breeder,
+    /// metres: the pack keeps together between hunts. A placeholder.
+    pub follow_radius_m: f64,
+    /// An adult that wants a rest walks home to its den first, for at most this long;
+    /// after it, it rests where it is, seconds. A placeholder.
+    pub home_give_up_s: f64,
 }
 
 impl Pack {
@@ -507,6 +516,9 @@ impl Pack {
         chase_give_up_s: 20.0,
         chase_reserve_floor: 0.3,
         call_s: 1.0,
+        den_search_m: 8.0,
+        follow_radius_m: 3.0,
+        home_give_up_s: 600.0,
     };
 }
 
@@ -1221,17 +1233,57 @@ impl FounderPhysiology {
                     ..grazer
                 }
             }
-            // R3 stub: the lanternjaw's table (its egg bank, nocturnal, its prey list) at a
-            // founding count of 0, carrying the brief's pack numbers. The implementer
-            // builds the chorister here (Brief R3): 1.4 × 0.35 × 0.6 m, the lanternjaw's
-            // table by body volume ([`CHORISTER_VOLUME_RATIO`]) at twice its specific
-            // upkeep, live birth, diurnal, diet [carrion], its own prey list, founded as
-            // packs.
-            Founder::Chorister => FounderPhysiology {
-                founding_count: 0,
-                pack: Some(Pack::CHORISTER),
-                ..FounderPhysiology::placeholder(Founder::Lanternjaw)
-            },
+            // The chorister (roster R3, Brief R3; predation-and-flight §2.10, §2.14;
+            // organism-large-animals §5): a diurnal pack hunter on the lanternjaw's hunter
+            // table and strike machinery, built from the lanternjaw by **body volume**, as
+            // R1 built the capgnawer and the loftstrider.
+            //
+            // Volume ratio: 1.4 × 0.35 × 0.6 m over the lanternjaw's 1.0 × 0.25 × 0.45 m,
+            // **r ≈ 2.61** ([`CHORISTER_VOLUME_RATIO`]; the 0.8 m tail is geometry only).
+            // Stocks and absolute rates are the lanternjaw's × r
+            // ([`SpeciesConfig::scale_mass`]); the reserve cap is a fraction of body, so it
+            // stays. Specific upkeep is **twice** the lanternjaw's (§2.14: "a higher
+            // upkeep"), and the motor keeps the lanternjaw's rule (full cruise at its basal
+            // rate). Live birth on the grazers' placeholder clocks, the newborn's package
+            // twice its `body_min` (the frondgrazer's ratio); the litter, its interval and
+            // the breeder are the pack's ([`Pack`]).
+            Founder::Chorister => {
+                let lj = FounderPhysiology::placeholder(Founder::Lanternjaw);
+                let mut core = lj.core;
+                core.reproduction = Reproduction::LIVE_BIRTH_PLACEHOLDER;
+                // The grazers' surplus floor at the lanternjaw's body (the frondgrazer's
+                // 0.005 at its 0.05), then × r with the other stocks.
+                core.reproduction.surplus_floor *= lj.core.body_max / 0.05;
+                core.birth_cost = 2.0 * core.body_min;
+                core.scale_mass(CHORISTER_VOLUME_RATIO);
+                core.maintenance_per_s = 2.0 * lj.core.maintenance_per_s;
+                FounderPhysiology {
+                    core,
+                    motor_respiration_per_s: core.maintenance_per_s,
+                    // Its own height both ways, the lanternjaw's rule.
+                    step_up_m: 0.6,
+                    step_down_m: 0.6,
+                    adult_length_m: 1.4,
+                    adult_width_m: 0.35,
+                    adult_height_m: 0.6,
+                    // The lanternjaw keeps the night.
+                    active: crate::Activity::Diurnal,
+                    // The lanternjaw's strike table, no lure, its own list (§2.14): the
+                    // frondgrazer, the loftstrider (only a pack's window takes an adult),
+                    // the lanternjaw, and a grounded seedporter.
+                    hunter: Some(Hunter {
+                        prey: [false, true, true, false, true, false, false, true, false],
+                        lure_power: 0.0,
+                        ..Hunter::LANTERNJAW
+                    }),
+                    diet: crate::Diet::only(crate::Food::Carrion),
+                    founding: Founding::Pack,
+                    founding_site: FoundingSite::AtFood,
+                    founding_count: 0,
+                    pack: Some(Pack::CHORISTER),
+                    ..lj
+                }
+            }
             Founder::RippleSnail => {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let grazer = FounderPhysiology::placeholder(Founder::Browser);

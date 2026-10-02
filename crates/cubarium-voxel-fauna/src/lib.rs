@@ -29,6 +29,7 @@ mod knobs;
 mod manifest;
 mod pose;
 mod predation;
+mod pack;
 mod registry;
 pub use registry::registry;
 mod senses;
@@ -59,7 +60,7 @@ pub use body::{
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
-    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, Response, Scripted, heuristic, resolve_actions,
+    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, PackHunter, Response, Scripted, heuristic, resolve_actions,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
@@ -816,9 +817,20 @@ pub struct Animal {
     /// **Pack membership** (roster R3, a lineage with [`FounderPhysiology::pack`]): the
     /// pack it belongs to ([`PackRecord`]), whether it is a pup, and its call. `None` for
     /// every body outside a pack.
-    // R3 stub: declared, `None` everywhere, read by nothing.
     #[serde(default)]
     pub pack: Option<PackMember>,
+    /// **Walking home to rest** (roster R3, a pack adult driven by its pack heuristic):
+    /// ticks it has wanted a rest (satiated, or out of its activity phase) while away from
+    /// its den. Its rest begins only within [`Pack::den_radius_m`] of the den, or once this
+    /// reaches [`Pack::home_give_up_s`]. Zero for every other body.
+    #[serde(default)]
+    pub homing_ticks: u32,
+    /// **Yielding a carcass** (roster R3, the lanternjaw's heuristic): set when a body that
+    /// hunts it came within `carcass_yield_radius_m` while it fed, cleared once none is
+    /// within `threat_clear_m` ([`crate::PredationConfig`]); while set it walks directly
+    /// away. `false` for every other body.
+    #[serde(default)]
+    pub yielding: bool,
 }
 
 /// A body's place in a pack (roster R3).
@@ -843,7 +855,20 @@ impl PackMember {
     }
 }
 
-/// A pack (roster R3): its den and its breeder. Saved with the layer.
+/// How a pack's den was chosen at founding (roster R3; Fable's fallback rule).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DenChoice {
+    /// A covered face (solid within [`Pack::den_cover_m`] over it) within
+    /// [`Pack::den_search_m`] of the founding point, the nearest.
+    Covered,
+    /// No covered face there: the face with the most solid cells over it in its column.
+    MostOverhead,
+    /// No face there has anything over it: the founding point.
+    FoundingPoint,
+}
+
+/// A pack (roster R3): its den, its breeder, and the scripted pack tactic's state (its
+/// target, its chase clock, its carcass). Saved with the layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackRecord {
     /// Its id, never reused.
@@ -856,6 +881,27 @@ pub struct PackRecord {
     /// The one member that conceives; `None` only while no adult is left. When it dies the
     /// oldest adult in the pack takes its place.
     pub breeder: Option<u64>,
+    /// How the den was chosen; `None` for a pack founded on a given face
+    /// ([`Command::FoundPack`] directly).
+    #[serde(default)]
+    pub den_choice: Option<DenChoice>,
+    /// The tick its last litter was born: the next is conceived no sooner than
+    /// [`Pack::litter_interval_s`] after it.
+    #[serde(default)]
+    pub last_litter_tick: Option<u64>,
+    /// **The pack target**: the prey every adult member is driving or flanking now.
+    #[serde(default)]
+    pub target: Option<u64>,
+    /// The tick the chase on `target` began ([`Pack::chase_give_up_s`]).
+    #[serde(default)]
+    pub chase_since_tick: u64,
+    /// The target's face when last seen: where its carcass lies if it was killed.
+    #[serde(default)]
+    pub target_site: Option<Site>,
+    /// **The pack's carcass**: the face of a kill it is eating, until the carrion there is
+    /// gone. Pups eat at it too when it is within [`Pack::den_radius_m`] of the den.
+    #[serde(default)]
+    pub feast: Option<Site>,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -1076,6 +1122,9 @@ pub struct Escrow {
     pub energy: f64,
     /// Instalments paid so far. The birth is at `gestation_ticks`.
     pub ticks: u64,
+    /// The young it carries (roster R3, a pack breeder's litter); 0 reads as one.
+    #[serde(default)]
+    pub young: u32,
 }
 
 /// A clutch of eggs: a **stationary paid package in the world**, on the support face
@@ -2246,11 +2295,24 @@ pub struct FaunaLedger {
     /// **Provisioning** (roster R3): organic matter adults at a den passed out of their
     /// reserves to pups, and what the pups received of it (`provision_efficiency` of it;
     /// the rest is respired, inside `respired_out`).
-    // R3 stub: declared, never booked.
     #[serde(default)]
     pub provision_given_organic: f64,
     #[serde(default)]
     pub provision_received_organic: f64,
+    /// **The pack tactic** (roster R3): pack chases begun (a member set a pack target),
+    /// and those that ended with the target dead and its carrion on its face.
+    #[serde(default)]
+    pub pack_chases: u64,
+    #[serde(default)]
+    pub pack_chase_kills: u64,
+    /// Lanternjaws that left a carcass to a body that hunts them (roster R3, the yield).
+    #[serde(default)]
+    pub carcass_yields: u64,
+    /// A pack breeder's litters born, and the pups in them (roster R3).
+    #[serde(default)]
+    pub litters: u64,
+    #[serde(default)]
+    pub pups_born: u64,
 }
 
 impl FaunaLedger {
@@ -2477,7 +2539,6 @@ pub enum Command {
     /// breeder. Refused off a support face, for a lineage with no pack table, and when the
     /// stores are refused. The caller (the habitat seeder, `--introduce chorister:N`)
     /// picks the covered den.
-    // R3 stub: always refused.
     FoundPack {
         den: Site,
         founder: Founder,
@@ -2595,6 +2656,9 @@ pub struct Fauna {
     /// The packs standing in the world (roster R3), by id.
     #[serde(default)]
     packs: Vec<PackRecord>,
+    /// The next pack's id: ids are never reused.
+    #[serde(default)]
+    next_pack: u64,
 }
 
 /// The most gut-seed void events [`Fauna`] keeps undrained.
@@ -2629,6 +2693,7 @@ impl Fauna {
             last_daylight: None,
             seed_voids: Vec::new(),
             packs: Vec::new(),
+            next_pack: 0,
         })
     }
 
@@ -2758,6 +2823,77 @@ impl Fauna {
         self.packs.iter().find(|p| p.id == id)
     }
 
+    pub(crate) fn pack_mut(&mut self, id: u64) -> Option<&mut PackRecord> {
+        self.packs.iter_mut().find(|p| p.id == id)
+    }
+
+    pub(crate) fn packs_mut(&mut self) -> &mut Vec<PackRecord> {
+        &mut self.packs
+    }
+
+    /// Record how a pack's den was chosen (the habitat seeder's founding search).
+    pub fn set_den_choice(&mut self, pack: u64, choice: DenChoice) {
+        if let Some(p) = self.pack_mut(pack) {
+            p.den_choice = Some(choice);
+        }
+    }
+
+    /// [`Command::FoundPack`]: a new pack on `den`, its `pack_size` adults introduced on
+    /// that face, the first the breeder. The new pack's id, or `None` (nothing changed)
+    /// for a lineage with no pack table, a face that is not one, or refused stores.
+    fn found_pack(
+        &mut self,
+        world: &World,
+        den: Site,
+        founder: Founder,
+        stores: StartingStores,
+        heading_rad: f64,
+    ) -> Option<u64> {
+        let table = self.config.founder(founder).pack?;
+        let id = self.next_pack;
+        let mut members = Vec::new();
+        for _ in 0..table.pack_size {
+            if !self.apply(
+                world,
+                Command::IntroduceFounderOnFace {
+                    site: den,
+                    founder,
+                    stores,
+                    heading_rad,
+                },
+            ) {
+                break;
+            }
+            members.push(self.ledger.births - 1);
+        }
+        if members.is_empty() {
+            return None;
+        }
+        for &m in &members {
+            if let Ok(i) = self.animals.binary_search_by_key(&m, |a| a.id) {
+                self.animals[i].pack = Some(PackMember {
+                    pack: id,
+                    pup: false,
+                    calling_ticks: 0,
+                });
+            }
+        }
+        self.next_pack += 1;
+        self.packs.push(PackRecord {
+            id,
+            lineage: founder,
+            den,
+            breeder: members.first().copied(),
+            den_choice: None,
+            last_litter_tick: None,
+            target: None,
+            chase_since_tick: 0,
+            target_site: None,
+            feast: None,
+        });
+        Some(id)
+    }
+
     pub fn view(&self) -> FaunaView<'_> {
         FaunaView {
             config: &self.config,
@@ -2877,8 +3013,12 @@ impl Fauna {
                 lineage,
                 eggs,
             } => self.bury_clutch(world, site, lineage, eggs),
-            // R3 stub: refused.
-            Command::FoundPack { .. } => false,
+            Command::FoundPack {
+                den,
+                founder,
+                stores,
+                heading_rad,
+            } => self.found_pack(world, den, founder, stores, heading_rad).is_some(),
             Command::IntroduceAloft {
                 pose,
                 founder,
@@ -3070,6 +3210,8 @@ impl Fauna {
             last_bloom: None,
             gut_seeds: GutSeedLots::default(),
             pack: None,
+            homing_ticks: 0,
+            yielding: false,
         };
         let mut animal = animal;
         // A flyer on a face is perched on it (F1).

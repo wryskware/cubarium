@@ -78,6 +78,11 @@ pub struct PredationConfig {
     /// §2.7: the tremor a blind prey heuristic flees, `left + right`, in the tremor's own
     /// units.
     pub flee_tremor: f64,
+    /// Roster R3 (Fable): a lanternjaw feeding at a carcass under its heuristic leaves it
+    /// when a body that hunts it comes within this, metres. 3.
+    pub carcass_yield_radius_m: f64,
+    /// ...and walks directly away until none is within this, then resumes, metres. 5.
+    pub threat_clear_m: f64,
 }
 
 impl Default for PredationConfig {
@@ -109,6 +114,8 @@ impl Default for PredationConfig {
             recovery_speed: 0.5,
             flee_sight_m: 3.0,
             flee_tremor: 0.015,
+            carcass_yield_radius_m: 3.0,
+            threat_clear_m: 5.0,
         }
     }
 }
