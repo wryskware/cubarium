@@ -16,6 +16,7 @@ use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_sim::Sim;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::curiosity::{Curiosity, Geometry, Memory};
 use super::ecology::EcologyParams;
 use super::readout::{self, Ctx, LineageStats, Pool, Scan};
 use super::variants::VariantTable;
@@ -40,6 +41,8 @@ pub struct LiveWorld {
     pub info: FoundInfo,
     /// Windows this world has run since it was founded or replaced.
     pub windows: u32,
+    /// Its bodies' familiarity, carried from window to window (training side only).
+    pub memory: Memory,
 }
 
 /// One body's result for one window.
@@ -62,6 +65,8 @@ pub struct WindowResult {
     pub wall_s: f64,
     /// Bodies whose measured intake came out negative beyond rounding (clamped to zero).
     pub intake_anomalies: u64,
+    /// The living bodies' familiarity, for the next window of this world.
+    pub memory: Memory,
 }
 
 /// Where a body stands around the ring, metres, and its id.
@@ -90,7 +95,14 @@ pub struct NetEnergy {
     pub motor_loss_normalized: f64,
     /// Whether it died in the window.
     pub died: bool,
-    /// What the ES ranks by: `delta + given`.
+    /// Ground new to the body this window, over the cells a walk at cruise would enter
+    /// ([`super::curiosity`]); earned before a death is kept.
+    #[serde(default)]
+    pub novelty: f64,
+    /// The curiosity term, `weight × novelty` (0 without a curiosity file).
+    #[serde(default)]
+    pub curiosity: f64,
+    /// What the ES ranks by: `delta + given + curiosity`.
     pub score: f64,
 }
 
@@ -118,7 +130,21 @@ impl NetEnergy {
             intake_normalized: intake / body_reference,
             motor_loss_normalized: motor / body_reference,
             died,
+            novelty: 0.0,
+            curiosity: 0.0,
             score: delta_normalized + given_normalized,
+        }
+    }
+
+    /// The score with the curiosity term: `delta + given + weight × novelty`. Weight 0 is
+    /// the energy score unchanged.
+    pub fn with_curiosity(self, novelty: f64, weight: f64) -> NetEnergy {
+        let curiosity = weight * novelty;
+        NetEnergy {
+            novelty,
+            curiosity,
+            score: self.delta_normalized + self.given_normalized + curiosity,
+            ..self
         }
     }
 }
@@ -241,6 +267,8 @@ struct Tracked {
     visited: FxHashSet<u32>,
     minute_bl: f64,
     minute_ticks: u64,
+    /// Cells' worth of new ground it entered this window ([`Memory::observe`]).
+    earned: f64,
 }
 
 /// One window in progress on one world: [`Window::begin`], [`Window::step`] once per
@@ -263,6 +291,9 @@ pub struct Window {
     assigned: Vec<Vec<(f64, usize)>>,
     stats: [LineageStats; Founder::COUNT],
     newcomers: Vec<(u64, Founder, f64, BodyMeter, EnergyMeter)>,
+    curiosity: Curiosity,
+    geometry: Vec<Geometry>,
+    memory: Memory,
 }
 
 impl Window {
@@ -275,6 +306,20 @@ impl Window {
         tables: &[Option<VariantTable>],
         first_pair: &[usize],
         ticks: u64,
+    ) -> Window {
+        Window::begin_with(sim, tables, first_pair, ticks, &Curiosity::default(), Memory::default())
+    }
+
+    /// [`Window::begin`] with each lineage's `curiosity` and the world's bodies'
+    /// familiarity carried from its last window (`memory`; empty for a fresh world).
+    /// [`WindowResult::memory`] hands it on.
+    pub fn begin_with(
+        sim: &mut Sim,
+        tables: &[Option<VariantTable>],
+        first_pair: &[usize],
+        ticks: u64,
+        curiosity: &Curiosity,
+        mut memory: Memory,
     ) -> Window {
         assert_eq!(tables.len(), Founder::COUNT);
         let voxel_m = sim.world().config().voxel_m;
@@ -304,6 +349,12 @@ impl Window {
             assigned: vec![Vec::new(); Founder::COUNT],
             stats: Default::default(),
             newcomers: Vec::new(),
+            curiosity: curiosity.clone(),
+            geometry: Founder::ALL
+                .iter()
+                .map(|f| Geometry::of(sim.fauna().config().founder(*f), curiosity.of(*f)))
+                .collect(),
+            memory: Memory::default(),
         };
         let bodies: Vec<(u64, Founder, f64, BodyMeter, EnergyMeter)> = sim
             .fauna()
@@ -315,6 +366,23 @@ impl Window {
                     .map(|f| (a.id, f, a.pose.x, BodyMeter::new(f, a), EnergyMeter::new(a)))
             })
             .collect();
+        // Only the living are remembered; a body met for the first time starts empty.
+        let living: FxHashSet<u64> = bodies.iter().map(|b| b.0).collect();
+        memory.retain(|id| living.contains(&id));
+        {
+            let ring_m = w.ring_m;
+            for a in sim.fauna().view().animals.iter() {
+                if let Some(f) = a.founder {
+                    memory.observe(
+                        a.id,
+                        &w.geometry[f.index()],
+                        a.pose.x.rem_euclid(ring_m),
+                        a.pose.z,
+                    );
+                }
+            }
+        }
+        w.memory = memory;
         for f in Founder::ALL {
             let fi = f.index();
             let mine: Vec<Placed> = bodies
@@ -350,6 +418,7 @@ impl Window {
                     visited: FxHashSet::default(),
                     minute_bl: 0.0,
                     minute_ticks: 0,
+                    earned: 0.0,
                 });
             }
         }
@@ -366,6 +435,7 @@ impl Window {
     pub fn step(&mut self, sim: &mut Sim) {
         sim.step();
         self.elapsed += 1;
+        self.memory.advance();
         let stamp = self.elapsed;
         self.newcomers.clear();
         {
@@ -394,19 +464,26 @@ impl Window {
                 b.minute_ticks += 1;
                 b.alive_ticks += 1;
                 b.x_m = a.pose.x;
+                b.earned += self.memory.observe(
+                    a.id,
+                    &self.geometry[f.index()],
+                    a.pose.x.rem_euclid(self.ring_m),
+                    a.pose.z,
+                );
                 if let Some((cx, cz)) = a.pose.column(self.voxel_m, self.depth) {
                     b.visited
                         .insert(cx.rem_euclid(i64::from(self.width)) as u32 * self.depth + cz);
                 }
             }
         }
-        for b in self
-            .tracked
-            .iter_mut()
-            .filter(|b| b.alive && b.seen != stamp)
-        {
-            b.alive = false;
-            b.energy.die();
+        for (id, &k) in &self.index {
+            let b = &mut self.tracked[k];
+            if b.alive && b.seen != stamp {
+                // Gone: what it earned is kept, its memory is not.
+                b.alive = false;
+                b.energy.die();
+                self.memory.forget(*id);
+            }
         }
         for (id, f, x, meter, energy) in self.newcomers.drain(..) {
             let fi = f.index();
@@ -419,6 +496,11 @@ impl Window {
             if let Some(c) = candidate {
                 self.counts[fi][c] += 1;
                 self.assigned[fi].push((x, c));
+            }
+            // Its first sight is its spawn, not an entry: it earns nothing.
+            if let Some(a) = sim.fauna().view().animals.iter().find(|a| a.id == id) {
+                self.memory
+                    .observe(id, &self.geometry[fi], x.rem_euclid(self.ring_m), a.pose.z);
             }
             self.index.insert(id, self.tracked.len());
             self.tracked.push(Tracked {
@@ -435,6 +517,7 @@ impl Window {
                 visited: FxHashSet::default(),
                 minute_bl: 0.0,
                 minute_ticks: 0,
+                earned: 0.0,
             });
         }
         if stamp.is_multiple_of(TICKS_PER_MIN) {
@@ -490,17 +573,28 @@ impl Window {
             s.unique_m2 += b.visited.len() as f64 * self.cell_area;
             s.intake += b.meter.intake;
             s.walked_bl += b.minute_bl;
+            let fi = b.founder.index();
+            let novelty = self.geometry[fi].novelty(b.earned, self.ticks);
+            let weight = self.curiosity.of(b.founder).weight;
+            if b.possible > 0 {
+                s.novelty_bodies += 1;
+                s.novelty_sum += novelty;
+                s.curiosity_sum += weight * novelty;
+            }
             let (Some(c), true) = (b.candidate, b.possible > 0) else {
                 continue;
             };
             if b.meter.intake < -1e-9 {
                 anomalies += 1;
             }
-            let score = b.energy.score(
-                b.meter.intake.max(0.0),
-                b.meter.motor.max(0.0),
-                b.founder.manifest().body_reference,
-            );
+            let score = b
+                .energy
+                .score(
+                    b.meter.intake.max(0.0),
+                    b.meter.motor.max(0.0),
+                    b.founder.manifest().body_reference,
+                )
+                .with_curiosity(novelty, weight);
             s.scored += 1;
             s.mean_score += score.score;
             scores.push(BodyScore {
@@ -532,6 +626,7 @@ impl Window {
             ticks: self.elapsed,
             wall_s,
             intake_anomalies: anomalies,
+            memory: self.memory,
         }
     }
 }
@@ -542,13 +637,17 @@ pub fn run_window(
     tables: &[Option<VariantTable>],
     first_pair: &[usize],
     ticks: u64,
+    curiosity: &Curiosity,
 ) -> WindowResult {
-    let mut w = Window::begin(&mut world.sim, tables, first_pair, ticks);
+    let memory = std::mem::take(&mut world.memory);
+    let mut w = Window::begin_with(&mut world.sim, tables, first_pair, ticks, curiosity, memory);
     while !w.done() {
         w.step(&mut world.sim);
     }
     world.windows += 1;
-    w.finish(&world.sim, world.id)
+    let mut r = w.finish(&world.sim, world.id);
+    world.memory = std::mem::take(&mut r.memory);
+    r
 }
 
 /// Mean distance from each point to its nearest other point, metres, with `x` wrapping

@@ -40,8 +40,9 @@ use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_flora::Species;
 use serde::Serialize;
 
+use super::curiosity::{Curiosity, Memory};
 use super::ecology::EcologyParams;
-use super::readout::Scan;
+use super::readout::{LineageStats, Scan};
 use super::screen::{Rsf, ScreenSpec, Verdict, rsf};
 use super::trainer::{ascend, parallel, pooled_scores};
 use super::variants::VariantTable;
@@ -302,6 +303,9 @@ pub struct EvalSpec {
     /// an early stop) the animal count is projected on its last hour's trend
     /// ([`project`]). Equal to `horizon_ticks` is no projection.
     pub score_horizon_ticks: u64,
+    /// Each lineage's curiosity in the brains' score (`--curiosity`; weight 0 without).
+    /// A training knob, not an ecology gene: the CMA never sees it.
+    pub curiosity: Curiosity,
 }
 
 impl EvalSpec {
@@ -317,6 +321,7 @@ impl EvalSpec {
             abort_animals: 240,
             band: BandSpec::default(),
             score_horizon_ticks: horizon_ticks,
+            curiosity: Curiosity::default(),
         }
     }
 }
@@ -493,6 +498,10 @@ pub struct EvalRun {
     elapsed: u64,
     /// The centre key ([`centre_key`]) each window ran, in order.
     pub keys: Vec<u64>,
+    /// Its bodies' familiarity, carried from window to window.
+    memory: Memory,
+    /// What the last window counted per lineage.
+    last: [LineageStats; Founder::COUNT],
 }
 
 impl EvalRun {
@@ -535,7 +544,14 @@ impl EvalRun {
             stopped: None,
             elapsed: 0,
             keys: Vec::new(),
+            memory: Memory::default(),
+            last: Default::default(),
         }
+    }
+
+    /// What the last window counted per lineage (all zero before the first).
+    pub fn last_lineages(&self) -> &[LineageStats; Founder::COUNT] {
+        &self.last
     }
 
     /// Whether the horizon is run or the world stopped early.
@@ -565,7 +581,9 @@ impl EvalRun {
         let half_ticks = spec.horizon_ticks / 2;
         let ticks = spec.window_ticks.min(spec.horizon_ticks - self.elapsed);
         let window_start = self.elapsed;
-        let mut w = Window::begin(&mut self.sim, tables, first_pair, ticks);
+        let memory = std::mem::take(&mut self.memory);
+        let mut w =
+            Window::begin_with(&mut self.sim, tables, first_pair, ticks, &spec.curiosity, memory);
         let mut halt = None;
         while !w.done() {
             w.step(&mut self.sim);
@@ -598,7 +616,9 @@ impl EvalRun {
                 }
             }
         }
-        let r = w.finish(&self.sim, 0);
+        let mut r = w.finish(&self.sim, 0);
+        self.memory = std::mem::take(&mut r.memory);
+        self.last = r.lineages.clone();
         let b = &r.lineages[Founder::Browser.index()];
         self.moving[2] += b.moving_minutes;
         self.moving[3] += b.body_minutes;
@@ -833,6 +853,15 @@ pub struct LineageWindow {
     pub pair_spread: f64,
     /// The step's update rms (0: no step).
     pub update_rms: f64,
+    /// Over the scored bodies: mean novelty and mean curiosity term (`weight × novelty`),
+    /// and the within-world spreads (sd about each world's mean, pooled over worlds) of
+    /// `delta + given` and of novelty, the curiosity weight's calibration numbers.
+    pub mean_novelty: f64,
+    pub mean_curiosity: f64,
+    pub sd_energy: f64,
+    pub sd_novelty: f64,
+    /// Moving body-minutes over body-minutes, every body of the lineage in the window.
+    pub moving_share: f64,
     /// The centre this window ran, before its step.
     pub centre_key: u64,
 }
@@ -864,6 +893,18 @@ pub fn signal(scores: &[f64]) -> (f64, f64) {
         pair += (0.5 * (a + b) - m).abs();
     }
     (twin / pairs as f64, pair / pairs as f64)
+}
+
+/// The within-world standard deviation: each value about its own world's mean, pooled
+/// over the worlds (as [`pooled_scores`] normalises). 0 with no values.
+pub fn within_world_sd(per_world: &[Vec<f64>]) -> f64 {
+    let (mut ss, mut n) = (0.0, 0usize);
+    for xs in per_world.iter().filter(|xs| !xs.is_empty()) {
+        let m = xs.iter().sum::<f64>() / xs.len() as f64;
+        ss += xs.iter().map(|x| (x - m).powi(2)).sum::<f64>();
+        n += xs.len();
+    }
+    if n > 0 { (ss / n as f64).sqrt() } else { 0.0 }
 }
 
 /// One trained centre's state in a [`Checkpoint`].
@@ -959,20 +1000,39 @@ fn lockstep(
             .filter(|(r, _)| !r.done())
             .collect();
         let tables_ref = &tables;
-        let results: Vec<Vec<BodyScore>> = parallel(live, spec.threads, |(r, first)| {
-            r.window(tables_ref, &first, key)
-        });
+        let results: Vec<(Vec<BodyScore>, [LineageStats; Founder::COUNT])> =
+            parallel(live, spec.threads, |(r, first)| {
+                let scores = r.window(tables_ref, &first, key);
+                (scores, r.last_lineages().clone())
+            });
         let mut lineages = Vec::new();
         for ((f, theta, adam), k) in thetas.iter_mut().zip(&keys) {
             let per_world: Vec<Vec<(usize, f64)>> = results
                 .iter()
-                .map(|sc| {
+                .map(|(sc, _)| {
                     sc.iter()
                         .filter(|b| b.founder == *f)
                         .map(|b| (b.candidate, b.score.score))
                         .collect()
                 })
                 .collect();
+            let part = |pick: fn(&BodyScore) -> f64| -> Vec<Vec<f64>> {
+                results
+                    .iter()
+                    .map(|(sc, _)| sc.iter().filter(|b| b.founder == *f).map(pick).collect())
+                    .collect()
+            };
+            let energy = part(|b| b.score.delta_normalized + b.score.given_normalized);
+            let novelty = part(|b| b.score.novelty);
+            let curiosity = part(|b| b.score.curiosity);
+            let mean = |xs: &[Vec<f64>]| {
+                let n: usize = xs.iter().map(Vec::len).sum();
+                xs.iter().flatten().sum::<f64>() / n.max(1) as f64
+            };
+            let (moving, minutes) = results.iter().fold((0u64, 0u64), |a, (_, l)| {
+                let l = &l[f.index()];
+                (a.0 + l.moving_minutes, a.1 + l.body_minutes)
+            });
             let bodies: usize = per_world.iter().map(Vec::len).sum();
             let (scores, _) = pooled_scores(&per_world, candidates);
             let (twin_diff, pair_spread) = signal(&scores);
@@ -988,6 +1048,11 @@ fn lockstep(
                 twin_diff,
                 pair_spread,
                 update_rms,
+                mean_novelty: mean(&novelty),
+                mean_curiosity: mean(&curiosity),
+                sd_energy: within_world_sd(&energy),
+                sd_novelty: within_world_sd(&novelty),
+                moving_share: if minutes > 0 { moving as f64 / minutes as f64 } else { f64::NAN },
                 centre_key: *k,
             });
         }
@@ -1023,13 +1088,19 @@ pub fn window_line(w: &WindowLog) -> String {
     );
     for l in &w.lineages {
         s.push_str(&format!(
-            " | {} n={} twin={:.3} pair={:.3} ratio={:.2} rms={:.2e}",
+            " | {} n={} twin={:.3} pair={:.3} ratio={:.2} rms={:.2e} nov={:.3} cur={:.3} \
+             sdE={:.3} sdN={:.3} mov={:.2}",
             l.lineage,
             l.bodies,
             l.twin_diff,
             l.pair_spread,
             l.twin_diff / l.pair_spread.max(1e-12),
-            l.update_rms
+            l.update_rms,
+            l.mean_novelty,
+            l.mean_curiosity,
+            l.sd_energy,
+            l.sd_novelty,
+            l.moving_share
         ));
     }
     s
@@ -1487,6 +1558,7 @@ pub fn check(
     centres: &[(Founder, PathBuf)],
     founders: [usize; Founder::COUNT],
     threads: usize,
+    curiosity: &Curiosity,
     out: &std::path::Path,
 ) -> Result<(), String> {
     std::fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
@@ -1520,6 +1592,7 @@ pub fn check(
                 header.push(format!("{}.{}", l.name(), d.name()));
             }
             header.push(format!("{}.moving_share", l.name()));
+            header.push(format!("{}.mean_novelty", l.name()));
             header.push(format!("{}.readiness", l.name()));
             header.push(format!("{}.reserve_fraction", l.name()));
             header.push(format!("{}.pace_bl_per_s", l.name()));
@@ -1544,14 +1617,17 @@ pub fn check(
         let tables = vec![None; Founder::COUNT];
         let zeros = vec![0usize; Founder::COUNT];
         let mut elapsed = 0u64;
+        // Novelty is a measurement here: the same cells and memory as training.
+        let mut memory = Memory::default();
         while elapsed < horizon {
             let ticks = window_ticks.min(horizon - elapsed);
-            let mut w = Window::begin(&mut sim, &tables, &zeros, ticks);
+            let mut w = Window::begin_with(&mut sim, &tables, &zeros, ticks, curiosity, memory);
             while !w.done() {
                 w.step(&mut sim);
             }
             elapsed += ticks;
-            let r = w.finish(&sim, 0);
+            let mut r = w.finish(&sim, 0);
+            memory = std::mem::take(&mut r.memory);
             let pop = window::population(&sim);
             let get = |n: &str| {
                 r.readout
@@ -1580,6 +1656,7 @@ pub fn check(
                         f64::NAN
                     }
                 ));
+                row.push(format!("{:.4}", s.mean_novelty()));
                 // Breeding readiness and reserve over cap, means over the living bodies
                 // now.
                 let fauna = sim.fauna();
