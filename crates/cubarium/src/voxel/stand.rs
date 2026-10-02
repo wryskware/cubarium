@@ -45,7 +45,6 @@
 //! a voxel from the height the shade model used. Pixel art has no finer answer at 4 px
 //! per voxel.
 
-use std::collections::BTreeMap;
 
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FaceDraw, FloraView, MAX_FOLIAGE_LAYERS, Species, Stand};
@@ -257,6 +256,52 @@ const FILM_LEVELS: f32 = 8.0;
 /// presentation constant.
 const FILM_FADE_S: f32 = 1.0;
 
+/// One rebuild's film easing: `drawn` (ascending by site) eased by `k` toward `marks`
+/// (also ascending). A mark with film moves `k` of the way to its stock (all the way when
+/// `k` is 1, the first rebuild); a drawn mark whose film is gone dims by `1 − k` and is
+/// dropped once it is under half a level. One merge of the two lists.
+fn ease_film(
+    drawn: &[(cubarium_voxel_flora::Site, f32)],
+    marks: &[FilmMark],
+    k: f32,
+) -> Vec<(cubarium_voxel_flora::Site, f32)> {
+    let first = k >= 1.0;
+    let mut next = Vec::with_capacity(marks.len() + drawn.len());
+    let dim = |next: &mut Vec<_>, site, d: f32| {
+        let d = d * (1.0 - k);
+        if d * FILM_LEVELS >= 0.5 {
+            next.push((site, d));
+        }
+    };
+    let mut old = drawn.iter().peekable();
+    for m in marks {
+        while let Some(&&(site, d)) = old.peek() {
+            if site >= m.site {
+                break;
+            }
+            old.next();
+            dim(&mut next, site, d);
+        }
+        let from = match old.peek() {
+            Some(&&(site, d)) if site == m.site => {
+                old.next();
+                d
+            }
+            _ => 0.0,
+        };
+        let d = if first {
+            m.strength
+        } else {
+            from + (m.strength - from) * k
+        };
+        next.push((m.site, d));
+    }
+    for &(site, d) in old {
+        dim(&mut next, site, d);
+    }
+    next
+}
+
 /// A film mark's style at a drawn strength: [`colours::FILM_INTERIM`], washed and darkened
 /// toward bare (the wilt treatment, [`wilted`]) as the strength falls — a grazed face shows
 /// less tint. Interim, with the colour, until the art direction covers the film.
@@ -378,10 +423,11 @@ pub struct Stands {
     /// ([`colours::Glow`]), beside `styles`; shorter than it, or `None`, for a style that
     /// does not emit.
     emits: Vec<Option<([f32; 3], bool)>>,
-    /// Each film mark's **drawn** strength, by site: it eases toward the site's
+    /// Each film mark's **drawn** strength, by site, ascending: it eases toward the site's
     /// [`FilmMark::strength`] on the frame clock ([`FILM_FADE_S`]), and a mark whose film
-    /// is gone keeps drawing while it dims out.
-    film_drawn: BTreeMap<cubarium_voxel_flora::Site, f32>,
+    /// is gone keeps drawing while it dims out. A sorted array, merged with the flora's
+    /// film sites (also in site order) each rebuild.
+    film_drawn: Vec<(cubarium_voxel_flora::Site, f32)>,
     /// When the last rebuild drew the film marks; `None` before the first, which draws
     /// every mark at its stock.
     film_clock: Option<std::time::Instant>,
@@ -479,7 +525,7 @@ impl Stands {
             placing: 0,
             emission: false,
             emits: Vec::new(),
-            film_drawn: BTreeMap::new(),
+            film_drawn: Vec::new(),
             film_clock: None,
         }
     }
@@ -915,31 +961,9 @@ impl Stands {
             }
         };
         let marks = film_marks(flora);
-        let first = k >= 1.0;
-        let drawn = std::mem::take(&mut self.film_drawn);
-        // Marks whose film is gone dim toward nothing.
-        let mut next: BTreeMap<cubarium_voxel_flora::Site, f32> = BTreeMap::new();
-        for (&site, &d) in &drawn {
-            if marks.binary_search_by_key(&site, |m| m.site).is_err() {
-                let d = d * (1.0 - k);
-                if d * FILM_LEVELS >= 0.5 {
-                    next.insert(site, d);
-                }
-            }
-        }
-        for m in &marks {
-            let d = if first {
-                m.strength
-            } else {
-                let from = drawn.get(&m.site).copied().unwrap_or(0.0);
-                from + (m.strength - from) * k
-            };
-            next.insert(m.site, d);
-        }
-        self.film_drawn = next;
-        let sites: Vec<(cubarium_voxel_flora::Site, f32)> =
-            self.film_drawn.iter().map(|(&s, &d)| (s, d)).collect();
-        for (site, d) in sites {
+        self.film_drawn = ease_film(&self.film_drawn, &marks, k);
+        for j in 0..self.film_drawn.len() {
+            let (site, d) = self.film_drawn[j];
             let style = self.styles.len().min(u16::MAX as usize) as u16;
             if usize::from(style) != self.styles.len() {
                 break;
@@ -1735,6 +1759,50 @@ mod tests {
             "and still cool: {:?}",
             dry.crown
         );
+    }
+
+    /// The film easing merge against the map it replaced: marks ease toward their stock,
+    /// a gone mark dims and is dropped under half a level, a new mark starts from nothing.
+    #[test]
+    fn film_easing_matches_the_map_it_replaced() {
+        use cubarium_voxel_flora::Site;
+        use std::collections::BTreeMap;
+        let site = |x| Site { x, y: 3, z: 1 };
+        let reference = |drawn: &BTreeMap<Site, f32>, marks: &[FilmMark], k: f32| {
+            let mut next = BTreeMap::new();
+            for (&s, &d) in drawn {
+                if marks.binary_search_by_key(&s, |m| m.site).is_err() {
+                    let d = d * (1.0 - k);
+                    if d * FILM_LEVELS >= 0.5 {
+                        next.insert(s, d);
+                    }
+                }
+            }
+            for m in marks {
+                let d = if k >= 1.0 {
+                    m.strength
+                } else {
+                    let from = drawn.get(&m.site).copied().unwrap_or(0.0);
+                    from + (m.strength - from) * k
+                };
+                next.insert(m.site, d);
+            }
+            next
+        };
+        let mark = |x, strength| FilmMark { site: site(x), strength };
+        let rounds: [(&[FilmMark], f32); 5] = [
+            (&[mark(2, 0.5), mark(5, 1.0), mark(9, 0.2)], 1.0),
+            (&[mark(5, 0.1), mark(7, 0.8)], 0.3),
+            (&[mark(1, 0.4), mark(7, 0.8)], 0.3),
+            (&[], 0.6),
+            (&[mark(5, 1.0)], 0.9),
+        ];
+        let (mut map, mut vec) = (BTreeMap::new(), Vec::new());
+        for (marks, k) in rounds {
+            map = reference(&map, marks, k);
+            vec = ease_film(&vec, marks, k);
+            assert_eq!(vec, map.iter().map(|(&s, &d)| (s, d)).collect::<Vec<_>>());
+        }
     }
 
     fn frond_cap(flora: &Flora) -> f64 {
