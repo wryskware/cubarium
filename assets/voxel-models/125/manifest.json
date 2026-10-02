@@ -24,7 +24,8 @@
   "a_glow",
   "a_membrane",
   "a_fruit",
-  "a_tendril"
+  "a_tendril",
+  "a_lure"
  ],
  "variants": 3,
  "bins": 5,
@@ -41,7 +42,8 @@
  },
  "founders": {
   "littershredder": "littershredder.cvm",
-  "frondgrazer": "frondgrazer.cvm"
+  "frondgrazer": "frondgrazer.cvm",
+  "lanternjaw": "lanternjaw.cvm"
  },
  "detail": {
   "bloomcrown": {
@@ -1861,6 +1863,31 @@
     {
      "length_m": 0.05,
      "cells": 12
+    }
+   ]
+  },
+  "lanternjaw": {
+   "bytes": 1998,
+   "bins": [
+    {
+     "length_m": 0.4597,
+     "cells": 26
+    },
+    {
+     "length_m": 0.5948,
+     "cells": 54
+    },
+    {
+     "length_m": 0.7298,
+     "cells": 70
+    },
+    {
+     "length_m": 0.8649,
+     "cells": 103
+    },
+    {
+     "length_m": 1.0,
+     "cells": 113
     }
    ]
   }

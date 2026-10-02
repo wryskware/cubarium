@@ -42,7 +42,7 @@ all in `/home/wrysk/wryskware/cubarium/art/gen/index.html`.
 | FG   | frondgrazer    | — (settled) | saddle shield                                                                                                                  |        |
 | LT   | littershredder | — (settled) | plough segment                                                                                                                 |        |
 | BW   | bellwing       | A / B / C   | A, final                                                                                                                       |        |
-| LJ   | lanternjaw     | A–D         | prefer D, the scorpid version. overall idea is good. however, needs refinement or some reimagining.                            |        |
+| LJ   | lanternjaw     | A–D         | prefer D, the scorpid version. overall idea is good. however, needs refinement or some reimagining.                            | final 2026-10-01: `artbook/lanternjaw.png` + model |
 | CH   | chorister      | A–D         | A, leaning. needs some rework and reimagining. perhaps hexapod, or somewhat raptorial like C? not sure i like the smooth body. |        |
 | LS   | loftstrider    | A–D         | none of these really satisfy. full reimagining.                                                                                |        |
 | CG   | capgnawer      | A–D         | torn between A and D. not sure it has any reason to fly though.                                                                |        |
@@ -119,3 +119,19 @@ Wrysk: "top row for everything … except bellwing, which we should keep the ori
 not try to recolor." The chorister is good; GPT-image does the final details pass.
 Alternates stay available ("maybe different lineages, or just an option to pick from").
 See backlog §8.
+
+## Lanternjaw pick (Wrysk, 2026-10-01)
+
+Final: Wrysk's own mantis-scorpid reference with twin tail lures
+(`art/gen/artbook/lanternjaw.png`), refined in a Blender/voxel round
+(`scripts/blender/animal_models.py` `lanternjaw()`, baked as the lanternjaw founder):
+
+- The tail forks at its root. The image only draws a second end beside one tail.
+- The tails climb higher and reach over the face.
+- The body tapers and turns up into the tail early.
+- The fangs are larger and vertical.
+- The striking arms end in pale razor blades.
+- The orbs are one voxel each, one column behind the fangs, held from the cell behind.
+- No cells join the two tails on top.
+
+"great. lets go with this one." The loftstrider is still open.

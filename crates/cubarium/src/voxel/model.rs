@@ -468,7 +468,7 @@ impl<'a> Reader<'a> {
 /// `scripts/blender/animal_models.py`): what each slot is, and its colour, is per animal
 /// ([`super::colours::animal`], [`super::colours::specimen`]); the hex here is only a
 /// reference (the frondgrazer's, where it has the slot).
-pub const PALETTE: [(&str, u32); 23] = [
+pub const PALETTE: [(&str, u32); 24] = [
     ("plum", 0x002A_0E4A),
     ("violet", 0x003A_1A7A),
     ("detritus", 0x0051_0B6D),
@@ -492,6 +492,8 @@ pub const PALETTE: [(&str, u32); 23] = [
     ("a_membrane", 0x00DB_DA7B),
     ("a_fruit", 0x00D6_658A),
     ("a_tendril", 0x00EE_B4A7),
+    // the lanternjaw's lure orbs (2026-10-01), an accent so each keeps its cell
+    ("a_lure", 0x0063_EEFC),
 ];
 
 /// The index of a palette name.

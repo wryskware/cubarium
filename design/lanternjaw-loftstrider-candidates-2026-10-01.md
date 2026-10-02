@@ -5,7 +5,13 @@ again to explore visually? get creative in the prose -- dont adhere to the exist
 dossiers. but maybe make 2 of the lanternjaw variants retain some of that scorpid
 influence".
 
-Exploration only; nothing here is picked. Images are in
+Exploration only; nothing here was picked.
+
+**Outcome (same day).** Wrysk: "all of these are unusably bad".
+- **Lanternjaw:** settled from his own mantis-scorpid reference, refined in a Blender/voxel
+  round. See D16's selected appearance in `design/organism-large-animals-2026-09-23.md`.
+- **Loftstrider:** continues from LS-I-feeding-b3, with six legs and tentacles that reach
+  the canopy (`art/gen/runs/2026-10-01-lj-ls-round2/`). Images are in
 `art/gen/runs/2026-10-01-lj-ls-candidates/`. The body plans ignore the dossiers and the
 09-24 reimagining.
 

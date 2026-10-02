@@ -147,6 +147,35 @@ at the edge of a carcass).
 back, and a heavy head that is mostly jaw. The **lure** is a stalk rising from the
 brow, carrying a luminous cyan bulb, which it holds dead still. The glow costs reserve.
 
+**Selected appearance (2026-10-01):** [mantis scorpid with twin lures](../art/gen/artbook/lanternjaw.png),
+as modelled in `scripts/blender/animal_models.py` `lanternjaw()`. It replaces the body
+plan sketch above in visual scope; niche, prey, lure cost and life history are unchanged.
+
+- **Body.** A low violet scorpid with six overlapping back plates over a dark body. The
+  body tapers to the rear and turns up into the tail early.
+- **Head.** A helmeted head with a central ridge, two large magenta eyes and two small
+  ones. Two large, vertical pale fangs hang in front of the mouth.
+- **Limbs.** A pair of mantis striking arms: a thick femur raised high, then a spined
+  tibia curving down into a pale razor blade with a hooked tip. Six heavy walking legs
+  with knees above the plates, dark joints and long dark claw tips.
+- **Tail and lures.** The tail forks at its root, close to the body. The two branches
+  climb, arch high over the back and reach forward over the face. Each tip turns down
+  behind a cyan lure orb and grips it with three claws. The image draws a second tail
+  end beside one tail instead of a fork; the model is the reference there, and for the
+  fangs and blades.
+- **Size.** Body 1.0 × 0.25 m (plates and legs reach past the width); the tails' arch
+  tops out near 0.6 m, above the 0.45 m body height, so the curl reads.
+- **Colour.** Sampled from the image: the colours doc's animal table. The orbs are cyan
+  pigment for now; glowing them when the lure is lit needs the lure state in the
+  presenter.
+- **Voxels, 0.125 m (8 × 7 × 5).** The fangs are a pale column two cells tall at the
+  face, each razor blade a pale cell at a front corner, the eyes magenta beside them.
+  Each orb is one cyan cell one column behind the fangs, open on top, in front and
+  beside, with the dark holder cell behind it. The two tails stay separate along the
+  top.
+- **Simulation.** It shows two orbs where the simulation has one lure; the lure's glow
+  source (the tail tip, above the body and ahead of the jaw) still matches.
+
 ## 5. D17 · Chorister (*Lycochorus*, "the chorister"): the pack hunter, for decision
 
 *Why it exists.* An adult loftstrider is too tall and too well armed for any one

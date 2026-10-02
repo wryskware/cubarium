@@ -1,4 +1,4 @@
-# Cubarium artbook — concept picks, 2026-09-24–25
+# Cubarium artbook — concept picks, 2026-09-24–25 (lanternjaw 2026-10-01)
 
 [Open the visual artbook](index.html).
 
@@ -11,6 +11,7 @@ These are Wrysk's selected visual references, retained alternatives and terrain 
 - Bellwing: shift the thin tendril a little yellower than the retained muted peach, without returning to vivid yellow/orange; preserve its spindly corkscrew.
 - Velvetpad remains provisional. Bloomcrown retains both crown colours, leaning pink. Seedporter retains the exact selected image and the explicitly requested compact-head alternate.
 - All terrain stays candidate material for a later detailed rendering pass. Litter needs further arrangements and densities using our plants' foliage. Further animal colourway exploration is deferred.
+- Lanternjaw: where the image and the model differ (tail fork, fangs, razor blades), the model is the reference.
 - Reconcile rigging, exact counts, growth states and material palettes later. These picks do not imply engine changes.
 
 ## Plants
@@ -39,6 +40,7 @@ These are Wrysk's selected visual references, retained alternatives and terrain 
 | Seedporter | [compact-head alternate](seedporter-compact-head-alt.png) | Explicitly retained alternate: broader compact head, substantial muzzle and closed mouth, with lateral skull lobes. Does not replace the selected image. Outer halo needs cleanup. |
 | Frondgrazer | [coral saddle shield](frondgrazer.png) | Selected; six short legs, continuous double-raised saddle shield, folded neck and transverse cropping scoop. Two stalk-tip sensors have dark plum lenses and magenta rims; shoulder patches remain. Outer halo needs cleanup. |
 | Littershredder | [longer tapered crawler](littershredder.png) | Selected second version (the longer, tapered one); golden overlapping plates, brown bands, pale legs and feelers, single magenta spot. The later less-tapered variant was not selected. Exact segment count needs model reconciliation. Outer halo needs cleanup. |
+| Lanternjaw | [mantis scorpid with twin lures](lanternjaw.png) | Selected 2026-10-01 (Wrysk's own GPT-image reference, then a Blender/voxel round). Violet plated scorpid: helmeted head, two large magenta eyes and two small ones, pale fangs, a pair of spined mantis striking arms, six heavy walking legs with dark joints and claw tips, overlapping back plates. Two tails, each holding a cyan lure orb in a claw cup. **The image is not followed for the tail or the face:** the image draws a second tail end beside one tail; the model (`scripts/blender/animal_models.py` `lanternjaw()`) forks the tail at its root into two branches that arch high over the back and reach over the face, each orb held from behind. The model's fangs are larger and vertical, and the striking arms end in pale razor blades. Transparent background. |
 | Bellwing | [thin corkscrew tendril](bellwing.png) | Selected; plum bell, four lilac wings with cyan leading edges and magenta bell rim. Fine round tendril with a spindly three-dimensional corkscrew end, without a droplet. Shift its muted peach a little yellower later; avoid saturated orange or yellow. Alpha transparency verified. |
 
 ## Terrain candidates

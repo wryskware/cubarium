@@ -60,6 +60,11 @@ and feeding loftstriders need a tall canvas. These are prompts, not generated ar
 
 > prefer D, the scorpid version. overall idea is good. however, needs refinement or some reimagining.
 
+**Selected 2026-10-01:** neither D2 nor D3. Wrysk chose his own mantis-scorpid reference
+with twin tail lures, refined in a Blender/voxel round:
+[artbook](../art/gen/artbook/lanternjaw.png), and the selected appearance in
+[D16](organism-large-animals-2026-09-23.md).
+
 **Body need.** The scorpid direction offers a useful separation between a stationary
 lure and a sudden capture, but needs a body whose jaw, supports and lure stay
 distinct. Keep the 1.0 × 0.25 × 0.45 m body, approximately 8 × 2 × 3.5 voxels:

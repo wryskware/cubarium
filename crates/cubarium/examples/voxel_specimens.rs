@@ -15,7 +15,8 @@
 //!
 //! Each producer stands at three sizes (wood at 10 %, 40 % and 100 % of its maximum),
 //! left to right, in the front slab. Bloomcrown, lanternberry and glowcap get a fourth,
-//! adult and ripe. Both founders stand at the end, facing each way, and after them the
+//! adult and ripe. The three founders stand at the end, two each, facing each way
+//! (frondgrazer, littershredder, lanternjaw), and after them the
 //! unsimulated animals the models carry as `specimens` (model pass MP-A: chorister,
 //! ripple-snail, capgnawer, seedporter, bellwing), drawn from the library only, never
 //! simulated. Every stand is drawn at full
@@ -47,6 +48,17 @@ use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, FloraVie
 
 /// Voxels between one specimen's crown edge and the next one's.
 const GAP: i64 = 3;
+
+/// The founders on the strip, two each, and the width of each one's slot in cells.
+const FOUNDERS: [Founder; 6] = [
+    Founder::Browser,
+    Founder::Browser,
+    Founder::Blind,
+    Founder::Blind,
+    Founder::Lanternjaw,
+    Founder::Lanternjaw,
+];
+const SLOT: i64 = 10;
 
 /// The unsimulated animals drawn after the founders: manifest name, heading (π/2 faces
 /// +x, side-on; π faces the viewer), and how many voxels above the ground it hovers.
@@ -112,8 +124,8 @@ fn main() -> Result<()> {
         columns.push(x + r);
         x += 2 * r + 1 + GAP;
     }
-    let animal_x: Vec<i64> = (0..4).map(|k| x + 3 + k * 9).collect();
-    let mut width = (x + 4 * 9 + 6) as u32;
+    let animal_x: Vec<i64> = (0..FOUNDERS.len() as i64).map(|k| x + 4 + k * SLOT).collect();
+    let mut width = (x + FOUNDERS.len() as i64 * SLOT + 6) as u32;
 
     // The unsimulated animals (the models' `specimens`) after the founders, each in its
     // own footprint: side-on as the chorister and ripple-snail picks are, the others facing
@@ -129,7 +141,7 @@ fn main() -> Result<()> {
     let depth = 8u32;
     let mut specimens = Vec::new();
     if let Some(lib) = &models {
-        let mut sx = x + 4 * 9 + 3;
+        let mut sx = x + FOUNDERS.len() as i64 * SLOT + 3;
         for (name, heading_rad, lift) in SPECIMENS {
             let Some(cells) = lib.specimen(name).and_then(|m| m.select(f64::INFINITY)) else {
                 eprintln!("voxel_specimens: no {name} model; skipped");
@@ -198,11 +210,7 @@ fn main() -> Result<()> {
     }
     let mut fauna = Fauna::new(FaunaConfig::default());
     for (k, &x) in animal_x.iter().enumerate() {
-        let founder = if k < 2 {
-            Founder::Browser
-        } else {
-            Founder::Blind
-        };
+        let founder = FOUNDERS[k];
         let heading_rad = if k % 2 == 0 { 1.5708 } else { -1.5708 };
         if !fauna.apply(
             &world,

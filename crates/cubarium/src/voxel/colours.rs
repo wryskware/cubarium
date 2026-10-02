@@ -139,9 +139,9 @@ const SENSE: Rgb = 0xFF_2AFC;
 /// A founder cell's colours. `band` is the cell's height in the body; `accent` is a sense
 /// patch or eye, which flashes [`CROPPING_FLASH`] while the animal crops.
 ///
-/// The frondgrazer and littershredder paint each part slot of their model
-/// (`scripts/blender/animal_models.py`) in its ramp from [`FRONDGRAZER`] and
-/// [`LITTERSHREDDER`], sampled from the artbook picks.
+/// Each founder paints each part slot of its model (`scripts/blender/animal_models.py`) in
+/// its ramp from [`FRONDGRAZER`], [`LITTERSHREDDER`] or [`LANTERNJAW`], sampled from the
+/// artbook picks.
 pub fn animal(founder: Founder, material: u8, band: u8, accent: bool, cropping: bool) -> Swatch {
     if accent && cropping {
         return Swatch {
@@ -153,15 +153,7 @@ pub fn animal(founder: Founder, material: u8, band: u8, accent: bool, cropping: 
     match founder {
         Founder::Browser => coat_swatch(FRONDGRAZER, material, band),
         Founder::Blind => coat_swatch(LITTERSHREDDER, material, band),
-        // Lanternjaw (interim, stage 1: its body plan is open): a dark teal carapace, an
-        // ember jaw. No model is baked for it, so this serves a future bake only.
-        Founder::Lanternjaw => {
-            if accent {
-                return block(0xFF_5A3C);
-            }
-            let t = f32::from(band.min(BANDS - 1)) / f32::from(BANDS - 1);
-            block(lerp(0x14_2A2E, 0x30_5A58, t))
-        }
+        Founder::Lanternjaw => coat_swatch(LANTERNJAW, material, band),
     }
 }
 
@@ -213,6 +205,19 @@ pub const LITTERSHREDDER: Coat = &[
     ("a_foot", 0x6D_3101, 0xE5_A537),
     ("a_limb", 0xC0_6F0E, 0xC0_6F0E),
     ("magenta", 0xA3_0E57, 0xA3_0E57),
+];
+/// Mantis scorpid (selected 2026-10-01, `art/gen/artbook/lanternjaw.png`): violet plates,
+/// dark joints and underside, legs and striking arms, dark claw tips, pale fangs and razor
+/// blades, magenta eyes, cyan lure orbs (pigment: they do not glow yet), lure holders.
+pub const LANTERNJAW: Coat = &[
+    ("a_main", 0x5E_4070, 0x91_68A1),
+    ("a_dark", 0x1B_161B, 0x2F_2433),
+    ("a_limb", 0x5E_4070, 0x86_5D9C),
+    ("a_foot", 0x2A_2530, 0x4A_4452),
+    ("a_head", 0xB6_91BF, 0xE5_D6ED),
+    ("a_eye", 0xB7_1984, 0xE4_37C1),
+    ("a_lure", 0x63_EEFC, 0xAD_FAFD),
+    ("a_mark", 0x4A_4452, 0x69_5787),
 ];
 /// Violet stalker: flank, dark back, pale countershade, rosettes, legs, claws, crest
 /// lobes, the magenta eye, the cyan muzzle.

@@ -3,7 +3,8 @@
     blender -b -P scripts/blender/animal_models.py -- --sheets OUT [--only NAME[,NAME]] [--view AZ,EL]
 
 The Blender builders the voxel bake (`bake_voxel_models.py`) takes its animals from: the
-two simulated founders (frondgrazer, littershredder) and five unsimulated specimens
+three simulated founders (frondgrazer, littershredder, and the lanternjaw, added
+2026-10-01 from its pick) and five unsimulated specimens
 (chorister, ripple-snail, capgnawer, seedporter, bellwing). Each moves its signed-off
 blockout (`animal_bodies_r2.py`: CH v3, RS-D2 v2, CG-D2 v2, SP-AB2, FG/LT v2, BW-A) to
 its pick in `art/gen/artbook/` (README table; `design/handoffs/voxel-model-pass-2026-10-01.md`).
@@ -116,8 +117,8 @@ COATS = {
         "magenta": ("#B5376A", "#C13E7B"),
     },
     # violet plates (shadow -> lit), dark joints and underside, legs and striking arms, claw
-    # tips, fangs and razor blades (pale), eyes (magenta), lure orbs (cyan), lure holders. Sampled 2026-10-01 from
-    # the candidate image (k-means of its opaque pixels; not an artbook pick yet).
+    # tips, fangs and razor blades (pale), eyes (magenta), lure orbs (cyan), lure holders.
+    # Sampled 2026-10-01 from the pick (k-means of its opaque pixels).
     "lanternjaw": {
         "a_main": ("#5E4070", "#9168A1"), "a_dark": ("#1B161B", "#2F2433"),
         "a_limb": ("#5E4070", "#865D9C"), "a_foot": ("#2A2530", "#4A4452"),
@@ -663,8 +664,7 @@ def bellwing():
 
 # --- lanternjaw · mantis scorpid with a forked lure tail (1.0 x 0.25 x 0.45 m) -------------
 #
-# Reference (Wrysk 2026-10-01): art/gen/runs/lanternjaw-model/ref-lanternjaw-mantis.png, a
-# front three-quarter view. A low plated scorpid: a helmeted head with two large
+# Pick (Wrysk 2026-10-01): art/gen/artbook/lanternjaw.png, a front three-quarter view. A low plated scorpid: a helmeted head with two large
 # magenta eyes and two small ones, pale curved fangs; a pair of mantis striking arms in front
 # (thick femur raised, a long spined tibia curving down to a hook); six walking legs, knees
 # high, dark joints, dark claw tips; six overlapping back plates over a dark body. The tail
@@ -810,7 +810,7 @@ PICKS = {
     "chorister": "chorister.png", "frondgrazer": "frondgrazer.png",
     "littershredder": "littershredder.png", "ripple-snail": "ripple-snail-organic.png",
     "capgnawer": "capgnawer-rose-bark.png", "seedporter": "seedporter.png", "bellwing": "bellwing.png",
-    "lanternjaw": "../runs/lanternjaw-model/ref-lanternjaw-mantis.png",  # candidate, not in the artbook
+    "lanternjaw": "lanternjaw.png",
 }
 # The pick's view: camera azimuth (degrees from +x, counter-clockwise seen from above; -90
 # looks from -y at the left flank) and elevation.
