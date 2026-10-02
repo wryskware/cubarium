@@ -1,6 +1,6 @@
 """Animal models from the artbook picks (model pass MP-A, 2026-10-01).
 
-    blender -b -P scripts/blender/animal_models.py -- --sheets OUT [--only NAME[,NAME]]
+    blender -b -P scripts/blender/animal_models.py -- --sheets OUT [--only NAME[,NAME]] [--view AZ,EL]
 
 The Blender builders the voxel bake (`bake_voxel_models.py`) takes its animals from: the
 two simulated founders (frondgrazer, littershredder) and five unsimulated specimens
@@ -57,11 +57,11 @@ def rz(deg):
 #
 # Part slots (palette names). Their meaning per animal is in the comment beside each coat.
 SLOTS = ["a_main", "a_dark", "a_pale", "a_mark", "a_limb", "a_foot", "a_head", "a_eye",
-         "a_glow", "a_membrane", "a_fruit", "a_tendril", "magenta"]
+         "a_glow", "a_membrane", "a_fruit", "a_tendril", "magenta", "a_lure"]
 # On an animal, these are accents (the bake's accent rule: an accent claims the cells whose
 # centres lie inside it, or the one cell its centre is in): sense patches and eyes, the
 # parts smaller than a voxel that must not vanish into the body.
-ACCENTS = {"magenta", "a_eye"}
+ACCENTS = {"magenta", "a_eye", "a_lure"}
 
 COATS = {
     # main flank, dark back, pale countershade, rosettes, legs (dark shin -> thigh), claws,
@@ -114,6 +114,15 @@ COATS = {
         "a_foot": ("#191817", "#30321A"), "a_eye": ("#0C0707", "#0C0707"),
         "a_membrane": ("#DBDA7B", "#EDEAA5"), "a_fruit": ("#802B51", "#D6658A"),
         "magenta": ("#B5376A", "#C13E7B"),
+    },
+    # violet plates (shadow -> lit), dark joints and underside, legs and striking arms, claw
+    # tips, fangs and razor blades (pale), eyes (magenta), lure orbs (cyan), lure holders. Sampled 2026-10-01 from
+    # the candidate image (k-means of its opaque pixels; not an artbook pick yet).
+    "lanternjaw": {
+        "a_main": ("#5E4070", "#9168A1"), "a_dark": ("#1B161B", "#2F2433"),
+        "a_limb": ("#5E4070", "#865D9C"), "a_foot": ("#2A2530", "#4A4452"),
+        "a_head": ("#B691BF", "#E5D6ED"), "a_eye": ("#B71984", "#E437C1"),
+        "a_lure": ("#63EEFC", "#ADFAFD"), "a_mark": ("#4A4452", "#695787"),
     },
     # plum bell (lighter toward the mouth), lilac wings, cyan leading edges, mauve wing
     # roots, peach tendril, magenta rim and underside
@@ -652,6 +661,119 @@ def bellwing():
 
 # --- the table ------------------------------------------------------------------------------
 
+# --- lanternjaw · mantis scorpid with a forked lure tail (1.0 x 0.25 x 0.45 m) -------------
+#
+# Reference (Wrysk 2026-10-01): art/gen/runs/lanternjaw-model/ref-lanternjaw-mantis.png, a
+# front three-quarter view. A low plated scorpid: a helmeted head with two large
+# magenta eyes and two small ones, pale curved fangs; a pair of mantis striking arms in front
+# (thick femur raised, a long spined tibia curving down to a hook); six walking legs, knees
+# high, dark joints, dark claw tips; six overlapping back plates over a dark body. The tail
+# forks close to the body (Wrysk: the image only draws a second end beside the first) and the
+# two branches arch forward side by side, each ending in a holder of three claws around a
+# cyan lure orb. Wrysk's changes to the image (2026-10-01): the tails climb higher and reach
+# further, the orbs hanging over and in front of the face; the body tapers and turns up into
+# the tail early; the fangs are larger and vertical, a pale column in front of the face; the
+# striking arms end in pale razor blades. Sizes are the founder's adult body (source.json):
+# ~1.0 m from the blades to the tail root, the body 0.25 m wide (plates and legs reach past
+# it). The tails' arch tops out near 0.6 m (5 voxels), above the 0.45 m height, so the curl
+# reads.
+
+# The orbs' cell column: 3 = one cell behind the fangs (Wrysk 2026-10-01), 2 = two cells
+# behind (the variant he asked to see). `LJ_ORB_CELL=2` in the environment picks it.
+LJ_ORB_CELL = int(os.environ.get("LJ_ORB_CELL", "3"))
+
+
+def lanternjaw():
+    # Voxel placement (the bake anchors the origin on a cell centre: cell (i, j, k) centres at
+    # x = 0.125 i, y = 0.125 j, z = 0.125 k + 0.0625). The fangs contain the two centres of
+    # cell column (4, 0, 0..1), the razor blades (4, +-2, 0), each orb the one cell
+    # (LJ_ORB_CELL, +-1, 3), held from the cell behind it, open on top, in front and beside. The two tail branches run
+    # on the cell rows y = +-0.125, thin enough that the row between them stays empty.
+    def body_zone(f, s, p):
+        return 0 if (p.x > 0.24 and s > -0.2) else 1    # violet helmet; the rest dark under plates
+    body = [  # x, y, z centre, half-width, half-height up, down; tapering, the rear turning up
+        (0.47, 0, 0.13, 0.035, 0.03, 0.03), (0.43, 0, 0.14, 0.10, 0.075, 0.055),
+        (0.35, 0, 0.15, 0.125, 0.085, 0.06), (0.25, 0, 0.145, 0.125, 0.075, 0.06),
+        (0.14, 0, 0.145, 0.135, 0.08, 0.06), (0.02, 0, 0.15, 0.13, 0.08, 0.062),
+        (-0.10, 0, 0.16, 0.112, 0.074, 0.058), (-0.20, 0, 0.18, 0.09, 0.066, 0.052),
+        (-0.28, 0, 0.21, 0.07, 0.058, 0.048), (-0.33, 0, 0.25, 0.058, 0.052, 0.045)]
+    loft(body, [c("a_main"), c("a_dark")], body_zone, nring=60, nseg=20)
+    # six overlapping back plates, narrowing and climbing with the body
+    for x, hw, z, tilt in ((0.15, 0.15, 0.21, -14), (0.06, 0.152, 0.215, -14), (-0.03, 0.14, 0.222, -16),
+                           (-0.12, 0.12, 0.232, -20), (-0.20, 0.098, 0.25, -26), (-0.27, 0.078, 0.278, -34)):
+        ell((x, 0, z), (0.058, hw, 0.036), c("a_main"), rot=ry(tilt))
+    # head: a central ridge, two large magenta eyes, two small ones
+    ell((0.35, 0, 0.215), (0.1, 0.018, 0.026), c("a_main"), rot=ry(8))
+    for sy in (-1, 1):
+        ell((0.395, sy * 0.085, 0.18), (0.036, 0.03, 0.04), c("a_eye"))
+        ell((0.435, sy * 0.028, 0.2), (0.014, 0.014, 0.014), c("a_eye"))
+        # fangs: two large pale blades hanging vertically in front of the mouth, tips hooked in
+        tube([(0.47, sy * 0.022, 0.24), (0.497, sy * 0.022, 0.135), (0.505, sy * 0.02, 0.035)], 0.04, 0.025,
+             c("a_head"), seg=10)
+        cyl((0.505, sy * 0.02, 0.035), (0.475, sy * 0.006, -0.005), 0.025, 0.003, mat=c("a_head"), seg=8)
+
+    def jointed(pts, r0, r1, tip_r):
+        """A thick armoured limb: straight segments with dark joint balls; the last segment
+        is a long dark claw."""
+        tube(pts[:-1], r0, r1, c("a_limb"), seg=10)
+        for p in pts[1:-1]:
+            ell(p, (r0 * 0.78,) * 3, c("a_dark"))
+        cyl(pts[-2], pts[-1], tip_r, 0.003, mat=c("a_foot"), seg=8)
+
+    for sy in (-1, 1):
+        # striking arm: coxa under the head, a thick femur raised high and out, a tibia curving
+        # down and forward into a pale razor blade with a hooked tip; pale razor spines inside
+        hip, knee = (0.30, sy * 0.10, 0.10), (0.39, sy * 0.25, 0.29)
+        tib = [knee, (0.47, sy * 0.275, 0.24), (0.52, sy * 0.268, 0.16)]
+        tube([hip, knee], 0.056, 0.048, c("a_limb"), seg=10)
+        ell(knee, (0.042,) * 3, c("a_dark"))
+        tube(tib, 0.044, 0.034, c("a_limb"), seg=10)
+        ell((0.515, sy * 0.255, 0.085), (0.035, 0.028, 0.085), c("a_head"), rot=ry(-10))
+        cyl((0.51, sy * 0.25, 0.01), (0.475, sy * 0.23, 0.0), 0.02, 0.003, mat=c("a_head"), seg=8)
+        T = catmull(tib, 21)
+        for t in (0.2, 0.45, 0.7, 0.95):
+            p = Vector(T[round(t * 20)])
+            cyl(tuple(p), tuple(p + Vector((-0.024, -sy * 0.06, -0.014))), 0.016, 0.001, mat=c("a_head"), seg=6)
+        # six walking legs: thick, knees above the plates, long dark claws splayed outward and
+        # toward their own end
+        for hx, dx in ((0.17, 0.08), (0.02, 0.0), (-0.14, -0.085)):
+            jointed([(hx, sy * 0.12, 0.12), (hx + dx * 0.5, sy * 0.29, 0.28), (hx + dx, sy * 0.38, 0.11),
+                     (hx + dx * 1.15, sy * 0.43, 0.0)], 0.046, 0.034, 0.032)
+
+    ox = 0.125 * LJ_ORB_CELL  # the orbs' cell column (x of its centre)
+    # tail: the rear turns up into one thick segment that forks at once; the two branches
+    # climb, arch high over the back and come down in front, the orbs hanging over the face
+    seg_tail([(-0.33, 0, 0.25), (-0.36, 0, 0.31)], 0.062, 0.058)
+    for sy in (-1, 1):
+        path = [(-0.36, sy * 0.03, 0.31), (-0.38, sy * 0.08, 0.40), (-0.34, sy * 0.11, 0.49),
+                (-0.24, sy * 0.125, 0.53), (-0.10, sy * 0.125, 0.555), (0.06, sy * 0.125, 0.56),
+                (ox - 0.205, sy * 0.125, 0.56), (ox - 0.14, sy * 0.125, 0.545)]
+        seg_tail(catmull(path, 12), 0.056, 0.04)
+        # the lure holder: the tip turns down behind the orb (Wrysk: the dark cell moves from
+        # above the orb to just behind it), three claws gripping the orb's back half
+        end = path[-1]
+        hold = (ox - 0.11, sy * 0.125, 0.45)
+        cyl(end, hold, 0.032, 0.028, mat=c("a_mark"), seg=10)
+        orb = Vector((ox, sy * 0.125, 0.4375))
+        ell(tuple(orb), (0.06,) * 3, c("a_lure"))
+        for ang in (90, 210, 330):  # the claws grip the orb's back half only
+            a = math.radians(ang)
+            tip = orb + Vector((-0.045, math.cos(a) * 0.045, math.sin(a) * 0.045))
+            cyl(hold, tuple(tip), 0.012, 0.003, mat=c("a_mark"), seg=6)
+
+
+def seg_tail(pts, r0, r1):
+    """A segmented tail: violet segments with a dark joint ring between each pair."""
+    n = len(pts) - 1
+    for k in range(n):
+        ra, rb = r0 + (r1 - r0) * k / n, r0 + (r1 - r0) * (k + 1) / n
+        a, b = Vector(pts[k]), Vector(pts[k + 1])
+        cyl(tuple(a), tuple(b), ra, rb, mat=c("a_main"), seg=12)
+        if k:
+            d = (b - a).normalized() * 0.008
+            cyl(tuple(a - d), tuple(a + d), ra * 1.06, ra * 1.06, mat=c("a_dark"), seg=12)
+
+
 # name: (builder, reference length, width, height in metres). The founders' references are
 # their adult bodies (`assets/voxel-models/source.json`); a specimen is built and baked at
 # its own (the bake's placeholder table), here as its built extent.
@@ -663,6 +785,7 @@ REF = {
     "capgnawer": (capgnawer, 0.25, 0.21, 0.19),
     "seedporter": (seedporter, 0.2, 0.63, 0.94),
     "bellwing": (bellwing, 0.05, 0.375, 0.4),
+    "lanternjaw": (lanternjaw, 1.0, 0.25, 0.45),
 }
 
 
@@ -687,13 +810,14 @@ PICKS = {
     "chorister": "chorister.png", "frondgrazer": "frondgrazer.png",
     "littershredder": "littershredder.png", "ripple-snail": "ripple-snail-organic.png",
     "capgnawer": "capgnawer-rose-bark.png", "seedporter": "seedporter.png", "bellwing": "bellwing.png",
+    "lanternjaw": "../runs/lanternjaw-model/ref-lanternjaw-mantis.png",  # candidate, not in the artbook
 }
 # The pick's view: camera azimuth (degrees from +x, counter-clockwise seen from above; -90
 # looks from -y at the left flank) and elevation.
 VIEWS = {
     "chorister": (-80.0, 8.0), "frondgrazer": (100.0, 8.0), "littershredder": (115.0, 20.0),
     "ripple-snail": (-60.0, 22.0), "capgnawer": (20.0, 22.0), "seedporter": (0.0, 5.0),
-    "bellwing": (0.0, 4.0),
+    "bellwing": (0.0, 4.0), "lanternjaw": (35.0, 22.0),
 }
 
 
@@ -778,6 +902,10 @@ def voxel_cubes(name, cells, vox):
 
 def main():
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    if "--view" in args:  # --view AZ,EL: render every sheet from this view instead
+        az, el = (float(v) for v in args[args.index("--view") + 1].split(","))
+        for k in VIEWS:
+            VIEWS[k] = (az, el)
     if "--sheets" in args:
         out = args[args.index("--sheets") + 1]
         only = set(filter(None, (args[args.index("--only") + 1] if "--only" in args else "").split(",")))
