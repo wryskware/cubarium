@@ -275,6 +275,10 @@ pub(crate) enum CueSource {
     /// detritus field's curve. Litter and carrion are not sources: `Chem(fungal)`, the
     /// capgnawer's, does not answer a litter pile.
     Fungal,
+    /// The **film** field (roster R2b): each support face holding glassfilm emits by its
+    /// film stock, `min(film / emit_reference, 1)` — the detritus field's curve.
+    /// `Chem(film)`, the ripple-snail's; litter, carrion and caps are not sources.
+    Film,
 }
 
 /// The detritus stock at one support face — its litter plus its carrion — and
@@ -440,6 +444,18 @@ impl DetritusField {
                     self.work.push(n as u32);
                 }
             }
+            CueSource::Film => {
+                for g in fv.ground.iter().filter(|g| g.film > 0.0) {
+                    let Some(n) = graph.node(i64::from(g.site.x), g.site.y, g.site.z) else {
+                        continue;
+                    };
+                    let n = n as usize;
+                    // Ground is one entry per site, so a face is a source once.
+                    self.emit[n] = (g.film / self.cue.emit_reference).min(1.0) * UPDATE_S;
+                    self.seen[n] = epoch;
+                    self.work.push(n as u32);
+                }
+            }
             CueSource::Fungal => {
                 for st in fv.stands.iter().filter(|st| {
                     st.foliage > 0.0
@@ -545,6 +561,9 @@ pub struct Senses {
     /// The fungal field (roster R1), the capgnawer's `Chem(fungal)`: the same transport
     /// as `field`, sourced by saprotroph cap stock. Updated and settled with it.
     fungal: DetritusField,
+    /// The film field (roster R2b), the ripple-snail's `Chem(film)`: the same transport,
+    /// sourced by the glassfilm stock per site. Updated and settled with the others.
+    film: DetritusField,
     chem_trend: FxHashMap<u64, ChemTrend>,
     /// The static episode's held cone occupancy ([`Senses::hold_cone`]); `None` builds
     /// one per controller stage.
@@ -574,6 +593,11 @@ impl Senses {
             fungal: DetritusField {
                 cue,
                 source: CueSource::Fungal,
+                ..DetritusField::default()
+            },
+            film: DetritusField {
+                cue,
+                source: CueSource::Film,
                 ..DetritusField::default()
             },
             chem_trend: FxHashMap::default(),
@@ -657,6 +681,7 @@ impl Senses {
     pub(crate) fn update(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>) {
         self.field.update(view, fv);
         self.fungal.update(view, fv);
+        self.film.update(view, fv);
     }
 
     /// Settle the field against a layout: at most [`SETTLE_MAX_UPDATES`] updates, stopping
@@ -667,7 +692,11 @@ impl Senses {
     pub fn settle(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>) -> (usize, bool) {
         let mut stable = 0u32;
         for updates in 1..=SETTLE_MAX_UPDATES {
-            let change = self.field.update(view, fv).max(self.fungal.update(view, fv));
+            let change = self
+                .field
+                .update(view, fv)
+                .max(self.fungal.update(view, fv))
+                .max(self.film.update(view, fv));
             if change < SETTLE_EPS {
                 stable += 1;
                 if stable >= SETTLE_STABLE {
@@ -689,6 +718,17 @@ impl Senses {
         standing_y: u32,
     ) -> Option<f64> {
         self.field.sample(view, pose, standing_y)
+    }
+
+    /// The film field's concentration at a receptor (`Chem(film)`, roster R2b), or `None`
+    /// as [`Senses::sample_cue`].
+    pub(crate) fn sample_film(
+        &self,
+        view: &VoxelView<'_>,
+        pose: &Pose,
+        standing_y: u32,
+    ) -> Option<f64> {
+        self.film.sample(view, pose, standing_y)
     }
 
     /// The fungal field's concentration at a receptor (`Chem(fungal)`), or `None` as

@@ -1353,26 +1353,26 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
 | `fauna.founders.ripple-snail.core.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
-| `fauna.founders.ripple-snail.core.bite_per_s` | 0.015 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
+| `fauna.founders.ripple-snail.core.bite_per_s` | 0.005822208 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
 | `fauna.founders.ripple-snail.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.ripple-snail.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
-| `fauna.founders.ripple-snail.core.body_max` | 0.375 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.ripple-snail.core.growth_max_per_s` | 0.000102 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
-| `fauna.founders.ripple-snail.core.body_min` | 0.09375 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
-| `fauna.founders.ripple-snail.core.birth_body` | 0.375 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
-| `fauna.founders.ripple-snail.core.birth_cost` | 0.1875 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
+| `fauna.founders.ripple-snail.core.body_max` | 0.1455552 | org-units | [0, inf) |  | D | placeholder | adult structure |
+| `fauna.founders.ripple-snail.core.growth_max_per_s` | 0.0000395910144 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.ripple-snail.core.body_min` | 0.0363888 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.ripple-snail.core.birth_body` | 0.1455552 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.ripple-snail.core.birth_cost` | 0.0727776 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.ripple-snail.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–1.5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.ripple-snail.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.ripple-snail.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.ripple-snail.core.lifespan_median_s` | 14400.0 | s | [0, inf) | 3600–57600 log | B | derived | median lifespan (0: none) |
-| `fauna.founders.ripple-snail.core.reproduction.surplus_floor` | 0.01875 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.founders.ripple-snail.core.reproduction.surplus_floor` | 0.00727776 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.ripple-snail.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.ripple-snail.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
 | `fauna.founders.ripple-snail.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
 | `fauna.founders.ripple-snail.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.ripple-snail.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.ripple-snail.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
-| `fauna.founders.ripple-snail.core.reproduction.egg_organic` | 0.12 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.ripple-snail.core.reproduction.egg_organic` | 0.046577664 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
 | `fauna.founders.ripple-snail.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.ripple-snail.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.ripple-snail.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
@@ -1380,20 +1380,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.ripple-snail.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.ripple-snail.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
-| `fauna.founders.ripple-snail.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.ripple-snail.cruise_body_lengths_per_s` | 0.3 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
 | `fauna.founders.ripple-snail.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
 | `fauna.founders.ripple-snail.wade_height_fraction` | 0.25 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
 | `fauna.founders.ripple-snail.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
 | `fauna.founders.ripple-snail.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder, digest | continuous time under water before it drowns |
-| `fauna.founders.ripple-snail.adult_length_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
-| `fauna.founders.ripple-snail.adult_width_m` | 0.125 | m | (0, inf) | yes | N | decision, digest | adult body width |
-| `fauna.founders.ripple-snail.adult_height_m` | 0.125 | m | (0, inf) | yes | N | decision, digest | adult body height |
+| `fauna.founders.ripple-snail.adult_length_m` | 0.19 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
+| `fauna.founders.ripple-snail.adult_width_m` | 0.19 | m | (0, inf) | yes | N | decision, digest | adult body width |
+| `fauna.founders.ripple-snail.adult_height_m` | 0.063 | m | (0, inf) | yes | N | decision, digest | adult body height |
 | `fauna.founders.ripple-snail.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
 | `fauna.founders.ripple-snail.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
 | `fauna.founders.ripple-snail.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.ripple-snail.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.ripple-snail.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
-| `fauna.founders.ripple-snail.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.ripple-snail.water_margin_m` | 0.25 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.ripple-snail.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5, 0.5 | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |

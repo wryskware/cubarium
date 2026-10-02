@@ -53,3 +53,11 @@ founding_count = 6
 
 [fauna.founders.loftstrider]
 founding_count = 2
+
+# Roster R2b: glassfilm is seeded at founding and the ripple-snail (a water-bound film
+# grazer) is founded on it; both code defaults are off, so training worlds are unchanged.
+[flora]
+seed_film_at_founding = true
+
+[fauna.founders."ripple-snail"]
+founding_count = 8

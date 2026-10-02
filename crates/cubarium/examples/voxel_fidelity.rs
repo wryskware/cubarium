@@ -582,7 +582,7 @@ fn plant_census(world: &World, flora: &Flora) -> (usize, String) {
                     Part::Crown { heart: true, .. } => heart += 1,
                     Part::Crown { heart: false, .. } => crown += 1,
                     Part::Sprout(_) => sprout += 1,
-                    Part::Log(_) | Part::Litter(_) | Part::Carrion(_) | Part::None => {}
+                    Part::Log(_) | Part::Litter(_) | Part::Carrion(_) | Part::Film(_) | Part::None => {}
                 }
             }
         }
@@ -941,7 +941,7 @@ fn rules(
                         out[14].voxels += 1;
                         p.worst_over((fc, fr, proj.s, proj.s), &mut out[14]);
                     }
-                    Part::Log(_) | Part::Litter(_) | Part::Carrion(_) | Part::None => {}
+                    Part::Log(_) | Part::Litter(_) | Part::Carrion(_) | Part::Film(_) | Part::None => {}
                 }
             }
         }

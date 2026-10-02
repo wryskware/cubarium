@@ -2326,7 +2326,6 @@ pub struct FloraConfig {
     /// [`Flora::seed_film`] on the pre-rolled world before the animals are founded.
     /// Default **false**, so co-training worlds do not change; the live presets set it.
     /// Not a number, so it has no registry row.
-    // R2b stub: declared, unread (the founding does not call `seed_film` yet).
     pub seed_film_at_founding: bool,
 }
 

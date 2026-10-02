@@ -446,8 +446,7 @@ const MODULE_CHEM_FUNGAL: Module = Module {
     channels: &CHEM_DETRITUS_CHANNELS,
 };
 
-// R2b stub: the module exists so the manifest has its own `Chem(film)` slot; nothing
-// samples it yet (the observation leaves it zero with validity 0).
+// Roster R2b: the ripple-snail's `Chem(film)`, the film field in the `Chem(detritus)` slot.
 const MODULE_CHEM_FILM: Module = Module {
     name: "Chem(film)",
     offset: 18,
@@ -929,7 +928,6 @@ impl Manifest {
     /// The ripple-snail (roster R2b): the blind 23-input layout with `Chem(film)` — the
     /// film field, sourced by the film stock per site — in the shredder's
     /// `Chem(detritus)` slot; its own anchors and `Self` references.
-    // R2b stub: the capgnawer's shape on the ripple-snail's (stub) physiology.
     pub fn ripple_snail() -> Manifest {
         let a = anchors(Founder::RippleSnail);
         let r = SelfReferences::of(Founder::RippleSnail);

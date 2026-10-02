@@ -45,6 +45,8 @@
 //! a voxel from the height the shade model used. Pixel art has no finer answer at 4 px
 //! per voxel.
 
+use std::collections::BTreeMap;
+
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FaceDraw, FloraView, MAX_FOLIAGE_LAYERS, Species, Stand};
 
@@ -229,10 +231,43 @@ pub struct FilmMark {
 }
 
 /// Every film site's floor mark, in site order ([`FilmMark`]).
-// R2b stub: no marks yet.
 pub fn film_marks(flora: FloraView<'_>) -> Vec<FilmMark> {
-    let _ = flora;
-    Vec::new()
+    let c = flora.config;
+    let capacity = c.film_capacity_per_m2 * c.voxel_m * c.voxel_m;
+    flora
+        .film_sites()
+        .map(|(site, film)| FilmMark {
+            site,
+            strength: if capacity > 0.0 {
+                (film / capacity).clamp(0.0, 1.0) as f32
+            } else {
+                1.0
+            },
+        })
+        .collect()
+}
+
+/// Drawn film strengths are quantized to this many levels, so every film mark shares a
+/// handful of styles (the GPU renderer has 256 style slots for the whole scene). A
+/// presentation constant, not an ecological number.
+const FILM_LEVELS: f32 = 8.0;
+
+/// The time constant a drawn film mark's strength eases toward its stock with, seconds
+/// of frame clock: a grazed trail dims and a fresh patch brightens without a pop. A
+/// presentation constant.
+const FILM_FADE_S: f32 = 1.0;
+
+/// A film mark's style at a drawn strength: [`colours::FILM_INTERIM`], washed and darkened
+/// toward bare (the wilt treatment, [`wilted`]) as the strength falls — a grazed face shows
+/// less tint. Interim, with the colour, until the art direction covers the film.
+fn film_style(strength: f32) -> Style {
+    let level = (strength.clamp(0.0, 1.0) * FILM_LEVELS).round() / FILM_LEVELS;
+    let c = wilted(srgb_linear(colours::FILM_INTERIM), 1.0 - level);
+    Style {
+        wood: c,
+        crown: c,
+        heart: c,
+    }
 }
 
 /// What a voxel holds, if anything: which part of which drawn stand or substrate feature.
@@ -257,6 +292,8 @@ pub enum Part {
     Litter(u16),
     /// Carrion / skeletal remnants on the floor.
     Carrion(u16),
+    /// A glassfilm mark on the floor (roster R2b, [`FilmMark`]).
+    Film(u16),
 }
 
 impl Part {
@@ -274,7 +311,8 @@ impl Part {
             | Part::Sprout(s)
             | Part::Log(s)
             | Part::Litter(s)
-            | Part::Carrion(s) => Some(s),
+            | Part::Carrion(s)
+            | Part::Film(s) => Some(s),
             Part::Crown { style, .. } => Some(style),
         }
     }
@@ -340,6 +378,13 @@ pub struct Stands {
     /// ([`colours::Glow`]), beside `styles`; shorter than it, or `None`, for a style that
     /// does not emit.
     emits: Vec<Option<([f32; 3], bool)>>,
+    /// Each film mark's **drawn** strength, by site: it eases toward the site's
+    /// [`FilmMark::strength`] on the frame clock ([`FILM_FADE_S`]), and a mark whose film
+    /// is gone keeps drawing while it dims out.
+    film_drawn: BTreeMap<cubarium_voxel_flora::Site, f32>,
+    /// When the last rebuild drew the film marks; `None` before the first, which draws
+    /// every mark at its stock.
+    film_clock: Option<std::time::Instant>,
 }
 
 /// A glowcap at or below this wood is a button, which the dossier draws without its lip
@@ -434,6 +479,8 @@ impl Stands {
             placing: 0,
             emission: false,
             emits: Vec::new(),
+            film_drawn: BTreeMap::new(),
+            film_clock: None,
         }
     }
 
@@ -591,6 +638,9 @@ impl Stands {
                 );
             }
         }
+        // Glassfilm (roster R2b): one floor mark per film site, its tint following the
+        // site's stock, eased on the frame clock.
+        self.place_film(view, flora);
         // Carrion / remains.
         for g in flora.ground {
             if g.carrion >= 0.05 {
@@ -851,6 +901,62 @@ impl Stands {
         Some(style)
     }
 
+    /// The film marks ([`film_marks`]), each at its drawn strength: eased toward the
+    /// stock by `1 − exp(−dt / FILM_FADE_S)` per rebuild, with `dt` the frame clock since
+    /// the last one. A mark appears from nothing and a grazed-bare one dims out before it
+    /// goes. The first rebuild draws every mark at its stock.
+    fn place_film(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>) {
+        let now = std::time::Instant::now();
+        let k = match self.film_clock.replace(now) {
+            None => 1.0,
+            Some(then) => {
+                let dt = now.duration_since(then).as_secs_f32();
+                1.0 - (-dt / FILM_FADE_S).exp()
+            }
+        };
+        let marks = film_marks(flora);
+        let first = k >= 1.0;
+        let drawn = std::mem::take(&mut self.film_drawn);
+        // Marks whose film is gone dim toward nothing.
+        let mut next: BTreeMap<cubarium_voxel_flora::Site, f32> = BTreeMap::new();
+        for (&site, &d) in &drawn {
+            if marks.binary_search_by_key(&site, |m| m.site).is_err() {
+                let d = d * (1.0 - k);
+                if d * FILM_LEVELS >= 0.5 {
+                    next.insert(site, d);
+                }
+            }
+        }
+        for m in &marks {
+            let d = if first {
+                m.strength
+            } else {
+                let from = drawn.get(&m.site).copied().unwrap_or(0.0);
+                from + (m.strength - from) * k
+            };
+            next.insert(m.site, d);
+        }
+        self.film_drawn = next;
+        let sites: Vec<(cubarium_voxel_flora::Site, f32)> =
+            self.film_drawn.iter().map(|(&s, &d)| (s, d)).collect();
+        for (site, d) in sites {
+            let style = self.styles.len().min(u16::MAX as usize) as u16;
+            if usize::from(style) != self.styles.len() {
+                break;
+            }
+            self.styles.push(film_style(d));
+            self.place(
+                view,
+                Cell {
+                    x: i64::from(site.x),
+                    y: site.y + 1,
+                    z: site.z,
+                },
+                Part::Film(style),
+            );
+        }
+    }
+
     /// Write one part, letting the stronger claim keep the cell. Wood beats canopy —
     /// a trunk through another stand's crown is a trunk — and a crown beats a sprout/log.
     fn place(&mut self, view: &VoxelView<'_>, cell: Cell, part: Part) {
@@ -863,7 +969,7 @@ impl Stands {
         let i = self.index(cell.x, cell.y, cell.z);
         let rank = |p: Part| match p {
             Part::None => 0u8,
-            Part::Litter(_) | Part::Carrion(_) => 1,
+            Part::Litter(_) | Part::Carrion(_) | Part::Film(_) => 1,
             Part::Sprout(_) => 2,
             Part::Log(_) => 3,
             Part::Crown { .. } => 4,

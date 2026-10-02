@@ -118,10 +118,12 @@ pub struct PreRoll {
 pub struct ComponentFood {
     /// Edible organic matter a mouth reaches from faces in this component.
     pub stock: f64,
-    /// Stands that stock comes from (browser: vascular stands; shredder: glowcaps).
+    /// Stands that stock comes from (browser: vascular stands; shredder: glowcaps;
+    /// ripple-snail: the film sites, each a patch of its own).
     pub stands: usize,
     /// Living producers of the renewable part rooted in the component (shredder:
-    /// litter-shedding stands and glowcaps; browser: the reached stands themselves).
+    /// litter-shedding stands and glowcaps; browser: the reached stands themselves;
+    /// ripple-snail: the film sites, the film being alive).
     pub producers: usize,
     /// **Reported, not gated.** Browser: the reached stands' foliage regrowth ceiling
     /// `r_p · W`; shredder: the rooted producers' litterfall `m_p · P`; per hour.
@@ -236,6 +238,9 @@ pub struct Seeded {
     pub acceptance: Acceptance,
     /// Latticevine founders rooted.
     pub vines: usize,
+    /// Faces the founding seeded with glassfilm (roster R2b,
+    /// `FloraConfig::seed_film_at_founding`); 0 when the knob is off.
+    pub film_sites: usize,
     /// Founder stands planted, by [`Species::index`].
     pub stands_by_species: [usize; Species::COUNT],
     /// Lanternjaw eggs the founding bank buried ([`bury_founding_clutches`]).
@@ -635,6 +640,13 @@ pub fn seed_pre_rolled(
     // lip, as many as `FloraConfig::latticevine.founders` asks for.
     seeded.vines = flora.seed_vine_founders(world);
 
+    // Glassfilm at founding (roster R2b): a flora knob, off by default so co-training
+    // worlds do not change; the live presets turn it on. The film goes on every
+    // wet-eligible face of the pre-rolled world before the animals are founded.
+    if flora.config().seed_film_at_founding {
+        seeded.film_sites = flora.seed_film(world);
+    }
+
     // The two **sensed founder lineages**, which is what walks this habitat now. Both
     // arrive grown with half a reserve ([`founder_arrival`]): room to eat, and a body's
     // worth of buffer to find food with at the shipped mass.
@@ -748,14 +760,17 @@ pub fn seed_pre_rolled(
                 let mut meadow =
                     faces_at_food(&map, &food, &world.view(), &flora.view(), phys.diet);
                 // A body drowns in the stream's way as surely as a plant does: under its
-                // own height of water it would be drowning (package mobility).
-                let drown = phys.drown_depth_m(&phys.adult_body());
-                meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= drown));
+                // own height of water it would be drowning (package mobility). An aquatic
+                // body never drowns (roster R2b).
+                if !phys.aquatic {
+                    let drown = phys.drown_depth_m(&phys.adult_body());
+                    meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= drown));
+                }
                 let chosen = place(
                     &meadow,
                     want,
                     |s| map.component_of(s),
-                    |c, k| food.get(&c).map_or(0.0, |f| f.stock) >= need * k as f64,
+                    |c, k| covers(&phys, food.get(&c).copied().unwrap_or_default(), need, k),
                 );
                 for (k, site) in chosen.into_iter().enumerate() {
                     if introduce_founder(world, fauna, founder, site, spread_heading(k, want)) {
@@ -821,6 +836,17 @@ pub fn upkeep_per_hour(phys: &FounderPhysiology) -> f64 {
 /// puts its founders where a x1 body's would go and the run says whether they live.
 pub fn founding_upkeep_per_hour(phys: &FounderPhysiology) -> f64 {
     upkeep_per_hour(phys) / phys.mass_scale
+}
+
+/// Whether a component's food carries `k` founders of a lineage at `need` each — the
+/// founding gate and the acceptance verdict's one rule. A **film-eater** (roster R2b)
+/// counts any film as food: seeded film is a thin living start that grows, so a
+/// component holding film at all carries it.
+fn covers(phys: &FounderPhysiology, f: ComponentFood, need: f64, k: usize) -> bool {
+    if phys.diet.eats(cubarium_voxel_fauna::Food::Film) {
+        return f.stock > 0.0;
+    }
+    f.stock >= need * k as f64
 }
 
 /// Each walkable component's food for a lineage, and the route map it was read on.
@@ -909,6 +935,23 @@ fn food_on(
             }
         }
     }
+    // Glassfilm (roster R2b): the film pool at a face's own height, every film site a
+    // living patch of its own.
+    if diet.eats(Food::Film) {
+        for g in fv.ground.iter().filter(|g| g.film > 0.0) {
+            let comps: std::collections::BTreeSet<usize> = map
+                .faces_reaching_pool(g.site)
+                .into_iter()
+                .map(|i| map.components[i])
+                .collect();
+            for c in comps {
+                let f = food.entry(c).or_default();
+                f.stock += g.film;
+                f.stands += 1;
+                f.producers += 1;
+            }
+        }
+    }
     if !reached_produce {
         for stand in fv.stands.iter() {
             let sc = fv.config.species(stand.species);
@@ -973,8 +1016,8 @@ pub fn accept(
         let mut worst = f64::INFINITY;
         for (c, n) in count {
             let f = food.get(&c).copied().unwrap_or_default();
-            let need = accept_hours * u * n as f64;
-            let habitable = f.stock >= need && (!v.needs_producer || f.producers > 0);
+            let habitable =
+                covers(&phys, f, accept_hours * u, n) && (!v.needs_producer || f.producers > 0);
             worst = worst.min(if u > 0.0 { f.stock / (u * n as f64) } else { f64::INFINITY });
             v.components.push(ComponentVerdict {
                 component: c,
@@ -1249,6 +1292,22 @@ fn faces_at_food(
                 if food
                     .get(&map.components[i])
                     .is_some_and(|f| f.stands >= 2)
+                {
+                    out.push(map.faces[i]);
+                }
+            }
+        }
+    }
+    // A film-eater (roster R2b) stands on the film itself: a face holding film, in a
+    // component with a second film site to go to when this one is grazed bare.
+    if diet.eats(cubarium_voxel_fauna::Food::Film) {
+        for g in fv.ground.iter().filter(|g| g.film > 0.0) {
+            // The film face itself, not a neighbour whose mouth reaches it.
+            for i in map.faces_reaching_pool(g.site) {
+                if map.faces[i] == g.site
+                    && food
+                        .get(&map.components[i])
+                        .is_some_and(|f| f.stands >= 2)
                 {
                     out.push(map.faces[i]);
                 }

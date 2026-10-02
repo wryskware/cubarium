@@ -116,6 +116,11 @@ const FOLIAGE_YIELD: f64 = 0.5;
 /// it scales are the knobs.
 pub const CAPGNAWER_VOLUME_RATIO: f64 = (0.25 * 0.21 * 0.19) / (0.375 * 0.125 * 0.125);
 
+/// The ripple-snail's body volume over the littershredder's (roster R2b): 0.19 × 0.19 ×
+/// 0.063 m over 0.375 × 0.125 × 0.125 m. A derivation, not a knob, as
+/// [`CAPGNAWER_VOLUME_RATIO`] is.
+pub const RIPPLE_SNAIL_VOLUME_RATIO: f64 = (0.19 * 0.19 * 0.063) / (0.375 * 0.125 * 0.125);
+
 /// The loftstrider's **hull** volume over the frondgrazer's body (roster R1): 1.5 × 0.55
 /// × 0.45 m over 0.75 × 0.375 × 0.375 m. Its 2.2 × 2.2 × 3.4 m envelope is legs and
 /// fronds, so it is not used here.
@@ -368,17 +373,14 @@ pub struct FounderPhysiology {
     /// wade refusal, and refuses a step whose destination support face has no standing
     /// water within [`FounderPhysiology::water_margin_m`]. `false` for every other
     /// lineage. Not a number, so it has no registry row.
-    // R2b stub: declared, unread.
     pub aquatic: bool,
     /// An aquatic body's reach out of the water, metres: a step's destination face must
     /// have standing water within this distance (0.25 for the ripple-snail). Unread for a
     /// lineage that is not [`FounderPhysiology::aquatic`].
-    // R2b stub: declared, unread.
     pub water_margin_m: f64,
     /// **Where an egg-layer's clutch goes** ([`EggSite`]): a face holding litter (the
     /// shredder, the capgnawer) or a face holding film (the ripple-snail). Not a number,
     /// so it has no registry row.
-    // R2b stub: declared, unread (the laying still asks for litter).
     pub egg_site: EggSite,
 }
 
@@ -845,14 +847,44 @@ impl FounderPhysiology {
                     ..grazer
                 }
             }
-            // R2b stub: the shredder's table at a founding count of 0. The implementer
-            // builds the ripple-snail here (roster R2b): its body, film diet and yield,
-            // pace, the volume scaling, `aquatic`, `water_margin_m`, `egg_site` and its
-            // founding site.
-            Founder::RippleSnail => FounderPhysiology {
-                founding_count: 0,
-                ..FounderPhysiology::placeholder(Founder::Blind)
-            },
+            // The ripple-snail (roster R2b, `design/handoffs/voxel-roster-2026-10-01.md`):
+            // a slow, water-bound grazer of glassfilm, built from the littershredder by
+            // **body volume** exactly as the capgnawer is. Its adult body 0.19 × 0.19 ×
+            // 0.063 m = 0.002274 m³ over the shredder's 0.005859 m³: **r = 0.388**
+            // ([`RIPPLE_SNAIL_VOLUME_RATIO`]). Stocks and absolute rates scale by r
+            // ([`SpeciesConfig::scale_mass`]); upkeep and the motor are per unit of body,
+            // so specific rates equal the shredder's. The shredder's eggs, timings,
+            // lifespan and legs.
+            Founder::RippleSnail => {
+                let shredder = FounderPhysiology::placeholder(Founder::Blind);
+                let grazer = FounderPhysiology::placeholder(Founder::Browser);
+                let mut core = shredder.core;
+                core.scale_mass(RIPPLE_SNAIL_VOLUME_RATIO);
+                // Film is fresh tissue: the browser's foliage yield. The other foods are
+                // not its diet and carry the same number so none is a silent zero.
+                let film_yield = grazer.yield_by_food[crate::Food::Foliage.index()];
+                FounderPhysiology {
+                    core,
+                    adult_length_m: 0.19,
+                    adult_width_m: 0.19,
+                    adult_height_m: 0.063,
+                    // Slow: 0.3 body lengths a second.
+                    cruise_body_lengths_per_s: 0.3,
+                    yield_by_food: [film_yield; crate::Food::COUNT],
+                    diet: crate::Diet::only(crate::Food::Film),
+                    // Water-bound: it never drowns, wades anything, and keeps within a
+                    // quarter metre of standing water.
+                    aquatic: true,
+                    water_margin_m: 0.25,
+                    // Its clutch goes on film, under water.
+                    egg_site: EggSite::Film,
+                    // On a film site (the diet-driven food filter).
+                    founding: Founding::Bodies,
+                    founding_site: FoundingSite::AtFood,
+                    founding_count: 0,
+                    ..shredder
+                }
+            }
         }
     }
 
@@ -875,8 +907,13 @@ impl FounderPhysiology {
         }
     }
 
-    /// The deepest standing water `body` walks into: `wade_height_fraction × height`.
+    /// The deepest standing water `body` walks into: `wade_height_fraction × height`, or
+    /// any depth for an [`FounderPhysiology::aquatic`] body.
     pub fn wade_depth_m(&self, body: &Body) -> f64 {
+        // An aquatic body (roster R2b) walks into any depth: no wade refusal.
+        if self.aquatic {
+            return f64::INFINITY;
+        }
         self.wade_height_fraction * body.height_m
     }
 
@@ -978,6 +1015,44 @@ pub(crate) fn resolve_motion(
     step_limits: StepLimits,
     held: Actions,
 ) -> Motion {
+    resolve_motion_in(
+        view,
+        pose,
+        standing_y,
+        manifest,
+        body,
+        wade_depth_m,
+        step_limits,
+        held,
+        None,
+    )
+}
+
+/// [`resolve_motion`] for a body that may be **water-bound** (roster R2b): with
+/// `water_margin_m` set, a sub-step onto another support face is refused, the way a wall
+/// refuses one, unless that face has standing water within the margin
+/// ([`water_within`]). A body already stranded beyond the margin is not held: it may walk
+/// anywhere, so it can find its way back.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_motion_in(
+    view: &VoxelView<'_>,
+    pose: &mut crate::Pose,
+    standing_y: &mut u32,
+    manifest: &Manifest,
+    body: &Body,
+    wade_depth_m: f64,
+    step_limits: StepLimits,
+    held: Actions,
+    water_margin_m: Option<f64>,
+) -> Motion {
+    // A stranded body is not held to the margin (it would never move again).
+    let water_margin_m = water_margin_m.filter(|&m| {
+        pose.column(view.config.voxel_m, view.config.depth)
+            .is_some_and(|(cx, cz)| {
+                let cx = cx.rem_euclid(i64::from(view.config.width));
+                water_within(view, cx, *standing_y, cz, m)
+            })
+    });
     let r = body.footprint_radius();
     let headroom = body.headroom_voxels(view.config.voxel_m);
     let v_req = held.forward * manifest.cruise_m_per_s;
@@ -1011,6 +1086,7 @@ pub(crate) fn resolve_motion(
             wade_depth_m,
             headroom,
             step_limits,
+            water_margin_m,
         ) {
             Some(actual) => {
                 moved += actual;
@@ -1046,6 +1122,7 @@ pub(crate) fn resolve_motion(
                         wade_depth_m,
                         headroom,
                         step_limits,
+                        water_margin_m,
                     )
                     .is_some()
                     {
@@ -1066,6 +1143,7 @@ pub(crate) fn resolve_motion(
                         wade_depth_m,
                         headroom,
                         step_limits,
+                        water_margin_m,
                     )
                     .expect("the bisection's best advance is valid");
                     pose.x = nx;
@@ -1100,6 +1178,7 @@ fn step_advance(
     wade_depth_m: f64,
     headroom: u32,
     step_limits: StepLimits,
+    water_margin_m: Option<f64>,
 ) -> Option<f64> {
     let (nx, nz, actual, ny) = advance_candidate(
         view,
@@ -1112,11 +1191,53 @@ fn step_advance(
         wade_depth_m,
         headroom,
         step_limits,
+        water_margin_m,
     )?;
     pose.x = nx;
     pose.z = nz;
     *standing_y = ny;
     Some(actual)
+}
+
+/// Whether the support face `(x, y, z)` has **standing water within `margin_m`** of it
+/// (roster R2b, an aquatic body's margin): any support face whose centre is within
+/// `margin_m` of this one's, itself included, holding standing water
+/// ([`VoxelView::standing_depth_m`]) over it. Distances are centre to centre between
+/// support faces, in metres; `x` wraps, `z` and `y` stop at the world's ends.
+pub(crate) fn water_within(view: &VoxelView<'_>, x: i64, y: u32, z: u32, margin_m: f64) -> bool {
+    let c = view.config;
+    let v = c.voxel_m;
+    if view.standing_depth_m(x, y, z) > 0.0 {
+        return true;
+    }
+    if !(margin_m > 0.0) || !(v > 0.0) {
+        return false;
+    }
+    let k = (margin_m / v + 1e-9).floor() as i64;
+    let reach2 = (margin_m / v) * (margin_m / v) + 1e-9;
+    for dy in -k..=k {
+        let yy = i64::from(y) + dy;
+        if yy < 0 || yy >= i64::from(c.height) {
+            continue;
+        }
+        for dz in -k..=k {
+            let zz = i64::from(z) + dz;
+            if zz < 0 || zz >= i64::from(c.depth) {
+                continue;
+            }
+            for dx in -k..=k {
+                if (dx * dx + dy * dy + dz * dz) as f64 > reach2 || (dx, dy, dz) == (0, 0, 0) {
+                    continue;
+                }
+                let xx = (x + dx).rem_euclid(i64::from(c.width));
+                let (yy, zz) = (yy as u32, zz as u32);
+                if view.is_support(xx, yy, zz) && view.standing_depth_m(xx, yy, zz) > 0.0 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// The candidate one sub-step would move the body to, as a pure query: the new
@@ -1154,6 +1275,7 @@ fn advance_candidate(
     wade_depth_m: f64,
     headroom: u32,
     step_limits: StepLimits,
+    water_margin_m: Option<f64>,
 ) -> Option<(f64, f64, f64, u32)> {
     let c = view.config;
     let v = c.voxel_m;
@@ -1185,6 +1307,16 @@ fn advance_candidate(
     if headroom > 0 && disc_hits_solid(view, cells, nx, nz, clearance + 1, clearance + headroom, r)
     {
         return None;
+    }
+    // A water-bound body (roster R2b): another face must have standing water within its
+    // margin, or the step is refused as a wall's is.
+    if let Some(margin) = water_margin_m {
+        let hz = ((pz / v).floor().max(0.0) as u32).min(c.depth.saturating_sub(1));
+        let hx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
+        let same_face = (hx, hz) == (cx, cz as u32) && ny == standing_y;
+        if !same_face && !water_within(view, cx, ny, cz as u32, margin) {
+            return None;
+        }
     }
     let there = view.water_depth_m(cx, ny, cz as u32);
     if there > wade_depth_m {
@@ -1595,8 +1727,8 @@ fn pool_stock(fv: &FloraView<'_>, site: Site, food: crate::Food) -> f64 {
     fv.ground_at(site).map_or(0.0, |g| match food {
         crate::Food::Litter => g.litter,
         crate::Food::Carrion => g.carrion,
-        // R2b stub: the film pool is not offered to a mouth yet.
-        crate::Food::Film => 0.0,
+        // Glassfilm (roster R2b): the film pool at the face.
+        crate::Food::Film => g.film,
         // Neither is a ground pool; a mouth never asks this of them.
         crate::Food::CapTissue | crate::Food::Foliage => 0.0,
     })
@@ -2259,15 +2391,23 @@ pub(crate) fn observation(
     // with validity 0.
     // The capgnawer's `Chem(fungal)` (roster R1) reads the fungal field the same way, in
     // the same slot.
+    // The ripple-snail's `Chem(film)` (roster R2b) reads the film field, in the same slot.
+    #[derive(Clone, Copy)]
+    enum ChemField {
+        Detritus,
+        Fungal,
+        Film,
+    }
     let chem = module_opt(manifest, "Chem(detritus)")
-        .map(|m| (m, false))
-        .or_else(|| module_opt(manifest, "Chem(fungal)").map(|m| (m, true)));
-    if let Some((cm, fungal)) = chem {
+        .map(|m| (m, ChemField::Detritus))
+        .or_else(|| module_opt(manifest, "Chem(fungal)").map(|m| (m, ChemField::Fungal)))
+        .or_else(|| module_opt(manifest, "Chem(film)").map(|m| (m, ChemField::Film)));
+    if let Some((cm, field)) = chem {
         if let Some(senses) = senses.as_deref_mut() {
-            let sampled = if fungal {
-                senses.sample_fungal(view, &a.pose, standing_y)
-            } else {
-                senses.sample_cue(view, &a.pose, standing_y)
+            let sampled = match field {
+                ChemField::Detritus => senses.sample_cue(view, &a.pose, standing_y),
+                ChemField::Fungal => senses.sample_fungal(view, &a.pose, standing_y),
+                ChemField::Film => senses.sample_film(view, &a.pose, standing_y),
             };
             if let Some(cue) = sampled {
                 let sat = manifest.tunings.chem_saturation;

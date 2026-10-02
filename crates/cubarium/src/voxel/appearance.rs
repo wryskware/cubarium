@@ -157,7 +157,7 @@ pub fn plant_class(part: Part) -> u8 {
         Part::Crown { heart: true, .. } => 3,
         Part::Sprout(_) => 4,
         Part::Log(_) => 6,
-        Part::Litter(_) | Part::Carrion(_) => 7,
+        Part::Litter(_) | Part::Carrion(_) | Part::Film(_) => 7,
     }
 }
 

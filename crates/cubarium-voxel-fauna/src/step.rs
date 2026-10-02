@@ -1011,7 +1011,7 @@ fn founder_act(
     let (motion, standing_y) = {
         let a = &mut fauna.animals[i];
         let mut standing_y = a.site.y;
-        let motion = body::resolve_motion(
+        let motion = body::resolve_motion_in(
             view,
             &mut a.pose,
             &mut standing_y,
@@ -1020,6 +1020,7 @@ fn founder_act(
             phys.wade_depth_m(&geometry),
             step_limits,
             held,
+            phys.aquatic.then_some(phys.water_margin_m),
         );
         (motion, standing_y)
     };
@@ -1550,6 +1551,14 @@ fn attach(
     if view.water_depth_m(ax, to_y, az) > phys.wade_depth_m(geometry) {
         return Attach::Nothing;
     }
+    // A water-bound body (roster R2b) climbs only to a face with standing water within
+    // its margin, refused as a step there would be (a stranded body is not held).
+    if phys.aquatic
+        && body::water_within(view, cx, y, cz, phys.water_margin_m)
+        && !body::water_within(view, ax, to_y, az, phys.water_margin_m)
+    {
+        return Attach::Nothing;
+    }
     let a = &mut fauna.animals[i];
     a.pose.x = px;
     a.pose.z = pz;
@@ -1745,8 +1754,7 @@ fn founder_feed(
         body::Meal::Pool { site, food } => match food {
             Food::Litter => flora.take_litter(site, bite),
             Food::Carrion => flora.take_carrion(site, bite),
-            // R2b stub: the mouth never offers film yet (`body::pool_stock`).
-            Food::Film => None,
+            Food::Film => flora.take_film(site, bite),
             Food::CapTissue | Food::Foliage => {
                 unreachable!("a stand's tissue is not a ground pool")
             }
@@ -2135,8 +2143,8 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 /// One egg-laying body's tick: a whole clutch, paid out of the reserve in one tick and
 /// left on the face the body stands on.
 ///
-/// The face has to hold litter — the littershredder lays in the litter it lives in —
-/// and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
+/// The face has to hold litter — the littershredder lays in the litter it lives in — or,
+/// for a lineage whose [`crate::EggSite`] is film, film; and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
 /// no refractory, and the surplus keeps standing for the next tick.
 fn lay(
     fauna: &mut Fauna,
@@ -2158,9 +2166,17 @@ fn lay(
     };
     let site = fauna.animals[i].site;
     // A dormant egg is buried in soil or litter (predation §2.13); the shredder lays in
-    // the litter it lives in.
-    if !rule.dormant && !flora.view().ground_at(site).is_some_and(|g| g.litter > rule.litter_min) {
-        return;
+    // the litter it lives in, the ripple-snail on the film it grazes (roster R2b,
+    // [`crate::EggSite`]).
+    if !rule.dormant {
+        let ground = flora.view().ground_at(site);
+        let fits = match fauna.config.founder(lineage).egg_site {
+            crate::EggSite::Litter => ground.is_some_and(|g| g.litter > rule.litter_min),
+            crate::EggSite::Film => ground.is_some_and(|g| g.film > 0.0),
+        };
+        if !fits {
+            return;
+        }
     }
     let cost = rule.package_cost(sc);
     let a = &mut fauna.animals[i];
@@ -2234,21 +2250,15 @@ fn clutch_fate(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     let lost: Vec<crate::Clutch> = fauna
         .clutches
         .iter()
-        .filter(|c| {
-            let drown = fauna.config.founder(c.lineage).core.drown_depth_m;
-            !view.is_support(i64::from(c.site.x), c.site.y, c.site.z)
-                || view.water_depth_m(i64::from(c.site.x), c.site.y, c.site.z) > drown
-        })
+        .filter(|c| !clutch_holds(fauna, view, c))
         .copied()
         .collect();
     if lost.is_empty() {
         return;
     }
-    fauna.clutches.retain(|c| {
-        let drown = fauna.config.founder(c.lineage).core.drown_depth_m;
-        view.is_support(i64::from(c.site.x), c.site.y, c.site.z)
-            && view.water_depth_m(i64::from(c.site.x), c.site.y, c.site.z) <= drown
-    });
+    let kept: Vec<bool> = fauna.clutches.iter().map(|c| clutch_holds(fauna, view, c)).collect();
+    let mut keep = kept.into_iter();
+    fauna.clutches.retain(|_| keep.next().unwrap_or(true));
     for c in lost {
         fauna.ledger.eggs_lost += u64::from(c.count);
         fauna.book_deposit(
@@ -2262,6 +2272,18 @@ fn clutch_fate(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
             },
         );
     }
+}
+
+/// Whether a clutch keeps its place: its face is still a support face and, unless its
+/// lineage is aquatic (roster R2b: the ripple-snail lays under water by design), no
+/// standing water over it is deeper than its lineage drowns in.
+fn clutch_holds(fauna: &Fauna, view: &VoxelView<'_>, c: &crate::Clutch) -> bool {
+    let (x, y, z) = (i64::from(c.site.x), c.site.y, c.site.z);
+    if !view.is_support(x, y, z) {
+        return false;
+    }
+    let phys = fauna.config.founder(c.lineage);
+    phys.aquatic || view.water_depth_m(x, y, z) <= phys.core.drown_depth_m
 }
 
 /// Clutches at term hatch together: `count` `body_min` juveniles at the clutch's site,
@@ -2510,7 +2532,8 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         };
         let phys = fauna.config.founder(founder);
         let geometry = phys.body_at(a.body);
-        let under = water_over_feet(view, &a) > phys.drown_depth_m(&geometry);
+        // An aquatic body (roster R2b) never drowns.
+        let under = !phys.aquatic && water_over_feet(view, &a) > phys.drown_depth_m(&geometry);
         let m = &mut fauna.animals[i].mobility;
         m.submerged_ticks = if under { m.submerged_ticks + 1 } else { 0 };
         drowning.push(m.submerged_ticks >= phys.drown_ticks());
