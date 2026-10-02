@@ -247,6 +247,8 @@ fn vine_rows() -> Vec<Row> {
         r("contest_check_s", "s", positive, "the contest wheel's period").grade("C"),
         r("spur_reserve_min", "org-units per reference face", nonneg, "reserve per face before a flowering cycle")
             .scale(area).evolve().grade("C"),
+        r("spread_hold", "multiples of spur_reserve_min per face", nonneg, "reserve kept back from spreading and sisters for flowering; 0 spends it all")
+            .search(0.0, 6.0),
         r("spur_window_s", "s", nonneg, "after a shower, a cycle may still start this long").evolve().grade("C"),
         r("spur_jitter_s", "s", nonneg, "spread of the per-face start delay").grade("C"),
         r("bud_s", "s", nonneg, "bud phase").evolve().grade("C"),

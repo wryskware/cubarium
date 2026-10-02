@@ -1671,6 +1671,8 @@ fn t19_crossing_a_step_costs_the_ordinary_spread_cost_and_nothing_more() {
     let mut world = plan.world(1.0, false);
     let mut config = frozen();
     config.latticevine.spread_cost = 0.2;
+    // The whole purse is for spreading: no flowering share held back.
+    config.latticevine.spread_hold = 0.0;
     let v = &config.latticevine;
     let price = v.spread_cost + v.contest_threshold * v.leaf_mass;
     let start = 3.5 * price;

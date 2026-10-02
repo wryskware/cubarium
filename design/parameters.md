@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (679 rows)
+**`flora.*`** (680 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -996,7 +996,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.dry_spell_s` | 600.0 | s | [0, inf) | yes | C | placeholder | dry this long: dormant |
 | `flora.latticevine.wet_spell_s` | 300.0 | s | [0, inf) | yes | C | placeholder | wet this long: regreens |
 | `flora.latticevine.leaf_fall_s` | 60.0 | s | (0, inf) |  | C | placeholder | a dormant face drops its leaf over this |
-| `flora.latticevine.assimilation` | 0.00018 | organic/s per reference face | [0, inf) | yes | C | placeholder | income per full face in full light |
+| `flora.latticevine.assimilation` | 0.00027 | organic/s per reference face | [0, inf) | yes | C | placeholder | income per full face in full light |
 | `flora.latticevine.underside_light` | 0.15 | fraction | [0, inf) | yes | B | placeholder | light factor on a downward face |
 | `flora.latticevine.leaf_mass` | 0.05 | org-units per reference face | (0, inf) | yes | C | placeholder | leaf tissue per full face |
 | `flora.latticevine.runner_mass` | 0.02 | org-units per reference face | [0, inf) | yes | C | placeholder | runner tissue per face |
@@ -1010,6 +1010,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.contest_threshold` | 0.2 | leafiness | [0, 1] | yes | C | placeholder | a face below this is contestable |
 | `flora.latticevine.contest_check_s` | 30.0 | s | (0, inf) |  | C | placeholder | the contest wheel's period |
 | `flora.latticevine.spur_reserve_min` | 0.005 | org-units per reference face | [0, inf) | yes | C | placeholder | reserve per face before a flowering cycle |
+| `flora.latticevine.spread_hold` | 2.0 | multiples of spur_reserve_min per face | [0, inf) | 0–6 | - | placeholder | reserve kept back from spreading and sisters for flowering; 0 spends it all |
 | `flora.latticevine.spur_window_s` | 120.0 | s | [0, inf) | yes | C | placeholder | after a shower, a cycle may still start this long |
 | `flora.latticevine.spur_jitter_s` | 60.0 | s | [0, inf) |  | C | placeholder | spread of the per-face start delay |
 | `flora.latticevine.bud_s` | 60.0 | s | [0, inf) | yes | C | placeholder | bud phase |

@@ -245,6 +245,51 @@ fn founders_spread_across_the_floor_before_they_share_a_tall_structure() {
     assert_eq!(flora.seed_vine_founders(&world(1)), 3);
 }
 
+/// One founder on a tall wall with `reserve`, stepped `ticks` with `spread_hold`; leaf
+/// regrowth off so spreading is the reserve's only big spender. The wall's frontier grows
+/// a face per spread check, so one check (100 ticks) roots at most one face. Returns the
+/// founder's faces and its reserve per face.
+fn hold_run(spread_hold: f64, reserve: f64, ticks: u32) -> (usize, f64, Flora) {
+    let mut world = walls(40, &[(20, 12)], 1);
+    let mut config = FloraConfig::default();
+    config.latticevine.founders = 1;
+    config.latticevine.founders_per_m2 = 0.0;
+    config.latticevine.founder_reserve = reserve;
+    config.latticevine.regrow_rate = 0.0;
+    config.latticevine.spread_hold = spread_hold;
+    let mut flora = Flora::new(config);
+    assert_eq!(flora.seed_vine_founders(&world), 1);
+    for _ in 0..ticks {
+        flora.step(&mut world);
+    }
+    assert_residuals(&flora, &format!("hold {spread_hold}"));
+    let v = flora.view().cover.vines()[0];
+    let faces = flora.view().cover.faces_of(v.id).len();
+    (faces, v.reserve / faces as f64, flora)
+}
+
+#[test]
+fn a_spreading_vine_keeps_back_its_flowering_reserve() {
+    let vc = VineConfig::default();
+    let new_cost = vc.spread_cost + vc.contest_threshold * vc.leaf_mass;
+    // Just over one face's cost: with no hold the founder spends it on a new face and is
+    // left under its spurs' threshold.
+    let tight = new_cost + 0.005;
+    let (faces, per_face, _) = hold_run(0.0, tight, 100);
+    assert_eq!(faces, 2, "no hold: it should have spread");
+    assert!(per_face < vc.spur_reserve_min, "no hold kept {per_face} per face");
+
+    // The default hold keeps the flowering share: no new face, the threshold kept.
+    let (faces, per_face, _) = hold_run(vc.spread_hold, tight, 100);
+    assert_eq!(faces, 1, "the vine spread out of its flowering reserve");
+    assert!(per_face >= vc.spur_reserve_min, "{per_face} per face under the spur threshold");
+
+    // With reserve to spare the hold does not stop the spread, and it keeps the share.
+    let (faces, per_face, _) = hold_run(vc.spread_hold, 0.5, 400);
+    assert!(faces >= 4, "the hold stopped a vine with reserve to spare: {faces} faces");
+    assert!(per_face >= vc.spread_hold * vc.spur_reserve_min);
+}
+
 #[test]
 fn the_founder_count_scales_with_floor_area_over_the_floor() {
     let vc = VineConfig::default();
@@ -279,6 +324,7 @@ fn every_new_knob_has_a_registry_row() {
         "flora.springturf.dark_sky_max",
         "flora.latticevine.founders_per_m2",
         "flora.latticevine.founder_spread_m",
+        "flora.latticevine.spread_hold",
     ] {
         assert!(registry().row_for(path).is_some(), "no registry row for {path}");
     }

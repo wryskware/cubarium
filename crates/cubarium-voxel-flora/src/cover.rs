@@ -768,6 +768,12 @@ pub struct VineConfig {
     pub contest_check_s: f64,
     /// Reserve **per covered face** a vine needs before its spurs start a cycle.
     pub spur_reserve_min: f64,
+    /// The flowering share of the reserve: spreading and sisters spend only what is above
+    /// `spread_hold · spur_reserve_min` per covered face, so a growing vine still has the
+    /// reserve to flower after a shower. Leaf regrowth is not held back. 0 spends it all
+    /// on spreading (the vine never flowers while it grows). At 2 the hold is about a
+    /// minute of a lit face's income at the 3× pace, so the spread barely slows.
+    pub spread_hold: f64,
     /// How long after a shower ends a cycle may still start, seconds.
     pub spur_window_s: f64,
     /// Spread of the per-face start delay, seconds.
@@ -810,14 +816,15 @@ impl Default for VineConfig {
     ///
     /// - **Earning back a face.** A new face costs `spread_cost` 0.05 (its runner 0.02, the
     ///   rest construction) plus its leaf, 0.05 at full leaf: 0.1 in all. A lit side face
-    ///   (sky about 0.7) nets about `0.7 · 1.8e-4 − 1e-5 − 2e-6 ≈ 1.1e-4` a second at full
-    ///   leaf, so it pays for a new face in about fifteen minutes, and a colony that
+    ///   (sky about 0.7) nets about `0.7 · 2.7e-4 − 1e-5 − 2e-6 ≈ 1.8e-4` a second at full
+    ///   leaf, so it pays for a new face in about ten minutes, and a colony that
     ///   reinvests everything (a new face also regrows from 0.2 leaf at `regrow_rate`
-    ///   0.002/s, about seven minutes to full) doubles in roughly fifteen to twenty
-    ///   minutes: twice the first pace (9e-5, a doubling in half an hour), raised
+    ///   0.002/s, about seven minutes to full) doubles in roughly ten to fifteen minutes:
+    ///   about three times the first pace (9e-5, a doubling in half an hour), raised
     ///   2026-10-01 because a live world's vines could not be seen
-    ///   (`design/handoffs/plants-glowcap-vine-2026-10-01.md` A3; 3× overshot, Wrysk
-    ///   settled on 2× 2026-10-02). One founder covers a
+    ///   (`design/handoffs/plants-glowcap-vine-2026-10-01.md` A3). Wrysk 2026-10-02 kept
+    ///   3× once the vine also holds back its flowering share (`spread_hold`). One
+    ///   founder covers a
     ///   lit, watered wall of a few hundred faces in a few hours (`tests/latticevine.rs`
     ///   t16–t17).
     /// - **Water per leaf area like the ground plants.** Per square metre of leaf,
@@ -838,7 +845,7 @@ impl Default for VineConfig {
             dry_spell_s: 600.0,
             wet_spell_s: 300.0,
             leaf_fall_s: 60.0,
-            assimilation: 1.8e-4,
+            assimilation: 2.7e-4,
             underside_light: 0.15,
             leaf_mass: 0.05,
             runner_mass: 0.02,
@@ -852,6 +859,7 @@ impl Default for VineConfig {
             contest_threshold: 0.2,
             contest_check_s: 30.0,
             spur_reserve_min: 0.005,
+            spread_hold: 2.0,
             spur_window_s: 120.0,
             spur_jitter_s: 60.0,
             bud_s: 60.0,
@@ -1590,8 +1598,11 @@ fn spread(
         return;
     };
     let new_cost = vc.spread_cost + vc.contest_threshold * vc.leaf_mass;
-    let can_spread = cover.vines[vi].reserve >= new_cost;
-    let can_sister = cover.vines[vi].reserve >= vc.sister_cost;
+    // The flowering share stays: only the reserve above it spreads.
+    let hold = vc.spread_hold * vc.spur_reserve_min * f64::from(cover.rt.aux[vi].faces.max(1));
+    let spare = |cover: &Cover| cover.vines[vi].reserve - hold;
+    let can_spread = spare(cover) >= new_cost;
+    let can_sister = spare(cover) >= vc.sister_cost;
     if !can_spread && !can_sister {
         return;
     }
@@ -1617,7 +1628,7 @@ fn spread(
         cover.rt.nbuf = nbuf;
         let root_face = cover.vines[vi].root_face;
         for (n, d, from) in targets {
-            if cover.vines[vi].reserve < new_cost {
+            if spare(cover) < new_cost {
                 break;
             }
             cover.vines[vi].reserve -= new_cost;
@@ -1641,7 +1652,7 @@ fn spread(
     }
 
     // A sister, where the cover reaches free soil far enough from the root.
-    if cover.vines[vi].reserve < vc.sister_cost {
+    if spare(cover) < vc.sister_cost {
         return;
     }
     let own_root = cover.vines[vi].root;
