@@ -99,6 +99,7 @@ const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 cha
                         g X Z introduce a frondgrazer, \
                         e [N] bury N lanternjaw egg clutches where prey live, \
                         j [N] introduce N adult lanternjaws where prey live, \
+                        k [N] found N chorister packs on covered dens near prey, \
                         w PATH save the terrain only, \
                         l PATH load a terrain only (refused once anything is alive), \
                         i X Y Z inspect, o outlet, q quit";
@@ -1419,13 +1420,24 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             }
             install_founder_controllers(&mut fauna, &drivers)?;
             // `--introduce lanternjaw:N` (predation §2.9): adults where the prey live, or
-            // the reason there are none.
+            // the reason there are none. `--introduce chorister:N` (roster R3): N packs,
+            // each on a covered den near the prey.
             for (founder, n) in args.introductions()? {
                 anyhow::ensure!(
-                    founder == Founder::Lanternjaw,
-                    "--introduce takes lanternjaw:N; the {} lineage is founded by the habitat",
+                    matches!(founder, Founder::Lanternjaw | Founder::Chorister),
+                    "--introduce takes lanternjaw:N or chorister:N; the {} lineage is founded by the habitat",
                     founder.name()
                 );
+                if founder == Founder::Chorister {
+                    match habitat::introduce_packs(&world, &flora, &mut fauna, founder, n) {
+                        Ok(ids) => eprintln!(
+                            "cubarium voxel: introduced {} chorister packs where the prey live",
+                            ids.len()
+                        ),
+                        Err(why) => eprintln!("cubarium voxel: --introduce chorister:{n} refused — {why}"),
+                    }
+                    continue;
+                }
                 match habitat::introduce_lanternjaws(&world, &flora, &mut fauna, n) {
                     Ok(ids) => eprintln!(
                         "cubarium voxel: introduced {} adult lanternjaws where the prey live",
@@ -3043,6 +3055,22 @@ impl Control {
                         ),
                         Err(why) => eprintln!("cubarium voxel: no lanternjaw introduced — {why}"),
                     }
+                }
+            }
+            // Development control (roster R3): N chorister packs on covered dens near the
+            // prey, refused with the reason when none can be founded.
+            "k" | "chorister" => {
+                let n = match rest.first().map(|t| t.parse::<usize>()) {
+                    None => 1,
+                    Some(Ok(n)) if n > 0 => n,
+                    _ => {
+                        eprintln!("cubarium voxel: `{verb} [N]` wants a positive count");
+                        return;
+                    }
+                };
+                match habitat::introduce_packs(world, flora, fauna, Founder::Chorister, n) {
+                    Ok(ids) => eprintln!("cubarium voxel: founded {} chorister packs (ids {ids:?})", ids.len()),
+                    Err(why) => eprintln!("cubarium voxel: no chorister pack founded — {why}"),
                 }
             }
             "g" | "grazer" => {

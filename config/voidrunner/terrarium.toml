@@ -54,3 +54,10 @@ founding_count = 6
 # crowns, latticevine faces); the code default is 0, so training worlds are unchanged.
 [fauna.founders.seedporter]
 founding_count = 4
+
+# R3: the chorister, a diurnal pack hunter (frondgrazer, loftstrider, lanternjaw,
+# grounded seedporter) living as packs with a covered den, one breeder, provisioned
+# pups and a territory. The count is packs of pack_size (4) adults; the code default is
+# 0, so training worlds are unchanged.
+[fauna.founders.chorister]
+founding_count = 1

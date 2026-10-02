@@ -115,6 +115,13 @@ ANIMAL_ROLE = {slot: "accent" for slot in A.ACCENTS}
 SPECIMENS = ["chorister", "ripple-snail", "capgnawer", "seedporter", "bellwing", "loftstrider",
              "seedporter-stand", "seedporter-ground", "seedporter-glide"]
 
+# A specimen that is a live founder with young drawn smaller (roster R3): extra bins at
+# these fractions of the adult's size, below the adult bin, so the presenter's nearest-
+# length pick draws a young body small. The chorister's newborn is
+# (body_min / body_max)^(1/3) = 0.46 of the adult's length (the lanternjaw's hatchling
+# ratio, which its table keeps by volume).
+SPECIMEN_YOUNG = {"chorister": [0.46]}
+
 KIND = {"Foliage": L.F, "Trunk": L.T, "Drape": L.D, "Mat": L.MAT}
 
 
@@ -465,14 +472,19 @@ def bake_animal(f, vox, out_dir):
 
 
 def bake_specimen(name, vox, out_dir):
-    """One adult bin at the builder's reference size (the placeholder table above)."""
+    """One adult bin at the builder's reference size (the placeholder table above), and
+    any young bins `SPECIMEN_YOUNG` lists below it, ascending by length."""
     _, l0, w0, h0 = A.REF[name]
-    reset_scene()
     floor = None if name in A.BELOW_GROUND else 0
-    cells = animal_cells(A.build(name, 0.5 * vox, 0.5 * vox, l0, w0, h0), vox, floor)
+    steps, meta = [], []
+    for s in sorted(SPECIMEN_YOUNG.get(name, [])) + [1.0]:
+        reset_scene()
+        cells = animal_cells(A.build(name, 0.5 * vox, 0.5 * vox, l0 * s, w0 * s, h0 * s), vox, floor)
+        steps.append((l0 * s, w0 * s, [cells]))
+        meta.append({"length_m": round(l0 * s, 4), "cells": len(cells)})
     file = f"{name}.cvm"
-    size = write_cvm(os.path.join(out_dir, file), 1, [(l0, w0, [cells])])
-    return file, size, [{"length_m": l0, "cells": len(cells)}]
+    size = write_cvm(os.path.join(out_dir, file), 1, steps)
+    return file, size, meta
 
 
 def main():
@@ -513,7 +525,7 @@ def main():
             file, size, meta = bake_specimen(name, vox, out_dir)
             manifest["specimens"][name] = file
             manifest["detail"][name] = {"bytes": size, "bins": meta}
-            print(f"{vox} m {name}: specimen, {meta[0]['cells']} cells, {size} bytes", flush=True)
+            print(f"{vox} m {name}: specimen, {[m['cells'] for m in meta]} cells, {size} bytes", flush=True)
         with open(manifest_path, "w") as fh:
             json.dump(manifest, fh, indent=1)
             fh.write("\n")

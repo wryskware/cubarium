@@ -153,8 +153,9 @@ pub struct Voxel {
     pub founder_heuristic: Vec<String>,
     /// Development control (`design/predation-and-flight-2026-09-28.md` §2.9): put `N`
     /// adult lanternjaws, hungry (reserve at their wake line), into the **ambient** run's world, on faces
-    /// where their prey live: `--introduce lanternjaw:4`. Repeatable. Refused, with the
-    /// reason, when no prey component exists.
+    /// where their prey live: `--introduce lanternjaw:4`; or `N` chorister packs (roster
+    /// R3), each `pack_size` adults on a covered den near the prey: `--introduce
+    /// chorister:1`. Repeatable. Refused, with the reason, when no prey component exists.
     #[arg(long, value_name = "LINEAGE:N", conflicts_with = "arena")]
     pub introduce: Vec<String>,
     /// Found a fresh world **without** its lanternjaw egg bank (§2.9): the predation
@@ -338,8 +339,14 @@ impl Voxel {
             let Some((name, n)) = spec.split_once(':') else {
                 anyhow::bail!("--introduce takes `<lineage>:<N>`, not `{spec}` (e.g. lanternjaw:2)");
             };
-            let founder = cubarium_search::es::voxel::parse_founder(name)
-                .map_err(|e| anyhow::anyhow!("--introduce `{spec}`: {e}"))?;
+            // The chorister (R3) is no training lineage, so the trainer's parser does not
+            // name it; `--introduce` does.
+            let founder = if name.trim().eq_ignore_ascii_case("chorister") {
+                Founder::Chorister
+            } else {
+                cubarium_search::es::voxel::parse_founder(name)
+                    .map_err(|e| anyhow::anyhow!("--introduce `{spec}`: {e}"))?
+            };
             let n: usize = n.trim().parse().map_err(|_| {
                 anyhow::anyhow!("--introduce `{spec}`: the count is not a whole number")
             })?;

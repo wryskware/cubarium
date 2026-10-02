@@ -84,3 +84,8 @@ founding_count = 4
 # crowns, latticevine faces); the code default is 0, so training worlds are unchanged.
 [fauna.founders.seedporter]
 founding_count = 3
+
+# R3: no chorister packs on the panel (Wrysk: bigger worlds only); the code default is
+# already 0, stated here so the panel says it.
+[fauna.founders.chorister]
+founding_count = 0

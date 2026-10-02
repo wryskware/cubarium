@@ -1822,8 +1822,12 @@
    ]
   },
   "chorister": {
-   "bytes": 794,
+   "bytes": 992,
    "bins": [
+    {
+     "length_m": 0.644,
+     "cells": 34
+    },
     {
      "length_m": 1.4,
      "cells": 142

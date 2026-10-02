@@ -997,8 +997,12 @@
    ]
   },
   "chorister": {
-   "bytes": 242,
+   "bytes": 293,
    "bins": [
+    {
+     "length_m": 0.644,
+     "cells": 6
+    },
     {
      "length_m": 1.4,
      "cells": 33
