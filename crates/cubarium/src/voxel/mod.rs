@@ -234,7 +234,52 @@ impl Default for VoxelConfig {
 /// `[flora]` and `[fauna]` tables, then `--set`, every layer validated against the
 /// parameter registry. A fresh world's plants and animals are built from it.
 pub fn resolve_params(args: &Voxel, cfg: &VoxelConfig) -> Result<Params> {
-    params_of(cfg, &args.set)
+    match &args.params {
+        None => params_of(cfg, &args.set),
+        Some(file) => params_with(cfg, file, &args.set),
+    }
+}
+
+/// [`params_of`] with a co-training run's ecology between the config's tables and `sets`
+/// (`--params`, R1's genome layer): a genome is decoded over the tables, a resolved
+/// parameter file replaces the plants and animals whole.
+pub fn params_with(cfg: &VoxelConfig, file: &std::path::Path, sets: &[String]) -> Result<Params> {
+    use cubarium_search::es::voxel::live::ecology::EcologyParams;
+    let mut p = params_of(cfg, &[])?;
+    let ecology = EcologyParams::load(file).map_err(|e| anyhow::anyhow!("--params: {e}"))?;
+    match &ecology {
+        EcologyParams::Genome(g) => {
+            p.apply_genome(g)
+                .map_err(|e| anyhow::anyhow!("--params {}: {e}", file.display()))?;
+            let moved: Vec<String> = g
+                .genes
+                .iter()
+                .filter(|x| x.value != 1.0)
+                .map(|x| format!("{}={:.3}", x.name, x.value))
+                .collect();
+            static SAID: std::sync::Once = std::sync::Once::new();
+            SAID.call_once(|| eprintln!(
+                "--params {}: a genome of {} genes; off x1: {}",
+                file.display(),
+                g.genes.len(),
+                if moved.is_empty() { "none".into() } else { moved.join(" ") }
+            ));
+        }
+        EcologyParams::Resolved { flora, fauna } => {
+            p.flora = (**flora).clone();
+            p.fauna = **fauna;
+            eprintln!("--params {}: a resolved parameter file", file.display());
+        }
+    }
+    Params::resolve_over(
+        p,
+        &Layers {
+            file: None,
+            genome: None,
+            sets: sets.to_vec(),
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("the parameter set: {e}"))
 }
 
 /// [`resolve_params`] for a caller without a command line: `cfg`'s tables, then `sets`.
@@ -3707,6 +3752,7 @@ mod tests {
         let args = |state: &Path| crate::cli::Voxel {
             config: None,
             set: Vec::new(),
+            params: None,
             sink: crate::cli::VoxelSinkArg::Web,
             scene: crate::cli::VoxelSceneArg::Generated,
             seed: Some(1),
@@ -4608,6 +4654,7 @@ width = 64
         let make_args = |seed: Option<u64>| Voxel {
             config: None,
             set: Vec::new(),
+            params: None,
             sink: VoxelSinkArg::Web,
             scene: VoxelSceneArg::Generated,
             seed,
@@ -4664,6 +4711,7 @@ width = 64
         let base_args = Voxel {
             config: None,
             set: Vec::new(),
+            params: None,
             sink: VoxelSinkArg::Web,
             scene: VoxelSceneArg::Generated,
             seed: None,

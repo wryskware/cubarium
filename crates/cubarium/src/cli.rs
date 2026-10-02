@@ -109,6 +109,13 @@ pub struct Voxel {
     /// cubarium-voxel-sim --example params` lists every path.
     #[arg(long = "set", value_name = "PATH=VALUE")]
     pub set: Vec<String>,
+    /// Plants and animals from a co-training run (opt-in): a search genome (a run's
+    /// `mean.toml` or `best.toml`, decoded over the config's `[flora]`/`[fauna]`) or a
+    /// resolved parameter file (a run's `mean-params/params.toml`, replacing them whole;
+    /// its `[world]` is ignored). Layered after the config file and before `--set`. Only
+    /// a freshly founded world is built from it.
+    #[arg(long, value_name = "FILE")]
+    pub params: Option<PathBuf>,
     /// Where frames go. The minifb preview is absent on purpose: it refuses ring rasters.
     #[arg(long, value_enum, default_value_t = VoxelSinkArg::Web)]
     pub sink: VoxelSinkArg,
