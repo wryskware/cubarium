@@ -116,7 +116,7 @@ COATS = {
         "magenta": ("#B5376A", "#C13E7B"),
     },
     # violet plates (shadow -> lit), dark joints and underside, legs and striking arms, claw
-    # tips, fangs, eyes (magenta), lure orbs (cyan), lure holders. Sampled 2026-10-01 from
+    # tips, fangs and razor blades (pale), eyes (magenta), lure orbs (cyan), lure holders. Sampled 2026-10-01 from
     # the candidate image (k-means of its opaque pixels; not an artbook pick yet).
     "lanternjaw": {
         "a_main": ("#5E4070", "#9168A1"), "a_dark": ("#1B161B", "#2F2433"),
@@ -663,39 +663,49 @@ def bellwing():
 
 # --- lanternjaw · mantis scorpid with a forked lure tail (1.0 x 0.25 x 0.45 m) -------------
 #
-# Candidate (Wrysk 2026-10-01, not yet picked): art/gen/runs/lanternjaw-model/ref-lanternjaw-
-# mantis.png, a front three-quarter view. A low plated scorpid: a helmeted head with two large
+# Reference (Wrysk 2026-10-01): art/gen/runs/lanternjaw-model/ref-lanternjaw-mantis.png, a
+# front three-quarter view. A low plated scorpid: a helmeted head with two large
 # magenta eyes and two small ones, pale curved fangs; a pair of mantis striking arms in front
 # (thick femur raised, a long spined tibia curving down to a hook); six walking legs, knees
 # high, dark joints, dark claw tips; six overlapping back plates over a dark body. The tail
 # forks close to the body (Wrysk: the image only draws a second end beside the first) and the
 # two branches arch forward side by side, each ending in a holder of three claws around a
-# cyan lure orb above the back. Sizes are the founder's adult body (source.json): 1.0 m from
-# the arm hooks to the tail's rear, the body 0.25 m wide (plates and legs reach past it). The
-# tails' arch tops out near 0.57 m, above the 0.45 m height: at 0.45 m it lies flat over the
-# back and the image's tall curl is lost. The orbs hang at ~0.4 m, the voxel row above the
-# knees, so at 0.125 m their two cyan cells are not buried under the legs and tail.
+# large cyan lure orb. Wrysk's changes to the image (2026-10-01): the tails climb higher and reach
+# further, the orbs hanging over and in front of the face; the body tapers and turns up into
+# the tail early; the fangs are larger and vertical, a pale column in front of the face; the
+# striking arms end in pale razor blades. Sizes are the founder's adult body (source.json):
+# ~1.0 m from the blades to the tail root, the body 0.25 m wide (plates and legs reach past
+# it). The tails' arch tops out near 0.6 m (5 voxels), above the 0.45 m height, so the curl
+# reads.
 
 def lanternjaw():
+    # Voxel placement (the bake anchors the origin on a cell centre: cell (i, j, k) centres at
+    # x = 0.125 i, y = 0.125 j, z = 0.125 k + 0.0625). The fangs contain the two centres of
+    # cell column (4, 0, 0..1), the razor blades (4, +-2, 0), each orb (4, +-1, 3..4) in the
+    # top row with its top, front and sides open, so the face, the blades and the lures show
+    # at 0.125 m, the lures from every heading (from behind, over the tail).
     def body_zone(f, s, p):
         return 0 if (p.x > 0.24 and s > -0.2) else 1    # violet helmet; the rest dark under plates
-    body = [  # x, y, z centre, half-width, half-height up, down
-        (0.46, 0, 0.12, 0.035, 0.03, 0.03), (0.42, 0, 0.135, 0.105, 0.075, 0.055),
-        (0.34, 0, 0.145, 0.13, 0.09, 0.06), (0.24, 0, 0.14, 0.125, 0.075, 0.06),
-        (0.14, 0, 0.14, 0.135, 0.078, 0.06), (0.00, 0, 0.145, 0.145, 0.082, 0.065),
-        (-0.14, 0, 0.145, 0.14, 0.078, 0.06), (-0.26, 0, 0.15, 0.125, 0.07, 0.055),
-        (-0.35, 0, 0.155, 0.095, 0.058, 0.048), (-0.39, 0, 0.16, 0.065, 0.05, 0.045)]
+    body = [  # x, y, z centre, half-width, half-height up, down; tapering, the rear turning up
+        (0.47, 0, 0.13, 0.035, 0.03, 0.03), (0.43, 0, 0.14, 0.10, 0.075, 0.055),
+        (0.35, 0, 0.15, 0.125, 0.085, 0.06), (0.25, 0, 0.145, 0.125, 0.075, 0.06),
+        (0.14, 0, 0.145, 0.135, 0.08, 0.06), (0.02, 0, 0.15, 0.13, 0.08, 0.062),
+        (-0.10, 0, 0.16, 0.112, 0.074, 0.058), (-0.20, 0, 0.18, 0.09, 0.066, 0.052),
+        (-0.28, 0, 0.21, 0.07, 0.058, 0.048), (-0.33, 0, 0.25, 0.058, 0.052, 0.045)]
     loft(body, [c("a_main"), c("a_dark")], body_zone, nring=60, nseg=20)
-    # six overlapping back plates, wider than the body, each tilted so its rear edge rides
-    # over the next; the dark body shows in the seams
-    for x, hw in ((0.15, 0.15), (0.06, 0.162), (-0.03, 0.165), (-0.12, 0.16), (-0.21, 0.148), (-0.295, 0.125)):
-        ell((x, 0, 0.205), (0.058, hw, 0.04), c("a_main"), rot=ry(-14))
-    # head: a central ridge, two large magenta eyes, two small ones, pale curved fangs
-    ell((0.35, 0, 0.228), (0.1, 0.018, 0.026), c("a_main"), rot=ry(8))
+    # six overlapping back plates, narrowing and climbing with the body
+    for x, hw, z, tilt in ((0.15, 0.15, 0.21, -14), (0.06, 0.152, 0.215, -14), (-0.03, 0.14, 0.222, -16),
+                           (-0.12, 0.12, 0.232, -20), (-0.20, 0.098, 0.25, -26), (-0.27, 0.078, 0.278, -34)):
+        ell((x, 0, z), (0.058, hw, 0.036), c("a_main"), rot=ry(tilt))
+    # head: a central ridge, two large magenta eyes, two small ones
+    ell((0.35, 0, 0.215), (0.1, 0.018, 0.026), c("a_main"), rot=ry(8))
     for sy in (-1, 1):
         ell((0.395, sy * 0.085, 0.18), (0.036, 0.03, 0.04), c("a_eye"))
         ell((0.435, sy * 0.028, 0.2), (0.014, 0.014, 0.014), c("a_eye"))
-        tube([(0.43, sy * 0.03, 0.11), (0.475, sy * 0.028, 0.075), (0.485, sy * 0.02, 0.03)], 0.02, 0.006, c("a_head"), seg=8)
+        # fangs: two large pale blades hanging vertically in front of the mouth, tips hooked in
+        tube([(0.47, sy * 0.022, 0.24), (0.497, sy * 0.022, 0.135), (0.505, sy * 0.02, 0.035)], 0.04, 0.025,
+             c("a_head"), seg=10)
+        cyl((0.505, sy * 0.02, 0.035), (0.475, sy * 0.006, -0.005), 0.025, 0.003, mat=c("a_head"), seg=8)
 
     def jointed(pts, r0, r1, tip_r):
         """A thick armoured limb: straight segments with dark joint balls; the last segment
@@ -706,42 +716,44 @@ def lanternjaw():
         cyl(pts[-2], pts[-1], tip_r, 0.003, mat=c("a_foot"), seg=8)
 
     for sy in (-1, 1):
-        # striking arm: coxa under the head, a thick femur raised high and out, a long blade-like
-        # tibia curving down and forward to a hook, big spines on its inner edge
+        # striking arm: coxa under the head, a thick femur raised high and out, a tibia curving
+        # down and forward into a pale razor blade with a hooked tip; pale razor spines inside
         hip, knee = (0.30, sy * 0.10, 0.10), (0.39, sy * 0.25, 0.29)
-        tib = [knee, (0.47, sy * 0.275, 0.24), (0.53, sy * 0.27, 0.15), (0.55, sy * 0.255, 0.06)]
+        tib = [knee, (0.47, sy * 0.275, 0.24), (0.52, sy * 0.268, 0.16)]
         tube([hip, knee], 0.056, 0.048, c("a_limb"), seg=10)
         ell(knee, (0.042,) * 3, c("a_dark"))
-        tube(tib, 0.044, 0.028, c("a_limb"), seg=10)
-        cyl(tib[-1], (0.52, sy * 0.23, 0.0), 0.022, 0.003, mat=c("a_foot"), seg=8)
+        tube(tib, 0.044, 0.034, c("a_limb"), seg=10)
+        ell((0.515, sy * 0.255, 0.085), (0.035, 0.028, 0.085), c("a_head"), rot=ry(-10))
+        cyl((0.51, sy * 0.25, 0.01), (0.475, sy * 0.23, 0.0), 0.02, 0.003, mat=c("a_head"), seg=8)
         T = catmull(tib, 21)
-        for t in (0.12, 0.28, 0.44, 0.6, 0.76, 0.9):
+        for t in (0.2, 0.45, 0.7, 0.95):
             p = Vector(T[round(t * 20)])
-            cyl(tuple(p), tuple(p + Vector((-0.024, -sy * 0.06, -0.014))), 0.016, 0.001, mat=c("a_limb"), seg=6)
+            cyl(tuple(p), tuple(p + Vector((-0.024, -sy * 0.06, -0.014))), 0.016, 0.001, mat=c("a_head"), seg=6)
         # six walking legs: thick, knees above the plates, long dark claws splayed outward and
         # toward their own end
         for hx, dx in ((0.17, 0.08), (0.02, 0.0), (-0.14, -0.085)):
-            jointed([(hx, sy * 0.13, 0.12), (hx + dx * 0.5, sy * 0.30, 0.28), (hx + dx, sy * 0.38, 0.11),
+            jointed([(hx, sy * 0.12, 0.12), (hx + dx * 0.5, sy * 0.29, 0.28), (hx + dx, sy * 0.38, 0.11),
                      (hx + dx * 1.15, sy * 0.43, 0.0)], 0.046, 0.034, 0.032)
 
-    # tail: one thick segment off the rear, then it forks close to the body; the two branches
-    # rise steeply, arch over and come down forward side by side, segment by segment
-    seg_tail([(-0.37, 0, 0.17), (-0.43, 0, 0.22)], 0.075, 0.07)
+    # tail: the rear turns up into one thick segment that forks at once; the two branches
+    # climb, arch high over the back and come down in front, the orbs hanging over the face
+    seg_tail([(-0.33, 0, 0.25), (-0.36, 0, 0.31)], 0.062, 0.058)
     for sy in (-1, 1):
-        path = [(-0.43, sy * 0.03, 0.22), (-0.49, sy * 0.07, 0.31), (-0.49, sy * 0.085, 0.41),
-                (-0.43, sy * 0.09, 0.49), (-0.33, sy * 0.09, 0.535), (-0.21, sy * 0.09, 0.525),
-                (-0.12, sy * 0.09, 0.515), (-0.04, sy * 0.09, 0.495), (0.01, sy * 0.09, 0.47)]
-        seg_tail(catmull(path, 11), 0.064, 0.045)
-        # the lure holder: a down-turned segment, three claws cupping the cyan orb below it
+        path = [(-0.36, sy * 0.03, 0.31), (-0.38, sy * 0.07, 0.40), (-0.34, sy * 0.09, 0.49),
+                (-0.24, sy * 0.10, 0.53), (-0.10, sy * 0.10, 0.555), (0.06, sy * 0.10, 0.56),
+                (0.20, sy * 0.10, 0.565), (0.31, sy * 0.105, 0.57), (0.385, sy * 0.11, 0.57)]
+        seg_tail(catmull(path, 12), 0.056, 0.04)
+        # the lure holder: a short forward segment, three claws gripping the back half of a
+        # large cyan orb held out over the face, level with the top of the arch
         end = path[-1]
-        hold = (end[0] + 0.03, end[1], end[2] - 0.035)
-        cyl(end, hold, 0.036, 0.03, mat=c("a_mark"), seg=10)
-        orb = Vector((hold[0] + 0.02, hold[1], hold[2] - 0.055))
-        ell(tuple(orb), (0.056,) * 3, c("a_lure"))
-        for ang in (0, 120, 240):
+        hold = (0.43, sy * 0.115, 0.56)
+        cyl(end, hold, 0.034, 0.03, mat=c("a_mark"), seg=10)
+        orb = Vector((0.505, sy * 0.12, 0.50))
+        ell(tuple(orb), (0.1,) * 3, c("a_lure"))
+        for ang in (90, 210, 330):  # the claws grip the orb's back half only
             a = math.radians(ang)
-            side = Vector((math.cos(a) * 0.058, math.sin(a) * 0.058, 0))
-            cyl(hold, tuple(orb + side + Vector((0, 0, 0.01))), 0.012, 0.003, mat=c("a_mark"), seg=6)
+            tip = orb + Vector((-0.06, math.cos(a) * 0.075, math.sin(a) * 0.075))
+            cyl(hold, tuple(tip), 0.012, 0.003, mat=c("a_mark"), seg=6)
 
 
 def seg_tail(pts, r0, r1):
