@@ -656,14 +656,13 @@ fn controllers(
     // the whole world, and a stage with one browser due indexes one browser's share of
     // the ring. A static episode's senses hold it instead (cone-speed item 4): built
     // once, patched from bites and deaths, bodies re-indexed — the same grid either way.
-    // The v2 cone (the browsers') reads one cell per body, exactly as before predation.
+    // The v2 cone (every sighted forager's: a cone and no hunter's table) reads one cell
+    // per body, exactly as before predation.
+    let v2_cone: [bool; Founder::COUNT] = Founder::ALL
+        .map(|f| f.manifest().cone_range_m > 0.0 && fauna.config.founder(f).hunter.is_none());
     let observers: Vec<f64> = due
         .iter()
-        // R1 stub: the loftstrider reads the browser's cone until its own band-limited
-        // one lands.
-        .filter(|&&i| {
-            matches!(fauna.animals[i].founder, Some(Founder::Browser | Founder::Loftstrider))
-        })
+        .filter(|&&i| fauna.animals[i].founder.is_some_and(|f| v2_cone[f.index()]))
         .map(|&i| fauna.animals[i].pose.x)
         .collect();
     let mut held = senses.as_deref_mut().and_then(|s| s.take_cone());
@@ -723,7 +722,7 @@ fn controllers(
         if fauna.animals[i].age_ticks == manifest.cadence_ticks() {
             fauna.animals[i].founder_state.feedback = IntervalFeedback::default();
         }
-        let occupancy = if matches!(founder, Founder::Browser | Founder::Loftstrider) {
+        let occupancy = if v2_cone[founder.index()] {
             cone_occupancy
         } else {
             predation_occupancy.as_ref()
@@ -1755,6 +1754,26 @@ fn founder_feed(
         return false;
     };
     let taken = fauna.book_eaten(taken, food);
+    // The sloppy feeder (roster R1): `bite_spill_fraction` of what the plant layer gave
+    // falls at once to the litter at its standing face, pro rata in all three currencies,
+    // booked `deposited_*`; only the rest reaches the gut.
+    let spill_fraction = fauna.config.founder(founder).bite_spill_fraction.clamp(0.0, 1.0);
+    let taken = if spill_fraction > 0.0 {
+        let spilt = Taken {
+            organic: taken.organic * spill_fraction,
+            mineral: taken.mineral * spill_fraction,
+            energy: taken.energy * spill_fraction,
+        };
+        let face = fauna.animals[i].site;
+        fauna.book_deposit(flora, face, DepositKind::Litter, spilt);
+        Taken {
+            organic: taken.organic - spilt.organic,
+            mineral: taken.mineral - spilt.mineral,
+            energy: taken.energy - spilt.energy,
+        }
+    } else {
+        taken
+    };
     if let Some(plant) = plant {
         fauna.ledger.bites_by_plant[plant.index()] += 1;
         fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;

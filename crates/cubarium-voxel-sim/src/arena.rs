@@ -218,14 +218,30 @@ const BYSTANDER_CLEARANCE: i64 = 9;
 /// replaces were: the palette is cycled over the sites from a seeded rotation and then
 /// shuffled, so a Stage-A layout carries every kind twice and a Stage-B pair two kinds.
 /// Stage B's palette holds only kinds the band reaches — both patches are scored.
+///
+/// The shredder's palette is the detritus kinds its **diet** eats: litter and carrion,
+/// and the glowcap cap only for a diet holding cap tissue (since roster R1 the shipped
+/// shredder's does not, so its layouts carry two kinds; a cap it cannot eat would be a
+/// scored patch at half its stock).
 fn patch_kinds(
     founder: Founder,
+    diet: cubarium_voxel_fauna::Diet,
     layout_seed: u64,
     kind: LayoutKind,
     sites: usize,
 ) -> Vec<PatchKind> {
+    use cubarium_voxel_fauna::Food;
+    let blind: Vec<PatchKind> = [
+        (PatchKind::Litter, Food::Litter),
+        (PatchKind::Carrion, Food::Carrion),
+        (PatchKind::Cap, Food::CapTissue),
+    ]
+    .into_iter()
+    .filter(|&(_, food)| diet.eats(food))
+    .map(|(k, _)| k)
+    .collect();
     let palette: &[PatchKind] = match (founder, kind) {
-        (Founder::Blind, _) => &[PatchKind::Litter, PatchKind::Carrion, PatchKind::Cap],
+        (Founder::Blind, _) => &blind,
         (Founder::Browser, LayoutKind::StageA) => {
             &[PatchKind::Seedling, PatchKind::Rosette, PatchKind::Stripped]
         }
@@ -233,7 +249,7 @@ fn patch_kinds(
             &[PatchKind::Seedling, PatchKind::Rosette]
         }
         (Founder::Lanternjaw, _) => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
-        (Founder::Capgnawer | Founder::Loftstrider, _) => panic!("R1: the sensing arena has no capgnawer or loftstrider layout (none until P2)"),
+        (Founder::Capgnawer | Founder::Loftstrider, _) => unreachable!("refused by Arena::has_layout"),
     };
     let mut rng = Rng::new(layout_seed ^ PATCH_KIND_SALT);
     let rotation = rng.below(palette.len());
@@ -468,6 +484,13 @@ impl SuccessorBand {
 }
 
 impl Arena {
+    /// Whether the sensing arena has a layout for `founder`: the littershredder and the
+    /// frondgrazer. Every other lineage (the lanternjaw; the capgnawer and loftstrider of
+    /// roster R1) has none until P2, and [`Arena::build`] refuses it by name.
+    pub fn has_layout(founder: Founder) -> bool {
+        matches!(founder, Founder::Blind | Founder::Browser)
+    }
+
     /// Build the frozen arena for `founder` from `layout_seed` on `grid`, its plant and
     /// animal layers from `layers` (the config in force, its plants already at
     /// `grid`'s cell size), and place one idle founder body off the food. The world is not
@@ -567,6 +590,15 @@ impl Arena {
         grid: ArenaGrid,
         layers: LayerConfig,
     ) -> (Arena, Option<Site>) {
+        // The sensing arena has layouts for the two grazing lineages only. A lineage with
+        // none (the lanternjaw, and the roster's capgnawer and loftstrider until P2) is
+        // refused here, with its name, before any layout draw.
+        assert!(
+            Arena::has_layout(founder),
+            "the sensing arena has no layout for the {}: only the littershredder and the \
+             frondgrazer have one until P2; give it a founding count of 0 in a search",
+            founder.name()
+        );
         let scale = grid.scale();
         let ground_y = grid.ground_y();
         let config = VoxelConfig {
@@ -725,7 +757,13 @@ impl Arena {
 
         // What each site holds, in the sorted resource order, drawn from its own stream
         // so the pond, the resource sites and the start placement are untouched.
-        let kinds = patch_kinds(founder, layout_seed, kind, resources.len());
+        let kinds = patch_kinds(
+            founder,
+            layers.fauna.founder(founder).diet,
+            layout_seed,
+            kind,
+            resources.len(),
+        );
         for (index, &planned) in resources.iter().enumerate() {
             // The stock a scored patch carries: Stage A's tile, or Stage B's patch with
             // the initial one at half the successor.
@@ -734,7 +772,7 @@ impl Arena {
                 (Founder::Blind, LayoutKind::Reacquisition(_)) => REACQUISITION_LITTER_PER_PATCH,
                 (Founder::Browser, _) => BROWSER_FOLIAGE_PER_STAND,
                 (Founder::Lanternjaw, _) => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
-                (Founder::Capgnawer | Founder::Loftstrider, _) => panic!("R1: the sensing arena has no capgnawer or loftstrider layout (none until P2)"),
+                (Founder::Capgnawer | Founder::Loftstrider, _) => unreachable!("refused by Arena::has_layout"),
             };
             let organic = if Some(planned) == initial_patch {
                 REACQUISITION_INITIAL_PATCH_FRACTION * full
@@ -823,7 +861,7 @@ impl Arena {
                         toward + (2.0 * rng.unit() - 1.0) * std::f64::consts::FRAC_PI_2
                     }
                     Founder::Lanternjaw => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
-                    Founder::Capgnawer | Founder::Loftstrider => panic!("R1: the sensing arena has no capgnawer or loftstrider layout (none until P2)"),
+                    Founder::Capgnawer | Founder::Loftstrider => unreachable!("refused by Arena::has_layout"),
                 }
             };
             // In the fauna's own `[0, 2pi)`, which its motion step wraps every heading
@@ -841,7 +879,7 @@ impl Arena {
             Founder::Blind => Founder::Browser,
             Founder::Browser => Founder::Blind,
             Founder::Lanternjaw => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
-            Founder::Capgnawer | Founder::Loftstrider => panic!("R1: the sensing arena has no capgnawer or loftstrider layout (none until P2)"),
+            Founder::Capgnawer | Founder::Loftstrider => unreachable!("refused by Arena::has_layout"),
         };
         let mut brng = Rng::new(layout_seed ^ BYSTANDER_SALT);
         let mut pool: Vec<Site> = candidates
@@ -988,7 +1026,7 @@ impl Arena {
                 add(&mut got, t.map(|t| t.taken));
             }
             Founder::Lanternjaw => add(&mut got, self.flora.take_carrion(site, want)),
-            Founder::Capgnawer | Founder::Loftstrider => panic!("R1: the sensing arena has no capgnawer or loftstrider layout (none until P2)"),
+            Founder::Capgnawer | Founder::Loftstrider => unreachable!("refused by Arena::has_layout"),
         }
         (got.organic > 0.0).then_some(got)
     }
@@ -1191,7 +1229,10 @@ mod tests {
                 }
                 let kinds: std::collections::BTreeSet<_> =
                     standard.resource_kinds.iter().map(|k| k.as_str()).collect();
-                assert_eq!(kinds.len(), 3, "{founder:?}: Stage A lays every kind");
+                // The shredder's palette is its diet's kinds (litter, carrion since roster
+                // R1); the browser's three crown kinds.
+                let palette = if founder == Founder::Blind { 2 } else { 3 };
+                assert_eq!(kinds.len(), palette, "{founder:?}: Stage A lays every kind");
             }
         }
     }

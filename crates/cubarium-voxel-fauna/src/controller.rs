@@ -457,10 +457,12 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         // The ambush teacher (predation §2.12): it has no trained centre, so this drives
         // every lanternjaw, hatched or introduced.
         Founder::Lanternjaw => Box::new(LanternjawAmbush::with_config(teachers)),
-        // R1 stub: the shredder's forager (reads the capgnawer's own `Chem` once the
-        // manifest has it) and the browser's forager on the loftstrider's cone and mouth.
-        Founder::Capgnawer => Box::new(BlindForager::with_config(teachers)),
-        Founder::Loftstrider => Box::new(BrowserForager::with_config(teachers)),
+        // Roster R1: the shredder's forager on the capgnawer's own `Chem(fungal)`, and the
+        // browser's forager on the loftstrider's banded cone and high mouth.
+        Founder::Capgnawer => Box::new(BlindForager::for_founder(Founder::Capgnawer, teachers)),
+        Founder::Loftstrider => {
+            Box::new(BrowserForager::for_founder(Founder::Loftstrider, teachers))
+        }
     }
 }
 
@@ -498,7 +500,19 @@ impl BlindForager {
 
     /// The blind founder's heuristic on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
     pub fn with_config(cfg: TeacherConfig) -> BlindForager {
-        let manifest = Founder::Blind.manifest();
+        BlindForager::for_founder(Founder::Blind, cfg)
+    }
+
+    /// The same forager on any blind-layout lineage's manifest: it follows that
+    /// manifest's one `Chem` module, whatever field it reads (the shredder's detritus, the
+    /// capgnawer's fungal field).
+    pub fn for_founder(founder: Founder, cfg: TeacherConfig) -> BlindForager {
+        let manifest = founder.manifest();
+        let chem = *manifest
+            .modules
+            .iter()
+            .find(|m| m.name.starts_with("Chem("))
+            .unwrap_or_else(|| panic!("the {} manifest has no Chem module", founder.name()));
         BlindForager {
             cfg,
             turn_bias: 1.0,
@@ -506,7 +520,7 @@ impl BlindForager {
             escape: 0,
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
-            chem: module_slot(&manifest, "Chem(detritus)"),
+            chem,
         }
     }
 }
@@ -637,6 +651,12 @@ pub struct BrowserForager {
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     cone: crate::manifest::Module,
+    /// Whether the adult's steepest ray reaches flat ground inside the cone's range, so
+    /// that the forward sector's floor rows mean "flat" ([`TeacherConfig::flat_clear`]).
+    /// True for the grazer (eye 0.3 m); false for the loftstrider (eye 1.5 m, the
+    /// −40° ray ends 1.29 m down), whose drop reflex is off and whose refused motor still
+    /// turns it away. Geometry, not a knob.
+    reads_drops: bool,
     /// The reflexes' numbers ([`TeacherConfig`]).
     cfg: TeacherConfig,
 }
@@ -650,7 +670,22 @@ impl BrowserForager {
 
     /// The browser founder's heuristic on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
     pub fn with_config(cfg: TeacherConfig) -> BrowserForager {
-        let manifest = Founder::Browser.manifest();
+        BrowserForager::for_founder(Founder::Browser, cfg)
+    }
+
+    /// The same forager on any sighted lineage's manifest (the grazer's, the
+    /// loftstrider's banded cone).
+    pub fn for_founder(founder: Founder, cfg: TeacherConfig) -> BrowserForager {
+        let manifest = founder.manifest();
+        let p = crate::FounderPhysiology::frozen(founder);
+        let eye = p.eye_height_fraction * p.adult_height_m;
+        let steepest = manifest
+            .ray_pitch_offsets_deg
+            .iter()
+            .fold(0.0f64, |a, &d| a.min(d))
+            .abs()
+            .to_radians();
+        let reads_drops = steepest > 0.0 && eye / steepest.sin() <= manifest.cone_range_m;
         BrowserForager {
             cfg,
             wander_bias: 1.0,
@@ -659,6 +694,7 @@ impl BrowserForager {
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
             cone: module_slot(&manifest, "Cone(3, foliage/body)"),
+            reads_drops,
         }
     }
 }
@@ -686,8 +722,9 @@ impl Controller for BrowserForager {
         // The forward sector (s1) read against flat ground: its downward rows escaping,
         // or its only hits far below.
         let (clear, proximity) = (o[base + 6], o[base + 7]);
-        let drop = clear > cfg.flat_clear + cfg.half_ray
-            || (clear >= cfg.flat_clear - cfg.half_ray && proximity < cfg.drop_proximity);
+        let drop = self.reads_drops
+            && (clear > cfg.flat_clear + cfg.half_ray
+                || (clear >= cfg.flat_clear - cfg.half_ray && proximity < cfg.drop_proximity));
         let away = self.wander_bias;
         if let Some((forward, turn)) =
             escape(&cfg, &mut self.escape, o[7] < cfg.motor_refused || drop, away)

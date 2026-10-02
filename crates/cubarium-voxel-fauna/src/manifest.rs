@@ -271,6 +271,10 @@ pub struct Manifest {
     /// [`Manifest::mouth_reach_body_lengths`].
     pub eye_height_fraction: f64,
     pub mouth_ceiling_fraction: f64,
+    /// The mouth band's floor, a fraction of height (roster R1): 0 for every lineage but
+    /// the loftstrider, whose band is `[0.235, 1.03] × height`. The canonical text names it
+    /// only when it is not 0, so the older lineages' digests do not move.
+    pub mouth_floor_fraction: f64,
     pub contact_height_fraction: f64,
     /// The lineage's step up and step down, metres: what the step rule treats as a ledge
     /// rather than a wall or a cliff (the contact receptors read the step up), and
@@ -330,6 +334,11 @@ pub struct Manifest {
     pub ray_pitch_offsets_deg: &'static [f64],
     /// Maximum cone ray range, metres; zero for a blind founder.
     pub cone_range_m: f64,
+    /// **The cone sees only the foliage its mouth band reaches** (roster R1, the
+    /// loftstrider's interim cone until P2): a foliage crown cell outside
+    /// [`crate::Body::mouth_layers`] from the standing face reads as an occluder, not as
+    /// foliage. `false` for every other lineage; named in the canonical text only when set.
+    pub cone_banded_to_mouth: bool,
     /// The bulk density a ground pool's physical height is computed with,
     /// `organic / (cell area × density)`, organic units per cubic metre (D3). An authored
     /// placeholder (`design/backlog.md` §1); the cone reads the same constant.
@@ -418,6 +427,16 @@ const MODULE_CHEM_DETRITUS: Module = Module {
     channels: &CHEM_DETRITUS_CHANNELS,
 };
 
+/// The capgnawer's diffused cue channel (roster R1): the **fungal** field, whose sources
+/// are the cap stock of saprotroph stands ([`crate::senses`]), in the shredder's
+/// `Chem(detritus)` slot and width.
+const MODULE_CHEM_FUNGAL: Module = Module {
+    name: "Chem(fungal)",
+    offset: 18,
+    width: 3,
+    channels: &CHEM_DETRITUS_CHANNELS,
+};
+
 const LIGHT_CHANNELS: [&str; 2] = ["response", "valid"];
 
 const MODULE_LIGHT: Module = Module {
@@ -462,6 +481,14 @@ const BLIND_MODULES: [Module; 6] = [
     MODULE_WET,
     MODULE_TASTE1,
     MODULE_CHEM_DETRITUS,
+    MODULE_LIGHT,
+];
+const CAPGNAWER_MODULES: [Module; 6] = [
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CHEM_FUNGAL,
     MODULE_LIGHT,
 ];
 const BROWSER_MODULES: [Module; 5] = [
@@ -571,6 +598,7 @@ struct Anchors {
     height: f64,
     eye: f64,
     mouth_ceiling: f64,
+    mouth_floor: f64,
     contact: f64,
     reach: f64,
     step_up: f64,
@@ -592,6 +620,7 @@ fn anchors(founder: Founder) -> Anchors {
         height: p.adult_height_m,
         eye: p.eye_height_fraction,
         mouth_ceiling: p.mouth_ceiling_fraction,
+        mouth_floor: p.mouth_floor_fraction,
         contact: p.contact_height_fraction,
         reach: p.mouth_reach_length_fraction,
         step_up: p.step_up_m,
@@ -603,6 +632,29 @@ fn anchors(founder: Founder) -> Anchors {
         cruise: p.cruise_body_lengths_per_s * p.adult_length_m,
         yaw: p.yaw_cap_rad_per_s,
         mass: p.mass_scale,
+    }
+}
+
+/// The `Self` references of a lineage's manifest, read off its placeholder (x1)
+/// physiology by the rule the three older manifests' hand-written numbers follow: the
+/// body and structural references are `body_max`, the reserve `reserve_cap · body_max`,
+/// the energy `energy_density · (body_max + reserve_cap · body_max)`. Used by the roster
+/// lineages (R1); the older manifests keep their literals so their digests do not move.
+struct SelfReferences {
+    body: f64,
+    reserve: f64,
+    energy: f64,
+}
+
+impl SelfReferences {
+    fn of(founder: Founder) -> SelfReferences {
+        let c = crate::FounderPhysiology::placeholder(founder).core;
+        let reserve = c.reserve_cap * c.body_max;
+        SelfReferences {
+            body: c.body_max,
+            reserve,
+            energy: c.energy_density * (c.body_max + reserve),
+        }
     }
 }
 
@@ -635,6 +687,7 @@ impl Manifest {
             body_height_m: a.height,
             eye_height_fraction: a.eye,
             mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
             contact_height_fraction: a.contact,
             step_up_m: a.step_up,
             step_down_m: a.step_down,
@@ -660,6 +713,7 @@ impl Manifest {
             ray_yaw_offsets_deg: &[],
             ray_pitch_offsets_deg: &[],
             cone_range_m: 0.0,
+            cone_banded_to_mouth: false,
             pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
@@ -685,6 +739,7 @@ impl Manifest {
             body_height_m: a.height,
             eye_height_fraction: a.eye,
             mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
             contact_height_fraction: a.contact,
             step_up_m: a.step_up,
             step_down_m: a.step_down,
@@ -710,6 +765,7 @@ impl Manifest {
             ray_yaw_offsets_deg: &BROWSER_RAY_YAW_OFFSETS_DEG,
             ray_pitch_offsets_deg: &BROWSER_RAY_PITCH_OFFSETS_DEG,
             cone_range_m: 2.0,
+            cone_banded_to_mouth: false,
             pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
@@ -736,6 +792,7 @@ impl Manifest {
             body_height_m: a.height,
             eye_height_fraction: a.eye,
             mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
             contact_height_fraction: a.contact,
             step_up_m: a.step_up,
             step_down_m: a.step_down,
@@ -762,6 +819,7 @@ impl Manifest {
             ray_yaw_offsets_deg: &BROWSER_RAY_YAW_OFFSETS_DEG,
             ray_pitch_offsets_deg: &BROWSER_RAY_PITCH_OFFSETS_DEG,
             cone_range_m: 2.0,
+            cone_banded_to_mouth: false,
             pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
@@ -771,23 +829,73 @@ impl Manifest {
         }
     }
 
-    /// The capgnawer (roster R1): the blind layout, its `Chem` reading the fungal field.
-    // R1 stub: the shredder's manifest under the capgnawer's name. The implementer gives
-    // it its own module list (`Chem(fungal)` in the shredder's `Chem(detritus)` slot) and
-    // its own anchors and references.
+    /// The capgnawer (roster R1): the blind 23-input layout with `Chem(fungal)` — the
+    /// fungal field, sourced by saprotroph cap stock — in the shredder's `Chem(detritus)`
+    /// slot; its own anchors (0.25 × 0.21 × 0.19 m) and `Self` references.
     pub fn capgnawer() -> Manifest {
+        let a = anchors(Founder::Capgnawer);
+        let r = SelfReferences::of(Founder::Capgnawer);
         Manifest {
             founder: Founder::Capgnawer,
+            modules: &CAPGNAWER_MODULES,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
+            contact_height_fraction: a.contact,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
+            body_reference: r.body,
+            adult_energy_reference: r.energy,
+            adult_reserve_reference: r.reserve,
+            structural_reference: r.body,
+            cruise_m_per_s: a.cruise,
+            yaw_cap_rad_per_s: a.yaw,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
+            mouth_reach_body_lengths: a.reach,
+            mass_scale: a.mass,
             ..Manifest::blind()
         }
     }
 
-    /// The loftstrider (roster R1): the browser's layout, its cone banded to its mouth.
-    // R1 stub: the browser's manifest under the loftstrider's name. The implementer gives
-    // it its own anchors and references (and the band-limited cone).
+    /// The loftstrider (roster R1): the browser's 37-input layout and fan, its own anchors
+    /// (2.2 × 2.2 × 3.4 m, the eye ring at 1.5 m, the mouth band 0.8–3.5 m) and `Self`
+    /// references, and a cone that counts only foliage inside its mouth band
+    /// ([`Manifest::cone_banded_to_mouth`]). Interim until P2.
     pub fn loftstrider() -> Manifest {
+        let a = anchors(Founder::Loftstrider);
+        let r = SelfReferences::of(Founder::Loftstrider);
         Manifest {
             founder: Founder::Loftstrider,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
+            contact_height_fraction: a.contact,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
+            body_reference: r.body,
+            adult_energy_reference: r.energy,
+            adult_reserve_reference: r.reserve,
+            structural_reference: r.body,
+            cruise_m_per_s: a.cruise,
+            yaw_cap_rad_per_s: a.yaw,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
+            mouth_reach_body_lengths: a.reach,
+            mass_scale: a.mass,
+            cone_banded_to_mouth: true,
             ..Manifest::browser()
         }
     }
@@ -869,8 +977,14 @@ impl Manifest {
         // on the living body, what the legs can step, and the water it wades and drowns in.
         let _ = write!(
             s,
-            "|anchor:eye={}H,mouth=[0,{}H],contact={}H|step:up={},down={},walls={}|wade:{}H|drown:{}H/{}s",
+            "|anchor:eye={}H,mouth=[{},{}H],contact={}H|step:up={},down={},walls={}|wade:{}H|drown:{}H/{}s",
             self.eye_height_fraction,
+            // A floor of 0 keeps the text it always had (`[0,…]`).
+            if self.mouth_floor_fraction == 0.0 {
+                "0".to_string()
+            } else {
+                format!("{}H", self.mouth_floor_fraction)
+            },
             self.mouth_ceiling_fraction,
             self.contact_height_fraction,
             self.step_up_m,
@@ -933,6 +1047,9 @@ impl Manifest {
             }
             let _ = write!(s, "|range:{}", self.cone_range_m);
             let _ = write!(s, "|traversal:{CONE_TRAVERSAL}");
+            if self.cone_banded_to_mouth {
+                let _ = write!(s, "|cone_band:mouth");
+            }
         } else {
             let _ = write!(s, "|sectors:none");
         }

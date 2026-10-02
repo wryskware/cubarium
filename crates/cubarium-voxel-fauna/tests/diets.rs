@@ -24,7 +24,7 @@ use cubarium_voxel_flora::{
 };
 
 use cubarium_voxel_fauna::{
-    Actions, Command as FaunaCommand, Fauna, FaunaConfig, Food, Founder, Manifest, Scripted,
+    Actions, Command as FaunaCommand, Diet, Fauna, FaunaConfig, Food, Founder, Manifest, Scripted,
     StartingStores, browser_mouth_foliage,
 };
 
@@ -196,12 +196,14 @@ fn a_founder_whose_diet_lacks_cap_tissue_never_takes_the_cap_in_its_band() {
     );
 }
 
-/// (1) **A shredder eats a glowcap cap.** No litter and no carrion anywhere, one
-/// glowcap whose cap sits in the shredder's band: the bite comes out of the cap's
-/// foliage as a foliage withdrawal, is booked under the cap-tissue food class, and both
-/// ledgers close.
+/// (1) **A blind mouth whose diet holds cap tissue eats a glowcap cap.** No litter and
+/// no carrion anywhere, one glowcap whose cap sits in the band: the bite comes out of the
+/// cap's foliage as a foliage withdrawal, is booked under the cap-tissue food class, and
+/// both ledgers close. Since roster R1 the shipped shredder eats no caps (the capgnawer
+/// does), so the fixture gives this shredder the pre-R1 diet `[litter, cap_tissue,
+/// carrion]`: the mouth rule is what is under test.
 #[test]
-fn a_shredder_with_no_litter_eats_the_glowcap_cap_in_its_band() {
+fn a_blind_mouth_whose_diet_holds_caps_eats_the_glowcap_cap_in_its_band() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
     assert_eq!(
@@ -219,7 +221,10 @@ fn a_shredder_with_no_litter_eats_the_glowcap_cap_in_its_band() {
         "there must be no litter for this to be the cap's bite"
     );
 
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut config = FaunaConfig::default();
+    config.founders[Founder::Blind.index()].diet =
+        Diet::of(&[Food::Litter, Food::CapTissue, Food::Carrion]);
+    let mut fauna = Fauna::new(config);
     let _ = feeding(&mut fauna, &world, Founder::Blind, 2, 2);
     for _ in 0..5 {
         fauna.step(&world, &mut flora);

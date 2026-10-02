@@ -111,6 +111,16 @@ const LITTER_YIELD: f64 = 0.5;
 /// shredder builds out of a unit of glowcap cap tissue.
 const FOLIAGE_YIELD: f64 = 0.5;
 
+/// The capgnawer's body volume over the littershredder's (roster R1): 0.25 × 0.21 ×
+/// 0.19 m over 0.375 × 0.125 × 0.125 m. A derivation, not a knob: the physiology fields
+/// it scales are the knobs.
+pub const CAPGNAWER_VOLUME_RATIO: f64 = (0.25 * 0.21 * 0.19) / (0.375 * 0.125 * 0.125);
+
+/// The loftstrider's **hull** volume over the frondgrazer's body (roster R1): 1.5 × 0.55
+/// × 0.45 m over 0.75 × 0.375 × 0.375 m. Its 2.2 × 2.2 × 3.4 m envelope is legs and
+/// fronds, so it is not used here.
+pub const LOFTSTRIDER_VOLUME_RATIO: f64 = (1.5 * 0.55 * 0.45) / (0.75 * 0.375 * 0.375);
+
 /// **A living body's physical geometry**, in metres, resolved from its lineage's
 /// [`FounderPhysiology`] and its current structure.
 ///
@@ -281,9 +291,9 @@ pub struct FounderPhysiology {
     /// **The sloppy feeder's spill** (roster R1): this fraction of every bite's withdrawn
     /// tissue goes to the litter pool at its standing face instead of its mouth, a
     /// mass-balance flow (the ledgers close). 0 for every lineage but the loftstrider
-    /// (0.25).
-    // R1 stub: the field and its registry row exist; the step does not read it yet, and
-    // the loftstrider's default is still 0.
+    /// (0.25). The plant layer gives the whole bite (its `consumed_*`); the animal books
+    /// it eaten and at once deposits this share of it, organic, mineral and energy pro
+    /// rata, as litter at its standing face (`deposited_*`), before assimilating the rest.
     pub bite_spill_fraction: f64,
     /// The contact receptors' height, as a fraction of body height over the standing
     /// surface (0.5). A placeholder.
@@ -340,8 +350,9 @@ pub struct FounderPhysiology {
     #[serde(default = "one")]
     pub mass_scale: f64,
     /// **What it eats** ([`crate::Diet`]): the food classes its mouth takes, each from its
-    /// own source. Shredder `[litter, cap_tissue, carrion]`, browser `[foliage]`,
-    /// lanternjaw `[carrion]`. Not a number, so it has no registry row; set it in TOML as
+    /// own source. Shredder `[litter, carrion]` (it lost the caps in roster R1), browser
+    /// `[foliage]`, lanternjaw `[carrion]`, capgnawer `[cap_tissue, litter]`, loftstrider
+    /// `[foliage]`. Not a number, so it has no registry row; set it in TOML as
     /// a list of food names.
     pub diet: crate::Diet,
     /// **How a fresh world founds it** ([`Founding`]): bodies, or the egg bank's clutches.
@@ -422,9 +433,9 @@ impl Hunter {
     /// band 0.6 H, windup 0.15 s, lunge 0.25 s, recovery 3 s, a strike at 100 s of awake
     /// upkeep, the lure at its awake upkeep, and the satiated rest at 0.9 / 0.25 / 0.5.
     pub const LANTERNJAW: Hunter = Hunter {
-        // R1: the capgnawer's column (index 3) is owed; the loftstrider (4) is on no
-        // list until the chorister.
-        prey: [true, true, false, false, false],
+        // Shredder, grazer and (roster R1) the capgnawer; the size window decides. The
+        // loftstrider (4) is on no list until the chorister.
+        prey: [true, true, false, true, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
@@ -559,11 +570,10 @@ impl FounderPhysiology {
                 agility: 0.3,
                 counter: None,
                 mass_scale: 1.0,
-                diet: crate::Diet::of(&[
-                    crate::Food::Litter,
-                    crate::Food::CapTissue,
-                    crate::Food::Carrion,
-                ]),
+                // Litter and carrion (Wrysk, 2026-10-01: the shredder goes back to litter;
+                // the capgnawer owns the glowcap caps, roster R1). Its cap-tissue yield
+                // stays as the capgnawer's template.
+                diet: crate::Diet::of(&[crate::Food::Litter, crate::Food::Carrion]),
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::LitterBed,
                 founding_count: 8,
@@ -691,23 +701,106 @@ impl FounderPhysiology {
                 founding_site: FoundingSite::AtFood,
                 founding_count: 3,
             },
-            // R1 stub: the shredder's table under the capgnawer's marker, founding none.
-            // The implementer writes its own (brief R1: 0.25 x 0.21 x 0.19 m, diet
-            // [cap_tissue, litter], cap yield the shredder's, litter yield half of it, the
-            // shredder's reproduction mode with rates scaled by body volume, founding
-            // bodies at food).
-            Founder::Capgnawer => FounderPhysiology {
-                founding_count: 0,
-                ..FounderPhysiology::placeholder(Founder::Blind)
-            },
-            // R1 stub: the browser's table under the loftstrider's marker, founding none.
-            // The implementer writes its own (brief R1: 2.2 x 2.2 x 3.4 m, eye 0.44, mouth
-            // band 0.235..1.03 of height, step up 0.5 m, wades where the grazer drowns,
-            // one young per birth, rates scaled by body volume, founding bodies at food).
-            Founder::Loftstrider => FounderPhysiology {
-                founding_count: 0,
-                ..FounderPhysiology::placeholder(Founder::Browser)
-            },
+            // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
+            // glowcap's grazer, built from the littershredder by **body volume**, the way
+            // P1 built the lanternjaw from the grazer (predation §2.12).
+            //
+            // Volume ratio: its adult body 0.25 × 0.21 × 0.19 m = 0.009975 m³ over the
+            // shredder's 0.375 × 0.125 × 0.125 m = 0.005859 m³, **r = 1.7024**
+            // ([`CAPGNAWER_VOLUME_RATIO`]). Every stock (body_max, body_min, birth_body,
+            // the clutch: egg_organic and surplus_floor) and every absolute rate
+            // (bite_per_s, growth_max_per_s) is the shredder's × r
+            // ([`SpeciesConfig::scale_mass`], which scales exactly those). Upkeep and the
+            // motor are already per unit of body per second, so they stay and the absolute
+            // upkeep scales with the body: specific rates equal the shredder's. The reserve
+            // cap is a fraction of body, so the reserve ceiling `reserve_cap · body_max`
+            // also scales by r (multiplying the fraction too would scale it by r²). Clocks
+            // (hold, interval, incubation, lifespan) are the shredder's: its reproduction
+            // mode and timings.
+            Founder::Capgnawer => {
+                let shredder = FounderPhysiology::placeholder(Founder::Blind);
+                let mut core = shredder.core;
+                core.scale_mass(CAPGNAWER_VOLUME_RATIO);
+                FounderPhysiology {
+                    core,
+                    // A gripping six-legged walker on bark: it keeps the shredder's legs
+                    // (0.25 m both ways, climbs walls, wades a quarter of its height).
+                    adult_length_m: 0.25,
+                    adult_width_m: 0.21,
+                    adult_height_m: 0.19,
+                    // Cap tissue at the shredder's cap yield; litter (conditioned, a weak
+                    // fallback) at half the shredder's litter yield. Carrion and foliage
+                    // are not its food and carry the cap yield so none is a silent zero.
+                    yield_by_food: [
+                        0.5 * LITTER_YIELD,
+                        FOLIAGE_YIELD,
+                        FOLIAGE_YIELD,
+                        FOLIAGE_YIELD,
+                    ],
+                    diet: crate::Diet::of(&[crate::Food::CapTissue, crate::Food::Litter]),
+                    // Near glowcap stands: a face from which its mouth reaches a stocked cap
+                    // (the diet-driven food filter).
+                    founding: Founding::Bodies,
+                    founding_site: FoundingSite::AtFood,
+                    founding_count: 0,
+                    ..shredder
+                }
+            }
+            // The loftstrider (roster R1; `design/organism-large-animals-2026-09-23.md` §3):
+            // the tall browser, built from the frondgrazer by **body volume**.
+            //
+            // Volume ratio, from its **hull** (1.5 × 0.55 × 0.45 m = 0.37125 m³, the body
+            // that carries the tissue; the 2.2 × 2.2 × 3.4 m leg and frond envelope is its
+            // geometry, not its mass) over the grazer's 0.75 × 0.375 × 0.375 m =
+            // 0.10547 m³: **r = 3.52** ([`LOFTSTRIDER_VOLUME_RATIO`]). Stocks and absolute
+            // rates are the grazer's × r ([`SpeciesConfig::scale_mass`]); upkeep and the
+            // motor are per unit of body, so specific rates equal the grazer's; the reserve
+            // ceiling scales with the body. Long-lived and slow: one young per birth (a
+            // gestation), the gestation 3× the grazer's and the median lifespan 3× the
+            // grazer's. The young following its parent is not modelled (owed).
+            Founder::Loftstrider => {
+                let grazer = FounderPhysiology::placeholder(Founder::Browser);
+                let mut core = grazer.core;
+                core.scale_mass(LOFTSTRIDER_VOLUME_RATIO);
+                core.reproduction.gestation_s *= 3.0;
+                core.lifespan_median_s *= 3.0;
+                FounderPhysiology {
+                    core,
+                    // Long legs: a 0.5 m step both ways, no wall climbing.
+                    step_up_m: 0.5,
+                    step_down_m: 0.5,
+                    climbs_walls: false,
+                    // It wades to a quarter of its height (0.85 m adult, under the hull)
+                    // where the grazer drowns at 0.375 m, and is under at the eye ring.
+                    wade_height_fraction: 0.25,
+                    drown_height_fraction: 0.44,
+                    adult_length_m: 2.2,
+                    adult_width_m: 2.2,
+                    adult_height_m: 3.4,
+                    // The eye ring at 1.5 m of 3.4.
+                    eye_height_fraction: 0.44,
+                    // The mouth band 0.8–3.5 m of 3.4: fronds from shrub height to the
+                    // crowns, never turf, rosettes or ground cover.
+                    mouth_floor_fraction: 0.235,
+                    mouth_ceiling_fraction: 1.03,
+                    // The sloppy feeder: a quarter of each bite falls to the litter at
+                    // its face.
+                    bite_spill_fraction: 0.25,
+                    // Its feet meet the terrain, not its hull: contact at the knee, 0.5 m.
+                    contact_height_fraction: 0.15,
+                    // On no prey list until the chorister (R3); no defence counter.
+                    armour: 0.0,
+                    agility: 0.0,
+                    counter: None,
+                    diet: crate::Diet::only(crate::Food::Foliage),
+                    // Near the tallest stands: a face from which its banded mouth reaches
+                    // a stocked layer.
+                    founding: Founding::Bodies,
+                    founding_site: FoundingSite::AtFood,
+                    founding_count: 0,
+                    ..grazer
+                }
+            }
         }
     }
 
@@ -1957,7 +2050,6 @@ pub(crate) fn taste_reading(
         standing_y,
         manifest,
         body,
-        founder,
         FounderPhysiology::placeholder(founder).diet,
         crate::CueConfig::default().emit_reference,
         // The unit tests' bodies are the placeholder tables' (mass 1).
@@ -1975,7 +2067,6 @@ pub(crate) fn taste_reading_at(
     standing_y: u32,
     manifest: &Manifest,
     body: &Body,
-    founder: Founder,
     diet: crate::Diet,
     emit_reference: f64,
     mass_scale: f64,
@@ -1996,13 +2087,12 @@ pub(crate) fn taste_reading_at(
     // as a valid zero; the lanternjaw's reads `carrion`, ground likewise; the browser's
     // reads `foliage`, and a mouth in air is no contact and no taste.
     let offer = mouth_meal(fv, view, &cols, standing_y, body, diet).map(|(_, _, offer)| offer);
-    let (class, ground_valid) = match founder {
-        // R1 stub: the capgnawer tastes as the blind layout, the loftstrider as the
-        // browser; the implementer confirms or gives each its own class.
-        Founder::Blind | Founder::Capgnawer => ("litter", true),
-        Founder::Lanternjaw => ("carrion", true),
-        Founder::Browser | Founder::Loftstrider => ("foliage", false),
-    };
+    // The class is the manifest's taste cue; a mouth on bare ground is a valid zero for
+    // every layout but the foliage-tasting ones (the browser's and the loftstrider's).
+    // The capgnawer keeps the blind layout's `litter` class: its caps and litter are both
+    // soft, as the shredder's three foods are.
+    let class = manifest.taste_cue;
+    let ground_valid = class != "foliage";
     match offer {
         Some(offer) => TasteReading {
             cue: response(offer),
@@ -2102,7 +2192,6 @@ pub(crate) fn observation(
         standing_y,
         manifest,
         &body,
-        founder,
         phys.diet,
         fauna.config.cue.emit_reference,
         phys.mass_scale,
@@ -2114,9 +2203,19 @@ pub(crate) fn observation(
     // Chem(detritus): the arena's detritus field at the receptor, response then trend
     // then validity. Blind founder only. Without a senses handle the module reads zero
     // with validity 0.
-    if let Some(cm) = module_opt(manifest, "Chem(detritus)") {
+    // The capgnawer's `Chem(fungal)` (roster R1) reads the fungal field the same way, in
+    // the same slot.
+    let chem = module_opt(manifest, "Chem(detritus)")
+        .map(|m| (m, false))
+        .or_else(|| module_opt(manifest, "Chem(fungal)").map(|m| (m, true)));
+    if let Some((cm, fungal)) = chem {
         if let Some(senses) = senses.as_deref_mut() {
-            if let Some(cue) = senses.sample_cue(view, &a.pose, standing_y) {
+            let sampled = if fungal {
+                senses.sample_fungal(view, &a.pose, standing_y)
+            } else {
+                senses.sample_cue(view, &a.pose, standing_y)
+            };
+            if let Some(cue) = sampled {
                 let sat = manifest.tunings.chem_saturation;
                 let q = cue / (cue + sat);
                 obs[cm.offset] = clamp01(q);

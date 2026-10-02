@@ -936,9 +936,12 @@ mod tests {
                 let mut kinds = arena.resource_kinds.clone();
                 kinds.sort_by_key(|k| k.as_str());
                 kinds.dedup();
+                // The shredder's palette is its diet's detritus kinds: litter and carrion
+                // since roster R1 (it eats no caps); the browser's three crown kinds.
+                let palette = if founder == Founder::Blind { 2 } else { 3 };
                 assert_eq!(
                     kinds.len(),
-                    3,
+                    palette,
                     "{founder:?} seed {seed}: every kind in Stage A"
                 );
                 for (&site, &kind) in arena.resources.iter().zip(&arena.resource_kinds) {

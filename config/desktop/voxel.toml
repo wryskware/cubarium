@@ -49,3 +49,12 @@ preset = "tropical_jungle"
 # dry_gap_max_s = 900   # 0 / 0 turns the gap off
 # [world.climate.downpour]
 # rate_r0 = 1.5         # a mode's key, e.g. the rate it rains at in multiples of R0
+
+# Roster R1 (design/handoffs/voxel-roster-2026-10-01.md): the capgnawer (glowcap caps)
+# and the loftstrider (tall browser) are founded in the live presets; their code default
+# is 0, so training worlds are unchanged.
+[fauna.founders.capgnawer]
+founding_count = 6
+
+[fauna.founders.loftstrider]
+founding_count = 2

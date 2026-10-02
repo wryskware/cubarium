@@ -1833,14 +1833,8 @@ pub fn start_probe(founder: String, horizons: String, workers: usize) -> Result<
         .collect();
     let cancel = AtomicBool::new(false);
     let phys = *super::training_world::training_fauna_config().founder(founder);
-    let foods: Vec<Food> = match founder {
-        Founder::Blind => vec![Food::Litter, Food::CapTissue, Food::Carrion],
-        Founder::Browser => vec![Food::Foliage],
-        Founder::Lanternjaw => vec![Food::Carrion],
-        // R1 stub: the capgnawer's and the loftstrider's diets (brief R1).
-        Founder::Capgnawer => vec![Food::CapTissue, Food::Litter],
-        Founder::Loftstrider => vec![Food::Foliage],
-    };
+    // The lineage's own diet, in `Food::ALL` order.
+    let foods: Vec<Food> = phys.diet.foods().collect();
     println!(
         "probe,bystanders,horizon,arm,score,survived,starved,drowned,{},motor,maintenance,\
          walked_m,intake_per_upkeep",

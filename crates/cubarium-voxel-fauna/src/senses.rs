@@ -241,6 +241,10 @@ impl Connectivity {
 /// same order, so every reading is the map field's.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DetritusField {
+    /// What emits into it ([`CueSource`]): ground detritus (the shredder's field, the
+    /// default) or saprotroph cap stock (the capgnawer's fungal field, roster R1). The
+    /// transport, decay, threshold and emission curve are the same for both.
+    source: CueSource,
     /// Cue units per node; zero where the node holds nothing (every held value is at
     /// least [`CueConfig::threshold`]).
     value: Vec<f64>,
@@ -257,6 +261,20 @@ pub(crate) struct DetritusField {
     /// The field's own numbers ([`CueConfig`]): half-life, diffusion, discard threshold
     /// and the emission reference.
     cue: CueConfig,
+}
+
+/// What a cue field's sources are. One field type carries both; only the source scan
+/// differs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum CueSource {
+    /// Litter plus carrion on each support face ([`detritus_of`]): `Chem(detritus)`.
+    #[default]
+    Detritus,
+    /// The **fungal** field (roster R1): each support face a saprotroph stand is rooted on
+    /// emits by its cap stock (the stand's foliage), `min(cap / emit_reference, 1)` — the
+    /// detritus field's curve. Litter and carrion are not sources: `Chem(fungal)`, the
+    /// capgnawer's, does not answer a litter pile.
+    Fungal,
 }
 
 /// The detritus stock at one support face — its litter plus its carrion — and
@@ -399,23 +417,50 @@ impl DetritusField {
         }
         let epoch = self.epoch;
 
-        // Sources: every site holding detritus — litter or carrion on the ground — that
-        // is a node. A fungal cap standing on a face is food and not a source
-        // ([`detritus_of`]). Each is a root, with its emission noted.
+        // Sources: for the detritus field every site holding detritus — litter or
+        // carrion on the ground — that is a node; a fungal cap standing on a face is food
+        // and not a source there ([`detritus_of`]). For the fungal field every stocked
+        // saprotroph stand's root face. Each is a root, with its emission noted.
         self.work.clear();
-        for g in fv
-            .ground
-            .iter()
-            .filter(|g| g.litter > 0.0 || g.carrion > 0.0)
-        {
-            let Some(n) = graph.node(i64::from(g.site.x), g.site.y, g.site.z) else {
-                continue;
-            };
-            let n = n as usize;
-            // Ground is one entry per site, so a face is a source once.
-            self.emit[n] = (detritus_of(g) / self.cue.emit_reference).min(1.0) * UPDATE_S;
-            self.seen[n] = epoch;
-            self.work.push(n as u32);
+        match self.source {
+            CueSource::Detritus => {
+                for g in fv
+                    .ground
+                    .iter()
+                    .filter(|g| g.litter > 0.0 || g.carrion > 0.0)
+                {
+                    let Some(n) = graph.node(i64::from(g.site.x), g.site.y, g.site.z) else {
+                        continue;
+                    };
+                    let n = n as usize;
+                    // Ground is one entry per site, so a face is a source once.
+                    self.emit[n] =
+                        (detritus_of(g) / self.cue.emit_reference).min(1.0) * UPDATE_S;
+                    self.seen[n] = epoch;
+                    self.work.push(n as u32);
+                }
+            }
+            CueSource::Fungal => {
+                for st in fv.stands.iter().filter(|st| {
+                    st.foliage > 0.0
+                        && fv.config.species(st.species).trophic
+                            == cubarium_voxel_flora::Trophic::Saprotroph
+                }) {
+                    let Some(n) = graph.node(i64::from(st.site.x), st.site.y, st.site.z) else {
+                        continue;
+                    };
+                    let n = n as usize;
+                    let add = st.foliage / self.cue.emit_reference * UPDATE_S;
+                    if self.seen[n] == epoch {
+                        // Two stands on one face emit as their summed stock would.
+                        self.emit[n] = (self.emit[n] + add).min(UPDATE_S);
+                    } else {
+                        self.emit[n] = add.min(UPDATE_S);
+                        self.seen[n] = epoch;
+                        self.work.push(n as u32);
+                    }
+                }
+            }
         }
         // Working set: active (nodes holding a value) + sources + exactly their
         // immediate same-height neighbours — not transitively. Every node that is not a
@@ -494,9 +539,12 @@ struct ChemTrend {
 
 /// Per-arena sensory state: the settled detritus field plus the per-body trend stores, which
 /// are episode-private (a fresh arena starts a fresh `Senses`).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Senses {
     field: DetritusField,
+    /// The fungal field (roster R1), the capgnawer's `Chem(fungal)`: the same transport
+    /// as `field`, sourced by saprotroph cap stock. Updated and settled with it.
+    fungal: DetritusField,
     chem_trend: FxHashMap<u64, ChemTrend>,
     /// The static episode's held cone occupancy ([`Senses::hold_cone`]); `None` builds
     /// one per controller stage.
@@ -506,10 +554,16 @@ pub struct Senses {
     light: Option<Box<LightMemo>>,
 }
 
+impl Default for Senses {
+    fn default() -> Senses {
+        Senses::with_cue(CueConfig::default())
+    }
+}
+
 impl Senses {
     /// An empty, unsettled senses handle.
     pub fn new() -> Senses {
-        Senses::default()
+        Senses::with_cue(CueConfig::default())
     }
 
     /// An empty, unsettled senses handle whose field runs on `cue`'s numbers (a world
@@ -517,7 +571,14 @@ impl Senses {
     pub fn with_cue(cue: CueConfig) -> Senses {
         Senses {
             field: DetritusField { cue, ..DetritusField::default() },
-            ..Senses::default()
+            fungal: DetritusField {
+                cue,
+                source: CueSource::Fungal,
+                ..DetritusField::default()
+            },
+            chem_trend: FxHashMap::default(),
+            cone: None,
+            light: None,
         }
     }
 
@@ -595,6 +656,7 @@ impl Senses {
     /// One field update (`view` + current flora as read, `dt = UPDATE_S`).
     pub(crate) fn update(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>) {
         self.field.update(view, fv);
+        self.fungal.update(view, fv);
     }
 
     /// Settle the field against a layout: at most [`SETTLE_MAX_UPDATES`] updates, stopping
@@ -605,7 +667,7 @@ impl Senses {
     pub fn settle(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>) -> (usize, bool) {
         let mut stable = 0u32;
         for updates in 1..=SETTLE_MAX_UPDATES {
-            let change = self.field.update(view, fv);
+            let change = self.field.update(view, fv).max(self.fungal.update(view, fv));
             if change < SETTLE_EPS {
                 stable += 1;
                 if stable >= SETTLE_STABLE {
@@ -627,6 +689,17 @@ impl Senses {
         standing_y: u32,
     ) -> Option<f64> {
         self.field.sample(view, pose, standing_y)
+    }
+
+    /// The fungal field's concentration at a receptor (`Chem(fungal)`), or `None` as
+    /// [`Senses::sample_cue`].
+    pub(crate) fn sample_fungal(
+        &self,
+        view: &VoxelView<'_>,
+        pose: &Pose,
+        standing_y: u32,
+    ) -> Option<f64> {
+        self.fungal.sample(view, pose, standing_y)
     }
 
     /// Advance a body's trend state and return the trend channel for this sample. The
@@ -1814,6 +1887,12 @@ pub(crate) fn cone_readings(
     let rays = manifest.ray_yaw_offsets_deg.len() * manifest.ray_pitch_offsets_deg.len();
     let ray_count = f64::from(rays as u32);
     let mut sectors = [SectorReading::ZERO; 3];
+    // A banded cone (the loftstrider's, roster R1) counts a foliage crown cell only when
+    // the mouth band reaches its layer from the standing face; any other crown cell it
+    // strikes still stops the ray, as an occluder.
+    let band = manifest
+        .cone_banded_to_mouth
+        .then(|| body.mouth_layers(standing_y, view.config.voxel_m));
     for (si, &centre_deg) in manifest.sector_centres_deg.iter().enumerate() {
         let (mut clear, mut hit, mut hit_prox) = (0u32, 0u32, 0.0f64);
         let (mut fol, mut fol_prox) = (0u32, 0.0f64);
@@ -1821,10 +1900,16 @@ pub(crate) fn cone_readings(
         for &oyaw in manifest.ray_yaw_offsets_deg {
             for &opitch in manifest.ray_pitch_offsets_deg {
                 let dir = ray_direction(heading, centre_deg, oyaw, opitch);
-                match ray_first_hit(view, occupancy, observer_id, origin, dir, range) {
+                match ray_first_hit_cell(view, occupancy, observer_id, origin, dir, range) {
                     None => clear += 1,
-                    Some((dist, fine)) => {
-                        let class = fine.coarse();
+                    Some((dist, fine, cell)) => {
+                        let mut class = fine.coarse();
+                        if class == Class::Foliage
+                            && let Some(band) = &band
+                            && !band.contains(&i64::from(view.config.coords(cell).1))
+                        {
+                            class = Class::Occluder;
+                        }
                         let prox = (1.0 - dist / range).clamp(0.0, 1.0);
                         hit += 1;
                         hit_prox += prox;
