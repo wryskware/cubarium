@@ -734,6 +734,7 @@ pub(crate) fn resolve_motion(
     body: &Body,
     wade_depth_m: f64,
     step_limits: StepLimits,
+    wall_friction: f64,
     held: Actions,
 ) -> Motion {
     let r = body.footprint_radius();
@@ -2286,6 +2287,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -2313,6 +2315,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -2351,6 +2354,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 0.0,
                     turn: 1.0,
@@ -2420,6 +2424,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -2568,6 +2573,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -2610,6 +2616,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -2659,6 +2666,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -3233,6 +3241,7 @@ mod step_rule_tests {
                     up: climb,
                     down: climb,
                 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,

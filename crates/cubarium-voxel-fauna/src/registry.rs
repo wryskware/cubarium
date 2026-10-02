@@ -301,6 +301,7 @@ fn knob_rows() -> Vec<Row> {
         l("lifespan_draw_min", "x median", pos, "lowest multiple of the median a lifespan draw takes").search(0.5, 1.0).grade("C"),
         l("lifespan_draw_span", "x median", nonneg, "width of the lifespan draw, in medians").search(0.0, 1.0).grade("C"),
         l("arriving_share_min", "fraction", fraction, "an arriving body keeps a uniform [this, 1) share of a draw").grade("N"),
+        l("wall_friction", "fraction", fraction, "share of a walk's along-wall component a wall takes away (0 slides freely, 1 stops)").search(0.0, 1.0),
     ]);
 
     // `fauna.cue.*`.

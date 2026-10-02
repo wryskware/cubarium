@@ -58,7 +58,8 @@ fn drive(world: &World, pose: &mut crate::Pose, y: &mut u32, actions: Actions, t
     let limits: StepLimits = phys.step_limits(V);
     let mut layers = Vec::new();
     for _ in 0..ticks {
-        resolve_motion(&view, pose, y, &manifest, &body, phys.wade_depth_m(&body), limits, actions);
+        let friction = crate::knobs::LifeConfig::default().wall_friction;
+        resolve_motion(&view, pose, y, &manifest, &body, phys.wade_depth_m(&body), limits, friction, actions);
         layers.push(*y);
     }
     layers

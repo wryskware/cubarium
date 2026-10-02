@@ -152,6 +152,16 @@ pub struct LifeConfig {
     /// An **arriving** body (an introduced founder) has lived part of its life: its
     /// remaining span is a uniform `[arriving_share_min, 1)` share of such a draw.
     pub arriving_share_min: f64,
+    /// **Wall slide** (crag fix 4, 2026-10-02): the share of a walking request's
+    /// along-wall component a wall takes away, `[0, 1]`. 0 slides the disc along the wall
+    /// at the full tangential share of the request; 1 is the old motor, which stops at
+    /// the wall. The refused remainder is paid for either way.
+    #[serde(default = "default_wall_friction")]
+    pub wall_friction: f64,
+}
+
+fn default_wall_friction() -> f64 {
+    LifeConfig::default().wall_friction
 }
 
 impl Default for LifeConfig {
@@ -164,6 +174,7 @@ impl Default for LifeConfig {
             lifespan_draw_min: 0.8,
             lifespan_draw_span: 0.4,
             arriving_share_min: 0.5,
+            wall_friction: 0.0,
         }
     }
 }

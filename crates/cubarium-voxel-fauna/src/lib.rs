@@ -41,6 +41,8 @@ mod cone_speed_tests;
 mod descent_tests;
 #[cfg(test)]
 mod hot_path_tests;
+#[cfg(test)]
+mod slide_tests;
 
 use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};

@@ -719,8 +719,10 @@ fn the_sweep_on_the_lookup_moves_every_body_as_the_walk_did() {
                         let (mut a, mut b) = (start, start);
                         let (mut ya, mut yb) = (face.y, face.y);
                         for t in 0..30 {
+                            // Friction 1: the reference sweep predates the wall slide
+                            // (`slide_tests` covers it).
                             let ma = crate::body::resolve_motion(
-                                &view, &mut a, &mut ya, &manifest, &body, wade, limits, held,
+                                &view, &mut a, &mut ya, &manifest, &body, wade, limits, 1.0, held,
                             );
                             let mb = ref_resolve_motion(
                                 &view, &mut b, &mut yb, &manifest, &body, wade, limits, held,
