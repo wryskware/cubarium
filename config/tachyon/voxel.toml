@@ -72,3 +72,9 @@ seed_film_at_founding = true
 
 [fauna.founders."ripple-snail"]
 founding_count = 6
+
+# F1: the bellwing, a diurnal nectar flyer, founded perched within its fan's reach of
+# nectar (bloomcrown flowers, latticevine faces); the code default is 0, so training
+# worlds are unchanged.
+[fauna.founders.bellwing]
+founding_count = 4
