@@ -64,6 +64,7 @@ impl Planes {
         write: [bool; SLOW_PLANES],
         owed: &'a mut BrickOwed,
         carried: &'a mut Carried,
+        styles_key: &'a mut u64,
     ) -> VoxelStaging<'a> {
         self.poses = PoseTable::EMPTY;
         self.emit_curves = [0; MAX_STYLES];
@@ -81,6 +82,7 @@ impl Planes {
             write,
             owed,
             carried,
+            styles_key,
         }
     }
 }
@@ -229,12 +231,14 @@ impl PackOracle {
         let started = Instant::now();
         let keys = self.full.prepare(view, flora, fauna, candle_s);
         let _ = keys;
+        let mut styles_key = 0;
         self.full.fill(
             view,
             w,
             h,
             d,
-            self.full_planes.staging([true; SLOW_PLANES], &mut self.full_owed, &mut self.full_carried),
+            self.full_planes
+                .staging([true; SLOW_PLANES], &mut self.full_owed, &mut self.full_carried, &mut styles_key),
         );
         report.full_ms = started.elapsed().as_secs_f64() * 1e3;
 
@@ -244,14 +248,16 @@ impl PackOracle {
         let started = Instant::now();
         let keys = self.delta.prepare(view, flora, fauna, candle_s);
         let write = self.slow.pack(b, keys);
+        let mut styles_key = 0;
         self.delta.fill(
             view,
             w,
             h,
             d,
-            self.buffers[b].staging(write, &mut self.owed, &mut self.carried[b]),
+            self.buffers[b].staging(write, &mut self.owed, &mut self.carried[b], &mut styles_key),
         );
         report.delta_ms = started.elapsed().as_secs_f64() * 1e3;
+        self.slow.restamp(b, PLANE_STYLES, styles_key);
         self.ring.packed(b);
         report.bricks = (!self.carried[b].full).then_some(self.carried[b].bricks.len());
 

@@ -23,75 +23,151 @@ pub(crate) type KeyBits = [u32; 18];
 
 /// A key's bits: equal bits, equal slot contents.
 pub(crate) fn key_bits(key: &StyleKey) -> KeyBits {
-    let _ = key;
-    todo!()
+    let (style, role, faces, emit) = key;
+    let mut k = [0u32; 18];
+    for (i, v) in style.wood.iter().chain(&style.crown).chain(&style.heart).enumerate() {
+        k[i] = v.to_bits();
+    }
+    k[9] = u32::from(*role);
+    k[10] = faces[0].map_or(u32::MAX, u32::from);
+    k[11] = faces[1].map_or(u32::MAX, u32::from);
+    if let Some(e) = emit {
+        k[12] = 1;
+        k[13..17].copy_from_slice(e);
+    }
+    k
+}
+
+/// One style slot's contents as the GPU reads them.
+pub(crate) fn voxel_style(key: &StyleKey) -> VoxelStyle {
+    let (style, role, faces, emit) = key;
+    VoxelStyle::new(style.wood, style.crown, style.heart)
+        .with_role(*role)
+        .with_faces(*faces)
+        .with_emit(emit.map(|e| [e[0], e[1], e[2]].map(f32::from_bits)))
+        .emit_whole(emit.is_some_and(|e| e[3] & 1 != 0))
+}
+
+/// A slot's candle curve: `0` steady, else the curve its emission follows.
+pub(crate) fn curve_of(key: &StyleKey) -> u8 {
+    key.3.map_or(0, |e| (e[3] >> 1) as u8)
 }
 
 /// The style table: slot contents, live counts and the free slots.
 pub(crate) struct Palette {
-    _private: (),
+    keys: Vec<Option<StyleKey>>,
+    count: Vec<u32>,
+    map: rustc_hash::FxHashMap<KeyBits, u8>,
+    /// Free slots, highest first, so the lowest is taken next.
+    free: Vec<u8>,
+    version: u64,
+    made: u64,
 }
 
 impl Palette {
     pub(crate) fn new() -> Palette {
-        todo!()
+        let mut p = Palette {
+            keys: vec![None; MAX_STYLES],
+            count: vec![0; MAX_STYLES],
+            map: Default::default(),
+            free: Vec::with_capacity(MAX_STYLES),
+            version: 0,
+            made: 0,
+        };
+        p.reset();
+        p
     }
 
     /// Every slot free again, as a fresh palette.
     pub(crate) fn reset(&mut self) {
-        todo!()
+        self.keys.fill(None);
+        self.count.fill(0);
+        self.map.clear();
+        self.free.clear();
+        self.free.extend((0..MAX_STYLES as u16).rev().map(|s| s as u8));
+        self.version += 1;
     }
 
     /// The slot holding `key`, if one does.
+    #[cfg(test)]
     pub(crate) fn find(&self, key: &StyleKey) -> Option<u8> {
-        let _ = key;
-        todo!()
+        self.map.get(&key_bits(key)).copied()
     }
 
     /// One more texel draws with `key`: its slot, given one if it has none, or `None` when
     /// every slot holds a live style.
     pub(crate) fn acquire(&mut self, key: &StyleKey) -> Option<u8> {
-        let _ = key;
-        todo!()
+        let bits = key_bits(key);
+        let slot = match self.map.get(&bits) {
+            Some(&s) => s,
+            None => {
+                let s = self.free.pop()?;
+                self.keys[usize::from(s)] = Some(*key);
+                self.map.insert(bits, s);
+                self.version += 1;
+                self.made += 1;
+                s
+            }
+        };
+        self.count[usize::from(slot)] += 1;
+        Some(slot)
     }
 
     /// One more texel draws with the style already in `slot`.
+    #[cfg(test)]
     pub(crate) fn retain(&mut self, slot: u8) {
-        let _ = slot;
-        todo!()
+        debug_assert!(self.keys[usize::from(slot)].is_some());
+        self.count[usize::from(slot)] += 1;
     }
 
     /// One texel fewer draws with `slot`; at zero the slot is free.
     pub(crate) fn release(&mut self, slot: u8) {
-        let _ = slot;
-        todo!()
+        let s = usize::from(slot);
+        debug_assert!(self.count[s] > 0, "releasing a free slot");
+        self.count[s] = self.count[s].saturating_sub(1);
+        if self.count[s] == 0
+            && let Some(key) = self.keys[s].take()
+        {
+            self.map.remove(&key_bits(&key));
+            self.free.push(slot);
+            self.version += 1;
+        }
     }
 
     /// What `slot` holds, `None` when it is free.
     pub(crate) fn key(&self, slot: u8) -> Option<&StyleKey> {
-        let _ = slot;
-        todo!()
+        self.keys[usize::from(slot)].as_ref()
     }
 
     /// Slots holding a live style.
     pub(crate) fn live(&self) -> usize {
-        todo!()
+        MAX_STYLES - self.free.len()
     }
 
     /// Styles given a slot since the palette was made.
     pub(crate) fn made(&self) -> u64 {
-        todo!()
+        self.made
     }
 
     /// Bumped whenever a slot's contents change: the key the style plane is uploaded under.
     pub(crate) fn version(&self) -> u64 {
-        todo!()
+        self.version
     }
 
     /// The style table and its emission curves as the GPU reads them; a free slot is zero.
     pub(crate) fn write(&self, styles: &mut [VoxelStyle], curves: &mut [u8; MAX_STYLES]) {
-        let _ = (styles, curves);
-        todo!()
+        for (slot, key) in self.keys.iter().enumerate() {
+            match key {
+                Some(k) => {
+                    styles[slot] = voxel_style(k);
+                    curves[slot] = curve_of(k);
+                }
+                None => {
+                    styles[slot] = VoxelStyle::default();
+                    curves[slot] = 0;
+                }
+            }
+        }
     }
 }
 

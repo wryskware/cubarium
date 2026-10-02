@@ -1176,10 +1176,11 @@ struct VoxelUniforms {
 /// Where one tick's world is written, straight into mapped memory.
 ///
 /// The slices are the staging buffer itself, so the packer on the CPU writes the
-/// voxels once instead of filling a `Vec` and copying it. Voxels and the roof table are
-/// indexed `(z · height + y) · width + x` — texture upload order, not the core's
-/// `Config::index`.
+/// voxels once instead of filling a `Vec` and copying it. The roof table is indexed
+/// `(z · height + y) · width + x` — texture upload order, not the core's `Config::index`.
 pub struct VoxelStaging<'a> {
+    /// The voxels this buffer carries up ([`VoxelStaging::carried`]): the whole volume in
+    /// texture order, or the owed bricks one after another ([`write_upload`]).
     pub voxels: &'a mut [VoxelTexel],
     pub roof: &'a mut [u8],
     pub styles: &'a mut [VoxelStyle],
@@ -1193,7 +1194,7 @@ pub struct VoxelStaging<'a> {
     /// `(cell, cumulative transmission)`, highest cell first, at byte
     /// `((z · 2 + k / 2) · width + x) · 4 + (k % 2) · 2`. A face of a voxel at height `y`
     /// takes the transmission of the last step whose cell is above `y`; a cell of 0 ends
-    /// the list. Written every pack. Empty in the flat tier.
+    /// the list. A slow plane ([`PLANE_CANOPY`]). Empty in the flat tier.
     pub canopy: &'a mut [u8],
     /// The lit tier's glow volume: the local light of the frame's emitters, RGBA8 (alpha
     /// unused) at [`GLOW_CELL`]³ voxels a texel, `((z · h + y) · w + x) · 4` over
@@ -1219,6 +1220,9 @@ pub struct VoxelStaging<'a> {
     /// What this buffer's [`VoxelStaging::voxels`] carries up: the whole volume, or the
     /// listed bricks packed one after another. Written by [`write_upload`].
     pub carried: &'a mut Carried,
+    /// The style table's key ([`PLANE_STYLES`]), known only once the pack has written it:
+    /// the pack writes the whole table into every buffer and names its version here.
+    pub styles_key: &'a mut u64,
 }
 
 /// The edge of a voxel brick, the unit a change-only pack uploads: `BRICK`³ texels.
@@ -1257,41 +1261,82 @@ pub struct BrickOwed {
 impl BrickOwed {
     /// Nothing held yet: the whole volume is owed.
     pub fn new(width: u32, height: u32, depth: u32) -> BrickOwed {
-        let _ = (width, height, depth);
-        todo!()
+        let (bw, bh, bd) = brick_dims(width, height, depth);
+        BrickOwed {
+            owed: vec![false; (bw * bh * bd) as usize],
+            list: Vec::new(),
+            full: true,
+        }
     }
 
     /// Brick `b` changed.
+    #[inline]
     pub fn mark(&mut self, b: u32) {
-        let _ = b;
-        todo!()
+        if self.full {
+            return;
+        }
+        let o = &mut self.owed[b as usize];
+        if !*o {
+            *o = true;
+            self.list.push(b);
+        }
     }
 
     /// Everything changed: the next pack writes the whole volume.
     pub fn mark_full(&mut self) {
-        todo!()
+        self.full = true;
+        for &b in &self.list {
+            self.owed[b as usize] = false;
+        }
+        self.list.clear();
     }
 
     /// Whether the whole volume is owed.
     pub fn full(&self) -> bool {
-        todo!()
+        self.full
     }
 
     /// The owed bricks, in the order they were first marked.
     pub fn list(&self) -> &[u32] {
-        todo!()
+        &self.list
+    }
+
+    /// How many bricks the volume has.
+    pub fn bricks(&self) -> usize {
+        self.owed.len()
     }
 
     /// A recorded frame carries `carried` up.
     pub fn taken(&mut self, carried: &Carried) {
-        let _ = carried;
-        todo!()
+        if carried.full {
+            // Everything owed went up with it: changes are only marked by a pack, and
+            // this was the last pack before the frame.
+            self.full = false;
+            for &b in &self.list {
+                self.owed[b as usize] = false;
+            }
+            self.list.clear();
+            return;
+        }
+        if self.full {
+            return;
+        }
+        for &b in &carried.bricks {
+            self.owed[b as usize] = false;
+        }
+        let owed = &self.owed;
+        self.list.retain(|&b| owed[b as usize]);
     }
 
     /// A frame carrying `carried` was displaced before it ran.
     pub fn returned(&mut self, carried: &Carried) {
-        let _ = carried;
-        todo!()
+        if carried.full {
+            self.mark_full();
+            return;
+        }
+        for &b in &carried.bricks {
+            self.mark(b);
+        }
     }
 }
 
@@ -1318,8 +1363,74 @@ pub fn write_upload(
     voxels: &mut [VoxelTexel],
     carried: &mut Carried,
 ) {
-    let _ = (master, width, height, depth, owed, voxels, carried);
-    todo!()
+    let n = master.len();
+    let whole = owed.full()
+        || owed.list().len() * 4 > owed.bricks()
+        || owed.list().len() * BRICK_TEXELS > voxels.len();
+    if whole {
+        voxels[..n].copy_from_slice(master);
+        carried.full = true;
+        carried.bricks.clear();
+        return;
+    }
+    carried.full = false;
+    carried.bricks.clear();
+    carried.bricks.extend_from_slice(owed.list());
+    let (bw, bh, _) = brick_dims(width, height, depth);
+    let (w, h) = (width as usize, height as usize);
+    for (k, &b) in owed.list().iter().enumerate() {
+        let (bx, by, bz) = (b % bw, (b / bw) % bh, b / (bw * bh));
+        let (x0, y0, z0) = (bx * BRICK, by * BRICK, bz * BRICK);
+        let ex = (width - x0).min(BRICK) as usize;
+        let slot = &mut voxels[k * BRICK_TEXELS..(k + 1) * BRICK_TEXELS];
+        for dz in 0..(depth - z0).min(BRICK) {
+            for dy in 0..(height - y0).min(BRICK) {
+                let src = ((z0 + dz) as usize * h + (y0 + dy) as usize) * w + x0 as usize;
+                let dst = ((dz * BRICK + dy) * BRICK) as usize;
+                slot[dst..dst + ex].copy_from_slice(&master[src..src + ex]);
+            }
+        }
+    }
+}
+
+/// The copy regions of a brick upload: one per carried brick, from its slot of the
+/// staging buffer (`base` the voxel plane's offset) into its place in the image.
+pub fn brick_regions(
+    carried: &Carried,
+    width: u32,
+    height: u32,
+    depth: u32,
+    base: u64,
+) -> Vec<vk::BufferImageCopy> {
+    let (bw, bh, _) = brick_dims(width, height, depth);
+    carried
+        .bricks
+        .iter()
+        .enumerate()
+        .map(|(k, &b)| {
+            let (bx, by, bz) = (b % bw, (b / bw) % bh, b / (bw * bh));
+            let (x0, y0, z0) = (bx * BRICK, by * BRICK, bz * BRICK);
+            vk::BufferImageCopy::default()
+                .buffer_offset(base + (k * BRICK_TEXELS * 4) as u64)
+                .buffer_row_length(BRICK)
+                .buffer_image_height(BRICK)
+                .image_subresource(
+                    vk::ImageSubresourceLayers::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .layer_count(1),
+                )
+                .image_offset(vk::Offset3D {
+                    x: x0 as i32,
+                    y: y0 as i32,
+                    z: z0 as i32,
+                })
+                .image_extent(vk::Extent3D {
+                    width: (width - x0).min(BRICK),
+                    height: (height - y0).min(BRICK),
+                    depth: (depth - z0).min(BRICK),
+                })
+        })
+        .collect()
 }
 
 /// The upload of `carried` from a staging buffer's `voxels` into `image` (texture order),
@@ -1332,8 +1443,25 @@ pub fn apply_upload(
     depth: u32,
     image: &mut [VoxelTexel],
 ) {
-    let _ = (voxels, carried, width, height, depth, image);
-    todo!()
+    if carried.full {
+        image.copy_from_slice(&voxels[..image.len()]);
+        return;
+    }
+    let (bw, bh, _) = brick_dims(width, height, depth);
+    let (w, h) = (width as usize, height as usize);
+    for (k, &b) in carried.bricks.iter().enumerate() {
+        let (bx, by, bz) = (b % bw, (b / bw) % bh, b / (bw * bh));
+        let (x0, y0, z0) = (bx * BRICK, by * BRICK, bz * BRICK);
+        let ex = (width - x0).min(BRICK) as usize;
+        let slot = &voxels[k * BRICK_TEXELS..(k + 1) * BRICK_TEXELS];
+        for dz in 0..(depth - z0).min(BRICK) {
+            for dy in 0..(height - y0).min(BRICK) {
+                let dst = ((z0 + dz) as usize * h + (y0 + dy) as usize) * w + x0 as usize;
+                let src = ((dz * BRICK + dy) * BRICK) as usize;
+                image[dst..dst + ex].copy_from_slice(&slot[src..src + ex]);
+            }
+        }
+    }
 }
 
 impl VoxelStaging<'_> {
@@ -1470,7 +1598,8 @@ pub const PLANE_CANOPY: usize = 5;
 /// How many planes are written and uploaded only when they change.
 pub const SLOW_PLANES: usize = 6;
 
-/// What the **slow planes** — the roof table, the glyph atlas and the sky plane — hold,
+/// What the **slow planes** — the roof table, the glyph atlas, the sky plane, the glow
+/// volume, the style table and the canopy plane — hold,
 /// per staging buffer and in the images, so a pack writes them and a frame uploads them
 /// only when they have changed.
 ///
@@ -1504,6 +1633,18 @@ impl SlowPlanes {
         let write = std::array::from_fn(|p| held[p] != Some(keys[p]));
         *held = keys.map(Some);
         write
+    }
+
+    /// `buffer` holds `key` for `plane` after all: a plane whose content is known only
+    /// once the pack has run (the style table).
+    pub fn restamp(&mut self, buffer: usize, plane: usize, key: u64) {
+        self.buffers[buffer][plane] = Some(key);
+    }
+
+    /// Which planes a frame uploading from `buffer` now would copy, without taking it.
+    pub fn would_upload(&self, buffer: usize) -> [bool; SLOW_PLANES] {
+        let held = self.buffers[buffer];
+        std::array::from_fn(|p| held[p].is_none() || held[p] != self.images[p])
     }
 
     /// A frame uploads from `buffer`: which planes it must copy into their images.
@@ -1595,6 +1736,9 @@ pub struct VoxelRenderer {
     /// The voxel bricks the image is owed, and what each staging buffer carries.
     owed: BrickOwed,
     carried: Vec<Carried>,
+    /// What the last pack will upload, bytes: its voxels and the slow planes the images
+    /// lack.
+    last_upload: usize,
     /// Byte offsets into each of [`VoxelRenderer::staging`] of the six planes, indexed
     /// by the `AT_*` constants; the last is the buffer's size.
     offsets: [u64; 8],
@@ -2245,6 +2389,7 @@ impl VoxelRenderer {
             slow: SlowPlanes::new(STAGING_RING),
             owed: BrickOwed::new(params.width, params.height, params.depth),
             carried: vec![Carried::default(); STAGING_RING],
+            last_upload: 0,
             offsets,
             dirty: false,
             raster_current: false,
@@ -2438,9 +2583,9 @@ impl VoxelRenderer {
 
     /// Write one tick's world straight into the staging buffer.
     ///
-    /// The styles slice is zeroed first, so a frame with fewer stands than the last one
-    /// cannot paint with a stale colour. The voxels are not: every texel is written every
-    /// tick, and clearing them to then overwrite them is memory traffic nobody reads.
+    /// Nothing is cleared first: the pack writes every owed brick (or the whole volume)
+    /// and the whole style table, and names the table's version in
+    /// [`VoxelStaging::styles_key`]. A frame uploads only the bricks its buffer carries.
     ///
     /// `slow` names the roof table's and the glyph atlas's contents (equal key, equal
     /// bytes). `fill` is told through [`VoxelStaging::write`] which of them this buffer
@@ -2483,16 +2628,17 @@ impl VoxelRenderer {
                 std::slice::from_raw_parts_mut(buffer.ptr.add(at(AT_GLOW)), self.params.glow_bytes()),
             )
         };
-        styles.fill(VoxelStyle::default());
         let poses = &mut self.pose_tables[into];
         *poses = PoseTable::EMPTY;
         let emit_curves = &mut self.emit_curve_tables[into];
         emit_curves.fill(0);
         let carried = &mut self.carried[into];
         *carried = Carried::default();
+        let mut styles_key = 0;
         fill(VoxelStaging {
             owed: &mut self.owed,
             carried,
+            styles_key: &mut styles_key,
             voxels,
             roof,
             styles,
@@ -2504,6 +2650,28 @@ impl VoxelRenderer {
             emit_curves,
             write,
         });
+        self.slow.restamp(into, PLANE_STYLES, styles_key);
+        let c = &self.carried[into];
+        let voxels = if c.full { n } else { c.bricks.len() * BRICK_TEXELS } * 4;
+        let p = &self.params;
+        let sizes = [
+            n,
+            p.glyph_bytes(),
+            p.sky_bytes(),
+            p.glow_bytes(),
+            MAX_STYLES * std::mem::size_of::<VoxelStyle>(),
+            p.canopy_bytes(),
+        ];
+        let lit = |plane: usize| p.lit || !matches!(plane, PLANE_SKY | PLANE_GLOW | PLANE_CANOPY);
+        let planes: usize = self
+            .slow
+            .would_upload(into)
+            .iter()
+            .enumerate()
+            .filter(|&(k, &up)| up && lit(k))
+            .map(|(k, _)| sizes[k])
+            .sum();
+        self.last_upload = voxels + planes;
         self.ring.packed(into);
         self.dirty = true;
         self.staged = true;
@@ -2533,12 +2701,18 @@ impl VoxelRenderer {
             && frame.staging.is_some()
         {
             self.dirty = true;
-            // Its slow planes never reached the images either.
+            // Its slow planes never reached the images either, nor its bricks.
             self.slow.forget_images();
+            self.owed.returned(&self.carried[frame.staging.expect("checked above")]);
             // Its upload never ran, so the raster is not what that frame would have made
             // it: the next frame must draw the world again.
             self.raster_current = false;
         }
+    }
+
+    /// What the last pack will upload when its frame runs, bytes.
+    pub fn last_upload_bytes(&self) -> usize {
+        self.last_upload
     }
 
     /// Whether the last recorded frame redrew the world raster.
@@ -2593,6 +2767,9 @@ impl VoxelRenderer {
             Some(i) if upload => self.slow.upload(i),
             _ => [false; SLOW_PLANES],
         };
+        if upload && let Some(i) = frame.staging {
+            self.owed.taken(&self.carried[i]);
+        }
         // The raster already holds this picture unless something changed it, and the
         // upload only ever comes with a change.
         let redraw = !self.raster_current || self.sunvis.owed();
@@ -2640,11 +2817,42 @@ impl VoxelRenderer {
                 let lit = self.params.lit;
                 let (cw, ch) = self.params.canopy_extent();
                 let (gw, gh, gd) = self.params.glow_extent();
+                let source =
+                    self.staging[frame.staging.expect("an upload has a staged buffer")].buffer;
+                let carried = &self.carried[frame.staging.expect("an upload has a staged buffer")];
+                // The voxels: the whole volume, or only the bricks this buffer carries into
+                // an image that keeps the rest (so out of `SHADER_READ_ONLY_OPTIMAL`, not
+                // `UNDEFINED`, which would throw it away). A buffer carrying nothing leaves
+                // the image alone.
+                if !carried.full && !carried.bricks.is_empty() {
+                    let regions = brick_regions(carried, w, h, dd, self.offsets[AT_VOXELS]);
+                    barrier(
+                        d,
+                        cb,
+                        self.voxel_image,
+                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    );
+                    d.cmd_copy_buffer_to_image(
+                        cb,
+                        source,
+                        self.voxel_image,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        &regions,
+                    );
+                    barrier(
+                        d,
+                        cb,
+                        self.voxel_image,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    );
+                }
                 let planes = [
-                    (true, self.voxel_image, self.offsets[AT_VOXELS], w, h, dd),
+                    (carried.full, self.voxel_image, self.offsets[AT_VOXELS], w, h, dd),
                     (slow[PLANE_ROOF], self.roof_image, self.offsets[AT_ROOF], w, h, dd),
                     (
-                        true,
+                        slow[PLANE_STYLES],
                         self.style_image,
                         self.offsets[AT_STYLES],
                         STYLE_COLUMNS,
@@ -2667,7 +2875,7 @@ impl VoxelRenderer {
                         h,
                         dd,
                     ),
-                    (lit, self.canopy_image, self.offsets[AT_CANOPY], cw, ch, 1),
+                    (lit && slow[PLANE_CANOPY], self.canopy_image, self.offsets[AT_CANOPY], cw, ch, 1),
                     (
                         lit && slow[PLANE_GLOW],
                         self.glow_image,
@@ -2677,8 +2885,6 @@ impl VoxelRenderer {
                         gd,
                     ),
                 ];
-                let source =
-                    self.staging[frame.staging.expect("an upload has a staged buffer")].buffer;
                 // A plane left out keeps its image, in `SHADER_READ_ONLY_OPTIMAL`, holding
                 // what an earlier frame uploaded — no barrier, since the `UNDEFINED`
                 // transition is what would throw its contents away.

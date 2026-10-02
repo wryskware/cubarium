@@ -13,6 +13,11 @@ path = "src/lib.rs"
 name = "cubarium"
 path = "src/main.rs"
 
+[features]
+# `examples/pack_profile.rs`'s per-phase pack times. Off, the phase marks compile to
+# nothing (`sink/gpu/pack_timer.rs`).
+pack-profile = []
+
 [dependencies]
 cube-proto = { workspace = true }
 cubarium-surface = { workspace = true }

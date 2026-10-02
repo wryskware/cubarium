@@ -256,6 +256,11 @@ const FILM_LEVELS: f32 = 8.0;
 /// presentation constant.
 const FILM_FADE_S: f32 = 1.0;
 
+/// The level, of [`FILM_LEVELS`], a film mark at a drawn strength is drawn at.
+fn film_level(strength: f32) -> u8 {
+    (strength.clamp(0.0, 1.0) * FILM_LEVELS).round() as u8
+}
+
 /// One rebuild's film easing: `drawn` (ascending by site) eased by `k` toward `marks`
 /// (also ascending). A mark with film moves `k` of the way to its stock (all the way when
 /// `k` is 1, the first rebuild); a drawn mark whose film is gone dims by `1 − k` and is
@@ -306,7 +311,7 @@ fn ease_film(
 /// toward bare (the wilt treatment, [`wilted`]) as the strength falls — a grazed face shows
 /// less tint. Interim, with the colour, until the art direction covers the film.
 fn film_style(strength: f32) -> Style {
-    let level = (strength.clamp(0.0, 1.0) * FILM_LEVELS).round() / FILM_LEVELS;
+    let level = f32::from(film_level(strength)) / FILM_LEVELS;
     let c = wilted(srgb_linear(colours::FILM_INTERIM), 1.0 - level);
     Style {
         wood: c,
@@ -431,7 +436,19 @@ pub struct Stands {
     /// When the last rebuild drew the film marks; `None` before the first, which draws
     /// every mark at its stock.
     film_clock: Option<std::time::Instant>,
+    /// The clock the film eases on instead of the wall clock ([`Stands::set_film_now`]).
+    film_now: Option<std::time::Instant>,
+    /// While [`Some`], [`Stands::place`] records each part it would place here instead of
+    /// writing the grid: the change-only rebuild's claims.
+    collect: Option<Vec<(u32, Part)>>,
+    /// The change-only rebuild's state ([`Stands::set_incremental`]), or `None` for the
+    /// full rebuild every tick.
+    inc: Option<Box<delta::Inc>>,
 }
+
+#[path = "stand_delta.rs"]
+mod delta;
+pub(crate) use delta::{StyleId, vine_key};
 
 /// A glowcap at or below this wood is a button, which the dossier draws without its lip
 /// (D1: "button | wood ≤ 0.02").
@@ -439,6 +456,20 @@ const GLOWCAP_BUTTON_WOOD: f64 = 0.02;
 
 /// No style yet (and the one index a style never takes).
 const NO_STYLE: u16 = u16::MAX;
+
+/// What a stand's model stamp reads of the stand ([`Stands::model_inputs`]).
+#[derive(Clone, Copy, Debug)]
+struct ModelInputs {
+    /// Each foliage layer's fill, `stock / capacity`.
+    foliage: [f64; MAX_FOLIAGE_LAYERS],
+    wilt: u8,
+    /// The parcel over one propagule package.
+    ripe: f64,
+    /// Whether the warm accents are fruit, each kept by its own share of `ripe`.
+    fruit: bool,
+    lip: colours::Lip,
+    anchor: Cell,
+}
 
 /// Which existing part a model cell is drawn as, so it takes that part's lighting.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -527,7 +558,91 @@ impl Stands {
             emits: Vec::new(),
             film_drawn: Vec::new(),
             film_clock: None,
+            film_now: None,
+            collect: None,
+            inc: None,
         }
+    }
+
+    /// Rebuild only what changed from the next rebuild on ([`delta`]): each stand, mark
+    /// and the vine is restamped only when what it draws from moved, and
+    /// [`Stands::dirty`] names the cells whose part or style may have changed. The grid,
+    /// its owners and styles read as the full rebuild's would, except that a style index
+    /// is kept across rebuilds for as long as what it names exists.
+    pub fn set_incremental(&mut self, on: bool) {
+        self.inc = on.then(|| Box::new(delta::Inc::default()));
+    }
+
+    /// The change-only rebuild starts again from nothing at its next rebuild (the terrain
+    /// moved, or the world is another one): every cell it had stamped is dirty.
+    pub fn reset_incremental(&mut self) {
+        if let Some(inc) = &mut self.inc {
+            inc.reset = true;
+        }
+    }
+
+    /// The grid cells (`(z · width + x) · height + y`) whose part, owner or style the last
+    /// change-only rebuild may have changed; empty for the full rebuild.
+    pub fn dirty(&self) -> &[u32] {
+        self.inc.as_ref().map_or(&[][..], |inc| &inc.dirty[..])
+    }
+
+    /// Ease the film marks on this clock instead of the wall clock; `None` goes back to it.
+    pub fn set_film_now(&mut self, now: Option<std::time::Instant>) {
+        self.film_now = now;
+    }
+
+    /// Grid index `i` as `(x, y, z)`.
+    #[inline]
+    pub fn xyz(&self, i: u32) -> (u32, u32, u32) {
+        let (w, h) = (self.width as usize, self.height as usize);
+        let i = i as usize;
+        let (col, y) = (i / h, i % h);
+        ((col % w) as u32, y as u32, (col / w) as u32)
+    }
+
+    /// The part at grid index `i` (`(z · width + x) · height + y`).
+    #[inline]
+    pub fn at_index(&self, i: u32) -> Part {
+        self.grid[i as usize]
+    }
+
+    /// Every grid index something stands in, in no particular order.
+    pub fn stamped(&self) -> impl Iterator<Item = u32> + '_ {
+        self.stamped.iter().copied()
+    }
+
+    /// How many crown cells column `(x, z)` holds.
+    pub fn crowns_in_column(&self, x: u32, z: u32) -> u16 {
+        let h = self.height as usize;
+        let at = (z as usize * self.width as usize + x as usize) * h;
+        self.grid[at..at + h]
+            .iter()
+            .filter(|p| matches!(p, Part::Crown { .. }))
+            .count() as u16
+    }
+
+    /// A new style for `id` (the full rebuild: a fresh index every time), or in the
+    /// change-only rebuild the index `id` already has, its colours updated. `None` when
+    /// the indices are spent.
+    fn new_style(&mut self, id: StyleId, style: Style) -> Option<u16> {
+        if let Some(inc) = &mut self.inc {
+            if let Some(&s) = inc.style_ids.get(&id) {
+                let held = &mut self.styles[usize::from(s)];
+                if *held != style {
+                    *held = style;
+                    inc.restyled = true;
+                }
+                return Some(s);
+            }
+            let s = u16::try_from(self.styles.len()).ok().filter(|&s| s != NO_STYLE)?;
+            self.styles.push(style);
+            inc.style_ids.insert(id, s);
+            return Some(s);
+        }
+        let s = u16::try_from(self.styles.len()).ok().filter(|&s| s != NO_STYLE)?;
+        self.styles.push(style);
+        Some(s)
     }
 
     /// Give styles the dossiers' emissive colours ([`colours::plant_emission`],
@@ -579,7 +694,12 @@ impl Stands {
         if self.owner.is_empty() || y >= self.height || z >= self.depth {
             return None;
         }
-        self.owner[self.index(x, y, z)].checked_sub(1).map(|k| k as usize)
+        let o = self.owner[self.index(x, y, z)].checked_sub(1)?;
+        match &self.inc {
+            // The change-only grid records the stand's slot, which outlives its index.
+            Some(inc) => inc.k_of_slot.get(o as usize).map(|&k| k as usize),
+            None => Some(o as usize),
+        }
     }
 
     /// Rebuild from a flora view with the **dev-mode glyphs**: every stand drawn by
@@ -598,6 +718,11 @@ impl Stands {
         self.rebuild_inner(view, flora, lib);
     }
 
+    /// The film's clock this rebuild.
+    fn film_clock_now(&self) -> std::time::Instant {
+        self.film_now.unwrap_or_else(std::time::Instant::now)
+    }
+
     fn rebuild_inner(
         &mut self,
         view: &VoxelView<'_>,
@@ -609,13 +734,18 @@ impl Stands {
             let (vine_cells, cover_override) = (self.vine_cells, self.cover_override.take());
             let owners = !self.owner.is_empty();
             let emission = self.emission;
+            let (incremental, film_now) = (self.inc.is_some(), self.film_now);
             *self = Stands::empty(c.width, c.height, c.depth);
             self.vine_cells = vine_cells;
             self.emission = emission;
             self.cover_override = cover_override;
+            self.film_now = film_now;
+            self.set_incremental(incremental);
             if owners {
                 self.track_owners();
             }
+        } else if self.inc.is_some() {
+            return delta::rebuild(self, view, flora, lib);
         } else {
             // Only what the last rebuild stamped: the grid is otherwise all empty.
             for i in self.stamped.drain(..) {
@@ -624,6 +754,9 @@ impl Stands {
             self.styles.clear();
             self.model_tags.clear();
             self.emits.clear();
+        }
+        if self.inc.is_some() {
+            return delta::rebuild(self, view, flora, lib);
         }
         self.model_styles.fill(NO_STYLE);
         // Stands arrive in site order, which is the order the styles are pushed in, so
@@ -636,11 +769,9 @@ impl Stands {
                 }
                 continue;
             }
-            let style = self.styles.len().min(u16::MAX as usize) as u16;
-            if usize::from(style) != self.styles.len() {
+            let Some(style) = self.new_style(StyleId::Stand(stand.id), style_of(flora, stand)) else {
                 break; // more than 65 535 stands in one strip: refuse to alias styles.
-            }
-            self.styles.push(style_of(flora, stand));
+            };
             for (cell, part) in parts_of(flora, stand, style) {
                 self.place(view, cell, part);
             }
@@ -649,11 +780,9 @@ impl Stands {
         // Dead wood (fallen logs): rendered where dead_wood is above threshold.
         for g in flora.ground {
             if g.dead_wood >= 0.05 {
-                let style = self.styles.len().min(u16::MAX as usize) as u16;
-                if usize::from(style) != self.styles.len() {
+                let Some(style) = self.new_style(StyleId::Log, log_style()) else {
                     break;
-                }
-                self.styles.push(log_style());
+                };
                 self.place(
                     view,
                     Cell {
@@ -668,11 +797,9 @@ impl Stands {
         // Leaf litter and organic detritus on the soil.
         for g in flora.ground {
             if g.litter >= 0.05 {
-                let style = self.styles.len().min(u16::MAX as usize) as u16;
-                if usize::from(style) != self.styles.len() {
+                let Some(style) = self.new_style(StyleId::Litter, litter_style()) else {
                     break;
-                }
-                self.styles.push(litter_style());
+                };
                 self.place(
                     view,
                     Cell {
@@ -690,11 +817,9 @@ impl Stands {
         // Carrion / remains.
         for g in flora.ground {
             if g.carrion >= 0.05 {
-                let style = self.styles.len().min(u16::MAX as usize) as u16;
-                if usize::from(style) != self.styles.len() {
+                let Some(style) = self.new_style(StyleId::Carrion, carrion_style()) else {
                     break;
-                }
-                self.styles.push(carrion_style());
+                };
                 self.place(
                     view,
                     Cell {
@@ -713,11 +838,9 @@ impl Stands {
             let Some(species) = g.seed_mark(flora.tick, flora.config) else {
                 continue;
             };
-            let style = self.styles.len().min(u16::MAX as usize) as u16;
-            if usize::from(style) != self.styles.len() {
+            let Some(style) = self.new_style(StyleId::Seed(species.index() as u8), seed_style(species)) else {
                 break;
-            }
-            self.styles.push(seed_style(species));
+            };
             self.place(
                 view,
                 Cell {
@@ -760,23 +883,26 @@ impl Stands {
         let mut styles = [None::<u16>; 3 * 4];
         for c in cells {
             let i = self.index(i64::from(c.x), c.y, c.z);
-            if self.grid[i] != Part::None {
+            // A claim is placed whatever the cell holds: the change-only rebuild gives a vine
+            // the lowest rank instead.
+            if self.collect.is_none() && self.grid[i] != Part::None {
                 continue;
             }
             let key = c.density as usize * 4 + c.accent as usize;
             let style = match styles[key] {
                 Some(s) => s,
                 None => {
-                    let Some(s) = u16::try_from(self.styles.len()).ok().filter(|&s| s != NO_STYLE)
-                    else {
+                    let sw = colours::vine(c.density, c.accent);
+                    let Some(s) = self.new_style(
+                        StyleId::Vine(key as u8),
+                        Style {
+                            wood: srgb_linear(sw.shadow),
+                            crown: srgb_linear(sw.body),
+                            heart: srgb_linear(sw.glint),
+                        },
+                    ) else {
                         return;
                     };
-                    let sw = colours::vine(c.density, c.accent);
-                    self.styles.push(Style {
-                        wood: srgb_linear(sw.shadow),
-                        crown: srgb_linear(sw.body),
-                        heart: srgb_linear(sw.glint),
-                    });
                     if self.emission {
                         let glow = colours::vine_emission(c.accent)
                             .map(|rgb| colours::Glow { rgb, whole: false });
@@ -799,15 +925,8 @@ impl Stands {
         }
     }
 
-    /// Stamp one stand's model cells. False when the styles would alias (the strip's
-    /// 65 535-style cap), which stops the stand loop as the glyph path does.
-    fn stamp_model(
-        &mut self,
-        view: &VoxelView<'_>,
-        flora: FloraView<'_>,
-        stand: &Stand,
-        cells: &[ModelCell],
-    ) -> bool {
+    /// What a stand's model stamp reads of the stand, beside its model's cells.
+    fn model_inputs(&self, flora: FloraView<'_>, stand: &Stand) -> ModelInputs {
         let sc = flora.config.species(stand.species);
         // Each foliage layer's `stock / capacity`, as `layers_of` resolves them: the stage
         // the stand's wood is in, `share · α · W` each. A layer index the stage does not
@@ -850,21 +969,47 @@ impl Stands {
         } else {
             colours::Lip::None
         };
-        // The model's highest cell: each cell's colour comes from its height in the model.
-        let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
         // A glowcap on dead wood perches on the log, as the glyph does: the log is drawn
         // in the cell above the face, and the fungus grows out of it.
         let on_log = stand.species == Species::Glowcap
             && flora
                 .ground
-                .iter()
-                .find(|g| g.site == stand.site)
-                .is_some_and(|g| g.dead_wood >= 0.05);
+                .binary_search_by_key(&stand.site, |g| g.site)
+                .is_ok_and(|i| flora.ground[i].dead_wood >= 0.05);
         let anchor = Cell {
             x: i64::from(stand.site.x),
             y: stand.site.y + 1 + u32::from(on_log),
             z: stand.site.z,
         };
+        ModelInputs {
+            foliage,
+            wilt,
+            ripe,
+            fruit,
+            lip,
+            anchor,
+        }
+    }
+
+    /// Stamp one stand's model cells. False when the styles would alias (the strip's
+    /// 65 535-style cap), which stops the stand loop as the glyph path does.
+    fn stamp_model(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        stand: &Stand,
+        cells: &[ModelCell],
+    ) -> bool {
+        let ModelInputs {
+            foliage,
+            wilt,
+            ripe,
+            fruit,
+            lip,
+            anchor,
+        } = self.model_inputs(flora, stand);
+        // The model's highest cell: each cell's colour comes from its height in the model.
+        let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
         let mut ok = true;
         model::each_plant_cell(cells, anchor, stand.id, &foliage, view, |cell, m| {
             if !ok {
@@ -952,23 +1097,12 @@ impl Stands {
     /// the last one. A mark appears from nothing and a grazed-bare one dims out before it
     /// goes. The first rebuild draws every mark at its stock.
     fn place_film(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>) {
-        let now = std::time::Instant::now();
-        let k = match self.film_clock.replace(now) {
-            None => 1.0,
-            Some(then) => {
-                let dt = now.duration_since(then).as_secs_f32();
-                1.0 - (-dt / FILM_FADE_S).exp()
-            }
-        };
-        let marks = film_marks(flora);
-        self.film_drawn = ease_film(&self.film_drawn, &marks, k);
+        self.ease_film_marks(flora);
         for j in 0..self.film_drawn.len() {
             let (site, d) = self.film_drawn[j];
-            let style = self.styles.len().min(u16::MAX as usize) as u16;
-            if usize::from(style) != self.styles.len() {
+            let Some(style) = self.new_style(StyleId::Film(film_level(d)), film_style(d)) else {
                 break;
-            }
-            self.styles.push(film_style(d));
+            };
             self.place(
                 view,
                 Cell {
@@ -981,6 +1115,20 @@ impl Stands {
         }
     }
 
+    /// Ease the drawn film strengths one rebuild ([`ease_film`]) on the film's clock.
+    fn ease_film_marks(&mut self, flora: FloraView<'_>) {
+        let now = self.film_clock_now();
+        let k = match self.film_clock.replace(now) {
+            None => 1.0,
+            Some(then) => {
+                let dt = now.duration_since(then).as_secs_f32();
+                1.0 - (-dt / FILM_FADE_S).exp()
+            }
+        };
+        let marks = film_marks(flora);
+        self.film_drawn = ease_film(&self.film_drawn, &marks, k);
+    }
+
     /// Write one part, letting the stronger claim keep the cell. Wood beats canopy —
     /// a trunk through another stand's crown is a trunk — and a crown beats a sprout/log.
     fn place(&mut self, view: &VoxelView<'_>, cell: Cell, part: Part) {
@@ -991,6 +1139,10 @@ impl Stands {
             return;
         }
         let i = self.index(cell.x, cell.y, cell.z);
+        if let Some(claims) = &mut self.collect {
+            claims.push((i as u32, part));
+            return;
+        }
         let rank = |p: Part| match p {
             Part::None => 0u8,
             Part::Litter(_) | Part::Carrion(_) | Part::Film(_) => 1,
