@@ -794,6 +794,13 @@ pub struct VineConfig {
     /// The fewest voxels between two founders' roots (straight-line distance, the `x`
     /// axis wrapped). A count of voxels, **not** rescaled with the voxel size.
     pub founder_spacing: u32,
+    /// Metres of floor (the horizontal distance, `x` wrapped, `z`; height ignored) the
+    /// founders keep between their roots while the walls allow it, so the tallest walls
+    /// of **different** structures get one each rather than one tall structure taking
+    /// them all. When too few spread-apart walls remain, the rest root at
+    /// `founder_spacing`, so the count holds. 0 turns it off. 3 m gives the 32 m-wide
+    /// desktop terrarium room for about ten.
+    pub founder_spread_m: f64,
 }
 
 impl Default for VineConfig {
@@ -803,13 +810,14 @@ impl Default for VineConfig {
     ///
     /// - **Earning back a face.** A new face costs `spread_cost` 0.05 (its runner 0.02, the
     ///   rest construction) plus its leaf, 0.05 at full leaf: 0.1 in all. A lit side face
-    ///   (sky about 0.7) nets about `0.7 · 2.7e-4 − 1e-5 − 2e-6 ≈ 1.8e-4` a second at full
-    ///   leaf, so it pays for a new face in about ten minutes, and a colony that
+    ///   (sky about 0.7) nets about `0.7 · 1.8e-4 − 1e-5 − 2e-6 ≈ 1.1e-4` a second at full
+    ///   leaf, so it pays for a new face in about fifteen minutes, and a colony that
     ///   reinvests everything (a new face also regrows from 0.2 leaf at `regrow_rate`
-    ///   0.002/s, about seven minutes to full) doubles in roughly ten to fifteen minutes:
-    ///   about three times the first pace (9e-5, a doubling in half an hour), raised
+    ///   0.002/s, about seven minutes to full) doubles in roughly fifteen to twenty
+    ///   minutes: twice the first pace (9e-5, a doubling in half an hour), raised
     ///   2026-10-01 because a live world's vines could not be seen
-    ///   (`design/handoffs/plants-glowcap-vine-2026-10-01.md` A3). One founder covers a
+    ///   (`design/handoffs/plants-glowcap-vine-2026-10-01.md` A3; 3× overshot, Wrysk
+    ///   settled on 2× 2026-10-02). One founder covers a
     ///   lit, watered wall of a few hundred faces in a few hours (`tests/latticevine.rs`
     ///   t16–t17).
     /// - **Water per leaf area like the ground plants.** Per square metre of leaf,
@@ -830,7 +838,7 @@ impl Default for VineConfig {
             dry_spell_s: 600.0,
             wet_spell_s: 300.0,
             leaf_fall_s: 60.0,
-            assimilation: 2.7e-4,
+            assimilation: 1.8e-4,
             underside_light: 0.15,
             leaf_mass: 0.05,
             runner_mass: 0.02,
@@ -857,6 +865,7 @@ impl Default for VineConfig {
             founders_per_m2: 0.0625,
             founder_reserve: 0.1,
             founder_spacing: 8,
+            founder_spread_m: 3.0,
         }
     }
 }
@@ -1926,7 +1935,9 @@ impl Flora {
     /// **tallest walls first**: each candidate carries its wall's height in eligible faces
     /// — counted up from a foot (straight up or up a stair), down from a lip (straight down
     /// or down a stair) — and the world seed's shuffle only breaks ties; kept
-    /// [`VineConfig::founder_spacing`] voxels apart. Returns how many rooted.
+    /// [`VineConfig::founder_spacing`] voxels apart, and [`VineConfig::founder_spread_m`]
+    /// of floor apart while the walls allow it (a second pass fills the rest at the
+    /// spacing alone). Returns how many rooted.
     pub fn seed_vine_founders(&mut self, world: &World) -> usize {
         let view = world.view();
         let c = view.config;
@@ -2019,28 +2030,44 @@ impl Flora {
             let dz = a.z as i64 - b.z as i64;
             dx * dx + dy * dy + dz * dz >= spacing * spacing
         };
+        // Floor distance in voxels: `x` wrapped and `z`, height ignored.
+        let spread = self.config.latticevine.founder_spread_m / c.voxel_m;
+        let spread_apart = |a: Site, b: Site| {
+            let dx = (a.x as i64 - b.x as i64).rem_euclid(width);
+            let dx = dx.min(width - dx) as f64;
+            let dz = (a.z as i64 - b.z as i64) as f64;
+            dx * dx + dz * dz >= spread * spread
+        };
         let reserve = self.config.latticevine.founder_reserve;
         let mut rooted: Vec<Site> = Vec::new();
-        for (site, first, _) in candidates {
-            if rooted.len() >= want {
-                break;
-            }
-            if !rooted.iter().all(|&r| apart(r, site)) {
-                continue;
-            }
-            if self
-                .seed_vine(
-                    world,
-                    VineSeed {
-                        root: site,
-                        first,
-                        reserve,
-                        lineage: None,
-                    },
-                )
-                .is_some()
-            {
-                rooted.push(site);
+        // First spread apart, tallest first; then, if the walls ran out, the rest at the
+        // spacing alone.
+        let passes: &[bool] = if spread > 0.0 { &[true, false] } else { &[false] };
+        for &wide in passes {
+            for &(site, first, _) in &candidates {
+                if rooted.len() >= want {
+                    break;
+                }
+                if !rooted
+                    .iter()
+                    .all(|&r| apart(r, site) && (!wide || spread_apart(r, site)))
+                {
+                    continue;
+                }
+                if self
+                    .seed_vine(
+                        world,
+                        VineSeed {
+                            root: site,
+                            first,
+                            reserve,
+                            lineage: None,
+                        },
+                    )
+                    .is_some()
+                {
+                    rooted.push(site);
+                }
             }
         }
         rooted.len()

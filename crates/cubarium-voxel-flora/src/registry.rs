@@ -263,6 +263,8 @@ fn vine_rows() -> Vec<Row> {
             .scale(area).evolve().grade("C"),
         r("founder_spacing", "voxels (not rescaled)", nonneg, "the fewest voxels between two founders' roots")
             .search(2.0, 24.0),
+        r("founder_spread_m", "m of floor", nonneg, "floor distance founders keep while the walls allow it; the rest fill at founder_spacing; 0 off")
+            .search(0.0, 8.0),
     ]
 }
 

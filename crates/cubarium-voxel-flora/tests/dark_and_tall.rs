@@ -211,6 +211,41 @@ fn one_founder_roots_at_the_foot_of_the_six_face_wall_not_the_three_face_ones() 
 }
 
 #[test]
+fn founders_spread_across_the_floor_before_they_share_a_tall_structure() {
+    // Two tall walls a metre apart (x = 10 and 14, faces y = 3..=12) and one short wall
+    // far off (x = 50, faces y = 3..=6), on the 0.25 m voxel: 80 voxels is 20 m.
+    let world = |seed| walls(80, &[(10, 12), (14, 12), (50, 6)], seed);
+    let near_tall = |x: u32| (8..=16).contains(&x);
+    let mut config = FloraConfig::default();
+    config.latticevine.founders = 2;
+    config.latticevine.founders_per_m2 = 0.0;
+    config.latticevine.founder_spacing = 2;
+    for seed in 1..=8u64 {
+        // Off: both founders take the tall pair, as before.
+        config.latticevine.founder_spread_m = 0.0;
+        let mut flora = Flora::new(config.clone());
+        assert_eq!(flora.seed_vine_founders(&world(seed)), 2, "seed {seed}");
+        let xs: Vec<u32> = flora.view().cover.vines().iter().map(|v| v.root.x).collect();
+        assert!(xs.iter().all(|&x| near_tall(x)), "seed {seed}, spread off: {xs:?}");
+
+        // 3 m apart: the tallest wall first, then the short wall 9 m away, not its
+        // neighbour a metre off.
+        config.latticevine.founder_spread_m = 3.0;
+        let mut flora = Flora::new(config.clone());
+        assert_eq!(flora.seed_vine_founders(&world(seed)), 2, "seed {seed}");
+        let xs: Vec<u32> = flora.view().cover.vines().iter().map(|v| v.root.x).collect();
+        assert_eq!(xs.iter().filter(|&&x| near_tall(x)).count(), 1, "seed {seed}: {xs:?}");
+        assert!(xs.iter().any(|&x| (48..=52).contains(&x)), "seed {seed}: {xs:?}");
+    }
+    // When the floor runs out of spread-apart walls the count still holds: the rest
+    // fill at founder_spacing.
+    config.latticevine.founders = 3;
+    config.latticevine.founder_spread_m = 3.0;
+    let mut flora = Flora::new(config);
+    assert_eq!(flora.seed_vine_founders(&world(1)), 3);
+}
+
+#[test]
 fn the_founder_count_scales_with_floor_area_over_the_floor() {
     let vc = VineConfig::default();
     assert_eq!(vc.founders, 6);
@@ -243,6 +278,7 @@ fn every_new_knob_has_a_registry_row() {
         "flora.glowcap.dark_founder_share",
         "flora.springturf.dark_sky_max",
         "flora.latticevine.founders_per_m2",
+        "flora.latticevine.founder_spread_m",
     ] {
         assert!(registry().row_for(path).is_some(), "no registry row for {path}");
     }

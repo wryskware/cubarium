@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (678 rows)
+**`flora.*`** (679 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -996,7 +996,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.dry_spell_s` | 600.0 | s | [0, inf) | yes | C | placeholder | dry this long: dormant |
 | `flora.latticevine.wet_spell_s` | 300.0 | s | [0, inf) | yes | C | placeholder | wet this long: regreens |
 | `flora.latticevine.leaf_fall_s` | 60.0 | s | (0, inf) |  | C | placeholder | a dormant face drops its leaf over this |
-| `flora.latticevine.assimilation` | 0.00027 | organic/s per reference face | [0, inf) | yes | C | placeholder | income per full face in full light |
+| `flora.latticevine.assimilation` | 0.00018 | organic/s per reference face | [0, inf) | yes | C | placeholder | income per full face in full light |
 | `flora.latticevine.underside_light` | 0.15 | fraction | [0, inf) | yes | B | placeholder | light factor on a downward face |
 | `flora.latticevine.leaf_mass` | 0.05 | org-units per reference face | (0, inf) | yes | C | placeholder | leaf tissue per full face |
 | `flora.latticevine.runner_mass` | 0.02 | org-units per reference face | [0, inf) | yes | C | placeholder | runner tissue per face |
@@ -1023,6 +1023,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.founders_per_m2` | 0.0625 | vines per m2 of world floor | [0, inf) | 0–0.25 | - | placeholder | founder vines per square metre: max(founders, round(this * area)) |
 | `flora.latticevine.founder_reserve` | 0.1 | org-units per reference face | [0, inf) | yes | C | placeholder | each founder's starting reserve |
 | `flora.latticevine.founder_spacing` | 8 | voxels (not rescaled) | [0, inf) | 2–24 | - | placeholder | the fewest voxels between two founders' roots |
+| `flora.latticevine.founder_spread_m` | 3.0 | m of floor | [0, inf) | 0–8 | - | placeholder | floor distance founders keep while the walls allow it; the rest fill at founder_spacing; 0 off |
 | `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
 | `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
 | `flora.wood_decomposition` | 0.0001 | /s | [0, inf) | yes | C | placeholder | k_w: dead-wood decomposition |
