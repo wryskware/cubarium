@@ -605,6 +605,7 @@ mod tests {
                         x: (f64::from(xi) + 0.5) * 0.25,
                         z: (f64::from(zi) + 0.5) * 0.25,
                         heading_rad: heading,
+                        y_m: 0.0,
                     };
                     let cols = mouth_columns_at(&view, &pose, &body);
                     let live = mouth_foliage_stand(&fv, &view, &cols, 2, &body, Diet::only(crate::Food::Foliage));

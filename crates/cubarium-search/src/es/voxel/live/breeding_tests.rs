@@ -12,7 +12,7 @@ use cubarium_voxel_flora::{Flora, FloraConfig};
 
 use super::search::{BandSpec, body_readiness, breeding_shortfall};
 
-const FOUNDED: [usize; Founder::COUNT] = [8, 8, 9, 0, 0, 0];
+const FOUNDED: [usize; Founder::COUNT] = [8, 8, 9, 0, 0, 0, 0];
 const NOT_LOST: [bool; Founder::COUNT] = [false; Founder::COUNT];
 
 fn shortfall(late: [u64; 3], readiness: [f64; 3], spec: &BandSpec) -> f64 {

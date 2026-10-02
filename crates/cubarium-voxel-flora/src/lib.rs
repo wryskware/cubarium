@@ -341,6 +341,12 @@ pub struct Stand {
     /// (`design/handoffs/voxel-organism-decisions-2026-09-21.md` §4).
     #[serde(default)]
     pub profile_stage: u8,
+    /// **Nectar** held in the stand's flowers, organic units (F1, §3.7): paid from the
+    /// reserve in daylight up to the species' `nectar_cap`, taken by
+    /// [`Flora::take_stand_nectar`]. Not the seed parcel.
+    // F1 stub: declared, always 0.
+    #[serde(default)]
+    pub nectar: f64,
 }
 
 impl Stand {
@@ -982,6 +988,15 @@ pub struct SpeciesConfig {
     pub defence_per_bite: f64,
     /// The defence's **half-life** once grazing stops, seconds. Zero or less: no decay.
     pub defence_half_life_s: f64,
+    /// **Nectar** (F1, predation-and-flight §3.7, decision 6): organic matter an adult
+    /// stand moves from its reserve into its [`Stand::nectar`] stock per second, in
+    /// daylight only, until the stock reaches [`SpeciesConfig::nectar_cap`]. Zero makes
+    /// none: every species but bloomcrown.
+    // F1 stub: declared, unread.
+    pub nectar_per_s: f64,
+    /// The most nectar an adult stand holds, organic units. Unvisited nectar stays.
+    // F1 stub: declared, unread.
+    pub nectar_cap: f64,
     /// **A runner's reach**: how many columns sideways, in `x` and `z`, a runner or rhizome
     /// daughter may root from the parent (the square ring around the home column); the
     /// support face is then the one at the parent's height or a voxel above or below. A
@@ -1288,6 +1303,9 @@ impl SpeciesConfig {
             graze_refuge: 0.15,
             defence_per_bite: DEFENCE_PER_BITE,
             defence_half_life_s: DEFENCE_HALF_LIFE_S,
+            // F1 stub: no species makes nectar yet; F1 gives bloomcrown its numbers.
+            nectar_per_s: 0.0,
+            nectar_cap: 0.0,
             // A runner roots on the next column over (the eight neighbours).
             runner_reach: 1,
             // No founders: every preset that is seeded says so.
@@ -4178,6 +4196,7 @@ impl Flora {
             layer_stock: [0.0; MAX_FOLIAGE_LAYERS],
             profile_stage: 0,
             defence: 0.0,
+            nectar: 0.0,
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);
@@ -4374,6 +4393,14 @@ impl Flora {
         )?;
         g.clear_spent_carcass(self.config.carcass_gone_fraction);
         Some(self.book_consumed(taken))
+    }
+
+    /// Drink up to `want` of the nectar of the stand on `site` (F1, §3.7): `None` when
+    /// there is no stand or it holds no nectar. Booked as `consumed_*_out`, with the
+    /// mineral and energy the nectar carries.
+    // F1 stub: no stand holds nectar yet.
+    pub fn take_stand_nectar(&mut self, _site: Site, _want: f64) -> Option<Taken> {
+        None
     }
 
     /// **Glassfilm founding** (R2a): put `film_seed_per_m2` of film on every wet-eligible

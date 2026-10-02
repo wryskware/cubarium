@@ -1,0 +1,1123 @@
+//! **F1, written before the rule** (`design/handoffs/voxel-flight-2026-09-28.md` Brief F1
+//! "Tests first", with the roster brief's "F1 overrides"; the design note is
+//! `design/predation-and-flight-2026-09-28.md` §3): the flight substrate — the pose's
+//! `y_m`, the `Fly` and `Perched` modes, air motion, perches, the flyer fan, nectar —
+//! with the bellwing as its first lineage.
+//!
+//! In-crate because the `altitude` / `ceiling` claim reads the observation vector
+//! (`body::observation`), which is crate-private.
+//!
+//! Fixtures are hand-built at the 0.25 m reference voxel: soil at `y = 1..=2`, so a plain
+//! column's support face is `y = 2` and its top, the **surface**, is 0.75 m. Bellwings are
+//! placed in the air with [`Command::IntroduceAloft`] (a pose whose `y_m` is the body's
+//! base height) and driven by [`Scripted`] with a constant [`Scripted::lifting`] effort.
+//! The day clock is off unless a test needs daylight, so the diurnal bellwing is awake.
+//! No world is stepped: the fauna reads the world and does not move it. Plants are
+//! stepped only to grow a fixture's nectar or flowers. No run is longer than 200 ticks.
+//!
+//! Readings these tests fix where the brief leaves a choice (each named again where it
+//! is used):
+//! - **The ceiling** is `y_m` (the base) at most `band_max_m` over the top of the support
+//!   face below the body's column.
+//! - **The sphere** is radius `span_m / 2` about the body; a flyer pressed against a wall
+//!   keeps its centre at least that far from the face plane.
+//! - **An underside** is perched on by rising into it (lift up while touching the slab
+//!   from below); a crown top by descending onto it. A flyer moving level through a crown
+//!   passes through it at the foliage speed.
+//! - **"Can't pay a takeoff"** is an empty reserve.
+//! - **`ceiling`** in `Self` is the clear height above the body's base to the first solid
+//!   or water cell in its column, over `band_max_m`, capped at 1; **`altitude`** is the
+//!   base's height over the support face below, over `band_max_m`.
+
+use cubarium_voxel::weather::{DayClock, DayMode, RainMode};
+use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, DT, Material, World};
+use cubarium_voxel_flora::{
+    Command as FloraCommand, Face, FaceDir, Flora, FloraConfig, Site, Species as Plant, SpurPhase,
+    VineConfig, VineSeed,
+};
+
+use crate::{
+    Actions, Animal, Bloom, Command, ConeHit, Diet, Fauna, FaunaConfig, Flight, Food, Founder,
+    FounderPhysiology, Founding, Hunter, MobilityMode, PerchKind, Pose, Scripted, StartingStores,
+    surface_m,
+};
+
+const V: f64 = 0.25;
+const BW: Founder = Founder::Bellwing;
+/// The top of a plain column's support face `y = 2`.
+const SURFACE: f64 = 0.75;
+/// Facing `+x`: `Pose::forward` is `(sin h, cos h)`.
+const EAST: f64 = std::f64::consts::FRAC_PI_2;
+/// A body that is perched sits on its perch within this, metres.
+const ON: f64 = 0.02;
+
+// ------------------------------------------------------------------ fixtures
+
+fn clock_off() -> DayClock {
+    DayClock {
+        mode: DayMode::Off,
+        ..DayClock::default()
+    }
+}
+
+/// A day clock held at `hour` (the world is never stepped, so it stays there).
+fn clock_at(hour: f64) -> DayClock {
+    DayClock {
+        start_hour: hour,
+        ..DayClock::default()
+    }
+}
+
+fn config(width: u32, height: u32, depth: u32, day: DayClock) -> VoxelConfig {
+    VoxelConfig {
+        width,
+        height,
+        depth,
+        voxel_m: V,
+        seed: 7,
+        day,
+        ..VoxelConfig::default()
+    }
+}
+
+/// Soil at `y = 1..=2` everywhere, with every soil voxel at field capacity (the plants'
+/// and the vines' fixtures need wet ground; nothing here needs it dry).
+fn soil(world: &mut World) {
+    let c = world.config().clone();
+    let m = cubarium_voxel::Materials::DEFAULT;
+    let fc = m.field_capacity(Material::Soil);
+    let cap = m.pore_capacity(Material::Soil) * c.voxel_volume();
+    for z in 0..c.depth {
+        for x in 0..i64::from(c.width) {
+            for y in 1..=2 {
+                world.apply(WorldCommand::AddWater {
+                    x,
+                    y,
+                    z,
+                    volume_m3: fc * cap,
+                });
+                world.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: Material::Soil,
+                });
+            }
+        }
+    }
+}
+
+fn plain_with(c: VoxelConfig) -> World {
+    let mut w = World::empty(c);
+    soil(&mut w);
+    w
+}
+
+/// A flat plain, day clock off.
+fn plain(width: u32, height: u32, depth: u32) -> World {
+    plain_with(config(width, height, depth, clock_off()))
+}
+
+/// Rock over columns `xs` (every `z`) at `ys`.
+fn rock(world: &mut World, xs: std::ops::RangeInclusive<i64>, ys: std::ops::RangeInclusive<u32>) {
+    let depth = world.config().depth;
+    for z in 0..depth {
+        for x in xs.clone() {
+            for y in ys.clone() {
+                world.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: Material::Rock,
+                });
+            }
+        }
+    }
+}
+
+/// The centre of column `(x, z)` in metres.
+fn centre(x: u32, z: u32) -> (f64, f64) {
+    ((f64::from(x) + 0.5) * V, (f64::from(z) + 0.5) * V)
+}
+
+fn bellwing_flight(fauna: &Fauna) -> Flight {
+    fauna
+        .config()
+        .founder(BW)
+        .flight
+        .expect("the bellwing has a flight table (F1)")
+}
+
+/// Put a bellwing in the air at `(x_m, y_m, z_m)`; returns its id.
+fn aloft(fauna: &mut Fauna, world: &World, x_m: f64, z_m: f64, y_m: f64, heading_rad: f64, stores: StartingStores) -> u64 {
+    assert!(
+        fauna.apply(
+            world,
+            Command::IntroduceAloft {
+                pose: Pose {
+                    x: x_m,
+                    z: z_m,
+                    heading_rad,
+                    y_m,
+                },
+                founder: BW,
+                stores,
+            },
+        ),
+        "the fixture places a bellwing aloft at ({x_m}, {y_m}, {z_m})"
+    );
+    fauna.view().ledger.births - 1
+}
+
+/// Put a founder on the highest support face of column `(x, z)`; returns its id.
+fn on_ground(fauna: &mut Fauna, world: &World, founder: Founder, x: i64, z: u32, stores: StartingStores) -> u64 {
+    assert!(
+        fauna.apply(
+            world,
+            Command::IntroduceFounder {
+                x,
+                z,
+                founder,
+                stores,
+                heading_rad: EAST,
+            },
+        ),
+        "the fixture places a {founder:?} at ({x}, {z})"
+    );
+    fauna.view().ledger.births - 1
+}
+
+/// Hold `forward`, `feed` and `lift` every tick.
+fn fly(fauna: &mut Fauna, id: u64, forward: f64, feed: f64, lift: f64) {
+    assert!(fauna.set_controller(
+        id,
+        Box::new(
+            Scripted::new(vec![Actions {
+                forward,
+                turn: 0.0,
+                feed,
+            }])
+            .lifting(lift),
+        ),
+    ));
+}
+
+fn animal(fauna: &Fauna, id: u64) -> Animal {
+    *fauna.view().animal(id).expect("the body is alive")
+}
+
+fn mode(fauna: &Fauna, id: u64) -> MobilityMode {
+    animal(fauna, id).mobility.mode
+}
+
+fn perch_kind(fauna: &Fauna, id: u64) -> Option<PerchKind> {
+    animal(fauna, id).mobility.perch.map(|p| p.kind)
+}
+
+fn steps(fauna: &mut Fauna, world: &World, flora: &mut Flora, n: usize) {
+    for _ in 0..n {
+        fauna.step(world, flora);
+    }
+}
+
+/// Step until `done` or `cap` ticks; returns the ticks taken.
+fn until(fauna: &mut Fauna, world: &World, flora: &mut Flora, cap: usize, done: impl Fn(&Fauna) -> bool) -> usize {
+    let mut n = 0;
+    while !done(fauna) && n < cap {
+        fauna.step(world, flora);
+        n += 1;
+    }
+    n
+}
+
+/// Respiration over `n` ticks beyond basal upkeep: what flight (or anything but
+/// maintenance) cost. One body per layer in every caller, so it is that body's.
+fn beyond_basal(fauna: &mut Fauna, world: &World, flora: &mut Flora, n: usize) -> f64 {
+    let l = &fauna.view().ledger;
+    let before = l.respired_out - l.respired_maintenance_out;
+    steps(fauna, world, flora, n);
+    let l = &fauna.view().ledger;
+    l.respired_out - l.respired_maintenance_out - before
+}
+
+/// All respiration over `n` ticks.
+fn respired(fauna: &mut Fauna, world: &World, flora: &mut Flora, n: usize) -> f64 {
+    let before = fauna.view().ledger.respired_out;
+    steps(fauna, world, flora, n);
+    fauna.view().ledger.respired_out - before
+}
+
+/// Both layers' books close, and what the plant layer lost is what the animal booked
+/// eating minus what it put back.
+fn ledgers_close(fauna: &Fauna, flora: &Flora, flora_organic_before: f64) {
+    let av = fauna.view();
+    let fv = flora.view();
+    for (name, got, want) in [
+        ("fauna organic", av.organic(), av.ledger.expected_organic()),
+        ("fauna mineral", av.mineral(), av.ledger.expected_mineral()),
+        ("fauna energy", av.energy(), av.ledger.expected_energy()),
+        ("flora organic", fv.organic(), fv.ledger.expected_organic()),
+        ("flora mineral", fv.mineral(), fv.ledger.expected_mineral()),
+        ("flora energy", fv.energy(), fv.ledger.expected_energy()),
+    ] {
+        assert!(
+            (got - want).abs() <= 1e-9 * got.abs().max(1.0),
+            "the {name} ledger must close: {got} against {want}"
+        );
+    }
+    let lost = flora_organic_before - fv.organic();
+    let net = av.ledger.eaten_organic_in - av.ledger.deposited_organic_out;
+    assert!(
+        (lost - net).abs() <= 1e-12 * lost.abs().max(1.0),
+        "the plant layer lost {lost} and the animal booked {net}"
+    );
+}
+
+/// Seed a full-grown stand of `species` on column `(x, z)`; returns its site.
+fn full_stand(flora: &mut Flora, world: &World, species: Plant, x: i64, z: u32) -> Site {
+    let wood = flora.config().species(species).wood_max;
+    assert!(flora.apply(world, FloraCommand::Seed { x, z, species, wood }));
+    flora
+        .view()
+        .stands
+        .iter()
+        .find(|s| i64::from(s.site.x) == x && s.site.z == z)
+        .expect("the stand")
+        .site
+}
+
+/// A stand's foliage layers as `(cell, layer)`, bottom-up.
+fn foliage_layers(flora: &Flora, site: Site) -> Vec<cubarium_voxel_flora::StandLayer> {
+    let mut v: Vec<_> = flora
+        .view()
+        .layers_at(site)
+        .filter(|l| l.foliage_index.is_some())
+        .collect();
+    v.sort_by_key(|l| l.cell);
+    v
+}
+
+/// The top of a stand's crown slab: the top of its highest foliage layer's cell.
+fn crown_top(flora: &Flora, site: Site) -> f64 {
+    let top = *foliage_layers(flora, site).last().expect("a crown");
+    (top.cell + 1) as f64 * V
+}
+
+/// A flora config whose bloomcrowns make nectar fast enough for a fixture: 1e-3 a second
+/// up to 2e-3 (full in 2 s of daylight). Explicit, so the implementer's defaults change
+/// none of these results.
+fn nectar_flora() -> FloraConfig {
+    let mut c = FloraConfig::default();
+    c.bloomcrown.nectar_per_s = 1e-3;
+    c.bloomcrown.nectar_cap = 2e-3;
+    c
+}
+
+/// A bloomcrown on `(x, z)` given `ticks` of daylight to make nectar (the world's clock
+/// must be at day).
+fn blooming(flora: &mut Flora, world: &mut World, x: i64, z: u32, ticks: usize) -> Site {
+    let site = full_stand(flora, world, Plant::Bloomcrown, x, z);
+    for _ in 0..ticks {
+        flora.step(world);
+    }
+    site
+}
+
+fn stand_nectar(flora: &Flora, site: Site) -> f64 {
+    flora.view().stand_at(site).expect("the stand").nectar
+}
+
+// ------------------------------------------------------------------ the table
+
+/// **The bellwing's table** (§3.9, the roster overrides): the specimen's name, a nectar
+/// diet, its body and span, the flight costs and band, cruise 8 BL/s, diurnal, founded
+/// by bodies at a code-default count of 0, on no hunter's list, and a flyer — the only
+/// one. Its manifest adds `lift` to the three shared actions; every walker keeps three
+/// (the lanternjaw its `lure`), so no existing action list moves.
+#[test]
+fn the_f1_bellwing_table_is_the_briefs() {
+    assert_eq!(BW.name(), "bellwing", "the specimen key");
+    assert!(Founder::ALL.contains(&BW));
+    assert!(Food::ALL.contains(&Food::Nectar) && !Food::Nectar.is_pool(), "a flower product");
+    assert_eq!(Food::Nectar.name(), "nectar");
+
+    let x1 = FounderPhysiology::placeholder(BW);
+    let bw = FounderPhysiology::frozen(BW);
+    assert_eq!(bw.diet, Diet::only(Food::Nectar));
+    assert_eq!(bw.adult_length_m, 0.125);
+    assert_eq!(x1.core.body_max, 0.001, "body_max 0.001 in the x1 table");
+    assert!((bw.cruise_body_lengths_per_s - 8.0).abs() < 1e-12, "cruise 8 BL/s (1 m/s)");
+    assert_eq!(bw.active, crate::Activity::Diurnal);
+    assert_eq!(bw.founding, Founding::Bodies);
+    assert_eq!(bw.founding_count, 0, "a new lineage founds none by default");
+    assert_eq!(FaunaConfig::default().founder_counts()[BW.index()], 0);
+    assert!(bw.hunter.is_none());
+    assert!(!Hunter::LANTERNJAW.hunts(BW), "on no hunter's list yet");
+
+    let f = bw.flight.expect("the bellwing flies");
+    assert_eq!(f.span_m, 0.375);
+    assert_eq!(f.band_max_m, 2.5);
+    assert_eq!(f.flight_factor, 4.0);
+    assert_eq!(f.hover_factor, 5.0);
+    assert_eq!(f.takeoff_s, 1.0);
+    assert_eq!(f.foliage_speed_factor, 0.5);
+    assert!(f.climb_work_per_m > 0.0, "lift work is paid going up");
+    assert!(f.shower_rain_reference_m_per_s > 0.0);
+    for other in Founder::ALL.into_iter().filter(|&o| o != BW) {
+        assert!(FounderPhysiology::frozen(other).flight.is_none(), "{other:?} walks");
+    }
+
+    let m = BW.manifest();
+    assert_eq!(m.actions.len(), 4);
+    assert_eq!(m.actions[3].name, "lift_effort");
+    assert_eq!((m.actions[3].low, m.actions[3].high), (-1.0, 1.0));
+    assert_eq!(m.actions[3].transfer, crate::Transfer::Tanh);
+    for other in Founder::ALL.into_iter().filter(|&o| o != BW) {
+        let want = if other == Founder::Lanternjaw { 4 } else { 3 };
+        assert_eq!(other.manifest().actions.len(), want, "{other:?}'s actions do not move");
+    }
+}
+
+// ------------------------------------------------------------------ 1. aloft
+
+/// **1. A bellwing with no support under its feet stays aloft while paying the airborne
+/// cost; a walker in the same spot is refused.** A bellwing placed 1 m over a plain and
+/// holding a hover (forward 0, lift 0) for 40 ticks is flying, keeps its height, and
+/// respires beyond its basal upkeep at least that upkeep again (hover is 5× basal, so the
+/// excess is at least 4×). A shredder asked to stand at the same pose is refused.
+/// Walkers are unchanged: an introduced shredder's `y_m` is the top of its support face,
+/// and stays so as it walks.
+#[test]
+fn a_bellwing_stays_aloft_paying_and_a_walker_there_is_refused() {
+    let world = plain(16, 20, 8);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(8, 4);
+    let y = SURFACE + 1.0;
+    let id = aloft(&mut fauna, &world, x, z, y, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, 0.0);
+    assert_eq!(mode(&fauna, id), MobilityMode::Fly, "placed in the air, it flies");
+
+    let body = animal(&fauna, id).body;
+    let basal = fauna.config().founder(BW).core.maintenance_per_s * body * 40.0 * DT;
+    let extra = beyond_basal(&mut fauna, &world, &mut flora, 40);
+    let a = animal(&fauna, id);
+    assert_eq!(a.mobility.mode, MobilityMode::Fly, "still aloft");
+    assert!((a.pose.y_m - y).abs() < 1e-9, "a hover holds its height: {}", a.pose.y_m);
+    assert!(extra >= basal, "the airborne cost is paid: {extra} beyond a basal {basal}");
+
+    // A walker at the same pose.
+    let births = fauna.view().ledger.births;
+    assert!(
+        !fauna.apply(
+            &world,
+            Command::IntroduceAloft {
+                pose: Pose { x, z, heading_rad: EAST, y_m: y },
+                founder: Founder::Blind,
+                stores: StartingStores::FULL,
+            },
+        ),
+        "a walker cannot be put in the air"
+    );
+    assert_eq!(fauna.view().ledger.births, births, "and nothing was placed");
+
+    // Walkers stand on their face.
+    let mut walkers = Fauna::new(FaunaConfig::default());
+    let s = on_ground(&mut walkers, &world, Founder::Blind, 4, 4, StartingStores::FULL);
+    fly(&mut walkers, s, 1.0, 0.0, 0.0);
+    for _ in 0..40 {
+        let a = animal(&walkers, s);
+        assert_eq!(a.mobility.mode, MobilityMode::Ground);
+        assert!(
+            (a.pose.y_m - surface_m(a.site.y, V)).abs() < 1e-12,
+            "a walker's y_m is its support face's top: {} on {:?}",
+            a.pose.y_m,
+            a.site
+        );
+        walkers.step(&world, &mut flora);
+    }
+}
+
+// ------------------------------------------------------------------ 2. air only
+
+/// **2. It cannot enter rock or water, and cannot climb past the ceiling.**
+/// - Flying east at full forward toward a rock wall (columns 10..=11, up to `y = 15`) for
+///   200 ticks, its centre never comes nearer the wall's face than its sphere's radius,
+///   and the cell at its base is never solid.
+/// - Descending at full down-lift over a pond (one cell of water on every column) for 200
+///   ticks, its base never goes below the water's surface.
+/// - Climbing at full lift for 200 ticks, its base never stands more than `band_max_m`
+///   over the support face below, and gets within a voxel of it.
+#[test]
+fn a_flyer_never_enters_rock_or_water_nor_climbs_past_its_ceiling() {
+    // Rock.
+    let mut world = plain(24, 20, 8);
+    rock(&mut world, 10..=11, 3..=15);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(4, 4);
+    let y = SURFACE + 1.0;
+    let id = aloft(&mut fauna, &world, x, z, y, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 1.0, 0.0, 0.0);
+    let r = bellwing_flight(&fauna).span_m / 2.0;
+    let face = 10.0 * V;
+    let mut nearest = f64::INFINITY;
+    for t in 0..200 {
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, id);
+        nearest = nearest.min(face - a.pose.x);
+        assert!(
+            a.pose.x + r <= face + 1e-9,
+            "tick {t}: the sphere crosses the rock face: x {} radius {r}",
+            a.pose.x
+        );
+        let cell = ((a.pose.y_m / V).floor() as u32, (a.pose.x / V).floor() as i64);
+        assert!(!world.view().is_solid(cell.1, cell.0, 4), "tick {t}: inside rock at {cell:?}");
+    }
+    assert!(nearest < r + 0.1, "it flew up to the wall: nearest {nearest}");
+
+    // Water.
+    let mut world = plain(16, 20, 8);
+    let cell = world.config().voxel_volume();
+    for z in 0..8 {
+        for x in 0..16 {
+            world.apply(WorldCommand::AddWater { x, y: 3, z, volume_m3: cell });
+        }
+    }
+    let water_top = SURFACE + world.view().standing_depth_m(8, 2, 4);
+    assert!((water_top - (SURFACE + V)).abs() < 1e-9, "fixture: a cell of water");
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, SURFACE + 1.5, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, -1.0);
+    let mut lowest = f64::INFINITY;
+    for t in 0..200 {
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, id);
+        lowest = lowest.min(a.pose.y_m);
+        assert!(a.pose.y_m >= water_top - 1e-9, "tick {t}: under the water at {}", a.pose.y_m);
+    }
+    assert!(lowest < water_top + 0.3, "it came down to the water: lowest {lowest}");
+
+    // Ceiling.
+    let world = plain(16, 24, 8);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = aloft(&mut fauna, &world, x, z, SURFACE + 1.5, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, 1.0);
+    let band = bellwing_flight(&fauna).band_max_m;
+    let mut highest = 0.0f64;
+    for t in 0..200 {
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, id);
+        let over = a.pose.y_m - surface_m(a.site.y, V);
+        highest = highest.max(over);
+        assert!(over <= band + 1e-9, "tick {t}: {over} m over its support, ceiling {band}");
+    }
+    assert!(highest > band - V, "it climbed to the ceiling: {highest} of {band}");
+}
+
+// ------------------------------------------------------------------ 3. costs
+
+/// **3. Hover costs more per second than cruise, which costs more than perching; lift
+/// work is paid going up and not going down.** Five single-bellwing layers on one plain,
+/// 10 ticks each, all starting 1.25 m up (the perched one on the ground): hover (forward
+/// 0, lift 0), cruise (forward 1), perched (resting on its face), climbing (lift 1) and
+/// descending (lift −1). Hover > cruise > perched, and cruise is at least 3.5× perched
+/// (4× basal); the climb costs the hover plus `climb_work_per_m × body × rise` (within
+/// 10 %); the descent costs no more than the hover.
+#[test]
+fn hover_costs_more_than_cruise_than_perching_and_only_climbing_pays_lift_work() {
+    let world = plain(48, 20, 8);
+    let mut flora = Flora::new(FloraConfig::default());
+    let (x, z) = centre(8, 4);
+    let y = SURFACE + 1.25;
+    let run = |forward: f64, lift: f64, flora: &mut Flora| -> (f64, f64, f64) {
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let id = aloft(&mut fauna, &world, x, z, y, EAST, StartingStores::FULL);
+        fly(&mut fauna, id, forward, 0.0, lift);
+        let body = animal(&fauna, id).body;
+        let paid = respired(&mut fauna, &world, flora, 10);
+        let a = animal(&fauna, id);
+        assert_eq!(a.mobility.mode, MobilityMode::Fly, "aloft throughout ({forward}, {lift})");
+        (paid, a.pose.y_m - y, body)
+    };
+    let (hover, _, _) = run(0.0, 0.0, &mut flora);
+    let (cruise, _, _) = run(1.0, 0.0, &mut flora);
+    let (up, rise, body) = run(0.0, 1.0, &mut flora);
+    let (down, fall, _) = run(0.0, -1.0, &mut flora);
+
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = on_ground(&mut fauna, &world, BW, 8, 4, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, 0.0);
+    assert_eq!(mode(&fauna, id), MobilityMode::Perched, "a flyer on a face is perched");
+    let perched = respired(&mut fauna, &world, &mut flora, 10);
+    assert_eq!(mode(&fauna, id), MobilityMode::Perched);
+
+    assert!(hover > cruise, "hover {hover} over cruise {cruise}");
+    assert!(cruise > perched, "cruise {cruise} over perched {perched}");
+    assert!(cruise >= 3.5 * perched, "flight is several times basal: {cruise} vs {perched}");
+
+    let climb_work = FaunaConfig::default().founder(BW).flight.expect("flies").climb_work_per_m;
+    assert!(rise > 0.0 && fall < 0.0, "it rose {rise} and fell {fall}");
+    let lift_work = climb_work * body * rise;
+    assert!(
+        ((up - hover) - lift_work).abs() <= 0.1 * lift_work,
+        "going up pays the lift work: {} beyond the hover, {lift_work} expected",
+        up - hover
+    );
+    assert!(down <= hover * (1.0 + 1e-9), "descent is free: {down} against a hover {hover}");
+}
+
+// ------------------------------------------------------------------ 4. perches
+
+/// Descend (or rise) until perched; returns the ticks.
+fn settle(fauna: &mut Fauna, world: &World, flora: &mut Flora, id: u64) -> usize {
+    until(fauna, world, flora, 200, |f| mode(f, id) == MobilityMode::Perched)
+}
+
+/// It holds the perch at no airborne cost: 20 ticks resting there move it nowhere and
+/// cost nothing beyond basal upkeep.
+fn holds(fauna: &mut Fauna, world: &World, flora: &mut Flora, id: u64, what: &str) {
+    fly(fauna, id, 0.0, 0.0, 0.0);
+    let before = animal(fauna, id).pose;
+    let extra = beyond_basal(fauna, world, flora, 20);
+    let a = animal(fauna, id);
+    assert_eq!(a.mobility.mode, MobilityMode::Perched, "{what}: still perched");
+    assert!((a.pose.y_m - before.y_m).abs() < 1e-12, "{what}: it holds its height");
+    assert!(extra.abs() < 1e-15, "{what}: no airborne cost on a perch, paid {extra}");
+}
+
+/// **4. It lands on a ground face, a bloomcrown crown top, a latticevine face and under a
+/// frond's crown slab; each perch holds it at no airborne cost.** Descending at full
+/// down-lift onto a plain, and onto a full-grown bloomcrown's crown from half a metre
+/// over it; descending against a vine-covered wall (pressing into it) — and against the
+/// same wall bare, where it slides down to the ground instead; rising at full lift under
+/// a full-grown umbrellafrond's lowest foliage slab, two columns from its trunk.
+#[test]
+fn it_lands_on_ground_crown_vine_and_under_a_frond_and_each_perch_is_free() {
+    // A ground face.
+    let world = plain(16, 20, 8);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, SURFACE + 1.0, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, -1.0);
+    let n = settle(&mut fauna, &world, &mut flora, id);
+    assert_eq!(mode(&fauna, id), MobilityMode::Perched, "landed in {n} ticks");
+    assert_eq!(perch_kind(&fauna, id), Some(PerchKind::Face));
+    assert!((animal(&fauna, id).pose.y_m - SURFACE).abs() <= ON, "on the ground");
+    holds(&mut fauna, &world, &mut flora, id, "the ground");
+
+    // A bloomcrown's crown top.
+    let mut flora = Flora::new(FloraConfig::default());
+    let site = full_stand(&mut flora, &world, Plant::Bloomcrown, 8, 4);
+    let top = crown_top(&flora, site);
+    assert!(top > SURFACE + 0.5, "fixture: a crown well off the ground at {top}");
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = aloft(&mut fauna, &world, x, z, top + 0.5, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, -1.0);
+    let n = settle(&mut fauna, &world, &mut flora, id);
+    assert_eq!(mode(&fauna, id), MobilityMode::Perched, "landed in {n} ticks");
+    assert_eq!(perch_kind(&fauna, id), Some(PerchKind::CrownTop));
+    let y = animal(&fauna, id).pose.y_m;
+    assert!((y - top).abs() <= V / 2.0, "on the crown top {top}, not the ground: {y}");
+    holds(&mut fauna, &world, &mut flora, id, "a crown top");
+
+    // A latticevine face, and the same wall bare.
+    for covered in [true, false] {
+        let (world, mut flora, faces) = vine_wall(covered, FloraConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let r = bellwing_flight(&fauna).span_m / 2.0;
+        let (_, z) = centre(0, WALL_Z);
+        let id = aloft(&mut fauna, &world, WALL_FACE_M - r - 0.005, z, 6.0 * V, EAST, StartingStores::FULL);
+        fly(&mut fauna, id, 0.3, 0.0, -0.3);
+        let n = settle(&mut fauna, &world, &mut flora, id);
+        let a = animal(&fauna, id);
+        assert_eq!(a.mobility.mode, MobilityMode::Perched, "landed in {n} ticks");
+        if covered {
+            assert!(!faces.is_empty());
+            assert_eq!(perch_kind(&fauna, id), Some(PerchKind::VineFace), "it clings to the vine");
+            assert!(a.pose.y_m > SURFACE + V, "on the wall, not the ground: {}", a.pose.y_m);
+            holds(&mut fauna, &world, &mut flora, id, "a vine face");
+        } else {
+            assert_eq!(perch_kind(&fauna, id), Some(PerchKind::Face), "a bare wall is no perch");
+            assert!((a.pose.y_m - SURFACE).abs() <= ON, "it came down to the ground");
+        }
+    }
+
+    // Under a frond's crown slab.
+    let world = plain(20, 24, 8);
+    let mut flora = Flora::new(FloraConfig::default());
+    let site = full_stand(&mut flora, &world, Plant::Umbrellafrond, 8, 4);
+    let lowest = foliage_layers(&flora, site)[0];
+    let underside = lowest.cell as f64 * V;
+    let view = world.view();
+    let stand = *flora.view().stand_at(site).expect("the frond");
+    assert!(
+        crate::layer_columns(&view, &stand, &lowest).contains(&(10, 4)),
+        "fixture: the lowest slab covers column 10"
+    );
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(10, 4);
+    let id = aloft(&mut fauna, &world, x, z, SURFACE + 0.3, EAST, StartingStores::FULL);
+    assert!(SURFACE + 0.3 < underside - 0.3, "fixture: it starts well under the slab");
+    fly(&mut fauna, id, 0.0, 0.0, 1.0);
+    let n = settle(&mut fauna, &world, &mut flora, id);
+    assert_eq!(mode(&fauna, id), MobilityMode::Perched, "hung up in {n} ticks");
+    assert_eq!(perch_kind(&fauna, id), Some(PerchKind::Underside));
+    let y = animal(&fauna, id).pose.y_m;
+    assert!(y < underside && y > underside - 0.5, "hanging under the slab at {underside}: {y}");
+    holds(&mut fauna, &world, &mut flora, id, "an underside");
+}
+
+/// The vine wall's west face plane, metres: rock at `x = 6`.
+const WALL_FACE_M: f64 = 6.0 * V;
+/// The slab the vine climbs.
+const WALL_Z: u32 = 2;
+
+/// A rock wall at `x = 6`, `y = 1..=12`, on a wet plain 16 × 20 × 5, day clock off. With
+/// `covered`, a latticevine rooted at its foot on slab [`WALL_Z`] covers its west faces
+/// `y = 3..=10` at full leaf; returns those faces.
+fn vine_wall(covered: bool, config: FloraConfig) -> (World, Flora, Vec<Face>) {
+    let mut world = plain(16, 20, 5);
+    rock(&mut world, 6..=6, 1..=12);
+    let mut flora = Flora::new(config);
+    let mut faces = Vec::new();
+    if covered {
+        let first = Face::new(6, 3, WALL_Z, FaceDir::NegX);
+        let id = flora
+            .seed_vine(
+                &world,
+                VineSeed {
+                    root: Site { x: 5, y: 2, z: WALL_Z },
+                    first,
+                    reserve: 100.0,
+                    lineage: None,
+                },
+            )
+            .expect("fixture: the vine founder");
+        faces.push(first);
+        for y in 4..=10 {
+            let f = Face::new(6, y, WALL_Z, FaceDir::NegX);
+            assert!(flora.cover_face(&world, id, f, 1.0), "fixture: cover {f:?}");
+            faces.push(f);
+        }
+    }
+    (world, flora, faces)
+}
+
+// ------------------------------------------------------------------ 5. losing a perch
+
+/// **5. Its perch crown is eaten away: it takes off, or drops when it can't pay.** A
+/// bellwing lands on a full-grown bloomcrown's crown top; the crown's foliage is then
+/// taken whole (the species' graze refuge set to 0 so a take can strip it). With a full
+/// reserve it takes off within a few ticks and stays up (holding a hover). With an empty
+/// reserve — it cannot pay a takeoff — it drops to the ground below and perches there,
+/// never rising above the crown it lost.
+#[test]
+fn a_lost_crown_perch_means_a_takeoff_or_a_drop() {
+    for (stores, pays) in [
+        (StartingStores::FULL, true),
+        (StartingStores { body: 1.0, reserve: 0.0 }, false),
+    ] {
+        let world = plain(16, 20, 8);
+        let mut config = FloraConfig::default();
+        config.bloomcrown.graze_refuge = 0.0;
+        let mut flora = Flora::new(config);
+        let site = full_stand(&mut flora, &world, Plant::Bloomcrown, 8, 4);
+        let top = crown_top(&flora, site);
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let (x, z) = centre(8, 4);
+        let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, stores);
+        fly(&mut fauna, id, 0.0, 0.0, -1.0);
+        let n = until(&mut fauna, &world, &mut flora, 100, |f| mode(f, id) == MobilityMode::Perched);
+        assert_eq!(perch_kind(&fauna, id), Some(PerchKind::CrownTop), "fixture: perched in {n} ticks");
+
+        assert!(flora.take_foliage(site, 1e9).is_some(), "fixture: the crown is eaten");
+        assert!(flora.view().stand_at(site).expect("alive").foliage <= 1e-12, "stripped");
+        fly(&mut fauna, id, 0.0, 0.0, 0.0);
+        if pays {
+            let n = until(&mut fauna, &world, &mut flora, 5, |f| mode(f, id) == MobilityMode::Fly);
+            assert_eq!(mode(&fauna, id), MobilityMode::Fly, "it took off ({n} ticks)");
+            steps(&mut fauna, &world, &mut flora, 20);
+            let a = animal(&fauna, id);
+            assert_eq!(a.mobility.mode, MobilityMode::Fly, "and stays up");
+            assert!(a.pose.y_m > top - V, "near where its perch was: {}", a.pose.y_m);
+        } else {
+            let mut highest = 0.0f64;
+            for _ in 0..200 {
+                fauna.step(&world, &mut flora);
+                highest = highest.max(animal(&fauna, id).pose.y_m);
+                if mode(&fauna, id) == MobilityMode::Perched
+                    && perch_kind(&fauna, id) == Some(PerchKind::Face)
+                {
+                    break;
+                }
+            }
+            let a = animal(&fauna, id);
+            assert_eq!(a.mobility.mode, MobilityMode::Perched, "it dropped and perched");
+            assert_eq!(perch_kind(&fauna, id), Some(PerchKind::Face), "on the ground");
+            assert!((a.pose.y_m - SURFACE).abs() <= ON, "below its lost perch: {}", a.pose.y_m);
+            assert!(highest <= top + 1e-9, "it never rose: {highest} over a crown at {top}");
+        }
+    }
+}
+
+// ------------------------------------------------------------------ 6. sipping
+
+/// A spur config fast enough to flower inside a fixture: the latticevine tests' numbers
+/// (`crates/cubarium-voxel-flora/tests/latticevine.rs`, `fast` with a fixed cover).
+fn flowering_vines() -> FloraConfig {
+    let mut c = FloraConfig {
+        decomposition: 0.0,
+        wood_decomposition: 0.0,
+        carrion_decomposition: 0.0,
+        ..FloraConfig::default()
+    };
+    c.latticevine = VineConfig {
+        spur_reserve_min: 0.1,
+        spur_window_s: 3.0,
+        spur_jitter_s: 2.0,
+        bud_s: 0.5,
+        flower_s: 30.0,
+        fruit_s: 0.5,
+        spent_s: 0.5,
+        nectar: 0.01,
+        fruit: 0.02,
+        spread_cost: 1e12,
+        sister_cost: 1e12,
+        ..c.latticevine
+    };
+    c
+}
+
+/// **6. A sip takes latticevine nectar through `take_nectar` and bloomcrown nectar from the
+/// new stock; the books close; an empty flower gives nothing.**
+/// - A vine wall rained on once and stepped dry until a face is in flower with nectar; a
+///   bellwing hovering against that face, holding `feed`, takes nectar: a nectar bite, the
+///   face's nectar falls, the plant layer books consumed exactly what the animal booked
+///   eating, the body records the face as its last bloom, and both ledgers close.
+/// - A bloomcrown given daylight to make nectar; a bellwing descending onto its crown
+///   holding `feed` sips: the stand's nectar falls, booked the same way, the body builds
+///   tissue from it (nectar carries a little mineral), records the stand, and the books
+///   close.
+/// - The same flowers drained beforehand give no bite.
+#[test]
+fn a_sip_takes_vine_and_bloomcrown_nectar_the_books_close_and_an_empty_flower_gives_nothing() {
+    // The vine.
+    for drained in [false, true] {
+        let (mut sky, mut flora, faces) = vine_wall(true, flowering_vines());
+        assert!(!sky.view().is_raining());
+        // A shower ends: the spurs start. The rain twin is the same wall in an open world
+        // with a rain rate (the latticevine tests' twin trick).
+        let mut rain = {
+            let mut c = sky.config().clone();
+            c.rain_m_per_s = 1e-6;
+            let mut wet = World::empty(c);
+            soil(&mut wet);
+            rock(&mut wet, 6..=6, 1..=12);
+            wet
+        };
+        assert!(rain.view().is_raining(), "fixture: the twin rains");
+        flora.step(&mut rain);
+        let flowering = |flora: &Flora| {
+            faces.iter().copied().find(|&f| {
+                flora
+                    .view()
+                    .cover
+                    .face(f)
+                    .is_some_and(|c| c.spur == SpurPhase::Flower && c.nectar > 0.0)
+            })
+        };
+        let mut t = 0;
+        while flowering(&flora).is_none() && t < 160 {
+            flora.step(&mut sky);
+            t += 1;
+        }
+        let face = flowering(&flora).expect("fixture: a face flowers after the shower");
+        if drained {
+            assert!(flora.take_nectar(face, 1e9).is_some(), "fixture: drained");
+        }
+        let nectar = flora.view().cover.face(face).expect("the face").nectar;
+        let organic = flora.view().organic();
+        let consumed = flora.view().ledger.consumed_organic_out;
+
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let r = bellwing_flight(&fauna).span_m / 2.0;
+        let (_, z) = centre(0, WALL_Z);
+        let y = f64::from(face.y) * V + 0.05;
+        let id = aloft(&mut fauna, &sky, WALL_FACE_M - r - 0.005, z, y, EAST, StartingStores::HUNGRY);
+        fly(&mut fauna, id, 0.0, 1.0, 0.0);
+        steps(&mut fauna, &sky, &mut flora, 40);
+        let l = &fauna.view().ledger;
+        if drained {
+            assert_eq!(l.bites_by_food[Food::Nectar.index()], 0, "an empty flower gives nothing");
+            assert_eq!(animal(&fauna, id).last_bloom, None);
+            continue;
+        }
+        assert!(l.bites_by_food[Food::Nectar.index()] >= 1, "a nectar bite: {:?}", l.bites_by_food);
+        assert!(l.bites_by_founder_food[BW.index()][Food::Nectar.index()] >= 1);
+        let eaten = l.eaten_by_food[Food::Nectar.index()];
+        assert!(eaten > 0.0);
+        let left = flora.view().cover.face(face).expect("the face").nectar;
+        assert!(left < nectar, "the face's nectar fell: {left} of {nectar}");
+        let booked = flora.view().ledger.consumed_organic_out - consumed;
+        assert!((booked - eaten).abs() <= 1e-12, "take_nectar booked {booked}, the sip {eaten}");
+        assert_eq!(animal(&fauna, id).last_bloom, Some(Bloom::Vine(face)), "the pollen seam");
+        ledgers_close(&fauna, &flora, organic);
+    }
+
+    // The bloomcrown.
+    for drained in [false, true] {
+        let mut world = plain_with(config(16, 20, 8, clock_at(12.0)));
+        assert!(world.life_daylight() > 0.5, "fixture: noon");
+        let mut flora = Flora::new(nectar_flora());
+        let site = blooming(&mut flora, &mut world, 8, 4, 60);
+        let nectar = stand_nectar(&flora, site);
+        assert!(nectar > 0.0, "fixture: the bloomcrown made nectar in daylight (F1's flora rule)");
+        if drained {
+            assert!(flora.take_stand_nectar(site, 1e9).is_some(), "fixture: drained");
+            assert_eq!(stand_nectar(&flora, site), 0.0);
+        }
+        let nectar = stand_nectar(&flora, site);
+        let top = crown_top(&flora, site);
+        let organic = flora.view().organic();
+        let consumed = flora.view().ledger.consumed_organic_out;
+
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let (x, z) = centre(8, 4);
+        let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, StartingStores::HUNGRY);
+        fly(&mut fauna, id, 0.0, 1.0, -1.0);
+        steps(&mut fauna, &world, &mut flora, 60);
+        let l = &fauna.view().ledger;
+        if drained {
+            assert_eq!(l.bites_by_food[Food::Nectar.index()], 0, "an empty flower gives nothing");
+            assert_eq!(stand_nectar(&flora, site), 0.0);
+            continue;
+        }
+        assert!(l.bites_by_food[Food::Nectar.index()] >= 1, "a nectar bite: {:?}", l.bites_by_food);
+        let eaten = l.eaten_by_food[Food::Nectar.index()];
+        assert!(stand_nectar(&flora, site) < nectar, "the stand's nectar fell");
+        let booked = flora.view().ledger.consumed_organic_out - consumed;
+        assert!((booked - eaten).abs() <= 1e-12, "the stock booked {booked}, the sip {eaten}");
+        assert!(
+            l.assimilated_by_founder[BW.index()] > 0.0,
+            "nectar's small mineral share lets it build tissue"
+        );
+        assert_eq!(animal(&fauna, id).last_bloom, Some(Bloom::Stand(site)), "the pollen seam");
+        ledgers_close(&fauna, &flora, organic);
+    }
+}
+
+// ------------------------------------------------------------------ 8. weather
+
+/// A plain whose sky holds water, so it can rain; `downpour` forces one (the world is
+/// never stepped, so it keeps falling).
+fn weather_plain(downpour: bool) -> World {
+    let mut c = config(16, 20, 8, clock_off());
+    c.closed_water_budget = true;
+    c.initial_atmosphere_m3 = 0.5;
+    let mut w = plain_with(c);
+    if downpour {
+        assert!(w.force_rain(RainMode::Downpour), "fixture: a downpour");
+        assert_eq!(w.weather().mode(), RainMode::Downpour);
+    }
+    w
+}
+
+/// **8. In a downpour a flyer aloft descends and lands, and a perched one can't take
+/// off.** A bellwing 1.5 m up holding a hover comes down and perches within 200 ticks; a
+/// bellwing perched on the ground holding full lift stays there for 40 ticks. In a dry
+/// twin the same lift takes it up.
+#[test]
+fn a_downpour_grounds_a_flyer_and_keeps_a_perched_one_down() {
+    let mut flora = Flora::new(FloraConfig::default());
+    let wet = weather_plain(true);
+    let (x, z) = centre(8, 4);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = aloft(&mut fauna, &wet, x, z, SURFACE + 1.5, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, 0.0);
+    let n = until(&mut fauna, &wet, &mut flora, 200, |f| mode(f, id) == MobilityMode::Perched);
+    let a = animal(&fauna, id);
+    assert_eq!(a.mobility.mode, MobilityMode::Perched, "it came down in the downpour ({n} ticks)");
+    assert!(a.pose.y_m < SURFACE + 1.5, "lower than it was: {}", a.pose.y_m);
+
+    for (world, grounded) in [(weather_plain(true), true), (weather_plain(false), false)] {
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let id = on_ground(&mut fauna, &world, BW, 8, 4, StartingStores::FULL);
+        assert_eq!(mode(&fauna, id), MobilityMode::Perched, "a flyer on a face is perched");
+        fly(&mut fauna, id, 0.0, 0.0, 1.0);
+        steps(&mut fauna, &world, &mut flora, 40);
+        let a = animal(&fauna, id);
+        if grounded {
+            assert_eq!(a.mobility.mode, MobilityMode::Perched, "no takeoff in a downpour");
+            assert!((a.pose.y_m - SURFACE).abs() <= ON);
+        } else {
+            assert_eq!(a.mobility.mode, MobilityMode::Fly, "dry, the same lift takes it up");
+            assert!(a.pose.y_m > SURFACE + 0.1);
+        }
+    }
+}
+
+// ------------------------------------------------------------------ 9. foliage
+
+/// **9. Inside foliage layers its speed cap halves.** Full forward for 4 ticks, level,
+/// inside a full-grown umbrellafrond's lowest (widest) foliage slab, against the same in
+/// open air at the same height: the distance inside is half the distance outside
+/// (±10 %), and the path stays inside the slab's columns.
+#[test]
+fn inside_foliage_layers_the_speed_cap_halves() {
+    let world = plain(32, 24, 8);
+    let mut flora = Flora::new(FloraConfig::default());
+    let site = full_stand(&mut flora, &world, Plant::Umbrellafrond, 8, 4);
+    let slab = foliage_layers(&flora, site)[0];
+    let stand = *flora.view().stand_at(site).expect("the frond");
+    let cols = crate::layer_columns(&world.view(), &stand, &slab);
+    for c in [(7, 4), (8, 4), (9, 4)] {
+        assert!(cols.contains(&c), "fixture: the slab covers {c:?}");
+    }
+    let y = slab.cell as f64 * V + 0.05;
+    let (cx, z) = centre(8, 4);
+    let distance = |x0: f64, flora: &mut Flora| -> f64 {
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let id = aloft(&mut fauna, &world, x0, z, y, EAST, StartingStores::FULL);
+        fly(&mut fauna, id, 1.0, 0.0, 0.0);
+        steps(&mut fauna, &world, flora, 4);
+        let a = animal(&fauna, id);
+        assert_eq!(a.mobility.mode, MobilityMode::Fly, "level flight, no perch");
+        a.pose.x - x0
+    };
+    let inside = distance(cx - 0.3, &mut flora);
+    let open = distance(centre(24, 4).0, &mut flora);
+    assert!(open > 0.0, "it flew: {open}");
+    assert!(cx - 0.3 + inside < 10.0 * V, "the path stayed in the slab's columns");
+    let ratio = inside / open;
+    assert!((0.45..=0.55).contains(&ratio), "inside {inside} against open {open}: {ratio}");
+}
+
+// ------------------------------------------------------------------ 10. senses
+
+/// **10. The flyer fan sees a flower 3 m below-ahead; `altitude` and `ceiling` read true
+/// on a hand-built column.**
+/// - The fan is §3.6's: pitches −80, −50, −20, +10, +40, range 4 m, three sectors.
+/// - A bellwing over a rock ledge (columns 0..=8 up to `y = 6`, so 2.3 m over its own
+///   support), facing east, with a nectar-holding bloomcrown's crown top 3 m away along
+///   the −50° ray of its centre sector: a fan ray reports [`ConeHit::Bloom`] between 2
+///   and 4 m. The same crown with no nectar reads as foliage and never as a bloom.
+/// - Under a rock overhang whose underside is 0.75 m above its base, 1 m over a plain:
+///   `altitude` 1.0 / 2.5 = 0.4 and `ceiling` 0.75 / 2.5 = 0.3; in the open beside it,
+///   `altitude` 0.4 and `ceiling` 1 (capped). Both ±0.05 (the base or the top of a body
+///   0.06 m tall).
+#[test]
+fn the_fan_sees_a_flower_below_ahead_and_altitude_and_ceiling_read_true() {
+    let m = BW.manifest();
+    assert_eq!(m.ray_pitch_offsets_deg, &[-80.0, -50.0, -20.0, 10.0, 40.0][..]);
+    assert_eq!(m.cone_range_m, 4.0);
+    assert_eq!(m.sector_centres_deg.len(), 3);
+    let middle = m
+        .sector_centres_deg
+        .iter()
+        .position(|&c| c == 0.0)
+        .expect("a forward sector");
+
+    let (d, drop) = (3.0 * 50f64.to_radians().cos(), 3.0 * 50f64.to_radians().sin());
+    let mut bloom_ray = None;
+    for nectar in [true, false] {
+        let mut world = plain_with(config(24, 24, 9, clock_at(12.0)));
+        rock(&mut world, 0..=8, 3..=6);
+        let mut flora = Flora::new(if nectar { nectar_flora() } else { FloraConfig::default() });
+        let site = blooming(&mut flora, &mut world, 16, 4, 60);
+        assert_eq!(stand_nectar(&flora, site) > 0.0, nectar, "fixture: nectar {nectar}");
+        let top = crown_top(&flora, site);
+        let (sx, z) = centre(16, 4);
+        let (x, y) = (sx - d, top + drop);
+        let ledge = surface_m(6, V);
+        assert!((x / V).floor() as u32 == 8, "fixture: over the ledge's last column");
+        assert!(y - ledge <= 2.5, "fixture: within its band over the ledge: {}", y - ledge);
+
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let id = aloft(&mut fauna, &world, x, z, y, EAST, StartingStores::FULL);
+        let (view, fv) = (world.view(), flora.view());
+        let census = crate::flyer_fan_census(&view, &fv, &fauna.view(), &animal(&fauna, id), &[])
+            .expect("a flyer has a fan");
+        assert_eq!(census.range_m, 4.0);
+        let blooms: Vec<_> = census.rays.iter().filter(|r| r.hit == ConeHit::Bloom).collect();
+        if nectar {
+            assert!(!blooms.is_empty(), "the fan sees the flower: {:?}", census.rays);
+            let r = blooms
+                .iter()
+                .find(|r| r.sector == middle)
+                .unwrap_or_else(|| panic!("in the forward sector: {blooms:?}"));
+            assert!((2.0..=4.0).contains(&r.distance_m), "about 3 m off: {}", r.distance_m);
+            bloom_ray = Some((r.sector, r.yaw_deg, r.pitch_deg));
+        } else {
+            assert!(blooms.is_empty(), "a crown with no nectar is no bloom: {blooms:?}");
+            let (s, yaw, pitch) = bloom_ray.expect("the nectar arm ran first");
+            let same = census
+                .rays
+                .iter()
+                .find(|r| r.sector == s && r.yaw_deg == yaw && r.pitch_deg == pitch)
+                .expect("the same ray");
+            assert_eq!(same.hit, ConeHit::FoliageCrown, "the same ray reads the crown as foliage");
+        }
+    }
+
+    // Altitude and ceiling.
+    let mut world = plain(20, 20, 8);
+    rock(&mut world, 3..=7, 10..=11);
+    let flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let y = SURFACE + 1.0;
+    let (ux, z) = centre(5, 4);
+    let under = aloft(&mut fauna, &world, ux, z, y, EAST, StartingStores::FULL);
+    let open = aloft(&mut fauna, &world, centre(14, 4).0, z, y, EAST, StartingStores::FULL);
+    let manifest = fauna.config().manifest(BW);
+    let selfm = *manifest.modules.iter().find(|m| m.name == "Self").expect("a Self module");
+    let channel = |name: &str| {
+        selfm
+            .channels
+            .iter()
+            .position(|&c| c == name)
+            .unwrap_or_else(|| panic!("Self has `{name}`: {:?}", selfm.channels))
+    };
+    let (alt, ceil) = (selfm.offset + channel("altitude"), selfm.offset + channel("ceiling"));
+    let read = |id: u64| {
+        let i = fauna.animals.iter().position(|a| a.id == id).expect("alive");
+        crate::body::observation(&fauna, i, &world.view(), &flora.view(), &manifest, None, None)
+    };
+    let (u, o) = (read(under), read(open));
+    assert!((u[alt] - 0.4).abs() <= 0.05, "altitude under the overhang: {}", u[alt]);
+    assert!((u[ceil] - 0.3).abs() <= 0.05, "ceiling under the overhang: {}", u[ceil]);
+    assert!((o[alt] - 0.4).abs() <= 0.05, "altitude in the open: {}", o[alt]);
+    assert!((o[ceil] - 1.0).abs() <= 1e-9, "ceiling in the open is capped: {}", o[ceil]);
+}
+
+// ------------------------------------------------------------------ 11. snapshot
+
+/// **11. Snapshot round trip with a flying and a perched bellwing.** One bellwing hovering
+/// 1.2 m up and one perched on the ground, stepped 5 ticks: the layer read back from its
+/// bytes holds the same bodies — pose `y_m`, mode and perch included — and the same
+/// ledger.
+#[test]
+fn a_snapshot_round_trip_keeps_a_flying_and_a_perched_bellwing() {
+    let world = plain(16, 20, 8);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(4, 4);
+    let flying = aloft(&mut fauna, &world, x, z, SURFACE + 1.2, EAST, StartingStores::FULL);
+    let perched = on_ground(&mut fauna, &world, BW, 10, 4, StartingStores::FULL);
+    fly(&mut fauna, flying, 0.0, 0.0, 0.0);
+    fly(&mut fauna, perched, 0.0, 0.0, 0.0);
+    steps(&mut fauna, &world, &mut flora, 5);
+    assert_eq!(mode(&fauna, flying), MobilityMode::Fly);
+    assert_eq!(mode(&fauna, perched), MobilityMode::Perched);
+    assert_eq!(perch_kind(&fauna, perched), Some(PerchKind::Face));
+
+    let back = Fauna::load(&fauna.save()).expect("the layer round-trips");
+    assert_eq!(back.view().animals, fauna.view().animals, "the same bodies");
+    let a = *back.view().animal(flying).expect("the flyer");
+    assert!((a.pose.y_m - (SURFACE + 1.2)).abs() < 1e-9, "its height: {}", a.pose.y_m);
+    assert_eq!(a.mobility.mode, MobilityMode::Fly);
+    assert_eq!(back.view().animal(perched).expect("the percher").mobility.perch, animal(&fauna, perched).mobility.perch);
+    assert_eq!(back.view().ledger, fauna.view().ledger, "the same ledger");
+}

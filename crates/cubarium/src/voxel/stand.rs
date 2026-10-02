@@ -1676,6 +1676,7 @@ mod tests {
                     layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
                     profile_stage: 0,
                     defence: 0.0,
+                    nectar: 0.0,
                 };
                 // A hand-built stand bins its own foliage, as every stand the model
                 // makes does.
@@ -1779,6 +1780,7 @@ mod tests {
                     layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
                     profile_stage: 0,
                     defence: 0.0,
+                    nectar: 0.0,
                 };
                 stand.bin_layers(flora.config());
                 let parts = parts_of(flora.view(), &stand, 0);
@@ -1846,6 +1848,7 @@ mod tests {
                 layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
                 profile_stage: 0,
                 defence: 0.0,
+                nectar: 0.0,
             };
             stand.bin_layers(flora.config());
             // **Distinct cells**, not parts: since the layers package two layers of one
@@ -2029,6 +2032,7 @@ mod tests {
                 layer_stock: [0.0; cubarium_voxel_flora::MAX_FOLIAGE_LAYERS],
                 profile_stage: 0,
                 defence: 0.0,
+                nectar: 0.0,
             };
             stand.bin_layers(flora.config());
             let parts = parts_of(flora.view(), &stand, 0);

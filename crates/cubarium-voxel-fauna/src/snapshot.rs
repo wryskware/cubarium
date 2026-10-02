@@ -16,7 +16,9 @@ use crate::Fauna;
 /// inside the snapshot, or what a saved field means changes. Postcard is not
 /// self-describing, so an older world is **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 27;
+// 28: F1 (tests-first stubs) — `Pose::y_m`, `Mobility::{mode, perch}`, `Animal::last_bloom`,
+// `FounderPhysiology::flight`, the bellwing lineage and the nectar food class.
+pub const SCHEMA: u32 = 28;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -336,6 +338,7 @@ mod tests {
             speed_m_s: 0.0,
             alert_ticks: 0,
             attached: None,
+            last_bloom: None,
         }
     }
 

@@ -511,7 +511,7 @@ fn a_rider_cannot_be_struck_on_its_own() {
             .hunter
             .as_mut()
             .expect("the lanternjaw hunts");
-        h.prey = [false, false, true, false, false, false];
+        h.prey = [false, false, true, false, false, false, false];
         c
     };
     let (mut s, host, rider) = ride(hunts_lanternjaws(config()));

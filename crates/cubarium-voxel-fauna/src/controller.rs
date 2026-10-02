@@ -87,6 +87,16 @@ pub trait Controller: Send + Sync {
         0.0
     }
 
+    /// The **lift** effort (`[-1, 1]`, vertical) this controller holds after its last
+    /// [`drive`]: a flyer manifest's fourth action (F1, predation-and-flight §3.3), the
+    /// lure's seam until P2's contract v3 carries it in the response. Every controller
+    /// that is not a flyer's answers 0, and the body only reads it for a flyer.
+    ///
+    /// [`drive`]: Controller::drive
+    fn lift(&self) -> f64 {
+        0.0
+    }
+
     /// Whether the tick applies the **prey flee rule** to this controller's body
     /// (predation §2.7) while a hunter is in the world: the prey heuristics say yes, and
     /// nothing else does — a trained policy's behaviour changes only through the world,
@@ -314,12 +324,24 @@ impl std::fmt::Debug for FounderFactories {
 pub struct Scripted {
     script: Vec<Actions>,
     next: usize,
+    lift: f64,
 }
 
 impl Scripted {
     /// Cycle `script` forever; an empty script rests.
     pub fn new(script: Vec<Actions>) -> Scripted {
-        Scripted { script, next: 0 }
+        Scripted {
+            script,
+            next: 0,
+            lift: 0.0,
+        }
+    }
+
+    /// The same script holding a constant `lift` effort ([`Controller::lift`]) beside it:
+    /// a flyer's test control (F1).
+    pub fn lifting(mut self, lift: f64) -> Scripted {
+        self.lift = lift;
+        self
     }
 }
 
@@ -335,6 +357,10 @@ impl Controller for Scripted {
 
     fn reset(&mut self) {
         self.next = 0;
+    }
+
+    fn lift(&self) -> f64 {
+        self.lift
     }
 }
 
@@ -467,6 +493,9 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         Founder::RippleSnail => {
             Box::new(BlindForager::for_founder(Founder::RippleSnail, teachers))
         }
+        // F1 stub: the browser's forager on the bellwing's (stub) manifest. F1 builds the
+        // hover-sip teacher here.
+        Founder::Bellwing => Box::new(BrowserForager::for_founder(Founder::Bellwing, teachers)),
     }
 }
 

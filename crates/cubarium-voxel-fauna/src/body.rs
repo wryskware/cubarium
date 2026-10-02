@@ -398,6 +398,36 @@ pub struct FounderPhysiology {
     /// shredder, the capgnawer) or a face holding film (the ripple-snail). Not a number,
     /// so it has no registry row.
     pub egg_site: EggSite,
+    /// `Some` for a **flyer** (F1, predation-and-flight §3.2–3.4, §3.8): its span, band,
+    /// flight costs and weather response; the lineage has the `Fly` and `Perched` modes.
+    /// `None` for every walker.
+    #[serde(default)]
+    pub flight: Option<Flight>,
+}
+
+/// A flyer's table ([`FounderPhysiology::flight`], F1; the bellwing's numbers are
+/// predation-and-flight §3.3, §3.9, placeholders).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Flight {
+    /// Wingspan, metres: the collision sphere's diameter (air is any cell not solid and
+    /// not water; the body is a sphere of radius `span_m / 2`). Bellwing 0.375.
+    pub span_m: f64,
+    /// **The ceiling**: the most the body's base may stand above the support face below
+    /// its column, metres. Bellwing 2.5.
+    pub band_max_m: f64,
+    /// Cost of a second airborne at cruise, × basal upkeep. Bellwing 4.
+    pub flight_factor: f64,
+    /// Cost of a second hovering (forward 0), × basal upkeep. Bellwing 5.
+    pub hover_factor: f64,
+    /// Lift work paid going up, organic units per metre climbed per unit of body. Descent
+    /// is free.
+    pub climb_work_per_m: f64,
+    /// A takeoff costs this many seconds of flight. Bellwing 1.
+    pub takeoff_s: f64,
+    /// The speed cap inside a crown's foliage layers, × the open-air cap. 0.5.
+    pub foliage_speed_factor: f64,
+    /// `R₀` of the shower cost: flight costs × `(1 + rain rate / this)`, m/s of rain.
+    pub shower_rain_reference_m_per_s: f64,
 }
 
 /// Where an egg-laying lineage lays ([`FounderPhysiology::egg_site`], roster R2b).
@@ -480,7 +510,8 @@ impl Hunter {
         // Shredder, grazer and (roster R1) the capgnawer; the size window decides. The
         // loftstrider (4) is on no list until the chorister.
         // The ripple-snail (5, roster R2b) is on no hunter's list.
-        prey: [true, true, false, true, false, false],
+        // The bellwing (6, F1) is on no hunter's list.
+        prey: [true, true, false, true, false, false, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
@@ -612,6 +643,8 @@ impl FounderPhysiology {
                     FOLIAGE_YIELD,
                     // R2b: film is not its food; the foliage yield so it is not a zero.
                     FOLIAGE_YIELD,
+                    // F1: nor nectar.
+                    FOLIAGE_YIELD,
                 ],
                 organ_structure_fraction: 0.05,
                 active: crate::Activity::Nocturnal,
@@ -633,6 +666,7 @@ impl FounderPhysiology {
                 aquatic: false,
                 water_margin_m: 0.0,
                 egg_site: EggSite::Litter,
+                flight: None,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -686,6 +720,7 @@ impl FounderPhysiology {
                 aquatic: false,
                 water_margin_m: 0.0,
                 egg_site: EggSite::Litter,
+                flight: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
             // scorpid ambusher, 1.0 × 0.25 × 0.45 m, a fifth of the grazer's upkeep.
@@ -764,6 +799,7 @@ impl FounderPhysiology {
                 aquatic: false,
                 water_margin_m: 0.0,
                 egg_site: EggSite::Litter,
+                flight: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
             // glowcap's grazer, built from the littershredder by **body volume**, the way
@@ -797,6 +833,7 @@ impl FounderPhysiology {
                     // are not its food and carry the cap yield so none is a silent zero.
                     yield_by_food: [
                         0.5 * LITTER_YIELD,
+                        FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
@@ -874,6 +911,13 @@ impl FounderPhysiology {
             // ([`SpeciesConfig::scale_mass`]); upkeep and the motor are per unit of body,
             // so specific rates equal the shredder's. The shredder's eggs, timings,
             // lifespan and legs.
+            // F1 stub: the browser's table at a founding count of 0, walking. The
+            // implementer builds the bellwing here (predation-and-flight §3.9): its body,
+            // span and `flight` table, nectar diet, cruise, Diurnal, founding site.
+            Founder::Bellwing => FounderPhysiology {
+                founding_count: 0,
+                ..FounderPhysiology::placeholder(Founder::Browser)
+            },
             Founder::RippleSnail => {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let grazer = FounderPhysiology::placeholder(Founder::Browser);
@@ -1764,8 +1808,9 @@ fn pool_stock(fv: &FloraView<'_>, site: Site, food: crate::Food) -> f64 {
         crate::Food::Carrion => g.carrion,
         // Glassfilm (roster R2b): the film pool at the face.
         crate::Food::Film => g.film,
-        // Neither is a ground pool; a mouth never asks this of them.
-        crate::Food::CapTissue | crate::Food::Foliage => 0.0,
+        // Neither is a ground pool; a mouth never asks this of them. Nectar (F1) is a
+        // flower product, not a pool.
+        crate::Food::CapTissue | crate::Food::Foliage | crate::Food::Nectar => 0.0,
     })
 }
 
@@ -2613,6 +2658,7 @@ mod tests {
             x: x_m,
             z: z_m,
             heading_rad: heading,
+            y_m: 0.0,
         }
     }
 
@@ -3576,6 +3622,7 @@ mod step_rule_tests {
             x: start_x_m,
             z: 2.5 * v,
             heading_rad: std::f64::consts::FRAC_PI_2,
+            y_m: 0.0,
         };
         let mut y = y0;
         let mut layers = Vec::new();
@@ -3735,6 +3782,7 @@ mod step_rule_tests {
             x: 5.0 * 0.25 - 0.0624,
             z: 2.5 * 0.25,
             heading_rad: std::f64::consts::FRAC_PI_2,
+            y_m: 0.0,
         };
 
         let ledge = terrace(0.25, 10, 2, 5..8, 1);

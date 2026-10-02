@@ -213,6 +213,7 @@ fn the_eye_is_the_same_height_in_metres_on_both_grids() {
             x: 4.0 * v,
             z: 4.0 * v,
             heading_rad: 0.0,
+            y_m: 0.0,
         };
         let surface = surface_m(support, v);
         assert!((surface - 0.75).abs() < 1e-12, "fixture: surface {surface}");
@@ -311,6 +312,7 @@ fn the_horizontal_reach_is_a_quarter_of_the_body_length() {
         x: 3.0 * v + 0.01,
         z: 4.5 * v,
         heading_rad: std::f64::consts::FRAC_PI_2,
+        y_m: 0.0,
     };
     let cols = cubarium_voxel_fauna::mouth_columns_at(&view, &pose, &adult);
     assert!(

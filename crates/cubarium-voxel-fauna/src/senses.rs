@@ -2054,6 +2054,7 @@ mod tests {
             x: x_m,
             z: z_m,
             heading_rad: 0.0,
+            y_m: 0.0,
         }
     }
 
@@ -2465,6 +2466,7 @@ mod tests {
             x: 2.0 * 0.25 + 0.125,
             z: 2.0 * 0.25 + 0.125,
             heading_rad: H,
+            y_m: 0.0,
         };
         let occupancy = cone_occupancy(&v, &fv, &fv_);
         let cone = cone_readings(&v, &occupancy, u64::MAX, &pose, 2, &manifest, &body);
@@ -2515,6 +2517,7 @@ mod tests {
             x: 0.5,
             z: 0.5,
             heading_rad: 0.0,
+            y_m: 0.0,
         };
         let occupancy = cone_occupancy(&ev, &eflora.view(), &fv_);
         let cone = cone_readings(&ev, &occupancy, u64::MAX, &pose, 2, &manifest, &body);

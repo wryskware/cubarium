@@ -60,7 +60,8 @@ pub fn lineage_horizon(founder: Founder) -> u64 {
         | Founder::Lanternjaw
         | Founder::Capgnawer
         | Founder::Loftstrider
-        | Founder::RippleSnail => {
+        | Founder::RippleSnail
+        | Founder::Bellwing => {
             LANDSCAPE_HORIZON_TICKS
         }
     }

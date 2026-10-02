@@ -43,13 +43,15 @@ mod hot_path_tests;
 mod roster_tests;
 #[cfg(test)]
 mod snail_tests;
+#[cfg(test)]
+mod flight_tests;
 
 use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    Body, Counter, EggSite, Face, FounderPhysiology, Founding, FoundingSite, Hunter, StepLimits, birth_readiness,
+    Body, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Hunter, StepLimits, birth_readiness,
     effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -172,6 +174,10 @@ pub enum ConeHit {
     GroundPool,
     /// Another animal's body.
     Body,
+    /// **A bloom** (F1, predation-and-flight §3.6): nectar that can be taken — a
+    /// latticevine face in flower, a bloomcrown core with nectar. A flyer's fan class.
+    // F1 stub: declared; no ray reports it yet.
+    Bloom,
 }
 
 impl ConeHit {
@@ -186,11 +192,12 @@ impl ConeHit {
             ConeHit::FoliageCrown => "foliage",
             ConeHit::GroundPool => "pool",
             ConeHit::Body => "body",
+            ConeHit::Bloom => "bloom",
         }
     }
 
     /// Every variant, in the order a census row prints them.
-    pub const ALL: [ConeHit; 8] = [
+    pub const ALL: [ConeHit; 9] = [
         ConeHit::Clear,
         ConeHit::Terrain,
         ConeHit::Water,
@@ -199,6 +206,7 @@ impl ConeHit {
         ConeHit::FoliageCrown,
         ConeHit::GroundPool,
         ConeHit::Body,
+        ConeHit::Bloom,
     ];
 
     /// Its index in [`ConeHit::ALL`].
@@ -212,6 +220,7 @@ impl ConeHit {
             ConeHit::FoliageCrown => 5,
             ConeHit::GroundPool => 6,
             ConeHit::Body => 7,
+            ConeHit::Bloom => 8,
         }
     }
 }
@@ -366,6 +375,21 @@ pub fn browser_cone_census(
     })
 }
 
+/// **A flyer's fan, ray by ray** (F1, predation-and-flight §3.6): the downward fan from
+/// the body's eye at `y_m`, every first hit named, [`ConeHit::Bloom`] among them, by the
+/// same march the flyer's observation reads. `probes` as [`browser_cone_census`]'s. `None`
+/// for a body that is not a flyer.
+// F1 stub: no flyer has a fan yet.
+pub fn flyer_fan_census(
+    _view: &VoxelView<'_>,
+    _flora: &FloraView<'_>,
+    _fauna: &FaunaView<'_>,
+    _animal: &Animal,
+    _probes: &[(f64, f64)],
+) -> Option<ConeCensus> {
+    None
+}
+
 /// The stand selected by the browser's actual mouth geometry, if any. Read-only
 /// diagnostic access for explaining a bite or a starvation event.
 pub fn browser_mouth_foliage(
@@ -505,9 +529,70 @@ impl Activity {
 pub struct Mobility {
     /// The wall it is climbing, or `None` on the ground.
     pub climb: Option<WallClimb>,
+    /// **How it is moving** (F1, predation-and-flight §3.1): on the ground, on a wall, in
+    /// the air or at rest off the ground. A lineage enables the modes it has (the bellwing
+    /// `Fly` + `Perched`).
+    // F1 stub: declared; every body stays `Ground` (a wall climb is still `climb`).
+    #[serde(default)]
+    pub mode: MobilityMode,
+    /// The perch a `Perched` body holds (§3.4): losing it means a takeoff, or a drop when
+    /// it cannot pay. `None` in every other mode.
+    // F1 stub: declared, never set.
+    #[serde(default)]
+    pub perch: Option<Perch>,
     /// Consecutive ticks under water deeper than its drown depth. It drowns when this
     /// reaches [`FounderPhysiology::drown_ticks`]; any tick not under resets it.
     pub submerged_ticks: u64,
+}
+
+/// A body's locomotion mode ([`Mobility::mode`], predation-and-flight §3.1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MobilityMode {
+    /// On a support face, walking (today's every body).
+    #[default]
+    Ground,
+    /// On a terrain face, the shredder's climb ([`Mobility::climb`]).
+    Wall,
+    /// On a plant stem or a latticevine face (the seedporter, F3).
+    Climb,
+    /// Powered flight: `y_m` moves freely within the band (the bellwing).
+    Fly,
+    /// Unpowered descent at a glide ratio (the seedporter, F3).
+    Glide,
+    /// At rest off the ground, or on it, holding a [`Perch`].
+    Perched,
+}
+
+/// A perch a flyer holds ([`Mobility::perch`], §3.4).
+// F1 stub: the kind only. F1 adds the anchor it holds (the face, the stand, the vine
+// face or the cell overhead), so a lost perch can be detected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Perch {
+    pub kind: PerchKind,
+}
+
+/// What a perch is (§3.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PerchKind {
+    /// The top of a support face: ground, a ledge.
+    Face,
+    /// The top of a stand's crown slab (a bloomcrown core), from the crown cache.
+    CrownTop,
+    /// A latticevine-covered face: clinging to the wall.
+    VineFace,
+    /// The underside of a crown slab or an overhang: hanging (the frond-underside roost).
+    Underside,
+}
+
+/// The last bloom a body sipped from (F1 §3.7's seam, pollen carriage later).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Bloom {
+    /// A stand's nectar stock (a bloomcrown), by its site.
+    Stand(Site),
+    /// A latticevine face in flower.
+    Vine(cubarium_voxel_flora::Face),
 }
 
 /// A body **on a terrain face**: a shredder going up a
@@ -621,6 +706,10 @@ pub struct Animal {
     /// motion, controller, sensing or strikes of its own; its position is its host's.
     /// Saved as the host's id.
     pub attached: Option<Attachment>,
+    /// **The last bloom it sipped from** (F1 §3.7, the pollen seam): `None` until a sip.
+    // F1 stub: declared, never set.
+    #[serde(default)]
+    pub last_bloom: Option<Bloom>,
 }
 
 /// A rider's hold on its host (parasite hatchlings): the host's [`Animal::id`].
@@ -1531,15 +1620,23 @@ pub enum Food {
     /// ([`cubarium_voxel_flora::Flora::take_film`]), the ripple-snail's food. Fresh tissue,
     /// not detritus.
     Film,
+    /// **Nectar** (F1, predation-and-flight §3.7, decision 6): a flower product, not the
+    /// seed parcel — a latticevine face in flower
+    /// ([`cubarium_voxel_flora::Flora::take_nectar`]) or a bloomcrown's own nectar stock
+    /// ([`cubarium_voxel_flora::Flora::take_stand_nectar`]). Energy-rich and mineral-poor.
+    /// The bellwing's food: a sip is `feed` with a bloom inside the mouth reach while
+    /// hovering at it or perched on it.
+    Nectar,
 }
 
 impl Food {
-    pub const ALL: [Food; 5] = [
+    pub const ALL: [Food; 6] = [
         Food::Litter,
         Food::CapTissue,
         Food::Carrion,
         Food::Foliage,
         Food::Film,
+        Food::Nectar,
     ];
     pub const COUNT: usize = Food::ALL.len();
 
@@ -1551,6 +1648,7 @@ impl Food {
             Food::Carrion => 2,
             Food::Foliage => 3,
             Food::Film => 4,
+            Food::Nectar => 5,
         }
     }
 
@@ -1576,6 +1674,7 @@ impl Food {
             Food::Carrion => "carrion",
             Food::Foliage => "foliage",
             Food::Film => "film",
+            Food::Nectar => "nectar",
         }
     }
 }
@@ -2043,6 +2142,18 @@ pub enum Command {
         lineage: Founder,
         eggs: u32,
     },
+    /// Put a **flyer** founder at exactly `pose`, its `y_m` the body's base height in
+    /// metres (F1): airborne ([`MobilityMode::Fly`]) over the support face below its
+    /// column, or perched where its base meets a perch. Booked as
+    /// [`Command::IntroduceFounder`] is. Refused as that is, and also for a lineage that
+    /// cannot fly, a pose whose body would occupy a solid or water cell, and a `y_m` above
+    /// the lineage's ceiling over the support face below.
+    // F1 stub: always refused.
+    IntroduceAloft {
+        pose: Pose,
+        founder: Founder,
+        stores: StartingStores,
+    },
 }
 
 /// How full a founder body arrives, as fractions of what its physiology lets it hold.
@@ -2388,6 +2499,8 @@ impl Fauna {
                 lineage,
                 eggs,
             } => self.bury_clutch(world, site, lineage, eggs),
+            // F1 stub: no flyer is placed yet.
+            Command::IntroduceAloft { .. } => false,
             Command::Remove { x, z } => {
                 let view = world.view();
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
@@ -2525,6 +2638,7 @@ impl Fauna {
             speed_m_s: 0.0,
             alert_ticks: 0,
             attached: None,
+            last_bloom: None,
         };
         self.ledger.births += 1;
         self.ledger.introduced += 1;

@@ -119,7 +119,7 @@ struct FoodProbe {
 fn reach_m(founder: Founder) -> f64 {
     match founder {
         Founder::Blind | Founder::Capgnawer | Founder::RippleSnail => BLIND_REACH_M,
-        Founder::Browser | Founder::Lanternjaw | Founder::Loftstrider => BROWSER_REACH_M,
+        Founder::Browser | Founder::Lanternjaw | Founder::Loftstrider | Founder::Bellwing => BROWSER_REACH_M,
     }
 }
 
@@ -219,7 +219,7 @@ fn main() {
     );
 
     let cfg = VoxelConfig::default();
-    let counts = if half_founders { [4, 4, 0, 0, 0, 0] } else { [8, 8, 0, 0, 0, 0] };
+    let counts = if half_founders { [4, 4, 0, 0, 0, 0, 0] } else { [8, 8, 0, 0, 0, 0, 0] };
     let (world, flora, mut fauna, seeded, scene_label) = if let Some(preset) = preset {
         // Exactly what `cubarium voxel` does with no TOML, for this preset: the recipe's
         // own extents, cell size and water, the lake gate, the pre-roll with its opening
@@ -1352,6 +1352,7 @@ fn report_diet(minute: u64, fv: &FloraView<'_>, av: &cubarium_voxel_fauna::Fauna
             Food::Litter => fv.ground.iter().map(|g| g.litter).sum(),
             Food::Carrion => fv.ground.iter().map(|g| g.carrion).sum(),
             Food::Film => fv.ground.iter().map(|g| g.film).sum(),
+            Food::Nectar => fv.stands.iter().map(|s| s.nectar).sum(),
             Food::CapTissue => fv
                 .stands
                 .iter()

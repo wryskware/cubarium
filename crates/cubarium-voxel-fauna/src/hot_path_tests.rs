@@ -323,6 +323,7 @@ fn a_mouth_through_the_index_and_the_cache_picks_what_the_full_scan_picks() {
                     x: (f64::from(face.x) + 0.5) * V,
                     z: (f64::from(face.z) + 0.5) * V,
                     heading_rad: std::f64::consts::TAU * f64::from(k) / 8.0,
+                    y_m: 0.0,
                 };
                 let cols = crate::body::mouth_columns(&view, &pose, &body);
                 for diet in [Diet::only(crate::Food::Foliage), Diet::only(crate::Food::CapTissue)] {
@@ -705,6 +706,7 @@ fn the_sweep_on_the_lookup_moves_every_body_as_the_walk_did() {
                             x: (f64::from(face.x) + 0.1 + 0.13 * k as f64) * V,
                             z: (f64::from(face.z) + 0.8 - 0.11 * k as f64) * V,
                             heading_rad: std::f64::consts::TAU * (f + k) as f64 / 7.0,
+                            y_m: 0.0,
                         };
                         let (mut a, mut b) = (start, start);
                         let (mut ya, mut yb) = (face.y, face.y);
@@ -965,6 +967,7 @@ fn same_readings(dense: &DetritusField, map: &MapDetritus, view: &VoxelView<'_>,
                 x: (f64::from(face.x) + fx) * V,
                 z: (f64::from(face.z) + fz) * V,
                 heading_rad: 0.0,
+                y_m: 0.0,
             };
             assert_eq!(
                 dense.sample(view, &pose, face.y),

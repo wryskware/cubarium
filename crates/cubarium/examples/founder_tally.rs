@@ -196,7 +196,7 @@ fn t0_report(sim: &Sim, params: &cubarium_voxel_sim::params::Params) {
     for a in sim.fauna().view().animals {
         if matches!(
             a.founder,
-            Some(Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail)
+            Some(Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing)
         ) {
             println!(
                 "t0: {} id={} site=({}, {}, {}) heading={:.2}",

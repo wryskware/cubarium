@@ -225,6 +225,15 @@ fn founder_rows() -> Vec<Row> {
         r("hunter.rest_at", "fraction of reserve cap", fraction, "satiated: rests at this reserve").optional(),
         r("hunter.torpor_upkeep", "x basal upkeep", nonneg, "upkeep in the satiated rest").optional(),
         r("hunter.wake_at", "fraction of reserve cap", fraction, "wakes from the rest below this").optional(),
+        // The flyer's table (`Flight`, F1): the bellwing's only, optional on the others.
+        r("flight.span_m", "m", Range::positive(), "wingspan: the collision sphere's diameter").optional().prov("decision"),
+        r("flight.band_max_m", "m", nonneg, "the ceiling: the base's most height over the support face below").optional().prov("decision"),
+        r("flight.flight_factor", "x basal upkeep", nonneg, "a second airborne at cruise").optional().prov("decision"),
+        r("flight.hover_factor", "x basal upkeep", nonneg, "a second hovering").optional().prov("decision"),
+        r("flight.climb_work_per_m", "org-units per m per unit body", nonneg, "lift work going up; descent is free").optional(),
+        r("flight.takeoff_s", "s of flight", nonneg, "a takeoff's cost").optional().prov("decision"),
+        r("flight.foliage_speed_factor", "x speed cap", fraction, "the speed cap inside a crown's foliage layers").optional().prov("decision"),
+        r("flight.shower_rain_reference_m_per_s", "m/s of rain", Range::positive(), "R0: flight costs x (1 + rain rate / R0) in a shower").optional(),
         // The counter-strike seam (`Counter`): unused, `None` for every lineage.
         r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
         r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),

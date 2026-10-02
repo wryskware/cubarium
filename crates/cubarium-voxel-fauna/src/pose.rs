@@ -22,6 +22,12 @@ pub struct Pose {
     pub z: f64,
     /// Heading in radians from +z toward +x.
     pub heading_rad: f64,
+    /// **The body's base height in metres** above the world floor (F1,
+    /// predation-and-flight §3.2): a walker's is the top of its support face
+    /// ([`crate::surface_m`]); a flyer moves it freely within its band.
+    // F1 stub: declared; 0 for every body until F1 keeps it.
+    #[serde(default)]
+    pub y_m: f64,
 }
 
 impl Pose {
@@ -30,6 +36,7 @@ impl Pose {
         x: 0.0,
         z: 0.0,
         heading_rad: 0.0,
+        y_m: 0.0,
     };
 
     /// The centre of `site`'s top face, heading along +z.
@@ -38,6 +45,8 @@ impl Pose {
             x: (f64::from(site.x) + 0.5) * voxel_m,
             z: (f64::from(site.z) + 0.5) * voxel_m,
             heading_rad: 0.0,
+            // F1 stub: F1 sets the support face's top, `(site.y + 1) · voxel_m`.
+            y_m: 0.0,
         }
     }
 

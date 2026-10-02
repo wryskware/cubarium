@@ -126,16 +126,22 @@ pub enum Founder {
     /// The shredder's blind 23-input layout with its `Chem` reading a film field (the
     /// film stock per site) in place of the detritus field. Diet `[film]`.
     RippleSnail,
+    /// The **bellwing** (F1, `design/handoffs/voxel-flight-2026-09-28.md` Brief F1): the
+    /// first flyer, a small diurnal nectar feeder that flies within its band, hovers at
+    /// flowers and perches on crowns, vine faces and undersides. Its own manifest with a
+    /// fourth action, `lift`. Diet `[nectar]`.
+    Bellwing,
 }
 
 impl Founder {
-    pub const ALL: [Founder; 6] = [
+    pub const ALL: [Founder; 7] = [
         Founder::Blind,
         Founder::Browser,
         Founder::Lanternjaw,
         Founder::Capgnawer,
         Founder::Loftstrider,
         Founder::RippleSnail,
+        Founder::Bellwing,
     ];
     pub const COUNT: usize = Founder::ALL.len();
 
@@ -149,6 +155,7 @@ impl Founder {
             Founder::Capgnawer => 3,
             Founder::Loftstrider => 4,
             Founder::RippleSnail => 5,
+            Founder::Bellwing => 6,
         }
     }
 
@@ -161,6 +168,7 @@ impl Founder {
             Founder::Capgnawer => "capgnawer",
             Founder::Loftstrider => "loftstrider",
             Founder::RippleSnail => "ripple-snail",
+            Founder::Bellwing => "bellwing",
         }
     }
 
@@ -173,6 +181,7 @@ impl Founder {
             Founder::Capgnawer => "fungivore",
             Founder::Loftstrider => "tall_browser",
             Founder::RippleSnail => "film_grazer",
+            Founder::Bellwing => "pollinator",
         }
     }
 
@@ -185,6 +194,7 @@ impl Founder {
             Founder::Capgnawer => Manifest::capgnawer(),
             Founder::Loftstrider => Manifest::loftstrider(),
             Founder::RippleSnail => Manifest::ripple_snail(),
+            Founder::Bellwing => Manifest::bellwing(),
         }
     }
 }
@@ -566,6 +576,22 @@ const LANTERNJAW_ACTIONS: [Action; 4] = [
         low: 0.0,
         high: 1.0,
         transfer: Transfer::Sigmoid,
+    },
+];
+
+/// The bellwing's four actions (F1, predation-and-flight §3.3): the three above and
+/// `lift_effort`, vertical effort in `[-1, 1]`. Forward 0 and lift 0 is a hover. The
+/// fourth reaches the body through [`crate::Controller::lift`], as the lanternjaw's lure
+/// does, until P2's contract v3 carries it in the response.
+const BELLWING_ACTIONS: [Action; 4] = [
+    ACTIONS[0],
+    ACTIONS[1],
+    ACTIONS[2],
+    Action {
+        name: "lift_effort",
+        low: -1.0,
+        high: 1.0,
+        transfer: Transfer::Tanh,
     },
 ];
 
@@ -968,6 +994,45 @@ impl Manifest {
             mass_scale: a.mass,
             taste_reference: a.taste_ref,
             ..Manifest::blind()
+        }
+    }
+
+    /// The bellwing (F1): its own 4-action manifest (`forward`, `turn`, `feed`, `lift`).
+    /// F1 builds the flyer's layout: the downward fan (pitches −80, −50, −20, +10, +40,
+    /// range 4 m, the three sectors) with a `bloom` class, and `Self` gaining `altitude`
+    /// and `ceiling` (predation-and-flight §3.6).
+    // F1 stub: the browser's layout, cone and references on the bellwing's (stub)
+    // physiology, with the lift action. No altitude, ceiling or bloom yet.
+    pub fn bellwing() -> Manifest {
+        let a = anchors(Founder::Bellwing);
+        let r = SelfReferences::of(Founder::Bellwing);
+        Manifest {
+            founder: Founder::Bellwing,
+            actions: &BELLWING_ACTIONS,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
+            contact_height_fraction: a.contact,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
+            body_reference: r.body,
+            adult_energy_reference: r.energy,
+            adult_reserve_reference: r.reserve,
+            structural_reference: r.body,
+            cruise_m_per_s: a.cruise,
+            yaw_cap_rad_per_s: a.yaw,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
+            mouth_reach_body_lengths: a.reach,
+            mass_scale: a.mass,
+            taste_reference: a.taste_ref,
+            ..Manifest::browser()
         }
     }
 

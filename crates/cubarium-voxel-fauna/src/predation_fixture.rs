@@ -138,6 +138,7 @@ pub(super) fn place(fauna: &mut Fauna, id: u64, x_m: f64, z_m: f64, heading_rad:
         x: x_m,
         z: z_m,
         heading_rad,
+        y_m: 0.0,
     };
     a.site = Site {
         x: (x_m / VOXEL_M).floor() as u32,

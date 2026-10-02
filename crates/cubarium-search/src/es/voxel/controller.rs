@@ -466,7 +466,7 @@ impl EpisodeDriver {
                         .to_string(),
                 );
             }
-            Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail => {
+            Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing => {
                 return Err(format!(
                     "the {} has no GRU policy until contract v3 (P2); its heuristic drives it",
                     founder.name()

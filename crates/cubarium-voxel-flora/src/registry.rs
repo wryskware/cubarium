@@ -179,6 +179,9 @@ fn species_rows() -> Vec<Row> {
             .evolve().log().grade("D").prov("measured"),
         r("defence_half_life_s", "s (<= 0: no decay)", finite, "induced defence half-life once grazing stops")
             .evolve().log().grade("D"),
+        r("nectar_per_s", "org-units/s per stand", nonneg, "reserve an adult stand moves into nectar per second, in daylight")
+            .grade("N").prov("decision"),
+        r("nectar_cap", "org-units per stand", nonneg, "the most nectar an adult stand holds").grade("N").prov("decision"),
         r("runner_reach", "voxels (not rescaled)", nonneg, "columns sideways a runner daughter may root from its parent")
             .search(1.0, 3.0),
         r("founder_per_m2", "founders per m2 of habitat", nonneg, "founding: stands per square metre of ground the species' own gates pass on")
