@@ -724,3 +724,12 @@ Commit your own paths only. Stop every background shell before you return.
   by 60 min with no births: small bites on thin film. That is `bite_half_stock` against
   film density, and the tuning pass sets it. The loftstrider drowns in 4 of 7 seeds
   (wade 0.85 m, under water at 1.5 m). Every lineage starves on the defaults.
+- **F3 (2026-10-02), for the tuning pass or a small fix:**
+  - Glides land in ponds: the edge-water refusal checks only the take-off. 10 of 32
+    seedporters drowned.
+  - Gut transit (900 s) is longer than founders live.
+  - Latticevine gut seeds are lost to litter: `seed_vine` founds new matter, so there is
+    no seed path for them (owed).
+  - Seedporters wander until a fruit ray lands inside the 2 m cone.
+- **Pose models:** `model::mode_model` maps the seedporter's four poses by mode
+  (17438074). The bellwing's vane and perch poses need baking.
