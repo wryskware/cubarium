@@ -696,10 +696,14 @@ pub fn seed_pre_rolled(
         if phys.founding_site == cubarium_voxel_fauna::FoundingSite::NearNectar {
             let room = phys.adult_body().headroom_voxels(world.config().voxel_m);
             let reach = founder.manifest().cone_range_m;
-            let pool: Vec<Site> = {
+            let pool_of = |stands_only: bool, taken: &[Site]| -> Vec<Site> {
                 let view = world.view();
                 let fv = flora.view();
-                let sources = nectar_sources(&view, &fv);
+                let sources = if stands_only {
+                    nectar_stands(&view, &fv)
+                } else {
+                    nectar_sources(&view, &fv)
+                };
                 sites
                     .iter()
                     .copied()
@@ -723,6 +727,17 @@ pub fn seed_pre_rolled(
                     .map(|(_, s)| s)
                     .collect()
             };
+            // Near the flowers that feed first (a bloomcrown's nectar carries mineral; a
+            // latticevine's does not, and flowers only after a shower); near any nectar
+            // when no such face is left.
+            let mut pool = pool_of(true, &taken);
+            if pool.len() < want {
+                for s in pool_of(false, &taken) {
+                    if !pool.contains(&s) {
+                        pool.push(s);
+                    }
+                }
+            }
             let chosen = place(&pool, want, |_| Some(0), |_, _| true);
             for (k, site) in chosen.into_iter().enumerate() {
                 if introduce_founder(world, fauna, founder, site, spread_heading(k, want)) {
@@ -831,6 +846,16 @@ pub fn seed_pre_rolled(
         - organic_before;
     seeded.acceptance = accept(world, flora, fauna, founder_counts);
     seeded
+}
+
+/// The nectar-making stands' column centres alone ([`nectar_sources`] without the vines).
+fn nectar_stands(view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<(f64, f64)> {
+    let v = view.config.voxel_m;
+    fv.stands
+        .iter()
+        .filter(|s| s.profile_stage >= 1 && fv.config.species(s.species).nectar_per_s > 0.0)
+        .map(|s| ((f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v))
+        .collect()
 }
 
 /// **Nectar sources** (F1): the column centres, metres, of every stand of a species that

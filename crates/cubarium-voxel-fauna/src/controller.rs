@@ -843,8 +843,17 @@ pub struct HoverSip {
     /// Resting: full, and not yet hungry again.
     resting: bool,
     lift: f64,
+    /// Samples since the last decision, and that decision: the teacher re-plans at the
+    /// walkers' cadence (0.25 s, [`HOVER_SIP_REPLAN`] ticks) so its reflex numbers —
+    /// the wander's holds and turns in samples — mean what they mean for the walkers;
+    /// a bloom at the mouth stops it at once.
+    since: u32,
+    last: Actions,
     cfg: TeacherConfig,
 }
+
+/// Ticks between the hover-sip teacher's decisions: the walkers' controller period.
+const HOVER_SIP_REPLAN: u32 = 5;
 
 impl HoverSip {
     pub fn with_config(cfg: TeacherConfig) -> HoverSip {
@@ -858,13 +867,17 @@ impl HoverSip {
             fan: module_slot(&m, "Fan(3, bloom/foliage/body)"),
             resting: false,
             lift: 0.0,
+            since: 0,
+            last: Actions::REST,
             cfg,
         }
     }
 
     fn act(&mut self, forward: f64, turn: f64, feed: f64, lift: f64) -> Response {
         self.lift = lift;
-        Response::Bounded(Actions { forward, turn, feed })
+        self.since = 0;
+        self.last = Actions { forward, turn, feed };
+        Response::Bounded(self.last)
     }
 }
 
@@ -888,6 +901,12 @@ impl Controller for HoverSip {
         }
         // Hold the search height, never climbing into cover close overhead (it would hang
         // there): it goes around.
+        // Between decisions it holds the last one, unless a bloom is at its mouth.
+        let sip_now = taste > cfg.feed_gate && !self.resting && self.last.feed <= 0.0;
+        self.since += 1;
+        if self.since < HOVER_SIP_REPLAN && !sip_now && self.since > 0 && self.last != Actions::REST {
+            return Response::Bounded(self.last);
+        }
         let hold = |alt: f64| {
             let lift = (cfg.bellwing_altitude_gain * (cfg.bellwing_cruise_altitude - alt)).clamp(-1.0, 1.0);
             if overhead < cfg.bellwing_roost_ceiling { lift.min(0.0) } else { lift }
@@ -952,6 +971,8 @@ impl Controller for HoverSip {
         self.escape = 0;
         self.resting = false;
         self.lift = 0.0;
+        self.since = 0;
+        self.last = Actions::REST;
     }
 
     fn lift(&self) -> f64 {

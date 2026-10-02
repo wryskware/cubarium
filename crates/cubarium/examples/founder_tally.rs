@@ -126,6 +126,17 @@ fn main() {
                             (dx * dx + dz * dz).sqrt()
                         })
                         .fold(f64::INFINITY, f64::min);
+                    let fan = cubarium_voxel_fauna::flyer_fan_census(
+                        &sim.world().view(),
+                        &fv,
+                        &sim.fauna().view(),
+                        a,
+                        &[],
+                    )
+                    .map_or(0, |c| {
+                        c.rays.iter().filter(|r| r.hit == cubarium_voxel_fauna::ConeHit::Bloom).count()
+                    });
+                    print!("fan_blooms={fan} ");
                     println!(
                         "trace t={} id={} x={:.2} z={:.2} y={:.2} over={:.2} mode={:?} perch={:?} state={:?} held=({:.2},{:.2},{:.2}) lift={:.2} reserve={:.5} body={:.5} bloom_m={:.2}",
                         tick / u64::from(cubarium_voxel::TICK_HZ),
