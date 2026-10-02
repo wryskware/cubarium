@@ -67,7 +67,7 @@ Model pass MP-A (`design/handoffs/voxel-model-pass-2026-10-01.md`). Every hex is
 image): a median of a 9 x 9 pixel patch, or single pixels on thin parts. Each part is a
 ramp **low → high** (belly → back, base → tip) by the cell's height in the model. The
 renderer's copy is `crates/cubarium/src/voxel/colours.rs` (`FRONDGRAZER`, `LITTERSHREDDER`,
-`LANTERNJAW` for `animal()`; `CHORISTER` … `BELLWING` for `specimen()`), the builders' copy
+`LANTERNJAW` for `animal()`; `CHORISTER` … `BELLWING`, `LOFTSTRIDER` for `specimen()`), the builders' copy
 `scripts/blender/animal_models.py` `COATS`, by the same part slots (`a_main` …).
 
 | animal (pick) | main | shadow / dark | pale | marking | limbs, feet | accents and other parts |
@@ -78,6 +78,7 @@ renderer's copy is `crates/cubarium/src/voxel/colours.rs` (`FRONDGRAZER`, `LITTE
 | seedporter (`seedporter.png`) | skin `#5C6A28` → `#889335` | open mouth `#361D13` | underside, face `#BEB55E` → `#EADE97` | dorsal stripe `#21361D` → `#2D441F` | claws `#191817` → `#30321A` | eyes `#0C0707`, membranes `#DBDA7B` → `#EDEAA5`, fruit `#802B51` → `#D6658A`, cheek dots `#B5376A` → `#C13E7B` |
 | frondgrazer (`frondgrazer.png`) | shield `#EE7156` → `#FB8162` | hoof band `#58342D` → `#5D3B31` | belly skirt `#BB7A5E` → `#DF9F7D` | saddles `#872935` → `#902C3A` | legs, neck `#9B4341` → `#D96862`, hooves `#C0927C` → `#CA9B86` | scoop lining `#FED3AC`, stalk-eye lens `#300919` → `#4E162B`, rim `#EE699E` → `#F370A2`, sensor spots `#C83C66` → `#D8456F` |
 | lanternjaw (`lanternjaw.png`, selected 2026-10-01; k-means of the pick's opaque pixels) | plates `#5E4070` → `#9168A1` | joints, underside `#1B161B` → `#2F2433` | fangs, razor blades `#B691BF` → `#E5D6ED` | lure holders `#4A4452` → `#695787` | legs, striking arms `#5E4070` → `#865D9C`, claw tips `#2A2530` → `#4A4452` | eyes `#B71984` → `#E437C1`, lure orbs `#63EEFC` → `#ADFAFD` (pigment; they do not glow yet) |
+| loftstrider (`loftstrider.png`, selected 2026-10-01; k-means per body region, then pushed brighter and more saturated to match the pick, Wrysk) | body `#22B4D2` → `#8A62E6` | mouth hole `#1A0E1A` → `#3A1C2A` | neck `#A07CE0` → `#D2A8F4` | knee bulbs, head `#D466B8` → `#F79AD6` | legs `#18A2C8` → `#8C5CDC`, toes `#2ED2D8` → `#6CF2E8` | eyes `#F02E9E` → `#FF4CBA`, tusks `#EEDAB4` → `#FFF0CC`, frond blades `#C6AEFF` → `#EADCFF`, frond edges `#00C6F2` → `#36E8FF` |
 | littershredder (`littershredder.png`) | plates `#F4AD31` → `#FED24E` | bands `#5A2D10` → `#693819` | underside, legs, feelers `#E6C690` → `#FEEEC0` | — | knees `#C06F0E`, claws `#6D3101` → `#E5A537` | sensor spot `#A30E57` |
 | **bellwing** (`bellwing.png`), original colours | bell `#5E1764` (mouth) → `#2E0D3E` (crown) | — | wings `#A580F2` → `#C19BFC` | — | wing roots `#9C547D` | rim and underside `#C0099E` → `#E20CAF`, leading edges `#5ABCEF` → `#95E7FC`, tendril (muted peach, not yet shifted yellower) `#EEB4A7` → `#F1C4B9` |
 

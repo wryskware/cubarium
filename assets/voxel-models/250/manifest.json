@@ -1065,6 +1065,15 @@
      "cells": 40
     }
    ]
+  },
+  "loftstrider": {
+   "bytes": 1212,
+   "bins": [
+    {
+     "length_m": 2.2,
+     "cells": 222
+    }
+   ]
   }
  },
  "specimens": {
@@ -1072,6 +1081,7 @@
   "ripple-snail": "ripple-snail.cvm",
   "capgnawer": "capgnawer.cvm",
   "seedporter": "seedporter.cvm",
-  "bellwing": "bellwing.cvm"
+  "bellwing": "bellwing.cvm",
+  "loftstrider": "loftstrider.cvm"
  }
 }

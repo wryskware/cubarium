@@ -210,6 +210,11 @@ membrane open as the forelimbs remain folded during pursuit.
 
 > none of these really satisfy. full reimagining.
 
+**Selected 2026-10-01:** none of LS-E/F/G. Wrysk chose his own radial reference (six
+legs, six eyes, six tusks and six fronds round a top mouth), refined in a Blender/voxel
+round: [artbook](../art/gen/artbook/loftstrider.png), and the selected appearance in
+[D15](organism-large-animals-2026-09-23.md).
+
 **Body need.** The old set made the animal a narrow upright, a suspended body,
 an arch or a tongue delivery system; none earned a preference. Start again
 with a substantial ground animal and make canopy feeding change its whole

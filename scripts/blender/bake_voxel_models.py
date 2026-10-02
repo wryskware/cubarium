@@ -106,7 +106,9 @@ ANIMAL_ROLE = {slot: "accent" for slot in A.ACCENTS}
 #   seedporter    upright as pictured: 0.5 head to pelvis, 0.62 across the arms, 0.92 tall
 #                 with the coiled tail               reimagining §Seedporter 0.5 x 0.25 body; pick proportions
 #   bellwing      0.375 wingspan, 0.4 tall with the tendril (0.31 without)   roster 2 x 3 v, D14 wingspan 3 v
-SPECIMENS = ["chorister", "ripple-snail", "capgnawer", "seedporter", "bellwing"]
+#   loftstrider   2.2 x 2.4 across the legs and fronds, 3.4 tall: underside 1.2, eyes 1.5,
+#                 mouth 2.8 m             D15 heights; the pick's radial plan (Wrysk 2026-10-01)
+SPECIMENS = ["chorister", "ripple-snail", "capgnawer", "seedporter", "bellwing", "loftstrider"]
 
 KIND = {"Foliage": L.F, "Trunk": L.T, "Drape": L.D, "Mat": L.MAT}
 

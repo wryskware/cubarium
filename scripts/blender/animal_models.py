@@ -4,8 +4,9 @@
 
 The Blender builders the voxel bake (`bake_voxel_models.py`) takes its animals from: the
 three simulated founders (frondgrazer, littershredder, and the lanternjaw, added
-2026-10-01 from its pick) and five unsimulated specimens
-(chorister, ripple-snail, capgnawer, seedporter, bellwing). Each moves its signed-off
+2026-10-01 from its pick) and six unsimulated specimens
+(chorister, ripple-snail, capgnawer, seedporter, bellwing, and the loftstrider, added
+2026-10-01 from its pick). Each moves its signed-off
 blockout (`animal_bodies_r2.py`: CH v3, RS-D2 v2, CG-D2 v2, SP-AB2, FG/LT v2, BW-A) to
 its pick in `art/gen/artbook/` (README table; `design/handoffs/voxel-model-pass-2026-10-01.md`).
 Blockout fidelity: primitives, tubes and lofts, every part, count, proportion and colour

@@ -18,7 +18,7 @@
 //! adult and ripe. The three founders stand at the end, two each, facing each way
 //! (frondgrazer, littershredder, lanternjaw), and after them the
 //! unsimulated animals the models carry as `specimens` (model pass MP-A: chorister,
-//! ripple-snail, capgnawer, seedporter, bellwing), drawn from the library only, never
+//! ripple-snail, capgnawer, seedporter, bellwing; the loftstrider), drawn from the library only, never
 //! simulated. Every stand is drawn at full
 //! moisture (or at `--wilt W`, a moisture of `1 − W`), with full foliage. The picture is
 //! written at 2× nearest, the panel's own upscale.
@@ -62,12 +62,13 @@ const SLOT: i64 = 10;
 
 /// The unsimulated animals drawn after the founders: manifest name, heading (π/2 faces
 /// +x, side-on; π faces the viewer), and how many voxels above the ground it hovers.
-const SPECIMENS: [(&str, f64, u32); 5] = [
+const SPECIMENS: [(&str, f64, u32); 6] = [
     ("chorister", std::f64::consts::FRAC_PI_2, 0),
     ("ripple-snail", std::f64::consts::FRAC_PI_2, 0),
     ("capgnawer", std::f64::consts::PI, 0),
     ("seedporter", std::f64::consts::PI, 0),
     ("bellwing", std::f64::consts::PI, 3),
+    ("loftstrider", std::f64::consts::PI, 0),
 ];
 
 fn main() -> Result<()> {
@@ -138,7 +139,8 @@ fn main() -> Result<()> {
             ModelLibrary::load(&models_dir, voxel_m).context("the baked models")?,
         ))
     };
-    let depth = 8u32;
+    // Deep enough for the widest specimen (the loftstrider's legs and fronds span 21 cells).
+    let mut depth = 8u32;
     let mut specimens = Vec::new();
     if let Some(lib) = &models {
         let mut sx = x + FOUNDERS.len() as i64 * SLOT + 3;
@@ -152,6 +154,8 @@ fn main() -> Result<()> {
                 cells.iter().map(|m| model::turn(q, m.offset[0], m.offset[2])).collect();
             let (x0, x1) = (turned.iter().map(|t| t.0).min().unwrap_or(0), turned.iter().map(|t| t.0).max().unwrap_or(0));
             let z0 = turned.iter().map(|t| t.1).min().unwrap_or(0);
+            let z1 = turned.iter().map(|t| t.1).max().unwrap_or(0);
+            depth = depth.max((z1 - z0 + 3) as u32);
             specimens.push(Specimen {
                 name: name.to_string(),
                 anchor: Cell {

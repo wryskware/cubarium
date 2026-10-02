@@ -76,6 +76,36 @@ grazer a real effect on frond recruitment.
 
 ## 3. D15 · Loftstrider (*Grallator vellicans*, "the loftstrider"): the canopy browser
 
+**Selected appearance (2026-10-01):** [radial canopy browser](../art/gen/artbook/loftstrider.png),
+as modelled in `scripts/blender/animal_models.py` `loftstrider()`. It replaces the "stilt
+column" body plan below in visual scope; niche, diet, reach, life history and the pack
+story are unchanged.
+
+- **Plan.** Radially symmetric about a vertical axis, in sixes (Wrysk; the image does
+  not keep the counts).
+- **Body.** An onion-shaped body, teal low and violet high, on six long legs. The legs
+  come down from hip bulbs under the body, with pink knee bulbs and three splayed teal
+  toes each.
+- **Eyes.** Six magenta eyes with slit pupils round the body's middle, each between two
+  legs. They are its route sense.
+- **Head.** A long violet neck rises to a pink head with the mouth hole on top.
+- **Feeding parts.** Round the mouth sit six bone tusks and six feeding fronds,
+  alternating and equally spaced. The fronds are lilac blades with frilled cyan edges
+  that arch out and droop, in three sizes (100, 75 and 60 %, each twice, no two
+  neighbours alike). They are the feeding organ: they reach into the canopy, grip foliage
+  and bring it to the mouth.
+- **Size.** Underside ~1.2 m, eyes ~1.5 m, mouth ~2.8 m, frond crowns ~3.4 m; legs and
+  fronds span ~2.2–2.4 m. That keeps the D15 reach.
+- **Colour.** Sampled from the image, then pushed brighter and more saturated to match
+  its vividness (colours doc).
+- **Voxels, 0.125 m (18 × 21 × 28).** Each eye keeps a magenta cell; the pupils are drawn
+  in Blender only. The twelve tusk and frond roots sit on the 0.25 m ring round the
+  mouth, twelve distinct cells, so tusks and fronds alternate cell by cell.
+- **Not simulated yet.** It is baked as a specimen, drawn only by `voxel_specimens`.
+- **Rotation, open.** Animal models turn in quarter turns today, so the mixed crown
+  shows four orientations. Turning freely (or in 30° steps) would show it off: Wrysk,
+  "should be interesting if the loftstriders are able to rotate freely".
+
 *Niche.* Eats the foliage between 0.8 m and 3.5 m above the ground it stands on: adult
 vaulttree lobes and drapes, umbrellafrond tiers, adult lanternberry. It does **not** eat
 ground cover, rosettes or turf, which stay the frondgrazer's. Two browsers, split by

@@ -171,6 +171,7 @@ pub fn specimen_coat(name: &str) -> Option<Coat> {
         "capgnawer" => CAPGNAWER,
         "seedporter" => SEEDPORTER,
         "bellwing" => BELLWING,
+        "loftstrider" => LOFTSTRIDER,
         _ => return None,
     })
 }
@@ -205,6 +206,22 @@ pub const LITTERSHREDDER: Coat = &[
     ("a_foot", 0x6D_3101, 0xE5_A537),
     ("a_limb", 0xC0_6F0E, 0xC0_6F0E),
     ("magenta", 0xA3_0E57, 0xA3_0E57),
+];
+/// Radial canopy browser (selected 2026-10-01, `art/gen/artbook/loftstrider.png`): body
+/// (teal → violet), neck, legs, feet, knee bulbs and the pink head, magenta eyes, bone
+/// tusks, lilac frond blades, cyan frond edges, the mouth hole. Sampled from the pick, then
+/// pushed brighter and more saturated to match its vividness (Wrysk).
+pub const LOFTSTRIDER: Coat = &[
+    ("a_main", 0x22_B4D2, 0x8A_62E6),
+    ("a_pale", 0xA0_7CE0, 0xD2_A8F4),
+    ("a_limb", 0x18_A2C8, 0x8C_5CDC),
+    ("a_foot", 0x2E_D2D8, 0x6C_F2E8),
+    ("a_mark", 0xD4_66B8, 0xF7_9AD6),
+    ("a_eye", 0xF0_2E9E, 0xFF_4CBA),
+    ("a_head", 0xEE_DAB4, 0xFF_F0CC),
+    ("a_membrane", 0xC6_AEFF, 0xEA_DCFF),
+    ("a_glow", 0x00_C6F2, 0x36_E8FF),
+    ("a_dark", 0x1A_0E1A, 0x3A_1C2A),
 ];
 /// Mantis scorpid (selected 2026-10-01, `art/gen/artbook/lanternjaw.png`): violet plates,
 /// dark joints and underside, legs and striking arms, dark claw tips, pale fangs and razor

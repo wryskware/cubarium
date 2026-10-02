@@ -10,8 +10,9 @@ Exploration only; nothing here was picked.
 **Outcome (same day).** Wrysk: "all of these are unusably bad".
 - **Lanternjaw:** settled from his own mantis-scorpid reference, refined in a Blender/voxel
   round. See D16's selected appearance in `design/organism-large-animals-2026-09-23.md`.
-- **Loftstrider:** continues from LS-I-feeding-b3, with six legs and tentacles that reach
-  the canopy (`art/gen/runs/2026-10-01-lj-ls-round2/`). Images are in
+- **Loftstrider:** round 2 tried LS-I-feeding-b3 with six legs and canopy tentacles
+  (`art/gen/runs/2026-10-01-lj-ls-round2/`). It was then settled from Wrysk's own radial
+  reference. See D15's selected appearance in the same doc. Images are in
 `art/gen/runs/2026-10-01-lj-ls-candidates/`. The body plans ignore the dossiers and the
 09-24 reimagining.
 

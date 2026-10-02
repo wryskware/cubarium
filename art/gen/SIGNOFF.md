@@ -44,7 +44,7 @@ all in `/home/wrysk/wryskware/cubarium/art/gen/index.html`.
 | BW   | bellwing       | A / B / C   | A, final                                                                                                                       |        |
 | LJ   | lanternjaw     | A–D         | prefer D, the scorpid version. overall idea is good. however, needs refinement or some reimagining.                            | final 2026-10-01: `artbook/lanternjaw.png` + model |
 | CH   | chorister      | A–D         | A, leaning. needs some rework and reimagining. perhaps hexapod, or somewhat raptorial like C? not sure i like the smooth body. |        |
-| LS   | loftstrider    | A–D         | none of these really satisfy. full reimagining.                                                                                |        |
+| LS   | loftstrider    | A–D         | none of these really satisfy. full reimagining.                                                                                | final 2026-10-01: `artbook/loftstrider.png` + model |
 | CG   | capgnawer      | A–D         | torn between A and D. not sure it has any reason to fly though.                                                                |        |
 | RS   | ripple-snail   | A–D         | B or D. D is giving canoli squid, while B is giving sand dollar. might need some adjustments.                                  |        |
 | SP   | seedporter     | A–D         | i would combine A and B. keep the alien monkey vibe but also give it skin flaps to glide with                                  |        |
@@ -134,4 +134,17 @@ Final: Wrysk's own mantis-scorpid reference with twin tail lures
 - The orbs are one voxel each, one column behind the fangs, held from the cell behind.
 - No cells join the two tails on top.
 
-"great. lets go with this one." The loftstrider is still open.
+"great. lets go with this one."
+
+## Loftstrider pick (Wrysk, 2026-10-01)
+
+Final: Wrysk's own radial reference (`art/gen/artbook/loftstrider.png`), refined in a
+Blender/voxel round (`scripts/blender/animal_models.py` `loftstrider()`, baked as a
+specimen). His counts, which the image does not keep:
+
+- Six legs.
+- Six eyes, each between two legs.
+- Six tusks and six fronds round the mouth, alternating and equally spaced.
+
+The voxel colours are more vibrant to match the image. The fronds are mixed sizes: 100, 75
+and 60 %, each twice ("lets do mixed").
