@@ -27,7 +27,7 @@
 use cubarium_voxel::{DT, TICK_HZ, VoxelView, World};
 
 use crate::step::{add_litter_cap, provisioned_slot};
-use crate::{Flora, Site, take_pool};
+use crate::{Flora, FloraConfig, Site, take_pool};
 
 /// Flora ticks per film step: one simulated second. A scheduling numeric, not ecology.
 pub(crate) const FILM_EVERY: u64 = TICK_HZ as u64;
@@ -38,21 +38,21 @@ pub(crate) fn is_film_tick(tick: u64) -> bool {
 }
 
 /// The standing water over support face `(x, y, z)`, if the face is wet-eligible: above 0
-/// and at most `max_depth_m`.
+/// and at most `film_max_depth_m`.
 pub(crate) fn eligible_depth(
     view: &VoxelView<'_>,
-    max_depth_m: f64,
+    c: &FloraConfig,
     x: i64,
     y: u32,
     z: u32,
 ) -> Option<f64> {
     let d = view.standing_depth_m(x, y, z);
-    (d > 0.0 && d <= max_depth_m).then_some(d)
+    (d > 0.0 && d <= c.film_max_depth_m).then_some(d)
 }
 
 /// [`eligible_depth`] as a yes or no.
-pub(crate) fn eligible(view: &VoxelView<'_>, max_depth_m: f64, x: i64, y: u32, z: u32) -> bool {
-    eligible_depth(view, max_depth_m, x, y, z).is_some()
+pub(crate) fn eligible(view: &VoxelView<'_>, c: &FloraConfig, x: i64, y: u32, z: u32) -> bool {
+    eligible_depth(view, c, x, y, z).is_some()
 }
 
 /// Every site holding film, in site order: the receivers the light phase computes sky and
@@ -94,7 +94,7 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
         }
         let s = g.site;
         before.push((s, f));
-        let depth = eligible_depth(&view, c.film_max_depth_m, i64::from(s.x), s.y, s.z);
+        let depth = eligible_depth(&view, c, i64::from(s.x), s.y, s.z);
         while k < open.len() && open[k].0 < s {
             k += 1;
         }
@@ -195,7 +195,7 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
             else {
                 continue;
             };
-            if to == from || !eligible(&view, c.film_max_depth_m, i64::from(to.x), to.y, to.z) {
+            if to == from || !eligible(&view, c, i64::from(to.x), to.y, to.z) {
                 continue;
             }
             let there = before

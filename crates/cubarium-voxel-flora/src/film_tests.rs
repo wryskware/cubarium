@@ -13,7 +13,7 @@
 use crate::snapshot::{SCHEMA, decode, encode};
 use crate::{Flora, FloraConfig, Provision, Site};
 use cubarium_voxel::weather::{DayClock, DayMode};
-use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, DT, Material, World};
+use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, DT, Material, TICK_HZ, World};
 
 const VOXEL_M: f64 = 0.25;
 const AREA_M2: f64 = VOXEL_M * VOXEL_M;
@@ -673,4 +673,340 @@ fn the_film_survives_a_snapshot() {
         flora.view().ground_at(face(2))
     );
     assert_eq!(back.view().ledger.film_seeded, 0.01);
+}
+
+// ------------------------------------------------------------ residues and drying out
+//
+// Wrysk, 2026-10-02: "it should definitely die when it dries out." A drained shower leaves
+// a residue on every ledge (under an overhang nothing evaporates it), and the old rule
+// read any water above 0 as wet; and a dry site's loss was exponential, so it kept a
+// sliver forever. `film_wet_min_depth_m` makes a residue dry; `film_gone_fraction` ends a
+// dry film at exactly nothing.
+
+/// A one-deep strip like [`strip`], with `depths[x]` metres of water standing in the one
+/// cell over column `x` (each under a cell).
+fn strip_m(depths: &[f64]) -> World {
+    let mut w = strip(&vec![0; depths.len()]);
+    for (x, &d) in depths.iter().enumerate() {
+        if d > 0.0 {
+            assert!(d < VOXEL_M, "fixture: one cell at most");
+            w.apply(WorldCommand::AddWater {
+                x: x as i64,
+                y: 1,
+                z: 0,
+                volume_m3: d * AREA_M2,
+            });
+        }
+    }
+    for (x, &d) in depths.iter().enumerate() {
+        let got = w.view().standing_depth_m(x as i64, 0, 0);
+        assert!(
+            (got - d).abs() <= 1e-12 * d.max(1e-12),
+            "fixture: column {x} stands {got} m, want {d}"
+        );
+    }
+    w
+}
+
+/// The site capacity on the test strip.
+fn capacity(c: &FloraConfig) -> f64 {
+    c.film_capacity_per_m2 * AREA_M2
+}
+
+/// A site whose standing water is a residue below `film_wet_min_depth_m` is dry: not
+/// eligible, no growth, dry death into its own litter, and it neither gives nor receives
+/// spread. A site standing at the knob exactly keeps the old (wet) behaviour.
+#[test]
+fn a_residue_is_dry() {
+    let c = config();
+    let min = c.film_wet_min_depth_m;
+    assert!(min > 0.0, "the knob is on by default");
+    let residue = 0.5 * min;
+    let wet = 2.0 * min;
+
+    // Eligibility on its own: under the knob no, at and over it yes.
+    let w = strip_m(&[residue, wet]);
+    let v = w.view();
+    assert!(!crate::film::eligible(&v, &c, 0, 0, 0), "a residue is eligible");
+    assert!(crate::film::eligible(&v, &c, 1, 0, 0), "wet water is not eligible");
+    let at = FloraConfig {
+        film_wet_min_depth_m: v.standing_depth_m(1, 0, 0),
+        ..c.clone()
+    };
+    assert!(crate::film::eligible(&v, &at, 1, 0, 0), "at the knob is not eligible");
+
+    // Growth and death: a seeded film over a residue declines into its litter, grows
+    // nothing.
+    let mut flora = Flora::in_world(&w, FloraConfig { decomposition: 0.0, ..config() });
+    let f0 = 0.5 * capacity(flora.config());
+    put_film(&mut flora, face(0), f0);
+    let litter0 = ground(&flora, face(0)).litter;
+    let mut world = strip_m(&[residue, 0.0, 0.0, 0.0]);
+    run(&mut flora, &mut world, TICKS);
+    let g = ground(&flora, face(0));
+    assert!(g.film < f0, "the residue's film did not decline");
+    assert!(g.litter > litter0, "the residue's film died to no litter");
+    let l = &flora.view().ledger;
+    assert_eq!(l.film_produced, 0.0, "film grew on a residue");
+    assert!(l.film_to_litter > 0.0, "no dry death on a residue");
+    assert_closes(&flora, "residue");
+    assert_film_budget(&flora, "residue");
+
+    // Spread, no growth or upkeep: column 0 is wet and filmed, 1 a bare residue beside
+    // it; 2 a filmed residue, 3 bare wet water beside it; 4 and 5 dry (the ring wraps).
+    // Neither residue gives or receives.
+    let mut world = strip_m(&[wet, residue, residue, wet, 0.0, 0.0]);
+    let mut flora = Flora::in_world(
+        &world,
+        FloraConfig {
+            film_growth_per_s: 0.0,
+            film_maintenance_per_s: 0.0,
+            film_dry_death_per_s: 0.0,
+            film_gone_fraction: 0.0,
+            ..config()
+        },
+    );
+    put_film(&mut flora, face(0), 0.01);
+    put_film(&mut flora, face(2), 0.01);
+    run(&mut flora, &mut world, TICKS);
+    assert_eq!(ground(&flora, face(1)).film, 0.0, "a residue received spread");
+    assert_eq!(ground(&flora, face(3)).film, 0.0, "a residue gave spread");
+    assert_eq!(ground(&flora, face(0)).film, 0.01, "the wet source spread onto a residue");
+    assert_eq!(ground(&flora, face(2)).film, 0.01, "the residue lost film to spread");
+    assert_closes(&flora, "residue spread");
+    assert_film_budget(&flora, "residue spread");
+
+    // At the knob exactly: the old behaviour, growth and spread both.
+    let mut world = strip_m(&[wet, wet, 0.0, 0.0]);
+    let d = world.view().standing_depth_m(0, 0, 0);
+    let mut flora = Flora::in_world(
+        &world,
+        FloraConfig {
+            film_wet_min_depth_m: d,
+            ..config()
+        },
+    );
+    let f0 = 0.1 * capacity(flora.config());
+    put_film(&mut flora, face(0), f0);
+    run(&mut flora, &mut world, TICKS);
+    assert!(flora.view().ledger.film_produced > 0.0, "at the knob: no growth");
+    assert!(ground(&flora, face(1)).film > 0.0, "at the knob: no spread");
+    assert_eq!(flora.view().ledger.film_to_litter, 0.0, "at the knob: dry death");
+    assert_closes(&flora, "at the knob");
+    assert_film_budget(&flora, "at the knob");
+}
+
+/// On a dry site the film falls until the step it would fall under `film_gone_fraction`
+/// of the site's capacity, and in that step all of it dies into the site's litter: film,
+/// its mineral and its energy exactly 0, the site gone from `film_sites`, the books shut.
+/// (A faster death rate than the default so the test is short; the rule is the same.)
+#[test]
+fn dry_film_dies_out_completely() {
+    let wet = strip(&[1; 3]);
+    let mut flora = Flora::in_world(
+        &wet,
+        FloraConfig {
+            decomposition: 0.0,
+            film_dry_death_per_s: 0.05,
+            ..config()
+        },
+    );
+    let c = flora.config().clone();
+    let floor = c.film_gone_fraction * capacity(&c);
+    assert!(floor > 0.0, "the floor is on by default");
+    let f0 = 0.5 * capacity(&c);
+    put_film(&mut flora, face(1), f0);
+    assert_closes(&flora, "placed");
+    let mut dry = strip(&[0; 3]);
+    // ln(f0 / floor) / rate, and a margin.
+    let need_s = (f0 / floor).ln() / (c.film_dry_death_per_s + c.film_maintenance_per_s);
+    let ticks = ((need_s * 1.5) / DT).ceil() as u32 + 2 * TICK_HZ;
+    let mut gone_at = None;
+    let mut last = f0;
+    for t in 0..ticks {
+        flora.step(&mut dry);
+        let g = ground(&flora, face(1));
+        if g.film > 0.0 {
+            assert!(
+                g.film >= floor,
+                "tick {t}: a dry film stands at {} under the floor {floor}",
+                g.film
+            );
+            assert!(g.film <= last, "tick {t}: a dry film grew");
+            last = g.film;
+        } else if gone_at.is_none() {
+            gone_at = Some(t);
+            let litter_film = flora.view().ledger.film_to_litter;
+            assert!(litter_film > 0.0);
+        }
+    }
+    let at = gone_at.unwrap_or_else(|| panic!("a dry film never died out ({last} left)"));
+    assert!(
+        f64::from(at) * DT <= need_s * 1.5,
+        "died out at {} s, the law gives about {need_s:.0} s",
+        f64::from(at) * DT
+    );
+    let g = ground(&flora, face(1));
+    assert_eq!((g.film, g.film_mineral, g.film_energy), (0.0, 0.0, 0.0), "dust left");
+    assert!(g.litter > 0.0, "the last of it went nowhere");
+    assert_eq!(flora.view().film_sites().count(), 0, "a dried site is still a film site");
+    let l = &flora.view().ledger;
+    assert!(
+        (l.film_to_litter + l.film_respired - f0).abs() <= 1e-12 * f0,
+        "film {f0} went {} to litter and {} to respiration",
+        l.film_to_litter,
+        l.film_respired
+    );
+    assert_closes(&flora, "died out");
+    assert_film_budget(&flora, "died out");
+}
+
+/// The floor is for dry sites only: a wet, eligible, lit site holding less film than the
+/// floor keeps it and grows.
+#[test]
+fn the_floor_never_touches_wet_film() {
+    let mut world = strip(&[0, 1, 0]);
+    let mut flora = Flora::in_world(&world, config());
+    let c = flora.config().clone();
+    let f0 = 0.25 * c.film_gone_fraction * capacity(&c);
+    assert!(f0 > 0.0);
+    put_film(&mut flora, face(1), f0);
+    run(&mut flora, &mut world, TICKS);
+    let f = ground(&flora, face(1)).film;
+    assert!(f > f0, "a wet film under the floor holds {f}, placed {f0}");
+    assert_eq!(flora.view().ledger.film_to_litter, 0.0, "wet film died");
+    assert_closes(&flora, "wet under the floor");
+    assert_film_budget(&flora, "wet under the floor");
+}
+
+/// The knobs: serde defaults (a config that never names them gets them) and registry rows.
+#[test]
+fn the_drying_knobs_are_plumbed() {
+    let d = FloraConfig::default();
+    let from: FloraConfig = toml::from_str("").expect("an empty flora table");
+    assert_eq!(from.film_wet_min_depth_m, d.film_wet_min_depth_m);
+    assert_eq!(from.film_gone_fraction, d.film_gone_fraction);
+    let set: FloraConfig =
+        toml::from_str("film_wet_min_depth_m = 0.003\nfilm_gone_fraction = 0.01\n").expect("set");
+    assert_eq!((set.film_wet_min_depth_m, set.film_gone_fraction), (0.003, 0.01));
+    for path in ["flora.film_wet_min_depth_m", "flora.film_gone_fraction"] {
+        assert!(
+            crate::registry().rows().iter().any(|r| r.path == path),
+            "no registry row for {path}"
+        );
+    }
+    // The floor is under the render's half level (marks are drawn from 1/16 of capacity),
+    // and the residue threshold well under a one-cell pond margin.
+    assert!(d.film_gone_fraction > 0.0 && d.film_gone_fraction < 1.0 / 16.0);
+    assert!(d.film_wet_min_depth_m > 0.0 && d.film_wet_min_depth_m < 0.25 * 0.125);
+    d.validate().expect("the defaults validate");
+}
+
+/// The real water step: a pond beside a stepped slope rising to a plateau whose middle is
+/// roofed, the slope stepping back down to the pond (the strip is a ring). Film on every
+/// face, a shower, the rain stops, the water drains. Within a bound set by the knobs every
+/// slope, plateau, covered-ledge and roof face holds no film and is out of `film_sites`;
+/// the pond's faces keep theirs.
+#[test]
+fn rain_then_drain_leaves_film_only_in_the_pond() {
+    const V: f64 = 0.125;
+    // Column tops (the support face's y); 0 is the pond floor.
+    let tops: [u32; 16] = [0, 0, 0, 0, 2, 3, 4, 5, 5, 5, 5, 4, 3, 2, 2, 2];
+    let roof = (8u32, 8..=9i64);
+    let mut world = World::empty(VoxelConfig {
+        width: 16,
+        height: 12,
+        depth: 1,
+        voxel_m: V,
+        seed: 23,
+        evaporation_m_per_s: 1e-5,
+        day: DayClock {
+            mode: DayMode::Off,
+            ..DayClock::default()
+        },
+        ..VoxelConfig::default()
+    });
+    for (x, &top) in tops.iter().enumerate() {
+        for y in 1..=top {
+            world.apply(WorldCommand::SetMaterial {
+                x: x as i64,
+                y,
+                z: 0,
+                material: Material::Bedrock,
+            });
+        }
+    }
+    for x in roof.1.clone() {
+        world.apply(WorldCommand::SetMaterial {
+            x,
+            y: roof.0,
+            z: 0,
+            material: Material::Bedrock,
+        });
+    }
+    let cell = world.config().voxel_volume();
+    for x in 0..4 {
+        world.apply(WorldCommand::AddWater {
+            x,
+            y: 1,
+            z: 0,
+            volume_m3: 0.95 * cell,
+        });
+    }
+    let mut flora = Flora::in_world(&world, config());
+    let c = flora.config().clone();
+    let cap = c.film_capacity_per_m2 * V * V;
+    let mut faces = Vec::new();
+    for x in 0..16i64 {
+        for y in 0..12u32 {
+            if world.view().is_support(x, y, 0) {
+                faces.push(Site { x: x as u32, y, z: 0 });
+            }
+        }
+    }
+    let pond: Vec<Site> = (0..4).map(|x| Site { x, y: 0, z: 0 }).collect();
+    for &s in &faces {
+        put_film(&mut flora, s, 0.5 * cap);
+    }
+    assert!(faces.len() > pond.len() + 12, "fixture: {} faces", faces.len());
+
+    // A five-minute shower, about 60 mm/h, through the real rain distribution.
+    let hz = u64::from(TICK_HZ);
+    let rate = 1.7e-5;
+    for _ in 0..5 * 60 * hz {
+        world.apply(WorldCommand::RainPulse {
+            volume_m3: rate * DT * 16.0 * V * V,
+        });
+        world.step();
+        flora.step(&mut world);
+    }
+    let wet_ledges = faces
+        .iter()
+        .filter(|s| !pond.contains(s) && world.view().standing_depth_m(i64::from(s.x), s.y, 0) > 0.0)
+        .count();
+    assert!(wet_ledges > 0, "fixture: the shower wetted no ledge");
+
+    // The bound: five minutes to drain, then a full film's dry death to the floor.
+    let bound_s = 300.0 + (1.0 / c.film_gone_fraction).ln() / c.film_dry_death_per_s;
+    assert!(bound_s <= 20.0 * 60.0, "the knobs give {bound_s:.0} s");
+    for _ in 0..(bound_s * f64::from(TICK_HZ)).ceil() as u64 {
+        world.step();
+        flora.step(&mut world);
+    }
+    let v = flora.view();
+    let left: Vec<(Site, f64, f64)> = v
+        .film_sites()
+        .filter(|(s, _)| !pond.contains(s))
+        .map(|(s, f)| (s, f / cap, world.view().standing_depth_m(i64::from(s.x), s.y, 0)))
+        .collect();
+    assert!(
+        left.is_empty(),
+        "{bound_s:.0} s after the rain, film (site, share of capacity, depth m) on {left:?}"
+    );
+    for &s in &pond {
+        let f = v.film_at(s);
+        assert!(f > 0.25 * cap, "pond face {s:?} kept {f} of {cap}");
+    }
+    assert_closes(&flora, "rain and drain");
+    assert_film_budget(&flora, "rain and drain");
 }

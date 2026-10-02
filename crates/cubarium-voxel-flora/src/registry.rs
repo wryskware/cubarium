@@ -323,6 +323,8 @@ fn rows() -> Vec<Row> {
         r("flora.film_maintenance_per_s", "/s", nonneg, "glassfilm: upkeep, respired"),
         r("flora.film_spread_per_s", "/s", nonneg, "glassfilm: fragments a neighbour sends per unit of its film"),
         r("flora.film_dry_death_per_s", "/s", nonneg, "glassfilm: loss on a dry or too-deep site, to litter"),
+        r("flora.film_wet_min_depth_m", "m", nonneg, "glassfilm: shallowest standing water a site is wet-eligible under (a residue is dry)"),
+        r("flora.film_gone_fraction", "fraction of capacity", fraction, "glassfilm: dry film below this share of capacity dies whole to litter"),
         r("flora.film_seed_per_m2", "org-units per m2", nonneg, "glassfilm: founding film per square metre"),
         r("flora.film_n_tissue", "mineral per org-unit", nonneg, "glassfilm: mineral per unit of film tissue, from the site's pool"),
         r("flora.film_energy_density", "energy per org-unit", nonneg, "glassfilm: energy per unit of film tissue"),

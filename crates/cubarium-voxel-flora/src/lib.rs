@@ -2481,6 +2481,15 @@ pub struct FloraConfig {
     pub film_spread_per_s: f64,
     /// Glassfilm: loss per second on a dry or too-deep site, into its own litter.
     pub film_dry_death_per_s: f64,
+    /// Glassfilm: the shallowest standing water a site is wet-eligible under, metres.
+    /// Shallower water is a **residue** (what a drained shower or a stopped film leaves
+    /// on a ledge, often under an overhang where nothing evaporates it) and the site
+    /// counts as dry: no growth, dry death, no spread either way.
+    pub film_wet_min_depth_m: f64,
+    /// Glassfilm: on a dry or too-deep site, film that would fall below this share of the
+    /// site's capacity dies whole into its litter that step, so a dried site ends at
+    /// exactly no film rather than an exponential sliver.
+    pub film_gone_fraction: f64,
     /// Glassfilm: what [`Flora::seed_film`] puts on every eligible site, organic matter
     /// per square metre.
     pub film_seed_per_m2: f64,
@@ -2543,6 +2552,8 @@ impl Default for FloraConfig {
             film_maintenance_per_s: 0.0001,
             film_spread_per_s: 0.0002,
             film_dry_death_per_s: 0.005,
+            film_wet_min_depth_m: 0.01,
+            film_gone_fraction: 0.02,
             // Half the capacity: a live world founds an established pond, not a fresh
             // film (roster R2b repair). Read only when `seed_film_at_founding` is on.
             film_seed_per_m2: 0.2,
@@ -4678,7 +4689,7 @@ impl Flora {
             for x in 0..i64::from(c.width) {
                 for y in 0..c.height {
                     if !view.is_support(x, y, z)
-                        || !film::eligible(&view, self.config.film_max_depth_m, x, y, z)
+                        || !film::eligible(&view, &self.config, x, y, z)
                     {
                         continue;
                     }
