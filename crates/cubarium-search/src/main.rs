@@ -838,6 +838,10 @@ enum Command {
         /// CMA state, the centres and their Adam state, the brain step, the best so far).
         #[arg(long)]
         resume: Option<PathBuf>,
+        /// Per-lineage brain curiosity (`config/training/curiosity.toml`): the novelty term
+        /// `weight × novelty` in the brains' window score. Without it every weight is 0.
+        #[arg(long)]
+        curiosity: Option<PathBuf>,
     },
     /// The R/S/F pre-screen of an ecology on a world: the three stay-or-go numbers and
     /// each founded species' row.
@@ -880,6 +884,10 @@ enum Command {
         /// config/desktop/terrarium.toml) instead of the still-water `small` preset.
         #[arg(long)]
         world: Option<PathBuf>,
+        /// The cells and memory the CSV's `mean_novelty` column is measured on
+        /// (`config/training/curiosity.toml`); the defaults without. A measurement only.
+        #[arg(long)]
+        curiosity: Option<PathBuf>,
     },
     /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
     /// every body of every lineage given a centre runs its own antithetic variant inside
@@ -929,6 +937,10 @@ enum Command {
         /// config/desktop/terrarium.toml) instead of the still-water `small` preset.
         #[arg(long)]
         world: Option<PathBuf>,
+        /// Per-lineage brain curiosity (`config/training/curiosity.toml`): the novelty term
+        /// `weight × novelty` in the brains' window score. Without it every weight is 0.
+        #[arg(long)]
+        curiosity: Option<PathBuf>,
     },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
@@ -1560,6 +1572,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             out,
             persist_only,
             resume,
+            curiosity,
         } => {
             let hz = f64::from(cubarium_voxel_fauna::TICK_HZ);
             let genome = match es::voxel::live::ecology::EcologyParams::load(&search)? {
@@ -1582,6 +1595,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (window_min * 60.0 * hz).round() as u64,
             );
             eval.founders = parse_founders(founders.as_deref())?;
+            eval.curiosity =
+                es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?;
             eval.water_every = water_every;
             eval.abort_animals = abort_animals;
             eval.score_horizon_ticks = (score_hours.unwrap_or(hours) * 3600.0 * hz).round() as u64;
@@ -1689,6 +1704,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             threads,
             out,
             world,
+            curiosity,
         } => {
             let world_cfg =
                 es::voxel::live::search::check_world_config(world.as_deref())?;
@@ -1718,6 +1734,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &parse_centres(&centres)?,
                 parse_founders(founders.as_deref())?,
                 threads,
+                &es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?,
                 &out,
             )?;
             Ok(())
@@ -1740,6 +1757,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             out,
             world,
             ecology,
+            curiosity,
         } => {
             let ecology = match ecology {
                 Some(p) => es::voxel::live::ecology::EcologyParams::load(&p)?,
@@ -1767,6 +1785,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 population_cap,
                 save_every,
                 out,
+                curiosity: es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?,
             };
             es::voxel::live::trainer::train(&spec)?;
             Ok(())
