@@ -150,6 +150,9 @@ pub struct VoxelView<'a> {
     /// Empty while a world is being generated and on a world taller than
     /// [`SOLID_MASK_ROWS`], and every reader then takes the direct test over `material`.
     solid: &'a [u128],
+    /// The world's wet set — every void cell holding free water — when it is trusted
+    /// (not between a load and the first step). Read through [`VoxelView::wet_cells`].
+    wet: Option<&'a crate::sparse::CellSet>,
 }
 
 impl<'a> VoxelView<'a> {
@@ -172,7 +175,32 @@ impl<'a> VoxelView<'a> {
             spring: None,
             weather: crate::weather::WeatherView::CLEAR_NOON,
             solid: &[],
+            wet: None,
         }
+    }
+
+    /// Every cell holding free water (`Config::index`), into `out`, in no particular
+    /// order: the cache the water phases keep, read-only. False, with `out` empty, when
+    /// the view has no trusted set (a terrain-only view, or a world loaded and not yet
+    /// stepped): the reader then looks at `free` itself.
+    pub fn wet_cells(&self, out: &mut Vec<usize>) -> bool {
+        out.clear();
+        let Some(set) = self.wet else { return false };
+        match set.columns() {
+            Some(cols) => {
+                let plane = cols.len();
+                for (col, &mask) in cols.iter().enumerate() {
+                    let mut m = mask;
+                    while m != 0 {
+                        let y = m.trailing_zeros() as usize;
+                        out.push(y * plane + col);
+                        m &= m - 1;
+                    }
+                }
+            }
+            None => out.extend(set.members()),
+        }
+        true
     }
 }
 
@@ -1177,6 +1205,7 @@ impl World {
             spring: self.spring_cell,
             weather: crate::weather::view(self),
             solid: &self.solid.bits,
+            wet: (!self.wet.needs_rebuild(self.free.len())).then_some(&self.wet),
         }
     }
 

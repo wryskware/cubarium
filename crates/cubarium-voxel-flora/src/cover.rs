@@ -540,6 +540,20 @@ impl Cover {
         out
     }
 
+    /// [`Cover::draw`] without the allocation or the sort: every covered face's
+    /// [`FaceDraw`], in no particular order. A read-only view for a presenter that only
+    /// needs to know whether what it draws moved.
+    pub fn face_draws(&self) -> impl Iterator<Item = FaceDraw> + '_ {
+        self.faces.iter().map(|c| FaceDraw {
+            face: c.face,
+            owner: c.owner,
+            leafiness: c.leafiness,
+            rooted: c.rooted,
+            dormant: self.vine(c.owner).is_some_and(|v| v.dormant),
+            spur: c.spur,
+        })
+    }
+
     /// One [`FaceDraw`] per covered face, sorted by face: the presenter's whole read.
     pub fn draw(&self) -> Vec<FaceDraw> {
         let mut out: Vec<FaceDraw> = self
