@@ -166,7 +166,7 @@ fn a_plain_riser_is_still_a_step_down_and_a_step_up() {
 fn founding_refuses_a_disc_in_a_wall_and_a_small_pocket() {
     let w = world(32, 16, |x, z| if (10..14).contains(&x) && (6..10).contains(&z) { 8 } else { 3 });
     let (phys, _, _) = browser();
-    let faces = crate::founding_faces(&w.view(), &phys);
+    let faces = crate::founding_faces(&w.view(), &phys, crate::FoundingConfig::default().clearance_margin_m);
     let has = |x, y, z| faces.contains(&Site { x, y, z });
     assert!(has(25, 3, 8), "an open face is a founding face");
     assert!(!has(9, 3, 8), "beside the mesa the disc overlaps its side");

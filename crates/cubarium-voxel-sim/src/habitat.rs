@@ -692,7 +692,7 @@ pub fn seed_pre_rolled(
     // Only where the whole disc clears its headroom, in the largest walkable component
     // (fix 2, `design/handoffs/browser-stuck-in-crags-2026-10-01.md`).
     let blind_found: std::collections::HashSet<Site> =
-        cubarium_voxel_fauna::founding_faces(&world.view(), &blind)
+        cubarium_voxel_fauna::founding_faces(&world.view(), &blind, founding.clearance_margin_m)
             .into_iter()
             .collect();
     let pool: Vec<Site> = {
@@ -765,7 +765,7 @@ pub fn seed_pre_rolled(
     // (fix 2): a founder with its disc in a wall cannot move, and one in a pocket of a few
     // square metres cannot leave it.
     let browser_found: std::collections::HashSet<Site> =
-        cubarium_voxel_fauna::founding_faces(&world.view(), &browser)
+        cubarium_voxel_fauna::founding_faces(&world.view(), &browser, founding.clearance_margin_m)
             .into_iter()
             .collect();
     meadow.retain(|f| browser_found.contains(f));
