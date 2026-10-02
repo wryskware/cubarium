@@ -457,6 +457,10 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         // The ambush teacher (predation §2.12): it has no trained centre, so this drives
         // every lanternjaw, hatched or introduced.
         Founder::Lanternjaw => Box::new(LanternjawAmbush::with_config(teachers)),
+        // R1 stub: the shredder's forager (reads the capgnawer's own `Chem` once the
+        // manifest has it) and the browser's forager on the loftstrider's cone and mouth.
+        Founder::Capgnawer => Box::new(BlindForager::with_config(teachers)),
+        Founder::Loftstrider => Box::new(BrowserForager::with_config(teachers)),
     }
 }
 

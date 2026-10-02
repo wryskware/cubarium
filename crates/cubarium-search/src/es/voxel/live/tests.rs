@@ -18,7 +18,7 @@ fn centre(founder: Founder) -> Vec<f64> {
     match founder {
         Founder::Blind => initial_center_shape::<23, 3>(5),
         Founder::Browser => initial_center_shape::<37, 3>(5),
-        Founder::Lanternjaw => unreachable!("the lanternjaw trains from P2"),
+        _ => unreachable!("this lineage trains from P2"),
     }
 }
 

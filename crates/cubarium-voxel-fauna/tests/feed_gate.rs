@@ -32,7 +32,7 @@ fn both_foragers_feed_on_any_food_they_taste() {
         let mut c: Box<dyn Controller> = match founder {
             Founder::Blind => Box::new(BlindForager::new()),
             Founder::Browser => Box::new(BrowserForager::new()),
-            Founder::Lanternjaw => unreachable!(),
+            _ => unreachable!(),
         };
         assert!(feeds(c.as_mut(), founder, 0.05), "{founder:?}: a x30 turf or tile");
         assert!(!feeds(c.as_mut(), founder, 0.0), "{founder:?}: nothing tasted");

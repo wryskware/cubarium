@@ -56,7 +56,9 @@ pub const SHREDDER_LANDSCAPE_HORIZON_TICKS: u64 = 24_000;
 pub fn lineage_horizon(founder: Founder) -> u64 {
     match founder {
         Founder::Blind => SHREDDER_LANDSCAPE_HORIZON_TICKS,
-        Founder::Browser | Founder::Lanternjaw => LANDSCAPE_HORIZON_TICKS,
+        Founder::Browser | Founder::Lanternjaw | Founder::Capgnawer | Founder::Loftstrider => {
+            LANDSCAPE_HORIZON_TICKS
+        }
     }
 }
 

@@ -173,7 +173,7 @@ pub fn arena_protocol(founder: Founder, stage: Stage, band: Band) -> String {
     };
     let base = format!("{base}+{P5_ARENA_REVISION}");
     match founder {
-        Founder::Blind | Founder::Lanternjaw => base,
+        Founder::Blind | Founder::Lanternjaw | Founder::Capgnawer | Founder::Loftstrider => base,
         Founder::Browser => format!("{base}+{BROWSER_CROWN_HEIGHT_REVISION}"),
     }
 }
@@ -218,8 +218,10 @@ pub const BLIND_CUE_REACH_M: f64 = 1.5;
 /// fan simply stops there — so the number is read from the manifest rather than copied.
 pub fn sensed_radius_m(founder: Founder) -> f64 {
     match founder {
-        Founder::Blind => BLIND_CUE_REACH_M,
-        Founder::Browser | Founder::Lanternjaw => founder.manifest().cone_range_m,
+        Founder::Blind | Founder::Capgnawer => BLIND_CUE_REACH_M,
+        Founder::Browser | Founder::Lanternjaw | Founder::Loftstrider => {
+            founder.manifest().cone_range_m
+        }
     }
 }
 
@@ -944,7 +946,7 @@ mod tests {
                         (_, PatchKind::Stripped) => 0.0,
                         (Founder::Browser, _) => BROWSER_FOLIAGE_PER_STAND,
                         (Founder::Blind, _) => 0.2,
-                        (Founder::Lanternjaw, _) => unreachable!("no lanternjaw arena"),
+                        (_, _) => unreachable!("no arena for this lineage"),
                     };
                     assert!(
                         (arena.patch_stock(site) - want).abs() < 1e-12,

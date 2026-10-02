@@ -1837,6 +1837,9 @@ pub fn start_probe(founder: String, horizons: String, workers: usize) -> Result<
         Founder::Blind => vec![Food::Litter, Food::CapTissue, Food::Carrion],
         Founder::Browser => vec![Food::Foliage],
         Founder::Lanternjaw => vec![Food::Carrion],
+        // R1 stub: the capgnawer's and the loftstrider's diets (brief R1).
+        Founder::Capgnawer => vec![Food::CapTissue, Food::Litter],
+        Founder::Loftstrider => vec![Food::Foliage],
     };
     println!(
         "probe,bystanders,horizon,arm,score,survived,starved,drowned,{},motor,maintenance,\

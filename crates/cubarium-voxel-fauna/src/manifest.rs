@@ -114,10 +114,24 @@ pub enum Founder {
     /// `lure`. An interim contract so a policy file could load; P2's contract v3 replaces
     /// it. No trained centre exists: its heuristic drives it.
     Lanternjaw,
+    /// The **capgnawer** (roster R1): the glowcap's grazer. The shredder's blind 23-input
+    /// layout with its `Chem` reading a fungal field (saprotroph cap stock) in place of the
+    /// detritus field. Diet `[cap_tissue, litter]`.
+    Capgnawer,
+    /// The **loftstrider** (roster R1): the tall browser, 2.2 × 2.2 × 3.4 m, feeding
+    /// 0.8–3.5 m up. The browser's 37-input layout with a cone that counts only foliage
+    /// inside its mouth band. Diet `[foliage]`, a sloppy feeder.
+    Loftstrider,
 }
 
 impl Founder {
-    pub const ALL: [Founder; 3] = [Founder::Blind, Founder::Browser, Founder::Lanternjaw];
+    pub const ALL: [Founder; 5] = [
+        Founder::Blind,
+        Founder::Browser,
+        Founder::Lanternjaw,
+        Founder::Capgnawer,
+        Founder::Loftstrider,
+    ];
     pub const COUNT: usize = Founder::ALL.len();
 
     /// Index into a per-founder array, in [`Founder::ALL`] order: stable, like the
@@ -127,6 +141,8 @@ impl Founder {
             Founder::Blind => 0,
             Founder::Browser => 1,
             Founder::Lanternjaw => 2,
+            Founder::Capgnawer => 3,
+            Founder::Loftstrider => 4,
         }
     }
 
@@ -136,6 +152,8 @@ impl Founder {
             Founder::Blind => "littershredder",
             Founder::Browser => "frondgrazer",
             Founder::Lanternjaw => "lanternjaw",
+            Founder::Capgnawer => "capgnawer",
+            Founder::Loftstrider => "loftstrider",
         }
     }
 
@@ -145,6 +163,8 @@ impl Founder {
             Founder::Blind => "blind",
             Founder::Browser => "browser",
             Founder::Lanternjaw => "hunter",
+            Founder::Capgnawer => "fungivore",
+            Founder::Loftstrider => "tall_browser",
         }
     }
 
@@ -154,6 +174,8 @@ impl Founder {
             Founder::Blind => Manifest::blind(),
             Founder::Browser => Manifest::browser(),
             Founder::Lanternjaw => Manifest::lanternjaw(),
+            Founder::Capgnawer => Manifest::capgnawer(),
+            Founder::Loftstrider => Manifest::loftstrider(),
         }
     }
 }
@@ -746,6 +768,27 @@ impl Manifest {
             mass_scale: a.mass,
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
+        }
+    }
+
+    /// The capgnawer (roster R1): the blind layout, its `Chem` reading the fungal field.
+    // R1 stub: the shredder's manifest under the capgnawer's name. The implementer gives
+    // it its own module list (`Chem(fungal)` in the shredder's `Chem(detritus)` slot) and
+    // its own anchors and references.
+    pub fn capgnawer() -> Manifest {
+        Manifest {
+            founder: Founder::Capgnawer,
+            ..Manifest::blind()
+        }
+    }
+
+    /// The loftstrider (roster R1): the browser's layout, its cone banded to its mouth.
+    // R1 stub: the browser's manifest under the loftstrider's name. The implementer gives
+    // it its own anchors and references (and the band-limited cone).
+    pub fn loftstrider() -> Manifest {
+        Manifest {
+            founder: Founder::Loftstrider,
+            ..Manifest::browser()
         }
     }
 

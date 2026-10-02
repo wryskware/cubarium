@@ -278,6 +278,13 @@ pub struct FounderPhysiology {
     /// mouth that reaches the ground); a tall browser that feeds well above it sets more.
     /// Ground pools (litter, carrion) are taken at the standing face whatever the floor.
     pub mouth_floor_fraction: f64,
+    /// **The sloppy feeder's spill** (roster R1): this fraction of every bite's withdrawn
+    /// tissue goes to the litter pool at its standing face instead of its mouth, a
+    /// mass-balance flow (the ledgers close). 0 for every lineage but the loftstrider
+    /// (0.25).
+    // R1 stub: the field and its registry row exist; the step does not read it yet, and
+    // the loftstrider's default is still 0.
+    pub bite_spill_fraction: f64,
     /// The contact receptors' height, as a fraction of body height over the standing
     /// surface (0.5). A placeholder.
     pub contact_height_fraction: f64,
@@ -415,7 +422,9 @@ impl Hunter {
     /// band 0.6 H, windup 0.15 s, lunge 0.25 s, recovery 3 s, a strike at 100 s of awake
     /// upkeep, the lure at its awake upkeep, and the satiated rest at 0.9 / 0.25 / 0.5.
     pub const LANTERNJAW: Hunter = Hunter {
-        prey: [true, true, false],
+        // R1: the capgnawer's column (index 3) is owed; the loftstrider (4) is on no
+        // list until the chorister.
+        prey: [true, true, false, false, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
@@ -533,6 +542,7 @@ impl FounderPhysiology {
                 eye_height_fraction: EYE_HEIGHT_FRACTION,
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
                 mouth_floor_fraction: 0.0,
+                bite_spill_fraction: 0.0,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 // Litter keeps the yield it has; cap tissue takes the foliage yield;
@@ -586,6 +596,7 @@ impl FounderPhysiology {
                 eye_height_fraction: EYE_HEIGHT_FRACTION,
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
                 mouth_floor_fraction: 0.0,
+                bite_spill_fraction: 0.0,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 // The browser eats foliage and nothing else; the other three are the
@@ -659,6 +670,7 @@ impl FounderPhysiology {
                 eye_height_fraction: EYE_HEIGHT_FRACTION,
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
                 mouth_floor_fraction: 0.0,
+                bite_spill_fraction: 0.0,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 // Carrion is the one food its mouth takes; every class carries the same
@@ -678,6 +690,23 @@ impl FounderPhysiology {
                 founding: Founding::Clutches,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 3,
+            },
+            // R1 stub: the shredder's table under the capgnawer's marker, founding none.
+            // The implementer writes its own (brief R1: 0.25 x 0.21 x 0.19 m, diet
+            // [cap_tissue, litter], cap yield the shredder's, litter yield half of it, the
+            // shredder's reproduction mode with rates scaled by body volume, founding
+            // bodies at food).
+            Founder::Capgnawer => FounderPhysiology {
+                founding_count: 0,
+                ..FounderPhysiology::placeholder(Founder::Blind)
+            },
+            // R1 stub: the browser's table under the loftstrider's marker, founding none.
+            // The implementer writes its own (brief R1: 2.2 x 2.2 x 3.4 m, eye 0.44, mouth
+            // band 0.235..1.03 of height, step up 0.5 m, wades where the grazer drowns,
+            // one young per birth, rates scaled by body volume, founding bodies at food).
+            Founder::Loftstrider => FounderPhysiology {
+                founding_count: 0,
+                ..FounderPhysiology::placeholder(Founder::Browser)
             },
         }
     }
@@ -1968,9 +1997,11 @@ pub(crate) fn taste_reading_at(
     // reads `foliage`, and a mouth in air is no contact and no taste.
     let offer = mouth_meal(fv, view, &cols, standing_y, body, diet).map(|(_, _, offer)| offer);
     let (class, ground_valid) = match founder {
-        Founder::Blind => ("litter", true),
+        // R1 stub: the capgnawer tastes as the blind layout, the loftstrider as the
+        // browser; the implementer confirms or gives each its own class.
+        Founder::Blind | Founder::Capgnawer => ("litter", true),
         Founder::Lanternjaw => ("carrion", true),
-        Founder::Browser => ("foliage", false),
+        Founder::Browser | Founder::Loftstrider => ("foliage", false),
     };
     match offer {
         Some(offer) => TasteReading {

@@ -3198,6 +3198,9 @@ fn spawn_stdin_reader() -> Receiver<String> {
 }
 
 #[cfg(test)]
+mod roster_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

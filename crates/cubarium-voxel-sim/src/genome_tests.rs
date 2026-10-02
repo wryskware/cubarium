@@ -147,7 +147,9 @@ range = [0.25, 8.0]
 "#,
     );
     let names = each.names();
-    for f in Founder::ALL {
+    // Every lineage the shipped table founds (a lineage at count 0 has no gene).
+    let founded = Params::defaults().fauna.founder_counts();
+    for f in Founder::ALL.into_iter().filter(|f| founded[f.index()] > 0) {
         assert!(
             names.contains(&format!("lifespan@{}", f.name())),
             "{names:?}"
@@ -402,7 +404,8 @@ range = [0.5, 2.0]
 "#;
     let file = || cubarium_voxel::genome::SearchFile::parse(text).expect("a search file");
     let shipped = Params::defaults().expand_genome(file()).expect("expands");
-    assert_eq!(shipped.names().len(), Founder::COUNT, "{:?}", shipped.names());
+    let founded = Params::defaults().fauna.founder_counts().iter().filter(|&&n| n > 0).count();
+    assert_eq!(shipped.names().len(), founded, "{:?}", shipped.names());
     let mut p = Params::defaults();
     p.fauna.founders[Founder::Lanternjaw.index()].founding_count = 0;
     let names = p.expand_genome(file()).expect("expands").names();

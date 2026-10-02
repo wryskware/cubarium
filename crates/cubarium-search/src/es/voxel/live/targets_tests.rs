@@ -122,7 +122,7 @@ fn centre(founder: Founder) -> Vec<f64> {
     match founder {
         Founder::Blind => initial_center_shape::<23, 3>(5),
         Founder::Browser => initial_center_shape::<37, 3>(5),
-        Founder::Lanternjaw => unreachable!("no lanternjaw centre exists"),
+        _ => unreachable!("no centre exists for this lineage"),
     }
 }
 
@@ -187,13 +187,13 @@ fn a_persist_only_lineage_of_eggs_takes_no_share_or_breeding_penalty() {
     let held = BandSpec::default().with_targets(&rest).expect("valid");
     let lj = Founder::Lanternjaw.index();
     assert!(held.persist_only[lj]);
-    let founded = [8, 8, 9];
+    let founded = [8, 8, 9, 0, 0];
     // Shredders and browsers bred late; the lanternjaw, all eggs, did not.
     let late = [2, 3, 0];
     let b = Band::for_founding(16, true, &held);
     let eggs_only = trace(30, 0);
     assert_eq!(penalty(&eggs_only, &b).share, 0.0);
-    let lost = [false; 3];
+    let lost = [false; Founder::COUNT];
     let ready = [0.0; 3];
     assert_eq!(
         breeding_shortfall(&founded, &late, &lost, &ready, &held, true),
@@ -249,20 +249,20 @@ fn the_lively_weight_scales_only_the_lively_term() {
 #[test]
 fn an_egg_founded_lineage_is_scored() {
     use super::search::{founded_lineages, lost_lineages};
-    let founded = founded_lineages(&[8, 8, 0], &[0, 0, 9]);
-    assert_eq!(founded, vec![8, 8, 9]);
+    let founded = founded_lineages(&[8, 8, 0, 0, 0], &[0, 0, 9, 0, 0]);
+    assert_eq!(founded, vec![8, 8, 9, 0, 0]);
     let lj = Founder::Lanternjaw.index();
     let spec = BandSpec {
-        persist_only: [false; 3],
+        persist_only: [false; Founder::COUNT],
         ..BandSpec::default()
     };
     let b = Band::for_founding(16, founded[lj] > 0, &spec);
     assert!(b.lanternjaw_share.is_some());
     assert!(penalty(&trace(30, 0), &b).share > 0.0, "the share target applies");
-    assert_eq!(lost_lineages(&founded, &[3, 3, 0], &[0, 0, 4]), 0, "eggs keep it");
-    assert_eq!(lost_lineages(&founded, &[3, 3, 0], &[0, 0, 0]), 1, "no bodies, no eggs");
+    assert_eq!(lost_lineages(&founded, &[3, 3, 0, 0, 0], &[0, 0, 4, 0, 0]), 0, "eggs keep it");
+    assert_eq!(lost_lineages(&founded, &[3, 3, 0, 0, 0], &[0, 0, 0, 0, 0]), 1, "no bodies, no eggs");
     // Breeding: held to it by default, exempt with breed_exempt; persistence either way.
-    let lost = [false; 3];
+    let lost = [false; Founder::COUNT];
     let ready = [0.0; 3];
     let late = [1, 1, 0];
     assert_eq!(breeding_shortfall(&founded, &late, &lost, &ready, &spec, true), 1.0);

@@ -191,6 +191,8 @@ fn founder_rows() -> Vec<Row> {
             .search(0.3, 2.5).digest(),
         r("mouth_floor_fraction", "x body height", nonneg, "the mouth band's floor (ground pools are taken whatever it is)")
             .prov("decision"),
+        r("bite_spill_fraction", "fraction of a bite", fraction, "share of each bite's withdrawn tissue spilt as litter at the standing face")
+            .prov("decision"),
         r("founding_count", "bodies (clutches for an egg bank)", nonneg, "how many a fresh world founds (a new lineage's default 0)")
             .prov("decision"),
         r("contact_height_fraction", "x body height", nonneg, "the contact receptors' height").digest(),

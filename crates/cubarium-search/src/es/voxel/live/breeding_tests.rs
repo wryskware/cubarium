@@ -12,8 +12,8 @@ use cubarium_voxel_flora::{Flora, FloraConfig};
 
 use super::search::{BandSpec, body_readiness, breeding_shortfall};
 
-const FOUNDED: [usize; 3] = [8, 8, 9];
-const NOT_LOST: [bool; 3] = [false; 3];
+const FOUNDED: [usize; Founder::COUNT] = [8, 8, 9, 0, 0];
+const NOT_LOST: [bool; Founder::COUNT] = [false; Founder::COUNT];
 
 fn shortfall(late: [u64; 3], readiness: [f64; 3], spec: &BandSpec) -> f64 {
     breeding_shortfall(&FOUNDED, &late, &NOT_LOST, &readiness, spec, true)
@@ -24,7 +24,7 @@ fn shortfall(late: [u64; 3], readiness: [f64; 3], spec: &BandSpec) -> f64 {
 #[test]
 fn the_term_is_graded_by_readiness() {
     let spec = BandSpec {
-        persist_only: [false; 3],
+        persist_only: [false; Founder::COUNT],
         ..BandSpec::default()
     };
     assert_eq!(spec.ready_target, 0.5, "the default target");
@@ -63,7 +63,7 @@ fn the_term_is_graded_by_readiness() {
 #[test]
 fn a_persist_only_lineage_is_unaffected() {
     let mut spec = BandSpec::default();
-    spec.persist_only = [false; 3];
+    spec.persist_only = [false; Founder::COUNT];
     spec.persist_only[Founder::Lanternjaw.index()] = true;
     assert_eq!(shortfall([1, 1, 0], [0.0; 3], &spec), 0.0);
     assert_eq!(shortfall([1, 1, 0], [0.0, 0.0, 0.3], &spec), 0.0);

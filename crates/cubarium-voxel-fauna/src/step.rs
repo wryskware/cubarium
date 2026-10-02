@@ -659,7 +659,11 @@ fn controllers(
     // The v2 cone (the browsers') reads one cell per body, exactly as before predation.
     let observers: Vec<f64> = due
         .iter()
-        .filter(|&&i| fauna.animals[i].founder == Some(Founder::Browser))
+        // R1 stub: the loftstrider reads the browser's cone until its own band-limited
+        // one lands.
+        .filter(|&&i| {
+            matches!(fauna.animals[i].founder, Some(Founder::Browser | Founder::Loftstrider))
+        })
         .map(|&i| fauna.animals[i].pose.x)
         .collect();
     let mut held = senses.as_deref_mut().and_then(|s| s.take_cone());
@@ -719,7 +723,7 @@ fn controllers(
         if fauna.animals[i].age_ticks == manifest.cadence_ticks() {
             fauna.animals[i].founder_state.feedback = IntervalFeedback::default();
         }
-        let occupancy = if founder == Founder::Browser {
+        let occupancy = if matches!(founder, Founder::Browser | Founder::Loftstrider) {
             cone_occupancy
         } else {
             predation_occupancy.as_ref()

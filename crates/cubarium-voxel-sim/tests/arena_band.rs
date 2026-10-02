@@ -33,7 +33,7 @@ fn in_band_stock(
                 ..patch
             })
             .map_or(0.0, |g| g.litter + g.carrion),
-        Founder::Browser | Founder::Lanternjaw => 0.0,
+        _ => 0.0,
     };
     let stands: f64 = fv
         .stand_at(patch)
@@ -41,7 +41,7 @@ fn in_band_stock(
             let trophic = fv.config.species(s.species).trophic;
             match founder {
                 Founder::Blind => trophic == Trophic::Saprotroph,
-                Founder::Browser | Founder::Lanternjaw => trophic != Trophic::Saprotroph,
+                _ => trophic != Trophic::Saprotroph,
             }
         })
         .map_or(0.0, |s| {

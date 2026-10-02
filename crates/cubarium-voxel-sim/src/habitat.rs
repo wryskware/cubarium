@@ -1623,7 +1623,7 @@ mod tests {
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
             "one patch is not a route to a second one"
         );
-        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0]);
+        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0, 0, 0]);
         assert_eq!(out.founders[Founder::Browser.index()], 0);
         assert_eq!(
             out.shortfall[Founder::Browser.index()],
@@ -1874,7 +1874,7 @@ mod tests {
             for _ in 0..n {
                 introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
             }
-            accept(&world, &flora, &fauna, [0, n, 0])
+            accept(&world, &flora, &fauna, [0, n, 0, 0, 0])
         };
         let at = with(fits);
         let v = &at.lineages[Founder::Browser.index()];
@@ -1903,12 +1903,12 @@ mod tests {
         ));
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         introduce(&mut fauna, &world, Founder::Blind, at_site);
-        let got = accept(&world, &bare, &fauna, [1, 0, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0]);
         let v = &got.lineages[Founder::Blind.index()];
         assert!(v.components[0].food.stock >= founding.starter_litter_organic - 1e-12, "{got:?}");
         assert!(!v.accepted && !got.accepted, "litter with no producer: {got:?}");
         plant(&mut bare, &world, 12, 2, Species::Springturf, 0.8);
-        let got = accept(&world, &bare, &fauna, [1, 0, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0]);
         assert!(
             got.lineages[Founder::Blind.index()].accepted && got.accepted,
             "a litter-shedding stand rooted in the component: {got:?}"
@@ -2100,7 +2100,7 @@ mod tests {
         }
         let mut flora = Flora::new(flora_cfg.clone());
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
-        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0]);
+        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0, 0, 0]);
         assert_eq!(seeded.pre_roll, pre.report);
         let drowned_on = |species: Species, site: Site| {
             let i = index_of(&pre.sites, site).expect("a support face");
@@ -2119,7 +2119,7 @@ mod tests {
         let calm_pre = pre_roll(&mut calm, false);
         let mut calm_flora = Flora::new(flora_cfg.clone());
         let mut calm_fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
-        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0]);
+        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0, 0, 0]);
         assert!(
             calm_flora
                 .view()
@@ -2213,6 +2213,76 @@ mod tests {
         );
         let browsers = got.founders[Founder::Browser.index()];
         assert!((1..=3).contains(&browsers), "the preset's three, at most: {got:?}");
+    }
+
+    /// Roster R1: **a preset that founds six capgnawers founds up to six, near glowcaps;
+    /// the code default founds none.** The capgnawer's founding site is at its food, and
+    /// its food in a stand is a glowcap's cap, so every placed body stands within two cells
+    /// of a stocked glowcap. The other lineages are switched off so the count is its own.
+    #[test]
+    fn a_preset_capgnawer_count_founds_up_to_six_near_glowcaps_and_the_default_none() {
+        let code = cubarium_voxel_fauna::FaunaConfig::default().founder_counts();
+        assert_eq!(code[Founder::Capgnawer.index()], 0, "the code default founds none");
+        assert_eq!(code[Founder::Loftstrider.index()], 0, "the code default founds none");
+
+        let file: toml::Table = r#"
+            [fauna.founders.littershredder]
+            founding_count = 0
+            [fauna.founders.frondgrazer]
+            founding_count = 0
+            [fauna.founders.lanternjaw]
+            founding_count = 0
+            [fauna.founders.capgnawer]
+            founding_count = 6
+        "#
+        .parse()
+        .unwrap();
+        let params = crate::params::Params::resolve(&crate::params::Layers {
+            file: Some(file),
+            ..Default::default()
+        })
+        .unwrap();
+        let counts = params.fauna.founder_counts();
+        assert_eq!(counts[Founder::Capgnawer.index()], 6, "the preset's count is honoured");
+        assert_eq!(counts[Founder::Loftstrider.index()], 0, "an unnamed lineage keeps its 0");
+        let mut world = crate::scene::authored(config());
+        let mut flora = Flora::new(Default::default());
+        let mut fauna = Fauna::new(params.fauna.clone());
+        let got = seed(&mut world, &mut flora, &mut fauna);
+        let placed = got.founders[Founder::Capgnawer.index()];
+        assert!((1..=6).contains(&placed), "up to the preset's six: {got:?}");
+        assert_eq!(
+            got.founders.iter().sum::<usize>(),
+            placed,
+            "nothing else was founded: {got:?}"
+        );
+
+        let fv = flora.view();
+        let width = i64::from(world.config().width);
+        let caps: Vec<Site> = fv
+            .stands
+            .iter()
+            .filter(|s| s.species == Species::Glowcap && s.foliage > 0.0)
+            .map(|s| s.site)
+            .collect();
+        assert!(!caps.is_empty(), "the authored scene grows glowcaps");
+        let gnawers: Vec<_> = fauna
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(Founder::Capgnawer))
+            .map(|a| a.site)
+            .collect();
+        assert_eq!(gnawers.len(), placed);
+        for g in gnawers {
+            let near = caps.iter().any(|c| {
+                let dx = (i64::from(g.x) - i64::from(c.x)).rem_euclid(width);
+                let dx = dx.min(width - dx);
+                let dz = (i64::from(g.z) - i64::from(c.z)).abs();
+                dx <= 2 && dz <= 2 && g.y.abs_diff(c.y) <= 2
+            });
+            assert!(near, "a capgnawer at {g:?} stands near a glowcap: {caps:?}");
+        }
     }
 
     /// A layer read back from its bytes has bodies but no controllers (they are not
@@ -2549,7 +2619,7 @@ mod tests {
 
         let mut fauna = Fauna::new(config);
         introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
-        let at = accept(&world, &flora, &fauna, [0, 1, 0]);
+        let at = accept(&world, &flora, &fauna, [0, 1, 0, 0, 0]);
         assert!(
             at.lineages[Founder::Browser.index()].accepted,
             "one heavy founder by a bloomcrown is founded as a light one would be: {at:?}"
