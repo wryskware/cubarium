@@ -1897,4 +1897,42 @@ mod tests {
         rig.tick(&b, &flora, &fauna, "world b at a's terrain version");
         rig.tick(&b, &flora, &fauna, "world b, the other buffer");
     }
+
+    /// `vine_tiles` is off by default. With `textures` off and `vine_tiles` on, only the
+    /// vine's tiles load: the vine draws as the tile layer (the packer leaves it out of the
+    /// stands' cells) while no face slot is filled, so terrain draws as the plain path.
+    #[test]
+    fn vine_tiles_load_the_vine_alone() {
+        use crate::voxel::textures::{Image, write_png};
+        assert!(!VoxelConfig::default().vine_tiles);
+        let root = std::env::temp_dir().join(format!("cubarium-vine-only-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let solid = |c: [u8; 4]| Image {
+            w: 48,
+            h: 48,
+            rgba: c.repeat(48 * 48),
+        };
+        write_png(&root.join("masters/rock-side-0.png"), &solid([100, 100, 100, 255])).unwrap();
+        write_png(&root.join("masters/vine/vine-full-5.png"), &solid([0, 200, 0, 255])).unwrap();
+        let c = Config::default();
+        let cfg = VoxelConfig {
+            world: c.clone(),
+            textures_dir: root.clone(),
+            vine_tiles: true,
+            ..VoxelConfig::default()
+        };
+        let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &c).unwrap();
+        let params = params_of(&cfg, proj, true);
+        let atlas = load_textures(&cfg, None, &params);
+        assert!(atlas.vine_on, "the vine is the tile layer");
+        assert_eq!(atlas.mask(), 0, "no face texture: terrain draws plain");
+        let packer = Packer::new(&params, None, atlas.vine_on, SpeciesFaces::of(&atlas), Emission::OFF);
+        assert!(packer.vine_tiles);
+        // Both off: nothing loads; textures on: the faces load as before.
+        let plain = load_textures(&VoxelConfig { vine_tiles: false, ..cfg.clone() }, None, &params);
+        assert!(!plain.vine_on && plain.mask() == 0);
+        let full = load_textures(&VoxelConfig { textures: true, ..cfg.clone() }, None, &params);
+        assert!(full.vine_on && full.mask() != 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
