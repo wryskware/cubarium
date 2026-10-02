@@ -80,7 +80,7 @@ fn disc_columns(view: &VoxelView<'_>, x: f64, z: f64, r: f64) -> Option<Vec<(i64
 }
 
 /// The row a height falls in, rounding a height on a cell boundary up into the cell above.
-fn row_at(y: f64, v: f64) -> i64 {
+pub(crate) fn row_at(y: f64, v: f64) -> i64 {
     ((y + EPS) / v).floor() as i64
 }
 
@@ -164,7 +164,7 @@ pub(crate) fn blocked(view: &VoxelView<'_>, shape: Shape, x: f64, z: f64, base: 
 /// The highest floor under the disc: solid tops and standing water, over every column the
 /// disc covers. `(height, the face, the water's depth on it)`; `None` over a bottomless
 /// disc.
-fn floor_under(view: &VoxelView<'_>, shape: Shape, x: f64, z: f64, base: f64) -> Option<(f64, Site, f64)> {
+pub(crate) fn floor_under(view: &VoxelView<'_>, shape: Shape, x: f64, z: f64, base: f64) -> Option<(f64, Site, f64)> {
     let cols = disc_columns(view, x, z, shape.r)?;
     let mut best: Option<(f64, Site, f64)> = None;
     for (cx, cz) in cols {
@@ -290,7 +290,7 @@ pub(crate) fn inside_foliage(view: &VoxelView<'_>, fv: &FloraView<'_>, shape: Sh
         .any(|(_, l)| l.cell == row)
 }
 
-fn foliage_layer_index(layer: &StandLayer) -> u8 {
+pub(crate) fn foliage_layer_index(layer: &StandLayer) -> u8 {
     layer.foliage_index.unwrap_or(0) as u8
 }
 
@@ -558,7 +558,7 @@ pub(crate) fn move_through_air(
 
 /// A latticevine-covered wall face the disc is pressed against (within [`CLING_M`]) at
 /// the row of the body's middle.
-fn vine_contact(view: &VoxelView<'_>, fv: &FloraView<'_>, shape: Shape, x: f64, z: f64, base: f64) -> Option<VineFace> {
+pub(crate) fn vine_contact(view: &VoxelView<'_>, fv: &FloraView<'_>, shape: Shape, x: f64, z: f64, base: f64) -> Option<VineFace> {
     if fv.cover.face_count() == 0 {
         return None;
     }
@@ -770,6 +770,152 @@ fn bloom_at_hit(
         let dz = i64::from(z) - i64::from(s.site.z);
         ((dx * dx + dz * dz) as f64) <= layer.radius_v * layer.radius_v
     })
+}
+
+/// The face of terrain cell `(x, y, z)` a ray entered it through: the cell it came from
+/// just before `t`, one step away along an axis.
+fn entered_face(
+    view: &VoxelView<'_>,
+    (x, y, z): (i64, i64, u32),
+    origin: (f64, f64, f64),
+    dir: (f64, f64, f64),
+    t: f64,
+) -> Option<VineFace> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let back = (t - 1e-6).max(0.0);
+    let (px, py, pz) = (
+        ((origin.0 + dir.0 * back) / v).floor() as i64,
+        ((origin.1 + dir.1 * back) / v).floor() as i64,
+        ((origin.2 + dir.2 * back) / v).floor() as i64,
+    );
+    let w = i64::from(c.width);
+    let mut ddx = (px - x).rem_euclid(w);
+    if ddx > w / 2 {
+        ddx -= w;
+    }
+    let face_dir = match (ddx, py - y, pz - i64::from(z)) {
+        (-1, 0, 0) => FaceDir::NegX,
+        (1, 0, 0) => FaceDir::PosX,
+        (0, 0, -1) => FaceDir::NegZ,
+        (0, 0, 1) => FaceDir::PosZ,
+        (0, -1, 0) => FaceDir::Down,
+        _ => return None,
+    };
+    Some(VineFace::new(x as u32, y as u32, z, face_dir))
+}
+
+/// Whether a cone ray's first hit at `cell` is **fruit** (F3, the seedporter's fruit cone):
+/// a foliage cell of a stand hanging fruit, or (for a terrain hit) a latticevine face in
+/// fruit, holding beads, that the ray entered.
+pub(crate) fn fruit_at_hit(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    cell: usize,
+    terrain: bool,
+    origin: (f64, f64, f64),
+    dir: (f64, f64, f64),
+    t: f64,
+) -> bool {
+    let c = view.config;
+    let (x, y, z) = c.coords(cell);
+    let (x, y, z) = (i64::from(x), i64::from(y), z);
+    if terrain {
+        if fv.cover.face_count() == 0 {
+            return false;
+        }
+        return entered_face(view, (x, y, z), origin, dir, t).is_some_and(|face| {
+            fv.cover
+                .face(face)
+                .is_some_and(|cf| cf.spur == SpurPhase::Fruit && cf.fruit > 0.0)
+        });
+    }
+    crown_layers_at(view, fv, x, z)
+        .iter()
+        .any(|(site, l)| l.cell == y && fv.stand_at(*site).is_some_and(|s| s.fruit > 0.0))
+}
+
+/// **The nearest fruit within `reach` of `p`** (F3): a foliage cell of a stand hanging
+/// fruit (any of its foliage layers holding foliage), or a latticevine face in fruit holding
+/// beads and facing `p`. `(the source, its fruit stock)`; a stand wins a tie.
+pub(crate) fn fruit_in_reach(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f64, f64), reach: f64) -> Option<(Bloom, f64)> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let ring = f64::from(c.width) * v;
+    let mut best: Option<(f64, Bloom, f64)> = None;
+    for stand in fv.stands.iter().filter(|s| s.fruit > 0.0) {
+        let sx = (f64::from(stand.site.x) + 0.5) * v;
+        let sz = (f64::from(stand.site.z) + 0.5) * v;
+        let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, sx, sz, ring);
+        if (dx * dx + dz * dz).sqrt() > reach + 3.0 * v + 1.0 {
+            continue;
+        }
+        let (ox, oz) = (p.0 + dx - 0.5 * v, p.2 + dz - 0.5 * v);
+        for layer in fv.profile_layers(stand) {
+            if !layer.kind.bears_foliage() || !(layer.stock > 0.0) {
+                continue;
+            }
+            let span = layer.radius_v.floor() as i64;
+            let r2 = layer.radius_v * layer.radius_v;
+            let y = (layer.cell as f64 * v, (layer.cell + 1) as f64 * v);
+            for ddz in -span..=span {
+                for ddx in -span..=span {
+                    if ((ddx * ddx + ddz * ddz) as f64) > r2 {
+                        continue;
+                    }
+                    let gz = i64::from(stand.site.z) + ddz;
+                    if gz < 0 || gz >= i64::from(c.depth) {
+                        continue;
+                    }
+                    let bx = ox + ddx as f64 * v;
+                    let bz = oz + ddz as f64 * v;
+                    let d = box_distance(p, (bx, bx + v), y, (bz, bz + v));
+                    if d <= reach && best.as_ref().is_none_or(|b| d < b.0) {
+                        best = Some((d, Bloom::Stand(stand.site), stand.fruit));
+                    }
+                }
+            }
+        }
+    }
+    if fv.cover.face_count() > 0 {
+        let (cx, cy, cz) = ((p.0 / v).floor() as i64, (p.1 / v).floor() as i64, (p.2 / v).floor() as i64);
+        for sy in cy - 1..=cy + 1 {
+            if sy < 0 || sy >= i64::from(c.height) {
+                continue;
+            }
+            for sz in cz - 1..=cz + 1 {
+                if sz < 0 || sz >= i64::from(c.depth) {
+                    continue;
+                }
+                for sx in cx - 1..=cx + 1 {
+                    let wx = wrap(sx, c.width);
+                    if !view.is_solid(wx, sy as u32, sz as u32) {
+                        continue;
+                    }
+                    let (x0, y0, z0) = (sx as f64 * v, sy as f64 * v, sz as f64 * v);
+                    for dir in FaceDir::ALL {
+                        let (front, d) = match dir {
+                            FaceDir::NegX => (p.0 < x0, box_distance(p, (x0, x0), (y0, y0 + v), (z0, z0 + v))),
+                            FaceDir::PosX => (p.0 > x0 + v, box_distance(p, (x0 + v, x0 + v), (y0, y0 + v), (z0, z0 + v))),
+                            FaceDir::NegZ => (p.2 < z0, box_distance(p, (x0, x0 + v), (y0, y0 + v), (z0, z0))),
+                            FaceDir::PosZ => (p.2 > z0 + v, box_distance(p, (x0, x0 + v), (y0, y0 + v), (z0 + v, z0 + v))),
+                            FaceDir::Down => (p.1 < y0, box_distance(p, (x0, x0 + v), (y0, y0), (z0, z0 + v))),
+                        };
+                        if !front || d > reach || best.as_ref().is_some_and(|b| d >= b.0) {
+                            continue;
+                        }
+                        let face = VineFace::new(wx as u32, sy as u32, sz as u32, dir);
+                        if let Some(cf) = fv.cover.face(face) {
+                            if cf.spur == SpurPhase::Fruit && cf.fruit > 0.0 {
+                                best = Some((d, Bloom::Vine(face), cf.fruit));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    best.map(|(_, b, n)| (b, n))
 }
 
 /// A flyer's fan ray, first hit named, [`ConeHit::Bloom`] among them.

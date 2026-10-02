@@ -115,6 +115,16 @@ const FOLIAGE_YIELD: f64 = 0.5;
 /// `n_tissue` (0.02) the mineral binds at the same 0.5. Kept within 2/3 so the search's
 /// ×1.5 yield gene stays a fraction.
 const NECTAR_YIELD: f64 = 0.5;
+
+/// The yield of **fruit** (F3, the seedporter): soft, energy-rich flesh digests better
+/// than leaf, so a little over the foliage yield; kept under 2/3 so cubarium-search's ×1.5
+/// yield gene stays a fraction. A placeholder.
+const FRUIT_YIELD: f64 = 0.6;
+
+/// The seedporter's body volume over the frondgrazer's (F3): 0.5 × 0.25 × 0.2 m over
+/// 0.75 × 0.375 × 0.375 m, r ≈ 0.237. A derivation, not a knob, as
+/// [`LOFTSTRIDER_VOLUME_RATIO`] is.
+pub const SEEDPORTER_VOLUME_RATIO: f64 = (0.5 * 0.25 * 0.2) / (0.75 * 0.375 * 0.375);
 /// The bellwing's mass against the littershredder's (F1): `body_max` 0.001 (x1, the
 /// note's number) over the shredder's 0.0125.
 pub const BELLWING_MASS_RATIO: f64 = 0.001 / 0.0125;
@@ -416,13 +426,11 @@ pub struct FounderPhysiology {
     /// down from height; the lineage has the `Climb`, `Glide` and `Perched` modes. Its
     /// climb pace and cost are [`FounderPhysiology::climb_speed_fraction`] and
     /// [`FounderPhysiology::wall_climb_cost_factor`]. `None` for every other lineage.
-    // F3 stub: declared, `None` everywhere, read by nothing.
     #[serde(default)]
     pub glider: Option<Glider>,
     /// `Some` for a lineage that **carries seeds in its gut** (F3, the seedporter): a fruit
     /// meal records the source species' seeds, voided at the body's face after the
     /// transit time. `None` for every other lineage.
-    // F3 stub: declared, `None` everywhere, read by nothing.
     #[serde(default)]
     pub gut_seeds: Option<GutSeeds>,
 }
@@ -443,6 +451,39 @@ pub struct Glider {
     /// A glide starts only from at least this height over the landing surface, metres.
     /// 1.0.
     pub glide_min_height_m: f64,
+    /// **The roost reflex's reach** (F3): at its rest hour, or in a downpour, a grounded
+    /// glider driven by its own heuristic walks to the nearest stand it can climb within
+    /// this horizontal distance, metres, climbs it and perches in the crown (under it in
+    /// a downpour). Twice the browser cone's 2 m range: 4.0.
+    #[serde(default = "roost_search_m")]
+    pub roost_search_m: f64,
+}
+
+fn roost_search_m() -> f64 {
+    4.0
+}
+
+impl Glider {
+    /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
+    /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 3 BL/s for 1.2 × basal.
+    pub const SEEDPORTER: Glider = Glider {
+        climb_min_stand_m: 1.0,
+        glide_ratio: 2.5,
+        glide_body_lengths_per_s: 3.0,
+        glide_cost_factor: 1.2,
+        glide_min_height_m: 1.0,
+        roost_search_m: 4.0,
+    };
+}
+
+impl GutSeeds {
+    /// The seedporter's gut (F3; placeholders): a tenth of a fruit's organic matter is
+    /// seed, voided a quarter hour after the meal (small frugivores hold a meal 10–60
+    /// min).
+    pub const SEEDPORTER: GutSeeds = GutSeeds {
+        seeds_per_fruit_organic: 0.1,
+        gut_transit_s: 900.0,
+    };
 }
 
 /// A frugivore's gut seeds ([`FounderPhysiology::gut_seeds`], F3).
@@ -594,8 +635,8 @@ impl Hunter {
         // loftstrider (4) is on no list until the chorister.
         // The ripple-snail (5, roster R2b) is on no hunter's list.
         // The bellwing (6, F1) is on no hunter's list.
-        // F3 stub: the seedporter (7) is not on the list yet; F3 puts a grounded one on it.
-        prey: [true, true, false, true, false, false, false, false],
+        // The seedporter (7, F3) is on it, but only while grounded ([`crate::is_prey_of`]).
+        prey: [true, true, false, true, false, false, false, true],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
@@ -1052,14 +1093,52 @@ impl FounderPhysiology {
                     ..shredder
                 }
             }
-            // F3 stub: the browser's table at a founding count of 0, walking. The
-            // implementer builds the seedporter here (Brief F3): the browser's table scaled
-            // by body volume (0.5 × 0.25 × 0.2 m), diet [fruit], the glider and gut-seed
-            // tables, Diurnal, founding at food.
-            Founder::Seedporter => FounderPhysiology {
-                founding_count: 0,
-                ..FounderPhysiology::placeholder(Founder::Browser)
-            },
+            // The seedporter (F3, Brief F3; predation-and-flight §3.5, §3.9): the frondgrazer's
+            // table by **body volume**, as R1 built the loftstrider: 0.5 × 0.25 × 0.2 m over
+            // the grazer's 0.75 × 0.375 × 0.375 m, r ≈ 0.237 ([`SEEDPORTER_VOLUME_RATIO`]),
+            // so `body_max` 0.05 × r ≈ 0.012 (§3.9). Upkeep and the motor are per unit of
+            // body, so its specific rates are the grazer's. It walks at 1 BL/s, climbs stems
+            // and vine faces at half that for the shredder's climbing cost, glides
+            // ([`Glider::SEEDPORTER`]) and carries seeds ([`GutSeeds::SEEDPORTER`]); diet
+            // [fruit], diurnal, founded at its food.
+            Founder::Seedporter => {
+                let grazer = FounderPhysiology::placeholder(Founder::Browser);
+                let shredder = FounderPhysiology::placeholder(Founder::Blind);
+                let mut core = grazer.core;
+                core.scale_mass(SEEDPORTER_VOLUME_RATIO);
+                FounderPhysiology {
+                    core,
+                    adult_length_m: 0.5,
+                    adult_width_m: 0.25,
+                    adult_height_m: 0.2,
+                    cruise_body_lengths_per_s: 1.0,
+                    // Half its length up or down in a stride; it does not climb terrain
+                    // walls (stems and vine faces are its climbing, [`Glider`]).
+                    step_up_m: 0.25,
+                    step_down_m: 0.25,
+                    climbs_walls: false,
+                    wall_climb_cost_factor: shredder.wall_climb_cost_factor,
+                    climb_speed_fraction: 0.5,
+                    // Fruit at [`FRUIT_YIELD`]; every other class carries the foliage
+                    // yield so none is a silent zero.
+                    yield_by_food: {
+                        let mut y = [FOLIAGE_YIELD; crate::Food::COUNT];
+                        y[crate::Food::Fruit.index()] = FRUIT_YIELD;
+                        y
+                    },
+                    active: crate::Activity::Diurnal,
+                    diet: crate::Diet::only(crate::Food::Fruit),
+                    founding: Founding::Bodies,
+                    founding_site: FoundingSite::AtFood,
+                    founding_count: 0,
+                    // Taste reads fruit against a lanternberry's full crop (its
+                    // `fruit_cap`, 0.02): a full crop tastes 1 before saturation.
+                    taste_reference: Some(0.02),
+                    glider: Some(Glider::SEEDPORTER),
+                    gut_seeds: Some(GutSeeds::SEEDPORTER),
+                    ..grazer
+                }
+            }
             Founder::RippleSnail => {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let grazer = FounderPhysiology::placeholder(Founder::Browser);
@@ -2605,6 +2684,30 @@ pub(crate) fn observation(
         phys.diet,
         phys.taste_reference_stock(fauna.config.cue.emit_reference),
     );
+    // A fruit taste (F3, the seedporter): the fruit in the mouth's reach — the stand it
+    // climbs or perches on, else the nearest fruiting crown cell or vine face in fruit —
+    // against the lineage's reference; nothing in reach is a valid zero.
+    let taste = if manifest.taste_cue == "fruit" {
+        let reference = phys.taste_reference_stock(fauna.config.cue.emit_reference);
+        let sat = manifest.tunings.chem_saturation;
+        match crate::step::glider_fruit_in_reach(view, fv, a, phys) {
+            Some((_, stock)) => {
+                let c = (stock / reference).min(1.0);
+                TasteReading {
+                    cue: c / (c + sat),
+                    resistance: resistance_of(manifest, "fruit"),
+                    valid: true,
+                }
+            }
+            None => TasteReading {
+                cue: 0.0,
+                resistance: resistance_of(manifest, "ground"),
+                valid: true,
+            },
+        }
+    } else {
+        taste
+    };
     obs[tm.offset] = taste.cue;
     obs[tm.offset + 1] = taste.resistance;
     obs[tm.offset + 2] = f64::from(taste.valid);
@@ -2664,8 +2767,9 @@ pub(crate) fn observation(
     // a senses handle.
     if let Some(cn) = module_opt(manifest, "Cone(3, foliage/body)") {
         let occupancy = cone_occupancy.expect("browser observations prepare cone occupancy");
-        let cone = crate::senses::cone_readings(
-            view, occupancy, a.id, &a.pose, standing_y, manifest, &body,
+        let fruit = manifest.cone_counts_fruit.then_some(fv);
+        let cone = crate::senses::cone_readings_in(
+            view, fruit, occupancy, a.id, &a.pose, standing_y, manifest, &body,
         );
         let base = cn.offset;
         for (k, sec) in cone.sectors.iter().enumerate() {

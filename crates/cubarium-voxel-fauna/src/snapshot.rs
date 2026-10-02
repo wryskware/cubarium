@@ -22,7 +22,9 @@ use crate::Fauna;
 // the flight ledger lines and the bellwing's own physiology.
 // 30: F3 (tests-first stubs) — the seedporter lineage, the fruit food class,
 // `FounderPhysiology::{glider, gut_seeds}`.
-pub const SCHEMA: u32 = 30;
+// 31: F3 — the seedporter climbs, glides and carries gut seeds (`Animal::gut_seeds`,
+// `Glider::roost_search_m`, the glider ledger lines).
+pub const SCHEMA: u32 = 31;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -343,6 +345,7 @@ mod tests {
             alert_ticks: 0,
             attached: None,
             last_bloom: None,
+            gut_seeds: crate::GutSeedLots::default(),
         }
     }
 

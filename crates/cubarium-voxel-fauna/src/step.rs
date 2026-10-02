@@ -92,6 +92,10 @@ enum Respiration {
 
 pub(crate) use cubarium_voxel::KeyedRng as Rng;
 
+#[path = "glider.rs"]
+mod glider;
+pub(crate) use glider::glider_fruit_in_reach;
+
 /// The tick's sky, read once (F1): what a flyer's act needs of the weather and the clock.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Sky {
@@ -163,6 +167,7 @@ fn tick_inner(
             grow(fauna);
             drop_off_grown(fauna);
             void_guts(fauna, flora);
+            glider::void_gut_seeds(fauna, flora);
         });
         // Maintenance and age settle first. A due field update then reads the litter as
         // it stands after the previous tick's feeding, before this tick's controllers.
@@ -176,7 +181,7 @@ fn tick_inner(
             // The controller stage: sample due founders and hold their actions, before
             // anything moves or eats this tick, from the same pre-action state every
             // controller of the tick reads.
-            controllers(fauna, &view, flora, senses);
+            controllers(fauna, &view, flora, senses, &sky);
         });
         cubarium_voxel::voxel_phase!(FaunaAct, {
             // Strike outcomes are events: the act only reads other bodies, and the hits
@@ -435,6 +440,8 @@ fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
         let free = a.alert_ticks == 0
             && a.mobility.climb.is_none()
             && a.mobility.mode != crate::MobilityMode::Fly
+            // A glider (F3) sleeps only perched.
+            && (phys.glider.is_none() || a.mobility.mode == crate::MobilityMode::Perched)
             && a.mobility.submerged_ticks == 0
             && !a
                 .strike
@@ -647,6 +654,7 @@ fn controllers(
     view: &VoxelView<'_>,
     flora: &Flora,
     mut senses: Option<&mut crate::Senses>,
+    sky: &Sky,
 ) {
     let due: Vec<usize> = fauna
         .animals
@@ -792,6 +800,13 @@ fn controllers(
                 lift = 0.0;
             }
         }
+        // A glider's roost reflex (F3): at its rest hour or in a downpour, its own
+        // heuristic gives way to a walk to the nearest crown it can climb.
+        if driven && fauna.controllers.flees(id) && fauna.config.founder(founder).glider.is_some() {
+            if let Some(roost) = glider::roost_reflex(fauna, i, view, &fv, sky) {
+                actions = roost;
+            }
+        }
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;
         a.founder_state.lure = if lure.is_finite() { lure.clamp(0.0, 1.0) } else { 0.0 };
@@ -913,12 +928,13 @@ fn act(
             continue;
         }
         let before = fauna.animals[i].pose;
-        let flyer = fauna.animals[i]
+        let (flyer, glider) = fauna.animals[i]
             .founder
-            .and_then(|f| fauna.config.founder(f).flight);
-        match flyer {
-            Some(flight) => flyer_act(fauna, view, flora, sky, flight, i),
-            None => {
+            .map_or((None, None), |f| (fauna.config.founder(f).flight, fauna.config.founder(f).glider));
+        match (flyer, glider) {
+            (Some(flight), _) => flyer_act(fauna, view, flora, sky, flight, i),
+            (None, Some(g)) => glider::glider_act(fauna, view, flora, seed, tick, sky, hits, g, i),
+            (None, None) => {
                 act_one(fauna, view, flora, seed, tick, hits, i);
                 // A walker's base is the top of its support face (F1).
                 let a = &mut fauna.animals[i];
@@ -1675,7 +1691,7 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     let a = fauna.animals.remove(j);
     fauna.controllers.take(a.id);
     fauna.free_riders(&a);
-    let organic = a.organic() + a.gut.organic;
+    let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic;
     let laid = bury_corpse(fauna, flora, &a, cause);
     if laid && matches!(cause, Departure::Killed { .. }) {
         if let Some(f) = a.founder {
@@ -1702,9 +1718,9 @@ fn bury_corpse(fauna: &mut Fauna, flora: &mut Flora, a: &Animal, cause: Departur
         a.site,
         DepositKind::Carrion,
         Taken {
-            organic: a.organic() + a.gut.organic,
-            mineral: a.mineral + a.gut.mineral,
-            energy: a.energy + a.gut.energy,
+            organic: a.organic() + a.gut.organic + a.gut_seeds.total().organic,
+            mineral: a.mineral + a.gut.mineral + a.gut_seeds.total().mineral,
+            energy: a.energy + a.gut.energy + a.gut_seeds.total().energy,
         },
     );
     fauna.ledger.deaths += 1;
@@ -2428,6 +2444,7 @@ fn newborn(
         alert_ticks: 0,
         attached: None,
         last_bloom: None,
+        gut_seeds: crate::GutSeedLots::default(),
     }
 }
 

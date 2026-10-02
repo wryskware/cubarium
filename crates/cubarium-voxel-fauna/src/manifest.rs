@@ -368,6 +368,11 @@ pub struct Manifest {
     /// [`crate::Body::mouth_layers`] from the standing face reads as an occluder, not as
     /// foliage. `false` for every other lineage; named in the canonical text only when set.
     pub cone_banded_to_mouth: bool,
+    /// **A fruit cone** (F3, the seedporter): the cone's class slot (the browser's
+    /// foliage fraction and proximity) counts a ray's first hit only when it is **fruit**
+    /// — a crown cell of a stand hanging fruit, or a latticevine face in fruit the ray
+    /// entered; plain foliage is an occluder. Interim until P2.
+    pub cone_counts_fruit: bool,
     /// The bulk density a ground pool's physical height is computed with,
     /// `organic / (cell area × density)`, organic units per cubic metre (D3). An authored
     /// placeholder (`design/backlog.md` §1); the cone reads the same constant.
@@ -632,6 +637,9 @@ pub const FLYER_VISIBLE_CLASSES: [&str; 3] = ["bloom", "foliage", "body"];
 /// nothing).
 const BELLWING_TASTE_RESISTANCES: [(&str, f64); 1] = [("nectar", 0.1)];
 
+/// The seedporter's mouth mapping (F3): soft fruit, firm ground.
+const SEEDPORTER_TASTE_RESISTANCES: [(&str, f64); 2] = [("fruit", 0.1), ("ground", 0.5)];
+
 const BROWSER_MODULES: [Module; 5] = [
     MODULE_SELF,
     MODULE_CONTACT4,
@@ -875,6 +883,7 @@ impl Manifest {
             ray_pitch_offsets_deg: &[],
             cone_range_m: 0.0,
             cone_banded_to_mouth: false,
+            cone_counts_fruit: false,
             pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
@@ -928,6 +937,7 @@ impl Manifest {
             ray_pitch_offsets_deg: &BROWSER_RAY_PITCH_OFFSETS_DEG,
             cone_range_m: 2.0,
             cone_banded_to_mouth: false,
+            cone_counts_fruit: false,
             pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
@@ -983,6 +993,7 @@ impl Manifest {
             ray_pitch_offsets_deg: &BROWSER_RAY_PITCH_OFFSETS_DEG,
             cone_range_m: 2.0,
             cone_banded_to_mouth: false,
+            cone_counts_fruit: false,
             pool_bulk_density: crate::CueConfig::default().pool_bulk_density,
             occlusion_rule: OCCLUSION_RULE,
             birth_readiness_rule: BIRTH_READINESS_RULE,
@@ -1150,9 +1161,7 @@ impl Manifest {
     /// The seedporter (F3): the browser's 37-input layout and three actions, its own
     /// anchors and `Self` references, and a cone that counts the fruit stock in view
     /// (lanternberry stands and latticevine faces in fruit) where the browser's counts
-    /// foliage. Interim until P2.
-    // F3 stub: the browser's layout on the seedporter's (stub) physiology; its cone still
-    // counts foliage.
+    /// foliage. Interim until P2. Its taste reads fruit in the mouth's reach.
     pub fn seedporter() -> Manifest {
         let a = anchors(Founder::Seedporter);
         let r = SelfReferences::of(Founder::Seedporter);
@@ -1180,6 +1189,10 @@ impl Manifest {
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
+            taste_reference: a.taste_ref,
+            taste_cue: "fruit",
+            taste_resistances: &SEEDPORTER_TASTE_RESISTANCES,
+            cone_counts_fruit: true,
             ..Manifest::browser()
         }
     }
@@ -1338,6 +1351,9 @@ impl Manifest {
             let _ = write!(s, "|traversal:{CONE_TRAVERSAL}");
             if self.cone_banded_to_mouth {
                 let _ = write!(s, "|cone_band:mouth");
+            }
+            if self.cone_counts_fruit {
+                let _ = write!(s, "|cone_class:fruit");
             }
         } else {
             let _ = write!(s, "|sectors:none");

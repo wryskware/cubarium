@@ -1,0 +1,1085 @@
+//! **Gliders** (F3, the seedporter; `design/predation-and-flight-2026-09-28.md` §3.5, §3.7,
+//! §3.9; Brief F3 in `design/handoffs/voxel-roster-2026-10-01.md`): a walker that climbs
+//! the stems of tall stands and latticevine-covered faces, perches in crowns, glides down
+//! from height, eats fruit and carries the seeds in its gut. A child of `step` (it shares
+//! the tick's private helpers); `flight` answers its questions of the air.
+//!
+//! The modes ([`MobilityMode`]) and what drives each:
+//!
+//! - **`Ground`**: the walker's own act ([`founder_act`], fruit aside). Walking into the
+//!   stem of a stand at least `climb_min_stand_m` tall (its centre within its radius and
+//!   half a voxel of the stem, the stem ahead) starts a **stem climb**; blocked against a
+//!   wall with a covered face in its body's rows ahead, a **vine climb**; blocked at an
+//!   edge with at least `glide_min_height_m` of drop beyond it, a **glide** (the body is
+//!   put just past the edge, clear of it).
+//! - **`Climb`**: on a stand's stem ([`PerchAnchor::Stand`]) or a covered face
+//!   ([`PerchAnchor::Vine`]), held in [`Mobility::perch`]. Up at `climb_speed_fraction` ×
+//!   the walking pace at the held forward effort, costing `wall_climb_cost_factor` × the
+//!   walking cost (the shredder's wall rule); [`Mobility::falling`] marks a climb **down**
+//!   (full effort, the same cost). A stem climb ends perched on the crown's top layer
+//!   (`CrownTop`), or in a downpour under its lowest layer (`Underside`, sheltered); a
+//!   vine climb ends perched on the face where the cover stops (`VineFace`); a climb
+//!   down ends on the ground.
+//! - **`Perched`**: basal upkeep only; it may turn (on a crown) and eat. Forward effort
+//!   glides off when the floor below is at least `glide_min_height_m` down (off a vine
+//!   face, away from the wall), else climbs: down from a crown top or a vine, on up from
+//!   under a crown. A downpour sends a crown-top perch down under its crown. A lost perch
+//!   (the crown eaten or grown, the face uncovered) is a forced glide.
+//! - **`Glide`**: no thrust; `glide_body_lengths_per_s` × its length a second across,
+//!   steered by `turn`, falling `1 / glide_ratio` of that; `glide_cost_factor` × basal in
+//!   all (the upkeep included, F1's hover convention). It lands on the first crown top of
+//!   a stand it could climb that it crosses at its centre column (perched), the floor of
+//!   its centre column (walking), or a covered face it is pressed against (climbing).
+//!
+//! **Fruit** (§3.7): on the due tick with `feed`, the sated bite from the stand it holds
+//! (its stem or crown) or else the nearest fruit in the mouth's reach — a fruiting crown
+//! cell ([`Flora::take_stand_fruit`]) or a latticevine face in fruit
+//! ([`Flora::take_fruit`]) — at fruit's yield. `seeds_per_fruit_organic` of the bite (all
+//! three currencies, pro rata) goes into a **gut seed lot** instead of the gut; the lot is
+//! voided at the body's support face no sooner than `gut_transit_s` after its last meal:
+//! a stand's seeds into that face's seed bank ([`Flora::deposit_seeds`]), a latticevine's
+//! to its litter (no path founds a vine from a seed yet: owed).
+//!
+//! **A glider sleeps only perched** (step's `circadian`), and the roost reflex
+//! ([`roost_reflex`]) takes a heuristic-driven one to a crown at its rest hour and in a
+//! downpour.
+
+use super::*;
+
+use crate::flight::{self, EPS, Shape};
+use crate::{Bloom, Glider, GutSeedLot, MobilityMode, Perch, PerchAnchor, PerchKind, SeedPlant, SeedVoid};
+use cubarium_voxel_flora::{Face as VineFace, FaceDir, FloraView, StandLayer};
+
+/// How near the wall a pressed body's centre is beyond its radius, metres, for a vine
+/// climb to start: a sweep stops within float dust of it.
+const PRESSED_M: f64 = 0.02;
+
+/// A glider's collision body: its footprint disc (half its width) and its height.
+pub(crate) fn shape(phys: &crate::FounderPhysiology, body: f64) -> Shape {
+    let g = phys.body_at(body);
+    Shape {
+        r: g.footprint_radius(),
+        h: g.height_m.max(1e-6),
+    }
+}
+
+/// Whether a stand's stem is one a glider climbs: foliage on it and a crown at least
+/// `climb_min_stand_m` tall.
+fn climbable(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand, glider: &Glider) -> bool {
+    stand.foliage > 0.0
+        && fv.config.species(stand.species).crown_height_m_at(stand.wood) >= glider.climb_min_stand_m - EPS
+}
+
+/// A stand's foliage layers holding foliage, lowest and highest.
+fn crown_span(fv: &FloraView<'_>, site: Site) -> Option<(StandLayer, StandLayer)> {
+    let stand = fv.stand_at(site)?;
+    let layers: Vec<StandLayer> = fv
+        .profile_layers(stand)
+        .into_iter()
+        .filter(|l| l.kind.bears_foliage() && l.stock > 0.0)
+        .collect();
+    let low = *layers.iter().min_by_key(|l| l.cell)?;
+    let high = *layers.iter().max_by_key(|l| l.cell)?;
+    Some((low, high))
+}
+
+/// The top of the support face under `(x, z)` at or below `y_m`, and that face.
+fn floor_at(view: &VoxelView<'_>, x: f64, z: f64, y_m: f64) -> Option<(f64, Site)> {
+    let site = flight::support_below(view, x, z, y_m + EPS)?;
+    Some((crate::surface_m(site.y, view.config.voxel_m), site))
+}
+
+/// **The fruit a glider's mouth reaches** (F3): the fruit of the stand it holds (climbing
+/// its stem or perched on its crown) first, else the nearest fruiting crown cell or vine
+/// face in fruit within its radius plus its mouth reach of its middle. `(the source, its
+/// stock)`.
+pub(crate) fn glider_fruit_in_reach(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    a: &Animal,
+    phys: &crate::FounderPhysiology,
+) -> Option<(Bloom, f64)> {
+    if matches!(a.mobility.mode, MobilityMode::Perched | MobilityMode::Climb)
+        && let Some(Perch {
+            anchor: PerchAnchor::Stand { site, .. },
+            ..
+        }) = a.mobility.perch
+        && let Some(stand) = fv.stand_at(site)
+        && stand.fruit > 0.0
+    {
+        return Some((Bloom::Stand(site), stand.fruit));
+    }
+    let s = shape(phys, a.body);
+    let reach = s.r + phys.body_at(a.body).mouth_reach_m;
+    flight::fruit_in_reach(view, fv, flight::mouth_point(a, s), reach)
+}
+
+/// The nearest climbable stem the body touches: a stand rooted within a voxel of its
+/// standing layer whose column centre is within the body's radius and half a voxel of its
+/// centre, and not behind it.
+fn stem_touched(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, shape: Shape, glider: &Glider) -> Option<Site> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let ring = f64::from(c.width) * v;
+    let (fx, fz) = a.pose.forward();
+    let reach = shape.r + 0.5 * v;
+    let (cx, cz) = a.pose.column(v, c.depth)?;
+    let mut best: Option<(f64, Site)> = None;
+    let mut consider = |stand: &cubarium_voxel_flora::Stand| {
+        if stand.site.y.abs_diff(a.site.y) > 1 || !climbable(fv, stand, glider) {
+            return;
+        }
+        let sx = (f64::from(stand.site.x) + 0.5) * v;
+        let sz = (f64::from(stand.site.z) + 0.5) * v;
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+        let d = (dx * dx + dz * dz).sqrt();
+        if d > reach || dx * fx + dz * fz < -EPS {
+            return;
+        }
+        if best.is_none_or(|(b, s)| d < b || (d == b && stand.site < s)) {
+            best = Some((d, stand.site));
+        }
+    };
+    match fv.stands_near(cx.rem_euclid(i64::from(c.width)), cz, c.width, c.depth) {
+        Some(near) => {
+            for &k in near {
+                consider(&fv.stands[k as usize]);
+            }
+        }
+        None => {
+            for s in fv.stands {
+                consider(s);
+            }
+        }
+    }
+    best.map(|(_, s)| s)
+}
+
+/// The covered face of the wall the body is pressed against along its heading's axis, in
+/// the rows its body spans: the lowest one.
+fn vine_ahead(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, shape: Shape) -> Option<VineFace> {
+    if fv.cover.face_count() == 0 {
+        return None;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let (cx, cz) = a.pose.column(v, c.depth)?;
+    let (dir, _) = axis_of(a.pose.heading_rad);
+    let (wx, wz) = (cx + dir.0, i64::from(cz) + dir.1);
+    if wz < 0 || wz >= i64::from(c.depth) {
+        return None;
+    }
+    let wx = wx.rem_euclid(i64::from(c.width));
+    // Pressed: the centre within its radius of the plane it faces.
+    let s = if dir.0 != 0 { dir.0 } else { dir.1 };
+    let col = if dir.0 != 0 { cx } else { i64::from(cz) };
+    let plane = beside_plane(col, s, v, 0.0, 0.0);
+    let along = if dir.0 != 0 { a.pose.x } else { a.pose.z };
+    let gap = if dir.0 != 0 {
+        let w = f64::from(c.width) * v;
+        let d = (plane - along).rem_euclid(w);
+        d.min(w - d)
+    } else {
+        (plane - along).abs()
+    };
+    if gap > shape.r + PRESSED_M {
+        return None;
+    }
+    let face_dir = match dir {
+        (1, 0) => FaceDir::NegX,
+        (-1, 0) => FaceDir::PosX,
+        (0, 1) => FaceDir::NegZ,
+        _ => FaceDir::PosZ,
+    };
+    let (lo, hi) = body_rows(a.pose.y_m, shape, v);
+    (lo..=hi).find_map(|y| {
+        if y < 0 || y >= i64::from(c.height) || !view.is_solid(wx, y as u32, wz as u32) {
+            return None;
+        }
+        let face = VineFace::new(wx as u32, y as u32, wz as u32, face_dir);
+        fv.cover.face(face).map(|_| face)
+    })
+}
+
+/// The cell rows a body standing on `base` spans.
+fn body_rows(base: f64, shape: Shape, v: f64) -> (i64, i64) {
+    let lo = flight::row_at(base, v);
+    let hi = (((base + shape.h - EPS) / v).floor() as i64).max(lo);
+    (lo, hi)
+}
+
+/// The covered face of `face`'s wall nearest the body's middle in the rows it spans, if
+/// any: what a vine climber holds.
+fn vine_hold(view: &VoxelView<'_>, fv: &FloraView<'_>, face: VineFace, base: f64, shape: Shape) -> Option<VineFace> {
+    let v = view.config.voxel_m;
+    let (lo, hi) = body_rows(base, shape, v);
+    let mid = ((base + 0.5 * shape.h) / v).floor() as i64;
+    let mut best: Option<(i64, VineFace)> = None;
+    for y in lo..=hi {
+        if y < 0 || y >= i64::from(view.config.height) || !view.is_solid(i64::from(face.x), y as u32, face.z) {
+            continue;
+        }
+        let f = VineFace::new(face.x, y as u32, face.z, face.dir);
+        if fv.cover.face(f).is_some() && best.is_none_or(|(d, _)| (y - mid).abs() < d) {
+            best = Some(((y - mid).abs(), f));
+        }
+    }
+    best.map(|(_, f)| f)
+}
+
+/// Whether the column under `(x, z)` is clear of solid over a body standing on `base`.
+fn room_over(view: &VoxelView<'_>, x: f64, z: f64, base: f64, shape: Shape) -> bool {
+    let c = view.config;
+    let v = c.voxel_m;
+    let cz = (z / v).floor();
+    if !(0.0..f64::from(c.depth)).contains(&cz) {
+        return false;
+    }
+    let cx = ((x / v).floor() as i64).rem_euclid(i64::from(c.width));
+    let (lo, hi) = body_rows(base, shape, v);
+    if lo < 0 || hi >= i64::from(c.height) {
+        return false;
+    }
+    !view.solid_in(cx, cz as u32, lo as u32, hi as u32)
+}
+
+/// The heading pointing out of a wall face, away from it.
+fn away_from(face: VineFace) -> f64 {
+    match face.dir {
+        FaceDir::NegX => heading_of((-1, 0)),
+        FaceDir::PosX => heading_of((1, 0)),
+        FaceDir::NegZ => heading_of((0, -1)),
+        _ => heading_of((0, 1)),
+    }
+}
+
+/// The heading pointing into a wall face.
+fn into_face(face: VineFace) -> f64 {
+    (away_from(face) + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+}
+
+fn set_mode(a: &mut Animal, mode: MobilityMode, perch: Option<Perch>, down: bool) {
+    a.mobility.mode = mode;
+    a.mobility.perch = perch;
+    a.mobility.falling = down;
+    a.mobility.climb = None;
+}
+
+fn start_glide(fauna: &mut Fauna, i: usize, forced: bool) {
+    set_mode(&mut fauna.animals[i], MobilityMode::Glide, None, false);
+    if forced {
+        fauna.ledger.glides_forced += 1;
+    } else {
+        fauna.ledger.glides += 1;
+    }
+}
+
+fn stand_perch(kind: PerchKind, site: Site, layer: &StandLayer) -> Perch {
+    Perch {
+        kind,
+        anchor: PerchAnchor::Stand {
+            site,
+            layer: flight::foliage_layer_index(layer),
+        },
+    }
+}
+
+/// **One glider's tick** (F3), in place of a walker's act. The module doc has the rules.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn glider_act(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    seed: u64,
+    tick: u64,
+    sky: &Sky,
+    hits: &mut Vec<Hit>,
+    glider: Glider,
+    i: usize,
+) {
+    let founder = fauna.animals[i].founder.expect("a founder body");
+    let asleep = fauna.animals[i].state == State::Asleep;
+    let mode = fauna.animals[i].mobility.mode;
+    if mode == MobilityMode::Ground {
+        if asleep {
+            fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+            return;
+        }
+        ground_tick(fauna, view, flora, seed, tick, glider, i, hits);
+        return;
+    }
+    fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+    let phys = *fauna.config.founder(founder);
+    let manifest = fauna.config.manifest(founder);
+    let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
+    let mut held = fauna.animals[i].founder_state.held;
+    {
+        let pc = &fauna.config.predation;
+        held.forward *= (1.0 - pc.wound_slow * fauna.animals[i].wound).clamp(0.0, 1.0);
+    }
+    match mode {
+        MobilityMode::Glide => glide_tick(fauna, view, flora, &phys, &manifest, glider, held, i),
+        MobilityMode::Climb => climb_tick(fauna, view, flora, sky, &phys, &manifest, held, due, i),
+        MobilityMode::Perched => perched_tick(fauna, view, flora, sky, &phys, &manifest, glider, held, due, asleep, i),
+        // A glider has no other mode; anything else walks.
+        _ => set_mode(&mut fauna.animals[i], MobilityMode::Ground, None, false),
+    }
+    // Off the ground its support face is the one below it.
+    let a = &mut fauna.animals[i];
+    if a.mobility.mode != MobilityMode::Ground
+        && let Some(site) = flight::support_below(view, a.pose.x, a.pose.z, a.pose.y_m + EPS)
+    {
+        a.site = site;
+    }
+}
+
+/// On the ground: the walker's act, then a stem, a vine or an edge.
+#[allow(clippy::too_many_arguments)]
+fn ground_tick(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    seed: u64,
+    tick: u64,
+    glider: Glider,
+    i: usize,
+    hits: &mut Vec<Hit>,
+) {
+    let founder = fauna.animals[i].founder.expect("a founder body");
+    let phys = *fauna.config.founder(founder);
+    let manifest = fauna.config.manifest(founder);
+    let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
+    let held = fauna.animals[i].founder_state.held;
+    let before = fauna.animals[i].pose;
+    // The walk, with the walker's mouth shut: fruit is this module's bite.
+    fauna.animals[i].founder_state.held.feed = 0.0;
+    founder_act(fauna, i, view, flora, seed, tick, hits);
+    fauna.animals[i].founder_state.held.feed = held.feed;
+    let v = view.config.voxel_m;
+    {
+        let a = &mut fauna.animals[i];
+        a.pose.y_m = crate::surface_m(a.site.y, v);
+    }
+    if held.forward > 0.0 {
+        let fv = flora.view();
+        let a = fauna.animals[i];
+        let s = shape(&phys, a.body);
+        if let Some(site) = stem_touched(view, &fv, &a, s, &glider) {
+            let Some((_, high)) = crown_span(&fv, site) else {
+                return;
+            };
+            set_mode(
+                &mut fauna.animals[i],
+                MobilityMode::Climb,
+                Some(stand_perch(PerchKind::CrownTop, site, &high)),
+                false,
+            );
+            fauna.animals[i].state = State::Climbing;
+            fauna.ledger.climbs += 1;
+            return;
+        }
+        let ring = f64::from(view.config.width) * v;
+        let (dx, dz) = crate::pose::wrapped_delta(before.x, before.z, a.pose.x, a.pose.z, ring);
+        let asked = held.forward * manifest.cruise_m_per_s * DT;
+        if (dx * dx + dz * dz).sqrt() < 0.5 * asked {
+            if let Some(face) = vine_ahead(view, &fv, &a, s) {
+                let a = &mut fauna.animals[i];
+                a.pose.heading_rad = into_face(face);
+                set_mode(
+                    a,
+                    MobilityMode::Climb,
+                    Some(Perch {
+                        kind: PerchKind::VineFace,
+                        anchor: PerchAnchor::Vine(face),
+                    }),
+                    false,
+                );
+                a.state = State::Climbing;
+                fauna.ledger.climbs += 1;
+                return;
+            }
+            if let Some((x, z)) = glide_off_edge(view, &a, s, &glider) {
+                let a = &mut fauna.animals[i];
+                a.pose.x = x;
+                a.pose.z = z;
+                start_glide(fauna, i, false);
+                fauna.animals[i].state = State::Walking;
+                return;
+            }
+        }
+    }
+    if due && held.feed > 0.0 && glider_feed(fauna, i, view, flora, &manifest, &phys, held.feed) {
+        fauna.animals[i].state = State::Cropping;
+    }
+}
+
+/// Where a glide off the edge ahead starts: the first point along the heading, up to two
+/// radii and a voxel on, where the disc is clear and every floor under it is at least
+/// `glide_min_height_m` below the base. `None` when there is no such drop.
+fn glide_off_edge(view: &VoxelView<'_>, a: &Animal, shape: Shape, glider: &Glider) -> Option<(f64, f64)> {
+    let v = view.config.voxel_m;
+    let base = a.pose.y_m;
+    let (fx, fz) = a.pose.forward();
+    let ring = f64::from(view.config.width) * v;
+    let n = (((2.0 * shape.r + v) / (0.125 * v)).ceil() as usize).max(1);
+    for k in 1..=n {
+        let d = k as f64 * 0.125 * v;
+        let (x, z) = ((a.pose.x + fx * d).rem_euclid(ring), a.pose.z + fz * d);
+        if flight::blocked(view, shape, x, z, base) {
+            return None;
+        }
+        let Some((top, _, _)) = flight::floor_under(view, shape, x, z, base) else {
+            continue;
+        };
+        if base - top >= glider.glide_min_height_m - EPS {
+            return Some((x, z));
+        }
+    }
+    None
+}
+
+/// One gliding tick.
+#[allow(clippy::too_many_arguments)]
+fn glide_tick(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    phys: &crate::FounderPhysiology,
+    manifest: &crate::Manifest,
+    glider: Glider,
+    held: Actions,
+    i: usize,
+) {
+    let v = view.config.voxel_m;
+    // An introduced glider's perch is resolved on its first tick: a crown top its base
+    // rests on at its centre column holds it.
+    if fauna.animals[i].mobility.falling {
+        fauna.animals[i].mobility.falling = false;
+        let fv = flora.view();
+        let a = fauna.animals[i];
+        let cz = (a.pose.z / v).floor().clamp(0.0, f64::from(view.config.depth) - 1.0) as u32;
+        let rest = flight::crown_layers_at(view, &fv, (a.pose.x / v).floor() as i64, cz)
+            .into_iter()
+            .filter(|(site, _)| fv.stand_at(*site).is_some_and(|st| climbable(&fv, st, &glider)))
+            .find(|(_, l)| (((l.cell + 1) as f64 * v) - a.pose.y_m).abs() <= 1e-6);
+        if let Some((site, l)) = rest {
+            let a = &mut fauna.animals[i];
+            set_mode(a, MobilityMode::Perched, Some(stand_perch(PerchKind::CrownTop, site, &l)), false);
+            a.state = State::Resting;
+            return;
+        }
+    }
+    let basal = phys.core.maintenance_per_s * fauna.animals[i].body;
+    let cost = (glider.glide_cost_factor - 1.0).max(0.0) * basal * DT;
+    let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
+    fauna.ledger.respired_flight_out += paid;
+    let s = shape(phys, fauna.animals[i].body);
+    let geometry = phys.body_at(fauna.animals[i].body);
+    let speed = glider.glide_body_lengths_per_s * geometry.length_m;
+    let distance = speed * DT;
+    let fall = if glider.glide_ratio > 0.0 {
+        distance / glider.glide_ratio
+    } else {
+        distance
+    };
+    let puddle = phys.drown_depth_m(&geometry);
+    let fv = flora.view();
+    let a = &mut fauna.animals[i];
+    a.pose.heading_rad =
+        (a.pose.heading_rad + held.turn * manifest.yaw_cap_rad_per_s * DT).rem_euclid(std::f64::consts::TAU);
+    let moved = flight::move_through_air(view, &fv, s, f64::INFINITY, puddle, &mut a.pose, distance, 0.0);
+    // The descent, against its centre column.
+    let y0 = a.pose.y_m;
+    let floor = floor_at(view, a.pose.x, a.pose.z, y0);
+    let floor_top = floor.map_or(0.0, |(t, _)| t);
+    let mut y = (y0 - fall).max(floor_top);
+    let cz = (a.pose.z / v).floor().clamp(0.0, f64::from(view.config.depth) - 1.0) as u32;
+    let cx = (a.pose.x / v).floor() as i64;
+    let crown = flight::crown_layers_at(view, &fv, cx, cz)
+        .into_iter()
+        .filter(|(site, _)| fv.stand_at(*site).is_some_and(|st| climbable(&fv, st, &glider)))
+        .map(|(site, l)| ((l.cell + 1) as f64 * v, site, l))
+        .filter(|&(top, _, _)| top < y0 - EPS && top >= y - EPS && top >= floor_top - EPS)
+        .max_by(|p, q| p.0.total_cmp(&q.0));
+    let mut landed = false;
+    if let Some((top, site, l)) = crown {
+        y = top;
+        a.pose.y_m = y;
+        set_mode(a, MobilityMode::Perched, Some(stand_perch(PerchKind::CrownTop, site, &l)), false);
+        landed = true;
+        fauna.ledger.landings_by_perch[PerchKind::CrownTop.index()] += 1;
+    } else if let Some((top, site)) = floor.filter(|&(t, _)| y <= t + EPS) {
+        a.pose.y_m = top;
+        a.site = site;
+        set_mode(a, MobilityMode::Ground, None, false);
+        landed = true;
+        fauna.ledger.landings_by_perch[PerchKind::Face.index()] += 1;
+    } else {
+        a.pose.y_m = y;
+        if let Some(face) = flight::vine_contact(view, &fv, s, a.pose.x, a.pose.z, y) {
+            a.pose.heading_rad = into_face(face);
+            set_mode(
+                a,
+                MobilityMode::Climb,
+                Some(Perch {
+                    kind: PerchKind::VineFace,
+                    anchor: PerchAnchor::Vine(face),
+                }),
+                false,
+            );
+            landed = true;
+            fauna.ledger.landings_by_perch[PerchKind::VineFace.index()] += 1;
+        }
+    }
+    let fb = &mut a.founder_state.feedback;
+    fb.attempted_equivalent += distance;
+    fb.delivered_equivalent += moved.distance_m;
+    fb.delivered_forward += moved.distance_m;
+    fb.motor_respiration += paid;
+    fb.structural_loss += body;
+    a.state = if landed && a.mobility.mode == MobilityMode::Perched {
+        State::Resting
+    } else {
+        State::Walking
+    };
+}
+
+/// One climbing tick: up or down a stem or a vine face.
+#[allow(clippy::too_many_arguments)]
+fn climb_tick(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    sky: &Sky,
+    phys: &crate::FounderPhysiology,
+    manifest: &crate::Manifest,
+    held: Actions,
+    due: bool,
+    i: usize,
+) {
+    let v = view.config.voxel_m;
+    let down = fauna.animals[i].mobility.falling;
+    let effort = if down { 1.0 } else { held.forward.clamp(0.0, 1.0) };
+    let s = shape(phys, fauna.animals[i].body);
+    let Some(perch) = fauna.animals[i].mobility.perch else {
+        start_glide(fauna, i, true);
+        return;
+    };
+    // The hold first: a stem with no crown left, or a vine with no cover in reach, lets go.
+    let fv = flora.view();
+    let a = fauna.animals[i];
+    let hold = match perch.anchor {
+        PerchAnchor::Stand { site, .. } => crown_span(&fv, site).map(|span| (Some((site, span)), None)),
+        PerchAnchor::Vine(face) => {
+            let f = vine_hold(view, &fv, face, a.pose.y_m, s);
+            // Going down it may slide below the cover to the ground.
+            if f.is_some() || down { Some((None, f.or(Some(face)))) } else { None }
+        }
+        _ => None,
+    };
+    let Some(hold) = hold else {
+        start_glide(fauna, i, true);
+        return;
+    };
+    if effort > 0.0 {
+        let cost = phys.motor_respiration_per_s * fauna.animals[i].body * effort * phys.wall_climb_cost_factor * DT;
+        let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
+        let rate = phys.climb_speed_fraction * effort * manifest.cruise_m_per_s;
+        let step = rate * DT;
+        let y0 = fauna.animals[i].pose.y_m;
+        let floor = floor_at(view, a.pose.x, a.pose.z, y0).map_or(0.0, |(t, _)| t);
+        let fv = flora.view();
+        let a = &mut fauna.animals[i];
+        let mut moved = 0.0;
+        match hold {
+            (Some((site, (low, high))), _) => {
+                let top = (high.cell + 1) as f64 * v;
+                let under = low.cell as f64 * v - s.h;
+                if down {
+                    let shelter = sky.downpour && y0 > under + EPS && under >= floor - EPS;
+                    let target = if shelter { under } else { floor };
+                    let y = (y0 - step).max(target);
+                    moved = y0 - y;
+                    a.pose.y_m = y;
+                    if y <= target + EPS {
+                        if shelter {
+                            set_mode(a, MobilityMode::Perched, Some(stand_perch(PerchKind::Underside, site, &low)), false);
+                        } else {
+                            set_mode(a, MobilityMode::Ground, None, false);
+                        }
+                    }
+                } else {
+                    let shelter = sky.downpour && y0 <= under + EPS;
+                    let (target, kind, layer) = if shelter {
+                        (under, PerchKind::Underside, low)
+                    } else {
+                        (top, PerchKind::CrownTop, high)
+                    };
+                    let y = (y0 + step).min(target.max(y0));
+                    moved = y - y0;
+                    a.pose.y_m = y;
+                    if y >= target - EPS {
+                        a.pose.y_m = target.max(floor);
+                        set_mode(a, MobilityMode::Perched, Some(stand_perch(kind, site, &layer)), false);
+                    }
+                }
+            }
+            (None, Some(face)) => {
+                if down {
+                    let y = (y0 - step).max(floor);
+                    moved = y0 - y;
+                    a.pose.y_m = y;
+                    if y <= floor + EPS {
+                        a.pose.heading_rad = away_from(face);
+                        set_mode(a, MobilityMode::Ground, None, false);
+                    } else if let Some(f) = vine_hold(view, &fv, face, y, s) {
+                        a.mobility.perch = Some(Perch {
+                            kind: PerchKind::VineFace,
+                            anchor: PerchAnchor::Vine(f),
+                        });
+                    }
+                } else {
+                    let y = y0 + step;
+                    match vine_hold(view, &fv, face, y, s) {
+                        // Room overhead in its own column (an overhang stops it).
+                        Some(f) if room_over(view, a.pose.x, a.pose.z, y, s) => {
+                            moved = step;
+                            a.pose.y_m = y;
+                            a.mobility.perch = Some(Perch {
+                                kind: PerchKind::VineFace,
+                                anchor: PerchAnchor::Vine(f),
+                            });
+                        }
+                        // The cover (or the room) stops: it clings where it is.
+                        _ => {
+                            let f = vine_hold(view, &fv, face, y0, s).unwrap_or(face);
+                            set_mode(
+                                a,
+                                MobilityMode::Perched,
+                                Some(Perch {
+                                    kind: PerchKind::VineFace,
+                                    anchor: PerchAnchor::Vine(f),
+                                }),
+                                false,
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        let fb = &mut a.founder_state.feedback;
+        fb.attempted_equivalent += step;
+        fb.delivered_equivalent += moved;
+        fb.delivered_forward += moved;
+        fb.structural_loss += body;
+        fb.motor_respiration += paid;
+    }
+    let fed = due && held.feed > 0.0 && glider_feed(fauna, i, view, flora, manifest, phys, held.feed);
+    let a = &mut fauna.animals[i];
+    a.state = match (fed, a.mobility.mode) {
+        (true, _) => State::Cropping,
+        (false, MobilityMode::Climb) => State::Climbing,
+        (false, MobilityMode::Ground) => State::Walking,
+        _ => State::Resting,
+    };
+}
+
+/// One perched tick.
+#[allow(clippy::too_many_arguments)]
+fn perched_tick(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    sky: &Sky,
+    phys: &crate::FounderPhysiology,
+    manifest: &crate::Manifest,
+    glider: Glider,
+    held: Actions,
+    due: bool,
+    asleep: bool,
+    i: usize,
+) {
+    let s = shape(phys, fauna.animals[i].body);
+    let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
+    let a = fauna.animals[i];
+    if !flight::perch_holds(view, &flora.view(), &a, s, puddle) {
+        start_glide(fauna, i, true);
+        return;
+    }
+    if asleep {
+        return;
+    }
+    let Some(perch) = a.mobility.perch else {
+        start_glide(fauna, i, true);
+        return;
+    };
+    // A downpour sends a crown-top perch down under its crown.
+    if sky.downpour
+        && perch.kind == PerchKind::CrownTop
+        && let PerchAnchor::Stand { site, .. } = perch.anchor
+        && let Some((low, _)) = crown_span(&flora.view(), site)
+    {
+        let under = low.cell as f64 * view.config.voxel_m - s.h;
+        let floor = floor_at(view, a.pose.x, a.pose.z, a.pose.y_m).map_or(0.0, |(t, _)| t);
+        if under >= floor - EPS && under < a.pose.y_m - EPS {
+            fauna.animals[i].mobility.mode = MobilityMode::Climb;
+            fauna.animals[i].mobility.falling = true;
+            fauna.animals[i].state = State::Climbing;
+            return;
+        }
+    }
+    if held.forward > 0.0 {
+        let floor = floor_at(view, a.pose.x, a.pose.z, a.pose.y_m).map_or(0.0, |(t, _)| t);
+        let high = a.pose.y_m - floor >= glider.glide_min_height_m - EPS;
+        match perch.anchor {
+            PerchAnchor::Vine(face) => {
+                if high {
+                    fauna.animals[i].pose.heading_rad = away_from(face);
+                    start_glide(fauna, i, false);
+                } else {
+                    let m = &mut fauna.animals[i].mobility;
+                    m.mode = MobilityMode::Climb;
+                    m.falling = true;
+                }
+            }
+            PerchAnchor::Stand { .. } => {
+                if high {
+                    start_glide(fauna, i, false);
+                } else {
+                    // Down from a crown top; on up from under a crown.
+                    let m = &mut fauna.animals[i].mobility;
+                    m.mode = MobilityMode::Climb;
+                    m.falling = perch.kind != PerchKind::Underside;
+                }
+            }
+            _ => start_glide(fauna, i, true),
+        }
+        fauna.animals[i].state = State::Walking;
+        return;
+    }
+    // At rest it may turn on a crown (a wall face holds its heading), and eat.
+    if !matches!(perch.anchor, PerchAnchor::Vine(_)) {
+        let a = &mut fauna.animals[i];
+        a.pose.heading_rad =
+            (a.pose.heading_rad + held.turn * manifest.yaw_cap_rad_per_s * DT).rem_euclid(std::f64::consts::TAU);
+    }
+    let fed = due && held.feed > 0.0 && glider_feed(fauna, i, view, flora, manifest, phys, held.feed);
+    fauna.animals[i].state = if fed { State::Cropping } else { State::Resting };
+}
+
+/// **A fruit bite** (F3, §3.7): the sated bite from [`glider_fruit_in_reach`], booked
+/// eaten whole, its seed share into the gut seed lots and the rest assimilated at fruit's
+/// yield.
+fn glider_feed(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    manifest: &crate::Manifest,
+    phys: &crate::FounderPhysiology,
+    effort: f64,
+) -> bool {
+    let sc = phys.core;
+    let want = sc.bite_per_s * manifest.controller_period_s * effort * hunger(&fauna.animals[i], &sc);
+    if !(want > 0.0) {
+        return false;
+    }
+    let founder = fauna.animals[i].founder.expect("a founder body");
+    let Some((source, stock)) = glider_fruit_in_reach(view, &flora.view(), &fauna.animals[i], phys) else {
+        return false;
+    };
+    let yield_fraction = phys.yield_for(Food::Fruit);
+    let bite = sated_bite(want, stock, &sc, &fauna.animals[i], yield_fraction);
+    if !(bite > 0.0) {
+        return false;
+    }
+    let (plant, src_site) = match source {
+        Bloom::Stand(site) => (
+            flora.view().stand_at(site).map(|s| SeedPlant::Stand(s.species)),
+            site,
+        ),
+        Bloom::Vine(face) => (
+            Some(SeedPlant::Latticevine),
+            flight::support_below(view, (f64::from(face.x) + 0.5) * view.config.voxel_m, (f64::from(face.z) + 0.5) * view.config.voxel_m, f64::from(face.y) * view.config.voxel_m)
+                .unwrap_or(fauna.animals[i].site),
+        ),
+    };
+    let taken = match source {
+        Bloom::Stand(site) => flora.take_stand_fruit(site, bite),
+        Bloom::Vine(face) => flora.take_fruit(face, bite),
+    };
+    let Some(taken) = taken else {
+        return false;
+    };
+    let taken = fauna.book_eaten(taken, Food::Fruit);
+    let k = match source {
+        Bloom::Stand(_) => 0,
+        Bloom::Vine(_) => 1,
+    };
+    fauna.ledger.fruit_eaten_by_source[k] += taken.organic;
+    fauna.ledger.fruit_bites_by_source[k] += 1;
+    if let Some(SeedPlant::Stand(sp)) = plant {
+        fauna.ledger.bites_by_plant[sp.index()] += 1;
+        fauna.ledger.eaten_by_plant[sp.index()] += taken.organic;
+    }
+    // The seeds ride in the gut: their share of all three currencies.
+    let rest = match (phys.gut_seeds, plant) {
+        (Some(gut), Some(plant)) if gut.seeds_per_fruit_organic > 0.0 => {
+            let f = gut.seeds_per_fruit_organic.clamp(0.0, 1.0);
+            let seeds = Taken {
+                organic: f * taken.organic,
+                mineral: f * taken.mineral,
+                energy: f * taken.energy,
+            };
+            let transit = cubarium_voxel::ticks_at_least_one(gut.gut_transit_s);
+            stow_seeds(&mut fauna.animals[i], plant, seeds, src_site, fauna.tick, transit);
+            Taken {
+                organic: taken.organic - seeds.organic,
+                mineral: taken.mineral - seeds.mineral,
+                energy: taken.energy - seeds.energy,
+            }
+        }
+        _ => taken,
+    };
+    let placed = assimilate(fauna, i, &sc, rest, yield_fraction);
+    let l = &mut fauna.ledger;
+    l.bites_by_founder[founder.index()] += 1;
+    l.bites_by_founder_food[founder.index()][Food::Fruit.index()] += 1;
+    l.assimilated_by_founder[founder.index()] += placed;
+    fauna.animals[i].founder_state.feedback.intake += placed;
+    true
+}
+
+/// Put a meal's seeds in a lot: the newest lot of the same plant and source opened within
+/// half the transit, else an empty slot (at most half the slots for one plant), else the
+/// newest lot of the same plant. Its due tick moves to this meal's plus the transit.
+fn stow_seeds(a: &mut Animal, plant: SeedPlant, seeds: Taken, source: Site, now: u64, transit: u64) {
+    let lots = &mut a.gut_seeds.lots;
+    let same = |l: &GutSeedLot| l.plant == Some(plant);
+    let newest = |lots: &[GutSeedLot], pred: &dyn Fn(&GutSeedLot) -> bool| {
+        lots.iter()
+            .enumerate()
+            .filter(|(_, l)| pred(l))
+            .max_by_key(|(_, l)| l.opened_tick)
+            .map(|(k, _)| k)
+    };
+    let joined = newest(lots, &|l| same(l) && l.source == source && now.saturating_sub(l.opened_tick) <= transit / 2);
+    let held = lots.iter().filter(|l| same(l)).count();
+    let k = joined
+        .or_else(|| (held < crate::GutSeedLots::SLOTS / 2).then(|| lots.iter().position(|l| l.plant.is_none())).flatten())
+        .or_else(|| newest(lots, &same))
+        .or_else(|| lots.iter().position(|l| l.plant.is_none()));
+    let Some(k) = k else {
+        // Every slot is the other plant's: fold into the newest lot whatever it is (cannot
+        // happen with half the slots per plant; kept total so nothing is lost).
+        let k = newest(lots, &|_| true).expect("a lot");
+        let l = &mut lots[k];
+        l.organic += seeds.organic;
+        l.mineral += seeds.mineral;
+        l.energy += seeds.energy;
+        l.due_tick = now + transit;
+        return;
+    };
+    let l = &mut lots[k];
+    if l.plant.is_none() {
+        *l = GutSeedLot {
+            plant: Some(plant),
+            organic: 0.0,
+            mineral: 0.0,
+            energy: 0.0,
+            source,
+            opened_tick: now,
+            due_tick: now + transit,
+        };
+    }
+    l.organic += seeds.organic;
+    l.mineral += seeds.mineral;
+    l.energy += seeds.energy;
+    l.due_tick = now + transit;
+}
+
+/// Step 2, after the gut: **every due gut seed lot is voided** at the body's support face
+/// — a stand's seeds into its seed bank, a latticevine's to its litter (no seed path
+/// founds a vine yet: owed) — booked `deposited_*`.
+pub(super) fn void_gut_seeds(fauna: &mut Fauna, flora: &mut Flora) {
+    let now = fauna.tick;
+    for i in 0..fauna.animals.len() {
+        if fauna.animals[i].gut_seeds.is_empty() {
+            continue;
+        }
+        for k in 0..crate::GutSeedLots::SLOTS {
+            let lot = fauna.animals[i].gut_seeds.lots[k];
+            let Some(plant) = lot.plant else {
+                continue;
+            };
+            if lot.due_tick > now {
+                continue;
+            }
+            fauna.animals[i].gut_seeds.lots[k] = GutSeedLot::default();
+            let (site, id) = (fauna.animals[i].site, fauna.animals[i].id);
+            let seeds = Taken {
+                organic: lot.organic,
+                mineral: lot.mineral,
+                energy: lot.energy,
+            };
+            let banked = match plant {
+                SeedPlant::Stand(species) => {
+                    if flora.deposit_seeds(site, species, seeds.organic, seeds.mineral, seeds.energy) {
+                        fauna.ledger.deposited_organic_out += seeds.organic;
+                        fauna.ledger.deposited_mineral_out += seeds.mineral;
+                        fauna.ledger.deposited_energy_out += seeds.energy;
+                        true
+                    } else {
+                        fauna.book_deposit(flora, site, DepositKind::Litter, seeds);
+                        false
+                    }
+                }
+                SeedPlant::Latticevine => {
+                    fauna.book_deposit(flora, site, DepositKind::Litter, seeds);
+                    false
+                }
+            };
+            fauna.ledger.seeds_voided_by_source[plant.source_index()] += seeds.organic;
+            fauna.ledger.seed_voids += 1;
+            fauna.log_seed_void(SeedVoid {
+                tick: now,
+                animal: id,
+                plant,
+                organic: seeds.organic,
+                source: lot.source,
+                landed: site,
+                banked,
+            });
+        }
+    }
+}
+
+/// **The roost reflex** (F3; Fable's call on the brief's night and downpour lines): a
+/// glider driven by its own heuristic, at its rest hour (and not hungry) or in a downpour,
+/// walks to the nearest stand it can climb within `roost_search_m`, climbs it (on to the
+/// crown top at night, under the crown in a downpour) and stays perched; `None` leaves its
+/// heuristic's actions (nothing to climb in reach, or already perched and not asked to
+/// move, or gliding).
+pub(super) fn roost_reflex(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    sky: &Sky,
+) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    let glider = phys.glider?;
+    let sleepy = !phys.active.awake(sky.clock_on, sky.daylight, &fauna.config.life)
+        && hunger(a, &phys.core) < phys.wake_hunger;
+    if !(sleepy || sky.downpour) {
+        return None;
+    }
+    let still = Actions {
+        forward: 0.0,
+        turn: 0.0,
+        feed: 0.0,
+    };
+    match a.mobility.mode {
+        MobilityMode::Perched => Some(still),
+        MobilityMode::Climb if !a.mobility.falling => Some(Actions {
+            forward: 1.0,
+            ..still
+        }),
+        MobilityMode::Ground => {
+            let c = view.config;
+            let v = c.voxel_m;
+            let ring = f64::from(c.width) * v;
+            let mut best: Option<(f64, f64, f64)> = None;
+            for stand in fv.stands.iter().filter(|s| climbable(fv, s, &glider)) {
+                let sx = (f64::from(stand.site.x) + 0.5) * v;
+                let sz = (f64::from(stand.site.z) + 0.5) * v;
+                let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+                let d = (dx * dx + dz * dz).sqrt();
+                if d <= glider.roost_search_m && best.is_none_or(|(b, _, _)| d < b) {
+                    best = Some((d, dx, dz));
+                }
+            }
+            let (_, dx, dz) = best?;
+            let (fx, fz) = a.pose.forward();
+            // Signed angle from the heading to the stem: `forward` is (sin h, cos h), so a
+            // positive turn (heading up) swings toward +x from +z.
+            let cross = fz * dx - fx * dz;
+            let dot = fx * dx + fz * dz;
+            let angle = cross.atan2(dot);
+            Some(Actions {
+                forward: if angle.abs() < std::f64::consts::FRAC_PI_2 { 1.0 } else { 0.0 },
+                turn: (angle * 2.0).clamp(-1.0, 1.0),
+                feed: 0.0,
+            })
+        }
+        _ => None,
+    }
+}
+
+impl Fauna {
+    /// [`crate::Command::IntroduceAloft`] for a glider (F3). The command sees the world
+    /// and not the plant layer, so a pose in the air is introduced **gliding, its perch
+    /// unresolved** ([`Mobility::falling`] set in `Glide`): its first tick perches it on
+    /// the crown top of a climbable stand its base meets at its centre column, or else it
+    /// glides on. A base on the floor below walks; a base in the air under
+    /// `glide_min_height_m` over the floor is refused, as is a body inside solid.
+    pub(crate) fn introduce_glider_aloft(
+        &mut self,
+        world: &World,
+        pose: crate::Pose,
+        founder: Founder,
+        stores: crate::StartingStores,
+    ) -> bool {
+        let phys = *self.config.founder(founder);
+        let Some(glider) = phys.glider else {
+            return false;
+        };
+        let Some((body, reserve)) = stores.resolve(&phys.core) else {
+            return false;
+        };
+        if !pose.is_finite() || !pose.y_m.is_finite() {
+            return false;
+        }
+        let view = world.view();
+        let s = shape(&phys, body);
+        if flight::blocked(&view, s, pose.x, pose.z, pose.y_m) {
+            return false;
+        }
+        let Some((floor_top, site)) = floor_at(&view, pose.x, pose.z, pose.y_m) else {
+            return false;
+        };
+        let on_floor = (pose.y_m - floor_top).abs() <= EPS;
+        if !on_floor && pose.y_m - floor_top < glider.glide_min_height_m - EPS {
+            return false;
+        }
+        if !self.introduce_body(
+            world,
+            site,
+            crate::Species::Frondgrazer,
+            Some(founder),
+            body,
+            Some(reserve),
+            pose.heading_rad,
+        ) {
+            return false;
+        }
+        let id = self.ledger.births - 1;
+        let i = self
+            .animals
+            .binary_search_by_key(&id, |a| a.id)
+            .expect("just placed");
+        let a = &mut self.animals[i];
+        if on_floor {
+            a.pose = crate::Pose { y_m: floor_top, ..pose };
+            set_mode(a, MobilityMode::Ground, None, false);
+        } else {
+            a.pose = pose;
+            set_mode(a, MobilityMode::Glide, None, true);
+        }
+        true
+    }
+}
+

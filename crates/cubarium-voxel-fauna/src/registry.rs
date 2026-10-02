@@ -241,6 +241,7 @@ fn founder_rows() -> Vec<Row> {
         r("glider.glide_body_lengths_per_s", "body lengths/s", Range::positive(), "a glide's speed").optional().prov("decision"),
         r("glider.glide_cost_factor", "x basal upkeep", nonneg, "a second gliding, upkeep included").optional().prov("decision"),
         r("glider.glide_min_height_m", "m", nonneg, "a glide starts only from this height over the landing surface").optional().prov("decision"),
+        r("glider.roost_search_m", "m", nonneg, "at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this").optional(),
         // Gut seeds (`GutSeeds`, F3): the seedporter's only, optional on the others.
         r("gut_seeds.seeds_per_fruit_organic", "org-units per org-unit of fruit", fraction, "share of a fruit meal that is the source's seeds, carried in the gut").optional(),
         r("gut_seeds.gut_transit_s", "s", nonneg, "a meal's seeds are voided at the body's face this long after it").optional(),
@@ -390,6 +391,7 @@ fn knob_rows() -> Vec<Row> {
         t("bellwing_bloom_near", "1 - d/range", fraction, "a bloom this near: slow and come down to it").search(0.3, 0.9),
         t("bellwing_gaze_turn", "effort", fraction, "turn effort toward the sector with the most bloom").search(0.2, 1.0),
         t("bellwing_wander_forward", "effort", fraction, "forward effort of the bellwing's no-signal wander").search(0.2, 1.0),
+        t("seedporter_full_at", "fraction of adult reserve", fraction, "the seedporter's heuristic stops eating at this reserve").search(0.5, 1.0),
         t("bellwing_roost_ceiling", "fraction of band", fraction, "going to rest, cover closer than this overhead is an underside to rise into").search(0.1, 0.8),
     ]);
 

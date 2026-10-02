@@ -59,7 +59,7 @@ pub use body::{
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
-    FounderFactories, HoverSip, LanternjawAmbush, Response, Scripted, heuristic, resolve_actions,
+    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, Response, Scripted, heuristic, resolve_actions,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
@@ -583,12 +583,15 @@ pub struct Mobility {
     #[serde(default)]
     pub mode: MobilityMode,
     /// The perch a `Perched` body holds (§3.4): losing it means a takeoff, or a drop when
-    /// it cannot pay. `None` in every other mode.
+    /// it cannot pay (a glider's: a forced glide). A glider's `Climb` holds its stem or
+    /// vine face here too (F3). `None` in every other mode.
     #[serde(default)]
     pub perch: Option<Perch>,
     /// A flyer **dropping**: it lost a perch it could not pay to leave (or is asleep), so
     /// it falls straight down at the lift speed, paying nothing aloft, onto the first
-    /// perch below. Always `false` for a walker.
+    /// perch below. Always `false` for a walker. A **glider** (F3) uses it for a climb
+    /// **down** (`Climb`), and for an introduced glide whose perch is not yet resolved
+    /// (`Glide`, its first tick).
     #[serde(default)]
     pub falling: bool,
     /// Consecutive ticks under water deeper than its drown depth. It drowns when this
@@ -804,6 +807,102 @@ pub struct Animal {
     /// **The last bloom it sipped from** (F1 §3.7, the pollen seam): `None` until a sip.
     #[serde(default)]
     pub last_bloom: Option<Bloom>,
+    /// **Seeds in the gut** (F3, a lineage with [`FounderPhysiology::gut_seeds`]): each
+    /// fruit meal's seeds, by source, carried out of the fruit's organic matter and voided
+    /// at the body's face no sooner than `gut_transit_s` after the meal. Counted in the
+    /// stored totals and laid with the corpse at death. Empty for every other lineage.
+    #[serde(default)]
+    pub gut_seeds: GutSeedLots,
+}
+
+/// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
+/// latticevine face's beads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SeedPlant {
+    Stand(cubarium_voxel_flora::Species),
+    Latticevine,
+}
+
+impl SeedPlant {
+    /// `[stand fruit, latticevine fruit]` order, for the ledger's per-source lines.
+    pub const fn source_index(self) -> usize {
+        match self {
+            SeedPlant::Stand(_) => 0,
+            SeedPlant::Latticevine => 1,
+        }
+    }
+}
+
+/// One lot of gut seeds (F3): the seeds of one source plant from meals no further apart
+/// than half the transit time, voided together at `due_tick`, which the latest meal in the
+/// lot sets (so no meal's seeds leave sooner than the transit time after it).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GutSeedLot {
+    /// `None` for an empty slot.
+    pub plant: Option<SeedPlant>,
+    pub organic: f64,
+    pub mineral: f64,
+    pub energy: f64,
+    /// Where the first meal in the lot was eaten: the stand's site, or the vine face's
+    /// support below (for the dispersal census).
+    pub source: Site,
+    pub opened_tick: u64,
+    pub due_tick: u64,
+}
+
+impl Default for GutSeedLot {
+    fn default() -> GutSeedLot {
+        GutSeedLot {
+            plant: None,
+            organic: 0.0,
+            mineral: 0.0,
+            energy: 0.0,
+            source: Site { x: 0, y: 0, z: 0 },
+            opened_tick: 0,
+            due_tick: 0,
+        }
+    }
+}
+
+/// A body's gut seed lots: [`GutSeedLots::SLOTS`] fixed slots, at most half of them for
+/// one plant, so an animal stays a small `Copy` value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GutSeedLots {
+    pub lots: [GutSeedLot; GutSeedLots::SLOTS],
+}
+
+impl GutSeedLots {
+    pub const SLOTS: usize = 6;
+
+    /// Everything the lots hold.
+    pub fn total(&self) -> Taken {
+        let mut t = Taken::default();
+        for l in self.lots.iter().filter(|l| l.plant.is_some()) {
+            t.organic += l.organic;
+            t.mineral += l.mineral;
+            t.energy += l.energy;
+        }
+        t
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lots.iter().all(|l| l.plant.is_none())
+    }
+}
+
+/// One void of gut seeds (F3), for a census: what, from where, to where. Not world state;
+/// [`Fauna::take_seed_voids`] drains them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeedVoid {
+    pub tick: u64,
+    pub animal: u64,
+    pub plant: SeedPlant,
+    pub organic: f64,
+    pub source: Site,
+    pub landed: Site,
+    /// Whether the plant layer banked the seeds (a lanternberry's into the seed bank); a
+    /// latticevine's are voided to litter, lost (no path founds a vine from a seed yet).
+    pub banked: bool,
 }
 
 /// A rider's hold on its host (parasite hatchlings): the host's [`Animal::id`].
@@ -835,8 +934,10 @@ impl Animal {
     /// flyer's (F1) is the layer under the cell its base is in, so its body is indexed and
     /// drawn at `y_m`.
     pub fn sense_layer(&self, voxel_m: f64) -> u32 {
-        if matches!(self.mobility.mode, MobilityMode::Fly | MobilityMode::Perched)
-            && voxel_m > 0.0
+        if matches!(
+            self.mobility.mode,
+            MobilityMode::Fly | MobilityMode::Perched | MobilityMode::Climb | MobilityMode::Glide
+        ) && voxel_m > 0.0
             && self.pose.y_m.is_finite()
         {
             return ((self.pose.y_m / voxel_m + 1e-9).floor() - 1.0).max(0.0) as u32;
@@ -864,17 +965,26 @@ impl Animal {
     /// so a conservation check that ignored it would see matter vanish at the first
     /// instalment.
     pub fn stored_organic(&self) -> f64 {
-        self.organic() + self.gut.organic + self.reproduction.escrow.map_or(0.0, |e| e.organic)
+        self.organic()
+            + self.gut.organic
+            + self.reproduction.escrow.map_or(0.0, |e| e.organic)
+            + self.gut_seeds.total().organic
     }
 
     /// Mineral in this body, its gut and the escrowed offspring's included.
     pub fn stored_mineral(&self) -> f64 {
-        self.mineral + self.gut.mineral + self.reproduction.escrow.map_or(0.0, |e| e.mineral)
+        self.mineral
+            + self.gut.mineral
+            + self.reproduction.escrow.map_or(0.0, |e| e.mineral)
+            + self.gut_seeds.total().mineral
     }
 
     /// Energy in this body, its gut and the escrowed offspring's included.
     pub fn stored_energy(&self) -> f64 {
-        self.energy + self.gut.energy + self.reproduction.escrow.map_or(0.0, |e| e.energy)
+        self.energy
+            + self.gut.energy
+            + self.reproduction.escrow.map_or(0.0, |e| e.energy)
+            + self.gut_seeds.total().energy
     }
 }
 
@@ -2069,6 +2179,27 @@ pub struct FaunaLedger {
     /// lift work and takeoffs.
     #[serde(default)]
     pub respired_flight_out: f64,
+    /// **Gliders** (F3): fruit eaten by source, organic, `[stand fruit, latticevine
+    /// fruit]` (a share of `eaten_by_food[fruit]`), and the bites.
+    #[serde(default)]
+    pub fruit_eaten_by_source: [f64; 2],
+    #[serde(default)]
+    pub fruit_bites_by_source: [u64; 2],
+    /// Glides started by choice (off a ledge, a crown or a vine), and forced ones (a lost
+    /// perch or hold).
+    #[serde(default)]
+    pub glides: u64,
+    #[serde(default)]
+    pub glides_forced: u64,
+    /// Stem and vine climbs started.
+    #[serde(default)]
+    pub climbs: u64,
+    /// Gut seeds voided, organic, by source (`[stand, latticevine]`), and the voids. A
+    /// latticevine's seeds are voided to litter (lost: no seed path founds a vine yet).
+    #[serde(default)]
+    pub seeds_voided_by_source: [f64; 2],
+    #[serde(default)]
+    pub seed_voids: u64,
 }
 
 impl FaunaLedger {
@@ -2281,8 +2412,8 @@ pub enum Command {
     ///
     /// **A glider** (F3, the seedporter) is taken too: gliding ([`MobilityMode::Glide`])
     /// when its base is in the air at least its `glide_min_height_m` over the landing
-    /// surface below, perched where its base meets a crown top.
-    // F3 stub: a glider is refused like any walker.
+    /// surface below, perched where its base meets the crown top of a stand it could climb,
+    /// walking where it meets the ground; refused in between.
     IntroduceAloft {
         pose: Pose,
         founder: Founder,
@@ -2392,7 +2523,14 @@ pub struct Fauna {
     /// — daylight falling below [`LifeConfig::day_line`] — for the egg bank's trigger
     /// (§2.13). `None` before the first tick.
     last_daylight: Option<f64>,
+    /// Gut-seed voids since the last [`Fauna::take_seed_voids`] (F3): a census's events,
+    /// not world state, so not saved; bounded at [`SEED_VOID_LOG_MAX`] (the oldest go).
+    #[serde(skip)]
+    seed_voids: Vec<SeedVoid>,
 }
+
+/// The most gut-seed void events [`Fauna`] keeps undrained.
+pub const SEED_VOID_LOG_MAX: usize = 65_536;
 
 impl Fauna {
     /// An animal layer on a **valid** config. Panics with the offending field named if
@@ -2421,7 +2559,20 @@ impl Fauna {
             policy_driven: [false; Founder::COUNT],
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
+            seed_voids: Vec::new(),
         })
+    }
+
+    /// The gut-seed voids since the last call (F3), oldest first.
+    pub fn take_seed_voids(&mut self) -> Vec<SeedVoid> {
+        std::mem::take(&mut self.seed_voids)
+    }
+
+    pub(crate) fn log_seed_void(&mut self, v: SeedVoid) {
+        if self.seed_voids.len() >= SEED_VOID_LOG_MAX {
+            self.seed_voids.drain(..SEED_VOID_LOG_MAX / 2);
+        }
+        self.seed_voids.push(v);
     }
 
     /// Give the founder body `id` a controller: the diagnostic heuristic and the GRU
@@ -2653,6 +2804,9 @@ impl Fauna {
                 stores,
             } => {
                 let phys = *self.config.founder(founder);
+                if phys.glider.is_some() {
+                    return self.introduce_glider_aloft(world, pose, founder, stores);
+                }
                 let Some(flight) = phys.flight else {
                     return false;
                 };
@@ -2833,6 +2987,7 @@ impl Fauna {
             alert_ticks: 0,
             attached: None,
             last_bloom: None,
+            gut_seeds: GutSeedLots::default(),
         };
         let mut animal = animal;
         // A flyer on a face is perched on it (F1).

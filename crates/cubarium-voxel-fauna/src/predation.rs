@@ -74,7 +74,8 @@ pub struct Hit {
 }
 
 /// Whether `hunter` would take `prey` (§2.1): its lineage is on the hunter's list and its
-/// structure is inside the hunter's size window, which follows the hunter's own body.
+/// structure is inside the hunter's size window, which follows the hunter's own body; a
+/// glider only on the ground.
 pub fn is_prey_of(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool {
     let (Some(hf), Some(pf)) = (hunter.founder, prey.founder) else {
         return false;
@@ -84,6 +85,11 @@ pub fn is_prey_of(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool 
     };
     // A rider is no prey on its own and hunts nothing while it rides (parasite §2).
     if prey.attached.is_some() || hunter.attached.is_some() {
+        return false;
+    }
+    // A glider (F3, the seedporter) is prey only while grounded: climbing, perched or
+    // gliding it is out of a walker's reach.
+    if config.founder(pf).glider.is_some() && prey.mobility.mode != crate::MobilityMode::Ground {
         return false;
     }
     h.hunts(pf) && prey.body <= h.prey_max_ratio * hunter.body

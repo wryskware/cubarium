@@ -503,11 +503,8 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         }
         // F1: the hover-sip teacher.
         Founder::Bellwing => Box::new(HoverSip::with_config(teachers)),
-        // F3 stub: the browser's forager on the seedporter's manifest. F3 builds its own
-        // heuristic (Brief F3: climb to fruit, eat, glide on, sleep in a crown).
-        Founder::Seedporter => {
-            Box::new(BrowserForager::for_founder(Founder::Seedporter, teachers))
-        }
+        // F3: the seedporter's fruit forager (the body climbs, perches and glides).
+        Founder::Seedporter => Box::new(FruitForager::with_config(teachers)),
     }
 }
 
@@ -813,6 +810,109 @@ impl Controller for BrowserForager {
             forward,
             turn,
             feed,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.wander_bias = 1.0;
+        self.wander_ticks = 0;
+        self.escape = 0;
+    }
+
+    fn flees(&self) -> bool {
+        true
+    }
+}
+
+/// The seedporter's **fruit forager** (F3, Brief F3's heuristic), observation-only. The
+/// body does the climbing, perching and gliding (`step`'s glider act): walking into a
+/// tall stem climbs it to the crown, forward effort on a perch glides off (or climbs down
+/// when the drop is short), and a glide is steered by `turn`. So the forager only:
+///
+/// 1. **eats** (stops, `feed`) while fruit is in the mouth's reach (`Taste`) and its
+///    reserve is short of [`TeacherConfig::seedporter_full_at`] — until the source is empty
+///    or it is full;
+/// 2. else **turns toward** the cone sector with the most fruit in view and goes forward
+///    — walking to a stem and up it, or off a crown in a glide aimed at it;
+/// 3. else **wanders** forward (on a perch, that glides it off or takes it down), backing
+///    off a refused motor.
+///
+/// Night and downpours are the body's roost reflex, not this. It flees like the grazer.
+#[derive(Clone, Debug)]
+pub struct FruitForager {
+    wander_bias: f64,
+    wander_ticks: u32,
+    escape: u32,
+    selfm: crate::manifest::Module,
+    taste: crate::manifest::Module,
+    cone: crate::manifest::Module,
+    cfg: TeacherConfig,
+}
+
+impl FruitForager {
+    /// The seedporter's forager on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
+    pub fn with_config(cfg: TeacherConfig) -> FruitForager {
+        let manifest = Founder::Seedporter.manifest();
+        FruitForager {
+            cfg,
+            wander_bias: 1.0,
+            wander_ticks: 0,
+            escape: 0,
+            selfm: module_slot(&manifest, "Self"),
+            taste: module_slot(&manifest, "Taste(1)"),
+            cone: module_slot(&manifest, "Cone(3, foliage/body)"),
+        }
+    }
+}
+
+impl Controller for FruitForager {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        let cfg = self.cfg;
+        let reserve = o[self.selfm.offset + 1];
+        let full = reserve >= cfg.seedporter_full_at;
+        let taste = o[self.taste.offset];
+        let tasted = o[self.taste.offset + 2] > 0.5 && taste > cfg.feed_gate;
+        if tasted && !full {
+            self.wander_ticks = 0;
+            return Response::Bounded(Actions {
+                forward: 0.0,
+                turn: 0.0,
+                feed: 1.0,
+            });
+        }
+        let away = self.wander_bias;
+        if let Some((forward, turn)) = escape(&cfg, &mut self.escape, o[self.selfm.offset + 7] < cfg.motor_refused, away) {
+            self.wander_ticks = 0;
+            return Response::Bounded(Actions { forward, turn, feed: 0.0 });
+        }
+        let base = self.cone.offset;
+        // Per sector, the fruit fraction sits in the browser's foliage slot, base + k*6 + 2.
+        let frac = [o[base + 2], o[base + 8], o[base + 14]];
+        let turn = if frac.iter().any(|&f| f > cfg.browser_sector_gate) {
+            self.wander_ticks = 0;
+            if frac[0] >= frac[1] && frac[0] >= frac[2] {
+                self.wander_bias = -1.0;
+                -cfg.browser_gaze_turn
+            } else if frac[2] > frac[1] {
+                self.wander_bias = 1.0;
+                cfg.browser_gaze_turn
+            } else {
+                0.0
+            }
+        } else {
+            self.wander_ticks += 1;
+            if self.wander_ticks >= cfg.browser_wander_flip {
+                self.wander_ticks = 0;
+                self.wander_bias = -self.wander_bias;
+            }
+            self.wander_bias * cfg.browser_wander_turn
+        };
+        // Full forward even against a contact: a wall in front is often the vine it climbs
+        // (the body attaches), and a refused motor is the escape's.
+        Response::Bounded(Actions {
+            forward: 1.0,
+            turn,
+            feed: if full { 0.0 } else { 1.0 },
         })
     }
 

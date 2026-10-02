@@ -1923,6 +1923,24 @@ pub(crate) fn cone_readings(
     manifest: &Manifest,
     body: &crate::Body,
 ) -> ConeReading {
+    cone_readings_in(view, None, occupancy, observer_id, pose, standing_y, manifest, body)
+}
+
+/// [`cone_readings`], with the plant layer a **fruit cone** reads (F3,
+/// [`Manifest::cone_counts_fruit`]): given `fruit`, a ray's first hit fills the class slot
+/// only when it is fruit — a crown cell of a stand hanging fruit, or a latticevine face in
+/// fruit it entered — and plain foliage is an occluder.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn cone_readings_in(
+    view: &VoxelView<'_>,
+    fruit: Option<&cubarium_voxel_flora::FloraView<'_>>,
+    occupancy: &ConeOccupancy,
+    observer_id: u64,
+    pose: &Pose,
+    standing_y: u32,
+    manifest: &Manifest,
+    body: &crate::Body,
+) -> ConeReading {
     let invalid = ConeReading {
         valid: false,
         sectors: [SectorReading::ZERO; 3],
@@ -1953,6 +1971,16 @@ pub(crate) fn cone_readings(
                     None => clear += 1,
                     Some((dist, fine, cell)) => {
                         let mut class = fine.coarse();
+                        if let Some(fv) = fruit {
+                            let terrain = fine == Fine::Terrain;
+                            if class == Class::Foliage || terrain {
+                                class = if crate::flight::fruit_at_hit(view, fv, cell, terrain, origin, dir, dist) {
+                                    Class::Foliage
+                                } else {
+                                    Class::Occluder
+                                };
+                            }
+                        }
                         if class == Class::Foliage
                             && let Some(band) = &band
                             && !band.contains(&i64::from(view.config.coords(cell).1))

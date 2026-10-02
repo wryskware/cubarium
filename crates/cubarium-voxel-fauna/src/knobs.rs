@@ -301,6 +301,14 @@ pub struct TeacherConfig {
     /// below; searching it never climbs toward it; taking off under it, it goes out level.
     #[serde(default = "bw_roost_ceiling")]
     pub bellwing_roost_ceiling: f64,
+    /// **The seedporter's heuristic** (F3): it stops eating once `Self.reserve` reaches
+    /// this (a fraction of the adult reserve reference) and moves on.
+    #[serde(default = "sp_full")]
+    pub seedporter_full_at: f64,
+}
+
+fn sp_full() -> f64 {
+    0.9
 }
 
 fn bw_full() -> f64 {
@@ -373,6 +381,7 @@ impl Default for TeacherConfig {
             bellwing_gaze_turn: bw_gaze(),
             bellwing_wander_forward: bw_wander_forward(),
             bellwing_roost_ceiling: bw_roost_ceiling(),
+            seedporter_full_at: sp_full(),
         }
     }
 }
