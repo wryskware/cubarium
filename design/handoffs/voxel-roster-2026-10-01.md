@@ -193,6 +193,18 @@ niche)
 - **Presenter:** draw with the baked specimen model through R0's fallback; no rebake.
   The coat is the specimen coat. Quarter turns as today; free rotation is not in R1.
 
+### After R0 (032e775b, 50e54b83): what R1 builds on
+
+- **Diet:** a food set, written in TOML as `diet = ["litter","carrion"]`.
+- **Founding:** `[fauna.founders.<lineage>] founding_count = N` in a preset, with
+  `founding = "bodies"` and `founding_site = "at_food"` for both new animals.
+- **Prey list:** `Hunter::LANTERNJAW.prey` is a positional array; add the capgnawer's
+  column.
+- **Checklist:** follow the one on `Founder`.
+- **Glassfilm** is merged (ff7ad6dc). The R2b ripple-snail builds on it later.
+- **Measure:** use `founder_tally` (R0); `voxel_census config=` reads the preset's
+  `[fauna]` tables.
+
 ### Check t = 0 first
 
 On the desktop terrarium at t = 0, how much foliage stands in a loftstrider's 0.8–3.5 m
