@@ -353,10 +353,16 @@ pub struct Stand {
     /// predation-and-flight §3.7): paid from the reserve in daylight up to the species'
     /// `fruit_cap` on an adult stand, taken by [`Flora::take_stand_fruit`], falling to
     /// litter at the stand's site when left uneaten past `fruit_drop_s`. Like nectar, the
-    /// stand's material, not its tissue.
-    // F3 stub: declared; nothing makes, drops or counts it yet.
+    /// stand's material, not its tissue: its energy is the species' density, its mineral
+    /// stays in [`Stand::mineral`] until it is taken or falls, and it falls to litter when
+    /// the stand dies.
     #[serde(default)]
     pub fruit: f64,
+    /// Seconds the current crop has hung: counted from the tick the stock goes from empty
+    /// to holding fruit, back to zero when it is eaten out or falls. When it reaches the
+    /// species' `fruit_drop_s` the whole hanging crop falls to the litter (F3).
+    #[serde(default)]
+    pub fruit_age_s: f64,
 }
 
 impl Stand {
@@ -436,10 +442,11 @@ impl Stand {
         self.layer_stock[best] = (self.layer_stock[best] + residue).max(0.0);
     }
 
-    /// `W + P + Q + parcel`: every unit of organic matter this stand holds, which is what
-    /// the ledger has to account for and what the stand's mineral is a stock against.
+    /// `W + P + Q + parcel + nectar + fruit`: every unit of organic matter this stand
+    /// holds, which is what the ledger has to account for and what the stand's mineral is
+    /// a stock against.
     pub fn material(&self) -> f64 {
-        self.organic() + self.parcel + self.nectar
+        self.organic() + self.parcel + self.nectar + self.fruit
     }
 }
 
@@ -1016,8 +1023,8 @@ pub struct SpeciesConfig {
     /// **Fruit** (F3, the roster brief's Brief F3; predation-and-flight §3.7): organic
     /// matter an adult stand moves from its reserve into its [`Stand::fruit`] stock per
     /// second, in daylight only, until the stock reaches [`SpeciesConfig::fruit_cap`].
-    /// Zero makes none: every species but lanternberry.
-    // F3 stub: declared, 0 everywhere, read by nothing.
+    /// Zero makes none: every species but lanternberry. "Adult" is past the seedling
+    /// profile (`profile_stage >= 1`); "daylight" is the world's `life_daylight` above zero.
     #[serde(default)]
     pub fruit_per_s: f64,
     /// The most fruit an adult stand holds, organic units.
@@ -1340,7 +1347,7 @@ impl SpeciesConfig {
             nectar_per_s: 0.0,
             nectar_cap: 0.0,
             nectar_mineral_fraction: 0.0,
-            // F3 stub: no species makes fruit yet (lanternberry will).
+            // F3: no species but lanternberry makes fruit ([`SpeciesConfig::lanternberry`]).
             fruit_per_s: 0.0,
             fruit_cap: 0.0,
             fruit_drop_s: 0.0,
@@ -2104,6 +2111,19 @@ impl SpeciesConfig {
             hop: 2,
             seed_mass: 3,
             overtop_per_check: 0.1,
+            // F3 (the seedporter's food, predation-and-flight §3.7): fruit hung from the
+            // reserve in daylight. 1e-4 a second is bloomcrown's nectar rate, about 1 % of
+            // a full-grown shrub's gross income at full light (assimilation 0.004/s ×
+            // foliage 2.0); the cap, 0.02, is 200 s of it and under a twentieth of the
+            // reserve cap (0.5), so an unvisited crop costs the plant a small, bounded
+            // store. Uneaten, the crop falls to the litter after half an hour (1800 s).
+            // The mineral share 0.01 is nectar's: small, not zero. The shrub's own seed
+            // parcel (`propagule_rate`, dropped beneath it) stays; fruit is a second,
+            // carried crop.
+            fruit_per_s: 1e-4,
+            fruit_cap: 0.02,
+            fruit_drop_s: 1800.0,
+            fruit_mineral_fraction: 0.01,
             wood_max: 1.0,
             alive_min: 0.02,
             donor_min: 0.4,
@@ -4246,6 +4266,7 @@ impl Flora {
             defence: 0.0,
             nectar: 0.0,
             fruit: 0.0,
+            fruit_age_s: 0.0,
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);
@@ -4449,10 +4470,71 @@ impl Flora {
     /// `consumed_*_out`, with the mineral and energy the fruit carries: the species'
     /// `fruit_mineral_fraction` of the organic matter out of the stand's mineral (never
     /// more than it holds), and its `energy_density`.
-    // F3 stub: no stand holds fruit yet; always `None`.
     pub fn take_stand_fruit(&mut self, site: Site, want: f64) -> Option<Taken> {
-        let _ = (site, want);
-        None
+        if !(want > 0.0) || !want.is_finite() {
+            return None;
+        }
+        let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
+        let sc = self.config.species(self.stands[i].species);
+        let (fraction, e_v) = (sc.fruit_mineral_fraction.max(0.0), sc.energy_density);
+        let stand = &mut self.stands[i];
+        if !(stand.fruit > 0.0) {
+            return None;
+        }
+        let took = if want >= stand.fruit {
+            stand.fruit_age_s = 0.0;
+            std::mem::replace(&mut stand.fruit, 0.0)
+        } else {
+            stand.fruit -= want;
+            want
+        };
+        let mineral = (fraction * took).min(stand.mineral.max(0.0));
+        stand.mineral -= mineral;
+        Some(self.book_consumed(Taken {
+            organic: took,
+            mineral,
+            energy: e_v * took,
+        }))
+    }
+
+    /// **Seeds voided by an animal** (F3, the seedporter's gut): `organic` and `mineral` of
+    /// `species`' seed land in the bank of `site` (the arrival bin of this tick), booked as
+    /// `deposited_*_in` with the energy the seeds hold, `energy_density · organic`; any
+    /// difference between that and the `energy` the depositor hands over leaves as heat,
+    /// so a depositor that carried the seeds at another density still closes its books.
+    /// Refused (`false`, booking nothing) when a number is not finite or negative, or the
+    /// organic matter is zero. A site with no ground entry is provisioned as
+    /// [`Flora::deposit`] provisions one.
+    pub fn deposit_seeds(&mut self, site: Site, species: Species, organic: f64, mineral: f64, energy: f64) -> bool {
+        for v in [organic, mineral, energy] {
+            if !v.is_finite() || v < 0.0 {
+                return false;
+            }
+        }
+        if !(organic > 0.0) {
+            return false;
+        }
+        let gi = match self.ground.binary_search_by_key(&site, |g| g.site) {
+            Ok(i) => i,
+            Err(i) => {
+                self.ledger.seeded_mineral_in += self.config.initial_mineral;
+                self.ground
+                    .insert(i, Ground::new(site, self.config.initial_mineral));
+                i
+            }
+        };
+        let sc = self.config.species(species);
+        let held = sc.energy_density * organic;
+        self.ledger.deposited_organic_in += organic;
+        self.ledger.deposited_mineral_in += mineral;
+        self.ledger.deposited_energy_in += energy;
+        self.ledger.heat_out += energy - held;
+        let fresh = self.ground[gi].seeds.is_empty();
+        seeds::add_cohort(&mut self.ground[gi], species, organic, mineral, self.tick, sc);
+        if fresh {
+            seeds::schedule(self, site);
+        }
+        true
     }
 
     /// Drink up to `want` of the nectar of the stand on `site` (F1, §3.7): `None` when

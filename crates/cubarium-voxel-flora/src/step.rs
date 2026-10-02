@@ -2663,6 +2663,32 @@ fn grow_stand(
         }
     }
 
+    // ---- 4.4c fruit (F3, predation-and-flight §3.7): the same move for a species that
+    // hangs fruit, up to `fruit_cap`. The crop's clock runs while any fruit hangs; at
+    // `fruit_drop_s` the whole uneaten crop falls to this site's litter (with senescence,
+    // below), carrying `fruit_mineral_fraction` of itself out of the stand's mineral.
+    if sc.fruit_per_s > 0.0 && daylight > 0.0 && stand.profile_stage >= 1 {
+        let room = (sc.fruit_cap - stand.fruit).max(0.0);
+        let make = (sc.fruit_per_s * DT).min(room).min(stand.reserve.max(0.0));
+        if make > 0.0 {
+            stand.reserve -= make;
+            stand.fruit += make;
+        }
+    }
+    let mut fell = (0.0, 0.0);
+    if stand.fruit > 0.0 {
+        stand.fruit_age_s += DT;
+        if stand.fruit_age_s >= sc.fruit_drop_s {
+            let o = std::mem::replace(&mut stand.fruit, 0.0);
+            let m = (sc.fruit_mineral_fraction.max(0.0) * o).min(stand.mineral.max(0.0));
+            stand.mineral -= m;
+            stand.fruit_age_s = 0.0;
+            fell = (o, m);
+        }
+    } else {
+        stand.fruit_age_s = 0.0;
+    }
+
     // The tissue built out of this tick's income settles its mineral: `n_tissue` per
     // unit, met from what arrived with the income first, the excess released to the
     // site's pool and a shortfall drawn from it. Only this stand draws on this site.
@@ -2686,7 +2712,8 @@ fn grow_stand(
     let shed_mineral = pull_mineral(stand, organic_before, shed);
     {
         let mut heat = FloraLedger::default();
-        add_litter(config, g, shed, shed_mineral, e_v * shed, &mut heat);
+        let (fo, fm) = fell;
+        add_litter(config, g, shed + fo, shed_mineral + fm, e_v * (shed + fo), &mut heat);
         if heat.heat_out != 0.0 {
             book.heat(heat.heat_out);
         }
@@ -2790,7 +2817,7 @@ pub(crate) fn die(
     }
     // A parcel dies with its donor: material saved for a package that will never be sent
     // falls where the foliage and the reserve fall, and its mineral goes with it.
-    let shed = stand.foliage + stand.reserve + stand.parcel + stand.nectar;
+    let shed = stand.foliage + stand.reserve + stand.parcel + stand.nectar + stand.fruit;
     let shed_mineral = (stand.mineral - wood_mineral).max(0.0);
     let gi = ground_slot(ground, stand.site);
     add_litter_cap(

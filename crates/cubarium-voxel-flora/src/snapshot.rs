@@ -17,7 +17,8 @@ use crate::Flora;
 // 14: F1 — bloomcrown's nectar is made and taken; `SpeciesConfig::nectar_mineral_fraction`.
 // 15: F3 (tests-first stubs) — `Stand::fruit`, `SpeciesConfig::{fruit_per_s, fruit_cap,
 // fruit_drop_s, fruit_mineral_fraction}`.
-pub const SCHEMA: u32 = 15;
+// 16: F3 — lanternberry fruit is made, falls and is taken; `Stand::fruit_age_s`.
+pub const SCHEMA: u32 = 16;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

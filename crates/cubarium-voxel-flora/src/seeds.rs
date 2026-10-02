@@ -252,9 +252,9 @@ fn ensure_wheel(flora: &mut Flora) {
     flora.bank_wheel = wheel;
 }
 
-/// Put `site` on the wheel, for a fixture that banks seeds by hand. A site already on it
+/// Put `site` on the wheel: a fixture that banks seeds by hand, or seeds an animal voids
+/// ([`Flora::deposit_seeds`]). A site already on it
 /// is deduplicated at its check.
-#[cfg(test)]
 pub(crate) fn schedule(flora: &mut Flora, site: Site) {
     ensure_wheel(flora);
     let period = check_period(&flora.config);
@@ -502,6 +502,7 @@ fn newborn(
         defence: 0.0,
         nectar: 0.0,
         fruit: 0.0,
+        fruit_age_s: 0.0,
     };
     // A newborn's foliage goes into its seedling profile bottom-up, like any other tissue.
     born.bin_foliage(sc, config.voxel_m);
