@@ -125,6 +125,20 @@ COATS = {
         "a_head": ("#B691BF", "#E5D6ED"), "a_eye": ("#B71984", "#E437C1"),
         "a_lure": ("#63EEFC", "#ADFAFD"), "a_mark": ("#4A4452", "#695787"),
     },
+    # body (teal low -> violet high), neck, legs, feet, knee and hip bulbs and the pink head,
+    # eyes (magenta), tusks (bone), frond blades (lilac), frond edges (cyan), pupils and the
+    # mouth hole. Sampled 2026-10-01 from the reference (k-means per body region), then
+    # pushed brighter and more saturated to match its vividness (Wrysk).
+    "loftstrider": {
+        "a_main": ("#22B4D2", "#8A62E6"), "a_pale": ("#A07CE0", "#D2A8F4"),
+        "a_limb": ("#18A2C8", "#8C5CDC"), "a_foot": ("#2ED2D8", "#6CF2E8"),
+        "a_mark": ("#D466B8", "#F79AD6"), "a_eye": ("#F02E9E", "#FF4CBA"),
+        "a_head": ("#EEDAB4", "#FFF0CC"), "a_membrane": ("#C6AEFF", "#EADCFF"),
+        "a_glow": ("#00C6F2", "#36E8FF"), "a_dark": ("#1A0E1A", "#3A1C2A"),
+        # the eyes' slit pupils: smaller than a voxel, and not in the bake's palette, so
+        # they are drawn in Blender only and never cover an eye's magenta cell
+        "a_pupil": ("#120810", "#120810"),
+    },
     # plum bell (lighter toward the mouth), lilac wings, cyan leading edges, mauve wing
     # roots, peach tendril, magenta rim and underside
     "bellwing": {
@@ -774,6 +788,99 @@ def seg_tail(pts, r0, r1):
             cyl(tuple(a - d), tuple(a + d), ra * 1.06, ra * 1.06, mat=c("a_dark"), seg=12)
 
 
+# --- loftstrider · radial canopy browser (2.2 x 2.4 x 3.4 m) ---------------------------------
+#
+# Pick (Wrysk 2026-10-01): art/gen/artbook/loftstrider.png, a front view. Radially symmetric about a vertical axis, in sixes (Wrysk: the image does not keep
+# these counts): an onion-shaped body on six long legs, six magenta eyes round its middle,
+# each between two legs; a long neck up to a pink head with the mouth hole on top; round the
+# mouth six bone tusks and six feeding fronds, alternating and equally spaced, the fronds in
+# three sizes (`LS_FROND`). Front (+x) is
+# an eye. Legs and fronds at 30 + 60 k degrees, eyes and tusks at 60 k. Sizes follow D15:
+# underside ~1.2 m, eyes at ~1.5 m, mouth at ~2.8 m, frond crowns to ~3.4 m.
+#
+# Voxel placement (cell centres at x = 0.125 i, y = 0.125 j, z = 0.125 k + 0.0625): the twelve
+# tusk and frond roots sit on the radius-0.25 m ring round the mouth, which falls on twelve
+# distinct cells, so each keeps its own cell at 0.125 m.
+
+def ribbon(path, widths, side, mat, th=0.02):
+    """A thin closed blade along `path` (3D points), `widths[k]` across at each point, laid
+    out along the unit vector `side`: a slab `th` thick."""
+    bm = bmesh.new()
+    pts = [Vector(p) for p in path]
+    n = len(pts)
+    rows = []
+    for k, p in enumerate(pts):
+        t = (pts[min(k + 1, n - 1)] - pts[max(k - 1, 0)]).normalized()
+        nrm = t.cross(side).normalized()
+        w = side * (widths[k] / 2)
+        rows.append([bm.verts.new(p + sgn * w + h * nrm * th / 2) for sgn, h in ((-1, 1), (1, 1), (1, -1), (-1, -1))])
+    for k in range(n - 1):
+        a, b = rows[k], rows[k + 1]
+        for q in range(4):
+            bm.faces.new((a[q], a[(q + 1) % 4], b[(q + 1) % 4], b[q]))
+    bm.faces.new(rows[0][::-1])
+    bm.faces.new(rows[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return L.mk("ribbon", bm, mat)
+
+
+# The fronds' sizes, from the root, one per frond going round (k = 0..5 at 30 + 60 k
+# degrees), 1 being the reference's size. Wrysk 2026-10-01 chose them mixed: each of
+# 100, 75 and 60 % twice, no two neighbours alike. `LS_FROND=0.75` (all alike) or six
+# values in the environment override it for comparisons.
+LS_FROND = [float(v) for v in os.environ.get("LS_FROND", "1,0.75,0.6,0.75,1,0.6").split(",")]
+LS_FROND = LS_FROND * 6 if len(LS_FROND) == 1 else LS_FROND
+
+
+def loftstrider():
+    def zone(f, s, p):
+        return 0 if p.z < 1.98 else (1 if p.z < 2.62 else 2)   # body, neck, pink head
+    column = [  # x, y, z, radius: the body, the neck and the head in one loft up the axis
+        (0, 0, 1.15, 0.05), (0, 0, 1.19, 0.30), (0, 0, 1.29, 0.47), (0, 0, 1.43, 0.555),
+        (0, 0, 1.57, 0.56), (0, 0, 1.71, 0.50), (0, 0, 1.84, 0.38), (0, 0, 1.96, 0.26),
+        (0, 0, 2.14, 0.19), (0, 0, 2.40, 0.155), (0, 0, 2.60, 0.16), (0, 0, 2.71, 0.20),
+        (0, 0, 2.78, 0.21), (0, 0, 2.83, 0.13)]
+    loft([(x, y, z, r, r, r) for x, y, z, r in column], [c("a_main"), c("a_pale"), c("a_mark")], zone,
+         nring=90, nseg=36)
+    # the mouth hole on top
+    ell((0, 0, 2.835), (0.07, 0.07, 0.025), c("a_dark"))
+    for k in range(6):
+        a = math.radians(60 * k)            # eyes and tusks
+        b = math.radians(30 + 60 * k)       # legs and fronds
+        ca, sa, cb, sb = math.cos(a), math.sin(a), math.cos(b), math.sin(b)
+        # eye: a magenta lens on the body's middle facing out, a dark vertical slit pupil
+        ell((0.53 * ca, 0.53 * sa, 1.52), (0.06, 0.1, 0.1), c("a_eye"), rot=rz(60 * k))
+        ell((0.585 * ca, 0.585 * sa, 1.52), (0.012, 0.014, 0.075), c("a_pupil"), rot=rz(60 * k))
+        # tusk: from the head's rim, curving up and out
+        tube([(0.19 * ca, 0.19 * sa, 2.73), (0.25 * ca, 0.25 * sa, 2.83), (0.29 * ca, 0.29 * sa, 2.95),
+              (0.28 * ca, 0.28 * sa, 3.06), (0.24 * ca, 0.24 * sa, 3.12)], 0.05, 0.008, c("a_head"), seg=10)
+        # frond: rises from the rim, arcs outward and droops, its edges frilled cyan
+        prof = [(0.22, 2.76), (0.36, 3.02), (0.56, 3.27), (0.82, 3.37), (1.04, 3.27), (1.17, 3.03),
+                (1.2, 2.78), (1.14, 2.6)]
+        fs = LS_FROND[k]
+        prof = [(0.22 + (r - 0.22) * fs, 2.76 + (z - 2.76) * fs) for r, z in prof]
+        path = [(r * cb, r * sb, z) for r, z in catmull(prof, 16)]
+        widths = [0.07 + 0.3 * fs * math.sin(math.pi * min(1.0, t / 15 * 1.12)) for t in range(16)]
+        side = Vector((-sb, cb, 0))
+        ribbon(path, widths, side, c("a_membrane"), th=0.035)
+        for sgn in (-1, 1):
+            edge = [tuple(Vector(p) + side * (sgn * w / 2)) for p, w in zip(path, widths)]
+            tube(edge[1:], 0.025, 0.016, c("a_glow"), seg=6)
+        # leg: a hip bulb under the body, the thigh out and down to a bulbous knee, the shin
+        # down to the ankle, three splayed toes
+        hip, knee, ankle = (0.40 * cb, 0.40 * sb, 1.22), (0.72 * cb, 0.72 * sb, 0.80), (0.92 * cb, 0.92 * sb, 0.16)
+        ell(hip, (0.12,) * 3, c("a_limb"))
+        tube([hip, knee], 0.088, 0.072, c("a_limb"), seg=12)
+        ell(knee, (0.1,) * 3, c("a_mark"))
+        tube([knee, ankle], 0.07, 0.06, c("a_limb"), seg=12)
+        ell(ankle, (0.075,) * 3, c("a_mark"))
+        for dt in (-30, 0, 30):
+            d = math.radians(30 + 60 * k + dt)
+            toe = (0.92 * cb + 0.17 * math.cos(d), 0.92 * sb + 0.17 * math.sin(d), 0.05)
+            cyl(ankle, toe, 0.06, 0.05, mat=c("a_foot"), seg=8)
+            ell(toe, (0.1, 0.07, 0.05), c("a_foot"), rot=rz(30 + 60 * k + dt))
+
+
 # name: (builder, reference length, width, height in metres). The founders' references are
 # their adult bodies (`assets/voxel-models/source.json`); a specimen is built and baked at
 # its own (the bake's placeholder table), here as its built extent.
@@ -786,6 +893,7 @@ REF = {
     "seedporter": (seedporter, 0.2, 0.63, 0.94),
     "bellwing": (bellwing, 0.05, 0.375, 0.4),
     "lanternjaw": (lanternjaw, 1.0, 0.25, 0.45),
+    "loftstrider": (loftstrider, 2.2, 2.4, 3.4),
 }
 
 
@@ -811,6 +919,7 @@ PICKS = {
     "littershredder": "littershredder.png", "ripple-snail": "ripple-snail-organic.png",
     "capgnawer": "capgnawer-rose-bark.png", "seedporter": "seedporter.png", "bellwing": "bellwing.png",
     "lanternjaw": "lanternjaw.png",
+    "loftstrider": "loftstrider.png",
 }
 # The pick's view: camera azimuth (degrees from +x, counter-clockwise seen from above; -90
 # looks from -y at the left flank) and elevation.
@@ -818,6 +927,7 @@ VIEWS = {
     "chorister": (-80.0, 8.0), "frondgrazer": (100.0, 8.0), "littershredder": (115.0, 20.0),
     "ripple-snail": (-60.0, 22.0), "capgnawer": (20.0, 22.0), "seedporter": (0.0, 5.0),
     "bellwing": (0.0, 4.0), "lanternjaw": (35.0, 22.0),
+    "loftstrider": (0.0, 8.0),
 }
 
 
