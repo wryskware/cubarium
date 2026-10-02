@@ -1782,6 +1782,10 @@ pub struct FaunaLedger {
     /// `eaten_organic_in` over every bite this layer took.
     pub bites_by_food: [u64; Food::COUNT],
     pub eaten_by_food: [f64; Food::COUNT],
+    /// A founder body's bites by lineage **and** food class (roster R1's measure: which
+    /// of its foods a lineage actually takes, when two lineages share one). Founder
+    /// bites only, so each row sums to [`FaunaLedger::bites_by_founder`].
+    pub bites_by_founder_food: [[u64; Food::COUNT]; Founder::COUNT],
     /// Steps taken, one voxel each.
     pub steps: u64,
     /// Movement counters, per lineage: walls climbed to the top and

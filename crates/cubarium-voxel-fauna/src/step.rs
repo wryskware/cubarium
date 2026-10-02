@@ -1783,6 +1783,7 @@ fn founder_feed(
     }
     let placed = assimilate(fauna, i, sc, taken, yield_fraction);
     fauna.ledger.bites_by_founder[founder.index()] += 1;
+    fauna.ledger.bites_by_founder_food[founder.index()][food.index()] += 1;
     fauna.ledger.assimilated_by_founder[founder.index()] += placed;
     fauna.animals[i].founder_state.feedback.intake += placed;
     true
