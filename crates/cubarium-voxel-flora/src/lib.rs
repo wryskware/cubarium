@@ -2463,8 +2463,8 @@ pub struct FloraConfig {
     /// L, and the voxel readings ([`SpeciesConfig::crown_height`]) divide by this. Set by
     /// [`FloraConfig::for_voxel_size`]; the reference 0.25 m by default.
     pub voxel_m: f64,
-    /// **Glassfilm** (R2a): a site is wet-eligible while its standing water is above 0
-    /// and at most this deep, metres.
+    /// **Glassfilm** (R2a): a site is wet-eligible while its standing water is at least
+    /// `film_wet_min_depth_m` and at most this deep, metres.
     pub film_max_depth_m: f64,
     /// Glassfilm: light under water is the sky light times `exp(-this · depth)`, per metre.
     pub film_extinction_per_m: f64,
@@ -2552,7 +2552,15 @@ impl Default for FloraConfig {
             film_maintenance_per_s: 0.0001,
             film_spread_per_s: 0.0002,
             film_dry_death_per_s: 0.005,
+            // Plausible, untuned (film-dry, 2026-10-02): on the desktop terrarium's
+            // founding (seed 1) the wet faces split into residues under 1e-3 m (108 open,
+            // 836 covered, nearly all under 1e-6 m) and pools from 0.03 m up (a half-cell
+            // margin is ~0.06 m, a one-cell one ~0.11 m), with 32 faces between. 1 cm sits
+            // in that gap: ten times the residues, a sixth of a one-cell margin.
             film_wet_min_depth_m: 0.01,
+            // Under the render's first drawn level (1/16 of capacity): a mark fades out
+            // before the film is cut, and a dried full film is gone in ln 50 / 0.005 s,
+            // about 13 minutes.
             film_gone_fraction: 0.02,
             // Half the capacity: a live world founds an established pond, not a fresh
             // film (roster R2b repair). Read only when `seed_film_at_founding` is on.
@@ -4670,7 +4678,8 @@ impl Flora {
     }
 
     /// **Glassfilm founding** (R2a): put `film_seed_per_m2` of film on every wet-eligible
-    /// support face of `world` (standing water above 0 and at most `film_max_depth_m`),
+    /// support face of `world` (standing water from `film_wet_min_depth_m` to
+    /// `film_max_depth_m`: a residue is not seeded),
     /// at `film_n_tissue` mineral and `film_energy_density` energy per unit, booked as
     /// introduced the way `Seed` is. A site with no [`Ground`] is provisioned with its
     /// `initial_mineral` as a deposit's is, under either [`Provision`]. Returns how many

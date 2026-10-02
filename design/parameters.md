@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (753 rows)
+**`flora.*`** (755 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1115,6 +1115,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_maintenance_per_s` | 0.0001 | /s | [0, inf) |  | - | placeholder | glassfilm: upkeep, respired |
 | `flora.film_spread_per_s` | 0.0002 | /s | [0, inf) |  | - | placeholder | glassfilm: fragments a neighbour sends per unit of its film |
 | `flora.film_dry_death_per_s` | 0.005 | /s | [0, inf) |  | - | placeholder | glassfilm: loss on a dry or too-deep site, to litter |
+| `flora.film_wet_min_depth_m` | 0.01 | m | [0, inf) |  | - | placeholder | glassfilm: shallowest standing water a site is wet-eligible under (a residue is dry) |
+| `flora.film_gone_fraction` | 0.02 | fraction of capacity | [0, 1] |  | - | placeholder | glassfilm: dry film below this share of capacity dies whole to litter |
 | `flora.film_seed_per_m2` | 0.2 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm: founding film per square metre |
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |

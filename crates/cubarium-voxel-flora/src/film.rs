@@ -6,8 +6,12 @@
 //! decomposition, so what dies to litter this tick decomposes from the next. Per site
 //! holding film, from the film it held when the step began:
 //!
-//! - **Eligible** while the standing water over its support face is above 0 and at most
-//!   `film_max_depth_m`.
+//! - **Eligible** while the standing water over its support face is at least
+//!   `film_wet_min_depth_m` (and above 0) and at most `film_max_depth_m`. Shallower water
+//!   is a **residue** and the site is dry: what a drained shower or a stopped film leaves
+//!   on a ledge, below the depth the water solver still spreads, often under an overhang
+//!   where evaporation never reaches it, so without the threshold such a ledge would read
+//!   wet forever.
 //! - **Growth** (eligible sites only): `film_growth_per_s · light · film · (1 − film / K)`,
 //!   `K = film_capacity_per_m2 · cell area`, `light` = the plants' sky × canopy
 //!   transmission × the day's daylight × `exp(−film_extinction_per_m · depth)`. No
@@ -18,8 +22,12 @@
 //!   respired (`respired_out`, its energy at the stock's density as heat), its mineral
 //!   back to the site's pool.
 //! - **Death** on a dry or too-deep site: `film_dry_death_per_s · film` into the site's
-//!   own litter, under litter's energy cap.
-//! - **Spread**: an eligible site with less film gains from each eligible 4-neighbour
+//!   own litter, under litter's energy cap. In the step a dry film would fall below
+//!   `film_gone_fraction` of the site's capacity, all of it dies (what upkeep does not
+//!   respire goes to litter), so a dried site ends at exactly no film and leaves the film
+//!   sites rather than keeping an exponential sliver.
+//! - **Spread** (between eligible sites only, so a residue neither gives nor receives): an
+//!   eligible site with less film gains from each eligible 4-neighbour
 //!   `film_spread_per_s · neighbour film` (never more than half the difference, so a pair
 //!   does not overshoot and swap), paid by the neighbour at its own densities. A target
 //!   with no [`Ground`] is provisioned as a deposit's is.
@@ -37,8 +45,9 @@ pub(crate) fn is_film_tick(tick: u64) -> bool {
     tick.is_multiple_of(FILM_EVERY)
 }
 
-/// The standing water over support face `(x, y, z)`, if the face is wet-eligible: above 0
-/// and at most `film_max_depth_m`.
+/// The standing water over support face `(x, y, z)`, if the face is wet-eligible: above 0,
+/// at least `film_wet_min_depth_m` (shallower is a residue, dry) and at most
+/// `film_max_depth_m`.
 pub(crate) fn eligible_depth(
     view: &VoxelView<'_>,
     c: &FloraConfig,
@@ -47,7 +56,7 @@ pub(crate) fn eligible_depth(
     z: u32,
 ) -> Option<f64> {
     let d = view.standing_depth_m(x, y, z);
-    (d > 0.0 && d <= c.film_max_depth_m).then_some(d)
+    (d > 0.0 && d >= c.film_wet_min_depth_m && d <= c.film_max_depth_m).then_some(d)
 }
 
 /// [`eligible_depth`] as a yes or no.
@@ -129,10 +138,16 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
             respired *= f / (respired + died);
             died = f - respired;
         }
+        // A dry film that would fall under the floor dies whole this step: a dried site
+        // ends at exactly nothing, not an exponential sliver.
+        let gone = depth.is_none() && f - respired - died < c.film_gone_fraction * cap;
+        if gone {
+            died = f - respired;
+        }
         let lost = respired + died;
         if lost > 0.0 {
             // Pro rata out of the stock, then split between the two sinks.
-            let all = lost >= f;
+            let all = gone || lost >= f;
             let lost_m = if all {
                 g.film_mineral
             } else {
