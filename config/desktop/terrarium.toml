@@ -67,3 +67,9 @@ founding_count = 8
 # worlds are unchanged.
 [fauna.founders.bellwing]
 founding_count = 6
+
+# F3: the seedporter, a diurnal fruit eater that climbs stems and vine faces and glides
+# between groves, founded on the ground within its roost reach of fruit (lanternberry
+# crowns, latticevine faces); the code default is 0, so training worlds are unchanged.
+[fauna.founders.seedporter]
+founding_count = 4

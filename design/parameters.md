@@ -903,10 +903,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.nectar_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into nectar per second, in daylight |
 | `flora.lanternberry.nectar_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most nectar an adult stand holds |
 | `flora.lanternberry.nectar_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of nectar carries (pollen lumped in) |
-| `flora.lanternberry.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
-| `flora.lanternberry.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
-| `flora.lanternberry.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.lanternberry.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.lanternberry.fruit_per_s` | 0.0001 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
+| `flora.lanternberry.fruit_cap` | 0.02 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
+| `flora.lanternberry.fruit_drop_s` | 1800.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.lanternberry.fruit_mineral_fraction` | 0.01 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.lanternberry.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.lanternberry.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.lanternberry.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -1053,7 +1053,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (783 rows)
+**`fauna.*`** (792 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1159,6 +1159,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
 | `fauna.founders.littershredder.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.littershredder.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.littershredder.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.littershredder.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.littershredder.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
@@ -1243,6 +1244,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
 | `fauna.founders.frondgrazer.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.frondgrazer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.frondgrazer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.frondgrazer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.frondgrazer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
@@ -1327,6 +1329,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
 | `fauna.founders.lanternjaw.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.lanternjaw.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.lanternjaw.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.lanternjaw.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.lanternjaw.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
@@ -1411,6 +1414,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
 | `fauna.founders.capgnawer.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.capgnawer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.capgnawer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.capgnawer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.capgnawer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
@@ -1495,6 +1499,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
 | `fauna.founders.loftstrider.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.loftstrider.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.loftstrider.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.loftstrider.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.loftstrider.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
@@ -1579,6 +1584,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
 | `fauna.founders.ripple-snail.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.ripple-snail.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.ripple-snail.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.ripple-snail.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.ripple-snail.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
@@ -1663,25 +1669,26 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
 | `fauna.founders.bellwing.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.bellwing.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.bellwing.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.bellwing.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.bellwing.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
 | `fauna.founders.seedporter.core.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
-| `fauna.founders.seedporter.core.bite_per_s` | 0.06 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
+| `fauna.founders.seedporter.core.bite_per_s` | 0.014222222222222223 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
 | `fauna.founders.seedporter.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.seedporter.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
-| `fauna.founders.seedporter.core.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.seedporter.core.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
-| `fauna.founders.seedporter.core.body_min` | 0.15 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
-| `fauna.founders.seedporter.core.birth_body` | 0.8999999999999999 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
-| `fauna.founders.seedporter.core.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
+| `fauna.founders.seedporter.core.body_max` | 0.35555555555555557 | org-units | [0, inf) |  | D | placeholder | adult structure |
+| `fauna.founders.seedporter.core.growth_max_per_s` | 0.00006755555555555557 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.seedporter.core.body_min` | 0.035555555555555556 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.seedporter.core.birth_body` | 0.21333333333333335 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.seedporter.core.birth_cost` | 0.07111111111111111 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.seedporter.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–1.5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.seedporter.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.seedporter.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.seedporter.core.lifespan_median_s` | 14400.0 | s | [0, inf) | 3600–57600 log | B | derived | median lifespan (0: none) |
-| `fauna.founders.seedporter.core.reproduction.surplus_floor` | 0.15 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.founders.seedporter.core.reproduction.surplus_floor` | 0.035555555555555556 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.seedporter.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.seedporter.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
 | `fauna.founders.seedporter.core.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
@@ -1692,8 +1699,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.seedporter.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.seedporter.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.seedporter.step_up_m` | 0.375 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
-| `fauna.founders.seedporter.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
+| `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.seedporter.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.seedporter.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
 | `fauna.founders.seedporter.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
@@ -1701,9 +1708,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
 | `fauna.founders.seedporter.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
 | `fauna.founders.seedporter.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder, digest | continuous time under water before it drowns |
-| `fauna.founders.seedporter.adult_length_m` | 0.75 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
-| `fauna.founders.seedporter.adult_width_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body width |
-| `fauna.founders.seedporter.adult_height_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body height |
+| `fauna.founders.seedporter.adult_length_m` | 0.5 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
+| `fauna.founders.seedporter.adult_width_m` | 0.25 | m | (0, inf) | yes | N | decision, digest | adult body width |
+| `fauna.founders.seedporter.adult_height_m` | 0.2 | m | (0, inf) | yes | N | decision, digest | adult body height |
 | `fauna.founders.seedporter.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
 | `fauna.founders.seedporter.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
 | `fauna.founders.seedporter.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
@@ -1719,7 +1726,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.seedporter.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
 | `fauna.founders.seedporter.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.seedporter.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.seedporter.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1742,13 +1749,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.seedporter.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.seedporter.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
-| `fauna.founders.seedporter.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
-| `fauna.founders.seedporter.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.seedporter.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
-| `fauna.founders.seedporter.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
-| `fauna.founders.seedporter.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
-| `fauna.founders.seedporter.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
-| `fauna.founders.seedporter.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
+| `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
+| `fauna.founders.seedporter.glider.glide_body_lengths_per_s` | 3.0 | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.seedporter.glider.glide_cost_factor` | 1.2 | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
+| `fauna.founders.seedporter.glider.glide_min_height_m` | 1.0 | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.seedporter.glider.roost_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.seedporter.gut_seeds.seeds_per_fruit_organic` | 0.1 | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
+| `fauna.founders.seedporter.gut_seeds.gut_transit_s` | 900.0 | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1828,6 +1836,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.bellwing_bloom_near` | 0.6 | 1 - d/range | [0, 1] | 0.3–0.9 | - | placeholder | a bloom this near: slow and come down to it |
 | `fauna.teachers.bellwing_gaze_turn` | 0.8 | effort | [0, 1] | 0.2–1 | - | placeholder | turn effort toward the sector with the most bloom |
 | `fauna.teachers.bellwing_wander_forward` | 0.7 | effort | [0, 1] | 0.2–1 | - | placeholder | forward effort of the bellwing's no-signal wander |
+| `fauna.teachers.seedporter_full_at` | 0.9 | fraction of adult reserve | [0, 1] | 0.5–1 | - | placeholder | the seedporter's heuristic stops eating at this reserve |
 | `fauna.teachers.bellwing_roost_ceiling` | 0.4 | fraction of band | [0, 1] | 0.1–0.8 | - | placeholder | going to rest, cover closer than this overhead is an underside to rise into |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 0.5 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
