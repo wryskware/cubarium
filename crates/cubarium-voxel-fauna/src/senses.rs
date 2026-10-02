@@ -276,7 +276,7 @@ pub(crate) enum CueSource {
     /// capgnawer's, does not answer a litter pile.
     Fungal,
     /// The **film** field (roster R2b): each support face holding glassfilm emits by its
-    /// film stock, `min(film / emit_reference, 1)` — the detritus field's curve.
+    /// film stock against the film's capacity per face, `min(film / capacity, 1)`.
     /// `Chem(film)`, the ripple-snail's; litter, carrion and caps are not sources.
     Film,
 }
@@ -445,13 +445,22 @@ impl DetritusField {
                 }
             }
             CueSource::Film => {
+                // A film face emits against the film's own capacity per face, not the
+                // detritus reference: glassfilm is far thinner per face than litter, and
+                // against `emit_reference` a full film emitted about 0.1 (roster R2b).
+                let voxel_m = view.config.voxel_m;
+                let capacity = fv.config.film_capacity_per_m2 * voxel_m * voxel_m;
                 for g in fv.ground.iter().filter(|g| g.film > 0.0) {
                     let Some(n) = graph.node(i64::from(g.site.x), g.site.y, g.site.z) else {
                         continue;
                     };
                     let n = n as usize;
                     // Ground is one entry per site, so a face is a source once.
-                    self.emit[n] = (g.film / self.cue.emit_reference).min(1.0) * UPDATE_S;
+                    self.emit[n] = if capacity > 0.0 {
+                        (g.film / capacity).min(1.0) * UPDATE_S
+                    } else {
+                        0.0
+                    };
                     self.seen[n] = epoch;
                     self.work.push(n as u32);
                 }
