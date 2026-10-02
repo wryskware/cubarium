@@ -10,8 +10,9 @@
 //!
 //! `--state DIR` loads a saved world (`world.voxel`, `flora.bin`, `fauna.bin`, as
 //! `light_capture --state` writes them); without it the world is founded from `--seed`
-//! and stepped `--found-ticks` first. The frames vary: most run at once, some stay in
-//! flight across the next pack, some are never recorded, a few are displaced. Prints the
+//! and stepped `--found-ticks` first. The frames follow random legal interleavings
+//! (`PackOracle::tick_random`, `--rng SEED`): packs refused while both buffers are read,
+//! frames recorded, run and displaced in any order the presenters can make. Prints the
 //! first mismatch and exits non-zero, or each pack's CPU time and bricks per tick.
 
 use std::path::PathBuf;
@@ -32,6 +33,7 @@ fn main() -> Result<()> {
     let mut set: Vec<String> = Vec::new();
     let mut state: Option<PathBuf> = None;
     let (mut seed, mut found_ticks, mut ticks, mut shower_at, mut px) = (1u64, 0u64, 1200u64, None, None);
+    let mut rng: u64 = 0x9e37_79b9_7f4a_7c15;
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut v = || it.next().context("missing value");
@@ -44,6 +46,7 @@ fn main() -> Result<()> {
             "--ticks" => ticks = v()?.parse()?,
             "--shower-at" => shower_at = Some(v()?.parse::<u64>()?),
             "--px" => px = Some(v()?.parse::<u32>()?),
+            "--rng" => rng = v()?.parse()?,
             _ => bail!("unknown argument {k}"),
         }
     }
@@ -94,25 +97,22 @@ fn main() -> Result<()> {
     let (mut full_ms, mut delta_ms, mut bricks) = (Vec::new(), Vec::new(), Vec::new());
     let mut whole = 0;
     let mut raining = 0;
+    let mut refused = 0;
     for k in 0..ticks {
         if Some(k) == shower_at {
             let ok = sim.world_mut().force_rain(cubarium_voxel::weather::RainMode::Shower);
             eprintln!("pack_oracle: a shower forced at tick {k}: {ok}");
         }
         sim.step();
-        let frame = match k % 13 {
-            5 => Frame::InFlight,
-            9 => Frame::Unrecorded,
-            _ => Frame::Now,
-        };
         let w = sim.world();
         raining += usize::from(w.view().is_raining());
         let r = o
-            .tick(&w.view(), sim.flora().view(), sim.fauna().view(), candle(w.tick()), frame)
+            .tick_random(&w.view(), sim.flora().view(), sim.fauna().view(), candle(w.tick()), &mut rng)
             .map_err(|e| anyhow::anyhow!("tick {k} (world tick {}): {e}", w.tick()))?;
-        if frame == Frame::InFlight && k % 39 == 5 {
-            o.discard();
-        }
+        let Some(r) = r else {
+            refused += 1;
+            continue;
+        };
         full_ms.push(r.full_ms);
         delta_ms.push(r.delta_ms);
         match r.bricks {
@@ -126,8 +126,8 @@ fn main() -> Result<()> {
         format!("{:.3} / {:.3} / {:.3}", at(0.5), at(0.95), at(1.0))
     };
     println!(
-        "pack_oracle: {ticks} ticks match ({raining} raining). median / p95 / max: full pack {} ms, \
-         change-only {} ms, bricks {} ({whole} whole-volume uploads), {} styles made",
+        "pack_oracle: {ticks} ticks match ({raining} raining, {refused} packs refused). median / p95 / max: \
+         full pack {} ms, change-only {} ms, bricks {} ({whole} whole-volume uploads), {} styles made",
         q(full_ms),
         q(delta_ms),
         if bricks.is_empty() { "-".into() } else { q(bricks) },

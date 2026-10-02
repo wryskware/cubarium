@@ -1567,10 +1567,12 @@ impl StagingRing {
     }
 
     /// The newest recorded frame will never be submitted — a fresher one displaced it.
-    /// Its buffer is free again and the upload it carried is owed again.
+    /// Its buffer is free again and the upload it carried is owed again: it goes up as
+    /// the waiting pack, unless a newer pack already waits. That one stays, and the
+    /// displaced frame's bricks, given back to [`BrickOwed`], go up with the pack after.
     pub fn discard(&mut self) -> Option<Recorded> {
         let frame = self.recorded.pop_back()?;
-        if frame.staging.is_some() {
+        if frame.staging.is_some() && self.packed.is_none() {
             self.packed = frame.staging;
         }
         Some(frame)

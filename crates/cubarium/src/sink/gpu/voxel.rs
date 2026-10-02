@@ -821,6 +821,9 @@ struct Delta {
     canopy_cols: Vec<u32>,
     /// Scratch for the two-phase palette update.
     changed: Vec<(u32, VoxelTexel, Option<StyleKey>)>,
+    /// Texels that wanted a style when every slot was live, and draw with slot 0 (or a
+    /// candle copy's steady style) meanwhile: composed again every tick a slot is free.
+    overflowed: Vec<u32>,
 }
 
 impl Delta {
@@ -1475,14 +1478,16 @@ impl Packer {
         None
     }
 
-    /// The slot a composed texel draws with in the full pack: its key's, given one if new;
-    /// out of slots, a candle copy falls back to its steady style and anything else to
-    /// slot 0. Counts the texel in the palette. Returns the slot and whether it is keyed.
-    fn acquire(&mut self, key: Option<StyleKey>) -> (u8, bool) {
+    /// The slot a composed texel (texture index `i`) draws with: its key's, given one if
+    /// new; out of slots, a candle copy falls back to its steady style and anything else
+    /// to slot 0, and the texel is listed to try again. Counts the texel in the palette.
+    /// Returns the slot and whether it is keyed.
+    fn acquire(&mut self, i: u32, key: Option<StyleKey>) -> (u8, bool) {
         let Some(key) = key else { return (0, false) };
         if let Some(s) = self.palette.acquire(&key) {
             return (s, true);
         }
+        self.delta.overflowed.push(i);
         if let Some(emit) = key.3
             && emit[3] >> 1 != 0
         {
@@ -1547,6 +1552,7 @@ impl Packer {
     /// The full pack into `master`, and everything the change-only pack keeps reset to it.
     fn fill_full(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32) {
         self.palette.reset();
+        self.delta.overflowed.clear();
         let (wu, hu, du) = (w as usize, h as usize, d as usize);
         let mats = &view.config.materials;
         let master = &mut self.delta.master;
@@ -1577,7 +1583,7 @@ impl Packer {
         for &i in &overlay {
             let i = i as usize;
             if let Some((mut t, key)) = self.overlay(view, i, w, h) {
-                let (slot, keyed) = self.acquire(key);
+                let (slot, keyed) = self.acquire(i as u32, key);
                 t.0[3] = slot;
                 self.delta.master[i] = t;
                 self.delta.set_keyed(i, keyed);
@@ -1637,6 +1643,12 @@ impl Packer {
         };
         let delta = &mut self.delta;
         delta.dirty.clear();
+        // The texels that overflowed the style table, while it has room again.
+        if !delta.overflowed.is_empty() && self.palette.live() < MAX_STYLES {
+            for i in std::mem::take(&mut delta.overflowed) {
+                delta.mark(i);
+            }
+        }
         // Free water: the cells that hold it now and the cells that held it.
         let wet = std::mem::take(&mut delta.wet);
         let mut cells = std::mem::take(&mut delta.wet_cells);
@@ -1796,7 +1808,7 @@ impl Packer {
             let (i, mut t, key) = changed[k];
             let iu = i as usize;
             if key.is_some() {
-                let (slot, keyed) = self.acquire(key);
+                let (slot, keyed) = self.acquire(i, key);
                 t.0[3] = slot;
                 self.delta.set_keyed(iu, keyed);
             } else {
@@ -1807,6 +1819,11 @@ impl Packer {
         self.delta.dirty = dirty;
         self.delta.dirty.clear();
         self.delta.changed = changed;
+        // A texel that overflowed twice while the table stayed full is listed once.
+        if self.delta.overflowed.len() > 1 {
+            self.delta.overflowed.sort_unstable();
+            self.delta.overflowed.dedup();
+        }
         lap!("palette");
         // The wet list for next tick: every texel with free water is in the wet set (or in
         // the full scan's list when the set was not trusted).
