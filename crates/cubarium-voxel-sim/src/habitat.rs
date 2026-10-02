@@ -2875,6 +2875,48 @@ mod tests {
         let mut world = crate::scene::authored(config());
         let mut flora = Flora::new(Default::default());
         let mut fauna = Fauna::new(params.fauna.clone());
+        // The authored scene's own glowcaps all sit in a 13-face pocket the capgnawer's
+        // founding faces (crag fix 2: the largest walkable component) exclude. Stock two
+        // glowcaps on logs in that component first, so there is food a founder can reach.
+        {
+            let gnawer = *params.fauna.founder(Founder::Capgnawer);
+            let margin = params.fauna.founding.clearance_margin_m;
+            let faces = cubarium_voxel_fauna::founding_faces(&world.view(), &gnawer, margin);
+            let sc = flora.config().species(Species::Glowcap).clone();
+            let log = 4.0 * sc.wood_max;
+            let mut stocked: Vec<Site> = Vec::new();
+            for f in faces {
+                if stocked.len() == 2 {
+                    break;
+                }
+                let soil = world.view().material_at(i64::from(f.x), f.y, f.z) == Material::Soil;
+                if !soil || stocked.iter().any(|s| s.x.abs_diff(f.x) < 8) {
+                    continue;
+                }
+                let laid = flora.deposit(
+                    f,
+                    Deposit {
+                        kind: DepositKind::DeadWood,
+                        organic: log,
+                        mineral: sc.n_tissue * log,
+                        energy: sc.energy_density * log,
+                    },
+                );
+                if laid
+                    && flora.apply(
+                        &world,
+                        FloraCommand::SeedOnFace {
+                            site: f,
+                            species: Species::Glowcap,
+                            wood: 0.5 * sc.wood_max,
+                        },
+                    )
+                {
+                    stocked.push(f);
+                }
+            }
+            assert_eq!(stocked.len(), 2, "two glowcaps stocked where a capgnawer walks");
+        }
         let got = seed(&mut world, &mut flora, &mut fauna);
         let placed = got.founders[Founder::Capgnawer.index()];
         assert!((1..=6).contains(&placed), "up to the preset's six: {got:?}");
