@@ -747,6 +747,9 @@ fn a_seedporter_takes_latticevine_and_lanternberry_fruit_and_both_books_close() 
         let mut fauna = Fauna::new(FaunaConfig::default());
         let (x, z) = centre(8, 4);
         let id = aloft(&mut fauna, &world, x, z, top, HUNGRY_ADULT);
+        // `Fauna::apply` sees the world, not the plant layer, so a crown perch is resolved
+        // on the first step.
+        steps(&mut fauna, &world, &mut flora, 1);
         assert_eq!(perched_on(&fauna, id), Some(site), "on its crown top");
         hold(&mut fauna, id, 0.0, 1.0);
         steps(&mut fauna, &world, &mut flora, 40);
