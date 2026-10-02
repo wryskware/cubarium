@@ -692,6 +692,39 @@ pub fn seed_pre_rolled(
         if want == 0 {
             continue;
         }
+        // A flyer (F1) is founded perched near nectar; walkable components do not enter it.
+        if phys.founding_site == cubarium_voxel_fauna::FoundingSite::NearNectar {
+            let room = phys.adult_body().headroom_voxels(world.config().voxel_m);
+            let reach = founder.manifest().cone_range_m;
+            let pool: Vec<Site> = {
+                let view = world.view();
+                let fv = flora.view();
+                let sources = nectar_sources(&view, &fv);
+                sites
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(i, s)| {
+                        !taken.contains(s)
+                            && wettest[*i] <= 0.0
+                            && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+                            && has_headroom(&view, i64::from(s.x), s.y, s.z, room)
+                            && near_nectar(&view, &sources, *s, reach)
+                    })
+                    .map(|(_, s)| s)
+                    .collect()
+            };
+            let chosen = place(&pool, want, |_| Some(0), |_, _| true);
+            for (k, site) in chosen.into_iter().enumerate() {
+                if introduce_founder(world, fauna, founder, site, spread_heading(k, want)) {
+                    taken.push(site);
+                    seeded.founders[founder.index()] += 1;
+                }
+            }
+            seeded.shortfall[founder.index()] =
+                want.saturating_sub(seeded.founders[founder.index()]);
+            continue;
+        }
         let need = founding.accept_founder_hours * founding_upkeep_per_hour(&phys);
         let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, founder);
         match phys.founding_site {
@@ -778,6 +811,7 @@ pub fn seed_pre_rolled(
                     }
                 }
             }
+            cubarium_voxel_fauna::FoundingSite::NearNectar => unreachable!("founded above"),
         }
         seeded.shortfall[founder.index()] = want.saturating_sub(seeded.founders[founder.index()]);
     }
@@ -788,6 +822,38 @@ pub fn seed_pre_rolled(
         - organic_before;
     seeded.acceptance = accept(world, flora, fauna, founder_counts);
     seeded
+}
+
+/// **Nectar sources** (F1): the column centres, metres, of every stand of a species that
+/// makes nectar once past its seedling profile, and of every latticevine-covered face.
+fn nectar_sources(view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<(f64, f64)> {
+    let v = view.config.voxel_m;
+    let mut out: Vec<(f64, f64)> = fv
+        .stands
+        .iter()
+        .filter(|s| s.profile_stage >= 1 && fv.config.species(s.species).nectar_per_s > 0.0)
+        .map(|s| ((f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v))
+        .collect();
+    out.extend(
+        fv.cover
+            .faces()
+            .iter()
+            .map(|c| ((f64::from(c.face.x) + 0.5) * v, (f64::from(c.face.z) + 0.5) * v)),
+    );
+    out
+}
+
+/// Whether the face `site`'s centre is within `reach` (horizontally, on the ring) of a
+/// nectar source.
+fn near_nectar(view: &VoxelView<'_>, sources: &[(f64, f64)], site: Site, reach: f64) -> bool {
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let (x, z) = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
+    sources.iter().any(|&(sx, sz)| {
+        let dx = (x - sx).rem_euclid(ring);
+        let dx = dx.min(ring - dx);
+        (dx * dx + (z - sz).powi(2)).sqrt() <= reach
+    })
 }
 
 /// Choose up to `want` faces from `pool`, spread over it: a stride sample first and then
@@ -988,6 +1054,61 @@ pub fn accept(
     let mut out = Acceptance::default();
     for founder in Founder::ALL {
         let phys = *fauna.config().founder(founder);
+        // A flyer (F1): one verdict over the world, each placed body within its fan's
+        // range of a nectar source; the food is the sources' nectar now and per hour.
+        if phys.founding_site == cubarium_voxel_fauna::FoundingSite::NearNectar {
+            let u = founding_upkeep_per_hour(&phys);
+            let sources = nectar_sources(&view, &fv);
+            let reach = founder.manifest().cone_range_m;
+            let mut v = LineageVerdict {
+                wanted: wanted[founder.index()],
+                upkeep_per_h: u,
+                accept_hours: fauna.config().founding.accept_founder_hours,
+                ..LineageVerdict::default()
+            };
+            let mut near = 0usize;
+            for a in av.animals.iter().filter(|a| a.founder == Some(founder)) {
+                v.placed += 1;
+                if near_nectar(&view, &sources, a.site, reach) {
+                    near += 1;
+                } else {
+                    v.stranded += 1;
+                }
+            }
+            let food = ComponentFood {
+                stock: fv.stands.iter().map(|s| s.nectar).sum::<f64>()
+                    + fv.cover.faces().iter().map(|c| c.nectar).sum::<f64>(),
+                stands: sources.len(),
+                producers: sources.len(),
+                production_per_h: fv
+                    .stands
+                    .iter()
+                    .filter(|s| s.profile_stage >= 1)
+                    .map(|s| fv.config.species(s.species).nectar_per_s * 3600.0)
+                    .sum(),
+            };
+            if near > 0 {
+                v.components.push(ComponentVerdict {
+                    component: 0,
+                    founders: near,
+                    food,
+                    habitable: !sources.is_empty(),
+                });
+            }
+            v.accepted = v.placed >= v.wanted
+                && v.stranded == 0
+                && v.components.iter().all(|c| c.habitable);
+            v.ratio = if v.wanted == 0 {
+                f64::INFINITY
+            } else if v.placed == 0 || v.stranded > 0 || !(u > 0.0) {
+                0.0
+            } else {
+                food.production_per_h / (u * v.placed as f64)
+                    * (v.placed.min(v.wanted) as f64 / v.wanted as f64)
+            };
+            out.lineages[founder.index()] = v;
+            continue;
+        }
         let (map, food) = lineage_food(&view, &fv, &phys, founder);
         let u = founding_upkeep_per_hour(&phys);
         // A carnivore arrives from its egg bank, not as a placed body: the seeder places

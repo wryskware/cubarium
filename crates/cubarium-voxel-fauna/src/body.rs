@@ -110,8 +110,11 @@ const LITTER_YIELD: f64 = 0.5;
 /// What a grazer builds out of a unit of foliage — and, by the decision, what a
 /// shredder builds out of a unit of glowcap cap tissue.
 const FOLIAGE_YIELD: f64 = 0.5;
-/// Nectar's assimilation yield (F1): sugar, mostly absorbed. A placeholder.
-const NECTAR_YIELD: f64 = 0.8;
+/// Nectar's assimilation yield (F1): fresh plant matter's (the foliage yield). A
+/// placeholder; at bloomcrown's `nectar_mineral_fraction` (0.01) against the bellwing's
+/// `n_tissue` (0.02) the mineral binds at the same 0.5. Kept within 2/3 so the search's
+/// ×1.5 yield gene stays a fraction.
+const NECTAR_YIELD: f64 = 0.5;
 /// The bellwing's mass against the littershredder's (F1): `body_max` 0.001 (x1, the
 /// note's number) over the shredder's 0.0125.
 pub const BELLWING_MASS_RATIO: f64 = 0.001 / 0.0125;
@@ -975,9 +978,8 @@ impl FounderPhysiology {
                     step_up_m: 0.0,
                     step_down_m: 0.0,
                     climbs_walls: false,
-                    // Nectar is sugar: most of it is absorbed (0.8); the mineral it carries
-                    // (bloomcrown's `nectar_mineral_fraction`) binds before the yield does.
-                    // Every other class carries the foliage yield so none is a silent zero.
+                    // Nectar at [`NECTAR_YIELD`]; every other class carries the foliage
+                    // yield so none is a silent zero.
                     yield_by_food: {
                         let mut y = [FOLIAGE_YIELD; crate::Food::COUNT];
                         y[crate::Food::Nectar.index()] = NECTAR_YIELD;
