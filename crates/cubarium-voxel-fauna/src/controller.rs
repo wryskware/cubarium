@@ -505,6 +505,10 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         Founder::Bellwing => Box::new(HoverSip::with_config(teachers)),
         // F3: the seedporter's fruit forager (the body climbs, perches and glides).
         Founder::Seedporter => Box::new(FruitForager::with_config(teachers)),
+        // R3 stub: the lanternjaw's ambush on the chorister. R3 builds the scripted pack
+        // heuristic (Brief R3: drive and flank, give up, return to the den, keep out of
+        // other packs' territories; pups stay at the den).
+        Founder::Chorister => Box::new(LanternjawAmbush::with_config(teachers)),
     }
 }
 

@@ -62,7 +62,8 @@ pub fn lineage_horizon(founder: Founder) -> u64 {
         | Founder::Loftstrider
         | Founder::RippleSnail
         | Founder::Bellwing
-        | Founder::Seedporter => {
+        | Founder::Seedporter
+        | Founder::Chorister => {
             LANDSCAPE_HORIZON_TICKS
         }
     }

@@ -123,7 +123,8 @@ fn reach_m(founder: Founder) -> f64 {
         | Founder::Lanternjaw
         | Founder::Loftstrider
         | Founder::Bellwing
-        | Founder::Seedporter => BROWSER_REACH_M,
+        | Founder::Seedporter
+        | Founder::Chorister => BROWSER_REACH_M,
     }
 }
 
@@ -223,7 +224,7 @@ fn main() {
     );
 
     let cfg = VoxelConfig::default();
-    let counts = if half_founders { [4, 4, 0, 0, 0, 0, 0, 0] } else { [8, 8, 0, 0, 0, 0, 0, 0] };
+    let counts = if half_founders { [4, 4, 0, 0, 0, 0, 0, 0, 0] } else { [8, 8, 0, 0, 0, 0, 0, 0, 0] };
     let (world, flora, mut fauna, seeded, scene_label) = if let Some(preset) = preset {
         // Exactly what `cubarium voxel` does with no TOML, for this preset: the recipe's
         // own extents, cell size and water, the lake gate, the pre-roll with its opening

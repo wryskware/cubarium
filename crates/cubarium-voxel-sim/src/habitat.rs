@@ -679,6 +679,10 @@ pub fn seed_pre_rolled(
         match phys.founding {
             cubarium_voxel_fauna::Founding::Bodies => {}
             // The founding egg bank, in the prey's components (§2.9, §2.13): no adults.
+            // R3 stub: a pack lineage founds nothing yet. R3 founds `want` packs here
+            // ([`introduce_packs`]'s placement): each `pack_size` adults on a covered den
+            // near its founding point.
+            cubarium_voxel_fauna::Founding::Pack => continue,
             cubarium_voxel_fauna::Founding::Clutches => {
                 if want > 0 {
                     match bury_founding_clutches(world, flora, fauna, founder, want) {
@@ -1378,6 +1382,24 @@ pub fn introduce_lanternjaws(
     Ok(ids)
 }
 
+/// **Packs** (roster R3, `--introduce chorister:N` and the founding of a
+/// [`cubarium_voxel_fauna::Founding::Pack`] lineage): `n` packs of `founder`, each through
+/// [`FaunaCommand::FoundPack`] — `pack_size` adults on a **covered den** (a support face
+/// with solid within `den_cover_m` over it) that the breeder picks near its founding
+/// point, with the lineage's controllers installed. The new packs' ids, or why none could
+/// be founded.
+// R3 stub: refuses.
+pub fn introduce_packs(
+    world: &World,
+    flora: &Flora,
+    fauna: &mut Fauna,
+    founder: Founder,
+    n: usize,
+) -> Result<Vec<u64>, String> {
+    let _ = (world, flora, fauna, founder, n);
+    Err("R3 stub: packs are not founded yet".to_string())
+}
+
 /// **The founding egg bank** (§2.9, §2.13): `clutches` clutches of `founder`'s own size
 /// (the lanternjaw's, shipped), buried on faces where its prey stand — spread over the
 /// prey, so a component with more prey gets more of the bank — and nowhere else. The
@@ -1913,7 +1935,7 @@ mod tests {
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
             "one patch is not a route to a second one"
         );
-        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0, 0, 0, 0, 0, 0]);
+        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(out.founders[Founder::Browser.index()], 0);
         assert_eq!(
             out.shortfall[Founder::Browser.index()],
@@ -2164,7 +2186,7 @@ mod tests {
             for _ in 0..n {
                 introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
             }
-            accept(&world, &flora, &fauna, [0, n, 0, 0, 0, 0, 0, 0])
+            accept(&world, &flora, &fauna, [0, n, 0, 0, 0, 0, 0, 0, 0])
         };
         let at = with(fits);
         let v = &at.lineages[Founder::Browser.index()];
@@ -2193,12 +2215,12 @@ mod tests {
         ));
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         introduce(&mut fauna, &world, Founder::Blind, at_site);
-        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0, 0, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0, 0, 0, 0]);
         let v = &got.lineages[Founder::Blind.index()];
         assert!(v.components[0].food.stock >= founding.starter_litter_organic - 1e-12, "{got:?}");
         assert!(!v.accepted && !got.accepted, "litter with no producer: {got:?}");
         plant(&mut bare, &world, 12, 2, Species::Springturf, 0.8);
-        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0, 0, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert!(
             got.lineages[Founder::Blind.index()].accepted && got.accepted,
             "a litter-shedding stand rooted in the component: {got:?}"
@@ -2390,7 +2412,7 @@ mod tests {
         }
         let mut flora = Flora::new(flora_cfg.clone());
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
-        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0, 0, 0, 0, 0, 0]);
+        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(seeded.pre_roll, pre.report);
         let drowned_on = |species: Species, site: Site| {
             let i = index_of(&pre.sites, site).expect("a support face");
@@ -2409,7 +2431,7 @@ mod tests {
         let calm_pre = pre_roll(&mut calm, false);
         let mut calm_flora = Flora::new(flora_cfg.clone());
         let mut calm_fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
-        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0, 0, 0, 0, 0, 0]);
+        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert!(
             calm_flora
                 .view()
@@ -2817,6 +2839,151 @@ mod tests {
         }
     }
 
+    /// R3: whether `site` is a **covered** den face — solid within `cover_m` over the top
+    /// of its support cell (the test's own reading of Brief R3's "solid within
+    /// `den_cover_m` overhead").
+    fn covered(world: &World, site: Site, cover_m: f64) -> bool {
+        let view = world.view();
+        let v = view.config.voxel_m;
+        (site.y + 1..view.config.height).any(|y| {
+            f64::from(y - site.y - 1) * v <= cover_m
+                && view.material_at(i64::from(site.x), y, site.z) != Material::Air
+        })
+    }
+
+    /// R3: the ring distance from a body to a den face's column centre, metres.
+    fn from_den(world: &World, a: &cubarium_voxel_fauna::Animal, den: Site) -> f64 {
+        let v = world.config().voxel_m;
+        let ring = f64::from(world.config().width) * v;
+        let (cx, cz) = ((f64::from(den.x) + 0.5) * v, (f64::from(den.z) + 0.5) * v);
+        let dx = (a.pose.x - cx).rem_euclid(ring);
+        let dx = dx.min(ring - dx);
+        (dx * dx + (a.pose.z - cz).powi(2)).sqrt()
+    }
+
+    /// R3: what a world founded one pack with — the pack, its den covered, `pack_size`
+    /// choristers all of it, none a pup, one of them its breeder, each within
+    /// `den_radius_m` of the den.
+    fn assert_one_founded_pack(world: &World, fauna: &Fauna) {
+        let c = Founder::Chorister;
+        let table = fauna.config().founder(c).pack.expect("a pack lineage");
+        assert_eq!(fauna.packs().len(), 1, "one pack: {:?}", fauna.packs());
+        let pack = fauna.packs()[0];
+        assert_eq!(pack.lineage, c);
+        assert!(
+            covered(world, pack.den, table.den_cover_m),
+            "the den {:?} has solid within {} m over it",
+            pack.den,
+            table.den_cover_m
+        );
+        let members: Vec<_> = fauna
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(c))
+            .copied()
+            .collect();
+        assert_eq!(members.len(), table.pack_size, "pack_size choristers");
+        for a in &members {
+            let m = a.pack.expect("every chorister is in the pack");
+            assert_eq!(m.pack, pack.id, "#{} is of the one pack", a.id);
+            assert!(!m.pup, "#{}: a founded adult is no pup", a.id);
+            let d = from_den(world, a, pack.den);
+            assert!(d <= table.den_radius_m, "#{} is {d} m from its den", a.id);
+        }
+        let breeder = pack.breeder.expect("a breeder");
+        assert!(members.iter().any(|a| a.id == breeder), "the breeder is one of them");
+    }
+
+    /// R3 (Brief R3, "Founding"): **a preset of one chorister pack founds `pack_size`
+    /// choristers with one pack id and a breeder, the den covered; the code default founds
+    /// none.** The authored scene, the other lineages at their defaults (the prey are
+    /// there).
+    #[test]
+    fn a_preset_of_one_chorister_pack_founds_a_pack_on_a_covered_den_and_the_default_none() {
+        let c = Founder::Chorister;
+        let code = cubarium_voxel_fauna::FaunaConfig::default();
+        assert_eq!(code.founder_counts()[c.index()], 0, "the code default founds none");
+        let cover = code.founder(c).pack.expect("a pack lineage").den_cover_m;
+        {
+            let world = crate::scene::authored(config());
+            let faces = support_sites(&world);
+            assert!(
+                faces.iter().any(|&f| covered(&world, f, cover)),
+                "the fixture: the authored scene has a covered face"
+            );
+            let (_, _, fauna, _) = seeded(world);
+            assert!(fauna.packs().is_empty(), "no pack by default");
+            assert!(
+                fauna.view().animals.iter().all(|a| a.founder != Some(c)),
+                "no chorister by default"
+            );
+        }
+        assert_eq!(code.founder(c).founding, cubarium_voxel_fauna::Founding::Pack);
+        let file: toml::Table = r#"
+            [fauna.founders.chorister]
+            founding_count = 1
+        "#
+        .parse()
+        .unwrap();
+        let params = crate::params::Params::resolve(&crate::params::Layers {
+            file: Some(file),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(params.fauna.founder_counts()[c.index()], 1, "the preset's one pack");
+        let mut world = crate::scene::authored(config());
+        let mut flora = Flora::new(Default::default());
+        let mut fauna = Fauna::new(params.fauna.clone());
+        let got = seed(&mut world, &mut flora, &mut fauna);
+        let size = fauna.config().founder(c).pack.expect("a pack lineage").pack_size;
+        assert_eq!(got.founders[c.index()], size, "bodies founded: {got:?}");
+        assert_eq!(got.shortfall[c.index()], 0, "no shortfall: {got:?}");
+        assert_one_founded_pack(&world, &fauna);
+    }
+
+    /// R3 (Brief R3, "`--introduce chorister:N` introduces N packs"): on a plain with
+    /// grazers and one rock roof 1 m over the ground, [`introduce_packs`] founds the asked
+    /// pack on a covered den under the roof, with `pack_size` adults and a breeder, each
+    /// driven by its lineage's heuristic.
+    #[test]
+    fn introduce_packs_founds_a_pack_on_a_covered_den() {
+        let mut world = plain(64, 12);
+        // A roof slab over x = 40..=51, the whole depth, at y = 7 (1 m of air over the
+        // y = 2 support faces).
+        for z in 0..12 {
+            for x in 40..=51 {
+                world.apply(cubarium_voxel::Command::SetMaterial {
+                    x,
+                    y: 7,
+                    z,
+                    material: Material::Rock,
+                });
+            }
+        }
+        let flora = Flora::new(Default::default());
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());
+        install_heuristics(&mut fauna);
+        for x in [8, 16, 24] {
+            introduce(&mut fauna, &world, Founder::Browser, Site { x, y: 2, z: 6 });
+        }
+        let ids = introduce_packs(&world, &flora, &mut fauna, Founder::Chorister, 1)
+            .expect("a pack is introduced");
+        assert_eq!(ids.len(), 1, "one pack id");
+        assert_eq!(fauna.packs()[0].id, ids[0]);
+        assert_one_founded_pack(&world, &fauna);
+        let ids: Vec<u64> = fauna
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(Founder::Chorister))
+            .map(|a| a.id)
+            .collect();
+        for id in ids {
+            assert!(fauna.take_controller(id).is_some(), "#{id} is driven");
+        }
+    }
+
     /// A layer read back from its bytes has bodies but no controllers (they are not
     /// saved); `reinstall_heuristics` puts one back on every founder body.
     #[test]
@@ -3151,7 +3318,7 @@ mod tests {
 
         let mut fauna = Fauna::new(config);
         introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
-        let at = accept(&world, &flora, &fauna, [0, 1, 0, 0, 0, 0, 0, 0]);
+        let at = accept(&world, &flora, &fauna, [0, 1, 0, 0, 0, 0, 0, 0, 0]);
         assert!(
             at.lineages[Founder::Browser.index()].accepted,
             "one heavy founder by a bloomcrown is founded as a light one would be: {at:?}"

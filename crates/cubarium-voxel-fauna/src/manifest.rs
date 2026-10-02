@@ -136,10 +136,15 @@ pub enum Founder {
     /// grove and carries seeds in its gut. The browser's 37-input layout with a cone that
     /// counts fruit in place of foliage. Diet `[fruit]`.
     Seedporter,
+    /// The **chorister** (roster R3, `design/handoffs/voxel-roster-2026-10-01.md` Brief R3;
+    /// predation-and-flight §2.10, §2.14): a diurnal pack hunter, 1.4 × 0.35 × 0.6 m, built
+    /// on the lanternjaw's hunter table and strike machinery with no lure. Packs with a den,
+    /// one breeder, provisioned pups and a territory. Diet `[carrion]`.
+    Chorister,
 }
 
 impl Founder {
-    pub const ALL: [Founder; 8] = [
+    pub const ALL: [Founder; 9] = [
         Founder::Blind,
         Founder::Browser,
         Founder::Lanternjaw,
@@ -148,6 +153,7 @@ impl Founder {
         Founder::RippleSnail,
         Founder::Bellwing,
         Founder::Seedporter,
+        Founder::Chorister,
     ];
     pub const COUNT: usize = Founder::ALL.len();
 
@@ -163,6 +169,7 @@ impl Founder {
             Founder::RippleSnail => 5,
             Founder::Bellwing => 6,
             Founder::Seedporter => 7,
+            Founder::Chorister => 8,
         }
     }
 
@@ -177,6 +184,7 @@ impl Founder {
             Founder::RippleSnail => "ripple-snail",
             Founder::Bellwing => "bellwing",
             Founder::Seedporter => "seedporter",
+            Founder::Chorister => "chorister",
         }
     }
 
@@ -191,6 +199,7 @@ impl Founder {
             Founder::RippleSnail => "film_grazer",
             Founder::Bellwing => "pollinator",
             Founder::Seedporter => "glider",
+            Founder::Chorister => "pack_hunter",
         }
     }
 
@@ -205,6 +214,7 @@ impl Founder {
             Founder::RippleSnail => Manifest::ripple_snail(),
             Founder::Bellwing => Manifest::bellwing(),
             Founder::Seedporter => Manifest::seedporter(),
+            Founder::Chorister => Manifest::chorister(),
         }
     }
 }
@@ -1194,6 +1204,43 @@ impl Manifest {
             taste_resistances: &SEEDPORTER_TASTE_RESISTANCES,
             cone_counts_fruit: true,
             ..Manifest::browser()
+        }
+    }
+
+    /// The chorister (roster R3): the lanternjaw's layout on its own anchors and `Self`
+    /// references, **without the lure** (Brief R3: the lanternjaw's strike machinery, no
+    /// lure). Interim until P2.
+    // R3 stub: the lanternjaw's manifest with the walkers' three actions, on the
+    // chorister's (stub) physiology.
+    pub fn chorister() -> Manifest {
+        let a = anchors(Founder::Chorister);
+        let r = SelfReferences::of(Founder::Chorister);
+        Manifest {
+            founder: Founder::Chorister,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
+            contact_height_fraction: a.contact,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
+            body_reference: r.body,
+            adult_energy_reference: r.energy,
+            adult_reserve_reference: r.reserve,
+            structural_reference: r.body,
+            cruise_m_per_s: a.cruise,
+            yaw_cap_rad_per_s: a.yaw,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
+            mouth_reach_body_lengths: a.reach,
+            mass_scale: a.mass,
+            actions: &ACTIONS,
+            ..Manifest::lanternjaw()
         }
     }
 

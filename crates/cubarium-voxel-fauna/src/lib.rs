@@ -54,7 +54,7 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    BELLWING_MASS_RATIO, Body, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, GutSeeds, Hunter, StepLimits, birth_readiness,
+    BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, GutSeeds, Hunter, Pack, StepLimits, birth_readiness,
     effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -813,6 +813,49 @@ pub struct Animal {
     /// stored totals and laid with the corpse at death. Empty for every other lineage.
     #[serde(default)]
     pub gut_seeds: GutSeedLots,
+    /// **Pack membership** (roster R3, a lineage with [`FounderPhysiology::pack`]): the
+    /// pack it belongs to ([`PackRecord`]), whether it is a pup, and its call. `None` for
+    /// every body outside a pack.
+    // R3 stub: declared, `None` everywhere, read by nothing.
+    #[serde(default)]
+    pub pack: Option<PackMember>,
+}
+
+/// A body's place in a pack (roster R3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackMember {
+    /// The pack's id ([`PackRecord::id`]).
+    pub pack: u64,
+    /// **A pup**: born into the pack and younger than its lineage's
+    /// [`Pack::independence_age_s`]. It cannot strike and stays within
+    /// [`Pack::den_radius_m`] of the den; at its independence age this clears and it joins
+    /// the pack's hunts. A founded adult is never a pup.
+    pub pup: bool,
+    /// Ticks its **call** has left: set to [`Pack::call_s`] when the pack target changes or
+    /// it strikes, counted down each tick. Saved, and read by the presenter.
+    pub calling_ticks: u32,
+}
+
+impl PackMember {
+    /// Whether it is calling now.
+    pub fn calling(&self) -> bool {
+        self.calling_ticks > 0
+    }
+}
+
+/// A pack (roster R3): its den and its breeder. Saved with the layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackRecord {
+    /// Its id, never reused.
+    pub id: u64,
+    /// The lineage whose pack this is.
+    pub lineage: Founder,
+    /// The den's support face: covered (solid within [`Pack::den_cover_m`] over it),
+    /// picked by the breeder at founding.
+    pub den: Site,
+    /// The one member that conceives; `None` only while no adult is left. When it dies the
+    /// oldest adult in the pack takes its place.
+    pub breeder: Option<u64>,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -2200,6 +2243,14 @@ pub struct FaunaLedger {
     pub seeds_voided_by_source: [f64; 2],
     #[serde(default)]
     pub seed_voids: u64,
+    /// **Provisioning** (roster R3): organic matter adults at a den passed out of their
+    /// reserves to pups, and what the pups received of it (`provision_efficiency` of it;
+    /// the rest is respired, inside `respired_out`).
+    // R3 stub: declared, never booked.
+    #[serde(default)]
+    pub provision_given_organic: f64,
+    #[serde(default)]
+    pub provision_received_organic: f64,
 }
 
 impl FaunaLedger {
@@ -2419,6 +2470,20 @@ pub enum Command {
         founder: Founder,
         stores: StartingStores,
     },
+    /// **Found a pack** (roster R3) of a lineage with a [`FounderPhysiology::pack`] table:
+    /// a new [`PackRecord`] with its den on the support face `den`, and its `pack_size`
+    /// adults introduced on that face (as [`Command::IntroduceFounderOnFace`] with
+    /// `stores` and `heading_rad`), each a member of it and none a pup; the first is the
+    /// breeder. Refused off a support face, for a lineage with no pack table, and when the
+    /// stores are refused. The caller (the habitat seeder, `--introduce chorister:N`)
+    /// picks the covered den.
+    // R3 stub: always refused.
+    FoundPack {
+        den: Site,
+        founder: Founder,
+        stores: StartingStores,
+        heading_rad: f64,
+    },
 }
 
 /// How full a founder body arrives, as fractions of what its physiology lets it hold.
@@ -2527,6 +2592,9 @@ pub struct Fauna {
     /// not world state, so not saved; bounded at [`SEED_VOID_LOG_MAX`] (the oldest go).
     #[serde(skip)]
     seed_voids: Vec<SeedVoid>,
+    /// The packs standing in the world (roster R3), by id.
+    #[serde(default)]
+    packs: Vec<PackRecord>,
 }
 
 /// The most gut-seed void events [`Fauna`] keeps undrained.
@@ -2560,6 +2628,7 @@ impl Fauna {
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
             seed_voids: Vec::new(),
+            packs: Vec::new(),
         })
     }
 
@@ -2677,6 +2746,16 @@ impl Fauna {
 
     pub fn tick(&self) -> u64 {
         self.tick
+    }
+
+    /// The packs standing in the world (roster R3), by id.
+    pub fn packs(&self) -> &[PackRecord] {
+        &self.packs
+    }
+
+    /// One pack, by id.
+    pub fn pack(&self, id: u64) -> Option<&PackRecord> {
+        self.packs.iter().find(|p| p.id == id)
     }
 
     pub fn view(&self) -> FaunaView<'_> {
@@ -2798,6 +2877,8 @@ impl Fauna {
                 lineage,
                 eggs,
             } => self.bury_clutch(world, site, lineage, eggs),
+            // R3 stub: refused.
+            Command::FoundPack { .. } => false,
             Command::IntroduceAloft {
                 pose,
                 founder,
@@ -2988,6 +3069,7 @@ impl Fauna {
             attached: None,
             last_bloom: None,
             gut_seeds: GutSeedLots::default(),
+            pack: None,
         };
         let mut animal = animal;
         // A flyer on a face is perched on it (F1).
@@ -3129,7 +3211,8 @@ mod starting_stores_tests {
             // the grazing lineages' reserve cap of 0.5; the lanternjaw's is 1.0).
             let full = sc.body_max + sc.reserve_of(sc.body_max);
             assert!(
-                founder == Founder::Lanternjaw ||
+                // The chorister (roster R3) keeps the lanternjaw's reserve cap.
+                matches!(founder, Founder::Lanternjaw | Founder::Chorister) ||
                 ((full - body) - sc.body_max).abs() < 1e-15,
                 "{founder:?}: headroom {} is not one body_max",
                 full - body

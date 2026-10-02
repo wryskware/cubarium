@@ -249,7 +249,7 @@ fn patch_kinds(
             &[PatchKind::Seedling, PatchKind::Rosette]
         }
         (Founder::Lanternjaw, _) => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
-        (Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter, _) => unreachable!("refused by Arena::has_layout"),
+        (Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter | Founder::Chorister, _) => unreachable!("refused by Arena::has_layout"),
     };
     let mut rng = Rng::new(layout_seed ^ PATCH_KIND_SALT);
     let rotation = rng.below(palette.len());
@@ -772,7 +772,7 @@ impl Arena {
                 (Founder::Blind, LayoutKind::Reacquisition(_)) => REACQUISITION_LITTER_PER_PATCH,
                 (Founder::Browser, _) => BROWSER_FOLIAGE_PER_STAND,
                 (Founder::Lanternjaw, _) => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
-                (Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter, _) => unreachable!("refused by Arena::has_layout"),
+                (Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter | Founder::Chorister, _) => unreachable!("refused by Arena::has_layout"),
             };
             let organic = if Some(planned) == initial_patch {
                 REACQUISITION_INITIAL_PATCH_FRACTION * full
@@ -861,7 +861,7 @@ impl Arena {
                         toward + (2.0 * rng.unit() - 1.0) * std::f64::consts::FRAC_PI_2
                     }
                     Founder::Lanternjaw => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
-                    Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter => unreachable!("refused by Arena::has_layout"),
+                    Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter | Founder::Chorister => unreachable!("refused by Arena::has_layout"),
                 }
             };
             // In the fauna's own `[0, 2pi)`, which its motion step wraps every heading
@@ -879,7 +879,7 @@ impl Arena {
             Founder::Blind => Founder::Browser,
             Founder::Browser => Founder::Blind,
             Founder::Lanternjaw => panic!("the sensing arena is built for the two grazing lineages; the lanternjaw has none until P2"),
-            Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter => unreachable!("refused by Arena::has_layout"),
+            Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter | Founder::Chorister => unreachable!("refused by Arena::has_layout"),
         };
         let mut brng = Rng::new(layout_seed ^ BYSTANDER_SALT);
         let mut pool: Vec<Site> = candidates
@@ -1026,7 +1026,7 @@ impl Arena {
                 add(&mut got, t.map(|t| t.taken));
             }
             Founder::Lanternjaw => add(&mut got, self.flora.take_carrion(site, want)),
-            Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter => unreachable!("refused by Arena::has_layout"),
+            Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter | Founder::Chorister => unreachable!("refused by Arena::has_layout"),
         }
         (got.organic > 0.0).then_some(got)
     }
@@ -1329,7 +1329,7 @@ mod tests {
                     .sin()
                     .atan2((animal.pose.heading_rad - toward).cos());
                 match founder {
-                    Founder::Lanternjaw | Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter => {
+                    Founder::Lanternjaw | Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter | Founder::Chorister => {
                         unreachable!("no arena for this lineage")
                     }
                     Founder::Blind => blind_errors.push(error),
@@ -1941,7 +1941,7 @@ mod tests {
                 let arena = build(founder, seed);
                 let id = arena.animal_id.expect("the Stage A founder is placed");
                 match founder {
-                    Founder::Lanternjaw | Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter => {
+                    Founder::Lanternjaw | Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter | Founder::Chorister => {
                         unreachable!("no arena for this lineage")
                     }
                     Founder::Blind => {

@@ -42,7 +42,7 @@ fn landscape() -> Landscape {
     let founded = found::found(
         &tiny(),
         &LayerConfig::new(&Params::defaults(), tiny().voxel_m),
-        [3, 3, 0, 0, 0, 0, 0, 0],
+        [3, 3, 0, 0, 0, 0, 0, 0, 0],
         found::Seeds::Asked(TINY_SEED),
         true,
     );
@@ -306,7 +306,7 @@ fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
     let founded = found::found(
         &tiny(),
         &LayerConfig::new(&Params::defaults(), tiny().voxel_m),
-        [3, 3, 0, 0, 0, 0, 0, 0],
+        [3, 3, 0, 0, 0, 0, 0, 0, 0],
         found::Seeds::Asked(TINY_SEED),
         true,
     );

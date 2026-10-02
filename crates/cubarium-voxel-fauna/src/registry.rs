@@ -245,6 +245,22 @@ fn founder_rows() -> Vec<Row> {
         // Gut seeds (`GutSeeds`, F3): the seedporter's only, optional on the others.
         r("gut_seeds.seeds_per_fruit_organic", "org-units per org-unit of fruit", fraction, "share of a fruit meal that is the source's seeds, carried in the gut").optional(),
         r("gut_seeds.gut_transit_s", "s", nonneg, "a meal's seeds are voided at the body's face this long after it").optional(),
+        // The pack table (`Pack`, roster R3): the chorister's only, optional on the others.
+        r("pack.pack_radius_m", "m", nonneg, "the size window sums the bodies of packmates within this").optional().prov("decision"),
+        r("pack.pack_size", "adults", nonneg, "adults per pack at founding (the first is the breeder)").optional().prov("decision"),
+        r("pack.den_cover_m", "m", nonneg, "a den has solid within this over its face").optional().prov("decision"),
+        r("pack.den_radius_m", "m", nonneg, "adults rest and pups stay within this of the den").optional().prov("decision"),
+        r("pack.litter_size_max", "young", nonneg, "a litter is 2 up to this").optional().prov("decision"),
+        r("pack.litter_interval_s", "s", nonneg, "the breeder's litters are at least this far apart").optional().prov("decision"),
+        r("pack.independence_age_s", "s", nonneg, "a pup cannot strike and stays at the den until this age").optional().prov("decision"),
+        r("pack.provision_reserve_fraction", "fraction of reserve cap", fraction, "an adult at the den provisions a pup while its reserve is above this").optional().prov("decision"),
+        r("pack.provision_rate_per_s", "org-units/s per unit giver body", nonneg, "the provisioning transfer").optional(),
+        r("pack.provision_efficiency", "fraction", fraction, "share of a transfer the pup receives; the rest is respired").optional().prov("decision"),
+        r("pack.territory_radius_m", "m", nonneg, "a pack never paths within this of another pack's den").optional().prov("decision"),
+        r("pack.flank_offset_m", "m", nonneg, "flankers go this far either side of the target").optional(),
+        r("pack.chase_give_up_s", "s", nonneg, "a chase is dropped after this").optional().prov("decision"),
+        r("pack.chase_reserve_floor", "fraction of reserve cap", fraction, "a chase is dropped when a member's reserve falls under this").optional(),
+        r("pack.call_s", "s", nonneg, "a member calls this long after the target changes or it strikes").optional().prov("decision"),
         // The counter-strike seam (`Counter`): unused, `None` for every lineage.
         r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
         r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),

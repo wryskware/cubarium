@@ -446,7 +446,7 @@ mod tests {
             judged.set(judged.get() + 1);
             judged.get() > 1
         };
-        let founded = found_judged(&cfg, &layers, [2, 2, 0, 0, 0, 0, 0, 0], Seeds::from(5), false, first_fails);
+        let founded = found_judged(&cfg, &layers, [2, 2, 0, 0, 0, 0, 0, 0, 0], Seeds::from(5), false, first_fails);
         assert_eq!(judged.get(), 2, "two worlds were judged");
         assert_eq!(founded.seed, 6, "the refused first draw was replaced");
         assert!(founded.accepted && founded.habitat_rejected == 1);
@@ -475,7 +475,7 @@ mod tests {
         let founded = found_judged(
             &cfg,
             &layers,
-            [2, 2, 0, 0, 0, 0, 0, 0],
+            [2, 2, 0, 0, 0, 0, 0, 0, 0],
             Seeds::Asked(6),
             false,
             |_: &habitat::Seeded| false,

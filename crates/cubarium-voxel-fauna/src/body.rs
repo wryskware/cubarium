@@ -125,6 +125,10 @@ const FRUIT_YIELD: f64 = 0.6;
 /// 0.75 × 0.375 × 0.375 m, r ≈ 0.237. A derivation, not a knob, as
 /// [`LOFTSTRIDER_VOLUME_RATIO`] is.
 pub const SEEDPORTER_VOLUME_RATIO: f64 = (0.5 * 0.25 * 0.2) / (0.75 * 0.375 * 0.375);
+/// The chorister's body volume over the lanternjaw's (roster R3): 1.4 × 0.35 × 0.6 m over
+/// 1.0 × 0.25 × 0.45 m, r ≈ 2.61 (the 0.8 m tail is geometry only). A derivation, not a
+/// knob.
+pub const CHORISTER_VOLUME_RATIO: f64 = (1.4 * 0.35 * 0.6) / (1.0 * 0.25 * 0.45);
 /// The bellwing's mass against the littershredder's (F1): `body_max` 0.001 (x1, the
 /// note's number) over the shredder's 0.0125.
 pub const BELLWING_MASS_RATIO: f64 = 0.001 / 0.0125;
@@ -433,6 +437,77 @@ pub struct FounderPhysiology {
     /// transit time. `None` for every other lineage.
     #[serde(default)]
     pub gut_seeds: Option<GutSeeds>,
+    /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
+    /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
+    /// numbers ([`Pack`]). `None` for every other lineage.
+    // R3 stub: declared with the brief's numbers on the chorister, read by nothing.
+    #[serde(default)]
+    pub pack: Option<Pack>,
+}
+
+/// A pack lineage's table ([`FounderPhysiology::pack`], roster R3; the chorister's numbers
+/// are Brief R3's decisions, the rest placeholders).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Pack {
+    /// **The pack seam**: the size window measures prey against the summed body of the
+    /// striker's packmates (itself included) within this, metres. 6.
+    pub pack_radius_m: f64,
+    /// Adults per pack at founding ([`Founding::Pack`]); the first is the breeder. 4.
+    pub pack_size: usize,
+    /// A den is covered: solid within this over its face, metres. 3.
+    pub den_cover_m: f64,
+    /// Adults rest and sleep, and pups stay, within this of the den, metres. 4.
+    pub den_radius_m: f64,
+    /// Young in one litter: 2 up to this. 4.
+    pub litter_size_max: u32,
+    /// The breeder's litters are at least this far apart, seconds. 3 clock-days (the
+    /// default day clock's 7,200 s day).
+    pub litter_interval_s: f64,
+    /// A pup cannot strike and stays at the den until this age, seconds; then it joins the
+    /// pack. 1 clock-day.
+    pub independence_age_s: f64,
+    /// An adult at the den passes reserve to the hungriest pup there while its reserve is
+    /// above this fraction of its reserve cap. 0.6.
+    pub provision_reserve_fraction: f64,
+    /// The provisioning transfer, organic units per second per unit of the giver's body.
+    /// A placeholder.
+    pub provision_rate_per_s: f64,
+    /// The share of a transfer the pup receives; the rest is respired. 0.7.
+    pub provision_efficiency: f64,
+    /// A pack's heuristic never paths within this of another pack's den, metres. 10.
+    pub territory_radius_m: f64,
+    /// Flankers go to points this far either side of the pack target, metres. A
+    /// placeholder.
+    pub flank_offset_m: f64,
+    /// A chase is dropped after this, seconds. 20.
+    pub chase_give_up_s: f64,
+    /// ...or when a member's reserve falls under this fraction of its reserve cap. A
+    /// placeholder.
+    pub chase_reserve_floor: f64,
+    /// A member's `calling` flag stays set this long after the pack target changes or it
+    /// strikes, seconds. 1.
+    pub call_s: f64,
+}
+
+impl Pack {
+    /// The chorister's table (Brief R3).
+    pub const CHORISTER: Pack = Pack {
+        pack_radius_m: 6.0,
+        pack_size: 4,
+        den_cover_m: 3.0,
+        den_radius_m: 4.0,
+        litter_size_max: 4,
+        litter_interval_s: 3.0 * 7200.0,
+        independence_age_s: 7200.0,
+        provision_reserve_fraction: 0.6,
+        provision_rate_per_s: 0.01,
+        provision_efficiency: 0.7,
+        territory_radius_m: 10.0,
+        flank_offset_m: 1.5,
+        chase_give_up_s: 20.0,
+        chase_reserve_floor: 0.3,
+        call_s: 1.0,
+    };
 }
 
 /// A glider's table ([`FounderPhysiology::glider`], F3; the seedporter's numbers are
@@ -569,6 +644,9 @@ pub enum Founding {
     /// `founding_count` **clutches** buried on faces where its prey stand (§2.9, §2.13:
     /// the lanternjaw's egg bank); no adults. A count of 0 is the no-egg-bank control.
     Clutches,
+    /// `founding_count` **packs** (roster R3, the chorister): each `pack_size` adults
+    /// ([`Pack`]) with one pack id, the first the breeder, around a covered den.
+    Pack,
 }
 
 /// Where a founding body goes ([`FounderPhysiology::founding_site`]). Both read the
@@ -636,7 +714,8 @@ impl Hunter {
         // The ripple-snail (5, roster R2b) is on no hunter's list.
         // The bellwing (6, F1) is on no hunter's list.
         // The seedporter (7, F3) is on it, but only while grounded ([`crate::is_prey_of`]).
-        prey: [true, true, false, true, false, false, false, true],
+        // The chorister (8, roster R3) is on no lanternjaw's list.
+        prey: [true, true, false, true, false, false, false, true, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
@@ -796,6 +875,7 @@ impl FounderPhysiology {
                 flight: None,
                 glider: None,
                 gut_seeds: None,
+                pack: None,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -852,6 +932,7 @@ impl FounderPhysiology {
                 flight: None,
                 glider: None,
                 gut_seeds: None,
+                pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
             // scorpid ambusher, 1.0 × 0.25 × 0.45 m, a fifth of the grazer's upkeep.
@@ -933,6 +1014,7 @@ impl FounderPhysiology {
                 flight: None,
                 glider: None,
                 gut_seeds: None,
+                pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
             // glowcap's grazer, built from the littershredder by **body volume**, the way
@@ -1139,6 +1221,17 @@ impl FounderPhysiology {
                     ..grazer
                 }
             }
+            // R3 stub: the lanternjaw's table (its egg bank, nocturnal, its prey list) at a
+            // founding count of 0, carrying the brief's pack numbers. The implementer
+            // builds the chorister here (Brief R3): 1.4 × 0.35 × 0.6 m, the lanternjaw's
+            // table by body volume ([`CHORISTER_VOLUME_RATIO`]) at twice its specific
+            // upkeep, live birth, diurnal, diet [carrion], its own prey list, founded as
+            // packs.
+            Founder::Chorister => FounderPhysiology {
+                founding_count: 0,
+                pack: Some(Pack::CHORISTER),
+                ..FounderPhysiology::placeholder(Founder::Lanternjaw)
+            },
             Founder::RippleSnail => {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let grazer = FounderPhysiology::placeholder(Founder::Browser);

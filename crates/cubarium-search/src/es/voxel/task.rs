@@ -179,7 +179,8 @@ pub fn arena_protocol(founder: Founder, stage: Stage, band: Band) -> String {
         | Founder::Loftstrider
         | Founder::RippleSnail
         | Founder::Bellwing
-        | Founder::Seedporter => base,
+        | Founder::Seedporter
+        | Founder::Chorister => base,
         Founder::Browser => format!("{base}+{BROWSER_CROWN_HEIGHT_REVISION}"),
     }
 }
@@ -229,7 +230,8 @@ pub fn sensed_radius_m(founder: Founder) -> f64 {
         | Founder::Lanternjaw
         | Founder::Loftstrider
         | Founder::Bellwing
-        | Founder::Seedporter => founder.manifest().cone_range_m,
+        | Founder::Seedporter
+        | Founder::Chorister => founder.manifest().cone_range_m,
     }
 }
 

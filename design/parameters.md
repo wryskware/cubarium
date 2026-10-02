@@ -1053,7 +1053,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (792 rows)
+**`fauna.*`** (1012 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1162,6 +1162,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.littershredder.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.littershredder.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.littershredder.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.littershredder.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.littershredder.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.littershredder.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.littershredder.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.littershredder.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.littershredder.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.littershredder.pack.provision_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.littershredder.pack.provision_rate_per_s` | (absent) | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.littershredder.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.littershredder.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.littershredder.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.littershredder.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.littershredder.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1247,6 +1262,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.frondgrazer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.frondgrazer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.frondgrazer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.frondgrazer.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.frondgrazer.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.frondgrazer.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.frondgrazer.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.frondgrazer.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.frondgrazer.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.frondgrazer.pack.provision_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.frondgrazer.pack.provision_rate_per_s` | (absent) | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.frondgrazer.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.frondgrazer.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.frondgrazer.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.frondgrazer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.frondgrazer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1332,6 +1362,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.lanternjaw.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.lanternjaw.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.lanternjaw.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.lanternjaw.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.lanternjaw.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.lanternjaw.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.lanternjaw.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.lanternjaw.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.lanternjaw.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.lanternjaw.pack.provision_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.lanternjaw.pack.provision_rate_per_s` | (absent) | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.lanternjaw.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.lanternjaw.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.lanternjaw.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.lanternjaw.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.lanternjaw.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1417,6 +1462,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.capgnawer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.capgnawer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.capgnawer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.capgnawer.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.capgnawer.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.capgnawer.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.capgnawer.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.capgnawer.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.capgnawer.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.capgnawer.pack.provision_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.capgnawer.pack.provision_rate_per_s` | (absent) | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.capgnawer.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.capgnawer.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.capgnawer.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.capgnawer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.capgnawer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.capgnawer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1502,6 +1562,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.loftstrider.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.loftstrider.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.loftstrider.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.loftstrider.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.loftstrider.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.loftstrider.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.loftstrider.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.loftstrider.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.loftstrider.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.loftstrider.pack.provision_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.loftstrider.pack.provision_rate_per_s` | (absent) | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.loftstrider.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.loftstrider.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.loftstrider.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.loftstrider.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.loftstrider.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1587,6 +1662,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.ripple-snail.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.ripple-snail.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.ripple-snail.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.ripple-snail.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.ripple-snail.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.ripple-snail.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.ripple-snail.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.ripple-snail.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.ripple-snail.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.ripple-snail.pack.provision_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.ripple-snail.pack.provision_rate_per_s` | (absent) | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.ripple-snail.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.ripple-snail.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.ripple-snail.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.ripple-snail.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.ripple-snail.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.ripple-snail.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1672,6 +1762,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.bellwing.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.bellwing.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.bellwing.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.bellwing.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.bellwing.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.bellwing.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.bellwing.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.bellwing.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.bellwing.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.bellwing.pack.provision_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.bellwing.pack.provision_rate_per_s` | (absent) | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.bellwing.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.bellwing.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.bellwing.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.bellwing.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.bellwing.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1757,9 +1862,124 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.glider.roost_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.seedporter.gut_seeds.seeds_per_fruit_organic` | 0.1 | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.seedporter.gut_seeds.gut_transit_s` | 900.0 | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.seedporter.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.seedporter.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.seedporter.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.seedporter.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.seedporter.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.seedporter.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.seedporter.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.seedporter.pack.provision_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.seedporter.pack.provision_rate_per_s` | (absent) | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.seedporter.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.seedporter.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.seedporter.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.seedporter.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.seedporter.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.chorister.core.maintenance_per_s` | 0.0002 | org-units/s per unit body | [0, inf) | 0.00025–0.004 log | B | placeholder | basal upkeep, paid from reserve then body |
+| `fauna.founders.chorister.core.bite_per_s` | 0.042 | org-units/s | [0, inf) | 0.0002–0.004 log | C | placeholder | the hungry mouth's intake rate |
+| `fauna.founders.chorister.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
+| `fauna.founders.chorister.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.chorister.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
+| `fauna.founders.chorister.core.growth_max_per_s` | 0.00007500000000000001 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.chorister.core.body_min` | 0.102 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.chorister.core.birth_body` | 0.63 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.chorister.core.birth_cost` | 0.15 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
+| `fauna.founders.chorister.core.reserve_cap` | 1.0 | fraction of body | [0, inf) | 0.2–1.5 | A | placeholder | ceiling on new intake into the reserve |
+| `fauna.founders.chorister.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
+| `fauna.founders.chorister.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
+| `fauna.founders.chorister.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–57600 log | B | derived | median lifespan (0: none) |
+| `fauna.founders.chorister.core.reproduction.surplus_floor` | 0.375 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.founders.chorister.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
+| `fauna.founders.chorister.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
+| `fauna.founders.chorister.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.chorister.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
+| `fauna.founders.chorister.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
+| `fauna.founders.chorister.core.reproduction.clutch_size` | 3 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
+| `fauna.founders.chorister.core.reproduction.egg_organic` | 0.15 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.chorister.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
+| `fauna.founders.chorister.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
+| `fauna.founders.chorister.motor_respiration_per_s` | 0.0002 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
+| `fauna.founders.chorister.step_up_m` | 0.45 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.chorister.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
+| `fauna.founders.chorister.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
+| `fauna.founders.chorister.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
+| `fauna.founders.chorister.cruise_body_lengths_per_s` | 0.6 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.chorister.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
+| `fauna.founders.chorister.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
+| `fauna.founders.chorister.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
+| `fauna.founders.chorister.drown_after_s` | 60.0 | s | [0, inf) | 10–36000 log | - | placeholder, digest | continuous time under water before it drowns |
+| `fauna.founders.chorister.adult_length_m` | 1.0 | m | (0, inf) | yes | N | decision, digest | adult body length (cruise is 1 BL/s) |
+| `fauna.founders.chorister.adult_width_m` | 0.25 | m | (0, inf) | yes | N | decision, digest | adult body width |
+| `fauna.founders.chorister.adult_height_m` | 0.45 | m | (0, inf) | yes | N | decision, digest | adult body height |
+| `fauna.founders.chorister.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
+| `fauna.founders.chorister.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
+| `fauna.founders.chorister.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
+| `fauna.founders.chorister.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
+| `fauna.founders.chorister.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.chorister.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.chorister.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
+| `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
+| `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.chorister.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
+| `fauna.founders.chorister.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
+| `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
+| `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.chorister.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
+| `fauna.founders.chorister.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
+| `fauna.founders.chorister.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
+| `fauna.founders.chorister.hunter.jaw_band_height_fraction` | 0.6 | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
+| `fauna.founders.chorister.hunter.jaw_forward_length_fraction` | 0.5 | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
+| `fauna.founders.chorister.hunter.windup_s` | 0.15 | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.chorister.hunter.lunge_s` | 0.25 | s | [0, inf) |  | - | placeholder | the lunge |
+| `fauna.founders.chorister.hunter.recovery_s` | 3.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
+| `fauna.founders.chorister.hunter.strike_cost_s` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
+| `fauna.founders.chorister.hunter.lure_power` | 1.0 | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.chorister.hunter.rest_at` | 0.9 | fraction of reserve cap | [0, 1] |  | - | placeholder | satiated: rests at this reserve |
+| `fauna.founders.chorister.hunter.torpor_upkeep` | 0.25 | x basal upkeep | [0, inf) |  | - | placeholder | upkeep in the satiated rest |
+| `fauna.founders.chorister.hunter.wake_at` | 0.5 | fraction of reserve cap | [0, 1] |  | - | placeholder | wakes from the rest below this |
+| `fauna.founders.chorister.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
+| `fauna.founders.chorister.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
+| `fauna.founders.chorister.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
+| `fauna.founders.chorister.flight.hover_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second hovering |
+| `fauna.founders.chorister.flight.climb_work_per_m` | (absent) | org-units per m per unit body | [0, inf) |  | - | placeholder | lift work going up; descent is free |
+| `fauna.founders.chorister.flight.takeoff_s` | (absent) | s of flight | [0, inf) |  | - | decision | a takeoff's cost |
+| `fauna.founders.chorister.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
+| `fauna.founders.chorister.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
+| `fauna.founders.chorister.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
+| `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
+| `fauna.founders.chorister.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.chorister.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
+| `fauna.founders.chorister.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
+| `fauna.founders.chorister.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.chorister.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
+| `fauna.founders.chorister.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
+| `fauna.founders.chorister.pack.pack_radius_m` | 6.0 | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
+| `fauna.founders.chorister.pack.pack_size` | 4 | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
+| `fauna.founders.chorister.pack.den_cover_m` | 3.0 | m | [0, inf) |  | - | decision | a den has solid within this over its face |
+| `fauna.founders.chorister.pack.den_radius_m` | 4.0 | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.chorister.pack.litter_size_max` | 4 | young | [0, inf) |  | - | decision | a litter is 2 up to this |
+| `fauna.founders.chorister.pack.litter_interval_s` | 21600.0 | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
+| `fauna.founders.chorister.pack.independence_age_s` | 7200.0 | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.chorister.pack.provision_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
+| `fauna.founders.chorister.pack.provision_rate_per_s` | 0.01 | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
+| `fauna.founders.chorister.pack.provision_efficiency` | 0.7 | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
+| `fauna.founders.chorister.pack.territory_radius_m` | 10.0 | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
+| `fauna.founders.chorister.pack.flank_offset_m` | 1.5 | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
+| `fauna.founders.chorister.pack.chase_give_up_s` | 20.0 | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
+| `fauna.founders.chorister.pack.call_s` | 1.0 | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
+| `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
+| `fauna.founders.chorister.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
+| `fauna.founders.chorister.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
 | `fauna.predation.still_after_s` | 2.0 | s | [0, inf) | 0.5–10 | - | decision | a body is still once it has not moved this long |
 | `fauna.predation.still_speed_bl_per_s` | 0.1 | body lengths/s | [0, inf) | 0.02–0.5 | - | decision | ground speed that counts as moving |
 | `fauna.predation.still_threat_near_m` | 0.5 | m | [0, inf) | 0.1–2 | - | decision | a still threat reads as a threat inside this distance |

@@ -16,6 +16,10 @@
 //! **F3** (the roster brief's Brief F3 "Tests first"): the live presets found seedporters
 //! (4 on the desktop and voidrunner terrariums and the desktop voxel preset, 3 on the
 //! Tachyon panel), and a live seedporter draws with its specimen model at its `y_m`.
+//!
+//! **R3** (Brief R3 "Tests first"): the live presets found one chorister pack (desktop and
+//! voidrunner terrariums, desktop voxel) and none on the Tachyon panel, and a live
+//! chorister draws with its specimen model, a pup at its body scale.
 
 use std::path::{Path, PathBuf};
 
@@ -484,4 +488,82 @@ fn a_live_seedporter_draws_each_mode_with_its_own_model() {
     seen.sort();
     seen.dedup();
     assert_eq!(seen.len(), 4, "four poses, four models");
+}
+
+// ------------------------------------------------------------------ R3: the chorister
+
+/// R3 (Brief R3, "Founding counts"): **the live presets found one chorister pack** on the
+/// desktop and voidrunner terrariums and the desktop voxel preset, and **none on the Tachyon
+/// panel** (Wrysk: bigger worlds only); the code default (co-training worlds) founds none.
+/// The count is packs ([`cubarium_voxel_fauna::Founding::Pack`]).
+#[test]
+fn the_live_presets_found_one_chorister_pack_and_tachyon_none() {
+    let c = Founder::Chorister;
+    let code = FaunaConfig::default();
+    assert_eq!(code.founder_counts()[c.index()], 0, "training worlds are unchanged");
+    assert_eq!(code.founder(c).founding, cubarium_voxel_fauna::Founding::Pack, "counted in packs");
+    for (file, want) in [
+        ("config/desktop/terrarium.toml", 1),
+        ("config/voidrunner/terrarium.toml", 1),
+        ("config/desktop/voxel.toml", 1),
+        ("config/tachyon/voxel.toml", 0),
+    ] {
+        let path = repo(file).canonicalize().expect("the preset is committed");
+        let cfg = super::load_config(&path).unwrap_or_else(|e| panic!("{file}: {e:#}"));
+        let params = super::params_of(&cfg, &[]).unwrap_or_else(|e| panic!("{file}: {e:#}"));
+        assert_eq!(params.fauna.founder_counts()[c.index()], want, "{file}: chorister packs");
+    }
+}
+
+/// R3 (Brief R3, "Presenter"): **a live chorister draws with its baked specimen model and
+/// coat** (R0's fallback, one pose), stamped from the model and not a glyph, and **a pup
+/// is drawn at its body scale**: a body at a tenth of `body_max` selects a shorter size bin
+/// than an adult and stamps fewer cells.
+#[test]
+fn a_live_chorister_draws_with_its_specimen_model_and_a_pup_at_its_body_scale() {
+    let f = Founder::Chorister;
+    assert_eq!(f.name(), "chorister", "the specimen key");
+    let lib = ModelLibrary::load(&repo("assets/voxel-models"), 0.125).expect("the baked library");
+    let specimen = lib.specimen(f.name()).expect("the baked specimen of its name");
+    let drawn = lib.animal(f).expect("a live body has a model");
+    assert!(std::ptr::eq(drawn, specimen), "the chorister draws with its specimen");
+    let coat = colours::founder_coat(f);
+    let want = colours::specimen_coat(f.name()).expect("the specimen's coat");
+    assert!(std::ptr::eq(coat, want), "and wears its specimen coat");
+
+    let world = plain();
+    let view = world.view();
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    for (x, body) in [(12, 1.0), (36, 0.1)] {
+        assert!(fauna.apply(
+            &world,
+            Command::IntroduceFounder {
+                x,
+                z: 16,
+                founder: f,
+                stores: StartingStores { body, reserve: 0.5 },
+                heading_rad: 0.0,
+            },
+        ));
+    }
+    let mut animals = Animals::empty(0, 0, 0);
+    animals.rebuild_with(&view, Some(fauna.view()), &lib);
+    let model_cells = animals
+        .cells()
+        .filter(|&(x, y, z)| {
+            matches!(animals.at(i64::from(x), i64::from(y), z), AnimalPart::Model(_))
+        })
+        .count();
+    assert!(model_cells > 0, "a live chorister is stamped from its model, not a glyph");
+
+    let config = fauna.config().clone();
+    let [adult, pup] = [fauna.view().animals[0], fauna.view().animals[1]];
+    let adult_cells = super::animal::model_cells(&lib, &config, &adult).expect("a model");
+    let pup_cells = super::animal::model_cells(&lib, &config, &pup).expect("a model");
+    assert!(
+        pup_cells.len() < adult_cells.len(),
+        "the pup is drawn smaller: {} cells against the adult's {}",
+        pup_cells.len(),
+        adult_cells.len()
+    );
 }

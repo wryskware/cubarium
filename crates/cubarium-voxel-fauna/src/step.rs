@@ -2445,6 +2445,7 @@ fn newborn(
         attached: None,
         last_bloom: None,
         gut_seeds: crate::GutSeedLots::default(),
+        pack: None,
     }
 }
 
@@ -2945,3 +2946,6 @@ mod predation_life_tests;
 #[cfg(test)]
 #[path = "parasite_tests.rs"]
 mod parasite_tests;
+#[cfg(test)]
+#[path = "chorister_tests.rs"]
+mod chorister_tests;
