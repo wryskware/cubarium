@@ -450,11 +450,17 @@ pub(crate) fn steer(
         }
     }
 
-    // A new target: a member that is hungry, above the floor and with a packmate within
+    // A new target: a member that is hungry, with every adult above the floor and a packmate within
     // `pack_radius_m` takes the nearest prey it sees ahead (its cone's range) inside the
     // pack's window and outside every other territory. Alone, it hunts as the lanternjaw.
     let current = fauna.pack(own).and_then(|p| p.target);
-    if current.is_none() && frac < h.rest_at && frac >= t.chase_reserve_floor {
+    // The floor reads as the drop does: no chase begins while any adult is under it (else
+    // a spent packmate drops each new target at the next sampling and the pack flips
+    // between targets).
+    let spent = adults
+        .iter()
+        .any(|b| reserve_fraction(fauna, b) < t.chase_reserve_floor);
+    if current.is_none() && frac < h.rest_at && !spent {
         let mates = adults
             .iter()
             .filter(|b| b.id != a.id && distance(&a, b.pose.x, b.pose.z, ring) <= t.pack_radius_m)
