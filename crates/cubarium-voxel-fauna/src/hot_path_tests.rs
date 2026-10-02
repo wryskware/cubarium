@@ -14,7 +14,9 @@
 //! - item 3 in the body: the motion sweep on the support lookup — the step rule's nearest
 //!   face, the disc's ground and its clearance — moves every body exactly as the sweep at
 //!   `main` a31ecdc did (kept verbatim below, reading `material` directly), walls,
-//!   risers, ledges, water and the bisection against a wall included.
+//!   risers, ledges, water and the bisection against a wall included; plus the
+//!   step-down landing check added to the rule on 2026-10-01 (fix 1 of
+//!   `design/handoffs/browser-stuck-in-crags-2026-10-01.md`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -546,6 +548,14 @@ fn ref_advance_candidate(
     if (1..=headroom).any(|d| ref_disc_hits_solid(view, nx, nz, clearance + d, r)) {
         return None;
     }
+    // Added with the rule (fix 1, 2026-10-01, design/handoffs/browser-stuck-in-crags-2026-10-01.md):
+    // a step down is checked again as the landed body's next sub-step sees it.
+    if ny < standing_y {
+        let landed = ref_disc_ground_layer(view, nx, nz, r, ny, step_limits).max(ny);
+        if (1..=headroom).any(|d| ref_disc_hits_solid(view, nx, nz, landed + d, r)) {
+            return None;
+        }
+    }
     let there = view.water_depth_m(cx, ny, cz as u32);
     if there > wade_depth_m {
         // The escape: within the face it stands on, or to a face shallower than it.
@@ -711,8 +721,10 @@ fn the_sweep_on_the_lookup_moves_every_body_as_the_walk_did() {
                         let (mut a, mut b) = (start, start);
                         let (mut ya, mut yb) = (face.y, face.y);
                         for t in 0..30 {
+                            // Friction 1: the reference sweep predates the wall slide
+                            // (`slide_tests` covers it).
                             let ma = crate::body::resolve_motion(
-                                &view, &mut a, &mut ya, &manifest, &body, wade, limits, held,
+                                &view, &mut a, &mut ya, &manifest, &body, wade, limits, 1.0, held,
                             );
                             let mb = ref_resolve_motion(
                                 &view, &mut b, &mut yb, &manifest, &body, wade, limits, held,

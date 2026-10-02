@@ -29,7 +29,9 @@ use crate::Fauna;
 // 33: R3 — the chorister lives: its physiology, the pack tactic's state on
 // `PackRecord`, `Animal::{homing_ticks, yielding}`, `Escrow::young`, the pack and yield
 // ledger lines, `PredationConfig::{carcass_yield_radius_m, threat_clear_m}`.
-pub const SCHEMA: u32 = 33;
+// 34: merge with main's crag fixes — `LifeConfig::wall_friction`,
+// `FoundingConfig::clearance_margin_m` in the saved config.
+pub const SCHEMA: u32 = 34;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

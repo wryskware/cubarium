@@ -159,6 +159,16 @@ pub struct LifeConfig {
     /// An **arriving** body (an introduced founder) has lived part of its life: its
     /// remaining span is a uniform `[arriving_share_min, 1)` share of such a draw.
     pub arriving_share_min: f64,
+    /// **Wall slide** (crag fix 4, 2026-10-02): the share of a walking request's
+    /// along-wall component a wall takes away, `[0, 1]`. 0 slides the disc along the wall
+    /// at the full tangential share of the request; 1 is the old motor, which stops at
+    /// the wall. The refused remainder is paid for either way.
+    #[serde(default = "default_wall_friction")]
+    pub wall_friction: f64,
+}
+
+fn default_wall_friction() -> f64 {
+    LifeConfig::default().wall_friction
 }
 
 impl Default for LifeConfig {
@@ -171,6 +181,7 @@ impl Default for LifeConfig {
             lifespan_draw_min: 0.8,
             lifespan_draw_span: 0.4,
             arriving_share_min: 0.5,
+            wall_friction: 0.0,
         }
     }
 }
@@ -413,6 +424,16 @@ pub struct FoundingConfig {
     /// founder-hours of adult basal upkeep in reachable edible stock for every founder
     /// placed in it (decisions §8), hours.
     pub accept_founder_hours: f64,
+    /// Founders go only where the disc, this much wider than the body's footprint, clears
+    /// its headroom at a face and between faces, in the largest such component
+    /// (`encounter::founding_faces`), metres. A slack against corridors exactly as wide
+    /// as the body, which the live body passes only on its exact centre line.
+    #[serde(default = "default_clearance_margin_m")]
+    pub clearance_margin_m: f64,
+}
+
+fn default_clearance_margin_m() -> f64 {
+    FoundingConfig::default().clearance_margin_m
 }
 
 impl Default for FoundingConfig {
@@ -424,6 +445,7 @@ impl Default for FoundingConfig {
             starter_litter_mineral_fraction: 0.02,
             starter_litter_energy_density: 2.0,
             accept_founder_hours: 1.0,
+            clearance_margin_m: 0.03,
         }
     }
 }

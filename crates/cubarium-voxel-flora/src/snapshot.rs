@@ -18,7 +18,8 @@ use crate::Flora;
 // 15: F3 (tests-first stubs) — `Stand::fruit`, `SpeciesConfig::{fruit_per_s, fruit_cap,
 // fruit_drop_s, fruit_mineral_fraction}`.
 // 16: F3 — lanternberry fruit is made, falls and is taken; `Stand::fruit_age_s`.
-pub const SCHEMA: u32 = 16;
+// 17: merge with main's glowcap dark habitat (main's schema 11).
+pub const SCHEMA: u32 = 17;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

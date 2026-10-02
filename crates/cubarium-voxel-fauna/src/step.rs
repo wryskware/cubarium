@@ -1119,6 +1119,7 @@ fn founder_act(
     // (`design/handoffs/voxel-founder-step-2026-09-22.md`; split up/down and the water
     // read against the body's own height by package mobility).
     let step_limits = phys.step_limits(view.config.voxel_m);
+    let wall_friction = fauna.config.life.wall_friction;
     let (motion, standing_y) = {
         let a = &mut fauna.animals[i];
         let mut standing_y = a.site.y;
@@ -1130,6 +1131,7 @@ fn founder_act(
             &geometry,
             phys.wade_depth_m(&geometry),
             step_limits,
+            wall_friction,
             held,
             phys.aquatic.then_some(phys.water_margin_m),
         );
@@ -1636,6 +1638,7 @@ fn strike_tick(
         feed: 0.0,
     };
     let step_limits = phys.step_limits(view.config.voxel_m);
+    let wall_friction = fauna.config.life.wall_friction;
     let standing_y = {
         let a = &mut fauna.animals[i];
         let mut standing_y = a.site.y;
@@ -1647,6 +1650,7 @@ fn strike_tick(
             &geometry,
             phys.wade_depth_m(&geometry),
             step_limits,
+            wall_friction,
             lunge,
         );
         standing_y

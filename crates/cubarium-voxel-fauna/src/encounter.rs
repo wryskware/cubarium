@@ -394,6 +394,116 @@ pub fn route_components(
     cubarium_voxel::walk::components_linked(&cells, c.width, rule.step.mutual(), &links)
 }
 
+/// The faces a lineage's founders may be placed on (fix 2,
+/// `design/handoffs/browser-stuck-in-crags-2026-10-01.md`): standable for its adult body,
+/// in the **largest** component of the graph below. A founder with its disc in a wall can
+/// move nowhere; one in a pocket of a few square metres eats it bare and cannot leave.
+///
+/// The graph is the disc's, not the column's, with `margin_m`
+/// ([`crate::FoundingConfig::clearance_margin_m`]) added to the radius:
+/// - a face is a node when the disc at its centre ([`crate::Pose::at_site`]) is clear of
+///   solid over its headroom ([`crate::body::pose_clear`], the motion's own clearance);
+/// - two neighbouring nodes within the lineage's mutual step are joined when the disc is
+///   also clear at the midpoint between their centres, standing on either layer, so a
+///   corner the swept disc meets between two clear centres cuts the edge;
+/// - a climber's wall links ([`crate::wall_ascent`]) join as in [`route_components`].
+///
+/// The margin is why a corridor exactly as wide as the disc is not a way out: the live
+/// body passes one only on its exact centre line.
+pub fn founding_faces(
+    view: &VoxelView<'_>,
+    phys: &crate::FounderPhysiology,
+    margin_m: f64,
+) -> Vec<Site> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let body = phys.adult_body();
+    let step = phys.step_limits(v);
+    let room = body.headroom_voxels(v);
+    let r = body.footprint_radius() + margin_m.max(0.0);
+    let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, room, step);
+    let faces: Vec<Site> = standable_faces(view, &body, phys.wade_depth_m(&body))
+        .into_iter()
+        .filter(|f| clear((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, f.y))
+        .collect();
+    let index: FxHashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
+    let mut parent: Vec<usize> = (0..faces.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let mut join = |parent: &mut Vec<usize>, a: usize, b: usize| {
+        let (ra, rb) = (root(parent, a), root(parent, b));
+        if ra != rb {
+            parent[ra.max(rb)] = ra.min(rb);
+        }
+    };
+    let climb = step.mutual();
+    for (i, f) in faces.iter().enumerate() {
+        for (dx, dz) in [(1i64, 0i64), (0, 1)] {
+            let nz = i64::from(f.z) + dz;
+            if nz >= i64::from(c.depth) {
+                continue;
+            }
+            let nx = (i64::from(f.x) + dx).rem_euclid(i64::from(c.width)) as u32;
+            // The midpoint between the two centres, unwrapped on x: the disc's lookups wrap.
+            let (mx, mz) = (
+                (f64::from(f.x) + 0.5 + dx as f64 / 2.0) * v,
+                (f64::from(f.z) + 0.5 + dz as f64 / 2.0) * v,
+            );
+            for ny in f.y.saturating_sub(climb)..=f.y + climb {
+                let Some(&j) = index.get(&Site { x: nx, y: ny, z: nz as u32 }) else {
+                    continue;
+                };
+                if clear(mx, mz, f.y) && clear(mx, mz, ny) {
+                    join(&mut parent, i, j);
+                }
+            }
+        }
+    }
+    if phys.climbs_walls {
+        for (i, f) in faces.iter().enumerate() {
+            for dir in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+                let crate::Face::Climb(top) =
+                    crate::wall_ascent(view, i64::from(f.x), f.y, f.z, dir, room, step.up)
+                else {
+                    continue;
+                };
+                let to = Site {
+                    x: (i64::from(f.x) + dir.0).rem_euclid(i64::from(c.width)) as u32,
+                    y: top,
+                    z: (i64::from(f.z) + dir.1) as u32,
+                };
+                if let Some(&j) = index.get(&to) {
+                    join(&mut parent, i, j);
+                }
+            }
+        }
+    }
+    let roots: Vec<usize> = (0..faces.len()).map(|i| root(&mut parent, i)).collect();
+    let mut size: FxHashMap<usize, usize> = FxHashMap::default();
+    for r in &roots {
+        *size.entry(*r).or_default() += 1;
+    }
+    // The largest; a tie goes to the lowest root, so the answer is one component.
+    let Some(big) = size
+        .iter()
+        .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+        .map(|(r, _)| *r)
+    else {
+        return Vec::new();
+    };
+    faces
+        .into_iter()
+        .zip(roots)
+        .filter(|(_, r)| *r == big)
+        .map(|(f, _)| f)
+        .collect()
+}
+
 /// One lineage's **route map** over a world: every face its adult body can stand on,
 /// the walkable component of each under the lineage's climb, and the mouth columns a body
 /// standing there could cover at any heading.

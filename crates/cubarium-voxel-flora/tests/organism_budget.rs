@@ -246,6 +246,8 @@ fn vine_config() -> FloraConfig {
         contest_threshold: 0.3,
         contest_check_s: DT,
         spur_reserve_min: 1e12,
+        // Spurs off, so no flowering share is held back from spreading.
+        spread_hold: 0.0,
         energy_density: 1.0,
         ..VineConfig::default()
     };

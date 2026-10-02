@@ -76,6 +76,8 @@ pub struct LiveSpec {
     /// The world every training world is founded from: a host file's `[world]`
     /// (`--world`, e.g. the desktop terrarium), or the still `small` preset when `None`.
     pub world: Option<cubarium_voxel::Config>,
+    /// Each lineage's curiosity (`--curiosity`; weight 0 everywhere without).
+    pub curiosity: super::curiosity::Curiosity,
 }
 
 /// One lineage's side of a generation.
@@ -189,6 +191,7 @@ fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> LiveW
         ecology,
         info,
         windows: 0,
+        memory: Default::default(),
     }
 }
 
@@ -343,7 +346,7 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
         let jobs: Vec<(&mut LiveWorld, Vec<usize>)> = worlds.iter_mut().zip(first).collect();
         let tables_ref = &tables;
         let results: Vec<WindowResult> = parallel(jobs, spec.threads, |(w, first)| {
-            window::run_window(w, tables_ref, &first, spec.window_ticks)
+            window::run_window(w, tables_ref, &first, spec.window_ticks, &spec.curiosity)
         });
 
         // 3. One update per lineage, from the scores normalised within each world.
@@ -490,7 +493,8 @@ pub fn summary_line(r: &GenerationRecord) -> String {
     for f in Founder::ALL {
         let n = f.name();
         s.push_str(&format!(
-            " | {n}: pop={:.0} mov={:.2} pace={:.3} b/h={:.1} st/h={:.1} dr/h={:.1} sc={:.3}",
+            " | {n}: pop={:.0} mov={:.2} pace={:.3} b/h={:.1} st/h={:.1} dr/h={:.1} sc={:.3} \
+             nov={:.3} cur={:.3}",
             get(&format!("{n}.population")),
             get(&format!("{n}.moving_share")),
             get(&format!("{n}.pace_bl_per_s")),
@@ -498,6 +502,8 @@ pub fn summary_line(r: &GenerationRecord) -> String {
             get(&format!("{n}.starved_per_h")),
             get(&format!("{n}.drowned_per_h")),
             get(&format!("{n}.mean_score")),
+            get(&format!("{n}.mean_novelty")),
+            get(&format!("{n}.mean_curiosity")),
         ));
     }
     s.push_str(&format!(

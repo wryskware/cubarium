@@ -50,6 +50,27 @@ pub struct LineageStats {
     /// samples that had two bodies or more, and how many there were.
     pub nn_sum_m: f64,
     pub nn_samples: u64,
+    /// Novelty ([`super::curiosity`]) summed over the bodies that lived in the window,
+    /// the curiosity term `weight × novelty` summed over the same, and how many there were.
+    pub novelty_sum: f64,
+    pub curiosity_sum: f64,
+    pub novelty_bodies: u64,
+}
+
+impl LineageStats {
+    /// Mean novelty over the bodies that lived in the window (NaN with none).
+    pub fn mean_novelty(&self) -> f64 {
+        if self.novelty_bodies > 0 { self.novelty_sum / self.novelty_bodies as f64 } else { f64::NAN }
+    }
+
+    /// Moving body-minutes over body-minutes (NaN with none).
+    pub fn moving_share(&self) -> f64 {
+        if self.body_minutes > 0 {
+            self.moving_minutes as f64 / self.body_minutes as f64
+        } else {
+            f64::NAN
+        }
+    }
 }
 
 /// One world at the end of a window, and what the window counted.
@@ -225,6 +246,14 @@ pub const LINEAGE_FACTORS: &[LineageFactor] = &[
     }),
     ("mean_score", Pool::Mean, |c, f| {
         c.lineages[f.index()].mean_score
+    }),
+    ("mean_novelty", Pool::Mean, |c, f| {
+        let l = &c.lineages[f.index()];
+        share(l.novelty_sum, l.novelty_bodies as f64)
+    }),
+    ("mean_curiosity", Pool::Mean, |c, f| {
+        let l = &c.lineages[f.index()];
+        share(l.curiosity_sum, l.novelty_bodies as f64)
     }),
     ("intake_per_body_h", Pool::Mean, |c, f| {
         let l = &c.lineages[f.index()];

@@ -1458,6 +1458,7 @@ pub(crate) fn resolve_motion(
     body: &Body,
     wade_depth_m: f64,
     step_limits: StepLimits,
+    wall_friction: f64,
     held: Actions,
 ) -> Motion {
     resolve_motion_in(
@@ -1468,6 +1469,7 @@ pub(crate) fn resolve_motion(
         body,
         wade_depth_m,
         step_limits,
+        wall_friction,
         held,
         None,
     )
@@ -1487,6 +1489,7 @@ pub(crate) fn resolve_motion_in(
     body: &Body,
     wade_depth_m: f64,
     step_limits: StepLimits,
+    wall_friction: f64,
     held: Actions,
     water_margin_m: Option<f64>,
 ) -> Motion {
@@ -1596,6 +1599,18 @@ pub(crate) fn resolve_motion_in(
                     *standing_y = ny;
                     moved += actual;
                 }
+                moved += wall_slide(
+                    view,
+                    pose,
+                    standing_y,
+                    dir,
+                    (left - lo) * (1.0 - wall_friction.clamp(0.0, 1.0)),
+                    r,
+                    wade_depth_m,
+                    headroom,
+                    step_limits,
+                    water_margin_m,
+                );
                 break;
             }
         }
@@ -1607,6 +1622,71 @@ pub(crate) fn resolve_motion_in(
         delivered_turn: dyaw,
         blocked,
     }
+}
+
+/// **Wall slide** (crag fix 4): after a refused sub-step has pressed the body up to the
+/// obstruction, the rest of the request, `budget` metres (already scaled by
+/// `1 − wall_friction`), goes along the wall instead of being lost. Voxel walls are
+/// axis-aligned, so the heading's two axis components are the candidate tangents: the
+/// larger is tried first and the first one that advances at all takes the slide, swept
+/// in sub-steps of at most `r` until it is spent or refused. A head-on walk has no
+/// tangential component and does not move. The return is the slide's distance projected
+/// onto the heading — the forward progress it delivered.
+#[allow(clippy::too_many_arguments)]
+fn wall_slide(
+    view: &VoxelView<'_>,
+    pose: &mut crate::Pose,
+    standing_y: &mut u32,
+    (fx, fz): (f64, f64),
+    budget: f64,
+    r: f64,
+    wade_depth_m: f64,
+    headroom: u32,
+    step_limits: StepLimits,
+    water_margin_m: Option<f64>,
+) -> f64 {
+    if budget <= 1e-12 {
+        return 0.0;
+    }
+    let mut axes = [((fx.signum(), 0.0), fx.abs()), ((0.0, fz.signum()), fz.abs())];
+    if axes[1].1 > axes[0].1 {
+        axes.swap(0, 1);
+    }
+    for (axis, share) in axes {
+        let mut left = budget * share;
+        if left <= 1e-12 {
+            continue;
+        }
+        let mut slid = 0.0;
+        while left > 1e-12 {
+            let step = left.min(r);
+            let Some(actual) =
+                step_advance(
+                view,
+                pose,
+                standing_y,
+                axis,
+                step,
+                r,
+                wade_depth_m,
+                headroom,
+                step_limits,
+                water_margin_m,
+            )
+            else {
+                break;
+            };
+            slid += actual;
+            left -= step;
+            if actual < step - 1e-9 {
+                break;
+            }
+        }
+        if slid > 0.0 {
+            return slid * share;
+        }
+    }
+    0.0
 }
 
 /// One bounded sub-step. `Some(actual)` hands back the distance actually covered — a
@@ -1705,6 +1785,17 @@ pub(crate) fn water_within(view: &VoxelView<'_>, x: i64, y: u32, z: u32, margin_
 /// only faces are outside the climb — a wall, a cliff — contributes nothing, so its
 /// solid is checked and refuses exactly as before.
 ///
+/// **A step down is also checked as the next sub-step will see it** (fix 1,
+/// `design/handoffs/browser-stuck-in-crags-2026-10-01.md`): when the destination's layer
+/// is below `standing_y`, the disc's ground is taken again from the landing layer —
+/// [`disc_ground_layer`] from `ny`, never below `ny` — and the disc must be clear over
+/// the `headroom` layers above that too ([`pose_clear`]). Otherwise a column within the
+/// climb of the upper layer but out of it from the lower one counts as ground on the way
+/// down and as a wall once there: the landed body could move nowhere, only turn. The
+/// ledge it came down from is within the climb of the landing layer (a step down is at
+/// most `down`, and every lineage's `up == down`), so a plain riser still descends. Only
+/// descents run the second pass.
+///
 /// The standing water at the destination must be within the body's wade depth, **or
 /// shallower than the water at the column the sub-step starts from**: a body caught deeper than it can wade may always step toward the
 /// shallows, and never deeper; it may also move about the face it stands on.
@@ -1753,6 +1844,9 @@ fn advance_candidate(
     {
         return None;
     }
+    if ny < standing_y && !pose_clear(view, nx, nz, ny, r, headroom, step_limits) {
+        return None;
+    }
     // A water-bound body (roster R2b): another face must have standing water within its
     // margin, or the step is refused as a wall's is.
     if let Some(margin) = water_margin_m {
@@ -1782,6 +1876,43 @@ fn advance_candidate(
         dx += width_m;
     }
     Some((nx, nz, (dx * fx + (nz - pz) * fz).max(0.0), ny))
+}
+
+/// Whether a disc of radius `r` centred at `(cx, cz)`, standing on `standing_y`, is clear
+/// of solid over its `headroom` layers above the highest within-step ground under it:
+/// the clearance [`advance_candidate`] asks of a sub-step that stays on its layer, asked
+/// of the pose itself.
+pub(crate) fn pose_clear(
+    view: &VoxelView<'_>,
+    cx: f64,
+    cz: f64,
+    standing_y: u32,
+    r: f64,
+    headroom: u32,
+    step: StepLimits,
+) -> bool {
+    if headroom == 0 {
+        return true;
+    }
+    let cells = disc_box(view.config.voxel_m, cx, cz, r);
+    let ground = disc_ground_layer(view, cells, cx, cz, r, standing_y, step).max(standing_y);
+    !disc_hits_solid(view, cells, cx, cz, ground + 1, ground + headroom, r)
+}
+
+/// Whether `body`, placed on `face` as the model places one ([`crate::Pose::at_site`]),
+/// stands with its whole disc clear of solid over its headroom ([`pose_clear`]). The
+/// column rule ([`has_headroom`]) checks the face's own column only.
+pub fn disc_clear_on_face(view: &VoxelView<'_>, body: &Body, face: Site, step: StepLimits) -> bool {
+    let pose = crate::Pose::at_site(face, view.config.voxel_m);
+    pose_clear(
+        view,
+        pose.x,
+        pose.z,
+        face.y,
+        body.footprint_radius(),
+        body.headroom_voxels(view.config.voxel_m),
+        step,
+    )
 }
 
 /// The support face of column `(x, z)` a body standing on `standing_y` could put its
@@ -3221,6 +3352,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -3248,6 +3380,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -3286,6 +3419,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 0.0,
                     turn: 1.0,
@@ -3355,6 +3489,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -3503,6 +3638,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -3545,6 +3681,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -3594,6 +3731,7 @@ mod tests {
                 &body,
                 0.05,
                 StepLimits { up: 1, down: 1 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,
@@ -4169,6 +4307,7 @@ mod step_rule_tests {
                     up: climb,
                     down: climb,
                 },
+                crate::LifeConfig::default().wall_friction,
                 Actions {
                     forward: 1.0,
                     turn: 0.0,

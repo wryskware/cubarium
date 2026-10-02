@@ -1011,6 +1011,10 @@ pub(crate) struct Drink {
     pub(crate) taken_m3: f64,
     /// The fraction of the root box's voxels at or above the species' `saturated_pore`.
     pub(crate) saturated: f64,
+    /// The stand's darkness ([`SpeciesConfig::darkness`] of its terrain sky): what its
+    /// moisture read the cave damp at, and what its seep income is paid at. Zero for a
+    /// species with no dark habitat.
+    pub(crate) darkness: f64,
 }
 
 /// Collect every stand's demand per voxel, then withdraw once per voxel and split what
@@ -1268,12 +1272,21 @@ fn drink_read(
             drinkable,
         );
         // `moisture_of`: the species' ramp over the box's mean available water, and an
-        // empty box is a wilting one.
-        d.moisture = if band <= 0.0 {
-            0.0
-        } else {
-            sc.moisture_at(water / band)
-        };
+        // empty box is a wilting one — unless it is dark and the species reads the cave
+        // damp ([`SpeciesConfig::damp_available`]). The sky is the tick's memo, which the
+        // light pass has filled for every stand.
+        if sc.dark_sky_max > 0.0 {
+            let site = stand.site;
+            let sky = match flora.sky.binary_search_by_key(&site, |e| e.0) {
+                Ok(k) => flora.sky[k].1,
+                Err(_) => view.sky_visibility(site.x as i64, site.y, site.z),
+            };
+            d.darkness = sc.darkness(sky);
+        }
+        let mean = (band > 0.0).then(|| water / band);
+        d.moisture = sc
+            .damp_available(mean, d.darkness)
+            .map_or(0.0, |a| sc.moisture_at(a));
         // A species that needs standing water and has lost it reads
         // `μ = 0`: it earns nothing and pays its upkeep out of reserve.
         if sc.water_depth_min_m > 0.0
@@ -2399,6 +2412,8 @@ fn grow(
 struct Booked {
     fixed: f64,
     light: f64,
+    /// The seep's organic matter, mineral and energy ([`SpeciesConfig::dark_uptake_per_s`]).
+    seep: [f64; 3],
     respired: [f64; 2],
     respired_n: u8,
     heat: [f64; 3],
@@ -2420,6 +2435,9 @@ impl Booked {
         // A saprotroph books no assimilation: adding its zero changes nothing.
         ledger.fixed_in += self.fixed;
         ledger.light_in += self.light;
+        ledger.seep_organic_in += self.seep[0];
+        ledger.seep_mineral_in += self.seep[1];
+        ledger.seep_energy_in += self.seep[2];
         for &r in &self.respired[..self.respired_n as usize] {
             ledger.respired_out += r;
         }
@@ -2589,7 +2607,24 @@ fn grow_stand(
             book.light = e_v * a;
             (a, 0.0)
         }
-        Trophic::Saprotroph => saprotrophy(substrate, e_v, book),
+        Trophic::Saprotroph => {
+            let (a, mineral) = saprotrophy(substrate, e_v, book);
+            // The seep: a dark site's drip water, paid per unit of mycelium at its darkness
+            // and `μ`, on top of the substrate, and capped like photosynthesis at what the
+            // stand can spend this tick — what it cannot spend never arrives. It brings its
+            // own mineral at `n_tissue` and its energy at `e_v`, booked as an input.
+            let spend = m + (1.0 + sc.build) * (d_p + d_w) + d_q;
+            let seep = (sc.dark_uptake_per_s * w0 * drink.darkness * mu * DT)
+                .max(0.0)
+                .min((spend - a).max(0.0));
+            if seep > 0.0 {
+                let n = sc.n_tissue.max(0.0) * seep;
+                book.seep = [seep, n, e_v * seep];
+                (a + seep, mineral + n)
+            } else {
+                (a, mineral)
+            }
+        }
     };
 
     // ---- 4.3 maintenance from income first, then reserve; 4.4a the mineral budget
@@ -3129,7 +3164,9 @@ pub struct Gates {
     /// at all: rock, or a box that falls outside the world.
     pub soil_voxels: usize,
     /// Mean [`available_water`] of the root box: 0 at the wilting point, 1 at
-    /// field capacity. `None` for a box with no plant-available band in it at all.
+    /// field capacity. `None` for a box with no plant-available band in it at all. A
+    /// dark site's cave damp is in it ([`SpeciesConfig::damp_available`]): it is what the
+    /// pore gate read.
     pub mean_water: Option<f64>,
     /// Fraction of the root box's voxels at or above the species' `saturated_pore`.
     pub saturated_fraction: f64,
@@ -3148,7 +3185,8 @@ pub struct Gates {
     /// food a site holds.
     pub litter: f64,
     /// The pore-water gate: `mean_water >= establish_water_min`, on the available-water
-    /// scale, and false for a box with no soil in it.
+    /// scale, and false for a box with no soil in it unless the site is dark enough for
+    /// the cave damp to carry it.
     pub pore_ok: bool,
     /// `saturated_fraction <= establish_saturated_max`.
     pub aeration_ok: bool,
@@ -3160,6 +3198,10 @@ pub struct Gates {
     /// `substrate() >= establish_substrate_min` — and **always true for a `Photo`
     /// species**, whose substrate gate is open by construction.
     pub substrate_ok: bool,
+    /// The site's darkness for this species ([`SpeciesConfig::darkness`] of
+    /// `sky_visibility`): what the cave damp and the dark substrate gate read. Zero for a
+    /// species with no dark habitat.
+    pub darkness: f64,
     /// Settled standing water on the site or beside it, metres
     /// ([`standing_water_beside`]). Read only for a species with a
     /// `water_depth_min_m`; zero, unread, for every other.
@@ -3239,7 +3281,9 @@ pub fn establishment_gates_with_sky(
     #[cfg(feature = "profile")]
     cubarium_voxel::profile::add(cubarium_voxel::profile::Count::GatesEvaluated, 1);
     let box_ = root_box(view, site, sc);
-    let mean_water = mean_available(view, &box_);
+    let darkness = sc.darkness(sky_visibility);
+    // The cave damp: a dark site reads at least `dark_damp · darkness`, soil or not.
+    let mean_water = sc.damp_available(mean_available(view, &box_), darkness);
     let saturated_fraction = saturated_fraction(view, &box_, sc);
     let water_depth_m = view.water_depth_m(site.x as i64, site.y, site.z);
     let standing_depth_m = if sc.water_depth_min_m > 0.0 {
@@ -3267,8 +3311,13 @@ pub fn establishment_gates_with_sky(
         },
         substrate_ok: match sc.trophic {
             Trophic::Photo => true,
-            Trophic::Saprotroph => dead_wood + litter >= sc.establish_substrate_min,
+            // Or dark enough to live on the seep alone.
+            Trophic::Saprotroph => {
+                dead_wood + litter >= sc.establish_substrate_min
+                    || (sc.dark_establish_min > 0.0 && darkness >= sc.dark_establish_min)
+            }
         },
+        darkness,
         standing_depth_m,
         standing_ok: sc.water_depth_min_m <= 0.0 || standing_depth_m >= sc.water_depth_min_m,
     }
@@ -3546,7 +3595,8 @@ mod tests {
             Drink {
                 moisture: 1.0,
                 taken_m3: 0.0,
-                saturated: 0.0
+                saturated: 0.0,
+                darkness: 0.0,
             };
             2
         ];
@@ -4056,6 +4106,7 @@ mod tests {
                     moisture: [0.0, 0.5, 1.0, 0.9][i % 4],
                     taken_m3: 1e-9 * i as f64,
                     saturated: [0.0, 0.7][i % 2],
+                    darkness: 0.0,
                 })
                 .collect();
             let substrate = feed(&mut flora, &world, &drink, 1);
