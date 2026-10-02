@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 
 use cubarium_voxel::{Material, Settle, VoxelView, World};
 use cubarium_voxel_fauna::{
-    Command as FaunaCommand, Controller, Fauna, Founder, FounderPhysiology, RouteMap,
+    Command as FaunaCommand, Controller, DenChoice, Fauna, Founder, FounderPhysiology, RouteMap,
     StartingStores, has_headroom,
 };
 use cubarium_voxel_flora::{
@@ -679,10 +679,21 @@ pub fn seed_pre_rolled(
         match phys.founding {
             cubarium_voxel_fauna::Founding::Bodies => {}
             // The founding egg bank, in the prey's components (§2.9, §2.13): no adults.
-            // R3 stub: a pack lineage founds nothing yet. R3 founds `want` packs here
-            // ([`introduce_packs`]'s placement): each `pack_size` adults on a covered den
-            // near its founding point.
-            cubarium_voxel_fauna::Founding::Pack => continue,
+            // R3: `want` packs ([`introduce_packs`]'s placement), each `pack_size` adults
+            // arriving as founders do, on a covered den near its founding point.
+            cubarium_voxel_fauna::Founding::Pack => {
+                if want > 0 {
+                    let size = phys.pack.map_or(0, |t| t.pack_size);
+                    let before = fauna.view().animals.iter().filter(|a| a.founder == Some(founder)).count();
+                    let stores = founder_arrival(&fauna.config().founding);
+                    let _ = found_packs(world, fauna, founder, want, stores);
+                    let after = fauna.view().animals.iter().filter(|a| a.founder == Some(founder)).count();
+                    seeded.founders[founder.index()] += after - before;
+                    seeded.shortfall[founder.index()] =
+                        (want * size).saturating_sub(seeded.founders[founder.index()]);
+                }
+                continue;
+            }
             cubarium_voxel_fauna::Founding::Clutches => {
                 if want > 0 {
                     match bury_founding_clutches(world, flora, fauna, founder, want) {
@@ -1388,7 +1399,9 @@ pub fn introduce_lanternjaws(
 /// with solid within `den_cover_m` over it) that the breeder picks near its founding
 /// point, with the lineage's controllers installed. The new packs' ids, or why none could
 /// be founded.
-// R3 stub: refuses.
+///
+/// Adults arrive **hungry**, as `--introduce lanternjaw:N`'s do (full structure, the
+/// reserve at the wake line), so an introduction shows a hunt soon.
 pub fn introduce_packs(
     world: &World,
     flora: &Flora,
@@ -1396,8 +1409,203 @@ pub fn introduce_packs(
     founder: Founder,
     n: usize,
 ) -> Result<Vec<u64>, String> {
-    let _ = (world, flora, fauna, founder, n);
-    Err("R3 stub: packs are not founded yet".to_string())
+    let _ = flora;
+    let wake_at = fauna.config().founder(founder).hunter.map_or(0.5, |h| h.wake_at);
+    let stores = StartingStores {
+        body: fauna.config().founding.arrival_body,
+        reserve: wake_at,
+    };
+    found_packs(world, fauna, founder, n, stores)
+}
+
+/// How far apart two packs' dens are founded: twice the territory radius, so neither den
+/// is inside the other's territory and their ranges barely touch. A 32 m ring founds one.
+fn den_spacing_m(t: &cubarium_voxel_fauna::Pack) -> f64 {
+    2.0 * t.territory_radius_m
+}
+
+/// [`introduce_packs`]'s placement with the given arrival stores. The founding points are
+/// spread over the dry standable faces of the lineage's **prey components** (as the
+/// lanternjaw's introduction places adults); for each pack the breeder takes the first
+/// point (in that spread, from the pack's own offset) whose search finds a covered den and
+/// whose den is [`den_spacing_m`] from every standing den. With no covered den anywhere,
+/// the first spaced point's fallback (Fable): the face within `den_search_m` with the most
+/// solid over it, else the founding point. The den choice is recorded on the pack.
+///
+/// A den need not be walkable from the prey's component (a covered pocket often is not):
+/// the adults are founded on the den when it is, and otherwise on the face of the
+/// founding point's component nearest the den within `den_radius_m`, which is where they
+/// rest; a den with no such face is passed over.
+fn found_packs(
+    world: &World,
+    fauna: &mut Fauna,
+    founder: Founder,
+    n: usize,
+    stores: StartingStores,
+) -> Result<Vec<u64>, String> {
+    let phys = *fauna.config().founder(founder);
+    let Some(t) = phys.pack else {
+        return Err(format!("the {} lineage has no pack table", founder.name()));
+    };
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let (map, prey) = prey_components(world, fauna, founder);
+    if prey.is_empty() {
+        return Err(format!(
+            "no prey component: nothing a {} hunts stands anywhere it could walk",
+            founder.name()
+        ));
+    }
+    let view = world.view();
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let dry = |s: &Site| view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0;
+    let faces: Vec<(Site, usize)> = map
+        .faces
+        .iter()
+        .zip(&map.components)
+        .filter(|(f, c)| prey.contains_key(c) && dry(f))
+        .map(|(f, c)| (*f, *c))
+        .collect();
+    if faces.is_empty() {
+        return Err("the prey components have no dry face it fits on".to_string());
+    }
+    let dist = |a: Site, b: Site| {
+        let (ax, az) = cubarium_voxel_fauna::pack_centre(a, v);
+        let (bx, bz) = cubarium_voxel_fauna::pack_centre(b, v);
+        let dx = (bx - ax).rem_euclid(ring);
+        let dx = dx.min(ring - dx);
+        (dx * dx + (bz - az).powi(2)).sqrt()
+    };
+    // Solid cells over a face in its column: (within den_cover_m, anywhere above).
+    let overhead = |s: Site| -> (bool, usize) {
+        let mut covered = false;
+        let mut count = 0usize;
+        for y in s.y + 1..view.config.height {
+            if view.material_at(i64::from(s.x), y, s.z).is_solid() {
+                count += 1;
+                if f64::from(y - s.y - 1) * v <= t.den_cover_m {
+                    covered = true;
+                }
+            }
+        }
+        (covered, count)
+    };
+    // Every standable dry face (any component): a den may be a covered pocket the pack
+    // cannot stand in, so long as it lives within `den_radius_m` of it.
+    let all: Vec<(Site, usize)> = map
+        .faces
+        .iter()
+        .zip(&map.components)
+        .filter(|(f, _)| dry(f))
+        .map(|(f, c)| (*f, *c))
+        .collect();
+    // Where the pack stands for a den `d` from a founding point of component `comp`: the
+    // den itself when it is in that component, else the face of that component nearest
+    // it within `den_radius_m` (less a voxel), else nowhere.
+    let stand_for = |d: (Site, usize), comp: usize| -> Option<Site> {
+        if d.1 == comp {
+            return Some(d.0);
+        }
+        faces
+            .iter()
+            .filter(|(f, c)| *c == comp && dist(*f, d.0) <= t.den_radius_m - v)
+            .min_by(|a, b| dist(a.0, d.0).total_cmp(&dist(b.0, d.0)))
+            .map(|(f, _)| *f)
+    };
+    // The breeder's pick near a founding point: the nearest covered face it can live by
+    // (its own component first); else the face with the most solid over it; else the
+    // point. `(den, where the pack stands, how)`.
+    let choose = |point: (Site, usize)| -> (Site, Site, DenChoice) {
+        let mut near: Vec<(bool, f64, (Site, usize))> = all
+            .iter()
+            .filter(|(f, _)| dist(*f, point.0) <= t.den_search_m)
+            .map(|&(f, c)| (c != point.1, dist(f, point.0), (f, c)))
+            .collect();
+        near.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        let mut most: Option<(usize, Site, Site)> = None;
+        for &(_, _, d) in &near {
+            let (covered, k) = overhead(d.0);
+            if k == 0 {
+                continue;
+            }
+            let Some(stand) = stand_for(d, point.1) else {
+                continue;
+            };
+            if covered {
+                return (d.0, stand, DenChoice::Covered);
+            }
+            if most.is_none_or(|(bk, _, _)| k > bk) {
+                most = Some((k, d.0, stand));
+            }
+        }
+        match most {
+            Some((_, den, stand)) => (den, stand, DenChoice::MostOverhead),
+            None => (point.0, point.0, DenChoice::FoundingPoint),
+        }
+    };
+    let points = strided(&faces, (16 * n).min(faces.len()));
+    let mut ids = Vec::new();
+    for k in 0..n {
+        let dens: Vec<Site> = fauna.packs().iter().map(|p| p.den).collect();
+        let spaced = |s: Site| dens.iter().all(|&d| dist(d, s) >= den_spacing_m(&t));
+        let offset = (k * points.len()) / n;
+        let mut fallback: Option<(Site, Site, DenChoice)> = None;
+        let mut chosen: Option<(Site, Site, DenChoice)> = None;
+        for j in 0..points.len() {
+            let point = points[(offset + j) % points.len()];
+            if !spaced(point.0) {
+                continue;
+            }
+            let (den, stand, how) = choose(point);
+            if !spaced(den) {
+                continue;
+            }
+            if how == DenChoice::Covered {
+                chosen = Some((den, stand, how));
+                break;
+            }
+            fallback.get_or_insert((den, stand, how));
+        }
+        let Some((den, stand, how)) = chosen.or(fallback) else {
+            break;
+        };
+        if !fauna.apply(
+            world,
+            FaunaCommand::FoundPack {
+                den: stand,
+                founder,
+                stores,
+                heading_rad: spread_heading(k, n),
+            },
+        ) {
+            continue;
+        }
+        let Some(id) = fauna.packs().last().map(|p| p.id) else {
+            continue;
+        };
+        fauna.set_den(id, den, how);
+        let members: Vec<u64> = fauna
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.pack.is_some_and(|m| m.pack == id))
+            .map(|a| a.id)
+            .collect();
+        for m in members {
+            fauna.install_founder_controller(m, founder);
+        }
+        ids.push(id);
+    }
+    if ids.is_empty() {
+        return Err(format!(
+            "no den for a {} pack: no dry face of a prey component {} m from every standing den",
+            founder.name(),
+            den_spacing_m(&t)
+        ));
+    }
+    Ok(ids)
 }
 
 /// **The founding egg bank** (§2.9, §2.13): `clutches` clutches of `founder`'s own size

@@ -30,7 +30,7 @@ use crate::controller::Actions;
 use crate::{Animal, Fauna, Pack};
 
 /// A den's (or any face's) column centre, metres.
-pub(crate) fn centre(site: Site, voxel_m: f64) -> (f64, f64) {
+pub fn centre(site: Site, voxel_m: f64) -> (f64, f64) {
     (
         (f64::from(site.x) + 0.5) * voxel_m,
         (f64::from(site.z) + 0.5) * voxel_m,

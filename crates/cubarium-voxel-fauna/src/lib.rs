@@ -30,6 +30,7 @@ mod manifest;
 mod pose;
 mod predation;
 mod pack;
+pub use pack::centre as pack_centre;
 mod registry;
 pub use registry::registry;
 mod senses;
@@ -2831,9 +2832,12 @@ impl Fauna {
         &mut self.packs
     }
 
-    /// Record how a pack's den was chosen (the habitat seeder's founding search).
-    pub fn set_den_choice(&mut self, pack: u64, choice: DenChoice) {
+    /// The breeder's den pick (the habitat seeder's founding search): the pack's den, and
+    /// how it was chosen. The pack may have been founded on a face beside it (a covered
+    /// pocket its adults cannot stand in); it lives within `den_radius_m` of it.
+    pub fn set_den(&mut self, pack: u64, den: Site, choice: DenChoice) {
         if let Some(p) = self.pack_mut(pack) {
+            p.den = den;
             p.den_choice = Some(choice);
         }
     }
