@@ -862,6 +862,13 @@ pub struct LineageWindow {
     pub sd_novelty: f64,
     /// Moving body-minutes over body-minutes, every body of the lineage in the window.
     pub moving_share: f64,
+    /// The same spreads over the bodies that neither died nor gave in the window (the
+    /// ones that simply lived through it), and the shares of scored bodies that died and
+    /// that gave.
+    pub sd_energy_lived: f64,
+    pub sd_novelty_lived: f64,
+    pub died_share: f64,
+    pub gave_share: f64,
     /// The centre this window ran, before its step.
     pub centre_key: u64,
 }
@@ -1023,6 +1030,23 @@ fn lockstep(
                     .collect()
             };
             let energy = part(|b| b.score.delta_normalized + b.score.given_normalized);
+            let lived = |pick: fn(&BodyScore) -> f64| -> Vec<Vec<f64>> {
+                results
+                    .iter()
+                    .map(|(sc, _)| {
+                        sc.iter()
+                            .filter(|b| {
+                                b.founder == *f && !b.score.died && b.score.given_normalized == 0.0
+                            })
+                            .map(pick)
+                            .collect()
+                    })
+                    .collect()
+            };
+            let mine = || results.iter().flat_map(|(sc, _)| sc.iter()).filter(|b| b.founder == *f);
+            let n_mine = mine().count().max(1) as f64;
+            let died_share = mine().filter(|b| b.score.died).count() as f64 / n_mine;
+            let gave_share = mine().filter(|b| b.score.given_normalized > 0.0).count() as f64 / n_mine;
             let novelty = part(|b| b.score.novelty);
             let curiosity = part(|b| b.score.curiosity);
             let mean = |xs: &[Vec<f64>]| {
@@ -1053,6 +1077,12 @@ fn lockstep(
                 sd_energy: within_world_sd(&energy),
                 sd_novelty: within_world_sd(&novelty),
                 moving_share: if minutes > 0 { moving as f64 / minutes as f64 } else { f64::NAN },
+                sd_energy_lived: within_world_sd(&lived(|b| {
+                    b.score.delta_normalized + b.score.given_normalized
+                })),
+                sd_novelty_lived: within_world_sd(&lived(|b| b.score.novelty)),
+                died_share,
+                gave_share,
                 centre_key: *k,
             });
         }
@@ -1089,7 +1119,7 @@ pub fn window_line(w: &WindowLog) -> String {
     for l in &w.lineages {
         s.push_str(&format!(
             " | {} n={} twin={:.3} pair={:.3} ratio={:.2} rms={:.2e} nov={:.3} cur={:.3} \
-             sdE={:.3} sdN={:.3} mov={:.2}",
+             sdE={:.3} sdN={:.3} mov={:.2} lived:sdE={:.3} sdN={:.4} died={:.2} gave={:.2}",
             l.lineage,
             l.bodies,
             l.twin_diff,
@@ -1100,7 +1130,11 @@ pub fn window_line(w: &WindowLog) -> String {
             l.mean_curiosity,
             l.sd_energy,
             l.sd_novelty,
-            l.moving_share
+            l.moving_share,
+            l.sd_energy_lived,
+            l.sd_novelty_lived,
+            l.died_share,
+            l.gave_share
         ));
     }
     s
