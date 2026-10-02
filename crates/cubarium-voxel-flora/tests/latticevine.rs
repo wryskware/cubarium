@@ -1431,11 +1431,12 @@ fn pace_world(avail: f64, thin: bool) -> (Flora, World, u64) {
     (flora, world, lineage)
 }
 
-/// Faces covered by the founder's lineage after each checkpoint, stepping flora alone.
-/// Also the founder's root water at the end (the available-water scale).
-fn pace_run(avail: f64, thin: bool, checkpoints_s: &[f64]) -> (Vec<usize>, f64) {
+/// Faces covered by the founder's lineage after each checkpoint, stepping flora alone,
+/// and the founder's root water at each (the available-water scale).
+fn pace_run(avail: f64, thin: bool, checkpoints_s: &[f64]) -> (Vec<usize>, Vec<f64>) {
     let (mut flora, mut world, lineage) = pace_world(avail, thin);
     let mut out = Vec::new();
+    let mut water = Vec::new();
     let mut done = 0;
     for &t in checkpoints_s {
         let n = ticks(t);
@@ -1444,16 +1445,18 @@ fn pace_run(avail: f64, thin: bool, checkpoints_s: &[f64]) -> (Vec<usize>, f64) 
         }
         done = n;
         out.push(lineage_faces(&flora, lineage).len());
+        water.push(
+            flora
+                .view()
+                .cover
+                .vines()
+                .iter()
+                .find(|v| v.lineage == lineage && v.root == foot(2))
+                .map_or(f64::NAN, |v| v.water),
+        );
     }
     assert_residuals(&flora, &format!("pace at avail {avail}"));
-    let root = flora
-        .view()
-        .cover
-        .vines()
-        .iter()
-        .find(|v| v.lineage == lineage && v.root == foot(2))
-        .map_or(f64::NAN, |v| v.water);
-    (out, root)
+    (out, water)
 }
 
 /// Well watered (soil near saturation) and lit, a founder covers at most fifteen faces in
@@ -1472,8 +1475,11 @@ fn t16_a_watered_founder_covers_at_most_fifteen_faces_in_ten_minutes() {
 /// layer of soil over rock) at half its drained water, so the root box holds a small store
 /// the cover itself drinks down — plateaus well below that: its peak is at most half the
 /// watered cover, its last hour's growth at most a fifth of the watered one's, and what
-/// stopped it is water — its root box has fallen deep into the moisture ramp while the
-/// watered root still reads full moisture — and not any cap (the wall has 190 faces).
+/// stopped it is water — its root box has fallen deep into the moisture ramp, where the
+/// watered root read full moisture all the while its cover was still growing — and not
+/// any cap (the wall has 190 faces). Since the 2026-10-01 pace (`assimilation` 2.7e-4) the
+/// watered cover fills the wall within the first hour and then drinks its own finite
+/// store down too, so its water is read only while it grows.
 /// Flora stepped alone, one run each on its own thread, sampled every ten minutes.
 #[test]
 fn t17_three_hours_cover_sixty_faces_when_watered_and_a_dry_root_plateaus_below() {
@@ -1485,8 +1491,8 @@ fn t17_three_hours_cover_sixty_faces_when_watered_and_a_dry_root_plateaus_below(
     });
     let ((wet, wet_water), (dry, dry_water)) = (wet, dry);
     eprintln!(
-        "faces every 10 min over 3 h — wet {wet:?} (root water {wet_water:.3}), \
-         dry {dry:?} (root water {dry_water:.3})"
+        "faces every 10 min over 3 h — wet {wet:?} (root water {wet_water:.3?}), \
+         dry {dry:?} (root water {dry_water:.3?})"
     );
     let vc = FloraConfig::default().latticevine;
     let w3 = wet[17];
@@ -1508,10 +1514,15 @@ fn t17_three_hours_cover_sixty_faces_when_watered_and_a_dry_root_plateaus_below(
         "the dry cover has all but stopped in the last hour: dry {dry:?}, wet {wet:?}"
     );
     let low = vc.wilt_water + 0.4 * (vc.full_water - vc.wilt_water);
+    let growing: Vec<f64> = (0..wet.len())
+        .filter(|&k| wet[k] < 190)
+        .map(|k| wet_water[k])
+        .collect();
     assert!(
-        dry_water < low && wet_water >= vc.full_water,
-        "water is the limit: the dry root reads {dry_water:.3} (under {low:.3}), the \
-         watered root {wet_water:.3}"
+        dry_water[17] < low && !growing.is_empty() && growing.iter().all(|&w| w >= vc.full_water),
+        "water is the limit: the dry root reads {:.3} (under {low:.3}), the watered root \
+         {growing:?} while it grew",
+        dry_water[17]
     );
 }
 
@@ -1660,6 +1671,8 @@ fn t19_crossing_a_step_costs_the_ordinary_spread_cost_and_nothing_more() {
     let mut world = plan.world(1.0, false);
     let mut config = frozen();
     config.latticevine.spread_cost = 0.2;
+    // The whole purse is for spreading: no flowering share held back.
+    config.latticevine.spread_hold = 0.0;
     let v = &config.latticevine;
     let price = v.spread_cost + v.contest_threshold * v.leaf_mass;
     let start = 3.5 * price;

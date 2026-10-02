@@ -13,7 +13,7 @@ use crate::Flora;
 /// The plant layer's snapshot format. Bumped whenever a serialized field, the config
 /// inside the snapshot, or what a saved field means changes. Postcard is not
 /// self-describing, so other tags are refused, never migrated.
-pub const SCHEMA: u32 = 10;
+pub const SCHEMA: u32 = 11;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

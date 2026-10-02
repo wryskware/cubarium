@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (614 rows)
+**`flora.*`** (680 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -421,6 +421,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.bloomcrown.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.bloomcrown.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.bloomcrown.dark_sky_max` | 0.0 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.bloomcrown.dark_sky_full` | 0.0 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.bloomcrown.dark_uptake_per_s` | 0.0 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.bloomcrown.dark_damp` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.bloomcrown.dark_establish_min` | 0.0 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.bloomcrown.dark_spore_bias` | 0.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.bloomcrown.dark_founder_share` | 0.0 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.bloomcrown.profile.*.wood_fraction_max` | 0.2, 0.5, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.bloomcrown.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.bloomcrown.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.4 … (14 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -483,6 +490,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.umbrellafrond.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.umbrellafrond.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.umbrellafrond.dark_sky_max` | 0.0 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.umbrellafrond.dark_sky_full` | 0.0 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.umbrellafrond.dark_uptake_per_s` | 0.0 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.umbrellafrond.dark_damp` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.umbrellafrond.dark_establish_min` | 0.0 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.umbrellafrond.dark_spore_bias` | 0.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.umbrellafrond.dark_founder_share` | 0.0 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.umbrellafrond.profile.*.wood_fraction_max` | 0.15, 0.5, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.umbrellafrond.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.umbrellafrond.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.5 … (16 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -545,6 +559,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.founder_per_m2` | 0.6 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.springturf.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.springturf.founder_cap` | 160 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.springturf.dark_sky_max` | 0.0 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.springturf.dark_sky_full` | 0.0 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.springturf.dark_uptake_per_s` | 0.0 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.springturf.dark_damp` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.springturf.dark_establish_min` | 0.0 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.springturf.dark_spore_bias` | 0.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.springturf.dark_founder_share` | 0.0 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.springturf.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.springturf.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.springturf.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -607,6 +628,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.founder_per_m2` | 0.2 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.stonecushion.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.stonecushion.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.stonecushion.dark_sky_max` | 0.0 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.stonecushion.dark_sky_full` | 0.0 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.stonecushion.dark_uptake_per_s` | 0.0 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.stonecushion.dark_damp` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.stonecushion.dark_establish_min` | 0.0 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.stonecushion.dark_spore_bias` | 0.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.stonecushion.dark_founder_share` | 0.0 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.stonecushion.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.stonecushion.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.stonecushion.profile.*.layers.*.band.*` | 0.0, 0.6, 0.6, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -669,6 +697,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.founder_per_m2` | 0.4 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.velvetpad.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.velvetpad.founder_cap` | 120 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.velvetpad.dark_sky_max` | 0.0 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.velvetpad.dark_sky_full` | 0.0 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.velvetpad.dark_uptake_per_s` | 0.0 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.velvetpad.dark_damp` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.velvetpad.dark_establish_min` | 0.0 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.velvetpad.dark_spore_bias` | 0.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.velvetpad.dark_founder_share` | 0.0 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.velvetpad.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.velvetpad.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.velvetpad.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -731,6 +766,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.glowcap.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.glowcap.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.glowcap.dark_sky_max` | 0.45 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.glowcap.dark_sky_full` | 0.1 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.glowcap.dark_uptake_per_s` | 0.008 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.glowcap.dark_damp` | 0.8 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.glowcap.dark_establish_min` | 0.5 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.glowcap.dark_spore_bias` | 4.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.glowcap.dark_founder_share` | 0.5 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.glowcap.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.glowcap.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.glowcap.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -793,6 +835,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.founder_per_m2` | 0.1 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.vaulttree.founder_colony` | 1 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.vaulttree.founder_cap` | 12 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.vaulttree.dark_sky_max` | 0.0 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.vaulttree.dark_sky_full` | 0.0 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.vaulttree.dark_uptake_per_s` | 0.0 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.vaulttree.dark_damp` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.vaulttree.dark_establish_min` | 0.0 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.vaulttree.dark_spore_bias` | 0.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.vaulttree.dark_founder_share` | 0.0 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.vaulttree.profile.*.wood_fraction_max` | 0.1, 0.4, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.vaulttree.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.vaulttree.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.55 … (14 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -855,6 +904,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.lanternberry.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.lanternberry.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.lanternberry.dark_sky_max` | 0.0 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.lanternberry.dark_sky_full` | 0.0 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.lanternberry.dark_uptake_per_s` | 0.0 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.lanternberry.dark_damp` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.lanternberry.dark_establish_min` | 0.0 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.lanternberry.dark_spore_bias` | 0.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.lanternberry.dark_founder_share` | 0.0 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.lanternberry.profile.*.wood_fraction_max` | 0.2, inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.lanternberry.profile.*.height_m_max` | 0.125 | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.lanternberry.profile.*.layers.*.band.*` | 0.0, 1.0, 0.0, 0.3 … (8 values) | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -917,6 +973,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.founder_per_m2` | 4.0 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.siphonreed.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.siphonreed.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
+| `flora.siphonreed.dark_sky_max` | 0.0 | sky visibility (0 = no dark habitat) | [0, 1] | 0–0.8 | - | placeholder | dark habitat: a site at or above this sky is not dark |
+| `flora.siphonreed.dark_sky_full` | 0.0 | sky visibility | [0, 1] | 0–0.4 | - | placeholder | dark habitat: a site at or below this sky is fully dark |
+| `flora.siphonreed.dark_uptake_per_s` | 0.0 | organic/s per unit mycelium at darkness 1 | [0, inf) | 0–0.03 | D | placeholder | dark habitat: seep income, with its own mineral |
+| `flora.siphonreed.dark_damp` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–1 | D | placeholder | dark habitat: least available water a fully dark site reads |
+| `flora.siphonreed.dark_establish_min` | 0.0 | darkness (0 = off) | [0, 1] | 0–1 | - | placeholder | dark habitat: darkness that opens the substrate gate with no substrate |
+| `flora.siphonreed.dark_spore_bias` | 0.0 | weight per unit darkness | [0, inf) | 0–10 | - | placeholder | dark habitat: spore landings weigh 1 + bias * darkness |
+| `flora.siphonreed.dark_founder_share` | 0.0 | fraction of founders | [0, 1] | 0–1 | - | placeholder | founding: share of founders placed on the darkest faces, no log laid |
 | `flora.siphonreed.profile.*.wood_fraction_max` | inf | fraction of wood_max (inf: the last stage) | [0, inf] | yes | C | placeholder | a stage applies up to this wood fraction |
 | `flora.siphonreed.profile.*.height_m_max` | (absent) | m | (0, inf) | yes | B | placeholder | a stage's crown-height ceiling (a capped seedling) |
 | `flora.siphonreed.profile.*.layers.*.band.*` | 0.0, 1.0 | fraction of crown height | [0, 1] | yes | C | placeholder | a layer's band [bottom, top] |
@@ -933,7 +996,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.dry_spell_s` | 600.0 | s | [0, inf) | yes | C | placeholder | dry this long: dormant |
 | `flora.latticevine.wet_spell_s` | 300.0 | s | [0, inf) | yes | C | placeholder | wet this long: regreens |
 | `flora.latticevine.leaf_fall_s` | 60.0 | s | (0, inf) |  | C | placeholder | a dormant face drops its leaf over this |
-| `flora.latticevine.assimilation` | 0.00009 | organic/s per reference face | [0, inf) | yes | C | placeholder | income per full face in full light |
+| `flora.latticevine.assimilation` | 0.00027 | organic/s per reference face | [0, inf) | yes | C | placeholder | income per full face in full light |
 | `flora.latticevine.underside_light` | 0.15 | fraction | [0, inf) | yes | B | placeholder | light factor on a downward face |
 | `flora.latticevine.leaf_mass` | 0.05 | org-units per reference face | (0, inf) | yes | C | placeholder | leaf tissue per full face |
 | `flora.latticevine.runner_mass` | 0.02 | org-units per reference face | [0, inf) | yes | C | placeholder | runner tissue per face |
@@ -947,6 +1010,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.contest_threshold` | 0.2 | leafiness | [0, 1] | yes | C | placeholder | a face below this is contestable |
 | `flora.latticevine.contest_check_s` | 30.0 | s | (0, inf) |  | C | placeholder | the contest wheel's period |
 | `flora.latticevine.spur_reserve_min` | 0.005 | org-units per reference face | [0, inf) | yes | C | placeholder | reserve per face before a flowering cycle |
+| `flora.latticevine.spread_hold` | 2.0 | multiples of spur_reserve_min per face | [0, inf) | 0–6 | - | placeholder | reserve kept back from spreading and sisters for flowering; 0 spends it all |
 | `flora.latticevine.spur_window_s` | 120.0 | s | [0, inf) | yes | C | placeholder | after a shower, a cycle may still start this long |
 | `flora.latticevine.spur_jitter_s` | 60.0 | s | [0, inf) |  | C | placeholder | spread of the per-face start delay |
 | `flora.latticevine.bud_s` | 60.0 | s | [0, inf) | yes | C | placeholder | bud phase |
@@ -956,9 +1020,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.nectar` | 0.002 | org-units per reference face | [0, inf) | yes | C | placeholder | a flower's organic matter |
 | `flora.latticevine.fruit` | 0.005 | org-units per reference face | [0, inf) | yes | C | placeholder | a bead bunch's organic matter |
 | `flora.latticevine.energy_density` | 1.0 | energy per org-unit | [0, inf) |  | D | placeholder | vine tissue energy |
-| `flora.latticevine.founders` | 6 | vines | [0, inf) | yes | C | placeholder | founder vines rooted on a fresh world |
+| `flora.latticevine.founders` | 6 | vines | [0, inf) | yes | C | placeholder | founder vines rooted on a fresh world: the floor under the area count |
+| `flora.latticevine.founders_per_m2` | 0.0625 | vines per m2 of world floor | [0, inf) | 0–0.25 | - | placeholder | founder vines per square metre: max(founders, round(this * area)) |
 | `flora.latticevine.founder_reserve` | 0.1 | org-units per reference face | [0, inf) | yes | C | placeholder | each founder's starting reserve |
 | `flora.latticevine.founder_spacing` | 8 | voxels (not rescaled) | [0, inf) | 2–24 | - | placeholder | the fewest voxels between two founders' roots |
+| `flora.latticevine.founder_spread_m` | 3.0 | m of floor | [0, inf) | 0–8 | - | placeholder | floor distance founders keep while the walls allow it; the rest fill at founder_spacing; 0 off |
 | `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
 | `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
 | `flora.wood_decomposition` | 0.0001 | /s | [0, inf) | yes | C | placeholder | k_w: dead-wood decomposition |
