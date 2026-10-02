@@ -1044,6 +1044,29 @@ impl Packer {
         self.palette.write(styles, curves);
     }
 
+    /// Fill every free slot with a style of its own (tests: an overflow).
+    #[cfg(test)]
+    fn fill_palette(&mut self) -> Vec<u8> {
+        let mut held = Vec::new();
+        for n in 0.. {
+            let c = [1e-3 * n as f32, 0.123, 0.456];
+            let key = (crate::voxel::stand::Style { wood: c, crown: c, heart: c }, 0, [None; 2], None);
+            match self.palette.acquire(&key) {
+                Some(s) => held.push(s),
+                None => break,
+            }
+        }
+        held
+    }
+
+    /// Give back what [`Packer::fill_palette`] took.
+    #[cfg(test)]
+    fn empty_palette(&mut self, held: Vec<u8>) {
+        for s in held {
+            self.palette.release(s);
+        }
+    }
+
     /// Styles given a slot since the packer was made.
     fn styles_made(&self) -> u64 {
         self.palette.made()
@@ -2965,5 +2988,93 @@ mod tests {
         let still = tick(&mut o);
         assert_eq!(still.bricks, Some(0), "nothing changed, no brick");
         assert_eq!(still.copied, [false; SLOW_PLANES], "and no plane");
+    }
+
+    /// A frame displaced after a newer pack was made, in the order the presenters make it:
+    /// record A, pack B, displace A, record, run. Nothing either pack changed is lost —
+    /// first with A carrying bricks, then with A the first pack, carrying the whole volume.
+    #[test]
+    fn a_displaced_frame_and_a_newer_pack_lose_no_change() {
+        let c = config();
+        let v = c.voxel_volume();
+        for a_whole in [true, false] {
+            let mut o = oracle(&c, false);
+            let mut world = world(&c);
+            let plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0)]);
+            let mut tick = |o: &mut PackOracle, world: &mut World, x: i64| {
+                world.apply(Command::AddWater { x, y: 10, z: 2, volume_m3: v * 0.5 });
+                world.step_with(1);
+                let beast = grazer(world, x, 1);
+                o.pack(&world.view(), plants.view(), beast.view(), 0.0).unwrap().expect("a buffer");
+            };
+            if !a_whole {
+                tick(&mut o, &mut world, 2);
+                o.record();
+                o.retire();
+            }
+            tick(&mut o, &mut world, 4); // A
+            o.record();
+            tick(&mut o, &mut world, 6); // B, into the other buffer
+            o.discard(); // A never runs
+            o.record();
+            o.retire();
+            o.check_images().unwrap_or_else(|e| panic!("A whole: {a_whole}: {e}"));
+            // The next pack carries what A owed.
+            tick(&mut o, &mut world, 8);
+            o.record();
+            o.retire();
+            o.check_images().unwrap_or_else(|e| panic!("A whole: {a_whole}, the pack after: {e}"));
+        }
+    }
+
+    /// Every interleaving the presenters can make — packs refused while both buffers are
+    /// read, frames recorded, run and displaced in any legal order — through a scripted
+    /// world's life: the images always hold the latest pack outside the owed bricks.
+    #[test]
+    fn random_frame_orders_never_lose_a_change() {
+        let c = config();
+        let v = c.voxel_volume();
+        for seed in [0x9e37_79b9_7f4a_7c15u64, 0x2545_f491_4f6c_dd1d, 7] {
+            let mut rng = seed;
+            let mut o = oracle(&c, false);
+            let mut world = world(&c);
+            let mut plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0), (1, 1, Species::Umbrellafrond, 1.0)]);
+            for t in 0..300u32 {
+                if t % 5 == 0 {
+                    world.apply(Command::AddWater { x: i64::from(t % 30), y: 10, z: t % c.depth, volume_m3: v * 0.5 });
+                }
+                world.step_with(1);
+                plants.step(&mut world);
+                let beast = grazer(&world, 2 + i64::from(t / 3 % 28), 1);
+                o.tick_random(&world.view(), plants.view(), beast.view(), 0.0, &mut rng)
+                    .unwrap_or_else(|e| panic!("seed {seed:#x}, tick {t}: {e}"));
+            }
+        }
+    }
+
+    /// More styles at once than the table holds: the texels that overflowed draw with slot
+    /// 0 for now, and once slots are free again they take their own style at the next
+    /// tick, though nothing about their cells changed.
+    #[test]
+    fn overflowed_texels_take_their_own_style_once_slots_free() {
+        let c = config();
+        let mut o = oracle(&c, false);
+        let world = world(&c);
+        let none = Fauna::new(FaunaConfig::default());
+        let first = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0)]);
+        o.tick(&world.view(), first.view(), none.view(), 0.0, Frame::Now).unwrap();
+        // Every free slot taken by a style no texel draws with.
+        let held = o.fill_palette();
+        let both = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0), (1, 1, Species::Umbrellafrond, 1.0)]);
+        assert!(
+            o.tick(&world.view(), both.view(), none.view(), 0.0, Frame::Now).is_err(),
+            "the new stand overflowed the table"
+        );
+        o.empty_palette(held);
+        // Nothing moves; the overflowed texels resolve to their own style all the same.
+        o.tick(&world.view(), both.view(), none.view(), 0.0, Frame::Now)
+            .unwrap_or_else(|e| panic!("after slots freed: {e}"));
+        o.tick(&world.view(), both.view(), none.view(), 0.0, Frame::Now)
+            .unwrap_or_else(|e| panic!("a tick later: {e}"));
     }
 }

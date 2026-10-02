@@ -1533,6 +1533,11 @@ impl StagingRing {
         (0..self.n).find(|i| !self.recorded.iter().any(|f| f.staging == Some(*i)))
     }
 
+    /// Whether a pack waits for a frame to take it.
+    pub fn for_pack_waiting(&self) -> bool {
+        self.packed.is_some()
+    }
+
     /// A pack has been written into `i`.
     pub fn packed(&mut self, i: usize) {
         self.packed = Some(i);
@@ -3839,6 +3844,59 @@ pub(crate) mod tests {
             "the pack it carried is owed again"
         );
         assert_eq!(ring.record().staging, Some(i), "and goes up next frame");
+    }
+
+    /// A frame displaced after a newer pack was made keeps that newer pack waiting: the
+    /// displaced frame's buffer is free, and its bricks stay owed for the pack after.
+    #[test]
+    fn a_displaced_frame_leaves_a_newer_pack_waiting_and_its_bricks_owed() {
+        let mut ring = StagingRing::new(STAGING_RING);
+        let a = ring.for_pack().expect("free");
+        ring.packed(a);
+        let frame = ring.record();
+        assert_eq!(frame.staging, Some(a));
+        let b = ring.for_pack().expect("the other buffer");
+        assert_ne!(a, b);
+        ring.packed(b);
+        assert_eq!(ring.discard(), Some(frame));
+        assert_eq!(ring.for_pack(), Some(b), "the newer pack is still the one waiting");
+        assert_eq!(ring.record().staging, Some(b), "and it is what goes up");
+    }
+
+    /// The bricks through record, pack, discard, record: nothing a pack changed is lost,
+    /// whether the displaced pack carried bricks or the whole volume.
+    #[test]
+    fn bricks_survive_a_displaced_frame_and_a_newer_pack() {
+        let (w, h, d) = (32, 16, 8);
+        for first_full in [false, true] {
+            let mut owed = BrickOwed::new(w, h, d);
+            let mut carried = [Carried::default(), Carried::default()];
+            let master = vec![VoxelTexel::default(); (w * h * d) as usize];
+            let mut buf = vec![VoxelTexel::default(); master.len()];
+            if !first_full {
+                // A first whole upload, run.
+                write_upload(&master, w, h, d, &owed, &mut buf, &mut carried[0]);
+                owed.taken(&carried[0]);
+                owed.mark(1);
+                owed.mark(2);
+            }
+            // Pack A into buffer 0, recorded.
+            write_upload(&master, w, h, d, &owed, &mut buf, &mut carried[0]);
+            assert_eq!(carried[0].full, first_full);
+            owed.taken(&carried[0]);
+            // Pack B into buffer 1: bricks 2 and 3 changed since.
+            owed.mark(2);
+            owed.mark(3);
+            write_upload(&master, w, h, d, &owed, &mut buf, &mut carried[1]);
+            // A is displaced; B goes up.
+            owed.returned(&carried[0]);
+            owed.taken(&carried[1]);
+            if first_full {
+                assert!(owed.full(), "a displaced whole upload is owed whole");
+            } else {
+                assert_eq!(owed.list(), &[1], "A's brick 1 is still owed; 2 and 3 went up with B");
+            }
+        }
     }
 
     /// A frame that re-presents a world the GPU already holds uploads nothing, but it is

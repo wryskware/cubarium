@@ -131,7 +131,8 @@ pub struct PackOracle {
     owed: BrickOwed,
     buffers: Vec<Planes>,
     carried: Vec<Carried>,
-    expect: Vec<Option<Expect>>,
+    /// What the latest pack held, for the images to be held to.
+    latest: Option<Expect>,
     pending: VecDeque<(Recorded, [bool; SLOW_PLANES])>,
     images: Planes,
     clock: Instant,
@@ -159,7 +160,7 @@ impl PackOracle {
             owed: BrickOwed::new(w, h, d),
             buffers: vec![Planes::junk(&params); n],
             carried: vec![Carried::default(); n],
-            expect: (0..n).map(|_| None).collect(),
+            latest: None,
             pending: VecDeque::new(),
             images: Planes::junk(&params),
             clock: Instant::now(),
@@ -191,6 +192,19 @@ impl PackOracle {
         self.params
     }
 
+    /// Take every free style slot of the change-only pack with a style no texel draws
+    /// with; returns them for [`PackOracle::empty_palette`]. For the overflow test.
+    #[cfg(test)]
+    pub(crate) fn fill_palette(&mut self) -> Vec<u8> {
+        self.delta.fill_palette()
+    }
+
+    /// Give back the slots [`PackOracle::fill_palette`] took.
+    #[cfg(test)]
+    pub(crate) fn empty_palette(&mut self, held: Vec<u8>) {
+        self.delta.empty_palette(held);
+    }
+
     /// Styles the change-only pack has given a slot since it was made.
     pub fn styles_made(&self) -> u64 {
         self.delta.styles_made()
@@ -220,8 +234,73 @@ impl PackOracle {
         candle_s: f64,
         frame: Frame,
     ) -> Result<TickReport, String> {
+        let Some(mut report) = self.pack(view, flora, fauna, candle_s)? else {
+            return Err("no staging buffer free".into());
+        };
+        // The frame still on the GPU from the tick before finishes now.
+        while !self.pending.is_empty() {
+            self.retire();
+        }
+        match frame {
+            Frame::Now => {
+                report.copied = self.record();
+                self.retire();
+            }
+            Frame::InFlight => report.copied = self.record(),
+            Frame::Unrecorded => {}
+        }
+        self.check_images()?;
+        Ok(report)
+    }
+
+    /// A tick as a presenter can interleave it, drawn from `rng`: a pack (refused when
+    /// every buffer is still read), then up to three of record (while a frame slot is
+    /// free), retire (oldest first) and displace (the newest, before it ran). Returns the
+    /// pack's report, or `None` for a refused pack.
+    pub fn tick_random(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        fauna: FaunaView<'_>,
+        candle_s: f64,
+        rng: &mut u64,
+    ) -> Result<Option<TickReport>, String> {
+        let mut next = || {
+            *rng ^= *rng << 13;
+            *rng ^= *rng >> 7;
+            *rng ^= *rng << 17;
+            *rng
+        };
+        let report = self.pack(view, flora, fauna, candle_s)?;
+        for _ in 0..next() % 4 {
+            match next() % 8 {
+                0..=3 if self.pending.len() < cubarium_gpu::voxel::STAGING_RING => {
+                    self.record();
+                }
+                4..=6 if !self.pending.is_empty() => self.retire(),
+                7 if !self.pending.is_empty() => self.discard(),
+                _ => {}
+            }
+        }
+        self.check_images()?;
+        Ok(report)
+    }
+
+    /// Pack one tick both ways and hold the change-only pack to the full one. `None` when
+    /// every staging buffer is still read: the pack is refused, as the renderer refuses it,
+    /// and neither packer sees the tick.
+    pub(crate) fn pack(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        fauna: FaunaView<'_>,
+        candle_s: f64,
+    ) -> Result<Option<TickReport>, String> {
         let p = self.params;
         let (w, h, d) = (p.width, p.height, p.depth);
+        let Some(b) = self.ring.for_pack() else {
+            return Ok(None);
+        };
         self.ticks += 1;
         let now = self.clock + Duration::from_millis(50 * self.ticks);
         self.full.set_film_now(Some(now));
@@ -229,8 +308,7 @@ impl PackOracle {
         let mut report = TickReport::default();
 
         let started = Instant::now();
-        let keys = self.full.prepare(view, flora, fauna, candle_s);
-        let _ = keys;
+        self.full.prepare(view, flora, fauna, candle_s);
         let mut styles_key = 0;
         self.full.fill(
             view,
@@ -242,9 +320,6 @@ impl PackOracle {
         );
         report.full_ms = started.elapsed().as_secs_f64() * 1e3;
 
-        let Some(b) = self.ring.for_pack() else {
-            return Err("no staging buffer free".into());
-        };
         let started = Instant::now();
         let keys = self.delta.prepare(view, flora, fauna, candle_s);
         let write = self.slow.pack(b, keys);
@@ -278,27 +353,13 @@ impl PackOracle {
         if emit_curves != self.buffers[b].emit_curves {
             return Err(format!("tick {}: the buffer's emission curves are not the palette's", view.tick));
         }
-        self.expect[b] = Some(Expect {
+        self.latest = Some(Expect {
             voxels: self.delta.master().to_vec(),
             styles,
             emit_curves,
             planes,
         });
-
-        // The frame still on the GPU from the tick before finishes now.
-        while let Some(&(rec, _)) = self.pending.front() {
-            let _ = rec;
-            self.retire()?;
-        }
-        match frame {
-            Frame::Now => {
-                report.copied = self.record();
-                self.retire()?;
-            }
-            Frame::InFlight => report.copied = self.record(),
-            Frame::Unrecorded => {}
-        }
-        Ok(report)
+        Ok(Some(report))
     }
 
     /// The newest recorded frame is displaced before it ran: its upload is owed again.
@@ -311,7 +372,7 @@ impl PackOracle {
         }
     }
 
-    fn record(&mut self) -> [bool; SLOW_PLANES] {
+    pub(crate) fn record(&mut self) -> [bool; SLOW_PLANES] {
         let rec = self.ring.record();
         let copy = match rec.staging {
             Some(i) => {
@@ -324,12 +385,11 @@ impl PackOracle {
         copy
     }
 
-    /// The oldest recorded frame ran: its upload lands in the images, which must then
-    /// hold exactly what its pack held.
-    fn retire(&mut self) -> Result<(), String> {
-        let Some((rec, copy)) = self.pending.pop_front() else { return Ok(()) };
+    /// The oldest recorded frame ran: its upload lands in the images.
+    pub(crate) fn retire(&mut self) {
+        let Some((rec, copy)) = self.pending.pop_front() else { return };
         self.ring.retire();
-        let Some(i) = rec.staging else { return Ok(()) };
+        let Some(i) = rec.staging else { return };
         let p = self.params;
         let buffer = &self.buffers[i];
         apply_upload(&buffer.voxels, &self.carried[i], p.width, p.height, p.depth, &mut self.images.voxels);
@@ -353,15 +413,37 @@ impl PackOracle {
                 to.clone_from(from);
             }
         }
-        let e = self.expect[i].as_ref().expect("an uploaded buffer was packed");
-        if let Some(at) = im.voxels.iter().zip(&e.voxels).position(|(a, b)| a != b) {
-            return Err(format!(
-                "after an upload, voxel texel {at} is {:?}, the pack held {:?}",
-                im.voxels[at], e.voxels[at]
-            ));
+    }
+
+    /// Once every frame recorded has run and no pack waits, the images hold the latest
+    /// pack: every texel of every brick not owed, the style table and every plane. An
+    /// owed brick goes up with the next pack.
+    pub(crate) fn check_images(&self) -> Result<(), String> {
+        if !self.pending.is_empty() || self.ring.for_pack_waiting() {
+            return Ok(());
+        }
+        let Some(e) = &self.latest else { return Ok(()) };
+        if self.owed.full() {
+            return Ok(());
+        }
+        let p = self.params;
+        let (w, h) = (p.width as usize, p.height as usize);
+        let owed: std::collections::HashSet<u32> = self.owed.list().iter().copied().collect();
+        let im = &self.images;
+        for (at, (a, b)) in im.voxels.iter().zip(&e.voxels).enumerate() {
+            if a == b {
+                continue;
+            }
+            let (x, y, z) = (at % w, (at / w) % h, at / (w * h));
+            let brick = cubarium_gpu::voxel::brick_of(p.width, p.height, x as u32, y as u32, z as u32);
+            if !owed.contains(&brick) {
+                return Err(format!(
+                    "the images hold voxel ({x}, {y}, {z}) as {a:?}, the latest pack {b:?}, and its brick is not owed"
+                ));
+            }
         }
         if im.styles != e.styles || im.emit_curves != e.emit_curves {
-            return Err("after an upload, the style table is not the pack's".into());
+            return Err("the images' style table is not the latest pack's".into());
         }
         let names = ["roof", "glyphs", "sky", "glow", "styles", "canopy"];
         for (plane, got) in [
@@ -375,7 +457,7 @@ impl PackOracle {
                 continue;
             }
             if *got != e.planes[plane] {
-                return Err(format!("after an upload, the {} plane is not the pack's", names[plane]));
+                return Err(format!("the images' {} plane is not the latest pack's", names[plane]));
             }
         }
         Ok(())
