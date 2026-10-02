@@ -25,6 +25,18 @@
 //! of perched body-ticks in downpours — and a `bloomcrown:` line (seed output: propagule
 //! organic funded and seeds landed, stands, nectar standing) and the wall time per tick.
 //!
+//! `trace=S` lines cover bellwings and seedporters.
+//!
+//! An optional `seedporters=N` (F3's measure) does the same for the seedporter (its count
+//! on the asked seed). The run then prints a `seedporter:` census line — body-hours, the
+//! shares of body-ticks on the ground / climbing / gliding / perched (and asleep, a share
+//! of perched), fruit eaten by source (organic and bites, `[lanternberry stand, latticevine
+//! face]`), glides started (and forced), climbs, seeds voided by source — and a
+//! `seed_dispersal:` line for the lanternberry seeds voided: how many voids, how many
+//! landed more than `GROVE_M` from their source stand (`away`), how many of those within
+//! `GROVE_M` of another adult lanternberry (`other_grove`), and the median and max
+//! distance of the away ones.
+//!
 //! At t = 0 it reports the roster R1 check: the glowcap caps standing (count and stock)
 //! and the foliage standing in a loftstrider's mouth band over each stand's support face
 //! (the adult band, `mouth_floor..mouth_ceiling × height`).
@@ -35,6 +47,10 @@ use cubarium::voxel::{LayerConfig, Seeds, found, load_config, params_of};
 use cubarium_voxel_fauna::{Departure, Food, Founder};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
+/// A grove's reach for the seed census, metres: a void this far from its source stand is
+/// "away", and within it of another adult lanternberry it is in another grove.
+const GROVE_M: f64 = 2.0;
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let path = args
@@ -44,11 +60,14 @@ fn main() {
     let seed: u64 = args.get(3).map_or(1, |a| a.parse().expect("SEED"));
     let mut snails: Option<usize> = None;
     let mut bellwings: Option<usize> = None;
+    let mut seedporters: Option<usize> = None;
     // `trace=S`: every S seconds, one line per bellwing (a diagnostic).
     let mut trace: Option<u64> = None;
     for a in args.iter().skip(4) {
         if let Some(n) = a.strip_prefix("snails=") {
             snails = Some(n.parse().expect("snails=N"));
+        } else if let Some(n) = a.strip_prefix("seedporters=") {
+            seedporters = Some(n.parse().expect("seedporters=N"));
         } else if let Some(n) = a.strip_prefix("bellwings=") {
             bellwings = Some(n.parse().expect("bellwings=N"));
         } else if let Some(n) = a.strip_prefix("trace=") {
@@ -68,7 +87,10 @@ fn main() {
     if let Some(n) = bellwings {
         counts[Founder::Bellwing.index()] = n;
     }
-    let asked = snails.is_some() || bellwings.is_some();
+    if let Some(n) = seedporters {
+        counts[Founder::Seedporter.index()] = n;
+    }
+    let asked = snails.is_some() || bellwings.is_some() || seedporters.is_some();
     let founded = found(
         &world_cfg,
         &LayerConfig::new(&params, world_cfg.voxel_m),
@@ -106,15 +128,63 @@ fn main() {
     // Bellwing body-ticks: aloft, perched awake, asleep; perched in a downpour, sheltered.
     let (mut aloft, mut perched, mut asleep, mut pour_perched, mut pour_sheltered) =
         (0u64, 0u64, 0u64, 0u64, 0u64);
+    // Seedporter body-ticks by mode (ground, climb, glide, perched) and asleep; its
+    // lanternberry seed voids as (distance from source, in another grove).
+    let sp = Founder::Seedporter;
+    let mut sp_modes = [0u64; 4];
+    let mut sp_asleep = 0u64;
+    let mut voids: Vec<(f64, bool)> = Vec::new();
     let started = std::time::Instant::now();
     for tick in 1..=ticks {
         sim.step();
+        {
+            use cubarium_voxel_fauna::MobilityMode;
+            for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(sp)) {
+                let k = match a.mobility.mode {
+                    MobilityMode::Climb => 1,
+                    MobilityMode::Glide => 2,
+                    MobilityMode::Perched => 3,
+                    _ => 0,
+                };
+                sp_modes[k] += 1;
+                if a.state == cubarium_voxel_fauna::State::Asleep {
+                    sp_asleep += 1;
+                }
+            }
+            let events = sim.fauna_mut().take_seed_voids();
+            if !events.is_empty() {
+                let fv = sim.flora().view();
+                let v = sim.world().config().voxel_m;
+                let ring = f64::from(sim.world().config().width) * v;
+                let centre = |s: cubarium_voxel_flora::Site| ((f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v);
+                let dist = |a: (f64, f64), b: (f64, f64)| {
+                    let dx = (a.0 - b.0).rem_euclid(ring);
+                    let dx = dx.min(ring - dx);
+                    (dx * dx + (a.1 - b.1).powi(2)).sqrt()
+                };
+                for e in events {
+                    if !matches!(e.plant, cubarium_voxel_fauna::SeedPlant::Stand(_)) {
+                        continue;
+                    }
+                    let (from, to) = (centre(e.source), centre(e.landed));
+                    let d = dist(from, to);
+                    let other = d > GROVE_M
+                        && fv.stands.iter().any(|s| {
+                            s.species == cubarium_voxel_flora::Species::Lanternberry
+                                && s.profile_stage >= 1
+                                && s.site != e.source
+                                && dist(centre(s.site), to) <= GROVE_M
+                        });
+                    voids.push((d, other));
+                }
+            }
+        }
         if let Some(every) = trace {
             if tick % (every * u64::from(cubarium_voxel::TICK_HZ)) == 0 {
                 let fv = sim.flora().view();
                 let v = sim.world().config().voxel_m;
                 let ring = f64::from(sim.world().config().width) * v;
-                for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(bw)) {
+                for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(bw) || a.founder == Some(Founder::Seedporter)) {
                     let near = fv
                         .stands
                         .iter()
@@ -243,6 +313,37 @@ fn main() {
             stands.iter().map(|s| s.wood).sum::<f64>(),
             stands.iter().map(|s| s.nectar).sum::<f64>(),
         );
+        let sp_ticks: u64 = sp_modes.iter().sum();
+        let sp_share = |n: u64| if sp_ticks > 0 { n as f64 / sp_ticks as f64 } else { 0.0 };
+        println!(
+            "seedporter: body_h={:.3} ground={:.3} climb={:.3} glide={:.3} perched={:.3} asleep={:.3} fruit_eaten=[stand={:.6} vine={:.6}] fruit_bites=[stand={} vine={}] glides={} glides_forced={} climbs={} seeds_voided=[stand={:.6} vine={:.6}] seed_voids={}",
+            sp_ticks as f64 / f64::from(cubarium_voxel::TICK_HZ) / 3600.0,
+            sp_share(sp_modes[0]),
+            sp_share(sp_modes[1]),
+            sp_share(sp_modes[2]),
+            sp_share(sp_modes[3]),
+            sp_share(sp_asleep),
+            l.fruit_eaten_by_source[0],
+            l.fruit_eaten_by_source[1],
+            l.fruit_bites_by_source[0],
+            l.fruit_bites_by_source[1],
+            l.glides,
+            l.glides_forced,
+            l.climbs,
+            l.seeds_voided_by_source[0],
+            l.seeds_voided_by_source[1],
+            l.seed_voids,
+        );
+        let mut away: Vec<f64> = voids.iter().filter(|(d, _)| *d > GROVE_M).map(|(d, _)| *d).collect();
+        away.sort_by(f64::total_cmp);
+        println!(
+            "seed_dispersal: lanternberry_voids={} away={} other_grove={} away_median_m={:.2} away_max_m={:.2}",
+            voids.len(),
+            away.len(),
+            voids.iter().filter(|(_, o)| *o).count(),
+            away.get(away.len() / 2).copied().unwrap_or(f64::NAN),
+            away.last().copied().unwrap_or(f64::NAN),
+        );
         println!("step_cost: wall_s={wall:.1} ms_per_tick={:.4}", 1000.0 * wall / ticks as f64);
     }
     for f in Founder::ALL {
@@ -339,7 +440,7 @@ fn t0_report(sim: &Sim, params: &cubarium_voxel_sim::params::Params) {
     for a in sim.fauna().view().animals {
         if matches!(
             a.founder,
-            Some(Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing)
+            Some(Founder::Capgnawer | Founder::Loftstrider | Founder::RippleSnail | Founder::Bellwing | Founder::Seedporter)
         ) {
             println!(
                 "t0: {} id={} site=({}, {}, {}) heading={:.2}",

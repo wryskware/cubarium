@@ -838,12 +838,24 @@ pub(crate) fn fruit_at_hit(
 /// **The nearest fruit within `reach` of `p`** (F3): a foliage cell of a stand hanging
 /// fruit (any of its foliage layers holding foliage), or a latticevine face in fruit holding
 /// beads and facing `p`. `(the source, its fruit stock)`; a stand wins a tie.
-pub(crate) fn fruit_in_reach(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f64, f64), reach: f64) -> Option<(Bloom, f64)> {
+/// `stands` limits which stands count: `None` none, `Some(None)` any, `Some(Some(site))` the
+/// one rooted on `site`.
+pub(crate) fn fruit_in_reach(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    p: (f64, f64, f64),
+    reach: f64,
+    stands: Option<Option<Site>>,
+) -> Option<(Bloom, f64)> {
     let c = view.config;
     let v = c.voxel_m;
     let ring = f64::from(c.width) * v;
     let mut best: Option<(f64, Bloom, f64)> = None;
-    for stand in fv.stands.iter().filter(|s| s.fruit > 0.0) {
+    for stand in fv
+        .stands
+        .iter()
+        .filter(|s| s.fruit > 0.0 && stands.is_some_and(|only| only.is_none_or(|site| site == s.site)))
+    {
         let sx = (f64::from(stand.site.x) + 0.5) * v;
         let sz = (f64::from(stand.site.z) + 0.5) * v;
         let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, sx, sz, ring);

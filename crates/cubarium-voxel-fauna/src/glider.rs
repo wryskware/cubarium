@@ -89,21 +89,29 @@ fn floor_at(view: &VoxelView<'_>, x: f64, z: f64, y_m: f64) -> Option<(f64, Site
     Some((crate::surface_m(site.y, view.config.voxel_m), site))
 }
 
-/// **The fruit a glider's mouth reaches** (F3): the fruit of the stand it holds (climbing
-/// its stem or perched on its crown) first, else the nearest fruiting crown cell or vine
-/// face in fruit within its radius plus its mouth reach of its middle. `(the source, its
-/// stock)`.
+/// **The fruit a glider's mouth reaches** (F3). A stand's fruit hangs in its crown: it is
+/// reached only from the stand the body holds — all of it perched on the crown, and while
+/// climbing the stem a fruiting crown cell within its radius plus its mouth reach of its
+/// middle. A vine face in fruit is reached from anywhere within that reach (the beads hang
+/// on the wall down to its foot). `(the source, its stock)`.
 pub(crate) fn glider_fruit_in_reach(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     a: &Animal,
     phys: &crate::FounderPhysiology,
 ) -> Option<(Bloom, f64)> {
-    if matches!(a.mobility.mode, MobilityMode::Perched | MobilityMode::Climb)
-        && let Some(Perch {
-            anchor: PerchAnchor::Stand { site, .. },
-            ..
-        }) = a.mobility.perch
+    let held = match (a.mobility.mode, a.mobility.perch) {
+        (
+            MobilityMode::Perched | MobilityMode::Climb,
+            Some(Perch {
+                anchor: PerchAnchor::Stand { site, .. },
+                ..
+            }),
+        ) => Some(site),
+        _ => None,
+    };
+    if a.mobility.mode == MobilityMode::Perched
+        && let Some(site) = held
         && let Some(stand) = fv.stand_at(site)
         && stand.fruit > 0.0
     {
@@ -111,24 +119,28 @@ pub(crate) fn glider_fruit_in_reach(
     }
     let s = shape(phys, a.body);
     let reach = s.r + phys.body_at(a.body).mouth_reach_m;
-    flight::fruit_in_reach(view, fv, flight::mouth_point(a, s), reach)
+    flight::fruit_in_reach(view, fv, flight::mouth_point(a, s), reach, held.map(Some))
 }
 
-/// The nearest climbable stem the body touches: a stand rooted within a voxel of its
-/// standing layer whose column centre is within the body's radius and half a voxel of its
-/// centre, and not behind it.
+/// The nearest climbable stand the body walks in under: a stand rooted within a voxel of
+/// its standing layer whose stem is within the body's radius and half a voxel of its
+/// centre, or under the stand's lowest foliage layer (its radius), and not behind it. It
+/// climbs into the crown from there.
 fn stem_touched(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, shape: Shape, glider: &Glider) -> Option<Site> {
     let c = view.config;
     let v = c.voxel_m;
     let ring = f64::from(c.width) * v;
     let (fx, fz) = a.pose.forward();
-    let reach = shape.r + 0.5 * v;
     let (cx, cz) = a.pose.column(v, c.depth)?;
     let mut best: Option<(f64, Site)> = None;
     let mut consider = |stand: &cubarium_voxel_flora::Stand| {
         if stand.site.y.abs_diff(a.site.y) > 1 || !climbable(fv, stand, glider) {
             return;
         }
+        let Some((low, _)) = crown_span(fv, stand.site) else {
+            return;
+        };
+        let reach = (shape.r + 0.5 * v).max(low.radius_m);
         let sx = (f64::from(stand.site.x) + 0.5) * v;
         let sz = (f64::from(stand.site.z) + 0.5) * v;
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
@@ -398,7 +410,7 @@ fn ground_tick(
                 fauna.ledger.climbs += 1;
                 return;
             }
-            if let Some((x, z)) = glide_off_edge(view, &a, s, &glider) {
+            if let Some((x, z)) = glide_off_edge(view, &a, s, &glider, phys.wade_depth_m(&phys.body_at(a.body))) {
                 let a = &mut fauna.animals[i];
                 a.pose.x = x;
                 a.pose.z = z;
@@ -415,8 +427,9 @@ fn ground_tick(
 
 /// Where a glide off the edge ahead starts: the first point along the heading, up to two
 /// radii and a voxel on, where the disc is clear and every floor under it is at least
-/// `glide_min_height_m` below the base. `None` when there is no such drop.
-fn glide_off_edge(view: &VoxelView<'_>, a: &Animal, shape: Shape, glider: &Glider) -> Option<(f64, f64)> {
+/// `glide_min_height_m` below the base. `None` when there is no such drop, or the water
+/// on the floor below is deeper than it wades (it does not jump out over a pond).
+fn glide_off_edge(view: &VoxelView<'_>, a: &Animal, shape: Shape, glider: &Glider, wade_m: f64) -> Option<(f64, f64)> {
     let v = view.config.voxel_m;
     let base = a.pose.y_m;
     let (fx, fz) = a.pose.forward();
@@ -428,11 +441,12 @@ fn glide_off_edge(view: &VoxelView<'_>, a: &Animal, shape: Shape, glider: &Glide
         if flight::blocked(view, shape, x, z, base) {
             return None;
         }
-        let Some((top, _, _)) = flight::floor_under(view, shape, x, z, base) else {
+        let Some((top, _, water)) = flight::floor_under(view, shape, x, z, base) else {
             continue;
         };
-        if base - top >= glider.glide_min_height_m - EPS {
-            return Some((x, z));
+        if base - (top - water) >= glider.glide_min_height_m - EPS {
+            // It does not jump out over water deeper than it wades.
+            return (water <= wade_m).then_some((x, z));
         }
     }
     None
