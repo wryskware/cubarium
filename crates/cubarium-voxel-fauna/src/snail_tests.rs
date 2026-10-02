@@ -354,6 +354,67 @@ fn a_snail_on_submerged_film_takes_film_the_books_close_and_the_pool_falls() {
     ledgers_close(&fauna, &flora, organic);
 }
 
+/// **Under its heuristic, a snail on a half-capacity film bites within a few hundred
+/// ticks** (the R2b repair). A 0.125 m plain — the live worlds' voxel — under one cell of
+/// water, film founded at half its capacity on every face; a hungry snail under
+/// [`crate::BlindForager`], not a script. Before its own `taste_reference` the snail tasted
+/// film against the litter rule (`emit_reference × mass_scale`, 1.5 at x30), so a
+/// half-capacity site (3.1e-3) tasted ~2e-3, under the 0.02 feed gate, and it never fed.
+#[test]
+fn a_snail_under_its_heuristic_bites_half_capacity_film() {
+    const V8: f64 = 0.125;
+    let (width, depth) = (16u32, 8u32);
+    let mut world = World::empty(VoxelConfig {
+        width,
+        height: 8,
+        depth,
+        voxel_m: V8,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
+        ..VoxelConfig::default()
+    });
+    let cell = world.config().voxel_volume();
+    for z in 0..depth {
+        for x in 0..i64::from(width) {
+            for y in 1..=2 {
+                world.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Soil });
+            }
+            world.apply(WorldCommand::AddWater { x, y: 3, z, volume_m3: cell });
+        }
+    }
+    let flora_config = FloraConfig {
+        voxel_m: V8,
+        ..FloraConfig::default()
+    };
+    let capacity = flora_config.film_capacity_per_m2 * V8 * V8;
+    let mut flora = Flora::new(flora_config);
+    assert!(flora.seed_film(&world) > 0, "the pond's faces are wet-eligible");
+    let face = site(8, 4);
+    let film = film_at(&flora, face);
+    assert!(
+        (film - 0.5 * capacity).abs() <= 1e-9 * capacity,
+        "the default founding film is half the capacity: {film} against {capacity}"
+    );
+
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = introduce(&mut fauna, &world, SNAIL, 8, 4, EAST, HUNGRY_ADULT);
+    assert!(fauna.set_controller(
+        id,
+        Box::new(crate::BlindForager::for_founder(SNAIL, crate::TeacherConfig::default())),
+    ));
+    let mut ticks = 0;
+    while fauna.view().ledger.bites_by_food[Food::Film.index()] == 0 && ticks < 300 {
+        fauna.step(&world, &mut flora);
+        ticks += 1;
+    }
+    assert!(
+        fauna.view().ledger.bites_by_food[Food::Film.index()] >= 1,
+        "no film bite in {ticks} ticks"
+    );
+}
+
 /// **It never takes litter or foliage.** On a dry plain, litter at its face and a
 /// velvetpad (ground cover, inside its band) at its column: a feeding snail bites nothing
 /// and both are untouched. A shredder in its place eats the litter, so the pile is in

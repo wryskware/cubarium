@@ -209,6 +209,8 @@ fn founder_rows() -> Vec<Row> {
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
+        r("taste_reference", "organic units per site", Range::positive(), "food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale)")
+            .optional().digest().prov("decision"),
         // The carnivore's table (`Hunter`): the lanternjaw's only, optional on the others.
         r("hunter.strike_power", "wound per hit", nonneg, "a hit adds power x (S_pred / S_prey) x (1 - armour)").optional(),
         r("hunter.prey_max_ratio", "x own body", nonneg, "the size window: prey at most this x its own").optional(),

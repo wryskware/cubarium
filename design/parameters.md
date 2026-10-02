@@ -986,11 +986,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_maintenance_per_s` | 0.0001 | /s | [0, inf) |  | - | placeholder | glassfilm: upkeep, respired |
 | `flora.film_spread_per_s` | 0.0002 | /s | [0, inf) |  | - | placeholder | glassfilm: fragments a neighbour sends per unit of its film |
 | `flora.film_dry_death_per_s` | 0.005 | /s | [0, inf) |  | - | placeholder | glassfilm: loss on a dry or too-deep site, to litter |
-| `flora.film_seed_per_m2` | 0.02 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm: founding film per square metre |
+| `flora.film_seed_per_m2` | 0.2 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm: founding film per square metre |
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (504 rows)
+**`fauna.*`** (510 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1068,6 +1068,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
+| `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
 | `fauna.founders.littershredder.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.littershredder.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.littershredder.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1135,6 +1136,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
+| `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
 | `fauna.founders.frondgrazer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.frondgrazer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.frondgrazer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1202,6 +1204,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
+| `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
 | `fauna.founders.lanternjaw.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.lanternjaw.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.lanternjaw.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1269,6 +1272,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
+| `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
 | `fauna.founders.capgnawer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.capgnawer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.capgnawer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1336,6 +1340,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
+| `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
 | `fauna.founders.loftstrider.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.loftstrider.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.loftstrider.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1403,6 +1408,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
+| `fauna.founders.ripple-snail.taste_reference` | 0.00625 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
 | `fauna.founders.ripple-snail.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.ripple-snail.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.ripple-snail.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |

@@ -119,6 +119,10 @@ pub const CAPGNAWER_VOLUME_RATIO: f64 = (0.25 * 0.21 * 0.19) / (0.375 * 0.125 * 
 /// The ripple-snail's body volume over the littershredder's (roster R2b): 0.19 × 0.19 ×
 /// 0.063 m over 0.375 × 0.125 × 0.125 m. A derivation, not a knob, as
 /// [`CAPGNAWER_VOLUME_RATIO`] is.
+/// The site edge the ripple-snail's taste reference is computed at (the live worlds'
+/// 0.125 m voxel): its `taste_reference` is the film capacity of one such site.
+const SNAIL_SITE_M: f64 = 0.125;
+
 pub const RIPPLE_SNAIL_VOLUME_RATIO: f64 = (0.19 * 0.19 * 0.063) / (0.375 * 0.125 * 0.125);
 
 /// The loftstrider's **hull** volume over the frondgrazer's body (roster R1): 1.5 × 0.55
@@ -354,6 +358,18 @@ pub struct FounderPhysiology {
     /// a x1 one with it (`cubarium_voxel_sim::habitat`).
     #[serde(default = "one")]
     pub mass_scale: f64,
+    /// **Taste's reference stock** (roster R2b repair): the food stock per site, organic
+    /// units, that reads as a taste cue of 1 before saturation (the mouth's response is
+    /// `min(stock / this, 1)` through the chem saturation curve). `None` keeps the
+    /// manifest rule every older lineage uses, `emit_reference × mass_scale`
+    /// ([`FounderPhysiology::taste_reference_stock`], `manifest::TASTE_REFERENCE_RULE`), so
+    /// their cues and digests do not move. The ripple-snail's is the glassfilm's capacity
+    /// per 0.125 m site: a film's stock is a few thousandths of a unit, far under the
+    /// litter-scaled rule's 1.5 at x30, which no film could ever reach the feed gate on.
+    /// Not scaled by [`FounderPhysiology::scale_mass`]: the food's stock does not change
+    /// with the eater's mass.
+    #[serde(default)]
+    pub taste_reference: Option<f64>,
     /// **What it eats** ([`crate::Diet`]): the food classes its mouth takes, each from its
     /// own source. Shredder `[litter, carrion]` (it lost the caps in roster R1), browser
     /// `[foliage]`, lanternjaw `[carrion]`, capgnawer `[cap_tissue, litter]`, loftstrider
@@ -606,6 +622,7 @@ impl FounderPhysiology {
                 agility: 0.3,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference: None,
                 // Litter and carrion (Wrysk, 2026-10-01: the shredder goes back to litter;
                 // the capgnawer owns the glowcap caps, roster R1). Its cap-tissue yield
                 // stays as the capgnawer's template.
@@ -661,6 +678,7 @@ impl FounderPhysiology {
                 agility: 0.5,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference: None,
                 diet: crate::Diet::only(crate::Food::Foliage),
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::AtFood,
@@ -737,6 +755,7 @@ impl FounderPhysiology {
                 agility: 0.0,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference: None,
                 diet: crate::Diet::only(crate::Food::Carrion),
                 // §2.9: a fresh world is founded with a buried egg bank, not adults.
                 founding: Founding::Clutches,
@@ -878,6 +897,15 @@ impl FounderPhysiology {
                     water_margin_m: 0.25,
                     // Its clutch goes on film, under water.
                     egg_site: EggSite::Film,
+                    // Taste reads film against the film's own capacity per site: the
+                    // plant layer's `film_capacity_per_m2` (0.4) × a 0.125 m site's area
+                    // (0.015625 m²) = 6.25e-3 organic units, so a full film tastes 1 and a
+                    // half-capacity pond 0.5 (`taste_reference`).
+                    taste_reference: Some(
+                        cubarium_voxel_flora::FloraConfig::default().film_capacity_per_m2
+                            * SNAIL_SITE_M
+                            * SNAIL_SITE_M,
+                    ),
                     // On a film site (the diet-driven food filter).
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
@@ -886,6 +914,13 @@ impl FounderPhysiology {
                 }
             }
         }
+    }
+
+    /// Taste's reference stock for a world whose cue config has `emit_reference`: the
+    /// lineage's own [`FounderPhysiology::taste_reference`] when it has one, else the
+    /// manifest rule `emit_reference × mass_scale`.
+    pub fn taste_reference_stock(&self, emit_reference: f64) -> f64 {
+        self.taste_reference.unwrap_or(emit_reference * self.mass_scale)
     }
 
     /// Total structure a `core` non-sensory budget buys, with sensor allocation `f`:
@@ -2237,14 +2272,15 @@ pub(crate) fn taste_reading(
         manifest,
         body,
         FounderPhysiology::placeholder(founder).diet,
-        crate::CueConfig::default().emit_reference,
         // The unit tests' bodies are the placeholder tables' (mass 1).
-        1.0,
+        FounderPhysiology::placeholder(founder)
+            .taste_reference_stock(crate::CueConfig::default().emit_reference),
     )
 }
 
-/// [`taste_reading`] for a body of `mass_scale`: the reference is `emit_reference ×
-/// mass_scale` ([`crate::CueConfig::emit_reference`], `manifest::TASTE_REFERENCE_RULE`).
+/// [`taste_reading`] against a reference stock `reference`
+/// ([`FounderPhysiology::taste_reference_stock`]: the lineage's own `taste_reference`, else
+/// `emit_reference × mass_scale`, `manifest::TASTE_REFERENCE_RULE`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn taste_reading_at(
     fv: &FloraView<'_>,
@@ -2254,14 +2290,12 @@ pub(crate) fn taste_reading_at(
     manifest: &Manifest,
     body: &Body,
     diet: crate::Diet,
-    emit_reference: f64,
-    mass_scale: f64,
+    reference: f64,
 ) -> TasteReading {
     let sat = manifest.tunings.chem_saturation;
-    // The contact-material response: `amount / (emit_reference × mass_scale)` cue units through
-    // the same curve the field's concentration reads through. The browser's foliage cue
-    // is still this — there is no foliage field to sample.
-    let reference = emit_reference * mass_scale;
+    // The contact-material response: `amount / reference` cue units through the same
+    // curve the field's concentration reads through. The browser's foliage cue is still
+    // this — there is no foliage field to sample.
     let response = |amount: f64| {
         let c = (amount / reference).min(1.0);
         c / (c + sat)
@@ -2379,8 +2413,7 @@ pub(crate) fn observation(
         manifest,
         &body,
         phys.diet,
-        fauna.config.cue.emit_reference,
-        phys.mass_scale,
+        phys.taste_reference_stock(fauna.config.cue.emit_reference),
     );
     obs[tm.offset] = taste.cue;
     obs[tm.offset + 1] = taste.resistance;

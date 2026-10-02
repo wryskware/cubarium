@@ -562,7 +562,8 @@ impl Controller for BlindForager {
         let forward = if front_blocked { cfg.blocked_forward } else { 1.0 };
         // Feed on any food the mouth tastes ([`TeacherConfig::feed_gate`], 0.02: "any
         // food"; taste's reference is `emit_reference × mass_scale`, so at the shipped x30
-        // a whole springturf or a starter litter tile tastes ~0.05). Failed attempts off
+        // a whole springturf or a starter litter tile tastes ~0.05; the ripple-snail's is its
+        // own `taste_reference`, the film capacity per site). Failed attempts off
         // the stock are free — the gate costs nothing but keeps feeding honest.
         let feed = if taste_valid > 0.5 && taste_resp > cfg.feed_gate {
             1.0

@@ -2366,7 +2366,7 @@ impl Default for FloraConfig {
             voxel_m: 0.25,
             film_max_depth_m: 0.6,
             film_extinction_per_m: 0.8,
-            // Plausible, untuned (brief R2a): a seed at 5 % of capacity fills to 90 % in
+            // Plausible, untuned (brief R2a): a fresh film at 5 % of capacity fills to 90 % in
             // about an hour of full light (net 1.4e-3 /s), a dried film is 95 % gone in
             // about ten minutes (ln 20 / 0.005 s), dark upkeep halves it in about two
             // hours, and spread is a fraction of growth.
@@ -2375,7 +2375,9 @@ impl Default for FloraConfig {
             film_maintenance_per_s: 0.0001,
             film_spread_per_s: 0.0002,
             film_dry_death_per_s: 0.005,
-            film_seed_per_m2: 0.02,
+            // Half the capacity: a live world founds an established pond, not a fresh
+            // film (roster R2b repair). Read only when `seed_film_at_founding` is on.
+            film_seed_per_m2: 0.2,
             film_n_tissue: SpeciesConfig::springturf().n_tissue,
             film_energy_density: SpeciesConfig::springturf().energy_density,
             seed_film_at_founding: false,

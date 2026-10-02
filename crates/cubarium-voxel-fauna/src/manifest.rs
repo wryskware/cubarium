@@ -365,6 +365,11 @@ pub struct Manifest {
     /// references scale with a body's mass.
     pub self_reference_rule: &'static str,
     pub taste_reference_rule: &'static str,
+    /// The lineage's own taste reference stock (`FounderPhysiology::taste_reference`),
+    /// when it does not follow [`TASTE_REFERENCE_RULE`]: the ripple-snail's film capacity
+    /// per site. `None` for every lineage on the rule, whose canonical text does not
+    /// change.
+    pub taste_reference: Option<f64>,
 }
 
 /// The `Self` energy, reserve, structural-loss and intake references are the manifest's
@@ -635,6 +640,7 @@ struct Anchors {
     cruise: f64,
     yaw: f64,
     mass: f64,
+    taste_ref: Option<f64>,
 }
 
 fn anchors(founder: Founder) -> Anchors {
@@ -657,6 +663,7 @@ fn anchors(founder: Founder) -> Anchors {
         cruise: p.cruise_body_lengths_per_s * p.adult_length_m,
         yaw: p.yaw_cap_rad_per_s,
         mass: p.mass_scale,
+        taste_ref: p.taste_reference,
     }
 }
 
@@ -745,6 +752,7 @@ impl Manifest {
             mass_scale: a.mass,
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
+            taste_reference: None,
         }
     }
 
@@ -797,6 +805,7 @@ impl Manifest {
             mass_scale: a.mass,
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
+            taste_reference: None,
         }
     }
 
@@ -851,6 +860,7 @@ impl Manifest {
             mass_scale: a.mass,
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
+            taste_reference: None,
         }
     }
 
@@ -956,6 +966,7 @@ impl Manifest {
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
+            taste_reference: a.taste_ref,
             ..Manifest::blind()
         }
     }
@@ -1073,6 +1084,11 @@ impl Manifest {
             "|mass:{}|self_ref:{}|taste_ref:{}",
             self.mass_scale, self.self_reference_rule, self.taste_reference_rule
         );
+        // A lineage off the rule writes its own reference stock; the others' text is
+        // unchanged.
+        if let Some(stock) = self.taste_reference {
+            let _ = write!(s, "|taste_ref_stock:{}", stock);
+        }
         let _ = write!(s, "|taste:{}", self.taste_cue);
         for (class, r) in self.taste_resistances {
             let _ = write!(s, ":{}={}", class, r);
