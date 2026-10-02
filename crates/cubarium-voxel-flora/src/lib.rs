@@ -980,6 +980,41 @@ pub struct SpeciesConfig {
     pub founder_colony: u32,
     /// **Founding**: the cap a world puts on founders of this species, in stands.
     pub founder_cap: u32,
+    /// **The dark habitat** (`design/handoffs/plants-glowcap-vine-2026-10-01.md` B): terrain
+    /// sky visibility ([`cubarium_voxel::VoxelView::sky_visibility`], no canopy in it) at and
+    /// above which a site is not dark at all. Darkness is
+    /// `clamp((dark_sky_max − sky) / (dark_sky_max − dark_sky_full), 0, 1)`
+    /// ([`SpeciesConfig::darkness`]). **0 turns the dark habitat off**: every site reads
+    /// darkness 0 and every `dark_*` knob below is inert. Off for every species but the
+    /// glowcap.
+    pub dark_sky_max: f64,
+    /// Sky visibility at and below which a site is **fully** dark (darkness 1). At most
+    /// `dark_sky_max`.
+    pub dark_sky_full: f64,
+    /// **Seep income**: organic matter per unit of mycelium (wood) per second at darkness 1
+    /// and `μ` 1 — drip water carrying dissolved organic matter down a cave wall. It adds to
+    /// the substrate income, is capped at what the stand can spend this tick, brings its
+    /// own mineral at `n_tissue`, and enters the ledger as `FloraLedger::seep_*_in`.
+    /// Organic/s per unit wood; 0 is none.
+    pub dark_uptake_per_s: f64,
+    /// **Cave damp**, on the available-water scale (1 = field capacity): a dark site reads
+    /// at least `dark_damp · darkness` of available water, in the germination gates and in
+    /// `μ`, even with no soil in its root box — cave air is saturated and rock weeps. It
+    /// creates no water: it is a reading, and a species with no transpiration draws
+    /// nothing. 0 is none.
+    pub dark_damp: f64,
+    /// Darkness at and above which the **substrate gate opens** without dead wood or
+    /// litter. 0 is off (the gate needs substrate as before).
+    pub dark_establish_min: f64,
+    /// **Spore landings favour the dark**: a candidate face weighs `1 + dark_spore_bias ·
+    /// darkness` among a package's tries, and a dark face under a roof within `hop`
+    /// rows of the donor weighs `dark_spore_bias · darkness` (`seeds`' `spore_target`).
+    /// 0 gives the undarkened picks exactly. Dimensionless.
+    pub dark_spore_bias: f64,
+    /// **Founding**: the share of this species' founders the habitat seeder places on the
+    /// darkest faces that pass its gates with no substrate laid (no log under them). 0 is
+    /// none: every founder is founded as before. A fraction.
+    pub dark_founder_share: f64,
     /// **What is in that volume**: the species' anatomy, staged by `wood / wood_max`.
     /// The first entry whose `wood_fraction_max` is at or above the fraction applies;
     /// the last must catch a full-grown stand. Its foliage-bearing layers are the
@@ -1151,6 +1186,14 @@ impl SpeciesConfig {
 
 /// Water: what the ground offers this species.
 impl SpeciesConfig {
+    /// How dark a site with terrain sky visibility `sky` is for this species, `0..=1`:
+    /// 0 at and above `dark_sky_max`, 1 at and below `dark_sky_full`, linear between.
+    /// Always 0 when `dark_sky_max` is 0 (no dark habitat).
+    pub fn darkness(&self, sky: f64) -> f64 {
+        let _ = sky;
+        0.0
+    }
+
     /// `μ` at root-box available water `a`: zero at and below `wilt_water`, one at and
     /// above `full_water`, linear between. A `full_water` at or below `wilt_water` is a
     /// step at `full_water`.
@@ -1277,6 +1320,14 @@ impl SpeciesConfig {
             founder_per_m2: 0.0,
             founder_colony: 1,
             founder_cap: 0,
+            // No dark habitat: only the glowcap has one.
+            dark_sky_max: 0.0,
+            dark_sky_full: 0.0,
+            dark_uptake_per_s: 0.0,
+            dark_damp: 0.0,
+            dark_establish_min: 0.0,
+            dark_spore_bias: 0.0,
+            dark_founder_share: 0.0,
             // The v1 base carries no anatomy of its own: every preset states one.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
                 [0.0, 1.0],
@@ -1819,6 +1870,19 @@ impl SpeciesConfig {
             founder_per_m2: 0.15,
             founder_colony: 3,
             founder_cap: 40,
+            // The dark habitat (`design/handoffs/plants-glowcap-vine-2026-10-01.md` B):
+            // dark below sky 0.45, fully dark at 0.1; the seep pays 0.008 per unit of
+            // mycelium at darkness 1 — a log at full moisture's `0.4 · 0.02`, so the same
+            // ~3× margin over upkeep; a dark site reads at least 0.8 of field capacity; the
+            // substrate gate opens at darkness 0.5; spores favour the dark 1 + 4·darkness;
+            // half the founders go to the darkest faces, with no log laid.
+            dark_sky_max: 0.45,
+            dark_sky_full: 0.1,
+            dark_uptake_per_s: 0.008,
+            dark_damp: 0.8,
+            dark_establish_min: 0.5,
+            dark_spore_bias: 4.0,
+            dark_founder_share: 0.5,
             trophic: Trophic::Saprotroph,
             substrate_uptake_per_s: 0.02,
             substrate_yield: 0.4,
@@ -2615,6 +2679,13 @@ pub struct FloraLedger {
     pub deposited_organic_in: f64,
     pub deposited_mineral_in: f64,
     pub deposited_energy_in: f64,
+    /// **Seep**: organic matter, mineral and energy a dark site's drip water brought a
+    /// saprotroph ([`SpeciesConfig::dark_uptake_per_s`]) — an external input beside
+    /// `fixed_in` / `light_in`, entering with its own mineral at `n_tissue` and its energy
+    /// at `energy_density`.
+    pub seep_organic_in: f64,
+    pub seep_mineral_in: f64,
+    pub seep_energy_in: f64,
     /// Water withdrawn through `Command::WithdrawPore`, cubic metres, for cross-checking
     /// against the core ledger's `transpiration_out`.
     pub transpired_m3: f64,

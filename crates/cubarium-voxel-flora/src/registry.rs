@@ -185,6 +185,20 @@ fn species_rows() -> Vec<Row> {
             .search(0.0, 10.0),
         r("founder_colony", "stands", Range::at_least(1.0), "founding: the size of one founder colony").search(1.0, 12.0),
         r("founder_cap", "stands", nonneg, "founding: the cap a world puts on this species' founders").search(0.0, 400.0),
+        r("dark_sky_max", "sky visibility (0 = no dark habitat)", fraction, "dark habitat: a site at or above this sky is not dark")
+            .search(0.0, 0.8),
+        r("dark_sky_full", "sky visibility", fraction, "dark habitat: a site at or below this sky is fully dark")
+            .search(0.0, 0.4),
+        r("dark_uptake_per_s", "organic/s per unit mycelium at darkness 1", nonneg, "dark habitat: seep income, with its own mineral")
+            .search(0.0, 0.03).grade("D"),
+        r("dark_damp", "available water (0 wp, 1 fc)", nonneg, "dark habitat: least available water a fully dark site reads")
+            .search(0.0, 1.0).grade("D"),
+        r("dark_establish_min", "darkness (0 = off)", fraction, "dark habitat: darkness that opens the substrate gate with no substrate")
+            .search(0.0, 1.0),
+        r("dark_spore_bias", "weight per unit darkness", nonneg, "dark habitat: spore landings weigh 1 + bias * darkness")
+            .search(0.0, 10.0),
+        r("dark_founder_share", "fraction of founders", fraction, "founding: share of founders placed on the darkest faces, no log laid")
+            .search(0.0, 1.0),
         r("profile.*.wood_fraction_max", "fraction of wood_max (inf: the last stage)", Range::nonneg_or_inf(), "a stage applies up to this wood fraction")
             .evolve().grade("C"),
         r("profile.*.height_m_max", "m", Range::positive(), "a stage's crown-height ceiling (a capped seedling)")
@@ -242,7 +256,9 @@ fn vine_rows() -> Vec<Row> {
         r("nectar", "org-units per reference face", nonneg, "a flower's organic matter").scale(area).evolve().grade("C"),
         r("fruit", "org-units per reference face", nonneg, "a bead bunch's organic matter").scale(area).evolve().grade("C"),
         r("energy_density", "energy per org-unit", nonneg, "vine tissue energy").grade("D"),
-        r("founders", "vines", nonneg, "founder vines rooted on a fresh world").evolve().grade("C"),
+        r("founders", "vines", nonneg, "founder vines rooted on a fresh world: the floor under the area count").evolve().grade("C"),
+        r("founders_per_m2", "vines per m2 of world floor", nonneg, "founder vines per square metre: max(founders, round(this * area))")
+            .search(0.0, 0.25),
         r("founder_reserve", "org-units per reference face", nonneg, "each founder's starting reserve")
             .scale(area).evolve().grade("C"),
         r("founder_spacing", "voxels (not rescaled)", nonneg, "the fewest voxels between two founders' roots")
@@ -372,6 +388,13 @@ fn species_rules(at: &str, sc: &SpeciesConfig) -> Result<(), String> {
         return fail(format!(
             "propagule_split w_frac is {w_frac}: a species that puts nothing into wood has no \
              package size and can never germinate"
+        ));
+    }
+    if sc.dark_sky_full > sc.dark_sky_max {
+        return fail(format!(
+            "dark_sky_full {} is over dark_sky_max {}: fully dark must be at least as dark as \
+             not dark at all",
+            sc.dark_sky_full, sc.dark_sky_max
         ));
     }
     if sc.alive_min > sc.wood_max {

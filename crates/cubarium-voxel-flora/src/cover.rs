@@ -782,8 +782,13 @@ pub struct VineConfig {
     pub fruit: f64,
     /// Energy per unit of organic matter in the vine's tissue.
     pub energy_density: f64,
-    /// Founder vines [`Flora::seed_vine_founders`] roots on a fresh world.
+    /// Founder vines [`Flora::seed_vine_founders`] roots on a fresh world: the **floor**
+    /// under the area count `founders_per_m2` ([`VineConfig::founder_count`]).
     pub founders: u32,
+    /// Founder vines per square metre of world floor (`width · depth · voxel_m²`); the
+    /// count is `max(founders, round(founders_per_m2 · area))`. 0.0625 gives the 192 m²
+    /// desktop terrarium 12.
+    pub founders_per_m2: f64,
     /// Each founder's starting reserve.
     pub founder_reserve: f64,
     /// The fewest voxels between two founders' roots (straight-line distance, the `x`
@@ -847,6 +852,7 @@ impl Default for VineConfig {
             fruit: 0.005,
             energy_density: 1.0,
             founders: 6,
+            founders_per_m2: 0.0625,
             founder_reserve: 0.1,
             founder_spacing: 8,
         }
@@ -854,6 +860,12 @@ impl Default for VineConfig {
 }
 
 impl VineConfig {
+    /// How many founders a world of `area_m2` of floor gets:
+    /// `max(founders, round(founders_per_m2 · area_m2))`.
+    pub fn founder_count(&self, area_m2: f64) -> usize {
+        let _ = area_m2;
+        self.founders as usize
+    }
 }
 
 

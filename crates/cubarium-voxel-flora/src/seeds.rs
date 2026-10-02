@@ -2053,4 +2053,109 @@ mod tests {
         assert!(two < eight, "two tries banked {two}, eight {eight}");
         assert!(two > 0, "two tries still land some");
     }
+
+    /// The spore picker as it stood before the dark bias: up to `spore_tries` columns
+    /// drawn uniformly within `hop`, the first whose highest support face passes the
+    /// ground gates. Kept here so `dark_spore_bias` 0 can be held to it.
+    fn reference_spore_target(
+        view: &VoxelView<'_>,
+        ground: &[Ground],
+        sc: &SpeciesConfig,
+        home: Site,
+        world_seed: u64,
+        tick: u64,
+    ) -> Landing {
+        let home_index = view.config.index(home.x as i64, home.y, home.z) as u64;
+        let c = view.config;
+        let hop = sc.hop as i64;
+        let span = (2 * hop + 1) as usize;
+        let mut rng = Rng::keyed(DOMAIN_SPORES, world_seed, home_index, tick);
+        let mut last = None;
+        for _ in 0..sc.spore_tries.max(1) {
+            let dx = rng.below(span) as i64 - hop;
+            let dz = rng.below(span) as i64 - hop;
+            let z = home.z as i64 + dz;
+            if (dx, dz) == (0, 0) || z < 0 || z >= c.depth as i64 {
+                continue;
+            }
+            let Some(site) = highest_support(view, home.x as i64 + dx, z as u32) else {
+                continue;
+            };
+            if site == home {
+                continue;
+            }
+            last = Some(site);
+            if ground_passes(view, ground, site, sc) {
+                return Landing::Bank(site);
+            }
+        }
+        last.map_or(Landing::Retry, Landing::Lost)
+    }
+
+    /// A wet 16 × 16 slab with a rock roof at `y = 4` over `z >= 10`: the floor under it is
+    /// dark, the roof's top and the open floor are lit. Litter on every floor face, so the
+    /// lit floor passes the glowcap's substrate gate too.
+    fn half_roofed() -> (World, Vec<Ground>) {
+        let (width, depth) = (16u32, 16u32);
+        let mut world = slab(width, depth, 0.6);
+        for z in 10..depth {
+            for x in 0..width as i64 {
+                world.apply(WorldCommand::SetMaterial {
+                    x,
+                    y: 4,
+                    z,
+                    material: Material::Rock,
+                });
+            }
+        }
+        let mut ground = Vec::new();
+        for z in 0..depth {
+            for x in 0..width {
+                let mut g = Ground::new(Site { x, y: 2, z }, 0.0);
+                g.litter = 1.0;
+                ground.push(g);
+            }
+        }
+        ground.sort_by_key(|g| g.site);
+        (world, ground)
+    }
+
+    /// `dark_spore_bias` 0 picks exactly what the undarkened picker picks; above 0 a larger
+    /// share of the landings falls on dark faces.
+    #[test]
+    fn the_dark_spore_bias_at_zero_is_todays_pick_and_above_zero_favours_the_dark() {
+        let (world, ground) = half_roofed();
+        let view = world.view();
+        let config = FloraConfig::default();
+        let home = Site { x: 8, y: 2, z: 7 };
+        let mut zero = config.glowcap.clone();
+        zero.dark_spore_bias = 0.0;
+        for tick in 0..600u64 {
+            assert_eq!(
+                landing(&view, &ground, &config, &zero, home, 11, tick),
+                reference_spore_target(&view, &ground, &zero, home, 11, tick),
+                "tick {tick}"
+            );
+        }
+        let dark_share = |sc: &SpeciesConfig| {
+            let (mut dark, mut banked) = (0u32, 0u32);
+            for tick in 0..2000u64 {
+                if let Landing::Bank(site) = landing(&view, &ground, &config, sc, home, 11, tick) {
+                    banked += 1;
+                    let sky = view.sky_visibility(site.x as i64, site.y, site.z);
+                    if sc.darkness(sky) >= 0.5 {
+                        dark += 1;
+                    }
+                }
+            }
+            assert!(banked > 500, "only {banked} landed");
+            f64::from(dark) / f64::from(banked)
+        };
+        let (at_zero, biased) = (dark_share(&zero), dark_share(&config.glowcap));
+        assert!(
+            biased > at_zero + 0.1,
+            "bias {} lands {biased} on the dark, bias 0 {at_zero}",
+            config.glowcap.dark_spore_bias
+        );
+    }
 }
