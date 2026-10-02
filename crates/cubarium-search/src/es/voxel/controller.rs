@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 use cubarium_core::neural::ShapePolicy;
 use cubarium_core::neural::gru::HIDDEN;
 use cubarium_voxel_fauna::{
-    Actions, BlindForager, BrowserForager, Controller, Founder, Response, TeacherConfig,
+    Actions, BrowserForager, Controller, Founder, Response, TeacherConfig,
     resolve_actions,
 };
 
@@ -285,14 +285,7 @@ impl Parker {
     /// [`cubarium_voxel_fauna::FaunaConfig::teachers`]).
     pub fn new(founder: Founder, teachers: TeacherConfig) -> Parker {
         Parker {
-            inner: match founder {
-                Founder::Blind => Box::new(BlindForager::with_config(teachers)),
-                Founder::Browser => Box::new(BrowserForager::with_config(teachers)),
-                // The lanternjaw's own heuristic is its ambush, as in the Heuristic arm.
-                Founder::Lanternjaw => Box::new(
-                    cubarium_voxel_fauna::LanternjawAmbush::with_config(teachers),
-                ),
-            },
+            inner: cubarium_voxel_fauna::heuristic(founder, teachers),
         }
     }
 }
@@ -547,19 +540,14 @@ impl EpisodeDriver {
             EpisodeKind::Control(VoxelControl::Cruise) => Box::new(Cruise),
             // The heuristic slot is the fauna's own observation-only heuristics: the
             // body the driver runs decides which one fits its founder.
-            EpisodeKind::Control(VoxelControl::Heuristic) => match self.founder {
-                Founder::Blind => Box::new(BlindForager::with_config(teachers)),
-                Founder::Browser => Box::new(BrowserForager::with_config(teachers)),
-                Founder::Lanternjaw => Box::new(
-                    cubarium_voxel_fauna::LanternjawAmbush::with_config(teachers),
-                ),
-            },
+            EpisodeKind::Control(VoxelControl::Heuristic) => {
+                cubarium_voxel_fauna::heuristic(self.founder, teachers)
+            }
+            // The herding variant is the browser's; every other lineage herds as its
+            // own heuristic.
             EpisodeKind::Control(VoxelControl::Herding) => match self.founder {
                 Founder::Browser => Box::new(HerdingBrowser::new(teachers)),
-                Founder::Blind => Box::new(BlindForager::with_config(teachers)),
-                Founder::Lanternjaw => Box::new(
-                    cubarium_voxel_fauna::LanternjawAmbush::with_config(teachers),
-                ),
+                other => cubarium_voxel_fauna::heuristic(other, teachers),
             },
             EpisodeKind::Control(VoxelControl::Parker) => {
                 Box::new(Parker::new(self.founder, teachers))

@@ -49,11 +49,9 @@ const LOOKAHEAD_TICKS: i64 = 8;
 /// Whether a founder's idle body moves its head. The littershredder (blind, about three
 /// voxels long) does not: it only breathes.
 pub fn moves_head(founder: Founder) -> bool {
-    match founder {
-        Founder::Browser => true,
-        // An ambusher waits motionless (interim; its body plan is open).
-        Founder::Blind | Founder::Lanternjaw => false,
-    }
+    // Only the browser; an ambusher waits motionless (interim; its body plan is open),
+    // and a lineage without its own idle stays still.
+    founder == Founder::Browser
 }
 
 /// One head move of one animal: a dip of `dip` voxels.

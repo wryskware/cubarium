@@ -73,9 +73,9 @@ fn the_lanternjaw_and_its_prey_carry_the_notes_numbers() {
     assert_eq!(lj.active, Activity::Nocturnal);
     let cruise = Founder::Lanternjaw.manifest().cruise_m_per_s;
     assert!((cruise - 0.6).abs() < 1e-12, "cruise {cruise} m/s, not 0.6 BL/s");
-    assert_eq!(Diet::of(Founder::Lanternjaw), Diet::Carrion);
+    assert_eq!(FaunaConfig::default().founder(Founder::Lanternjaw).diet, Diet::only(crate::Food::Carrion));
     for t in [Trophic::Photo, Trophic::Saprotroph] {
-        assert!(!Diet::Carrion.accepts(t), "a carnivore's mouth takes no {t:?}");
+        assert!(!Diet::only(crate::Food::Carrion).accepts(t), "a carnivore's mouth takes no {t:?}");
     }
 
     let h = lj.hunter.expect("the lanternjaw hunts");

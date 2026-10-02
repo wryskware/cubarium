@@ -130,7 +130,8 @@ pub struct Body {
     pub height_m: f64,
     /// The eye, metres over the standing surface.
     pub eye_m: f64,
-    /// The mouth band is `[0, mouth_ceiling_m]` over the standing surface.
+    /// The mouth band is `[mouth_floor_m, mouth_ceiling_m]` over the standing surface.
+    pub mouth_floor_m: f64,
     pub mouth_ceiling_m: f64,
     /// The contact receptors, metres over the standing surface.
     pub contact_m: f64,
@@ -159,10 +160,10 @@ impl Body {
     }
 
     /// The crown layers the mouth band reaches from `standing_y`: the cells whose slab
-    /// overlaps `[surface, surface + mouth_ceiling_m]` by a positive amount. A touch at
-    /// exactly the ceiling contributes nothing.
+    /// overlaps `[surface + mouth_floor_m, surface + mouth_ceiling_m]` by a positive
+    /// amount. A touch at exactly the floor or the ceiling contributes nothing.
     pub fn mouth_layers(&self, standing_y: u32, voxel_m: f64) -> std::ops::RangeInclusive<i64> {
-        crate::encounter::band_crown_layers(standing_y, voxel_m, self.mouth_ceiling_m)
+        crate::encounter::band_layers(standing_y, voxel_m, self.mouth_floor_m, self.mouth_ceiling_m)
     }
 
     /// The layer the contact receptors probe: the cell holding `contact_m` over the
@@ -272,6 +273,11 @@ pub struct FounderPhysiology {
     /// The mouth band's ceiling, as a fraction of body height over the standing surface
     /// (decisions §2: 1.33, the dossier's raised neck). A placeholder.
     pub mouth_ceiling_fraction: f64,
+    /// The mouth band's **floor**, as a fraction of body height over the standing
+    /// surface: the band is `[floor, ceiling] × height`. 0 for every lineage so far (a
+    /// mouth that reaches the ground); a tall browser that feeds well above it sets more.
+    /// Ground pools (litter, carrion) are taken at the standing face whatever the floor.
+    pub mouth_floor_fraction: f64,
     /// The contact receptors' height, as a fraction of body height over the standing
     /// surface (0.5). A placeholder.
     pub contact_height_fraction: f64,
@@ -326,6 +332,47 @@ pub struct FounderPhysiology {
     /// a x1 one with it (`cubarium_voxel_sim::habitat`).
     #[serde(default = "one")]
     pub mass_scale: f64,
+    /// **What it eats** ([`crate::Diet`]): the food classes its mouth takes, each from its
+    /// own source. Shredder `[litter, cap_tissue, carrion]`, browser `[foliage]`,
+    /// lanternjaw `[carrion]`. Not a number, so it has no registry row; set it in TOML as
+    /// a list of food names.
+    pub diet: crate::Diet,
+    /// **How a fresh world founds it** ([`Founding`]): bodies, or the egg bank's clutches.
+    pub founding: Founding,
+    /// Where a founding body is placed ([`FoundingSite`]); unread for [`Founding::Clutches`].
+    pub founding_site: FoundingSite,
+    /// **How many** a fresh world founds: bodies, or for [`Founding::Clutches`] clutches.
+    /// The code default of a new lineage is 0, so training worlds are unchanged until a
+    /// preset turns it on (`[fauna.founders.<lineage>] founding_count = N`). Shredder 8,
+    /// browser 8, lanternjaw 3 clutches.
+    pub founding_count: usize,
+}
+
+/// How a fresh world is founded with a lineage ([`FounderPhysiology::founding`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Founding {
+    /// `founding_count` living bodies, placed by [`FounderPhysiology::founding_site`].
+    Bodies,
+    /// `founding_count` **clutches** buried on faces where its prey stand (§2.9, §2.13:
+    /// the lanternjaw's egg bank); no adults. A count of 0 is the no-egg-bank control.
+    Clutches,
+}
+
+/// Where a founding body goes ([`FounderPhysiology::founding_site`]). Both read the
+/// lineage's own walkable components and the food its mouth reaches from each
+/// (`cubarium_voxel_sim::habitat::lineage_food`), and take founders into a component only
+/// while its stock covers the founding hours of upkeep for every one of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FoundingSite {
+    /// The littershredder's: dry open soil away from the stands, a starter tile of leaf
+    /// litter laid under each body first, in a component where a living producer of its
+    /// renewable food is rooted.
+    LitterBed,
+    /// The browser's: a face from which its mouth reaches a stocked layer of a stand its
+    /// diet accepts, in a component holding at least two such stands.
+    AtFood,
 }
 
 /// A carnivore's numbers (`design/predation-and-flight-2026-09-28.md` §2.12, every one
@@ -485,6 +532,7 @@ impl FounderPhysiology {
                 adult_height_m: 0.125,
                 eye_height_fraction: EYE_HEIGHT_FRACTION,
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
+                mouth_floor_fraction: 0.0,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 // Litter keeps the yield it has; cap tissue takes the foliage yield;
@@ -501,6 +549,14 @@ impl FounderPhysiology {
                 agility: 0.3,
                 counter: None,
                 mass_scale: 1.0,
+                diet: crate::Diet::of(&[
+                    crate::Food::Litter,
+                    crate::Food::CapTissue,
+                    crate::Food::Carrion,
+                ]),
+                founding: Founding::Bodies,
+                founding_site: FoundingSite::LitterBed,
+                founding_count: 8,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -529,6 +585,7 @@ impl FounderPhysiology {
                 adult_height_m: 0.375,
                 eye_height_fraction: EYE_HEIGHT_FRACTION,
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
+                mouth_floor_fraction: 0.0,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 // The browser eats foliage and nothing else; the other three are the
@@ -544,6 +601,10 @@ impl FounderPhysiology {
                 agility: 0.5,
                 counter: None,
                 mass_scale: 1.0,
+                diet: crate::Diet::only(crate::Food::Foliage),
+                founding: Founding::Bodies,
+                founding_site: FoundingSite::AtFood,
+                founding_count: 8,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
             // scorpid ambusher, 1.0 × 0.25 × 0.45 m, a fifth of the grazer's upkeep.
@@ -597,6 +658,7 @@ impl FounderPhysiology {
                 adult_height_m: 0.45,
                 eye_height_fraction: EYE_HEIGHT_FRACTION,
                 mouth_ceiling_fraction: MOUTH_CEILING_FRACTION,
+                mouth_floor_fraction: 0.0,
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 // Carrion is the one food its mouth takes; every class carries the same
@@ -611,6 +673,11 @@ impl FounderPhysiology {
                 agility: 0.0,
                 counter: None,
                 mass_scale: 1.0,
+                diet: crate::Diet::only(crate::Food::Carrion),
+                // §2.9: a fresh world is founded with a buried egg bank, not adults.
+                founding: Founding::Clutches,
+                founding_site: FoundingSite::AtFood,
+                founding_count: 3,
             },
         }
     }
@@ -695,6 +762,7 @@ impl FounderPhysiology {
             width_m,
             height_m,
             eye_m: self.eye_height_fraction * height_m,
+            mouth_floor_m: self.mouth_floor_fraction * height_m,
             mouth_ceiling_m: self.mouth_ceiling_fraction * height_m,
             contact_m: self.contact_height_fraction * height_m,
             mouth_reach_m: self.mouth_reach_length_fraction * length_m,
@@ -1389,71 +1457,67 @@ pub(crate) fn mouth_pool_site(
     best
 }
 
-/// Where one bite of detritus would come from: a ground pool at a site, or the cap of
-/// a fungal stand rooted at one.
+/// Where one bite would come from: a ground pool at a site, or the tissue of a stand
+/// rooted at one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Meal {
     /// A withdrawal from `site`'s [`crate::Food::Litter`] or [`crate::Food::Carrion`]
     /// pool.
     Pool { site: Site, food: crate::Food },
     /// A foliage withdrawal from the stand rooted at `root`, bounded to the mouth's own
-    /// layer range. Which food class that is depends on whose mouth it is: a
-    /// shredder's stand is fungal ([`crate::Food::CapTissue`]) and a browser's is
-    /// vascular ([`crate::Food::Foliage`]), because the diet chose it.
-    Stand { root: Site },
+    /// layer range. Its food class is the stand's own, by its species' income rule
+    /// ([`crate::Food::of_stand`]): a saprotroph's cap tissue, a plant's foliage — not
+    /// whose mouth took it.
+    Stand { root: Site, food: crate::Food },
 }
 
-/// **The shredder's three foods at one mouth, and which of them it would take**
-/// (decisions §3): litter and carrion at the standing face, and glowcap cap tissue from
-/// a fungal stand whose layer intersects the mouth band.
+impl Meal {
+    /// The food class this bite is.
+    pub(crate) fn food(self) -> crate::Food {
+        match self {
+            Meal::Pool { food, .. } | Meal::Stand { food, .. } => food,
+        }
+    }
+}
+
+/// **A lineage's foods at one mouth, and which of them it would take** (decisions §3,
+/// generalised over the diet list): for each food in `diet`, litter and carrion from the
+/// ground pool at the standing face, cap tissue from a saprotroph stand and foliage from a
+/// photosynthetic one whose layers the mouth band reaches.
 ///
 /// There is no new action: `bite` still means "take what is at the mouth", so when more
-/// than one food is there this picks the **richest available**, which is the choice the
-/// brief allows as long as it is stated. Ties go in [`crate::Food::ALL`] order — litter,
-/// then cap tissue, then carrion — so the answer is a pure function of the state.
+/// than one food is there this picks the **richest available** — the shredder's rule,
+/// stated once for every diet. Ties go in [`crate::Food::ALL`] order — litter, cap
+/// tissue, carrion, foliage — so the answer is a pure function of the state.
 ///
 /// It reports two amounts: the **stock** a bite diminishes on (a pool's whole stock at
 /// the site, or the stand's stock in the layers the band reaches, not its whole cap), and
 /// the **offer** the comparison is made on and the taste channel encodes — the stock, or
 /// for a stand `(1 − defence) ×` its stock (audit round §4: the defence is readable). A
 /// pool has no defence, so its offer is its stock.
-pub(crate) fn mouth_detritus(
+pub(crate) fn mouth_meal(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
     cols: &[(i64, u32)],
     standing_y: u32,
     body: &Body,
+    diet: crate::Diet,
 ) -> Option<(Meal, f64, f64)> {
     let mut best: Option<(Meal, f64, f64)> = None;
-    let mut consider = |meal: Meal, stock: f64, offer: f64| {
-        if stock > 0.0 && best.is_none_or(|(_, _, b)| offer > b) {
+    for food in diet.foods() {
+        let found = if food.is_pool() {
+            mouth_pool_site(fv, cols, standing_y, food)
+                .map(|(site, stock)| (Meal::Pool { site, food }, stock, stock))
+        } else {
+            mouth_foliage_offer(fv, view, cols, standing_y, body, crate::Diet::only(food))
+                .map(|(root, stock, offer)| (Meal::Stand { root, food }, stock, offer))
+        };
+        if let Some((meal, stock, offer)) = found
+            && stock > 0.0
+            && best.is_none_or(|(_, _, b)| offer > b)
+        {
             best = Some((meal, stock, offer));
         }
-    };
-    if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Litter) {
-        consider(
-            Meal::Pool {
-                site,
-                food: crate::Food::Litter,
-            },
-            stock,
-            stock,
-        );
-    }
-    if let Some((root, stock, offer)) =
-        mouth_foliage_offer(fv, view, cols, standing_y, body, crate::Diet::Fungal)
-    {
-        consider(Meal::Stand { root }, stock, offer);
-    }
-    if let Some((site, stock)) = mouth_pool_site(fv, cols, standing_y, crate::Food::Carrion) {
-        consider(
-            Meal::Pool {
-                site,
-                food: crate::Food::Carrion,
-            },
-            stock,
-            stock,
-        );
     }
     best
 }
@@ -1865,6 +1929,7 @@ pub(crate) fn taste_reading(
         manifest,
         body,
         founder,
+        FounderPhysiology::placeholder(founder).diet,
         crate::CueConfig::default().emit_reference,
         // The unit tests' bodies are the placeholder tables' (mass 1).
         1.0,
@@ -1882,6 +1947,7 @@ pub(crate) fn taste_reading_at(
     manifest: &Manifest,
     body: &Body,
     founder: Founder,
+    diet: crate::Diet,
     emit_reference: f64,
     mass_scale: f64,
 ) -> TasteReading {
@@ -1895,44 +1961,29 @@ pub(crate) fn taste_reading_at(
         c / (c + sat)
     };
     let cols = mouth_columns(view, pose, body);
-    match founder {
-        Founder::Blind => match mouth_detritus(fv, view, &cols, standing_y, body) {
-            Some((_, _, offer)) => TasteReading {
-                cue: response(offer),
-                resistance: resistance_of(manifest, "litter"),
-                valid: true,
-            },
-            None => TasteReading {
-                cue: 0.0,
-                resistance: resistance_of(manifest, "ground"),
-                valid: true,
-            },
+    // What is at the mouth is the lineage's own diet's richest offer ([`mouth_meal`]).
+    // The **channel's** class and its reading in air are the manifest's (P2 owns them):
+    // the blind layout reads every food as its one soft class `litter`, and bare ground
+    // as a valid zero; the lanternjaw's reads `carrion`, ground likewise; the browser's
+    // reads `foliage`, and a mouth in air is no contact and no taste.
+    let offer = mouth_meal(fv, view, &cols, standing_y, body, diet).map(|(_, _, offer)| offer);
+    let (class, ground_valid) = match founder {
+        Founder::Blind => ("litter", true),
+        Founder::Lanternjaw => ("carrion", true),
+        Founder::Browser => ("foliage", false),
+    };
+    match offer {
+        Some(offer) => TasteReading {
+            cue: response(offer),
+            resistance: resistance_of(manifest, class),
+            valid: true,
         },
-        Founder::Lanternjaw => match mouth_pool_site(fv, &cols, standing_y, crate::Food::Carrion) {
-            Some((_, stock)) => TasteReading {
-                cue: response(stock),
-                resistance: resistance_of(manifest, "carrion"),
-                valid: true,
-            },
-            None => TasteReading {
-                cue: 0.0,
-                resistance: resistance_of(manifest, "ground"),
-                valid: true,
-            },
+        None if ground_valid => TasteReading {
+            cue: 0.0,
+            resistance: resistance_of(manifest, "ground"),
+            valid: true,
         },
-        Founder::Browser => {
-            // What the stand would give, `(1 − defence) ×` its stock: a defended plant
-            // tastes thin (audit round §4; the digest names only the `foliage` cue).
-            match mouth_foliage_offer(fv, view, &cols, standing_y, body, crate::Diet::Vascular) {
-                Some((_, _, offer)) => TasteReading {
-                    cue: response(offer),
-                    resistance: resistance_of(manifest, "foliage"),
-                    valid: true,
-                },
-                // The mouth is in air: no contact, no taste.
-                None => TasteReading::INVALID,
-            }
-        }
+        None => TasteReading::INVALID,
     }
 }
 
@@ -2021,6 +2072,7 @@ pub(crate) fn observation(
         manifest,
         &body,
         founder,
+        phys.diet,
         fauna.config.cue.emit_reference,
         phys.mass_scale,
     );
@@ -3040,12 +3092,12 @@ mod tests {
         let cols_head = mouth_columns(&view, &pose_at(5.5 * 0.25, 2.5 * 0.25, 0.0), &browser);
 
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_over, 2, &browser, crate::Diet::Vascular),
+            mouth_foliage_stand(&fv, &view, &cols_over, 2, &browser, crate::Diet::only(crate::Food::Foliage)),
             None,
             "a crown cell starting 0.5 m over the face is above a 0.49875 m ceiling"
         );
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_head, 2, &browser, crate::Diet::Vascular)
+            mouth_foliage_stand(&fv, &view, &cols_head, 2, &browser, crate::Diet::only(crate::Food::Foliage))
                 .map(|(s, _)| s),
             Some(site(5, 2)),
             "the crown at the head layer is inside the band"
@@ -3056,13 +3108,13 @@ mod tests {
         let mut tall = browser;
         tall.mouth_ceiling_m = 0.75;
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_over, 2, &tall, crate::Diet::Vascular)
+            mouth_foliage_stand(&fv, &view, &cols_over, 2, &tall, crate::Diet::only(crate::Food::Foliage))
                 .map(|(s, _)| s),
             Some(site(2, 2)),
             "a 0.75 m band reaches the crown two voxels up"
         );
         assert_eq!(
-            mouth_foliage_stand(&fv, &view, &cols_head, 2, &tall, crate::Diet::Vascular)
+            mouth_foliage_stand(&fv, &view, &cols_head, 2, &tall, crate::Diet::only(crate::Food::Foliage))
                 .map(|(s, _)| s),
             Some(site(5, 2)),
             "and still takes the one at its feet"

@@ -58,7 +58,7 @@ fn main() {
         let founded = cubarium::voxel::found(
             &cfg,
             &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), cfg.voxel_m),
-            habitat::FOUNDER_COUNTS,
+            cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
             cubarium::voxel::Seeds::from(seed_base),
             false,
         );

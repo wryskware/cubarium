@@ -278,28 +278,6 @@ fn animal_style_unwounded(animal: &Animal) -> Style {
                 heart: srgb_linear(accent),
             }
         }
-        Founder::Lanternjaw => {
-            let body = if is_starving {
-                ANIMAL_STARVING_BODY_SRGB
-            } else {
-                LANTERNJAW_BODY_SRGB
-            };
-            let back = if is_starving {
-                0x0038_3C4A
-            } else {
-                LANTERNJAW_BACK_SRGB
-            };
-            let jaw = if is_cropping {
-                ANIMAL_CROPPING_FLASH_SRGB
-            } else {
-                LANTERNJAW_JAW_SRGB
-            };
-            Style {
-                wood: srgb_linear(body),
-                crown: srgb_linear(back),
-                heart: srgb_linear(jaw),
-            }
-        }
         Founder::Browser => {
             let body = if is_starving {
                 ANIMAL_STARVING_BODY_SRGB
@@ -324,15 +302,40 @@ fn animal_style_unwounded(animal: &Animal) -> Style {
                 heart: srgb_linear(accent),
             }
         }
+        // The lanternjaw's, and the interim glyph colours of a lineage without its own.
+        _ => {
+            let body = if is_starving {
+                ANIMAL_STARVING_BODY_SRGB
+            } else {
+                LANTERNJAW_BODY_SRGB
+            };
+            let back = if is_starving {
+                0x0038_3C4A
+            } else {
+                LANTERNJAW_BACK_SRGB
+            };
+            let jaw = if is_cropping {
+                ANIMAL_CROPPING_FLASH_SRGB
+            } else {
+                LANTERNJAW_JAW_SRGB
+            };
+            Style {
+                wood: srgb_linear(body),
+                crown: srgb_linear(back),
+                heart: srgb_linear(jaw),
+            }
+        }
     }
 }
 
-/// A lineage's body colour in linear light, for a carcass.
+/// A lineage's body colour in linear light, for a carcass: the three glyph lineages'
+/// own, and any other lineage's coat body (its first slot's low end).
 fn animal_colour(founder: Founder) -> [f32; 3] {
-    srgb_linear(match founder {
-        Founder::Blind => LITTERSHREDDER_BODY_SRGB,
-        Founder::Browser => FRONDGRAZER_BODY_SRGB,
-        Founder::Lanternjaw => LANTERNJAW_BODY_SRGB,
+    srgb_linear(match founder.name() {
+        "littershredder" => LITTERSHREDDER_BODY_SRGB,
+        "frondgrazer" => FRONDGRAZER_BODY_SRGB,
+        "lanternjaw" => LANTERNJAW_BODY_SRGB,
+        _ => colours::founder_coat(founder).first().map_or(LANTERNJAW_BODY_SRGB, |c| c.1),
     })
 }
 
@@ -410,52 +413,6 @@ pub fn cells_of_local(
     let mut out = Vec::new();
 
     match founder {
-        Founder::Lanternjaw => {
-            // Interim (stage 1, its body plan open): a box of its ladder size, the front
-            // column the jaw. The strike is a pose offset: a crouch (one row lower) in the
-            // windup, a stretch (one cell longer) in the lunge.
-            let (length, height) = match animal.strike.map(|s| s.phase) {
-                Some(StrikePhase::Windup) => (length, height.saturating_sub(1).max(1)),
-                Some(StrikePhase::Lunge) => (length + 1, height),
-                _ => (length, height),
-            };
-            let mut local = Vec::new();
-            for along in 0..length {
-                for across in 0..width {
-                    let a = (along - length / 2) as i32;
-                    let c = (across - width / 2) as i32;
-                    let front = along + 1 == length;
-                    for row in 0..height {
-                        let top = row + 1 == height;
-                        local.push((
-                            sleep::Local {
-                                a,
-                                c,
-                                row: row as i32,
-                                bump: top && !front,
-                            },
-                            if front && top {
-                                AnimalPart::Head {
-                                    style,
-                                    facing_right,
-                                }
-                            } else {
-                                AnimalPart::Body {
-                                    style,
-                                    head: front,
-                                    facing_right,
-                                }
-                            },
-                        ));
-                    }
-                }
-            }
-            place_local(&mut out, &local, |a, c, row| Cell {
-                x: anchor_x + i64::from(a) * step_x + i64::from(c) * side_x,
-                y: site.y + 1 + row as u32,
-                z: (anchor_z + i64::from(a) * step_z + i64::from(c) * side_z) as u32,
-            });
-        }
         Founder::Blind if animal.mobility.climb.is_some() => {
             // On a wall (package mobility, interim): the crawler stood on end in the air
             // column beside the face, head up the face or down it.
@@ -577,6 +534,53 @@ pub fn cells_of_local(
                                 },
                             ));
                         }
+                    }
+                }
+            }
+            place_local(&mut out, &local, |a, c, row| Cell {
+                x: anchor_x + i64::from(a) * step_x + i64::from(c) * side_x,
+                y: site.y + 1 + row as u32,
+                z: (anchor_z + i64::from(a) * step_z + i64::from(c) * side_z) as u32,
+            });
+        }
+        // The lanternjaw's, and the glyph of any lineage without its own.
+        _ => {
+            // Interim (stage 1, its body plan open): a box of its ladder size, the front
+            // column the jaw. The strike is a pose offset: a crouch (one row lower) in the
+            // windup, a stretch (one cell longer) in the lunge.
+            let (length, height) = match animal.strike.map(|s| s.phase) {
+                Some(StrikePhase::Windup) => (length, height.saturating_sub(1).max(1)),
+                Some(StrikePhase::Lunge) => (length + 1, height),
+                _ => (length, height),
+            };
+            let mut local = Vec::new();
+            for along in 0..length {
+                for across in 0..width {
+                    let a = (along - length / 2) as i32;
+                    let c = (across - width / 2) as i32;
+                    let front = along + 1 == length;
+                    for row in 0..height {
+                        let top = row + 1 == height;
+                        local.push((
+                            sleep::Local {
+                                a,
+                                c,
+                                row: row as i32,
+                                bump: top && !front,
+                            },
+                            if front && top {
+                                AnimalPart::Head {
+                                    style,
+                                    facing_right,
+                                }
+                            } else {
+                                AnimalPart::Body {
+                                    style,
+                                    head: front,
+                                    facing_right,
+                                }
+                            },
+                        ));
                     }
                 }
             }

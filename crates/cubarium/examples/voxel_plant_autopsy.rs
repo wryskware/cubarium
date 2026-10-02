@@ -254,7 +254,7 @@ fn run_preset(preset: &cubarium_voxel::Preset, seed_base: u64, coupled: bool, ho
     let founded = cubarium::voxel::found(
         &world_cfg,
         &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), world_cfg.voxel_m),
-        habitat::FOUNDER_COUNTS,
+        cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         cubarium::voxel::Seeds::from(seed_base),
         false,
     );

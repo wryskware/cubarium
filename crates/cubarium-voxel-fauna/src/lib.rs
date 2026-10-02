@@ -45,12 +45,12 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    Body, Counter, Face, FounderPhysiology, Hunter, StepLimits, birth_readiness,
+    Body, Counter, Face, FounderPhysiology, Founding, FoundingSite, Hunter, StepLimits, birth_readiness,
     effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
-    FounderFactories, LanternjawAmbush, Response, Scripted, resolve_actions,
+    FounderFactories, LanternjawAmbush, Response, Scripted, heuristic, resolve_actions,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
@@ -58,7 +58,7 @@ pub use predation::{
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use encounter::{
-    HEADING_SAMPLES, RouteMap, RouteRule, SightMap, band_crown_layers, crown_columns, crown_layer,
+    HEADING_SAMPLES, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
     mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
     reachable_layers_of, route_components, standable_faces, surface_m, walkable_components,
@@ -375,7 +375,7 @@ pub fn browser_mouth_foliage(
         return None;
     }
     let cols = body::mouth_columns(view, &animal.pose, &geometry);
-    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &geometry, Diet::Vascular)
+    body::mouth_foliage_stand(flora, view, &cols, animal.site.y, &geometry, Diet::only(Food::Foliage))
 }
 
 /// The physical geometry of one animal right now, from its lineage's physiology and its
@@ -404,7 +404,7 @@ pub fn browser_mouth_candidates(
         &cols,
         animal.site.y,
         &geometry,
-        Diet::Vascular,
+        Diet::only(Food::Foliage),
     ))
 }
 
@@ -1295,11 +1295,7 @@ impl Default for FaunaConfig {
         frondgrazer.scale_mass(SHIPPED_MASS_SCALE);
         FaunaConfig {
             frondgrazer,
-            founders: [
-                FounderPhysiology::frozen(Founder::Blind),
-                FounderPhysiology::frozen(Founder::Browser),
-                FounderPhysiology::frozen(Founder::Lanternjaw),
-            ],
+            founders: Founder::ALL.map(FounderPhysiology::frozen),
             hatch_chance_per_dusk: 1.0 / 3.0,
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
@@ -1322,11 +1318,7 @@ impl FaunaConfig {
     pub fn placeholder() -> FaunaConfig {
         FaunaConfig {
             frondgrazer: SpeciesConfig::frondgrazer(),
-            founders: [
-                FounderPhysiology::placeholder(Founder::Blind),
-                FounderPhysiology::placeholder(Founder::Browser),
-                FounderPhysiology::placeholder(Founder::Lanternjaw),
-            ],
+            founders: Founder::ALL.map(FounderPhysiology::placeholder),
             ..FaunaConfig::default()
         }
     }
@@ -1346,6 +1338,23 @@ impl FaunaConfig {
     /// One founder's physiology, by lineage.
     pub fn founder(&self, founder: Founder) -> &FounderPhysiology {
         &self.founders[founder.index()]
+    }
+
+    /// **How many each lineage founds** in a fresh world, in [`Founder::ALL`] order: each
+    /// physiology's [`FounderPhysiology::founding_count`] — bodies, or for
+    /// [`Founding::Clutches`] the egg bank's clutches.
+    pub fn founder_counts(&self) -> [usize; Founder::COUNT] {
+        Founder::ALL.map(|f| self.founder(f).founding_count)
+    }
+
+    /// [`FaunaConfig::founder_counts`] with **no egg bank**: every [`Founding::Clutches`]
+    /// lineage at 0. The predation measurement's control arm, and the training worlds
+    /// until the lanternjaw has a brain (P2).
+    pub fn founder_counts_without_egg_bank(&self) -> [usize; Founder::COUNT] {
+        Founder::ALL.map(|f| {
+            let p = self.founder(f);
+            if p.founding == Founding::Clutches { 0 } else { p.founding_count }
+        })
     }
 
     /// **The manifest the live body runs**: the founder's fixed [`Manifest`] with the
@@ -1401,21 +1410,18 @@ pub enum Departure {
 }
 
 impl Departure {
-    pub const ALL: [Departure; 4 + Founder::COUNT] = [
-        Departure::Starved,
-        Departure::Drowned,
-        Departure::Aged,
-        Departure::Removed,
-        Departure::Killed {
-            by: Founder::Blind,
-        },
-        Departure::Killed {
-            by: Founder::Browser,
-        },
-        Departure::Killed {
-            by: Founder::Lanternjaw,
-        },
-    ];
+    pub const ALL: [Departure; 4 + Founder::COUNT] = {
+        let mut all = [Departure::Starved; 4 + Founder::COUNT];
+        all[1] = Departure::Drowned;
+        all[2] = Departure::Aged;
+        all[3] = Departure::Removed;
+        let mut k = 0;
+        while k < Founder::COUNT {
+            all[4 + k] = Departure::Killed { by: Founder::ALL[k] };
+            k += 1;
+        }
+        all
+    };
     pub const COUNT: usize = Departure::ALL.len();
 
     /// Index into a per-cause array, in [`Departure::ALL`] order.
@@ -1440,11 +1446,15 @@ impl Departure {
             Departure::Drowned => "drowned",
             Departure::Aged => "aged",
             Departure::Removed => "removed",
-            Departure::Killed { by } => match by {
-                Founder::Blind => "killed_by_littershredder",
-                Founder::Browser => "killed_by_frondgrazer",
-                Founder::Lanternjaw => "killed_by_lanternjaw",
-            },
+            Departure::Killed { by } => {
+                static NAMES: std::sync::OnceLock<[&'static str; Founder::COUNT]> =
+                    std::sync::OnceLock::new();
+                NAMES.get_or_init(|| {
+                    Founder::ALL.map(|f| -> &'static str {
+                        Box::leak(format!("killed_by_{}", f.name()).into_boxed_str())
+                    })
+                })[by.index()]
+            }
         }
     }
 }
@@ -1497,6 +1507,7 @@ pub(crate) fn lifespan_salt(site: Site, tick: u64) -> u64 {
 /// against. The browser has one, `Foliage`; the shredder has three, and its three are
 /// the detritus the cue field now sums.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Food {
     /// The ground litter pool at the standing face — the shredder's original and only
     /// food ([`cubarium_voxel_flora::Flora::take_litter`]).
@@ -1519,12 +1530,27 @@ impl Food {
     pub const COUNT: usize = Food::ALL.len();
 
     /// Index into a per-food array, in [`Food::ALL`] order.
-    pub fn index(self) -> usize {
+    pub const fn index(self) -> usize {
         match self {
             Food::Litter => 0,
             Food::CapTissue => 1,
             Food::Carrion => 2,
             Food::Foliage => 3,
+        }
+    }
+
+    /// Whether a mouth takes this food from a **ground pool** at its standing face
+    /// (litter, carrion) rather than from a stand's tissue (cap tissue, foliage).
+    pub const fn is_pool(self) -> bool {
+        matches!(self, Food::Litter | Food::Carrion)
+    }
+
+    /// The food class of a stand's tissue, by its species' income rule: a saprotroph's is
+    /// cap tissue, a plant's foliage. The stand decides, not whose mouth took it.
+    pub const fn of_stand(trophic: cubarium_voxel_flora::Trophic) -> Food {
+        match trophic {
+            cubarium_voxel_flora::Trophic::Photo => Food::Foliage,
+            cubarium_voxel_flora::Trophic::Saprotroph => Food::CapTissue,
         }
     }
 
@@ -1538,45 +1564,82 @@ impl Food {
     }
 }
 
-/// Which stands' foliage a mouth accepts (decisions §3).
+/// **What a lineage eats**: a set of [`Food`] classes, the lineage's
+/// [`FounderPhysiology::diet`] (a knob; in TOML a list of food names,
+/// `diet = ["litter", "cap_tissue", "carrion"]`).
+///
+/// The mouth offers each food in the set from its own source ([`body`]'s generalised
+/// mouth): litter and carrion from the ground pool at the standing face, cap tissue from a
+/// [`cubarium_voxel_flora::Trophic::Saprotroph`] stand, foliage from a
+/// [`cubarium_voxel_flora::Trophic::Photo`] stand. The order of the list does not matter:
+/// when several foods are at the mouth the richest offer wins, ties in [`Food::ALL`]
+/// order.
 ///
 /// Reach and permission are separate tests (audit §2): a glowcap cap standing in a
-/// browser's band is reachable and is not food. This is the permission, applied inside
-/// the one scan both mouths run, so a stand a mouth may not eat is never offered to it
-/// as taste either.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Diet {
-    /// Every vascular species' foliage: the browser's, keeping today's broad acceptance
-    /// across bloomcrown, umbrellafrond, springturf, velvetpad and stonecushion.
-    Vascular,
-    /// Saprotroph tissue only: the shredder's glowcap cap.
-    Fungal,
-    /// No stand's tissue at all: a carnivore's mouth, which takes carrion off the ground
-    /// and nothing that grows (`design/predation-and-flight-2026-09-28.md` §2.3).
-    Carrion,
-    /// No permission test at all. A diagnostic and observer scan of what physically
-    /// stands in a band, which is a geometry question and not a diet one.
-    Any,
+/// browser's band is reachable and is not food. [`Diet::accepts`] is the permission,
+/// applied inside the one scan every mouth runs, so a stand a mouth may not eat is never
+/// offered to it as taste either. [`Diet::ANY`] is the diagnostic and observer scan of
+/// what physically stands in a band, a geometry question and not a diet one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "Vec<Food>", into = "Vec<Food>")]
+pub struct Diet {
+    foods: [bool; Food::COUNT],
 }
 
 impl Diet {
-    /// Whether this diet accepts a species with that income rule.
-    pub fn accepts(self, trophic: cubarium_voxel_flora::Trophic) -> bool {
-        match self {
-            Diet::Vascular => matches!(trophic, cubarium_voxel_flora::Trophic::Photo),
-            Diet::Fungal => matches!(trophic, cubarium_voxel_flora::Trophic::Saprotroph),
-            Diet::Carrion => false,
-            Diet::Any => true,
-        }
+    /// Every food class: accepts every stand.
+    pub const ANY: Diet = Diet { foods: [true; Food::COUNT] };
+    /// Nothing at all.
+    pub const NONE: Diet = Diet { foods: [false; Food::COUNT] };
+
+    /// The diet of one food.
+    pub const fn only(food: Food) -> Diet {
+        let mut foods = [false; Food::COUNT];
+        foods[food.index()] = true;
+        Diet { foods }
     }
 
-    /// The diet a lineage's mouth runs.
-    pub fn of(founder: Founder) -> Diet {
-        match founder {
-            Founder::Blind => Diet::Fungal,
-            Founder::Browser => Diet::Vascular,
-            Founder::Lanternjaw => Diet::Carrion,
+    /// The diet of these foods.
+    pub fn of(foods: &[Food]) -> Diet {
+        let mut d = Diet::NONE;
+        for f in foods {
+            d.foods[f.index()] = true;
         }
+        d
+    }
+
+    /// Whether `food` is in it.
+    pub const fn eats(self, food: Food) -> bool {
+        self.foods[food.index()]
+    }
+
+    /// Its foods, in [`Food::ALL`] order.
+    pub fn foods(self) -> impl Iterator<Item = Food> {
+        Food::ALL.into_iter().filter(move |f| self.eats(*f))
+    }
+
+    /// Whether this diet accepts a stand of a species with that income rule: a
+    /// photosynthetic stand's tissue is [`Food::Foliage`], a saprotroph's
+    /// [`Food::CapTissue`] ([`Food::of_stand`]).
+    pub fn accepts(self, trophic: cubarium_voxel_flora::Trophic) -> bool {
+        self.eats(Food::of_stand(trophic))
+    }
+
+    /// Whether any of its foods is a stand's tissue rather than a ground pool.
+    pub fn eats_stands(self) -> bool {
+        self.foods().any(|f| !f.is_pool())
+    }
+}
+
+impl From<Vec<Food>> for Diet {
+    fn from(foods: Vec<Food>) -> Diet {
+        Diet::of(&foods)
+    }
+}
+
+impl From<Diet> for Vec<Food> {
+    fn from(d: Diet) -> Vec<Food> {
+        d.foods().collect()
     }
 }
 

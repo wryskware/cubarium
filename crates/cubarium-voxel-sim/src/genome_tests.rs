@@ -387,3 +387,27 @@ fn a_genome_file_round_trips() {
     }
     assert_eq!(decoded(&g), decoded(&back));
 }
+
+/// Roster R0: **a lineage a world founds none of has no gene.** With the lanternjaw's
+/// `founding_count` at 0, a `tie = "each"` over `fauna.founders.*` splits over the other
+/// two lineages only; the shipped table (every lineage founded) still splits over all.
+#[test]
+fn a_lineage_at_founding_count_zero_has_no_gene() {
+    let text = r#"
+[[gene]]
+name = "upkeep"
+path = "fauna.founders.*.core.maintenance_per_s"
+tie = "each"
+range = [0.5, 2.0]
+"#;
+    let file = || cubarium_voxel::genome::SearchFile::parse(text).expect("a search file");
+    let shipped = Params::defaults().expand_genome(file()).expect("expands");
+    assert_eq!(shipped.names().len(), Founder::COUNT, "{:?}", shipped.names());
+    let mut p = Params::defaults();
+    p.fauna.founders[Founder::Lanternjaw.index()].founding_count = 0;
+    let names = p.expand_genome(file()).expect("expands").names();
+    assert!(!names.contains(&"upkeep@lanternjaw".to_string()), "{names:?}");
+    for f in [Founder::Blind, Founder::Browser] {
+        assert!(names.contains(&format!("upkeep@{}", f.name())), "{names:?}");
+    }
+}

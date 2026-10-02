@@ -923,7 +923,7 @@ fn load_or_create_world(
                         let founded = found(
                             &world_cfg,
                             &LayerConfig::new(&params, world_cfg.voxel_m),
-                            args.founder_counts(),
+                            args.founder_counts(&params.fauna),
                             asked.map_or(Seeds::Drawn(random_seed), Seeds::Asked),
                             false,
                         );
@@ -1246,7 +1246,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                             &mut flora,
                             &mut fauna,
                             &pre,
-                            args.founder_counts(),
+                            args.founder_counts(&params.fauna),
                         )
                     });
                     (flora, fauna, seeded)
@@ -1307,15 +1307,18 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         ""
                     },
                 );
+                let bodies: Vec<String> = Founder::ALL
+                    .into_iter()
+                    .filter(|f| seeded.founders[f.index()] > 0)
+                    .map(|f| format!("{} {}", seeded.founders[f.index()], f.name()))
+                    .collect();
                 eprintln!(
                     "cubarium voxel: seeded the example habitat — {} stands, {} logs, \
-                     {} litter tiles, {} littershredders, {} frondgrazer founders \
-                     (--empty for a bare world)",
+                     {} litter tiles, founders: {} (--empty for a bare world)",
                     seeded.stands,
                     seeded.logs,
                     seeded.litter_tiles,
-                    seeded.founders[Founder::Blind.index()],
-                    seeded.founders[Founder::Browser.index()],
+                    bodies.join(", "),
                 );
                 match &seeded.founding_bank_refused {
                     Some(why) => eprintln!("cubarium voxel: no lanternjaw egg bank — {why}"),
@@ -2981,7 +2984,7 @@ impl Control {
                     }
                 };
                 if matches!(verb, "e" | "eggs") {
-                    match habitat::bury_founding_clutches(world, flora, fauna, n) {
+                    match habitat::bury_founding_clutches(world, flora, fauna, Founder::Lanternjaw, n) {
                         Ok(eggs) => eprintln!(
                             "cubarium voxel: buried {eggs} lanternjaw eggs where the prey live"
                         ),

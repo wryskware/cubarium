@@ -446,6 +446,20 @@ fn escape(cfg: &TeacherConfig, escape: &mut u32, hazard: bool, turn: f64) -> Opt
     None
 }
 
+/// **Each lineage's own observation-only heuristic**, on the layer's reflex numbers
+/// (`teachers`, [`crate::FaunaConfig::teachers`]): the one place a founder is mapped to
+/// its heuristic. The seeder's birth factories, an introduced body's controller, the
+/// search's bystanders and its heuristic control all build from here.
+pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controller> {
+    match founder {
+        Founder::Blind => Box::new(BlindForager::with_config(teachers)),
+        Founder::Browser => Box::new(BrowserForager::with_config(teachers)),
+        // The ambush teacher (predation §2.12): it has no trained centre, so this drives
+        // every lanternjaw, hatched or introduced.
+        Founder::Lanternjaw => Box::new(LanternjawAmbush::with_config(teachers)),
+    }
+}
+
 /// Observation-only **blind foraging** heuristic: go up the litter cue's response and
 /// trend while they support it, feed when the mouth tastes litter, turn away from contact
 /// and cover ground with a remembered, alternating turn preference when there is no
@@ -925,11 +939,7 @@ mod tests {
             let founder = Founder::Blind;
             let manifest = founder.manifest();
             let walk = |salt: f64| -> Vec<f64> {
-                let mut c: Box<dyn Controller> = match founder {
-                    Founder::Blind => Box::new(BlindForager::new()),
-                    Founder::Browser => Box::new(BrowserForager::new()),
-                    Founder::Lanternjaw => Box::new(LanternjawAmbush::new()),
-                };
+                let mut c: Box<dyn Controller> = heuristic(founder, TeacherConfig::default());
                 c.reset();
                 let mut o = quiet(&manifest);
                 o[0] = salt;

@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use cubarium::voxel::{habitat, install_default_founders};
+use cubarium::voxel::install_default_founders;
 use cubarium_voxel::World;
 use cubarium_voxel::profile::{self, Phase};
 use cubarium_voxel_fauna::{Fauna, TICK_HZ};
@@ -68,7 +68,7 @@ fn found(config: &Path, seed: u64, threads: usize) -> (Sim, u64) {
     let founded = cubarium::voxel::found(
         &cfg.world,
         &cubarium::voxel::LayerConfig::new(&params, cfg.world.voxel_m),
-        habitat::FOUNDER_COUNTS,
+        cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         cubarium::voxel::Seeds::from(seed),
         false,
     );

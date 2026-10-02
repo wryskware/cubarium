@@ -310,7 +310,9 @@ impl EvalSpec {
     pub fn new(world: cubarium_voxel::Config, horizon_ticks: u64, window_ticks: u64) -> EvalSpec {
         EvalSpec {
             world,
-            founders: cubarium_voxel_sim::habitat::FOUNDER_COUNTS,
+            // The shipped founding table: a search's candidates share it (no count is a
+            // gene), and a lineage at 0 founds nothing and has no target or score term.
+            founders: cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
             horizon_ticks,
             window_ticks,
             water_every: 1,

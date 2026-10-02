@@ -81,6 +81,26 @@ pub const BIRTH_READINESS_RULE: &str =
     "eligible&!refractory&!gestating&hold_elapses_now&eggs_on_litter";
 
 /// Which phase-one founder this is: a lineage identity, not a controller.
+///
+/// # Adding a founder (species as data, roster R0)
+///
+/// 1. **An arm here**: [`Founder::ALL`], [`Founder::index`], [`Founder::name`] (its
+///    lineage name, which is also its model's and its coat's name), [`Founder::role`] and
+///    [`Founder::manifest`].
+/// 2. **A physiology default** in [`crate::FounderPhysiology::placeholder`]: the body and
+///    its anchors, the diet list ([`crate::Diet`]), the mouth band
+///    (`mouth_floor_fraction`, `mouth_ceiling_fraction`), the founding mode and site
+///    ([`crate::Founding`], [`crate::FoundingSite`]) and `founding_count` **0**, so
+///    training worlds are unchanged until a preset turns it on; and its column in every
+///    hunter's prey list.
+/// 3. **A heuristic** in [`crate::heuristic`], the one constructor per founder.
+/// 4. **A model and a coat under its name**: the presenter looks a live body's model up
+///    by lineage name among the baked founders and falls back to the specimens, and the
+///    coat likewise, so a baked specimen draws without a rebake.
+///
+/// The step, the founding loop, the search and the presenter loop over [`Founder::ALL`]
+/// and read the physiology; none has a per-lineage branch to add. The senses (the
+/// manifests, the cone and taste channels) are still per lineage until contract v3 (P2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Founder {
     /// The blind detritus feeder (littershredder): `Self`, `Contact(4)`, `Wet`, `Taste(1)`,

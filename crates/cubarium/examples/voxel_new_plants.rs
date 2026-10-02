@@ -23,7 +23,6 @@
 
 use std::collections::BTreeSet;
 
-use cubarium::voxel::habitat;
 use cubarium::voxel::install_default_founders;
 use cubarium_voxel_fauna::TICK_HZ;
 use cubarium_voxel_flora::{Site, Species, fall_line};
@@ -48,7 +47,7 @@ fn main() {
     let founded = cubarium::voxel::found(
         &cfg,
         &cubarium::voxel::LayerConfig::new(&cubarium_voxel_sim::params::Params::defaults(), cfg.voxel_m),
-        habitat::FOUNDER_COUNTS,
+        cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         cubarium::voxel::Seeds::from(seed),
         false,
     );

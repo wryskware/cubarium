@@ -40,7 +40,7 @@ use anyhow::{Context, Result, bail};
 use cubarium::sink::GpuTargetKind;
 use cubarium::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::voxel::project::Projection;
-use cubarium::voxel::{LayerConfig, Seeds, VoxelConfig, found as found_habitat, habitat, params_of};
+use cubarium::voxel::{LayerConfig, Seeds, VoxelConfig, found as found_habitat, params_of};
 use cubarium_voxel::World;
 use cubarium_voxel_fauna::Fauna;
 use cubarium_voxel_flora::Flora;
@@ -189,7 +189,7 @@ fn found(a: &Args, cfg: &VoxelConfig) -> Result<(World, Flora, Fauna)> {
     let founded = found_habitat(
         &cfg.world,
         &LayerConfig::new(&params, cfg.world.voxel_m),
-        habitat::FOUNDER_COUNTS,
+        cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         Seeds::from(a.seed),
         false,
     );

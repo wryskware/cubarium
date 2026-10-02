@@ -37,7 +37,7 @@ use cubarium_voxel_flora::Site;
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora};
 use cubarium_voxel_sim::Placement;
 use cubarium_voxel_sim::found::{self, Founded};
-use cubarium_voxel_sim::habitat;
+
 
 /// The landscape episode protocol: whole frozen worlds, two water states, as many acting
 /// bodies as the seeder placed, started on drawn faces of the judged components, bodies
@@ -89,7 +89,7 @@ pub const LANDSCAPE_PRESETS: [&str; 3] = ["small", "default", "wide"];
 pub enum WaterState {
     /// After the opening shower drained: the world the seeder planted on.
     Drained,
-    /// Half way through the opening shower ([`habitat::pre_roll_capturing`]).
+    /// Half way through the opening shower ([`cubarium_voxel_sim::habitat::pre_roll_capturing`]).
     MidShower,
 }
 
@@ -137,10 +137,12 @@ impl Landscape {
         // The live world, at an hour of the day drawn from the seed base (audit round
         // step 5): the preset's day clock and the training ecology's layers.
         let cfg = super::training_world::landscape_config(preset, seed_base)?;
+        let layers = super::training_world::layers(cfg.voxel_m);
+        let counts = layers.fauna.founder_counts_without_egg_bank();
         let founded = found::found(
             &cfg,
-            &super::training_world::layers(cfg.voxel_m),
-            habitat::NO_EGG_BANK,
+            &layers,
+            counts,
             found::Seeds::Counting {
                 base: seed_base,
                 stride: LANDSCAPE_REDRAW_STRIDE,

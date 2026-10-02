@@ -150,10 +150,18 @@ pub fn animal(founder: Founder, material: u8, band: u8, accent: bool, cropping: 
             glint: 0xFF_FFFF,
         };
     }
-    match founder {
-        Founder::Browser => coat_swatch(FRONDGRAZER, material, band),
-        Founder::Blind => coat_swatch(LITTERSHREDDER, material, band),
-        Founder::Lanternjaw => coat_swatch(LANTERNJAW, material, band),
+    coat_swatch(founder_coat(founder), material, band)
+}
+
+/// A live founder's coat, by lineage name: a baked founder's own, else its **specimen's**
+/// ([`specimen_coat`]), so a new founder is painted from its artbook pick without a new
+/// table. A lineage with neither (none so far) wears the frondgrazer's.
+pub fn founder_coat(founder: Founder) -> Coat {
+    match founder.name() {
+        "frondgrazer" => FRONDGRAZER,
+        "littershredder" => LITTERSHREDDER,
+        "lanternjaw" => LANTERNJAW,
+        other => specimen_coat(other).unwrap_or(FRONDGRAZER),
     }
 }
 
@@ -163,9 +171,9 @@ pub fn specimen(name: &str, material: u8, band: u8) -> Option<Swatch> {
     specimen_coat(name).map(|coat| coat_swatch(coat, material, band))
 }
 
-/// The coat of a specimen by its manifest name.
+/// The coat of a specimen by its manifest name (`_` and `-` alike).
 pub fn specimen_coat(name: &str) -> Option<Coat> {
-    Some(match name {
+    Some(match name.replace('_', "-").as_str() {
         "chorister" => CHORISTER,
         "ripple-snail" => RIPPLE_SNAIL,
         "capgnawer" => CAPGNAWER,

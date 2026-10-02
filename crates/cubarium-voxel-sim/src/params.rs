@@ -125,9 +125,25 @@ impl Params {
 
     /// Expand a search file over this set's plants and animals ([`Genome::expand`]):
     /// `tie = "each"` split, every path, group and rule checked.
+    ///
+    /// **A lineage this set founds none of** (`founding_count` 0, a new founder's code
+    /// default) **has no gene**: its `fauna.founders.<lineage>` subtree is hidden from the
+    /// expansion, so a `tie = "each"` over `fauna.founders.*` splits only over the
+    /// lineages a world is founded with.
     pub fn expand_genome(&self, file: SearchFile) -> Result<Genome, String> {
         let flora = registry::to_value(&self.flora)?;
-        let fauna = registry::to_value(&self.fauna)?;
+        let mut fauna = registry::to_value(&self.fauna)?;
+        if let Some(founders) = fauna
+            .as_table_mut()
+            .and_then(|t| t.get_mut("founders"))
+            .and_then(|f| f.as_array_mut())
+        {
+            for (slot, count) in founders.iter_mut().zip(self.fauna.founder_counts()) {
+                if count == 0 {
+                    *slot = toml::Value::Table(toml::Table::new());
+                }
+            }
+        }
         Genome::expand(
             file,
             &[

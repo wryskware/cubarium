@@ -192,6 +192,21 @@ fn main() {
         .filter_map(|a| a.strip_prefix("set=").map(str::to_string))
         .collect();
     let params_file = args.iter().find_map(|a| a.strip_prefix("params="));
+    // `config=<path>`'s own `[flora]` / `[fauna]` tables (a preset's founding table, say),
+    // under the `set=`s, exactly as `cubarium voxel` reads that file.
+    let file_tables: Option<toml::Table> =
+        args.iter().find_map(|a| a.strip_prefix("config=")).map(|p| {
+            let cfg = cubarium::voxel::load_config(std::path::Path::new(p))
+                .unwrap_or_else(|e| panic!("config {p:?}: {e}"));
+            let mut file = toml::Table::new();
+            if !cfg.flora.is_empty() {
+                file.insert("flora".into(), toml::Value::Table(cfg.flora));
+            }
+            if !cfg.fauna.is_empty() {
+                file.insert("fauna".into(), toml::Value::Table(cfg.fauna));
+            }
+            file
+        });
     let resolve = |world: cubarium_voxel::Config| -> Params {
         let params = Params::resolve_over(
             Params {
@@ -199,6 +214,7 @@ fn main() {
                 ..Params::defaults()
             },
             &Layers {
+                file: file_tables.clone(),
                 sets: sets.clone(),
                 ..Layers::default()
             },
@@ -233,13 +249,15 @@ fn main() {
     let nofauna = args.iter().any(|a| a == "nofauna");
     // `eggbank=off`: the predation control arm, the same world with no egg bank.
     let egg_bank = !args.iter().any(|a| a == "eggbank=off");
-    let founder_counts = || {
+    // The founding table: each lineage's `founding_count` in the arm's resolved animal
+    // config (the code default, a `config=` file's `[fauna.founders.<lineage>]`, a `set=`).
+    let founder_counts = |fauna: &cubarium_voxel_fauna::FaunaConfig| {
         if nofauna {
-            [0; habitat::FOUNDER_COUNTS.len()]
+            [0; Founder::COUNT]
         } else if egg_bank {
-            habitat::FOUNDER_COUNTS
+            fauna.founder_counts()
         } else {
-            habitat::NO_EGG_BANK
+            fauna.founder_counts_without_egg_bank()
         }
     };
     // `introduce=lanternjaw:N`: N adult lanternjaws where the prey live, after founding.
@@ -266,7 +284,7 @@ fn main() {
         let mut fauna = Fauna::new(params.fauna.clone());
         let pre = habitat::pre_roll(&mut world, false);
         let seeded =
-            habitat::seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, founder_counts());
+            habitat::seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, founder_counts(&params.fauna));
         eprintln!(
             "scene: world {path} ({}x{}x{} at {} m, tick {}); seeded stands={} animals={}",
             world.config().width,
@@ -311,8 +329,6 @@ fn main() {
                 }
             })
         });
-    let founder_counts = founder_counts();
-
     let cfg = VoxelConfig::default();
     // `gap=off`: the climate's dry gap at 0 / 0, so every natural start is the weather's
     // own (WX1's gap-off arms).
@@ -339,7 +355,7 @@ fn main() {
         let founded = cubarium::voxel::found(
             &arm_config,
             &cubarium::voxel::LayerConfig::new(&params, arm_config.voxel_m),
-            founder_counts,
+            founder_counts(&params.fauna),
             cubarium::voxel::Seeds::from(seed_base),
             false,
         );

@@ -179,7 +179,7 @@ fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> LiveW
     let (mut sim, info) = world::found_world(
         &cfg,
         base,
-        cubarium_voxel_sim::habitat::NO_EGG_BANK,
+        ecology.fauna().founder_counts_without_egg_bank(),
         &ecology,
     );
     prepare(&mut sim, spec, lineages);

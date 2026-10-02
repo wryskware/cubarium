@@ -25,7 +25,7 @@
 
 use std::time::Instant;
 
-use cubarium::voxel::{self, habitat, install_default_founders};
+use cubarium::voxel::{self, install_default_founders};
 use cubarium_voxel::profile::{self, Count, Phase, census};
 use cubarium_voxel::Command as WorldCommand;
 use cubarium_voxel_sim::{Sim, SimConfig};
@@ -72,7 +72,7 @@ fn main() {
     let founded = voxel::found(
         &cfg.world,
         &voxel::LayerConfig::new(&params, cfg.world.voxel_m),
-        habitat::FOUNDER_COUNTS,
+        cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         voxel::Seeds::Asked(seed),
         false,
     );

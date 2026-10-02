@@ -145,6 +145,57 @@ fn ledgers_close(fauna: &Fauna, flora: &Flora, flora_organic_before: f64) {
 
 // ------------------------------------------------------------------ the claims
 
+/// (R0) **The diet is a list, and a mouth takes nothing off it.** The shredder's own
+/// fixture — one glowcap whose cap sits in its band — with `CapTissue` struck from its
+/// diet: it never bites the cap. With litter at its face too, it takes the litter, so the
+/// list (not the lineage) is what decides.
+#[test]
+fn a_founder_whose_diet_lacks_cap_tissue_never_takes_the_cap_in_its_band() {
+    let world = flat_world();
+    let mut flora = Flora::new(FloraConfig::default());
+    let wood_max = flora.config().species(Plant::Glowcap).wood_max;
+    let s = seed(&mut flora, &world, 2, 2, Plant::Glowcap, wood_max);
+    let foliage_before = flora.view().stand_at(s).expect("the stand").foliage;
+
+    let mut config = FaunaConfig::default();
+    config.founders[Founder::Blind.index()].diet =
+        cubarium_voxel_fauna::Diet::of(&[Food::Litter, Food::Carrion]);
+    let mut fauna = Fauna::new(config);
+    let _ = feeding(&mut fauna, &world, Founder::Blind, 2, 2);
+    for _ in 0..5 {
+        fauna.step(&world, &mut flora);
+    }
+    let l = &fauna.view().ledger;
+    assert_eq!(l.bites, 0, "nothing on its list is at the mouth: {:?}", l.bites_by_food);
+    assert_eq!(
+        flora.view().stand_at(s).expect("the stand").foliage,
+        foliage_before,
+        "the cap is untouched"
+    );
+
+    // Litter at the face: the same mouth takes it, and still not the cap.
+    assert!(flora.deposit(
+        s,
+        Deposit {
+            kind: DepositKind::Litter,
+            organic: 1e-4,
+            mineral: 2e-6,
+            energy: 2e-4,
+        },
+    ));
+    for _ in 0..5 {
+        fauna.step(&world, &mut flora);
+    }
+    let l = &fauna.view().ledger;
+    assert!(l.bites_by_food[Food::Litter.index()] >= 1, "it eats the litter: {:?}", l.bites_by_food);
+    assert_eq!(l.bites_by_food[Food::CapTissue.index()], 0, "and never the cap");
+    assert_eq!(
+        flora.view().stand_at(s).expect("the stand").foliage,
+        foliage_before,
+        "the cap is still untouched"
+    );
+}
+
 /// (1) **A shredder eats a glowcap cap.** No litter and no carrion anywhere, one
 /// glowcap whose cap sits in the shredder's band: the bite comes out of the cap's
 /// foliage as a foliage withdrawal, is booked under the cap-tissue food class, and both

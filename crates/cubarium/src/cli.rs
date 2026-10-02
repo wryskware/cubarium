@@ -341,13 +341,18 @@ impl Voxel {
         Ok(out)
     }
 
-    /// The founder counts this run founds a fresh world with: the habitat's own, or the
-    /// same world with no egg bank (`--no-egg-bank`).
-    pub fn founder_counts(&self) -> [usize; Founder::COUNT] {
+    /// The founder counts this run founds a fresh world with: each lineage's
+    /// `founding_count` in `fauna` (the code default, or a preset's
+    /// `[fauna.founders.<lineage>] founding_count`), or the same with no egg bank
+    /// (`--no-egg-bank`).
+    pub fn founder_counts(
+        &self,
+        fauna: &cubarium_voxel_fauna::FaunaConfig,
+    ) -> [usize; Founder::COUNT] {
         if self.no_egg_bank {
-            crate::voxel::habitat::NO_EGG_BANK
+            fauna.founder_counts_without_egg_bank()
         } else {
-            crate::voxel::habitat::FOUNDER_COUNTS
+            fauna.founder_counts()
         }
     }
 

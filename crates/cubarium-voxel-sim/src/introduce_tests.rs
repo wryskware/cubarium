@@ -75,7 +75,7 @@ fn lanternjaws_arrive_only_in_a_prey_component_and_only_by_the_controls() {
     let mut empty = Fauna::new(Default::default());
     let why = introduce_lanternjaws(&world, &flora, &mut empty, 2).expect_err("no prey");
     assert!(!why.trim().is_empty());
-    let why = bury_founding_clutches(&world, &flora, &mut empty, 2).expect_err("no prey");
+    let why = bury_founding_clutches(&world, &flora, &mut empty, Founder::Lanternjaw, 2).expect_err("no prey");
     assert!(!why.trim().is_empty());
     assert_eq!(lanternjaws(&empty), 0);
     assert!(empty.view().clutches.is_empty());
@@ -105,7 +105,7 @@ fn lanternjaws_arrive_only_in_a_prey_component_and_only_by_the_controls() {
         assert_eq!(a.reserve, wake_at * phys.core.reserve_of(a.body), "hungry, at the wake line");
         assert_ne!(a.state, cubarium_voxel_fauna::State::Asleep, "awake");
     }
-    let eggs = bury_founding_clutches(&world, &flora, &mut fauna, 2).expect("prey live here");
+    let eggs = bury_founding_clutches(&world, &flora, &mut fauna, Founder::Lanternjaw, 2).expect("prey live here");
     assert!(eggs > 0);
     let buried: Vec<_> = fauna
         .view()

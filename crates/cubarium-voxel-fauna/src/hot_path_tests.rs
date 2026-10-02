@@ -325,7 +325,7 @@ fn a_mouth_through_the_index_and_the_cache_picks_what_the_full_scan_picks() {
                     heading_rad: std::f64::consts::TAU * f64::from(k) / 8.0,
                 };
                 let cols = crate::body::mouth_columns(&view, &pose, &body);
-                for diet in [Diet::Vascular, Diet::Fungal] {
+                for diet in [Diet::only(crate::Food::Foliage), Diet::only(crate::Food::CapTissue)] {
                     let indexed = crate::body::mouth_foliage_stand(&fv, &view, &cols, face.y, &body, diet);
                     let scanned =
                         crate::body::mouth_foliage_stand(&bare, &view, &cols, face.y, &body, diet);

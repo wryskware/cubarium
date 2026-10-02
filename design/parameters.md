@@ -980,7 +980,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.founder_patch_spacing_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | founding: least distance between two patch centres |
 | `flora.voxel_m` | 0.25 | m | (0, inf) |  | - | derived | the world's cell size, recorded (set from world.voxel_m) |
 
-**`fauna.*`** (291 rows)
+**`fauna.*`** (297 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1045,6 +1045,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.adult_height_m` | 0.125 | m | (0, inf) | yes | N | decision, digest | adult body height |
 | `fauna.founders.littershredder.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
 | `fauna.founders.littershredder.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
+| `fauna.founders.littershredder.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
+| `fauna.founders.littershredder.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1108,6 +1110,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.adult_height_m` | 0.375 | m | (0, inf) | yes | N | decision, digest | adult body height |
 | `fauna.founders.frondgrazer.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
 | `fauna.founders.frondgrazer.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
+| `fauna.founders.frondgrazer.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
+| `fauna.founders.frondgrazer.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1171,6 +1175,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.adult_height_m` | 0.45 | m | (0, inf) | yes | N | decision, digest | adult body height |
 | `fauna.founders.lanternjaw.eye_height_fraction` | 0.8 | x body height | [0, inf) |  | - | placeholder, digest | the eye over the standing surface |
 | `fauna.founders.lanternjaw.mouth_ceiling_fraction` | 1.33 | x body height | [0, inf) | 0.3–2.5 | - | placeholder, digest | the mouth band's ceiling |
+| `fauna.founders.lanternjaw.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
+| `fauna.founders.lanternjaw.founding_count` | 3 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |

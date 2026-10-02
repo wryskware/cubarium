@@ -115,20 +115,39 @@ pub fn mouth_crown_layers_at(standing_y: u32, body: &Body, voxel_m: f64) -> Rang
     mouth_crown_layers(standing_y, body, voxel_m)
 }
 
-/// The crown layers a **metre band** `[0, ceiling_m]` over the standing surface reaches.
+/// The crown layers a **metre band** `[0, ceiling_m]` over the standing surface reaches:
+/// [`band_layers`] with no floor.
+pub fn band_crown_layers(standing_y: u32, voxel_m: f64, ceiling_m: f64) -> RangeInclusive<i64> {
+    band_layers(standing_y, voxel_m, 0.0, ceiling_m)
+}
+
+/// The crown layers a **metre band** `[floor_m, ceiling_m]` over the standing surface
+/// reaches.
 ///
 /// A crown is one cell thick at layer `L`, so its physical slab is
 /// `[L·v, (L+1)·v]`; the band selects every `L` whose slab overlaps it by a positive
-/// amount. A touch at exactly the ceiling is not an overlap (audit §2: "a boundary touch
-/// alone contributes no stock"). A band that reaches nothing comes back empty.
-pub fn band_crown_layers(standing_y: u32, voxel_m: f64, ceiling_m: f64) -> RangeInclusive<i64> {
-    let lo = i64::from(standing_y) + 1;
-    let empty = lo..=(lo - 1);
+/// amount. A touch at exactly the floor or the ceiling is not an overlap (audit §2: "a
+/// boundary touch alone contributes no stock"). A band that reaches nothing comes back
+/// empty.
+pub fn band_layers(
+    standing_y: u32,
+    voxel_m: f64,
+    floor_m: f64,
+    ceiling_m: f64,
+) -> RangeInclusive<i64> {
+    let base = i64::from(standing_y) + 1;
+    let empty = base..=(base - 1);
     let q = ceiling_m / voxel_m;
     if !q.is_finite() || q <= 0.0 {
         return empty;
     }
-    let hi = lo + (q.ceil() as i64) - 1;
+    // The lowest slab `[k·v, (k+1)·v]` reaching above the floor: `k = floor(floor / v)`.
+    let f = (floor_m / voxel_m).max(0.0);
+    if !f.is_finite() {
+        return empty;
+    }
+    let lo = base + f.floor() as i64;
+    let hi = base + (q.ceil() as i64) - 1;
     if hi < lo { empty } else { lo..=hi }
 }
 
@@ -136,7 +155,7 @@ pub fn band_crown_layers(standing_y: u32, voxel_m: f64, ceiling_m: f64) -> Range
 /// of `cols`, and whose tissue `diet` accepts — the live mouth's own scan, with the
 /// layer range and the diet handed in.
 ///
-/// An observer measuring what physically stands in a band asks with [`Diet::Any`]; a
+/// An observer measuring what physically stands in a band asks with [`Diet::ANY`]; a
 /// mouth asks with its own ([`Diet::of`]), because since decisions §3 reach and
 /// permission are different questions and a glowcap cap answers them differently.
 pub fn foliage_stands_in_layers(
@@ -588,12 +607,12 @@ mod tests {
                         heading_rad: heading,
                     };
                     let cols = mouth_columns_at(&view, &pose, &body);
-                    let live = mouth_foliage_stand(&fv, &view, &cols, 2, &body, Diet::Vascular);
+                    let live = mouth_foliage_stand(&fv, &view, &cols, 2, &body, Diet::only(crate::Food::Foliage));
                     let shared =
-                        foliage_stands_in_layers(&fv, &view, &cols, &layers, Diet::Vascular);
+                        foliage_stands_in_layers(&fv, &view, &cols, &layers, Diet::only(crate::Food::Foliage));
                     assert_eq!(
                         shared,
-                        mouth_foliage_stands(&fv, &view, &cols, 2, &body, Diet::Vascular),
+                        mouth_foliage_stands(&fv, &view, &cols, 2, &body, Diet::only(crate::Food::Foliage)),
                         "the diagnostic list is the shared scan"
                     );
                     let best =

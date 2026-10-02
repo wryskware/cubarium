@@ -42,7 +42,7 @@ use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium::voxel::scene;
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_fauna::{
-    ConeHit, Diet, Fauna, FaunaConfig, Founder, Manifest, Pose, RouteMap, SightMap,
+    ConeHit, Diet, Fauna, FaunaConfig, Food, Founder, Manifest, Pose, RouteMap, SightMap,
     TICK_HZ, eye_origin_m, layer_columns, ray_direction_deg,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Species as Plant};
@@ -129,7 +129,7 @@ fn main() {
             let founded = cubarium::voxel::found(
                 &cfg,
                 &layers,
-                habitat::FOUNDER_COUNTS,
+                cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
                 cubarium::voxel::Seeds::from(seed_base),
                 false,
             );
@@ -358,7 +358,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
         // browser's band is reachable fungal tissue and not browser food, so it is
         // counted in the standing foliage and never in the reach. It is the shredder's
         // food and is reported as such in the detritus block below.
-        let edible = Diet::Vascular.accepts(fv.config.species(stand.species).trophic);
+        let edible = Diet::only(Food::Foliage).accepts(fv.config.species(stand.species).trophic);
         let mut counted_site = false;
         for layer in fv.layers(stand) {
             if !(layer.stock > 0.0) {
@@ -373,7 +373,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
             // The acceptance rule itself, not a re-derivation of it: every face whose
             // mouth the model's own band and per-layer scan let take from this layer.
             let reaching = if edible {
-                browser_map.faces_reaching_layer(&fv, &wv, stand, &layer, Diet::Vascular)
+                browser_map.faces_reaching_layer(&fv, &wv, stand, &layer, Diet::only(Food::Foliage))
             } else {
                 Vec::new()
             };
@@ -533,7 +533,7 @@ fn report(sim: &Sim, minute: u64, seeded_browser_faces: &[(u32, u32, u32)]) -> R
             fv.layers(s)
                 .map(|layer| {
                     let inside = blind_map
-                        .faces_reaching_layer(&fv, &wv, s, &layer, Diet::Fungal)
+                        .faces_reaching_layer(&fv, &wv, s, &layer, Diet::only(Food::CapTissue))
                         .iter()
                         .any(|&i| shredder_components.contains(&blind_map.components[i]));
                     (layer.stock, inside)

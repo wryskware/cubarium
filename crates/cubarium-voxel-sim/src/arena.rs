@@ -51,7 +51,7 @@ use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, W
 use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, Pose, Senses};
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, Site, Species as Plant,
-    Taken, Trophic,
+    Taken,
 };
 
 use crate::Sim;
@@ -299,15 +299,18 @@ pub fn edible_stock(
 ) -> f64 {
     let fv = flora.view();
     let band = phys.adult_body().mouth_layers(standing_y, voxel_m);
-    let pools = match founder {
-        Founder::Blind => fv.ground_at(site).map_or(0.0, |g| g.litter + g.carrion),
-        Founder::Browser => 0.0,
-        Founder::Lanternjaw => fv.ground_at(site).map_or(0.0, |g| g.carrion),
-    };
-    let stand = fv.stand_at(site).filter(|s| {
-        let fungal = fv.config.species(s.species).trophic == Trophic::Saprotroph;
-        fungal == (founder == Founder::Blind)
+    // The lineage's own diet ([`cubarium_voxel_fauna::Diet`]): the pools it eats, and a
+    // stand whose tissue it accepts.
+    let _ = founder;
+    let diet = phys.diet;
+    let pools = fv.ground_at(site).map_or(0.0, |g| {
+        let litter = if diet.eats(cubarium_voxel_fauna::Food::Litter) { g.litter } else { 0.0 };
+        let carrion = if diet.eats(cubarium_voxel_fauna::Food::Carrion) { g.carrion } else { 0.0 };
+        litter + carrion
     });
+    let stand = fv
+        .stand_at(site)
+        .filter(|s| diet.accepts(fv.config.species(s.species).trophic));
     pools
         + stand.map_or(0.0, |s| {
             // What a bite can lower: each band layer's stock above its graze floor

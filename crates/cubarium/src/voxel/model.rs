@@ -227,17 +227,28 @@ impl ModelLibrary {
         self.plants[species.index()].as_ref()
     }
 
+    /// A live founder's model: its own baked founder model, else the **specimen** of its
+    /// lineage name (`"ripple_snail"` finds `"ripple-snail"`), so a new founder draws with
+    /// its baked specimen and needs no rebake.
     pub fn animal(&self, founder: Founder) -> Option<&AnimalModel> {
-        self.animals[founder.index()].as_ref()
+        self.animals[founder.index()]
+            .as_ref()
+            .or_else(|| self.specimen(founder.name()))
     }
 
     pub fn insert_specimen(&mut self, name: &str, model: AnimalModel) {
         self.specimens.insert(name.to_string(), model);
     }
 
-    /// An unsimulated animal's model by its manifest name (`"ripple-snail"`).
+    /// An unsimulated animal's model by its manifest name (`"ripple-snail"`); `_` and `-`
+    /// are the same letter here.
     pub fn specimen(&self, name: &str) -> Option<&AnimalModel> {
-        self.specimens.get(name)
+        self.specimens.get(name).or_else(|| {
+            self.specimens
+                .iter()
+                .find(|(k, _)| same_name(k, name))
+                .map(|(_, m)| m)
+        })
     }
 
     /// Every specimen's name, in name order.
@@ -320,6 +331,14 @@ impl ModelLibrary {
         }
         Ok(lib)
     }
+}
+
+/// Whether two lineage or specimen names are the same, `_` and `-` alike.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .all(|(x, y)| x == y || (matches!(x, b'_' | b'-') && matches!(y, b'_' | b'-')))
 }
 
 /// `0.125` → `"125"`: the directory a voxel size's models live in.
@@ -941,6 +960,27 @@ mod tests {
         assert_eq!(lib.specimen_names().collect::<Vec<_>>(), ["ripple-snail"]);
         assert_eq!(lib.len(), 2);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Roster R0: a live founder with no founder model of its own draws with the specimen
+    /// of its lineage name (`_` and `-` alike), so a new founder needs no rebake; a
+    /// baked founder model still wins over a specimen of the same name.
+    #[test]
+    fn a_founder_with_no_founder_model_draws_with_its_specimen() {
+        let parse_animal = |bytes: Vec<u8>| match parse(&bytes).unwrap() {
+            Parsed::Animal(m) => m,
+            Parsed::Plant(_) => unreachable!("an animal file"),
+        };
+        let mut lib = ModelLibrary::default();
+        assert!(lib.animal(Founder::Lanternjaw).is_none(), "nothing to draw yet");
+        lib.insert_specimen("lanternjaw", parse_animal(one_bin_animal("a_main", 1.0)));
+        let drawn = lib.animal(Founder::Lanternjaw).expect("the specimen stands in");
+        assert_eq!(drawn.select(1.0).unwrap()[0].material, named_index("a_main"));
+        lib.insert_animal(Founder::Lanternjaw, parse_animal(one_bin_animal("a_mark", 1.0)));
+        let own = lib.animal(Founder::Lanternjaw).unwrap();
+        assert_eq!(own.select(1.0).unwrap()[0].material, named_index("a_mark"), "its own first");
+        assert!(same_name("ripple_snail", "ripple-snail") && !same_name("ripple", "ripple-snail"));
+        assert!(super::super::colours::specimen_coat("ripple_snail").is_some(), "the coat too");
     }
 
     #[test]

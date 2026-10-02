@@ -54,7 +54,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use cubarium_voxel_fauna::{
-    Animal, BlindForager, BrowserForager, Controller, Departure, Food, Founder, FounderPhysiology,
+    Animal, Controller, Departure, Food, Founder, FounderPhysiology,
     Pose, Response, StartingStores, TeacherConfig,
 };
 use cubarium_voxel_sim::{ArenaGrid, Placement, Sim, SimConfig, Site, edible_stock, populate};
@@ -523,13 +523,7 @@ impl Controller for Counted {
 
 /// A bystander's own observation-only heuristic, on the episode world's `teachers`.
 fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controller> {
-    match founder {
-        Founder::Blind => Box::new(BlindForager::with_config(teachers)),
-        Founder::Browser => Box::new(BrowserForager::with_config(teachers)),
-        Founder::Lanternjaw => Box::new(cubarium_voxel_fauna::LanternjawAmbush::with_config(
-            teachers,
-        )),
-    }
+    cubarium_voxel_fauna::heuristic(founder, teachers)
 }
 
 /// An arena episode: the fixture's private copy, its founder refounded at the sampled
@@ -901,14 +895,14 @@ fn drive(
     }
 
     // The acting lineage's food classes (decisions §3).
-    let classes: Vec<usize> = match founder {
-        Founder::Blind => vec![Food::Litter, Food::CapTissue, Food::Carrion],
-        Founder::Browser => vec![Food::Foliage],
-        Founder::Lanternjaw => vec![Food::Carrion],
-    }
-    .into_iter()
-    .map(Food::index)
-    .collect();
+    let classes: Vec<usize> = sim
+        .fauna()
+        .config()
+        .founder(founder)
+        .diet
+        .foods()
+        .map(Food::index)
+        .collect();
     let (eaten_start, deaths_start) = {
         let l = sim.fauna().view().ledger;
         (l.eaten_by_food, l.deaths_by_founder_cause[founder.index()])

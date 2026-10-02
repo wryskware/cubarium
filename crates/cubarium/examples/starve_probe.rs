@@ -99,7 +99,7 @@ fn main() {
     let (mut sim, info) = world::found_world(
         &cfg,
         seed,
-        cubarium_voxel_sim::habitat::FOUNDER_COUNTS,
+        cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         &EcologyParams::defaults(),
     );
     let drivers: Vec<_> = brains

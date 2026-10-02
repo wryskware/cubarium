@@ -1668,9 +1668,10 @@ fn climb_tick(
 /// stocks. Nothing in reach, a mouth in the air, or an unsupported body transfers
 /// nothing at all.
 ///
-/// Decisions §3 gave the shredder its three foods. There is no new action: `bite` still
-/// means "take what is at the mouth", and [`body::mouth_detritus`] resolves which of
-/// the three that is (the richest available, ties in [`Food::ALL`] order). The
+/// Decisions §3 gave the shredder its three foods; since R0 every lineage's foods are its
+/// physiology's diet list. There is no new action: `bite` still means "take what is at
+/// the mouth", and [`body::mouth_meal`] resolves which of the diet's foods that is (the
+/// richest available, ties in [`Food::ALL`] order). The
 /// assimilation rule is unchanged; what the food class chooses is the `yield` it reads
 /// ([`crate::FounderPhysiology::yield_for`]).
 #[allow(clippy::too_many_arguments)]
@@ -1708,45 +1709,16 @@ fn founder_feed(
     }
     let cols = body::mouth_columns(view, &pose, geometry);
     // Which food is at this mouth, and how much of it — the `E` the bite diminishes
-    // with — before anything is withdrawn.
-    let meal = match founder {
-        Founder::Blind => body::mouth_detritus(&flora.view(), view, &cols, site_y, geometry)
-            .map(|(meal, stock, _)| (meal, stock)),
-        // The carnivore's mouth takes carrion and nothing else (predation §2.6).
-        Founder::Lanternjaw => {
-            body::mouth_pool_site(&flora.view(), &cols, site_y, Food::Carrion).map(|(site, stock)| {
-                (
-                    body::Meal::Pool {
-                        site,
-                        food: Food::Carrion,
-                    },
-                    stock,
-                )
-            })
-        }
-        Founder::Browser => body::mouth_foliage_stand(
-            &flora.view(),
-            view,
-            &cols,
-            site_y,
-            geometry,
-            crate::Diet::of(founder),
-        )
-        .map(|(root, stock)| (body::Meal::Stand { root }, stock)),
-    };
-    let Some((meal, stock)) = meal else {
+    // with — before anything is withdrawn: the richest of the lineage's diet
+    // ([`body::mouth_meal`]). Its class is the source's own: a pool names it, and a
+    // stand's is its species' income rule.
+    let diet = fauna.config.founder(founder).diet;
+    let Some((meal, stock, _)) =
+        body::mouth_meal(&flora.view(), view, &cols, site_y, geometry, diet)
+    else {
         return false;
     };
-    // Which class this is: a pool names its own, and a stand's is whose mouth chose it
-    // — a shredder's stand is fungal because its diet is, a browser's vascular.
-    let food = match meal {
-        body::Meal::Pool { food, .. } => food,
-        body::Meal::Stand { .. } => match founder {
-            Founder::Blind => Food::CapTissue,
-            Founder::Browser => Food::Foliage,
-            Founder::Lanternjaw => unreachable!("a carnivore's mouth takes no stand"),
-        },
-    };
+    let food = meal.food();
     // The bite this hunger, this stock and this room allow.
     let yield_fraction = fauna.config.founder(founder).yield_for(food);
     let bite = sated_bite(want, stock, sc, &fauna.animals[i], yield_fraction);
@@ -1760,11 +1732,11 @@ fn founder_feed(
     // Whose tissue this is, read before the withdrawal, so the report says which
     // species was actually eaten.
     let plant = match meal {
-        body::Meal::Stand { root } => flora.view().stand_at(root).map(|s| s.species),
+        body::Meal::Stand { root, .. } => flora.view().stand_at(root).map(|s| s.species),
         body::Meal::Pool { .. } => None,
     };
     let taken = match meal {
-        body::Meal::Stand { root } => flora
+        body::Meal::Stand { root, .. } => flora
             .take_foliage_in_layers(root, bite, &layers)
             .map(|t| t.taken),
         body::Meal::Pool { site, food } => match food {

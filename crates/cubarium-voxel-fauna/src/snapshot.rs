@@ -16,7 +16,7 @@ use crate::Fauna;
 /// inside the snapshot, or what a saved field means changes. Postcard is not
 /// self-describing, so an older world is **refused**, not migrated
 /// (`always-fresh-never-migrate`): start a fresh world.
-pub const SCHEMA: u32 = 24;
+pub const SCHEMA: u32 = 25;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -66,7 +66,7 @@ fn riders(fauna: &Fauna) -> Result<(), String> {
                     a.id, hold.host
                 )
             })?;
-        if host.founder == a.founder || host.founder == Some(crate::Founder::Lanternjaw) {
+        if host.founder == a.founder {
             return Err(format!(
                 "animal #{} rides host #{}, a body of its own lineage",
                 a.id, host.id

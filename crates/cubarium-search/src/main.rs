@@ -1156,19 +1156,35 @@ fn parse_centres(
         .collect()
 }
 
-/// `shredders,browsers,lanternjaw-clutches`, or the live world's founding.
+/// The founding table: the live world's (each lineage's `founding_count`) with the named
+/// lineages set over it, `--founders frondgrazer=4,lanternjaw=0`; or one count per lineage
+/// in `Founder::ALL` order, `--founders 8,8,3` (the lanternjaw's are clutches).
 fn parse_founders(
     s: Option<&str>,
 ) -> Result<[usize; cubarium_voxel_fauna::Founder::COUNT], String> {
+    use cubarium_voxel_fauna::Founder;
+    let mut out = cubarium_voxel_fauna::FaunaConfig::default().founder_counts();
     let Some(s) = s else {
-        return Ok(cubarium_voxel_sim::habitat::FOUNDER_COUNTS);
+        return Ok(out);
     };
-    let v: Vec<usize> = s
-        .split(',')
-        .map(|x| x.trim().parse::<usize>().map_err(|e| format!("--founders {s}: {e}")))
-        .collect::<Result<_, _>>()?;
-    v.try_into()
-        .map_err(|_| format!("--founders takes one count per lineage, not {s}"))
+    let count = |x: &str| x.trim().parse::<usize>().map_err(|e| format!("--founders {s}: {e}"));
+    if !s.contains('=') {
+        let v: Vec<usize> = s.split(',').map(count).collect::<Result<_, _>>()?;
+        return v
+            .try_into()
+            .map_err(|_| format!("--founders takes one count per lineage, not {s}"));
+    }
+    for part in s.split(',') {
+        let (name, n) = part
+            .split_once('=')
+            .ok_or_else(|| format!("--founders takes <lineage>=<N>,..., not {part}"))?;
+        let f = Founder::ALL
+            .into_iter()
+            .find(|f| f.name() == name.trim())
+            .ok_or_else(|| format!("--founders: no lineage {name:?}"))?;
+        out[f.index()] = count(n)?;
+    }
+    Ok(out)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

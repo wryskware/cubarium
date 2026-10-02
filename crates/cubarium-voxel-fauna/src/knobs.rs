@@ -312,8 +312,8 @@ impl Default for TeacherConfig {
 
 /// How a fresh world is founded: the stores a founder arrives with, the litter laid under
 /// the shredders and the acceptance bar (`cubarium_voxel_sim::habitat`'s seeder). The
-/// founder **counts** (`habitat::FOUNDER_COUNTS`) stay `const`s there: the CLI and the
-/// examples of other crates pass them in by name.
+/// founder **counts** are each lineage's own
+/// [`crate::FounderPhysiology::founding_count`] ([`crate::FaunaConfig::founder_counts`]).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FoundingConfig {
     /// A seeded founder arrives at this fraction of its adult body (`StartingStores`).

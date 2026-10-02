@@ -30,8 +30,8 @@ use std::collections::BTreeMap;
 
 use cubarium_voxel::{Material, Settle, VoxelView, World};
 use cubarium_voxel_fauna::{
-    BlindForager, BrowserForager, Command as FaunaCommand, Controller, Fauna, Founder,
-    FounderPhysiology, LanternjawAmbush, RouteMap, StartingStores, has_headroom,
+    Command as FaunaCommand, Controller, Fauna, Founder, FounderPhysiology, RouteMap,
+    StartingStores, has_headroom,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species, SpeciesConfig,
@@ -82,22 +82,6 @@ const PRODUCERS: [Species; 8] = [
 /// `cubarium_voxel::walk::around_the_ring` asks the generator to keep, so a colony grows
 /// over ground something could actually walk across.
 const STEP_M: f64 = 0.5;
-
-/// How many **sensed founder bodies** of each lineage the habitat starts with: eight
-/// littershredders ([`Founder::Blind`]) and eight frondgrazer founders
-/// ([`Founder::Browser`]), the same count the legacy `Species::Frondgrazer`
-/// introductions used, now split across the two lineages. The legacy species stays in
-/// the fauna crate and is still reachable from the `g` stdin line; this seeder simply
-/// stops placing it.
-const SHREDDERS: usize = 8;
-const BROWSERS: usize = 8;
-
-/// **The founding egg bank** (`design/predation-and-flight-2026-09-28.md` §2.9, §2.13):
-/// how many lanternjaw clutches a fresh world buries in its prey components — no adults.
-/// Three clutches of the lineage's own three eggs: "a few", nine eggs whose thresholds
-/// (2–10) and viabilities (6–24 h) spread the first hatchings over several dusks.
-/// `founder_counts[Founder::Lanternjaw]` is this count of **clutches**, not bodies.
-const FOUNDING_CLUTCHES: usize = 3;
 
 /// What the startup pre-roll did before anything was seeded.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -169,6 +153,9 @@ pub struct LineageVerdict {
     pub components: Vec<ComponentVerdict>,
     /// Founders standing on no face of the lineage's route map at all.
     pub stranded: usize,
+    /// Whether a habitable component also needs a living producer rooted in it (a
+    /// [`cubarium_voxel_fauna::FoundingSite::LitterBed`] lineage's rule).
+    pub needs_producer: bool,
     pub accepted: bool,
     /// The worst founder-occupied component's `stock / (founders · upkeep_per_h)`,
     /// scaled by `placed / wanted`; zero when nothing was placed and something was wanted.
@@ -214,7 +201,7 @@ impl Acceptance {
                     c.food.stock,
                     c.founders,
                     l.accept_hours * l.upkeep_per_h * c.founders as f64,
-                    if founder == Founder::Blind && c.food.producers == 0 {
+                    if l.needs_producer && c.food.producers == 0 {
                         " and has no living producer"
                     } else {
                         ""
@@ -277,18 +264,9 @@ impl Seeded {
 /// the ordinary founder, deposit and introduction inflows the layers already name.
 /// Deterministic for a given world.
 pub fn seed(world: &mut World, flora: &mut Flora, fauna: &mut Fauna) -> Seeded {
-    seed_with_founder_counts(world, flora, fauna, FOUNDER_COUNTS)
+    let counts = fauna.config().founder_counts();
+    seed_with_founder_counts(world, flora, fauna, counts)
 }
-
-/// The default founder count per lineage: what [`seed`] places — littershredders and
-/// frondgrazers as bodies, and for the lanternjaw the founding bank's **clutches**
-/// ([`FOUNDING_CLUTCHES`]; §2.9: a fresh world is founded with a buried egg bank, not
-/// adults).
-pub const FOUNDER_COUNTS: [usize; Founder::COUNT] = [SHREDDERS, BROWSERS, FOUNDING_CLUTCHES];
-
-/// [`FOUNDER_COUNTS`] with **no egg bank**: the predation measurement's control arm, and
-/// the training worlds until the lanternjaw has a brain (P2).
-pub const NO_EGG_BANK: [usize; Founder::COUNT] = [SHREDDERS, BROWSERS, 0];
 
 /// Seed the example habitat with a caller-selected number of bodies per sensed lineage.
 /// The normal ambient scene uses [`seed`]; this variant exists for bounded diagnosis arms
@@ -679,109 +657,114 @@ pub fn seed_pre_rolled(
     // `N` founder-hours of upkeep for every one of them, and (shredder) only if a living
     // producer of its renewable food is rooted in it.
 
-    // Littershredders on litter-bearing soil: dry open soil away from the stands, each
-    // with its own starter tile of leaf litter laid under it first, so the founder
-    // begins on a cue it can smell and a stock it can bite. The starter tile is stock
-    // too, and it is counted.
-    let blind = *fauna.config().founder(Founder::Blind);
-    let blind_room = blind.adult_body().headroom_voxels(world.config().voxel_m);
+    // Every lineage in [`Founder::ALL`] order, by its physiology's founding mode and
+    // site ([`cubarium_voxel_fauna::Founding`], [`cubarium_voxel_fauna::FoundingSite`]);
+    // a count of 0 founds nothing.
     let founding = fauna.config().founding;
-    let blind_need = founding.accept_founder_hours * founding_upkeep_per_hour(&blind);
-    let (blind_map, blind_food) =
-        lineage_food(&world.view(), &flora.view(), &blind, Founder::Blind);
-    let pool: Vec<Site> = {
-        let view = world.view();
-        sites
-            .iter()
-            .copied()
-            .enumerate()
-            .filter(|(i, s)| {
-                !taken.contains(s)
-                    && wettest[*i] <= blind.drown_depth_m(&blind.adult_body())
-                    && view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
-                    && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
-                    && has_headroom(&view, i64::from(s.x), s.y, s.z, blind_room)
-                    && blind_map
-                        .component_of(*s)
-                        .and_then(|c| blind_food.get(&c))
-                        .is_some_and(|f| f.producers > 0)
-            })
-            .map(|(_, s)| s)
-            .collect()
-    };
-    let want = founder_counts[Founder::Blind.index()];
-    let chosen = place(
-        &pool,
-        want,
-        |s| blind_map.component_of(s),
-        |c, k| {
-            let stock = blind_food.get(&c).map_or(0.0, |f| f.stock);
-            stock + k as f64 * founding.starter_litter_organic >= blind_need * k as f64
-        },
-    );
-    for (k, site) in chosen.into_iter().enumerate() {
-        if !flora.deposit(
-            site,
-            Deposit {
-                kind: DepositKind::Litter,
-                organic: founding.starter_litter_organic,
-                mineral: founding.starter_litter_organic * founding.starter_litter_mineral_fraction,
-                energy: founding.starter_litter_organic * founding.starter_litter_energy_density,
-            },
-        ) {
+    for founder in Founder::ALL {
+        let want = founder_counts[founder.index()];
+        let phys = *fauna.config().founder(founder);
+        match phys.founding {
+            cubarium_voxel_fauna::Founding::Bodies => {}
+            // The founding egg bank, in the prey's components (§2.9, §2.13): no adults.
+            cubarium_voxel_fauna::Founding::Clutches => {
+                if want > 0 {
+                    match bury_founding_clutches(world, flora, fauna, founder, want) {
+                        Ok(eggs) => seeded.founding_eggs += eggs,
+                        Err(why) => seeded.founding_bank_refused = Some(why),
+                    }
+                }
+                continue;
+            }
+        }
+        if want == 0 {
             continue;
         }
-        seeded.litter_tiles += 1;
-        if introduce_founder(world, fauna, Founder::Blind, site, spread_heading(k, want)) {
-            taken.push(site);
-            seeded.founders[Founder::Blind.index()] += 1;
+        let need = founding.accept_founder_hours * founding_upkeep_per_hour(&phys);
+        let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, founder);
+        match phys.founding_site {
+            // On litter-bearing soil: dry open soil away from the stands, each with its
+            // own starter tile of leaf litter laid under it first, so the founder begins
+            // on a cue it can smell and a stock it can bite. The starter tile is stock
+            // too, and it is counted.
+            cubarium_voxel_fauna::FoundingSite::LitterBed => {
+                let room = phys.adult_body().headroom_voxels(world.config().voxel_m);
+                let pool: Vec<Site> = {
+                    let view = world.view();
+                    sites
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .filter(|(i, s)| {
+                            !taken.contains(s)
+                                && wettest[*i] <= phys.drown_depth_m(&phys.adult_body())
+                                && view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
+                                && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+                                && has_headroom(&view, i64::from(s.x), s.y, s.z, room)
+                                && map
+                                    .component_of(*s)
+                                    .and_then(|c| food.get(&c))
+                                    .is_some_and(|f| f.producers > 0)
+                        })
+                        .map(|(_, s)| s)
+                        .collect()
+                };
+                let chosen = place(
+                    &pool,
+                    want,
+                    |s| map.component_of(s),
+                    |c, k| {
+                        let stock = food.get(&c).map_or(0.0, |f| f.stock);
+                        stock + k as f64 * founding.starter_litter_organic >= need * k as f64
+                    },
+                );
+                for (k, site) in chosen.into_iter().enumerate() {
+                    if !flora.deposit(
+                        site,
+                        Deposit {
+                            kind: DepositKind::Litter,
+                            organic: founding.starter_litter_organic,
+                            mineral: founding.starter_litter_organic
+                                * founding.starter_litter_mineral_fraction,
+                            energy: founding.starter_litter_organic
+                                * founding.starter_litter_energy_density,
+                        },
+                    ) {
+                        continue;
+                    }
+                    seeded.litter_tiles += 1;
+                    if introduce_founder(world, fauna, founder, site, spread_heading(k, want)) {
+                        taken.push(site);
+                        seeded.founders[founder.index()] += 1;
+                    }
+                }
+            }
+            // **After the food**: a face with room for its body, water under its wade
+            // depth, a stocked layer its mouth actually reaches from there, and somewhere
+            // else to go when that patch is bare — a walkable route to a second stand.
+            // There is no foodless fallback: a lineage with nowhere to live is a
+            // shortfall in `Seeded` and nothing is placed (plan §5).
+            cubarium_voxel_fauna::FoundingSite::AtFood => {
+                let mut meadow =
+                    faces_at_food(&map, &food, &world.view(), &flora.view(), phys.diet);
+                // A body drowns in the stream's way as surely as a plant does: under its
+                // own height of water it would be drowning (package mobility).
+                let drown = phys.drown_depth_m(&phys.adult_body());
+                meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= drown));
+                let chosen = place(
+                    &meadow,
+                    want,
+                    |s| map.component_of(s),
+                    |c, k| food.get(&c).map_or(0.0, |f| f.stock) >= need * k as f64,
+                );
+                for (k, site) in chosen.into_iter().enumerate() {
+                    if introduce_founder(world, fauna, founder, site, spread_heading(k, want)) {
+                        seeded.founders[founder.index()] += 1;
+                    }
+                }
+            }
         }
-    }
-    seeded.shortfall[Founder::Blind.index()] =
-        want.saturating_sub(seeded.founders[Founder::Blind.index()]);
-
-    // Frondgrazer founders, **after the food**. A browser needs a face with room for its
-    // body, water under its wade depth, a stocked foliage layer its mouth actually
-    // reaches from there, and somewhere else to go when that patch is bare — a
-    // walkable route to a second stand. There is no foodless fallback: a lineage with
-    // nowhere to live is a shortfall in `Seeded` and nothing is placed (plan §5).
-    let browser = *fauna.config().founder(Founder::Browser);
-    let browser_need = founding.accept_founder_hours * founding_upkeep_per_hour(&browser);
-    let browser_map = RouteMap::for_founder(&world.view(), &browser);
-    let browser_food = food_on(&browser_map, &world.view(), &flora.view(), Founder::Browser);
-    let mut meadow = browser_faces_on(&browser_map, &browser_food, &world.view(), &flora.view());
-    // A body drowns in the stream's way as surely as a plant does.
-    // Under its own height of water it would be drowning (package mobility).
-    let browser_drown = browser.drown_depth_m(&browser.adult_body());
-    meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= browser_drown));
-    let want = founder_counts[Founder::Browser.index()];
-    let chosen = place(
-        &meadow,
-        want,
-        |s| browser_map.component_of(s),
-        |c, k| browser_food.get(&c).map_or(0.0, |f| f.stock) >= browser_need * k as f64,
-    );
-    for (k, site) in chosen.into_iter().enumerate() {
-        if introduce_founder(
-            world,
-            fauna,
-            Founder::Browser,
-            site,
-            spread_heading(k, want),
-        ) {
-            seeded.founders[Founder::Browser.index()] += 1;
-        }
-    }
-    seeded.shortfall[Founder::Browser.index()] =
-        want.saturating_sub(seeded.founders[Founder::Browser.index()]);
-
-    // The founding egg bank, in the prey's components (§2.9, §2.13): no adults.
-    let clutches = founder_counts[Founder::Lanternjaw.index()];
-    if clutches > 0 {
-        match bury_founding_clutches(world, flora, fauna, clutches) {
-            Ok(eggs) => seeded.founding_eggs = eggs,
-            Err(why) => seeded.founding_bank_refused = Some(why),
-        }
+        seeded.shortfall[founder.index()] = want.saturating_sub(seeded.founders[founder.index()]);
     }
 
     seeded.imported_organic = flora.view().ledger.seeded_organic_in
@@ -847,30 +830,38 @@ pub fn lineage_food(
     phys: &FounderPhysiology,
     founder: Founder,
 ) -> (RouteMap, BTreeMap<usize, ComponentFood>) {
+    let _ = founder;
     let map = RouteMap::for_founder(view, phys);
-    let food = food_on(&map, view, fv, founder);
+    let food = food_on(&map, view, fv, phys);
     (map, food)
 }
 
-/// The food each component of `map` holds for `founder`'s mouth.
+/// The food each component of `map` holds for a lineage's mouth, read off its
+/// physiology's diet ([`cubarium_voxel_fauna::Diet`]) and founding site.
 ///
-/// - **Browser**: the **edible** foliage ([`cubarium_voxel_flora::StandLayer::edible`],
-///   above the grazing floor) of every vascular stand's layers a mouth reaches
-///   from a face in the component ([`RouteMap::faces_reaching_layer`], the tick's own
-///   band and per-layer scan with the diet gate). Every such stand is its own producer.
-/// - **Shredder**: litter and carrion a mouth reaches at a face's own height
-///   ([`RouteMap::faces_reaching_pool`]), plus glowcap cap tissue in its band; its
-///   producers are the living stands **rooted** in the component that renew any of it —
-///   a stand that sheds litter, or a glowcap.
+/// - **Stand foods** (foliage, cap tissue): the **edible** foliage
+///   ([`cubarium_voxel_flora::StandLayer::edible`], above the grazing floor) of every
+///   stand the diet accepts whose layers a mouth reaches from a face in the component
+///   ([`RouteMap::faces_reaching_layer`], the tick's own band and per-layer scan with the
+///   diet gate).
+/// - **Pool foods** (litter, carrion): the pool a mouth reaches at a face's own height
+///   ([`RouteMap::faces_reaching_pool`]).
+/// - **Producers**: for an [`cubarium_voxel_fauna::FoundingSite::AtFood`] lineage every
+///   stand it reaches is its own producer; for a
+///   [`cubarium_voxel_fauna::FoundingSite::LitterBed`] lineage the living stands **rooted**
+///   in the component that renew any of its food — a stand that sheds litter (when litter
+///   is in the diet), or a stand whose tissue the diet accepts.
 ///
 /// Each stock counts once per component however many faces reach it.
 fn food_on(
     map: &RouteMap,
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
-    founder: Founder,
+    phys: &FounderPhysiology,
 ) -> BTreeMap<usize, ComponentFood> {
-    let diet = cubarium_voxel_fauna::Diet::of(founder);
+    use cubarium_voxel_fauna::{Food, FoundingSite};
+    let diet = phys.diet;
+    let reached_produce = phys.founding_site == FoundingSite::AtFood;
     let mut food: BTreeMap<usize, ComponentFood> = BTreeMap::new();
     for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
         let sc = fv.config.species(stand.species);
@@ -894,15 +885,17 @@ fn food_on(
         for c in reached {
             let f = food.entry(c).or_default();
             f.stands += 1;
-            if founder == Founder::Browser {
+            if reached_produce {
                 f.producers += 1;
                 f.production_per_h += sc.foliage_rate * stand.wood * 3600.0;
             }
         }
     }
-    if founder == Founder::Blind {
+    let (litter, carrion) = (diet.eats(Food::Litter), diet.eats(Food::Carrion));
+    if litter || carrion {
         for g in fv.ground.iter() {
-            let amount = g.litter.max(0.0) + g.carrion.max(0.0);
+            let amount = if litter { g.litter.max(0.0) } else { 0.0 }
+                + if carrion { g.carrion.max(0.0) } else { 0.0 };
             if !(amount > 0.0) {
                 continue;
             }
@@ -915,11 +908,13 @@ fn food_on(
                 food.entry(c).or_default().stock += amount;
             }
         }
+    }
+    if !reached_produce {
         for stand in fv.stands.iter() {
             let sc = fv.config.species(stand.species);
-            let sheds = sc.senescence > 0.0 && stand.foliage > 0.0;
-            let cap = stand.species == Species::Glowcap;
-            if !(sheds || cap) {
+            let sheds = litter && sc.senescence > 0.0 && stand.foliage > 0.0;
+            let tissue = diet.accepts(sc.trophic);
+            if !(sheds || tissue) {
                 continue;
             }
             let Some(c) = map.component_of(stand.site) else {
@@ -954,7 +949,7 @@ pub fn accept(
         let u = founding_upkeep_per_hour(&phys);
         // A carnivore arrives from its egg bank, not as a placed body: the seeder places
         // none of it and the verdict asks for none (its count is the bank's clutches).
-        let wanted_bodies = if phys.hunter.is_some() {
+        let wanted_bodies = if phys.founding == cubarium_voxel_fauna::Founding::Clutches {
             0
         } else {
             wanted[founder.index()]
@@ -964,6 +959,7 @@ pub fn accept(
             wanted: wanted_bodies,
             upkeep_per_h: u,
             accept_hours,
+            needs_producer: phys.founding_site == cubarium_voxel_fauna::FoundingSite::LitterBed,
             ..LineageVerdict::default()
         };
         let mut count: BTreeMap<usize, usize> = BTreeMap::new();
@@ -978,8 +974,7 @@ pub fn accept(
         for (c, n) in count {
             let f = food.get(&c).copied().unwrap_or_default();
             let need = accept_hours * u * n as f64;
-            let habitable =
-                f.stock >= need && (founder != Founder::Blind || f.producers > 0);
+            let habitable = f.stock >= need && (!v.needs_producer || f.producers > 0);
             worst = worst.min(if u > 0.0 { f.stock / (u * n as f64) } else { f64::INFINITY });
             v.components.push(ComponentVerdict {
                 component: c,
@@ -1012,22 +1007,15 @@ pub fn accept(
 /// them. Introduced bodies get theirs from [`introduce_founder`], out of the same
 /// recipes.
 pub fn install_heuristics(fauna: &mut Fauna) {
-    // The reflexes run on the layer's own numbers ([`cubarium_voxel_fauna::TeacherConfig`]).
+    // The reflexes run on the layer's own numbers ([`cubarium_voxel_fauna::TeacherConfig`]),
+    // each lineage's from its one constructor ([`cubarium_voxel_fauna::heuristic`]).
     let cfg = fauna.config().teachers;
-    fauna.set_founder_factory(
-        Founder::Blind,
-        Arc::new(move || -> Box<dyn Controller> { Box::new(BlindForager::with_config(cfg)) }),
-    );
-    fauna.set_founder_factory(
-        Founder::Browser,
-        Arc::new(move || -> Box<dyn Controller> { Box::new(BrowserForager::with_config(cfg)) }),
-    );
-    // The lanternjaw's ambush teacher (predation §2.12): it has no trained centre, so
-    // this drives every one of them, hatched or introduced.
-    fauna.set_founder_factory(
-        Founder::Lanternjaw,
-        Arc::new(move || -> Box<dyn Controller> { Box::new(LanternjawAmbush::with_config(cfg)) }),
-    );
+    for founder in Founder::ALL {
+        fauna.set_founder_factory(
+            founder,
+            Arc::new(move || -> Box<dyn Controller> { cubarium_voxel_fauna::heuristic(founder, cfg) }),
+        );
+    }
 }
 
 /// The **prey components** of a carnivore lineage (§2.9): the walkable components of its
@@ -1116,28 +1104,32 @@ pub fn introduce_lanternjaws(
     Ok(ids)
 }
 
-/// **The founding egg bank** (§2.9, §2.13): `clutches` lanternjaw clutches of the
-/// lineage's own size, buried on faces where its prey stand — spread over the prey, so a
-/// component with more prey gets more of the bank — and nowhere else. The eggs buried, or
-/// why none could be.
+/// **The founding egg bank** (§2.9, §2.13): `clutches` clutches of `founder`'s own size
+/// (the lanternjaw's, shipped), buried on faces where its prey stand — spread over the
+/// prey, so a component with more prey gets more of the bank — and nowhere else. The
+/// eggs buried, or why none could be.
 pub fn bury_founding_clutches(
     world: &World,
     flora: &Flora,
     fauna: &mut Fauna,
+    founder: Founder,
     clutches: usize,
 ) -> Result<usize, String> {
     let _ = flora;
-    let (_, prey) = prey_components(world, fauna, Founder::Lanternjaw);
+    let (_, prey) = prey_components(world, fauna, founder);
     if prey.is_empty() {
         return Err(
-            "no prey component: no frondgrazer or littershredder stands anywhere a              lanternjaw could walk, so no egg bank is buried"
-                .to_string(),
+            format!(
+                "no prey component: none of its prey stands anywhere a {} could walk, so \
+                 no egg bank is buried",
+                founder.name()
+            ),
         );
     }
     let faces: Vec<Site> = prey.values().flatten().copied().collect();
     let eggs = fauna
         .config()
-        .founder(Founder::Lanternjaw)
+        .founder(founder)
         .core
         .reproduction
         .clutch_size
@@ -1148,7 +1140,7 @@ pub fn bury_founding_clutches(
             world,
             FaunaCommand::BuryClutch {
                 site,
-                lineage: Founder::Lanternjaw,
+                lineage: founder,
                 eggs,
             },
         ) {
@@ -1233,18 +1225,19 @@ fn spread_heading(k: usize, of: usize) -> f64 {
 fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec<Site> {
     let phys = *fauna.config().founder(Founder::Browser);
     let map = RouteMap::for_founder(view, &phys);
-    let food = food_on(&map, view, fv, Founder::Browser);
-    browser_faces_on(&map, &food, view, fv)
+    let food = food_on(&map, view, fv, &phys);
+    faces_at_food(&map, &food, view, fv, phys.diet)
 }
 
-/// [`browser_faces`] on a route map and its food already built.
-fn browser_faces_on(
+/// [`browser_faces`]' rule for any diet, on a route map and its food already built: the
+/// faces of an [`cubarium_voxel_fauna::FoundingSite::AtFood`] lineage.
+fn faces_at_food(
     map: &RouteMap,
     food: &BTreeMap<usize, ComponentFood>,
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
+    diet: cubarium_voxel_fauna::Diet,
 ) -> Vec<Site> {
-    let diet = cubarium_voxel_fauna::Diet::of(Founder::Browser);
     let mut out: Vec<Site> = Vec::new();
     for stand in fv.stands.iter().filter(|s| s.foliage > 0.0) {
         for layer in fv.layers(stand) {
@@ -2170,6 +2163,58 @@ mod tests {
         );
     }
 
+    /// Roster R0: **the founding table is config**. A preset TOML's
+    /// `[fauna.founders.<lineage>] founding_count`, read through the parameter layers the
+    /// host reads a file with, is the count seeded; a lineage at 0 founds nothing (no body,
+    /// no starter litter); an unnamed lineage keeps its code default.
+    #[test]
+    fn a_lineage_at_count_zero_founds_nothing_and_a_preset_count_is_honoured() {
+        let file: toml::Table = r#"
+            [fauna.founders.littershredder]
+            founding_count = 0
+            diet = ["carrion", "litter"]
+            [fauna.founders.frondgrazer]
+            founding_count = 3
+        "#
+        .parse()
+        .unwrap();
+        let params = crate::params::Params::resolve(&crate::params::Layers {
+            file: Some(file),
+            ..Default::default()
+        })
+        .unwrap();
+        let counts = params.fauna.founder_counts();
+        use cubarium_voxel_fauna::{Diet, Food};
+        assert_eq!(
+            params.fauna.founder(Founder::Blind).diet,
+            Diet::of(&[Food::Litter, Food::Carrion]),
+            "the diet list is a knob too"
+        );
+        assert_eq!(counts[Founder::Blind.index()], 0);
+        assert_eq!(counts[Founder::Browser.index()], 3);
+        assert_eq!(
+            counts[Founder::Lanternjaw.index()],
+            cubarium_voxel_fauna::FaunaConfig::default().founder_counts()[Founder::Lanternjaw.index()],
+            "an unnamed lineage keeps its code default"
+        );
+        let mut fauna_cfg = cubarium_voxel_fauna::FaunaConfig::placeholder();
+        for f in Founder::ALL {
+            fauna_cfg.founders[f.index()].founding_count = counts[f.index()];
+        }
+        let mut world = crate::scene::authored(config());
+        let mut flora = Flora::new(Default::default());
+        let mut fauna = Fauna::new(fauna_cfg);
+        let got = seed(&mut world, &mut flora, &mut fauna);
+        assert_eq!(got.founders[Founder::Blind.index()], 0, "count 0 founds nothing: {got:?}");
+        assert_eq!(got.litter_tiles, 0, "and lays no starter litter");
+        assert!(
+            fauna.view().animals.iter().all(|a| a.founder != Some(Founder::Blind)),
+            "no littershredder anywhere"
+        );
+        let browsers = got.founders[Founder::Browser.index()];
+        assert!((1..=3).contains(&browsers), "the preset's three, at most: {got:?}");
+    }
+
     /// A layer read back from its bytes has bodies but no controllers (they are not
     /// saved); `reinstall_heuristics` puts one back on every founder body.
     #[test]
@@ -2385,7 +2430,7 @@ mod tests {
         let fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         let phys = *fauna.config().founder(Founder::Browser);
         let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, Founder::Browser);
-        let diet = cubarium_voxel_fauna::Diet::of(Founder::Browser);
+        let diet = fauna.config().founder(Founder::Browser).diet;
         let (fv, view) = (flora.view(), world.view());
         let (mut edible, mut stock) = (0.0, 0.0);
         for stand in fv.stands.iter() {
