@@ -1899,6 +1899,33 @@
      "cells": 1001
     }
    ]
+  },
+  "seedporter-stand": {
+   "bytes": 262,
+   "bins": [
+    {
+     "length_m": 0.31,
+     "cells": 39
+    }
+   ]
+  },
+  "seedporter-ground": {
+   "bytes": 275,
+   "bins": [
+    {
+     "length_m": 1.14,
+     "cells": 40
+    }
+   ]
+  },
+  "seedporter-glide": {
+   "bytes": 300,
+   "bins": [
+    {
+     "length_m": 1.24,
+     "cells": 45
+    }
+   ]
   }
  },
  "specimens": {
@@ -1907,6 +1934,9 @@
   "capgnawer": "capgnawer.cvm",
   "seedporter": "seedporter.cvm",
   "bellwing": "bellwing.cvm",
-  "loftstrider": "loftstrider.cvm"
+  "loftstrider": "loftstrider.cvm",
+  "seedporter-stand": "seedporter-stand.cvm",
+  "seedporter-ground": "seedporter-ground.cvm",
+  "seedporter-glide": "seedporter-glide.cvm"
  }
 }

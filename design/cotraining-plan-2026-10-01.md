@@ -115,3 +115,47 @@ and by a small σ.
    agents on it, and these processes don't saturate the cores.
 
 Stage 0's brief is `design/handoffs/cotrain-stage0-2026-10-01.md`.
+
+## Result, 2026-10-01 (stages 0–3 run overnight)
+
+**What ran**
+- **Stage 1** (ecology only, 1 h worlds) was stopped early. Two harness problems surfaced:
+  - Breeding was a binary cliff, so the search had nothing to climb. Fixed with graded
+    readiness.
+  - The x30 bite K was mass-scaled. That is a units bug: each bite got 17 % of its want.
+    Fixed at 6526dc36.
+- **Stage 2** (2 h worlds, 41 genes, soft screen margin, movement weight ×10 from g10/g8):
+  - **A, the lock step:** 15 generations, 189 brain steps.
+  - **B, the ecology-only control:** 12 generations.
+  - Both ran on two c7g.16xlarge spot hosts from g5/g4 on. The speedup was only about 15 %,
+    because the window barrier waits for the slowest world.
+
+**Gate:** seeds 9–16 × 2 h. Columns are summed over 8 worlds; "late" counts worlds with a
+late birth.
+
+| arm | shredders alive / births / late | browsers alive / births / late | browser moving |
+|---|---|---|---|
+| defaults + round-2 brains | 18 / 10 / 6 | 18 / 6 / 1 | 0.40 |
+| A ecology + A brains | 41 / 31 / 8 | 51 / 32 / 8 | 0.20 |
+| A ecology + round-2 brains | 36 / 21 / 8 | 40 / 22 / 8 | 0.18 |
+| B ecology + round-2 brains | 36 / 19 / 8 | 58 / 39 / 8 | 0.14 |
+| B ecology + A brains | 33 / 34 / 8 | 53 / 34 / 8 | 0.15 |
+
+**Reading the gate**
+- **Breeding is solved:** every lineage breeds late in every world.
+- **Survivors are about 2.5× the defaults.** No plant species was lost in any world.
+- **The trained brains add +10 births per lineage** on the same ecology.
+- **Movement is not solved.** Browsers move 0.14–0.20, below the 0.30 target and below the
+  defaults' 0.40. A's brains also park the shredders, at 0.22 against 0.51.
+- **Lanternjaws hatch but never establish,** in every arm.
+- **Wrysk saw browsers stuck spinning in crags:** `design/handoffs/browser-stuck-in-crags-2026-10-01.md`.
+
+The files are in `config/training/cotrain-2026-10-01/` (training only; the live defaults
+are unchanged):
+- `lockstep-g15-mean.toml` and its two centres;
+- `control-g12-mean.toml`.
+
+Watch it with `./scripts/run-voxel.sh --config config/desktop/terrarium.toml --params
+config/training/cotrain-2026-10-01/lockstep-g15-mean.toml --founder-policy
+browser=config/training/cotrain-2026-10-01/lockstep-g15-centre-frondgrazer.json
+--founder-policy littershredder=config/training/cotrain-2026-10-01/lockstep-g15-centre-littershredder.json`.

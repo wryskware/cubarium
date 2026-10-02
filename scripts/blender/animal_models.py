@@ -4,9 +4,10 @@
 
 The Blender builders the voxel bake (`bake_voxel_models.py`) takes its animals from: the
 three simulated founders (frondgrazer, littershredder, and the lanternjaw, added
-2026-10-01 from its pick) and six unsimulated specimens
+2026-10-01 from its pick) and nine unsimulated specimens
 (chorister, ripple-snail, capgnawer, seedporter, bellwing, and the loftstrider, added
-2026-10-01 from its pick). Each moves its signed-off
+2026-10-01 from its pick; the seedporter's stand, ground and glide poses, 2026-10-01, the
+pick's own pose being its climbing one). Each moves its signed-off
 blockout (`animal_bodies_r2.py`: CH v3, RS-D2 v2, CG-D2 v2, SP-AB2, FG/LT v2, BW-A) to
 its pick in `art/gen/artbook/` (README table; `design/handoffs/voxel-model-pass-2026-10-01.md`).
 Blockout fidelity: primitives, tubes and lofts, every part, count, proportion and colour
@@ -116,6 +117,12 @@ COATS = {
         "a_foot": ("#191817", "#30321A"), "a_eye": ("#0C0707", "#0C0707"),
         "a_membrane": ("#DBDA7B", "#EDEAA5"), "a_fruit": ("#802B51", "#D6658A"),
         "magenta": ("#B5376A", "#C13E7B"),
+        # the pose models' cheek dots: not in the bake's palette, so Blender only; at
+        # 0.125 m the face is one cell, and it shows the eyes
+        "a_cheek": ("#B5376A", "#C13E7B"),
+        # and their claws, Blender only too: a claw drawn in voxels is a black cell
+        # beyond the hand or foot
+        "a_claw": ("#191817", "#30321A"),
     },
     # violet plates (shadow -> lit), dark joints and underside, legs and striking arms, claw
     # tips, fangs and razor blades (pale), eyes (magenta), lure orbs (cyan), lure holders.
@@ -148,6 +155,10 @@ COATS = {
         "a_tendril": ("#EEB4A7", "#F1C4B9"), "magenta": ("#C0099E", "#E20CAF"),
     },
 }
+
+# the seedporter's poses wear its coat
+for _pose in ("stand", "ground", "glide"):
+    COATS[f"seedporter-{_pose}"] = COATS["seedporter"]
 
 CUR = [None]
 
@@ -634,6 +645,286 @@ def seedporter():
         ell(pts[i] - (pts[i] - centre).normalized() * r * 0.6, (r * 0.5, r * 0.5, r * 0.5), c("a_pale"))
 
 
+# --- seedporter poses · stand, ground, glide (Wrysk 2026-10-01) ------------------------------
+#
+# One body in three poses, from Wrysk's picks among the Qwen 2.1 edits of the artbook image
+# (art/gen/artbook/seedporter-{stand,ground,glide}.png; the rest in
+# art/gen/runs/2026-10-01-seedporter-poses/). Wrysk's anatomy, which the pictures do not
+# keep: the big clawed arms are the front pair; the membranes run from their wrists to the
+# hind legs' knees; the small fruit-handling arms are the middle pair. Proportions are the
+# pick builder's (0.5 m head to pelvis); the limbs keep their lengths in every pose (`ik`).
+
+SP_ARM, SP_SMALL, SP_LEG = (0.16, 0.16), (0.07, 0.07), (0.13, 0.13)
+SP_HEAD = 1.25  # the head's scale: the pictures' heads are as wide as the shoulders
+
+
+def _dir(az, el):
+    a, e = math.radians(az), math.radians(el)
+    return Vector((math.cos(e) * math.cos(a), math.cos(e) * math.sin(a), math.sin(e)))
+
+
+def ik(root, target, a, b, pole):
+    """Two-bone limb from root toward target, bending toward pole: (joint, end). Out of
+    reach, the limb straightens toward the target."""
+    root, target, pole = Vector(root), Vector(target), Vector(pole)
+    d = target - root
+    n = min(d.length, a + b - 1e-4)
+    u = d.normalized()
+    x = (a * a - b * b + n * n) / (2 * n)
+    h = math.sqrt(max(a * a - x * x, 0.0))
+    p = (pole - u * pole.dot(u)).normalized()
+    return root + u * x + p * h, root + u * n
+
+
+def sp_digits(root, d, up, n, length, claw, r):
+    """n fingers or toes fanned about `up`, from root along d, each ending in a dark claw
+    hooking down (against `up`)."""
+    d, up = Vector(d).normalized(), Vector(up).normalized()
+    for k in range(n):
+        dk = Matrix.Rotation(math.radians((k - (n - 1) / 2) * 18), 3, up) @ d
+        tip = root + dk * length
+        tube([root, root + dk * length * 0.55 + up * 0.006, tip], r, r * 0.75, c("a_main"), seg=6)
+        tube([tip, tip + dk * claw * 0.6 - up * claw * 0.8], r * 0.7, 0.0015, c("a_claw"), seg=5)
+
+
+def sp_web(edge, free, th=0.006):
+    """A membrane between its attached edge and its free edge (both run wrist -> knee): a
+    ruled slab, both resampled to the same count, thickened along the boundary's normal."""
+    n, rows = 24, 4
+    A = [Vector(p) for p in catmull([tuple(q) for q in edge], n)]
+    B = [Vector(p) for p in catmull([tuple(q) for q in free], n)]
+    loop = A + B[::-1]
+    nrm = Vector()
+    for i, p in enumerate(loop):  # Newell's normal of the boundary
+        q = loop[(i + 1) % len(loop)]
+        nrm += Vector(((p.y - q.y) * (p.z + q.z), (p.z - q.z) * (p.x + q.x), (p.x - q.x) * (p.y + q.y)))
+    nrm = nrm.normalized() * th / 2
+    bm = bmesh.new()
+    grid = [[A[i].lerp(B[i], r / rows) for i in range(n)] for r in range(rows + 1)]
+    top = [[bm.verts.new(p + nrm) for p in row] for row in grid]
+    bot = [[bm.verts.new(p - nrm) for p in row] for row in grid]
+    for r in range(rows):
+        for i in range(n - 1):
+            bm.faces.new((top[r][i], top[r][i + 1], top[r + 1][i + 1], top[r + 1][i]))
+            bm.faces.new((bot[r][i], bot[r + 1][i], bot[r + 1][i + 1], bot[r][i + 1]))
+    rim = ([(0, i) for i in range(n)] + [(r, n - 1) for r in range(1, rows + 1)]
+           + [(rows, i) for i in range(n - 2, -1, -1)] + [(r, 0) for r in range(rows - 1, -1, -1)])
+    for (r0, i0), (r1, i1) in zip(rim, rim[1:] + rim[:1]):
+        if (r0, i0) != (r1, i1):
+            bm.faces.new((top[r0][i0], bot[r0][i0], bot[r1][i1], top[r1][i1]))
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return L.mk("web", bm, c("a_membrane"))
+
+
+def sp_head(H, F, tilt, mouth_open):
+    """The head about its cranium centre H, the face toward F: the tall cranium tipped back
+    by `tilt` degrees, pale face and muzzle, big black almond eyes slanting up and out,
+    three magenta dots under each, the mouth, the dark stripe over the top."""
+    F = Vector(F).normalized()
+    S = Vector((0, 0, 1)).cross(F).normalized()
+    U = F.cross(S)
+
+    def at(f, s, u):
+        return H + F * f + S * s + U * u
+
+    def frame(t, roll=0.0):
+        t, ro = math.radians(t), math.radians(roll)
+        f2, u2 = F * math.cos(t) + U * math.sin(t), U * math.cos(t) - F * math.sin(t)
+        s2, u3 = S * math.cos(ro) + u2 * math.sin(ro), u2 * math.cos(ro) - S * math.sin(ro)
+        return Matrix(((f2.x, s2.x, u3.x, 0), (f2.y, s2.y, u3.y, 0), (f2.z, s2.z, u3.z, 0), (0, 0, 0, 1)))
+
+    k = SP_HEAD
+    cr = at(0.01 * k, 0, 0.025 * k)
+    ell(cr, (0.078 * k, 0.07 * k, 0.1 * k), c("a_main"), rot=frame(tilt))
+    ell(at(0.04 * k, 0, -0.04 * k), (0.05 * k, 0.056 * k, 0.048 * k), c("a_pale"), rot=frame(0))
+    ell(at(0.062 * k, 0, -0.07 * k), (0.022 * k, 0.03 * k, 0.022 * k), c("a_pale"), rot=frame(0))
+    ell(at(0.082 * k, 0, -0.08 * k), (0.008 * k, 0.016 * k, (0.006 + 0.006 * mouth_open) * k), c("a_dark"), rot=frame(0))
+    for s in (-1, 1):
+        ell(at(0.07 * k, s * 0.036 * k, -0.012 * k), (0.016 * k, 0.03 * k, 0.022 * k), c("a_eye"), rot=frame(0, -s * 25))
+        for d in range(3):
+            ell(at((0.08 - d * 0.004) * k, s * (0.024 + d * 0.009) * k, (-0.044 - d * 0.004) * k), (0.0035 * k,) * 3,
+                c("a_cheek"))
+    t = math.radians(tilt)
+    f2, u2 = F * math.cos(t) + U * math.sin(t), U * math.cos(t) - F * math.sin(t)
+    tube([cr + f2 * 0.078 * k * math.cos(math.radians(a)) + u2 * 0.1 * k * math.sin(math.radians(a))
+          for a in (40, 65, 90, 115, 140, 165, 190)], 0.009 * k, 0.008 * k, c("a_mark"), seg=6)
+
+
+def sp_body(spec):
+    """Draw the seedporter from a pose spec (see SP_POSES)."""
+    start = len(L.ORG)
+    grip = []  # the big hands' and the hind feet's digits
+    H, F = Vector(spec["head"]), _dir(*spec["face"])
+    U = F.cross(Vector((0, 0, 1)).cross(F).normalized())
+    nk = H - (F * 0.02 + U * 0.035) * SP_HEAD
+    st = spec["spine"] + [(nk.x, nk.y, nk.z, 0.026, 0.026)]  # tail base -> neck -> into the head
+    axis = [Vector(p[:3]) for p in catmull([s[:3] for s in st], 120)]
+
+    def zone(f, s, p):
+        i = min(range(len(axis)), key=lambda k: (axis[k] - p).length)
+        t = axis[min(i + 1, len(axis) - 1)] - axis[max(i - 1, 0)]
+        belly = Vector((t.z, 0.0, -t.x)).normalized()  # the spine's tangent turned down/forward
+        d = p - axis[i]
+        cosb = d.dot(belly) / max(d.length, 1e-9)
+        return 1 if cosb > 0.2 else (2 if cosb < -0.93 else 0)
+    loft([(x, y, z, ry, rz) for x, y, z, ry, rz in st], [c("a_main"), c("a_pale"), c("a_mark")], zone,
+         nring=48, nseg=20)
+    sp_head(H, F, spec["tilt"], spec["mouth"])
+    for s in (-1, 1):
+        def m(v):
+            return Vector((v[0], s * v[1], v[2]))
+        # the big front arms, and their hands
+        sh = m(spec["shoulder"])
+        el, wr = ik(sh, m(spec["hand"]), *SP_ARM, m(spec["arm_pole"]))
+        tube([sh, el, wr], 0.016, 0.011, c("a_main"), seg=8)
+        n0 = len(L.ORG)
+        sp_digits(wr, m(_dir(*spec["fingers"])), m(spec["finger_up"]), 4, 0.045, 0.022, 0.0055)
+        grip += L.ORG[n0:]
+        # the small middle arms, holding the fruit
+        ss = m(spec["small_shoulder"])
+        se, sw = ik(ss, m(spec["small_hand"]), *SP_SMALL, m(spec["small_pole"]))
+        tube([ss, se, sw], 0.011, 0.008, c("a_main"), seg=8)
+        sp_digits(sw, (spec["fruit"] - sw).normalized(), Vector((0, 0, 1)), 3, 0.022, 0.01, 0.004)
+        # the hind legs, and their feet
+        hp = m(spec["hip"])
+        kn, an = ik(hp, m(spec["ankle"]), *SP_LEG, m(spec["leg_pole"]))
+        tube([hp, kn], 0.026, 0.017, c("a_main"), seg=8)
+        tube([kn, an], 0.016, 0.012, c("a_main"), seg=8)
+        n0 = len(L.ORG)
+        sp_digits(an, m(_dir(*spec["toes"])), m(spec["toe_up"]), 4, 0.05, 0.022, 0.0065)
+        grip += L.ORG[n0:]
+        # the membrane: wrist, along the arm, down the flank, the thigh to the knee; its
+        # free edge back from the knee to the wrist
+        side = [m(q) for q in spec["flank"]]
+        edge = [wr, el, sh] + side + [hp, kn]
+        free = spec["free"](kn, wr, s)
+        sp_web(edge, [wr] + free + [kn])
+    ell(spec["fruit"], (0.028, 0.028, 0.03), c("a_fruit"))
+    # the long prehensile tail, its dorsal stripe along the outside
+    pts = [Vector(p) for p in catmull([st[0][:3]] + spec["tail"], 70)]
+    n = len(pts)
+    r0, r1 = spec.get("tail_r", (0.026, 0.005))
+    for i in range(n - 1):
+        r = r0 + (r1 - r0) * i / (n - 1)
+        cyl(pts[i], pts[i + 1], r, r, mat=c("a_main"), seg=8)
+        o = spec["tail_up"](pts[i], i / (n - 1))
+        t = (pts[i + 1] - pts[i]).normalized()
+        o = (o - t * o.dot(t)).normalized() * r * 0.75
+        cyl(pts[i] + o, pts[i + 1] + o, r * 0.45, r * 0.45, mat=c("a_mark"), seg=6)
+    if spec.get("feet_on_ground") is not None:
+        # z = 0 under the hands and feet (the perch), the tail hanging below it; the feet
+        # stand that far above it, inside the ground row of cells
+        low = min(v.co.z for ob in grip if ob.type == "MESH" and slot_of(ob.data.materials[0].name) != "a_claw"
+                  for v in ob.data.vertices)
+        for ob in L.ORG[start:]:
+            ob.data.transform(Matrix.Translation((0, 0, spec["feet_on_ground"] - low)))
+
+
+def _spiral(centre, plane, a0, a1, r0, r1, n=24):
+    """Points on a spiral about centre in a plane (two unit axes), angle a0 -> a1 degrees."""
+    u, v = (Vector(q) for q in plane)
+    out = []
+    for k in range(n + 1):
+        t = k / n
+        a = math.radians(a0 + (a1 - a0) * t)
+        r = r0 + (r1 - r0) * t
+        out.append(tuple(Vector(centre) + u * r * math.cos(a) + v * r * math.sin(a)))
+    return out
+
+
+def _sag(down, depth, bumps=0.0):
+    """A free edge between knee and wrist, hanging `depth` along `down` at its middle, with
+    `bumps` deep scallops between three slack points."""
+    def free(kn, wr, s):
+        out = []
+        dv = Vector((down[0], s * down[1], down[2]))
+        for t in (0.8, 0.6, 0.4, 0.2):  # wrist -> knee
+            out.append(kn.lerp(wr, t) + dv * (depth * math.sin(math.pi * t) + bumps * abs(math.sin(2.5 * math.pi * t))))
+        return out
+    return free
+
+
+SP_POSES = {
+    # perched upright on a branch (the branch is not drawn), eating the fruit; the big arms
+    # straight down to the perch outside the crouched knees, the membranes folded between
+    # them; the tail hanging below the perch into a coil seen from the front. The perch is
+    # z = 0 (Wrysk 2026-10-01: ground level under its feet), so the tail's cells go below it.
+    "stand": dict(
+        spine=[(-0.03, 0, 0.43, 0.03, 0.03), (0.0, 0, 0.47, 0.045, 0.042), (0.015, 0, 0.56, 0.036, 0.034),
+               (0.03, 0, 0.65, 0.05, 0.045), (0.035, 0, 0.72, 0.03, 0.028)],
+        head=(0.05, 0, 0.87), face=(0, -8), tilt=12, mouth=1.0,
+        shoulder=(0.03, 0.055, 0.69), hand=(0.1, 0.13, 0.39), arm_pole=(-0.3, 1, 0),
+        fingers=(15, -50), finger_up=(0.5, 0, 1),
+        small_shoulder=(0.06, 0.035, 0.6), small_hand=(0.14, 0.028, 0.735), small_pole=(0, 1, -0.6),
+        fruit=Vector((0.15, 0, 0.74)),
+        hip=(-0.005, 0.045, 0.45), ankle=(0.05, 0.08, 0.39), leg_pole=(1, 0.5, 0.6),
+        toes=(10, -30), toe_up=(0.4, 0, 1),
+        flank=[(0.025, 0.05, 0.64), (0.012, 0.038, 0.55)],
+        free=_sag((-0.5, 0.8, -0.3), 0.07, 0.015),
+        tail=[(-0.08, 0, 0.37), (-0.1, -0.015, 0.27), (-0.085, -0.01, 0.17)]
+             + _spiral((-0.07, 0.085, 0.085), ((0, 1, 0), (0, 0, 1)), 180, 520, 0.085, 0.022),
+        tail_up=lambda p, f: (p - Vector((-0.07, 0.085, 0.085))) if f > 0.4 else Vector((-1, 0, 0)),
+        # 0.1 m keeps the cells of the look Wrysk approved (2026-10-01, r6): the face row
+        # pale | eye | pale, the feet in the ground row
+        feet_on_ground=0.1,
+    ),
+    # walking on all fours, the big arms as front legs, the small arms holding the fruit at
+    # the chest, the membranes draped along the flanks; the tail behind, curling up into a
+    # coil seen from the side
+    "ground": dict(
+        spine=[(-0.3, 0, 0.29, 0.03, 0.03), (-0.24, 0, 0.29, 0.045, 0.042), (-0.09, 0, 0.29, 0.036, 0.034),
+               (0.06, 0, 0.295, 0.05, 0.046), (0.12, 0, 0.34, 0.03, 0.028)],
+        head=(0.2, 0, 0.49), face=(0, -8), tilt=45, mouth=0.0,
+        shoulder=(0.08, 0.055, 0.31), hand=(0.15, 0.09, 0.03), arm_pole=(-1, 0.4, 0),
+        fingers=(25, -8), finger_up=(0, 0, 1),
+        small_shoulder=(0.1, 0.035, 0.26), small_hand=(0.18, 0.026, 0.28), small_pole=(0, 1, -0.5),
+        fruit=Vector((0.19, 0, 0.28)),
+        hip=(-0.24, 0.045, 0.27), ankle=(-0.225, 0.11, 0.035), leg_pole=(1, 0.6, 0.5),
+        toes=(20, -8), toe_up=(0, 0, 1),
+        flank=[(0.06, 0.05, 0.295), (-0.09, 0.036, 0.29)],
+        free=_sag((0, 0.3, -1), 0.1, 0.012),
+        # thin, and level on the cell row z = 0.3125 so it is one voxel thick, ending in a
+        # small upward curl
+        tail=[(-0.4, 0, 0.3125), (-0.52, 0, 0.3125), (-0.64, 0, 0.3125), (-0.72, 0, 0.3125)]
+             + _spiral((-0.75, 0, 0.375), ((1, 0, 0), (0, 0, 1)), -90, -400, 0.0625, 0.02),
+        tail_r=(0.016, 0.004),
+        tail_up=lambda p, f: (p - Vector((-0.75, 0, 0.375))) if f > 0.7 else Vector((0, 0, 1)),
+    ),
+    # gliding, level and belly down: the big arms spread wide and the knees out, the
+    # membranes taut from wrist to knee; the small arms hold the fruit under the chest; the
+    # tail streams straight out behind
+    "glide": dict(
+        spine=[(-0.21, 0, 0.11, 0.03, 0.028), (-0.15, 0, 0.11, 0.045, 0.038), (-0.05, 0, 0.11, 0.036, 0.032),
+               (0.05, 0, 0.115, 0.05, 0.042), (0.12, 0, 0.13, 0.03, 0.028)],
+        head=(0.22, 0, 0.21), face=(0, -25), tilt=25, mouth=0.5,
+        shoulder=(0.08, 0.05, 0.135), hand=(0.24, 0.35, 0.21), arm_pole=(-1, 0, 0.2),
+        fingers=(40, -5), finger_up=(0, 0, 1),
+        small_shoulder=(0.1, 0.035, 0.09), small_hand=(0.155, 0.022, 0.055), small_pole=(0, 1, -0.3),
+        fruit=Vector((0.165, 0, 0.05)),
+        hip=(-0.15, 0.045, 0.1), ankle=(-0.27, 0.2, 0.08), leg_pole=(0.4, 1, 0.2),
+        toes=(160, -10), toe_up=(0, 0, 1),
+        flank=[(0.05, 0.048, 0.115), (-0.05, 0.035, 0.11)],
+        free=_sag((-0.5, -0.6, 0), 0.025, 0.02),
+        tail=[(-0.35, 0.02, 0.105), (-0.5, -0.03, 0.105), (-0.65, -0.05, 0.11), (-0.8, -0.01, 0.12),
+              (-0.9, 0.03, 0.13)],
+        tail_up=lambda p, f: Vector((0, 0, 1)),
+    ),
+}
+
+
+def seedporter_stand():
+    sp_body(SP_POSES["stand"])
+
+
+def seedporter_ground():
+    sp_body(SP_POSES["ground"])
+
+
+def seedporter_glide():
+    sp_body(SP_POSES["glide"])
+
+
 # --- bellwing · BW-A with the thin corkscrew tendril (wingspan 0.375 m) ---------------------
 #
 # Pick: art/gen/artbook/bellwing.png, front view: the hanging plum bell with its magenta
@@ -882,6 +1173,10 @@ def loftstrider():
             ell(toe, (0.1, 0.07, 0.05), c("a_foot"), rot=rz(30 + 60 * k + dt))
 
 
+# Models whose parts hang below their z = 0 (the perch under the stand pose's feet): the
+# voxelizer keeps their cells below the ground row (offsets dy < 0).
+BELOW_GROUND = {"seedporter-stand"}
+
 # name: (builder, reference length, width, height in metres). The founders' references are
 # their adult bodies (`assets/voxel-models/source.json`); a specimen is built and baked at
 # its own (the bake's placeholder table), here as its built extent.
@@ -892,6 +1187,9 @@ REF = {
     "ripple-snail": (ripple_snail, 0.19, 0.19, 0.125),
     "capgnawer": (capgnawer, 0.25, 0.21, 0.19),
     "seedporter": (seedporter, 0.2, 0.63, 0.94),
+    "seedporter-stand": (seedporter_stand, 0.31, 0.37, 1.04),
+    "seedporter-ground": (seedporter_ground, 1.14, 0.31, 0.67),
+    "seedporter-glide": (seedporter_glide, 1.24, 0.76, 0.35),
     "bellwing": (bellwing, 0.05, 0.375, 0.4),
     "lanternjaw": (lanternjaw, 1.0, 0.25, 0.45),
     "loftstrider": (loftstrider, 2.2, 2.4, 3.4),
@@ -919,6 +1217,8 @@ PICKS = {
     "chorister": "chorister.png", "frondgrazer": "frondgrazer.png",
     "littershredder": "littershredder.png", "ripple-snail": "ripple-snail-organic.png",
     "capgnawer": "capgnawer-rose-bark.png", "seedporter": "seedporter.png", "bellwing": "bellwing.png",
+    "seedporter-stand": "seedporter-stand.png", "seedporter-ground": "seedporter-ground.png",
+    "seedporter-glide": "seedporter-glide.png",
     "lanternjaw": "lanternjaw.png",
     "loftstrider": "loftstrider.png",
 }
@@ -927,6 +1227,7 @@ PICKS = {
 VIEWS = {
     "chorister": (-80.0, 8.0), "frondgrazer": (100.0, 8.0), "littershredder": (115.0, 20.0),
     "ripple-snail": (-60.0, 22.0), "capgnawer": (20.0, 22.0), "seedporter": (0.0, 5.0),
+    "seedporter-stand": (0.0, 5.0), "seedporter-ground": (70.0, 12.0), "seedporter-glide": (180.0, 45.0),
     "bellwing": (0.0, 4.0), "lanternjaw": (35.0, 22.0),
     "loftstrider": (0.0, 8.0),
 }
@@ -974,7 +1275,7 @@ def sheets(out, only):
         az, el = VIEWS[name]
         cam = ortho_camera(objs, az, el, W / H)
         L.render(cam, os.path.join(out, f"_{name}-model.png"), W, H)
-        cells = B.voxelize_animal(objs, vox)
+        cells = B.voxelize_animal(objs, vox, None if name in BELOW_GROUND else 0)
         B.reset_scene()
         cubes = voxel_cubes(name, cells, vox)
         cam = ortho_camera(cubes, az, el, W / H)
@@ -1004,10 +1305,17 @@ def voxel_cubes(name, cells, vox):
     for (i, j, k), mat in cells.items():
         slot = slot_of(mat)
         lo, hi = COATS[name].get(slot, COATS[name]["a_main"])
-        t = 1.0 if top <= 0 else round(k / top * 3) / 3
+        t = 1.0 if top <= 0 else round(min(max(k, 0), top) / top * 3) / 3
         key = f"vox:{name}:{slot}:{t:.2f}"
         L.PAL[key] = _mix(lo, hi, t)
         objs.append(box(((i + 0.5) * vox, (j + 0.5) * vox, (k + 0.5) * vox), (vox, vox, vox), key))
+    if name in BELOW_GROUND and cells:
+        # the ground (perch) line, z = 0, through the model: a thin plate in front of it
+        i0, i1 = min(c[0] for c in cells), max(c[0] for c in cells)
+        j0, j1 = min(c[1] for c in cells), max(c[1] for c in cells)
+        L.PAL["vox:ground"] = "#8A6F55"
+        objs.append(box((((i0 + i1) / 2 + 0.5) * vox, ((j0 + j1) / 2 + 0.5) * vox, -0.01),
+                        ((i1 - i0 + 3) * vox, (j1 - j0 + 3) * vox, 0.02), "vox:ground"))
     return objs
 
 
