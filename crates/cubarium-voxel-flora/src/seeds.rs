@@ -814,7 +814,7 @@ fn runner_target(
 }
 
 /// The support face in column `(x, z)` at `y`, or one voxel above or below it.
-fn support_near(view: &VoxelView<'_>, x: i64, z: u32, y: u32) -> Option<Site> {
+pub(crate) fn support_near(view: &VoxelView<'_>, x: i64, z: u32, y: u32) -> Option<Site> {
     let width = view.config.width as i64;
     [Some(y), y.checked_add(1), y.checked_sub(1)]
         .into_iter()

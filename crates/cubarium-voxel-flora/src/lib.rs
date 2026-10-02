@@ -52,6 +52,9 @@ mod layers;
 mod seed_marks_tests;
 #[cfg(test)]
 mod carrion_tests;
+mod film;
+#[cfg(test)]
+mod film_tests;
 mod seeds;
 pub mod snapshot;
 mod step;
@@ -517,6 +520,17 @@ pub struct Ground {
     /// next one if they still pass. A one-check delay, so the presenter reads a flag and
     /// evaluates no gate per frame.
     pub sprouting: Option<Species>,
+    /// **Glassfilm** (`design/handoffs/voxel-roster-2026-10-01.md`, R2a): the living film
+    /// on a shallow submerged face, organic matter. A fourth pool beside litter, dead wood
+    /// and carrion, stepped by `film.rs`: it grows from light on the site's `mineral`,
+    /// spreads to less-filmed wet neighbours, dies to this site's litter when the site
+    /// dries or deepens, and is grazed with [`Flora::take_film`].
+    pub film: f64,
+    /// The mineral held in the film: drawn from `mineral` as it grows, returned to it as
+    /// it respires.
+    pub film_mineral: f64,
+    /// The energy held in the film, respired as heat at the stock's current density.
+    pub film_energy: f64,
 }
 
 impl Ground {
@@ -548,6 +562,9 @@ impl Ground {
             carcass: None,
             last_landing: None,
             sprouting: None,
+            film: 0.0,
+            film_mineral: 0.0,
+            film_energy: 0.0,
         }
     }
 
@@ -2278,6 +2295,33 @@ pub struct FloraConfig {
     /// L, and the voxel readings ([`SpeciesConfig::crown_height`]) divide by this. Set by
     /// [`FloraConfig::for_voxel_size`]; the reference 0.25 m by default.
     pub voxel_m: f64,
+    /// **Glassfilm** (R2a): a site is wet-eligible while its standing water is above 0
+    /// and at most this deep, metres.
+    pub film_max_depth_m: f64,
+    /// Glassfilm: light under water is the sky light times `exp(-this · depth)`, per metre.
+    pub film_extinction_per_m: f64,
+    /// Glassfilm: logistic growth rate per second at full light,
+    /// `rate · light · film · (1 − film / capacity)`, with no construction cost.
+    pub film_growth_per_s: f64,
+    /// Glassfilm: carrying capacity per square metre of face, organic matter.
+    pub film_capacity_per_m2: f64,
+    /// Glassfilm: upkeep per second per unit film, respired, on every site holding film,
+    /// wet or dry.
+    pub film_maintenance_per_s: f64,
+    /// Glassfilm: fragments a less-filmed eligible site gains per second per unit of each
+    /// eligible 4-neighbour's film, paid by the neighbour.
+    pub film_spread_per_s: f64,
+    /// Glassfilm: loss per second on a dry or too-deep site, into its own litter.
+    pub film_dry_death_per_s: f64,
+    /// Glassfilm: what [`Flora::seed_film`] puts on every eligible site, organic matter
+    /// per square metre.
+    pub film_seed_per_m2: f64,
+    /// Glassfilm: mineral per unit of film tissue, drawn from the site's pool as it grows
+    /// (springturf's `n_tissue` by default).
+    pub film_n_tissue: f64,
+    /// Glassfilm: energy per unit of film tissue (springturf's `energy_density` by
+    /// default).
+    pub film_energy_density: f64,
 }
 
 impl Default for FloraConfig {
@@ -2315,6 +2359,20 @@ impl Default for FloraConfig {
             founder_log_organic: 0.4,
             founder_patch_spacing_m: 1.5,
             voxel_m: 0.25,
+            film_max_depth_m: 0.6,
+            film_extinction_per_m: 0.8,
+            // Plausible, untuned (brief R2a): a seed at 5 % of capacity fills to 90 % in
+            // about an hour of full light (net 1.4e-3 /s), a dried film is 95 % gone in
+            // about ten minutes (ln 20 / 0.005 s), dark upkeep halves it in about two
+            // hours, and spread is a fraction of growth.
+            film_growth_per_s: 0.0015,
+            film_capacity_per_m2: 0.4,
+            film_maintenance_per_s: 0.0001,
+            film_spread_per_s: 0.0002,
+            film_dry_death_per_s: 0.005,
+            film_seed_per_m2: 0.02,
+            film_n_tissue: SpeciesConfig::springturf().n_tissue,
+            film_energy_density: SpeciesConfig::springturf().energy_density,
         }
     }
 }
@@ -2688,6 +2746,16 @@ pub struct FloraLedger {
     /// **cover** species: a death, counted in `deaths` too, with its tissue booked to
     /// dead wood and litter like any other.
     pub overtopped: [u64; Species::COUNT],
+    /// **Glassfilm budget** (R2a), organic matter, cumulative diagnostics: what
+    /// [`Flora::seed_film`] introduced (also in `seeded_organic_in`), what the film grew
+    /// (also in `fixed_in`), what it respired (also in `respired_out`), what dying sent to
+    /// litter (internal), and what [`Flora::take_film`] handed out (also in
+    /// `consumed_organic_out`). Spread moves film between sites and books nothing.
+    pub film_seeded: f64,
+    pub film_produced: f64,
+    pub film_respired: f64,
+    pub film_to_litter: f64,
+    pub film_consumed: f64,
 }
 
 impl FloraLedger {
@@ -3377,6 +3445,19 @@ impl<'a> FloraView<'a> {
             .map(|i| &self.ground[i])
     }
 
+    /// The glassfilm stock on `site`, organic matter; 0 where there is none (R2a).
+    pub fn film_at(&self, site: Site) -> f64 {
+        self.ground_at(site).map_or(0.0, |g| g.film)
+    }
+
+    /// Every site holding film, with its stock, in site order (R2a).
+    pub fn film_sites(&self) -> impl Iterator<Item = (Site, f64)> + use<'a> {
+        self.ground
+            .iter()
+            .filter(|g| g.film > 0.0)
+            .map(|g| (g.site, g.film))
+    }
+
     /// Organic matter in every living and dead stock, the seed banks and the latticevines
     /// included. The site's mineral pool is not organic matter and is not in here.
     pub fn organic(&self) -> f64 {
@@ -3389,6 +3470,7 @@ impl<'a> FloraView<'a> {
                     g.litter
                         + g.dead_wood
                         + g.carrion
+                        + g.film
                         + g.seeds.iter().map(|c| c.organic).sum::<f64>()
                 })
                 .sum::<f64>()
@@ -3406,6 +3488,7 @@ impl<'a> FloraView<'a> {
                         + g.litter_mineral
                         + g.dead_wood_mineral
                         + g.carrion_mineral
+                        + g.film_mineral
                         + g.seeds.iter().map(|c| c.mineral).sum::<f64>()
                 })
                 .sum::<f64>()
@@ -3597,6 +3680,7 @@ impl<'a> FloraView<'a> {
                     g.litter_energy
                         + g.dead_wood_energy
                         + g.carrion_energy
+                        + g.film_energy
                         + g.seeds
                             .iter()
                             .map(|c| self.config.species(c.species).energy_density * c.organic)
@@ -4281,6 +4365,62 @@ impl Flora {
             want,
         )?;
         g.clear_spent_carcass(self.config.carcass_gone_fraction);
+        Some(self.book_consumed(taken))
+    }
+
+    /// **Glassfilm founding** (R2a): put `film_seed_per_m2` of film on every wet-eligible
+    /// support face of `world` (standing water above 0 and at most `film_max_depth_m`),
+    /// at `film_n_tissue` mineral and `film_energy_density` energy per unit, booked as
+    /// introduced the way `Seed` is. A site with no [`Ground`] is provisioned with its
+    /// `initial_mineral` as a deposit's is, under either [`Provision`]. Returns how many
+    /// sites were seeded.
+    pub fn seed_film(&mut self, world: &World) -> usize {
+        let view = world.view();
+        let c = view.config;
+        let organic = self.config.film_seed_per_m2 * c.voxel_m * c.voxel_m;
+        if !(organic > 0.0) {
+            return 0;
+        }
+        let mineral = self.config.film_n_tissue * organic;
+        let energy = self.config.film_energy_density * organic;
+        let mut n = 0;
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                for y in 0..c.height {
+                    if !view.is_support(x, y, z)
+                        || !film::eligible(&view, self.config.film_max_depth_m, x, y, z)
+                    {
+                        continue;
+                    }
+                    let site = Site { x: x as u32, y, z };
+                    let i = step::provisioned_slot(
+                        &self.config,
+                        &mut self.ground,
+                        site,
+                        &mut self.ledger,
+                    );
+                    let g = &mut self.ground[i];
+                    g.film += organic;
+                    g.film_mineral += mineral;
+                    g.film_energy += energy;
+                    self.ledger.seeded_organic_in += organic;
+                    self.ledger.seeded_mineral_in += mineral;
+                    self.ledger.seeded_energy_in += energy;
+                    self.ledger.film_seeded += organic;
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    /// A grazer eats **film** off the site, up to `want`, pro rata —
+    /// [`Flora::take_litter`]'s rule on the film pool, booked as consumed.
+    pub fn take_film(&mut self, site: Site, want: f64) -> Option<Taken> {
+        let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
+        let g = &mut self.ground[i];
+        let taken = take_pool(&mut g.film, &mut g.film_mineral, &mut g.film_energy, want)?;
+        self.ledger.film_consumed += taken.organic;
         Some(self.book_consumed(taken))
     }
 

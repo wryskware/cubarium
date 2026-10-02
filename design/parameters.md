@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (614 rows)
+**`flora.*`** (624 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -979,6 +979,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.founder_log_organic` | 0.4 | org-units | [0, inf) | 0.1–1 | - | placeholder | founding: dead wood laid under each glowcap founder |
 | `flora.founder_patch_spacing_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | founding: least distance between two patch centres |
 | `flora.voxel_m` | 0.25 | m | (0, inf) |  | - | derived | the world's cell size, recorded (set from world.voxel_m) |
+| `flora.film_max_depth_m` | 0.6 | m | [0, inf) |  | - | placeholder | glassfilm: deepest standing water a site is wet-eligible under |
+| `flora.film_extinction_per_m` | 0.8 | /m | [0, inf) |  | - | placeholder | glassfilm: light extinction per metre of water |
+| `flora.film_growth_per_s` | 0.0015 | /s | [0, inf) |  | - | placeholder | glassfilm: logistic growth rate at full light |
+| `flora.film_capacity_per_m2` | 0.4 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm: carrying capacity per square metre |
+| `flora.film_maintenance_per_s` | 0.0001 | /s | [0, inf) |  | - | placeholder | glassfilm: upkeep, respired |
+| `flora.film_spread_per_s` | 0.0002 | /s | [0, inf) |  | - | placeholder | glassfilm: fragments a neighbour sends per unit of its film |
+| `flora.film_dry_death_per_s` | 0.005 | /s | [0, inf) |  | - | placeholder | glassfilm: loss on a dry or too-deep site, to litter |
+| `flora.film_seed_per_m2` | 0.02 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm: founding film per square metre |
+| `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
+| `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
 **`fauna.*`** (297 rows)
 
