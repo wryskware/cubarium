@@ -331,6 +331,7 @@ Commit your own paths only. Stop every background shell before you return.
   model through R0's fallback, at `y_m`. One pose, as for every animal. The vane beat
   and the folded perch pose are owed, and they need more baked poses. Note it; don't
   invent them.
+- **Commit before the measure**, so an interrupt loses nothing.
 - **Measure:** 8 seeds × 60 min (WORKING_POLICY "Verification runs"), not 4 h. Presets:
   the desktop terrarium and the Tachyon voxel config. The MP4 stays.
 
