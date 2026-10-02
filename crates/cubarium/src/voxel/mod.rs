@@ -3830,6 +3830,63 @@ mod tests {
         assert!(format!("{e:#}").contains("flora.springturf.nope"), "{e:#}");
     }
 
+    /// `--params <file>` (opt-in; co-training stage 2's "watch the winner"): a search
+    /// genome (a run's `mean.toml` / `best.toml`) is decoded over the config's tables, a
+    /// resolved parameter file (a run's `mean-params/params.toml`) replaces the plants and
+    /// animals whole, `--set` still comes last, and without the flag nothing changes.
+    #[test]
+    fn params_takes_a_genome_or_a_resolved_file_and_is_opt_in() {
+        use clap::Parser;
+        let voxel = |args: &[&str]| -> crate::cli::Voxel {
+            let mut line = vec!["cubarium", "voxel"];
+            line.extend(args.iter().copied());
+            match crate::cli::Cli::parse_from(line).command {
+                crate::cli::Command::Voxel(v) => v,
+                other => panic!("expected a voxel command, got {other:?}"),
+            }
+        };
+        let dir = std::env::temp_dir().join(format!("cub-live-params-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg: VoxelConfig = toml::from_str("[world]
+width = 64
+").unwrap();
+        let shipped = resolve_params(&voxel(&[]), &cfg).expect("no --params");
+        let base = shipped.fauna.founder(Founder::Browser).core.maintenance_per_s;
+
+        // A genome: K_bio x2 runs every animal's upkeep twice as fast.
+        let mut g = cubarium_search::es::voxel::live::ecology::EcologyParams::cotrain();
+        g.set("K_bio", 2.0).unwrap();
+        let genome = dir.join("mean.toml");
+        g.save(&genome, "a test genome").unwrap();
+        let path = genome.display().to_string();
+        let p = resolve_params(&voxel(&["--params", &path]), &cfg).expect("a genome");
+        assert_eq!(p.fauna.founder(Founder::Browser).core.maintenance_per_s, 2.0 * base);
+        assert_eq!(p.world.width, 64, "the world stays the config's");
+        let p = resolve_params(
+            &voxel(&[
+                "--params",
+                &path,
+                "--set",
+                "fauna.founders.frondgrazer.core.maintenance_per_s=0.003",
+            ]),
+            &cfg,
+        )
+        .expect("--set over the genome");
+        assert_eq!(p.fauna.founder(Founder::Browser).core.maintenance_per_s, 0.003);
+
+        // A resolved parameter file: its plants and animals, the config's world.
+        let resolved = dir.join("params.toml");
+        std::fs::write(&resolved, g.params().unwrap().to_toml().unwrap()).unwrap();
+        let p = resolve_params(&voxel(&["--params", &resolved.display().to_string()]), &cfg)
+            .expect("a resolved file");
+        assert_eq!(p.fauna.founder(Founder::Browser).core.maintenance_per_s, 2.0 * base);
+        assert_eq!(p.world.width, 64);
+
+        // Without the flag, the shipped set.
+        assert_eq!(resolve_params(&voxel(&[]), &cfg).unwrap(), shipped);
+        assert!(resolve_params(&voxel(&["--params", "/no/such/file.toml"]), &cfg).is_err());
+    }
+
     /// A config file whose `[world]` no world can be built from is an error, not a panic:
     /// `World::new` asserts, so the run validates first.
     #[test]
