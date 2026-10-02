@@ -790,11 +790,11 @@ def seg_tail(pts, r0, r1):
 
 # --- loftstrider · radial canopy browser (2.2 x 2.4 x 3.4 m) ---------------------------------
 #
-# Reference (Wrysk 2026-10-01): art/gen/runs/loftstrider-model/ref-loftstrider.png, a front
-# view. Radially symmetric about a vertical axis, in sixes (Wrysk: the image does not keep
+# Pick (Wrysk 2026-10-01): art/gen/artbook/loftstrider.png, a front view. Radially symmetric about a vertical axis, in sixes (Wrysk: the image does not keep
 # these counts): an onion-shaped body on six long legs, six magenta eyes round its middle,
 # each between two legs; a long neck up to a pink head with the mouth hole on top; round the
-# mouth six bone tusks and six feeding fronds, alternating and equally spaced. Front (+x) is
+# mouth six bone tusks and six feeding fronds, alternating and equally spaced, the fronds in
+# three sizes (`LS_FROND`). Front (+x) is
 # an eye. Legs and fronds at 30 + 60 k degrees, eyes and tusks at 60 k. Sizes follow D15:
 # underside ~1.2 m, eyes at ~1.5 m, mouth at ~2.8 m, frond crowns to ~3.4 m.
 #
@@ -825,9 +825,10 @@ def ribbon(path, widths, side, mat, th=0.02):
 
 
 # The fronds' sizes, from the root, one per frond going round (k = 0..5 at 30 + 60 k
-# degrees): 1 as the reference draws them. Wrysk asked to see them smaller, then mixed.
-# `LS_FROND=0.75` (all alike) or `LS_FROND=1,0.75,0.6,0.75,1,0.6` in the environment.
-LS_FROND = [float(v) for v in os.environ.get("LS_FROND", "1").split(",")]
+# degrees), 1 being the reference's size. Wrysk 2026-10-01 chose them mixed: each of
+# 100, 75 and 60 % twice, no two neighbours alike. `LS_FROND=0.75` (all alike) or six
+# values in the environment override it for comparisons.
+LS_FROND = [float(v) for v in os.environ.get("LS_FROND", "1,0.75,0.6,0.75,1,0.6").split(",")]
 LS_FROND = LS_FROND * 6 if len(LS_FROND) == 1 else LS_FROND
 
 
@@ -918,7 +919,7 @@ PICKS = {
     "littershredder": "littershredder.png", "ripple-snail": "ripple-snail-organic.png",
     "capgnawer": "capgnawer-rose-bark.png", "seedporter": "seedporter.png", "bellwing": "bellwing.png",
     "lanternjaw": "lanternjaw.png",
-    "loftstrider": "../runs/loftstrider-model/ref-loftstrider.png",  # candidate, not in the artbook
+    "loftstrider": "loftstrider.png",
 }
 # The pick's view: camera azimuth (degrees from +x, counter-clockwise seen from above; -90
 # looks from -y at the left flank) and elevation.
