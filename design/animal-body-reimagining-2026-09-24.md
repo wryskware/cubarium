@@ -490,6 +490,23 @@ sensor marks. The chosen image retains a tall cranium and open mouth: do not sil
 replace it with subsequent head edits. Moss-green skin, pale underside and dark dorsal
 stripe remain the primary colourway.
 
+**Poses (selected 2026-10-01):** four models of the one body. The selected image is the
+**climbing** pose (its model is unchanged). Three more come from Wrysk's picks among Qwen
+2.1 edits of it: **standing**, perched upright eating
+([artbook](../art/gen/artbook/seedporter-stand.png)); **on the ground**, on all fours
+([artbook](../art/gen/artbook/seedporter-ground.png)); and **gliding**, level with the
+membranes spread ([artbook](../art/gen/artbook/seedporter-glide.png)). Wrysk set the
+anatomy the images do not keep: the membranes run from the big arms' wrists to the hind
+legs' knees, and the small fruit-handling arms are the middle pair. The models
+(`scripts/blender/animal_models.py`, `seedporter_stand`, `_ground`, `_glide` on one rig
+with fixed limb lengths) are the reference. They are baked as specimens
+`seedporter-stand`, `seedporter-ground` and `seedporter-glide`, in the seedporter's coat.
+The standing model's z = 0 is the perch under its feet, its tail hanging two cells below.
+On the ground the tail is thinner and the hind legs set back. In the pose models the cheek
+dots and claws are drawn in Blender only: at 0.125 m the face is one cell, and it shows
+the eyes. A seedporter's model by activity (climb, perch, walk, glide) is for the
+presenter when the animal is simulated; nothing selects it yet.
+
 **Retained alternate:** [compact head and fuller muzzle](../art/gen/artbook/seedporter-compact-head-alt.png),
 explicitly retained later, has a broader skull, lateral lobes and a closed mouth.
 It is an alternate, not a replacement. Both require outer-halo cleanup. The
