@@ -803,13 +803,15 @@ impl Default for VineConfig {
     ///
     /// - **Earning back a face.** A new face costs `spread_cost` 0.05 (its runner 0.02, the
     ///   rest construction) plus its leaf, 0.05 at full leaf: 0.1 in all. A lit side face
-    ///   (sky about 0.7) nets about `0.7 · 9e-5 − 1e-5 − 2e-6 ≈ 5.1e-5` a second at full
-    ///   leaf, so it pays for a new face in about half an hour, and a colony that
+    ///   (sky about 0.7) nets about `0.7 · 2.7e-4 − 1e-5 − 2e-6 ≈ 1.8e-4` a second at full
+    ///   leaf, so it pays for a new face in about ten minutes, and a colony that
     ///   reinvests everything (a new face also regrows from 0.2 leaf at `regrow_rate`
-    ///   0.002/s) doubles in roughly half an hour: one founder covers a few faces in its
-    ///   first ten minutes, about 25 in two hours and about 100 of a lit, watered wall in
-    ///   three (`tests/latticevine.rs` t16–t17), where stonecushion takes about 11,500 s
-    ///   to grow up.
+    ///   0.002/s, about seven minutes to full) doubles in roughly ten to fifteen minutes:
+    ///   about three times the first pace (9e-5, a doubling in half an hour), raised
+    ///   2026-10-01 because a live world's vines could not be seen
+    ///   (`design/handoffs/plants-glowcap-vine-2026-10-01.md` A3). One founder covers a
+    ///   lit, watered wall of a few hundred faces in a few hours (`tests/latticevine.rs`
+    ///   t16–t17).
     /// - **Water per leaf area like the ground plants.** Per square metre of leaf,
     ///   springturf transpires about `1e-6 · 0.12 / 0.196 ≈ 6e-7` m³/s at full size and
     ///   stonecushion about `1e-6 · 0.2 / 0.077 ≈ 2.6e-6`; the vine's 6e-8 m³/s per full
@@ -828,7 +830,7 @@ impl Default for VineConfig {
             dry_spell_s: 600.0,
             wet_spell_s: 300.0,
             leaf_fall_s: 60.0,
-            assimilation: 9e-5,
+            assimilation: 2.7e-4,
             underside_light: 0.15,
             leaf_mass: 0.05,
             runner_mass: 0.02,
@@ -863,8 +865,9 @@ impl VineConfig {
     /// How many founders a world of `area_m2` of floor gets:
     /// `max(founders, round(founders_per_m2 · area_m2))`.
     pub fn founder_count(&self, area_m2: f64) -> usize {
-        let _ = area_m2;
-        self.founders as usize
+        let by_area = (self.founders_per_m2 * area_m2).round();
+        let by_area = if by_area.is_finite() && by_area > 0.0 { by_area as usize } else { 0 };
+        by_area.max(self.founders as usize)
     }
 }
 
@@ -1915,18 +1918,23 @@ impl Flora {
         taken
     }
 
-    /// Root [`VineConfig::founders`] founder vines on a fresh world, each with
+    /// Root [`VineConfig::founder_count`] founder vines on a fresh world (the floor's area
+    /// times [`VineConfig::founders_per_m2`], at least [`VineConfig::founders`]), each with
     /// [`VineConfig::founder_reserve`]: on soil support faces at the **foot** of a wall at
     /// least three faces tall, or on the **lip** of a soil ledge with at least two faces of
-    /// drop below it (a stepped slope's risers count, joined by [`stair_up`]), drawn by the world seed and kept [`VineConfig::founder_spacing`] voxels apart.
-    /// Returns how many rooted.
+    /// drop below it (a stepped slope's risers count, joined by [`stair_up`]). The
+    /// **tallest walls first**: each candidate carries its wall's height in eligible faces
+    /// — counted up from a foot (straight up or up a stair), down from a lip (straight down
+    /// or down a stair) — and the world seed's shuffle only breaks ties; kept
+    /// [`VineConfig::founder_spacing`] voxels apart. Returns how many rooted.
     pub fn seed_vine_founders(&mut self, world: &World) -> usize {
-        let want = self.config.latticevine.founders as usize;
+        let view = world.view();
+        let c = view.config;
+        let area = f64::from(c.width) * f64::from(c.depth) * c.voxel_m * c.voxel_m;
+        let want = self.config.latticevine.founder_count(area);
         if want == 0 {
             return 0;
         }
-        let view = world.view();
-        let c = view.config;
         let ok = |f: Face| face_eligible(&view, f);
         // The next eligible face up from `f`, straight up the wall or up a stair.
         let up = |f: Face| {
@@ -1935,7 +1943,30 @@ impl Flora {
                 .filter(|&n| ok(n))
                 .or_else(|| stair_up(c, f).filter(|&n| ok(n)))
         };
-        let mut candidates: Vec<(Site, Face)> = Vec::new();
+        // The next eligible face down from `f`, straight down or down a stair.
+        let down = |f: Face| {
+            (f.y >= 1)
+                .then(|| Face::new(f.x, f.y - 1, f.z, f.dir))
+                .filter(|&n| ok(n))
+                .or_else(|| stair_down(c, f).filter(|&n| ok(n)))
+        };
+        // A wall's height in eligible faces from `f` along `next`, `f` included, bounded by
+        // the world's height so a pathological chain cannot loop.
+        let height = |f: Face, next: &dyn Fn(Face) -> Option<Face>| {
+            let mut n = 1u32;
+            let mut at = f;
+            while n < c.height {
+                match next(at) {
+                    Some(g) => {
+                        n += 1;
+                        at = g;
+                    }
+                    None => break,
+                }
+            }
+            n
+        };
+        let mut candidates: Vec<(Site, Face, u32)> = Vec::new();
         for z in 0..c.depth {
             for x in 0..c.width {
                 for y in view.supports_in_column(x as i64, z) {
@@ -1951,7 +1982,8 @@ impl Flora {
                             && ok(Face::new(wx, wy, wz, d))
                             && up(Face::new(wx, wy, wz, d)).and_then(up).is_some()
                         {
-                            candidates.push((s, Face::new(wx, wy, wz, d)));
+                            let f = Face::new(wx, wy, wz, d);
+                            candidates.push((s, f, height(f, &up)));
                         }
                         // Lip: the ledge's own side, with a drop below it, straight or
                         // down a stair.
@@ -1961,7 +1993,7 @@ impl Flora {
                             && (ok(Face::new(x, y - 1, z, d))
                                 || stair_down(c, lip).is_some_and(|n| ok(n)))
                         {
-                            candidates.push((s, Face::new(x, y, z, d)));
+                            candidates.push((s, lip, height(lip, &down)));
                         }
                     }
                 }
@@ -1970,12 +2002,14 @@ impl Flora {
         if candidates.is_empty() {
             return 0;
         }
-        // A keyed shuffle, then the first that keep their distance.
+        // A keyed shuffle, then tallest first — the sort is stable, so the shuffle breaks
+        // the ties — then the first that keep their distance.
         let mut rng = Rng::keyed(DOMAIN_VINE_FOUNDERS, c.seed, candidates.len() as u64, 0);
         for i in (1..candidates.len()).rev() {
             let j = rng.below(i + 1);
             candidates.swap(i, j);
         }
+        candidates.sort_by_key(|&(_, _, h)| std::cmp::Reverse(h));
         let width = c.width as i64;
         let spacing = i64::from(self.config.latticevine.founder_spacing);
         let apart = |a: Site, b: Site| {
@@ -1987,7 +2021,7 @@ impl Flora {
         };
         let reserve = self.config.latticevine.founder_reserve;
         let mut rooted: Vec<Site> = Vec::new();
-        for (site, first) in candidates {
+        for (site, first, _) in candidates {
             if rooted.len() >= want {
                 break;
             }
