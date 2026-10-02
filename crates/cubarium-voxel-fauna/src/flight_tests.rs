@@ -1025,7 +1025,16 @@ fn the_fan_sees_a_flower_below_ahead_and_altitude_and_ceiling_read_true() {
     for nectar in [true, false] {
         let mut world = plain_with(config(24, 24, 9, clock_at(12.0)));
         rock(&mut world, 0..=8, 3..=6);
-        let mut flora = Flora::new(if nectar { nectar_flora() } else { FloraConfig::default() });
+        // The no-nectar arm switches bloomcrown's nectar off explicitly (F1 implementer):
+        // the shipped default makes nectar (`bloomcrown_is_the_one_species_with_a_nectar_stock`
+        // requires it), so the default config cannot stand for "a crown with no nectar".
+        let mut flora = Flora::new(if nectar {
+            nectar_flora()
+        } else {
+            let mut c = FloraConfig::default();
+            c.bloomcrown.nectar_per_s = 0.0;
+            c
+        });
         let site = blooming(&mut flora, &mut world, 16, 4, 60);
         assert_eq!(stand_nectar(&flora, site) > 0.0, nectar, "fixture: nectar {nectar}");
         let top = crown_top(&flora, site);

@@ -531,6 +531,95 @@ const RIPPLE_SNAIL_MODULES: [Module; 6] = [
     MODULE_CHEM_FILM,
     MODULE_LIGHT,
 ];
+// F1: the flyer's layout (predation-and-flight §3.6). `Self` gains `altitude` (the base's
+// height over the support face below / `band_max_m`) and `ceiling` (the clear height over
+// the base to the first solid or water cell in its column / `band_max_m`, capped at 1).
+const FLYER_SELF_CHANNELS: [&str; 10] = [
+    "energy",
+    "reserve",
+    "birth_readiness",
+    "structural_loss",
+    "assimilated_intake",
+    "resolved_forward",
+    "resolved_turn",
+    "motor_delivery",
+    "altitude",
+    "ceiling",
+];
+
+const MODULE_FLYER_SELF: Module = Module {
+    name: "Self",
+    offset: 0,
+    width: 10,
+    channels: &FLYER_SELF_CHANNELS,
+};
+
+/// A flyer's state in the air: perched (1) or aloft (0), the rain rate over the flight's
+/// `R₀` (capped at 1), and whether a downpour is falling.
+const AIR_CHANNELS: [&str; 3] = ["perched", "rain", "downpour"];
+
+const MODULE_AIR: Module = Module {
+    name: "Air",
+    offset: 10,
+    width: 3,
+    channels: &AIR_CHANNELS,
+};
+
+/// A flyer's mouth: the nearest bloom's nectar in reach.
+const MODULE_FLYER_TASTE: Module = Module {
+    name: "Taste(1)",
+    offset: 13,
+    width: 3,
+    channels: &TASTE1_CHANNELS,
+};
+
+const FAN3_CHANNELS: [&str; 25] = [
+    "s0.clear",
+    "s0.all_proximity",
+    "s0.bloom",
+    "s0.bloom_proximity",
+    "s0.foliage",
+    "s0.foliage_proximity",
+    "s0.body",
+    "s0.body_proximity",
+    "s1.clear",
+    "s1.all_proximity",
+    "s1.bloom",
+    "s1.bloom_proximity",
+    "s1.foliage",
+    "s1.foliage_proximity",
+    "s1.body",
+    "s1.body_proximity",
+    "s2.clear",
+    "s2.all_proximity",
+    "s2.bloom",
+    "s2.bloom_proximity",
+    "s2.foliage",
+    "s2.foliage_proximity",
+    "s2.body",
+    "s2.body_proximity",
+    "valid",
+];
+
+/// The flyer's downward fan (§3.6): the browser's three sectors and yaw offsets, pitches
+/// −80 … +40, 4 m, with a `bloom` class beside foliage and bodies.
+const MODULE_FAN3: Module = Module {
+    name: "Fan(3, bloom/foliage/body)",
+    offset: 16,
+    width: 25,
+    channels: &FAN3_CHANNELS,
+};
+
+const BELLWING_MODULES: [Module; 4] = [MODULE_FLYER_SELF, MODULE_AIR, MODULE_FLYER_TASTE, MODULE_FAN3];
+
+/// The flyer fan's pitch offsets, degrees (§3.6): it looks down.
+pub const FLYER_RAY_PITCH_OFFSETS_DEG: [f64; 5] = [-80.0, -50.0, -20.0, 10.0, 40.0];
+/// The classes a flyer's fan exposes.
+pub const FLYER_VISIBLE_CLASSES: [&str; 3] = ["bloom", "foliage", "body"];
+/// The flyer's mouth mapping: a soft flower; no ground contact (a mouth in air reads
+/// nothing).
+const BELLWING_TASTE_RESISTANCES: [(&str, f64); 1] = [("nectar", 0.1)];
+
 const BROWSER_MODULES: [Module; 5] = [
     MODULE_SELF,
     MODULE_CONTACT4,
@@ -645,6 +734,8 @@ const BROWSER_TASTE_RESISTANCES: [(&str, f64); 3] =
 
 /// The controller period every founder is sampled at, seconds.
 const CONTROLLER_PERIOD_S: f64 = 0.25;
+/// A flyer's controller period (F1): one tick.
+const FLYER_CONTROLLER_PERIOD_S: f64 = cubarium_voxel::DT;
 
 /// The fields of a manifest that are the founder's **physical anchors**, read off its
 /// frozen physiology (D1) so the contract and the body cannot drift apart.
@@ -997,12 +1088,10 @@ impl Manifest {
         }
     }
 
-    /// The bellwing (F1): its own 4-action manifest (`forward`, `turn`, `feed`, `lift`).
-    /// F1 builds the flyer's layout: the downward fan (pitches −80, −50, −20, +10, +40,
-    /// range 4 m, the three sectors) with a `bloom` class, and `Self` gaining `altitude`
-    /// and `ceiling` (predation-and-flight §3.6).
-    // F1 stub: the browser's layout, cone and references on the bellwing's (stub)
-    // physiology, with the lift action. No altitude, ceiling or bloom yet.
+    /// The bellwing (F1): its own 4-action manifest (`forward`, `turn`, `feed`, `lift`)
+    /// and the flyer's layout — `Self` with `altitude` and `ceiling`, `Air`, a nectar
+    /// `Taste(1)`, and the downward fan (pitches −80, −50, −20, +10, +40, range 4 m, the
+    /// three sectors) with a `bloom` class (predation-and-flight §3.6). 41 inputs.
     pub fn bellwing() -> Manifest {
         let a = anchors(Founder::Bellwing);
         let r = SelfReferences::of(Founder::Bellwing);
@@ -1028,10 +1117,20 @@ impl Manifest {
             structural_reference: r.body,
             cruise_m_per_s: a.cruise,
             yaw_cap_rad_per_s: a.yaw,
-            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
             taste_reference: a.taste_ref,
+            modules: &BELLWING_MODULES,
+            // A flyer's controller is sampled every tick: at the walkers' 0.25 s a 1 m/s
+            // flyer would go a quarter metre past every decision (a hover at a flower is
+            // a centimetre-scale act).
+            controller_period_s: FLYER_CONTROLLER_PERIOD_S,
+            forward_reference_m: a.cruise * FLYER_CONTROLLER_PERIOD_S,
+            taste_cue: "nectar",
+            taste_resistances: &BELLWING_TASTE_RESISTANCES,
+            visible_classes: &FLYER_VISIBLE_CLASSES,
+            ray_pitch_offsets_deg: &FLYER_RAY_PITCH_OFFSETS_DEG,
+            cone_range_m: 4.0,
             ..Manifest::browser()
         }
     }

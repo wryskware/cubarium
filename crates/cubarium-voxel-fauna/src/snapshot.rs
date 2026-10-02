@@ -18,7 +18,9 @@ use crate::Fauna;
 /// (`always-fresh-never-migrate`): start a fresh world.
 // 28: F1 (tests-first stubs) — `Pose::y_m`, `Mobility::{mode, perch}`, `Animal::last_bloom`,
 // `FounderPhysiology::flight`, the bellwing lineage and the nectar food class.
-pub const SCHEMA: u32 = 28;
+// 29: F1 — `Perch::anchor`, `Mobility::falling`, `FounderState::lift`, `Flight::lift_speed_fraction`,
+// the flight ledger lines and the bellwing's own physiology.
+pub const SCHEMA: u32 = 29;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -110,6 +110,11 @@ const LITTER_YIELD: f64 = 0.5;
 /// What a grazer builds out of a unit of foliage — and, by the decision, what a
 /// shredder builds out of a unit of glowcap cap tissue.
 const FOLIAGE_YIELD: f64 = 0.5;
+/// Nectar's assimilation yield (F1): sugar, mostly absorbed. A placeholder.
+const NECTAR_YIELD: f64 = 0.8;
+/// The bellwing's mass against the littershredder's (F1): `body_max` 0.001 (x1, the
+/// note's number) over the shredder's 0.0125.
+pub const BELLWING_MASS_RATIO: f64 = 0.001 / 0.0125;
 
 /// The capgnawer's body volume over the littershredder's (roster R1): 0.25 × 0.21 ×
 /// 0.19 m over 0.375 × 0.125 × 0.125 m. A derivation, not a knob: the physiology fields
@@ -428,6 +433,34 @@ pub struct Flight {
     pub foliage_speed_factor: f64,
     /// `R₀` of the shower cost: flight costs × `(1 + rain rate / this)`, m/s of rain.
     pub shower_rain_reference_m_per_s: f64,
+    /// The vertical speed at full `lift` (either way), × the cruise speed. Bellwing 0.5:
+    /// half a metre a second, a full band (2.5 m) in five seconds.
+    #[serde(default = "half")]
+    pub lift_speed_fraction: f64,
+}
+
+fn half() -> f64 {
+    0.5
+}
+
+impl Flight {
+    /// The bellwing's table (predation-and-flight §3.3, §3.9; placeholders).
+    pub const BELLWING: Flight = Flight {
+        span_m: 0.375,
+        band_max_m: 2.5,
+        flight_factor: 4.0,
+        hover_factor: 5.0,
+        // Lift work: raising a body 1 m at a muscle efficiency of 0.25 costs g / 0.25 ≈
+        // 39 J/kg, against an insect's hover at about 300 W/kg. Scaled to this model's
+        // hover (5 × the basal 0.001 body/s), a metre climbed costs 0.005 × 39 / 300 ≈
+        // 6.5e-4 of the body: at the full lift (0.5 m/s) about 6 % on top of a hover.
+        climb_work_per_m: 6.5e-4,
+        takeoff_s: 1.0,
+        foliage_speed_factor: 0.5,
+        // Heavy rain (10 mm/h) doubles the cost of a second aloft.
+        shower_rain_reference_m_per_s: 10.0 / 1000.0 / 3600.0,
+        lift_speed_fraction: 0.5,
+    };
 }
 
 /// Where an egg-laying lineage lays ([`FounderPhysiology::egg_site`], roster R2b).
@@ -465,6 +498,10 @@ pub enum FoundingSite {
     /// The browser's: a face from which its mouth reaches a stocked layer of a stand its
     /// diet accepts, in a component holding at least two such stands.
     AtFood,
+    /// A flyer's (F1, the bellwing): perched on a dry support face within its fan's range
+    /// (horizontally) of a nectar source — a bloomcrown past its seedling profile or a
+    /// latticevine-covered face. Walkable components do not enter it.
+    NearNectar,
 }
 
 /// A carnivore's numbers (`design/predation-and-flight-2026-09-28.md` §2.12, every one
@@ -911,13 +948,55 @@ impl FounderPhysiology {
             // ([`SpeciesConfig::scale_mass`]); upkeep and the motor are per unit of body,
             // so specific rates equal the shredder's. The shredder's eggs, timings,
             // lifespan and legs.
-            // F1 stub: the browser's table at a founding count of 0, walking. The
-            // implementer builds the bellwing here (predation-and-flight §3.9): its body,
-            // span and `flight` table, nectar diet, cruise, Diurnal, founding site.
-            Founder::Bellwing => FounderPhysiology {
-                founding_count: 0,
-                ..FounderPhysiology::placeholder(Founder::Browser)
-            },
+            // The bellwing (F1, predation-and-flight §3.3, §3.9): a bell body 0.125 m long
+            // and wide, 0.0625 m tall, on a 0.375 m span; `body_max` 0.001 (x1), pinned by
+            // the note. Built from the littershredder **by mass** (k = 0.001 / 0.0125 =
+            // 0.08, [`SpeciesConfig::scale_mass`]) as the capgnawer is by volume: a small
+            // invertebrate-sized animal, so the shredder's per-unit upkeep, its eggs
+            // (on the litter of the face below its perch), timings and lifespan. Upkeep
+            // and the motor are per unit of body, so specific rates equal the shredder's.
+            Founder::Bellwing => {
+                let shredder = FounderPhysiology::placeholder(Founder::Blind);
+                let mut core = shredder.core;
+                core.scale_mass(BELLWING_MASS_RATIO);
+                // Nectar's half-stock: a tenth of a bloomcrown's nectar cap (0.02), so a
+                // full flower gives about nine tenths of a sip and a nearly drained one
+                // crumbs. Not a mass (the food's stock does not scale with the eater).
+                core.bite_half_stock = 0.002;
+                FounderPhysiology {
+                    core,
+                    // Cruise 8 BL/s, 1 m/s at 0.125 m (§3.3).
+                    cruise_body_lengths_per_s: 8.0,
+                    adult_length_m: 0.125,
+                    adult_width_m: 0.125,
+                    adult_height_m: 0.0625,
+                    // It never walks: no step, no wall climb. Wades and drowns at its
+                    // height (unread aloft: a flyer never enters water).
+                    step_up_m: 0.0,
+                    step_down_m: 0.0,
+                    climbs_walls: false,
+                    // Nectar is sugar: most of it is absorbed (0.8); the mineral it carries
+                    // (bloomcrown's `nectar_mineral_fraction`) binds before the yield does.
+                    // Every other class carries the foliage yield so none is a silent zero.
+                    yield_by_food: {
+                        let mut y = [FOLIAGE_YIELD; crate::Food::COUNT];
+                        y[crate::Food::Nectar.index()] = NECTAR_YIELD;
+                        y
+                    },
+                    organ_structure_fraction: 0.10,
+                    active: crate::Activity::Diurnal,
+                    agility: 0.0,
+                    diet: crate::Diet::only(crate::Food::Nectar),
+                    founding: Founding::Bodies,
+                    founding_site: FoundingSite::NearNectar,
+                    founding_count: 0,
+                    flight: Some(Flight::BELLWING),
+                    // Taste reads nectar against a bloomcrown's full flower (its
+                    // `nectar_cap`, 0.02): a full flower tastes 1 before saturation.
+                    taste_reference: Some(0.02),
+                    ..shredder
+                }
+            }
             Founder::RippleSnail => {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let grazer = FounderPhysiology::placeholder(Founder::Browser);
@@ -2406,6 +2485,9 @@ pub(crate) fn observation(
         .founder
         .expect("an observation is built for a founder body");
     let phys = fauna.config.founder(founder);
+    if let Some(flight) = phys.flight {
+        return flyer_observation(fauna, i, view, fv, manifest, cone_occupancy, &flight);
+    }
     // The body this animal actually has right now: the anchors below are fractions of
     // it, so a growing founder's eye, mouth and receptors rise with it (decisions §1).
     let body = phys.body_at(a.body);
@@ -2535,6 +2617,133 @@ pub(crate) fn observation(
         obs[base + 18] = f64::from(cone.valid);
     }
 
+    obs
+}
+
+/// **A flyer's observation** (F1, predation-and-flight §3.6; [`Manifest::bellwing`]'s
+/// layout): `Self` as every lineage's, plus `altitude` (the base's height over the support
+/// face below, over `band_max_m`) and `ceiling` (the clear height over the base to the
+/// first solid or water cell in its column, over `band_max_m`, capped at 1); `Air`
+/// (perched, the rain rate over the flight's `R₀`, a downpour); `Taste(1)`, the nearest
+/// bloom's nectar in the mouth's reach; and the downward fan, sector by sector, with
+/// `bloom` beside foliage and bodies. Without a prepared occupancy (a diagnostic) it
+/// builds its own window.
+fn flyer_observation(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    manifest: &Manifest,
+    cone_occupancy: Option<&crate::senses::ConeOccupancy>,
+    flight: &crate::Flight,
+) -> Vec<f64> {
+    let a = &fauna.animals[i];
+    let phys = fauna.config.founder(a.founder.expect("a founder body"));
+    let body = phys.body_at(a.body);
+    let v = view.config.voxel_m;
+    let mut obs = vec![0.0; manifest.inputs()];
+    let fb = &a.founder_state.feedback;
+    let k = phys.mass_scale;
+    obs[0] = clamp01(a.energy / (manifest.adult_energy_reference * k));
+    obs[1] = clamp01(a.reserve / (manifest.adult_reserve_reference * k));
+    obs[2] = f64::from(birth_readiness(&fauna.config, a, fv));
+    obs[3] = clamp01(fb.structural_loss / (manifest.structural_reference * k));
+    obs[4] = clamp01(fb.intake / (manifest.body_reference * k));
+    obs[5] = clamp01(fb.delivered_forward / manifest.forward_reference_m);
+    obs[6] = clamp_sym(fb.delivered_turn / manifest.turn_reference_rad);
+    obs[7] = if fb.attempted_equivalent > NONE_REQUESTED {
+        clamp01(fb.delivered_equivalent / fb.attempted_equivalent)
+    } else {
+        1.0
+    };
+    let band = flight.band_max_m;
+    if band > 0.0 {
+        obs[8] = clamp01((a.pose.y_m - crate::surface_m(a.site.y, v)) / band);
+        obs[9] = clamp01(crate::flight::clear_height(view, a.pose.x, a.pose.z, a.pose.y_m, band) / band);
+    }
+
+    let am = module(manifest, "Air");
+    obs[am.offset] = f64::from(a.mobility.mode == crate::MobilityMode::Perched);
+    if flight.shower_rain_reference_m_per_s > 0.0 {
+        obs[am.offset + 1] =
+            clamp01(f64::from(view.weather.rain_m_per_s) / flight.shower_rain_reference_m_per_s);
+    }
+    obs[am.offset + 2] =
+        f64::from(view.weather.mode == cubarium_voxel::weather::RainMode::Downpour);
+
+    let tm = module(manifest, "Taste(1)");
+    let shape = crate::flight::Shape::of(phys, flight, a.body);
+    let reach = shape.r + body.mouth_reach_m;
+    if let Some((_, stock)) =
+        crate::flight::bloom_in_reach(view, fv, crate::flight::mouth_point(a, shape), reach)
+    {
+        let reference = phys.taste_reference_stock(fauna.config.cue.emit_reference);
+        let c = if reference > 0.0 { (stock / reference).min(1.0) } else { 1.0 };
+        let sat = manifest.tunings.chem_saturation;
+        obs[tm.offset] = clamp01(c / (c + sat));
+        obs[tm.offset + 1] = resistance_of(manifest, "nectar");
+        obs[tm.offset + 2] = 1.0;
+    }
+
+    if let Some(fm) = module_opt(manifest, "Fan(3, bloom/foliage/body)") {
+        let owned;
+        let occupancy = match cone_occupancy {
+            Some(o) => o,
+            None => {
+                owned = crate::senses::cone_occupancy_window(
+                    view,
+                    fv,
+                    &fauna.view(),
+                    [a.pose.x],
+                    manifest.cone_range_m,
+                );
+                &owned
+            }
+        };
+        let origin = crate::flight::eye(a, &body);
+        let range = manifest.cone_range_m;
+        let rays = (manifest.ray_yaw_offsets_deg.len() * manifest.ray_pitch_offsets_deg.len()) as f64;
+        for (si, &centre) in manifest.sector_centres_deg.iter().enumerate().take(3) {
+            let (mut clear, mut hit, mut hit_prox) = (0u32, 0u32, 0.0f64);
+            let mut count = [0u32; 3];
+            let mut prox = [0.0f64; 3];
+            for &oyaw in manifest.ray_yaw_offsets_deg {
+                for &opitch in manifest.ray_pitch_offsets_deg {
+                    let dir = crate::senses::ray_direction(a.pose.heading_rad, centre, oyaw, opitch);
+                    match crate::flight::fan_first_hit(view, fv, occupancy, a.id, origin, dir, range) {
+                        None => clear += 1,
+                        Some((d, h)) => {
+                            let p = (1.0 - d / range).clamp(0.0, 1.0);
+                            hit += 1;
+                            hit_prox += p;
+                            let class = match h {
+                                crate::ConeHit::Bloom => Some(0),
+                                crate::ConeHit::FoliageCrown => Some(1),
+                                crate::ConeHit::Body => Some(2),
+                                _ => None,
+                            };
+                            if let Some(c) = class {
+                                count[c] += 1;
+                                prox[c] += p;
+                            }
+                        }
+                    }
+                }
+            }
+            let o = fm.offset + si * 8;
+            obs[o] = f64::from(clear) / rays;
+            obs[o + 1] = if hit > 0 { hit_prox / f64::from(hit) } else { 0.0 };
+            for c in 0..3 {
+                obs[o + 2 + 2 * c] = f64::from(count[c]) / rays;
+                obs[o + 3 + 2 * c] = if count[c] > 0 {
+                    prox[c] / f64::from(count[c])
+                } else {
+                    0.0
+                };
+            }
+        }
+        obs[fm.offset + 24] = 1.0;
+    }
     obs
 }
 

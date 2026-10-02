@@ -202,6 +202,14 @@ impl FounderControllers {
             .map_or(0.0, |at| self.entries[at].1.lure())
     }
 
+    /// The lift a body's controller holds after its last drive; 0 with no controller.
+    pub fn lift(&self, id: u64) -> f64 {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .map_or(0.0, |at| self.entries[at].1.lift())
+    }
+
     /// Whether a body's controller opts into the prey flee rule ([`Controller::flees`]).
     pub fn flees(&self, id: u64) -> bool {
         self.entries
@@ -493,9 +501,8 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         Founder::RippleSnail => {
             Box::new(BlindForager::for_founder(Founder::RippleSnail, teachers))
         }
-        // F1 stub: the browser's forager on the bellwing's (stub) manifest. F1 builds the
-        // hover-sip teacher here.
-        Founder::Bellwing => Box::new(BrowserForager::for_founder(Founder::Bellwing, teachers)),
+        // F1: the hover-sip teacher.
+        Founder::Bellwing => Box::new(HoverSip::with_config(teachers)),
     }
 }
 
@@ -812,6 +819,136 @@ impl Controller for BrowserForager {
 
     fn flees(&self) -> bool {
         true
+    }
+}
+
+/// The bellwing's **hover-sip teacher** (F1, Brief F1 item 8), observation-only:
+///
+/// - a bloom in the mouth's reach (`Taste`) and not full: hover (or stay perched) and sip;
+/// - full (`Self.reserve` at [`TeacherConfig::bellwing_full_at`]): go to rest — rise into
+///   cover close overhead (an underside), else come down onto what is below — and rest
+///   perched until hungry ([`TeacherConfig::bellwing_hungry_at`]), when it takes off;
+/// - a bloom in the fan: turn toward the sector with the most, fly at it, and come down
+///   when it is near;
+/// - nothing in sight: a correlated wander at its search height within the band;
+/// - a downpour: keep moving while the sky is open overhead, stop over cover (the body
+///   is brought down regardless); at night the body roosts by itself.
+pub struct HoverSip {
+    wander: Wander,
+    escape: u32,
+    selfm: crate::manifest::Module,
+    air: crate::manifest::Module,
+    taste: crate::manifest::Module,
+    fan: crate::manifest::Module,
+    /// Resting: full, and not yet hungry again.
+    resting: bool,
+    lift: f64,
+    cfg: TeacherConfig,
+}
+
+impl HoverSip {
+    pub fn with_config(cfg: TeacherConfig) -> HoverSip {
+        let m = Founder::Bellwing.manifest();
+        HoverSip {
+            wander: Wander::default(),
+            escape: 0,
+            selfm: module_slot(&m, "Self"),
+            air: module_slot(&m, "Air"),
+            taste: module_slot(&m, "Taste(1)"),
+            fan: module_slot(&m, "Fan(3, bloom/foliage/body)"),
+            resting: false,
+            lift: 0.0,
+            cfg,
+        }
+    }
+
+    fn act(&mut self, forward: f64, turn: f64, feed: f64, lift: f64) -> Response {
+        self.lift = lift;
+        Response::Bounded(Actions { forward, turn, feed })
+    }
+}
+
+impl Controller for HoverSip {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        let cfg = self.cfg;
+        let s = self.selfm.offset;
+        let (reserve, delivery, altitude, ceiling) = (o[s + 1], o[s + 7], o[s + 8], o[s + 9]);
+        let perched = o[self.air.offset] > 0.5;
+        let downpour = o[self.air.offset + 2] > 0.5;
+        let taste = if o[self.taste.offset + 2] > 0.5 { o[self.taste.offset] } else { 0.0 };
+        let f = self.fan.offset;
+        let bloom = [o[f + 2], o[f + 10], o[f + 18]];
+        let bloom_prox = [o[f + 3], o[f + 11], o[f + 19]];
+        if reserve >= cfg.bellwing_full_at {
+            self.resting = true;
+        } else if reserve < cfg.bellwing_hungry_at {
+            self.resting = false;
+        }
+        let hold = |alt: f64| (cfg.bellwing_altitude_gain * (cfg.bellwing_cruise_altitude - alt)).clamp(-1.0, 1.0);
+        // Hanging under something: so little clear height that rising would hang it again.
+        let hanging = perched && ceiling < 0.05;
+
+        // A bloom at the mouth: sip.
+        if taste > cfg.feed_gate && !self.resting {
+            self.wander.interrupt(&cfg);
+            return self.act(0.0, 0.0, 1.0, 0.0);
+        }
+        // A downpour: down regardless; keep going while the sky is open overhead.
+        if downpour {
+            if perched || ceiling < 1.0 {
+                return self.act(0.0, 0.0, 0.0, -1.0);
+            }
+            let turn = self.wander.turn(o, &cfg);
+            return self.act(1.0, turn, 0.0, -1.0);
+        }
+        if perched {
+            if self.resting {
+                return self.act(0.0, 0.0, 0.0, 0.0);
+            }
+            // Take off: drop from an underside, else lift.
+            return if hanging {
+                self.act(1.0, 0.0, 0.0, -1.0)
+            } else {
+                self.act(0.0, 0.0, 0.0, 1.0)
+            };
+        }
+        // Aloft and full: go to rest.
+        if self.resting {
+            let lift = if ceiling < cfg.bellwing_roost_ceiling { 1.0 } else { -1.0 };
+            return self.act(0.0, 0.0, 0.0, lift);
+        }
+        // Blocked (a wall, the ceiling over lower ground): turn away and climb a little.
+        let side = self.wander.side();
+        if let Some((forward, turn)) = escape(&cfg, &mut self.escape, delivery < cfg.motor_refused, side) {
+            self.wander.interrupt(&cfg);
+            return self.act(forward, turn, 0.0, hold(altitude));
+        }
+        // A bloom in the fan: at it.
+        let best = (0..3).max_by(|&a, &b| bloom[a].total_cmp(&bloom[b])).unwrap_or(1);
+        if bloom[best] > cfg.bellwing_bloom_gate {
+            self.wander.interrupt(&cfg);
+            let turn = match best {
+                0 => -cfg.bellwing_gaze_turn,
+                2 => cfg.bellwing_gaze_turn,
+                _ => 0.0,
+            };
+            let near = bloom_prox[best] > cfg.bellwing_bloom_near;
+            let (forward, lift) = if near { (0.3, -0.6) } else { (1.0, hold(altitude)) };
+            return self.act(forward, turn, 1.0, lift);
+        }
+        let turn = self.wander.turn(o, &cfg);
+        self.act(cfg.bellwing_wander_forward, turn, 0.0, hold(altitude))
+    }
+
+    fn reset(&mut self) {
+        self.wander = Wander::default();
+        self.escape = 0;
+        self.resting = false;
+        self.lift = 0.0;
+    }
+
+    fn lift(&self) -> f64 {
+        self.lift
     }
 }
 

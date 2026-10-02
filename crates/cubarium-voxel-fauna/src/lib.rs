@@ -45,18 +45,19 @@ mod roster_tests;
 mod snail_tests;
 #[cfg(test)]
 mod flight_tests;
+mod flight;
 
 use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    Body, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Hunter, StepLimits, birth_readiness,
+    BELLWING_MASS_RATIO, Body, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Hunter, StepLimits, birth_readiness,
     effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
-    FounderFactories, LanternjawAmbush, Response, Scripted, heuristic, resolve_actions,
+    FounderFactories, HoverSip, LanternjawAmbush, Response, Scripted, heuristic, resolve_actions,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
@@ -77,6 +78,7 @@ pub use manifest::{
 };
 pub use knobs::{CueConfig, FoundingConfig, LifeConfig, PredationConfig, TeacherConfig};
 pub use pose::Pose;
+pub use flight::flyer_sheltered;
 pub use senses::{Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
 
@@ -379,15 +381,59 @@ pub fn browser_cone_census(
 /// the body's eye at `y_m`, every first hit named, [`ConeHit::Bloom`] among them, by the
 /// same march the flyer's observation reads. `probes` as [`browser_cone_census`]'s. `None`
 /// for a body that is not a flyer.
-// F1 stub: no flyer has a fan yet.
 pub fn flyer_fan_census(
-    _view: &VoxelView<'_>,
-    _flora: &FloraView<'_>,
-    _fauna: &FaunaView<'_>,
-    _animal: &Animal,
-    _probes: &[(f64, f64)],
+    view: &VoxelView<'_>,
+    flora: &FloraView<'_>,
+    fauna: &FaunaView<'_>,
+    animal: &Animal,
+    probes: &[(f64, f64)],
 ) -> Option<ConeCensus> {
-    None
+    let founder = animal.founder?;
+    let phys = fauna.config.founder(founder);
+    phys.flight?;
+    let manifest = fauna.config.manifest(founder);
+    let occupancy = senses::cone_occupancy(view, flora, fauna);
+    let geometry = phys.body_at(animal.body);
+    let origin = flight::eye(animal, &geometry);
+    let heading = animal.pose.heading_rad;
+    let range = manifest.cone_range_m;
+    let march = |sector: usize, yaw_deg: f64, pitch_deg: f64, dir: (f64, f64, f64)| {
+        let (hit, distance_m) =
+            match flight::fan_first_hit(view, flora, &occupancy, animal.id, origin, dir, range) {
+                None => (ConeHit::Clear, f64::INFINITY),
+                Some((d, hit)) => (hit, d),
+            };
+        ConeRay {
+            sector,
+            yaw_deg,
+            pitch_deg,
+            hit,
+            distance_m,
+        }
+    };
+    let mut rays = Vec::new();
+    for (si, &centre_deg) in manifest.sector_centres_deg.iter().enumerate() {
+        for &oyaw in manifest.ray_yaw_offsets_deg {
+            for &opitch in manifest.ray_pitch_offsets_deg {
+                let dir = senses::ray_direction(heading, centre_deg, oyaw, opitch);
+                rays.push(march(si, centre_deg + oyaw, opitch, dir));
+            }
+        }
+    }
+    let probes = probes
+        .iter()
+        .map(|&(yaw, pitch)| {
+            let dir = senses::ray_direction(heading, yaw.to_degrees(), 0.0, pitch.to_degrees());
+            march(ConeRay::PROBE, yaw.to_degrees(), pitch.to_degrees(), dir)
+        })
+        .collect();
+    Some(ConeCensus {
+        origin_m: origin,
+        heading_rad: heading,
+        range_m: range,
+        rays,
+        probes,
+    })
 }
 
 /// The stand selected by the browser's actual mouth geometry, if any. Read-only
@@ -531,15 +577,18 @@ pub struct Mobility {
     pub climb: Option<WallClimb>,
     /// **How it is moving** (F1, predation-and-flight §3.1): on the ground, on a wall, in
     /// the air or at rest off the ground. A lineage enables the modes it has (the bellwing
-    /// `Fly` + `Perched`).
-    // F1 stub: declared; every body stays `Ground` (a wall climb is still `climb`).
+    /// `Fly` + `Perched`). A walker stays `Ground` (its wall climb is [`Mobility::climb`]).
     #[serde(default)]
     pub mode: MobilityMode,
     /// The perch a `Perched` body holds (§3.4): losing it means a takeoff, or a drop when
     /// it cannot pay. `None` in every other mode.
-    // F1 stub: declared, never set.
     #[serde(default)]
     pub perch: Option<Perch>,
+    /// A flyer **dropping**: it lost a perch it could not pay to leave (or is asleep), so
+    /// it falls straight down at the lift speed, paying nothing aloft, onto the first
+    /// perch below. Always `false` for a walker.
+    #[serde(default)]
+    pub falling: bool,
     /// Consecutive ticks under water deeper than its drown depth. It drowns when this
     /// reaches [`FounderPhysiology::drown_ticks`]; any tick not under resets it.
     pub submerged_ticks: u64,
@@ -564,12 +613,26 @@ pub enum MobilityMode {
     Perched,
 }
 
-/// A perch a flyer holds ([`Mobility::perch`], §3.4).
-// F1 stub: the kind only. F1 adds the anchor it holds (the face, the stand, the vine
-// face or the cell overhead), so a lost perch can be detected.
+/// A perch a flyer holds ([`Mobility::perch`], §3.4): what it is, and what holds it up,
+/// so a lost perch (a crown eaten, a face uncovered, a ledge dug out) is seen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Perch {
     pub kind: PerchKind,
+    pub anchor: PerchAnchor,
+}
+
+/// What holds a perch ([`Perch::anchor`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PerchAnchor {
+    /// The top of this support face (ground, a ledge): [`PerchKind::Face`].
+    Face(Site),
+    /// The foliage-bearing layer `layer` (its index among the stand's foliage layers) of
+    /// the stand rooted on `site`: its top ([`PerchKind::CrownTop`]) or its underside.
+    Stand { site: Site, layer: u8 },
+    /// A latticevine-covered face: [`PerchKind::VineFace`].
+    Vine(cubarium_voxel_flora::Face),
+    /// The solid cell `(x, y, z)` overhead (an overhang's underside).
+    Rock { x: u32, y: u32, z: u32 },
 }
 
 /// What a perch is (§3.4).
@@ -584,6 +647,36 @@ pub enum PerchKind {
     VineFace,
     /// The underside of a crown slab or an overhang: hanging (the frond-underside roost).
     Underside,
+}
+
+impl PerchKind {
+    /// Every kind, in the order [`FaunaLedger::landings_by_perch`] counts them.
+    pub const ALL: [PerchKind; 4] = [
+        PerchKind::Face,
+        PerchKind::CrownTop,
+        PerchKind::VineFace,
+        PerchKind::Underside,
+    ];
+
+    /// Its index in [`PerchKind::ALL`].
+    pub const fn index(self) -> usize {
+        match self {
+            PerchKind::Face => 0,
+            PerchKind::CrownTop => 1,
+            PerchKind::VineFace => 2,
+            PerchKind::Underside => 3,
+        }
+    }
+
+    /// Its name, for a census column.
+    pub const fn name(self) -> &'static str {
+        match self {
+            PerchKind::Face => "face",
+            PerchKind::CrownTop => "crown_top",
+            PerchKind::VineFace => "vine_face",
+            PerchKind::Underside => "underside",
+        }
+    }
 }
 
 /// The last bloom a body sipped from (F1 §3.7's seam, pollen carriage later).
@@ -707,7 +800,6 @@ pub struct Animal {
     /// Saved as the host's id.
     pub attached: Option<Attachment>,
     /// **The last bloom it sipped from** (F1 §3.7, the pollen seam): `None` until a sip.
-    // F1 stub: declared, never set.
     #[serde(default)]
     pub last_bloom: Option<Bloom>,
 }
@@ -737,8 +829,16 @@ impl Animal {
     }
 
     /// The layer this body's receptors read from and its body is drawn over: `site.y` on
-    /// the ground, and on a wall the layer its feet have reached, to the nearest voxel.
+    /// the ground, and on a wall the layer its feet have reached, to the nearest voxel. A
+    /// flyer's (F1) is the layer under the cell its base is in, so its body is indexed and
+    /// drawn at `y_m`.
     pub fn sense_layer(&self, voxel_m: f64) -> u32 {
+        if matches!(self.mobility.mode, MobilityMode::Fly | MobilityMode::Perched)
+            && voxel_m > 0.0
+            && self.pose.y_m.is_finite()
+        {
+            return ((self.pose.y_m / voxel_m + 1e-9).floor() - 1.0).max(0.0) as u32;
+        }
         let offset = self.wall_offset_m();
         if offset == 0.0 || !(voxel_m > 0.0) {
             return self.site.y;
@@ -1145,6 +1245,10 @@ pub struct FounderState {
     /// The held **lure** effort, a carnivore's fourth action (predation §2.2): lit while
     /// above zero, costing its `lure_power`. Zero for every other lineage.
     pub lure: f64,
+    /// The held **lift** effort, a flyer's fourth action (F1, §3.3), in `[-1, 1]`. Zero for
+    /// every walker.
+    #[serde(default)]
+    pub lift: f64,
 }
 
 /// What one controller interval actually did, from the body's own ledger events and
@@ -1939,6 +2043,21 @@ pub struct FaunaLedger {
     pub riders_attached: u64,
     pub rider_dropoffs: u64,
     pub riders_freed: u64,
+    /// **Flight** (F1): nectar sips by source, `[bloomcrown stand, latticevine face]`.
+    #[serde(default)]
+    pub sips_by_bloom: [u64; 2],
+    /// Landings by perch kind, in [`PerchKind::ALL`] order.
+    #[serde(default)]
+    pub landings_by_perch: [u64; 4],
+    /// Paid takeoffs, and drops: a lost perch a flyer could not pay to leave.
+    #[serde(default)]
+    pub takeoffs: u64,
+    #[serde(default)]
+    pub drops: u64,
+    /// The `respired_motor_out` share that was **flight**: seconds aloft beyond basal,
+    /// lift work and takeoffs.
+    #[serde(default)]
+    pub respired_flight_out: f64,
 }
 
 impl FaunaLedger {
@@ -2148,7 +2267,6 @@ pub enum Command {
     /// [`Command::IntroduceFounder`] is. Refused as that is, and also for a lineage that
     /// cannot fly, a pose whose body would occupy a solid or water cell, and a `y_m` above
     /// the lineage's ceiling over the support face below.
-    // F1 stub: always refused.
     IntroduceAloft {
         pose: Pose,
         founder: Founder,
@@ -2499,8 +2617,54 @@ impl Fauna {
                 lineage,
                 eggs,
             } => self.bury_clutch(world, site, lineage, eggs),
-            // F1 stub: no flyer is placed yet.
-            Command::IntroduceAloft { .. } => false,
+            Command::IntroduceAloft {
+                pose,
+                founder,
+                stores,
+            } => {
+                let phys = *self.config.founder(founder);
+                let Some(flight) = phys.flight else {
+                    return false;
+                };
+                let Some((body, reserve)) = stores.resolve(&phys.core) else {
+                    return false;
+                };
+                let view = world.view();
+                let Some((site, perch)) =
+                    flight::placement(&view, &phys, &flight, body, &pose)
+                else {
+                    return false;
+                };
+                if !self.introduce_body(
+                    world,
+                    site,
+                    Species::Frondgrazer,
+                    Some(founder),
+                    body,
+                    Some(reserve),
+                    pose.heading_rad,
+                ) {
+                    return false;
+                }
+                let id = self.ledger.births - 1;
+                let i = self
+                    .animals
+                    .binary_search_by_key(&id, |a| a.id)
+                    .expect("just placed");
+                let a = &mut self.animals[i];
+                a.pose = pose;
+                match perch {
+                    Some(p) => {
+                        a.mobility.mode = MobilityMode::Perched;
+                        a.mobility.perch = Some(p);
+                    }
+                    None => {
+                        a.mobility.mode = MobilityMode::Fly;
+                        a.mobility.perch = None;
+                    }
+                }
+                true
+            }
             Command::Remove { x, z } => {
                 let view = world.view();
                 let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z) else {
@@ -2640,6 +2804,11 @@ impl Fauna {
             attached: None,
             last_bloom: None,
         };
+        let mut animal = animal;
+        // A flyer on a face is perched on it (F1).
+        if founder.is_some_and(|f| self.config.founder(f).flight.is_some()) {
+            flight::perch_on_face(&mut animal, site);
+        }
         self.ledger.births += 1;
         self.ledger.introduced += 1;
         self.ledger.introduced_organic_in += organic;

@@ -234,6 +234,7 @@ fn founder_rows() -> Vec<Row> {
         r("flight.takeoff_s", "s of flight", nonneg, "a takeoff's cost").optional().prov("decision"),
         r("flight.foliage_speed_factor", "x speed cap", fraction, "the speed cap inside a crown's foliage layers").optional().prov("decision"),
         r("flight.shower_rain_reference_m_per_s", "m/s of rain", Range::positive(), "R0: flight costs x (1 + rain rate / R0) in a shower").optional(),
+        r("flight.lift_speed_fraction", "x cruise speed", nonneg, "vertical speed at full lift, either way").optional(),
         // The counter-strike seam (`Counter`): unused, `None` for every lineage.
         r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
         r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),
@@ -372,6 +373,15 @@ fn knob_rows() -> Vec<Row> {
         t("ambush_gaze_turn", "effort", fraction, "the ambush's turn toward foliage while seeking a crown").search(0.2, 1.0),
         t("ambush_wander_turn", "effort", fraction, "the ambush's no-signal wander turn").search(0.1, 1.0),
         t("ambush_wander_flip", "samples", count, "samples the ambush's wander holds a side before flipping").search(2.0, 24.0),
+        t("bellwing_full_at", "fraction of adult reserve", fraction, "the hover-sip teacher stops sipping and rests at this reserve").search(0.5, 1.0),
+        t("bellwing_hungry_at", "fraction of adult reserve", fraction, "a resting bellwing takes off to forage below this reserve").search(0.1, 0.9),
+        t("bellwing_cruise_altitude", "fraction of band", fraction, "the height the bellwing searches at").search(0.1, 0.9),
+        t("bellwing_altitude_gain", "effort per band fraction", nonneg, "lift effort per unit of altitude error").search(1.0, 10.0),
+        t("bellwing_bloom_gate", "fraction of rays", fraction, "a fan sector sees blooms above this fraction of its rays").search(0.005, 0.2).log(),
+        t("bellwing_bloom_near", "1 - d/range", fraction, "a bloom this near: slow and come down to it").search(0.3, 0.9),
+        t("bellwing_gaze_turn", "effort", fraction, "turn effort toward the sector with the most bloom").search(0.2, 1.0),
+        t("bellwing_wander_forward", "effort", fraction, "forward effort of the bellwing's no-signal wander").search(0.2, 1.0),
+        t("bellwing_roost_ceiling", "fraction of band", fraction, "going to rest, cover closer than this overhead is an underside to rise into").search(0.1, 0.8),
     ]);
 
     // `fauna.founding.*`: the seeder's founders.

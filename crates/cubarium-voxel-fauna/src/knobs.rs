@@ -271,6 +271,63 @@ pub struct TeacherConfig {
     pub ambush_wander_turn: f64,
     /// Samples the ambush's wander holds a side before flipping, count.
     pub ambush_wander_flip: u32,
+    /// **The hover-sip teacher** (F1, the bellwing): it stops sipping and goes to rest
+    /// once `Self.reserve` reaches this (a fraction of the adult reserve reference).
+    #[serde(default = "bw_full")]
+    pub bellwing_full_at: f64,
+    /// A resting bellwing takes off to forage once `Self.reserve` falls below this.
+    #[serde(default = "bw_hungry")]
+    pub bellwing_hungry_at: f64,
+    /// The height it searches at, a fraction of its band (`Self.altitude`).
+    #[serde(default = "bw_altitude")]
+    pub bellwing_cruise_altitude: f64,
+    /// Lift effort per unit of altitude error (fraction of the band), clamped to ±1.
+    #[serde(default = "bw_gain")]
+    pub bellwing_altitude_gain: f64,
+    /// A fan sector sees blooms above this fraction of its rays.
+    #[serde(default = "bw_bloom_gate")]
+    pub bellwing_bloom_gate: f64,
+    /// A bloom this near (`1 - d / range`) is close: it slows and comes down to it.
+    #[serde(default = "bw_bloom_near")]
+    pub bellwing_bloom_near: f64,
+    /// Turn effort toward the sector with the most bloom.
+    #[serde(default = "bw_gaze")]
+    pub bellwing_gaze_turn: f64,
+    /// Forward effort while it wanders with nothing in sight.
+    #[serde(default = "bw_wander_forward")]
+    pub bellwing_wander_forward: f64,
+    /// Going to rest: cover overhead closer than this (`Self.ceiling`, a fraction of the
+    /// band) is an underside to rise into; otherwise it comes down onto what is below.
+    #[serde(default = "bw_roost_ceiling")]
+    pub bellwing_roost_ceiling: f64,
+}
+
+fn bw_full() -> f64 {
+    0.9
+}
+fn bw_hungry() -> f64 {
+    0.6
+}
+fn bw_altitude() -> f64 {
+    0.4
+}
+fn bw_gain() -> f64 {
+    4.0
+}
+fn bw_bloom_gate() -> f64 {
+    0.02
+}
+fn bw_bloom_near() -> f64 {
+    0.6
+}
+fn bw_gaze() -> f64 {
+    0.8
+}
+fn bw_wander_forward() -> f64 {
+    0.7
+}
+fn bw_roost_ceiling() -> f64 {
+    0.4
 }
 
 impl Default for TeacherConfig {
@@ -306,6 +363,15 @@ impl Default for TeacherConfig {
             ambush_gaze_turn: 0.8,
             ambush_wander_turn: 0.4,
             ambush_wander_flip: 8,
+            bellwing_full_at: bw_full(),
+            bellwing_hungry_at: bw_hungry(),
+            bellwing_cruise_altitude: bw_altitude(),
+            bellwing_altitude_gain: bw_gain(),
+            bellwing_bloom_gate: bw_bloom_gate(),
+            bellwing_bloom_near: bw_bloom_near(),
+            bellwing_gaze_turn: bw_gaze(),
+            bellwing_wander_forward: bw_wander_forward(),
+            bellwing_roost_ceiling: bw_roost_ceiling(),
         }
     }
 }

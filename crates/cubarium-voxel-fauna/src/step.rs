@@ -91,6 +91,17 @@ enum Respiration {
 }
 
 pub(crate) use cubarium_voxel::KeyedRng as Rng;
+
+/// The tick's sky, read once (F1): what a flyer's act needs of the weather and the clock.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Sky {
+    /// A downpour is falling: no takeoff, and a flyer aloft comes down (§3.8).
+    pub downpour: bool,
+    /// The rain rate now, m/s (the shower cost's numerator).
+    pub rain_m_per_s: f64,
+    pub clock_on: bool,
+    pub daylight: f64,
+}
 use cubarium_voxel::organism::{Budget, build_from, settle_mineral, tissue_funded};
 use cubarium_voxel::pro_rata;
 
@@ -132,6 +143,12 @@ fn tick_inner(
             .is_some_and(|before| before >= fauna.config.life.day_line)
         && daylight < fauna.config.life.day_line;
     fauna.last_daylight = Some(daylight);
+    let sky = Sky {
+        downpour: view.weather.mode == cubarium_voxel::weather::RainMode::Downpour,
+        rain_m_per_s: f64::from(view.weather.rain_m_per_s).max(0.0),
+        clock_on,
+        daylight,
+    };
 
     cubarium_voxel::voxel_phase!(FaunaStep, {
         cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
@@ -165,7 +182,7 @@ fn tick_inner(
             // Strike outcomes are events: the act only reads other bodies, and the hits
             // are applied here, serially, in the order the strikers acted.
             let mut hits: Vec<Hit> = Vec::new();
-            act(fauna, &view, flora, seed, tick, &mut hits);
+            act(fauna, &view, flora, seed, tick, &sky, &mut hits);
             for hit in hits {
                 apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
             }
@@ -417,6 +434,7 @@ fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
         let hungry = hunger(a, &phys.core);
         let free = a.alert_ticks == 0
             && a.mobility.climb.is_none()
+            && a.mobility.mode != crate::MobilityMode::Fly
             && a.mobility.submerged_ticks == 0
             && !a
                 .strike
@@ -447,6 +465,7 @@ fn circadian(fauna: &mut Fauna, clock_on: bool, daylight: f64) {
                     a.state = State::Asleep;
                     a.founder_state.held = Actions::REST;
                     a.founder_state.lure = 0.0;
+                    a.founder_state.lift = 0.0;
                 }
                 a.rest = Some(reason);
                 if a.strike.is_some_and(|s| s.phase == StrikePhase::Recovery) {
@@ -672,12 +691,19 @@ fn controllers(
     } else if let Some(held) = held.as_mut() {
         Some(held.refresh(view, &fv, &fauna.view()))
     } else {
+        // The widest cone among the due sighted lineages (a flyer's fan reaches 4 m).
+        let range = due
+            .iter()
+            .filter_map(|&i| fauna.animals[i].founder)
+            .filter(|f| v2_cone[f.index()])
+            .map(|f| f.manifest().cone_range_m)
+            .fold(Founder::Browser.manifest().cone_range_m, f64::max);
         windowed = crate::senses::cone_occupancy_window(
             view,
             &fv,
             &fauna.view(),
             observers.iter().copied(),
-            Founder::Browser.manifest().cone_range_m,
+            range,
         );
         Some(&windowed)
     };
@@ -738,19 +764,21 @@ fn controllers(
         );
         // Reject rather than train through: an observation with a non-finite channel
         // holds rest instead of reaching the controller at all.
-        let (mut actions, mut lure, driven) = if obs.iter().all(|v| v.is_finite()) {
+        let (mut actions, mut lure, mut lift, driven) = if obs.iter().all(|v| v.is_finite()) {
             let response = fauna.controllers.drive(id, &obs);
             let driven = response.is_some();
             let lure = if driven { fauna.controllers.lure(id) } else { 0.0 };
+            let lift = if driven { fauna.controllers.lift(id) } else { 0.0 };
             (
                 response.map_or(Actions::REST, |r| {
                     crate::controller::resolve_actions(r, &manifest)
                 }),
                 lure,
+                lift,
                 driven,
             )
         } else {
-            (Actions::REST, 0.0, false)
+            (Actions::REST, 0.0, 0.0, false)
         };
         // The prey heuristics' flee rule (predation §2.7): a body driven by its own
         // heuristic — not a saved policy, whose behaviour changes only through the world
@@ -761,11 +789,18 @@ fn controllers(
             if let Some(flee) = flee(fauna, i, view, predation_occupancy.as_ref()) {
                 actions = flee;
                 lure = 0.0;
+                lift = 0.0;
             }
         }
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;
         a.founder_state.lure = if lure.is_finite() { lure.clamp(0.0, 1.0) } else { 0.0 };
+        // The lift (F1): clamped and deadbanded as the turn is.
+        a.founder_state.lift = if lift.is_finite() && lift.abs() >= manifest.deadband {
+            lift.clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
         a.founder_state.feedback = IntervalFeedback::default();
     }
     if let Some(s) = senses {
@@ -860,6 +895,7 @@ fn act(
     flora: &mut Flora,
     seed: u64,
     tick: u64,
+    sky: &Sky,
     hits: &mut Vec<Hit>,
 ) {
     let v = view.config.voxel_m;
@@ -877,7 +913,18 @@ fn act(
             continue;
         }
         let before = fauna.animals[i].pose;
-        act_one(fauna, view, flora, seed, tick, hits, i);
+        let flyer = fauna.animals[i]
+            .founder
+            .and_then(|f| fauna.config.founder(f).flight);
+        match flyer {
+            Some(flight) => flyer_act(fauna, view, flora, sky, flight, i),
+            None => {
+                act_one(fauna, view, flora, seed, tick, hits, i);
+                // A walker's base is the top of its support face (F1).
+                let a = &mut fauna.animals[i];
+                a.pose.y_m = crate::surface_m(a.site.y, v);
+            }
+        }
         // What the body did, for the senses of others (predation §2.2): its ground speed
         // this tick, and how long it has been still.
         let length = crate::body_of(&fauna.config, &fauna.animals[i]).map_or(v, |b| b.length_m);
@@ -1109,6 +1156,267 @@ fn founder_act(
     } else {
         State::Resting
     };
+}
+
+/// **One flyer's tick** (F1, predation-and-flight §3.2–3.8), in place of a walker's act:
+///
+/// 1. **The perch**: a perched flyer whose perch is gone (a crown eaten, a face uncovered)
+///    takes off when it is awake, the sky allows it and its reserve pays a takeoff; else
+///    it **drops** — straight down at the lift speed, paying nothing aloft — onto the
+///    first perch below.
+/// 2. **Forced down**: in a downpour, or sleepy (its lineage's rest hour and not hungry),
+///    a flyer aloft descends (`lift` −1, steering as it likes) and a perched one cannot
+///    take off. Asleep it does nothing else (it sleeps only perched).
+/// 3. **Perched**: `lift` up (down, or `forward`, from an underside) takes off, paying
+///    `takeoff_s` of flight out of the reserve; otherwise it may turn where it is, and sip.
+/// 4. **Aloft**: it pays `(factor − 1) ×` basal for the second beyond the upkeep it has
+///    paid (`factor` the hover's at forward 0, the cruise's at full forward, linear
+///    between; × `1 + rain / R₀` in rain), moves ([`crate::flight::move_through_air`]),
+///    pays `climb_work_per_m × body ×` the height it gained, and lands on what it met.
+/// 5. **A sip** ([`flyer_sip`]): on the due tick, `feed` with a bloom in reach while
+///    hovering (forward 0) or perched.
+fn flyer_act(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    sky: &Sky,
+    flight: crate::Flight,
+    i: usize,
+) {
+    use crate::flight;
+    use crate::{MobilityMode, PerchKind};
+    let founder = fauna.animals[i].founder.expect("a founder body");
+    let phys = *fauna.config.founder(founder);
+    let manifest = fauna.config.manifest(founder);
+    let sc = phys.core;
+    let life = fauna.config.life;
+    fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+    let (asleep, mut held, lift_held, due) = {
+        let a = &fauna.animals[i];
+        (
+            a.state == State::Asleep,
+            a.founder_state.held,
+            a.founder_state.lift,
+            a.age_ticks % founder.manifest().cadence_ticks() == 0,
+        )
+    };
+    {
+        let pc = &fauna.config.predation;
+        let a = &fauna.animals[i];
+        held.forward *= (1.0 - pc.wound_slow * a.wound).clamp(0.0, 1.0);
+    }
+    let shape = flight::Shape::of(&phys, &flight, fauna.animals[i].body);
+    let basal = sc.maintenance_per_s * fauna.animals[i].body;
+    let takeoff_cost = flight.takeoff_s * flight.flight_factor * basal;
+    let sleepy = !phys.active.awake(sky.clock_on, sky.daylight, &life)
+        && hunger(&fauna.animals[i], &sc) < phys.wake_hunger;
+    let grounded = sky.downpour || sleepy;
+    let can_pay = |a: &Animal| a.reserve >= takeoff_cost;
+    let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
+
+    // 1. The perch.
+    if fauna.animals[i].mobility.mode == MobilityMode::Perched {
+        let holds = flight::perch_holds(view, &flora.view(), &fauna.animals[i], shape, puddle);
+        if !holds {
+            if !asleep && !grounded && can_pay(&fauna.animals[i]) {
+                flyer_takeoff(fauna, i, takeoff_cost);
+            } else {
+                let m = &mut fauna.animals[i].mobility;
+                m.mode = MobilityMode::Fly;
+                m.perch = None;
+                m.falling = true;
+                fauna.ledger.drops += 1;
+            }
+        }
+    }
+    let (mode, falling) = {
+        let m = &fauna.animals[i].mobility;
+        (m.mode, m.falling)
+    };
+    if asleep && !falling {
+        return;
+    }
+
+    // 2. The controls, and what the sky and the hour force.
+    let (mut forward, mut turn, mut lift) = (held.forward.max(0.0), held.turn, lift_held);
+    if falling {
+        (forward, turn, lift) = (0.0, 0.0, -1.0);
+    } else if grounded {
+        lift = -1.0;
+    }
+
+    // 3. Perched.
+    if mode == MobilityMode::Perched {
+        let kind = fauna.animals[i].mobility.perch.map_or(PerchKind::Face, |p| p.kind);
+        let wants = match kind {
+            PerchKind::Underside => lift < 0.0 || forward > 0.0,
+            _ => lift > 0.0,
+        };
+        if wants && !grounded && can_pay(&fauna.animals[i]) {
+            flyer_takeoff(fauna, i, takeoff_cost);
+        } else {
+            let a = &mut fauna.animals[i];
+            a.pose.heading_rad = (a.pose.heading_rad + turn * manifest.yaw_cap_rad_per_s * DT)
+                .rem_euclid(std::f64::consts::TAU);
+            // On a face it stands on the top of whatever puddle is there.
+            if let Some(crate::Perch {
+                anchor: crate::PerchAnchor::Face(site),
+                ..
+            }) = a.mobility.perch
+            {
+                a.pose.y_m = crate::surface_m(site.y, view.config.voxel_m)
+                    + view.standing_depth_m(i64::from(site.x), site.y, site.z);
+            }
+            let fed = due
+                && held.feed > 0.0
+                && flyer_sip(fauna, i, view, flora, &manifest, &phys, shape, held.feed);
+            fauna.animals[i].state = if fed { State::Cropping } else { State::Resting };
+            return;
+        }
+    }
+
+    // 4. Aloft: the second's cost beyond basal, then the motion, then the lift work.
+    let (mut motor_paid, mut motor_body) = (0.0, 0.0);
+    if !falling {
+        let factor = flight.hover_factor + (flight.flight_factor - flight.hover_factor) * forward;
+        let shower = if flight.shower_rain_reference_m_per_s > 0.0 {
+            1.0 + sky.rain_m_per_s / flight.shower_rain_reference_m_per_s
+        } else {
+            1.0
+        };
+        let cost = (factor - 1.0).max(0.0) * basal * DT * shower;
+        let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
+        fauna.ledger.respired_flight_out += paid;
+        motor_paid += paid;
+        motor_body += body;
+    }
+    let cruise = manifest.cruise_m_per_s;
+    let moved = {
+        let fv = flora.view();
+        let a = &mut fauna.animals[i];
+        a.pose.heading_rad = (a.pose.heading_rad + turn * manifest.yaw_cap_rad_per_s * DT)
+            .rem_euclid(std::f64::consts::TAU);
+        let slow = if flight::inside_foliage(view, &fv, shape, a.pose.x, a.pose.z, a.pose.y_m) {
+            flight.foliage_speed_factor
+        } else {
+            1.0
+        };
+        let distance = forward * cruise * slow * DT;
+        let dy = lift * flight.lift_speed_fraction * cruise * DT;
+        let moved = flight::move_through_air(view, &fv, shape, flight.band_max_m, puddle, &mut a.pose, distance, dy);
+        if let Some(site) = flight::support_below(view, a.pose.x, a.pose.z, a.pose.y_m) {
+            a.site = site;
+        }
+        if let Some(p) = moved.landed {
+            a.mobility.mode = MobilityMode::Perched;
+            a.mobility.perch = Some(p);
+            a.mobility.falling = false;
+        }
+        let fb = &mut a.founder_state.feedback;
+        fb.attempted_equivalent += forward * cruise * DT;
+        fb.delivered_equivalent += moved.distance_m;
+        fb.delivered_forward += moved.distance_m;
+        moved
+    };
+    if let Some(p) = moved.landed {
+        fauna.ledger.landings_by_perch[p.kind.index()] += 1;
+    }
+    if !falling && moved.rise_m > 0.0 {
+        let work = flight.climb_work_per_m * fauna.animals[i].body * moved.rise_m;
+        let (paid, body) = respire(fauna, i, work, Respiration::Motor);
+        fauna.ledger.respired_flight_out += paid;
+        motor_paid += paid;
+        motor_body += body;
+    }
+    {
+        let fb = &mut fauna.animals[i].founder_state.feedback;
+        fb.structural_loss += motor_body;
+        fb.motor_respiration += motor_paid;
+    }
+
+    // 5. A sip, hovering or perched.
+    let hovering = forward <= 0.0 || fauna.animals[i].mobility.mode == MobilityMode::Perched;
+    let fed = due
+        && !falling
+        && held.feed > 0.0
+        && hovering
+        && flyer_sip(fauna, i, view, flora, &manifest, &phys, shape, held.feed);
+    fauna.animals[i].state = if fed {
+        State::Cropping
+    } else if moved.distance_m > 0.0 || moved.rise_m != 0.0 {
+        State::Walking
+    } else {
+        State::Resting
+    };
+}
+
+/// A paid takeoff: `takeoff_s` of flight out of the reserve (the caller checked it holds
+/// it), and the body is aloft where it was.
+fn flyer_takeoff(fauna: &mut Fauna, i: usize, cost: f64) {
+    let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
+    fauna.ledger.respired_flight_out += paid;
+    fauna.ledger.takeoffs += 1;
+    let a = &mut fauna.animals[i];
+    a.founder_state.feedback.motor_respiration += paid;
+    a.founder_state.feedback.structural_loss += body;
+    a.mobility.mode = crate::MobilityMode::Fly;
+    a.mobility.perch = None;
+    a.mobility.falling = false;
+}
+
+/// **A sip** (F1, §3.7): the sated bite out of the nearest bloom within the mouth's reach
+/// (the body's radius plus its mouth reach, from its middle) — a bloomcrown's nectar
+/// through [`Flora::take_stand_nectar`], a latticevine face's through
+/// [`Flora::take_nectar`] — assimilated at nectar's yield as far as its mineral pays, and
+/// the bloom recorded on the body (the pollen seam).
+#[allow(clippy::too_many_arguments)]
+fn flyer_sip(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    manifest: &crate::Manifest,
+    phys: &crate::FounderPhysiology,
+    shape: crate::flight::Shape,
+    effort: f64,
+) -> bool {
+    let sc = phys.core;
+    let want = sc.bite_per_s * manifest.controller_period_s * effort * hunger(&fauna.animals[i], &sc);
+    if !(want > 0.0) {
+        return false;
+    }
+    let founder = fauna.animals[i].founder.expect("a founder body");
+    let reach = shape.r + phys.body_at(fauna.animals[i].body).mouth_reach_m;
+    let p = crate::flight::mouth_point(&fauna.animals[i], shape);
+    let Some((bloom, stock)) = crate::flight::bloom_in_reach(view, &flora.view(), p, reach) else {
+        return false;
+    };
+    let yield_fraction = phys.yield_for(Food::Nectar);
+    let bite = sated_bite(want, stock, &sc, &fauna.animals[i], yield_fraction);
+    if !(bite > 0.0) {
+        return false;
+    }
+    let taken = match bloom {
+        crate::Bloom::Stand(site) => flora.take_stand_nectar(site, bite),
+        crate::Bloom::Vine(face) => flora.take_nectar(face, bite),
+    };
+    let Some(taken) = taken else {
+        return false;
+    };
+    let taken = fauna.book_eaten(taken, Food::Nectar);
+    let placed = assimilate(fauna, i, &sc, taken, yield_fraction);
+    let l = &mut fauna.ledger;
+    l.bites_by_founder[founder.index()] += 1;
+    l.bites_by_founder_food[founder.index()][Food::Nectar.index()] += 1;
+    l.assimilated_by_founder[founder.index()] += placed;
+    l.sips_by_bloom[match bloom {
+        crate::Bloom::Stand(_) => 0,
+        crate::Bloom::Vine(_) => 1,
+    }] += 1;
+    let a = &mut fauna.animals[i];
+    a.founder_state.feedback.intake += placed;
+    a.last_bloom = Some(bloom);
+    true
 }
 
 /// The jaw's point: the body's nose, `jaw_forward_length_fraction` of its length ahead of
@@ -1946,7 +2254,13 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
         .iter()
         .filter_map(|n| n.founder.map(|f| (n.id, f)))
         .collect();
-    for n in newborns {
+    for mut n in newborns {
+        // A newborn flyer is perched on the face it was born on (F1).
+        if n.founder.is_some_and(|f| fauna.config.founder(f).flight.is_some()) {
+            n.pose.y_m = crate::surface_m(n.site.y, view.config.voxel_m);
+            let site = n.site;
+            crate::flight::perch_on_face(&mut n, site);
+        }
         fauna.insert(n);
     }
     for (id, founder) in fresh {
@@ -2501,6 +2815,10 @@ fn host_for(
 /// foot).
 fn water_over_feet(view: &VoxelView<'_>, a: &Animal) -> f64 {
     let depth = |s: Site| view.water_depth_m(i64::from(s.x), s.y, s.z);
+    // A flyer's feet are at its base, over the support face below it (F1).
+    if matches!(a.mobility.mode, crate::MobilityMode::Fly | crate::MobilityMode::Perched) {
+        return depth(a.site) - (a.pose.y_m - crate::surface_m(a.site.y, view.config.voxel_m));
+    }
     match a.mobility.climb {
         None => depth(a.site),
         Some(c) if c.ascending => depth(c.from) - c.progress_m,
