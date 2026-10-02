@@ -38,6 +38,8 @@ mod step;
 #[cfg(test)]
 mod cone_speed_tests;
 #[cfg(test)]
+mod descent_tests;
+#[cfg(test)]
 mod hot_path_tests;
 
 use cubarium_voxel::{VoxelView, World};
@@ -46,7 +48,7 @@ use serde::{Deserialize, Serialize};
 
 pub use body::{
     Body, Counter, Face, FounderPhysiology, Hunter, StepLimits, birth_readiness,
-    effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
+    disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
@@ -62,6 +64,7 @@ pub use encounter::{
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
     mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
     reachable_layers_of, route_components, standable_faces, surface_m, walkable_components,
+    founding_faces,
 };
 pub use manifest::{
     ACTION_DEADBAND, Action, BIRTH_READINESS_RULE, BROWSER_RAY_PITCH_OFFSETS_DEG,

@@ -980,7 +980,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.founder_patch_spacing_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | founding: least distance between two patch centres |
 | `flora.voxel_m` | 0.25 | m | (0, inf) |  | - | derived | the world's cell size, recorded (set from world.voxel_m) |
 
-**`fauna.*`** (291 rows)
+**`fauna.*`** (292 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1270,6 +1270,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founding.starter_litter_mineral_fraction` | 0.02 | fraction of organic | [0, 1] | 0.005–0.1 | - | placeholder | mineral share of the starter litter |
 | `fauna.founding.starter_litter_energy_density` | 2.0 | energy per organic unit | [0, inf) | 0.5–4 | - | placeholder | retained energy density of the starter litter |
 | `fauna.founding.accept_founder_hours` | 1.0 | founder-hours | [0, inf) | 0.1–6 | - | placeholder | founder-hours of adult upkeep a component's stock must cover per founder |
+| `fauna.founding.clearance_margin_m` | 0.03 | m | [0, inf) |  | - | placeholder | slack added to the founder's disc radius when choosing where founders may be placed |
 | `fauna.hatch_chance_per_dusk` | 0.3333333333333333 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
 | `fauna.parasite_attach_radius_m` | 0.75 | m | [0, inf) | 0.25–2 | N | placeholder | host search radius from a hatching egg |
 | `fauna.parasite_max_per_host` | 1 | count | [0, inf) | 0–4 | N | placeholder | riders one host carries (0: dormant eggs never hatch) |

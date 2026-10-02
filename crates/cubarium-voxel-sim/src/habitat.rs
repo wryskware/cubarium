@@ -689,6 +689,12 @@ pub fn seed_pre_rolled(
     let blind_need = founding.accept_founder_hours * founding_upkeep_per_hour(&blind);
     let (blind_map, blind_food) =
         lineage_food(&world.view(), &flora.view(), &blind, Founder::Blind);
+    // Only where the whole disc clears its headroom, in the largest walkable component
+    // (fix 2, `design/handoffs/browser-stuck-in-crags-2026-10-01.md`).
+    let blind_found: std::collections::HashSet<Site> =
+        cubarium_voxel_fauna::founding_faces(&world.view(), &blind, founding.clearance_margin_m)
+            .into_iter()
+            .collect();
     let pool: Vec<Site> = {
         let view = world.view();
         sites
@@ -701,6 +707,7 @@ pub fn seed_pre_rolled(
                     && view.material_at(i64::from(s.x), s.y, s.z) == Material::Soil
                     && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
                     && has_headroom(&view, i64::from(s.x), s.y, s.z, blind_room)
+                    && blind_found.contains(s)
                     && blind_map
                         .component_of(*s)
                         .and_then(|c| blind_food.get(&c))
@@ -754,6 +761,14 @@ pub fn seed_pre_rolled(
     // Under its own height of water it would be drowning (package mobility).
     let browser_drown = browser.drown_depth_m(&browser.adult_body());
     meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= browser_drown));
+    // Only where the whole disc clears its headroom, in the largest walkable component
+    // (fix 2): a founder with its disc in a wall cannot move, and one in a pocket of a few
+    // square metres cannot leave it.
+    let browser_found: std::collections::HashSet<Site> =
+        cubarium_voxel_fauna::founding_faces(&world.view(), &browser, founding.clearance_margin_m)
+            .into_iter()
+            .collect();
+    meadow.retain(|f| browser_found.contains(f));
     let want = founder_counts[Founder::Browser.index()];
     let chosen = place(
         &meadow,

@@ -330,6 +330,16 @@ pub struct FoundingConfig {
     /// founder-hours of adult basal upkeep in reachable edible stock for every founder
     /// placed in it (decisions §8), hours.
     pub accept_founder_hours: f64,
+    /// Founders go only where the disc, this much wider than the body's footprint, clears
+    /// its headroom at a face and between faces, in the largest such component
+    /// (`encounter::founding_faces`), metres. A slack against corridors exactly as wide
+    /// as the body, which the live body passes only on its exact centre line.
+    #[serde(default = "default_clearance_margin_m")]
+    pub clearance_margin_m: f64,
+}
+
+fn default_clearance_margin_m() -> f64 {
+    FoundingConfig::default().clearance_margin_m
 }
 
 impl Default for FoundingConfig {
@@ -341,6 +351,7 @@ impl Default for FoundingConfig {
             starter_litter_mineral_fraction: 0.02,
             starter_litter_energy_density: 2.0,
             accept_founder_hours: 1.0,
+            clearance_margin_m: 0.03,
         }
     }
 }
