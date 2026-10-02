@@ -752,6 +752,8 @@ def sp_head(H, F, tilt, mouth_open):
 
 def sp_body(spec):
     """Draw the seedporter from a pose spec (see SP_POSES)."""
+    start = len(L.ORG)
+    grip = []  # the big hands' and the hind feet's digits
     H, F = Vector(spec["head"]), _dir(*spec["face"])
     U = F.cross(Vector((0, 0, 1)).cross(F).normalized())
     nk = H - (F * 0.02 + U * 0.035) * SP_HEAD
@@ -775,7 +777,9 @@ def sp_body(spec):
         sh = m(spec["shoulder"])
         el, wr = ik(sh, m(spec["hand"]), *SP_ARM, m(spec["arm_pole"]))
         tube([sh, el, wr], 0.016, 0.011, c("a_main"), seg=8)
+        n0 = len(L.ORG)
         sp_digits(wr, m(_dir(*spec["fingers"])), m(spec["finger_up"]), 4, 0.045, 0.022, 0.0055)
+        grip += L.ORG[n0:]
         # the small middle arms, holding the fruit
         ss = m(spec["small_shoulder"])
         se, sw = ik(ss, m(spec["small_hand"]), *SP_SMALL, m(spec["small_pole"]))
@@ -786,7 +790,9 @@ def sp_body(spec):
         kn, an = ik(hp, m(spec["ankle"]), *SP_LEG, m(spec["leg_pole"]))
         tube([hp, kn], 0.026, 0.017, c("a_main"), seg=8)
         tube([kn, an], 0.016, 0.012, c("a_main"), seg=8)
+        n0 = len(L.ORG)
         sp_digits(an, m(_dir(*spec["toes"])), m(spec["toe_up"]), 4, 0.05, 0.022, 0.0065)
+        grip += L.ORG[n0:]
         # the membrane: wrist, along the arm, down the flank, the thigh to the knee; its
         # free edge back from the knee to the wrist
         side = [m(q) for q in spec["flank"]]
@@ -797,13 +803,21 @@ def sp_body(spec):
     # the long prehensile tail, its dorsal stripe along the outside
     pts = [Vector(p) for p in catmull([st[0][:3]] + spec["tail"], 70)]
     n = len(pts)
+    r0, r1 = spec.get("tail_r", (0.026, 0.005))
     for i in range(n - 1):
-        r = 0.026 + (0.005 - 0.026) * i / (n - 1)
+        r = r0 + (r1 - r0) * i / (n - 1)
         cyl(pts[i], pts[i + 1], r, r, mat=c("a_main"), seg=8)
         o = spec["tail_up"](pts[i], i / (n - 1))
         t = (pts[i + 1] - pts[i]).normalized()
         o = (o - t * o.dot(t)).normalized() * r * 0.75
         cyl(pts[i] + o, pts[i + 1] + o, r * 0.45, r * 0.45, mat=c("a_mark"), seg=6)
+    if spec.get("feet_on_ground") is not None:
+        # z = 0 under the hands and feet (the perch), the tail hanging below it; the feet
+        # stand that far above it, inside the ground row of cells
+        low = min(v.co.z for ob in grip if ob.type == "MESH" and slot_of(ob.data.materials[0].name) != "a_claw"
+                  for v in ob.data.vertices)
+        for ob in L.ORG[start:]:
+            ob.data.transform(Matrix.Translation((0, 0, spec["feet_on_ground"] - low)))
 
 
 def _spiral(centre, plane, a0, a1, r0, r1, n=24):
@@ -833,7 +847,8 @@ def _sag(down, depth, bumps=0.0):
 SP_POSES = {
     # perched upright on a branch (the branch is not drawn), eating the fruit; the big arms
     # straight down to the perch outside the crouched knees, the membranes folded between
-    # them; the tail hanging below the perch into a coil seen from the front
+    # them; the tail hanging below the perch into a coil seen from the front. The perch is
+    # z = 0 (Wrysk 2026-10-01: ground level under its feet), so the tail's cells go below it.
     "stand": dict(
         spine=[(-0.03, 0, 0.43, 0.03, 0.03), (0.0, 0, 0.47, 0.045, 0.042), (0.015, 0, 0.56, 0.036, 0.034),
                (0.03, 0, 0.65, 0.05, 0.045), (0.035, 0, 0.72, 0.03, 0.028)],
@@ -849,25 +864,31 @@ SP_POSES = {
         tail=[(-0.08, 0, 0.37), (-0.1, -0.015, 0.27), (-0.085, -0.01, 0.17)]
              + _spiral((-0.07, 0.085, 0.085), ((0, 1, 0), (0, 0, 1)), 180, 520, 0.085, 0.022),
         tail_up=lambda p, f: (p - Vector((-0.07, 0.085, 0.085))) if f > 0.4 else Vector((-1, 0, 0)),
+        # 0.1 m keeps the cells of the look Wrysk approved (2026-10-01, r6): the face row
+        # pale | eye | pale, the feet in the ground row
+        feet_on_ground=0.1,
     ),
     # walking on all fours, the big arms as front legs, the small arms holding the fruit at
     # the chest, the membranes draped along the flanks; the tail behind, curling up into a
     # coil seen from the side
     "ground": dict(
-        spine=[(-0.2, 0, 0.27, 0.03, 0.03), (-0.14, 0, 0.28, 0.045, 0.042), (-0.04, 0, 0.285, 0.036, 0.034),
+        spine=[(-0.3, 0, 0.29, 0.03, 0.03), (-0.24, 0, 0.29, 0.045, 0.042), (-0.09, 0, 0.29, 0.036, 0.034),
                (0.06, 0, 0.295, 0.05, 0.046), (0.12, 0, 0.34, 0.03, 0.028)],
         head=(0.2, 0, 0.49), face=(0, -8), tilt=45, mouth=0.0,
         shoulder=(0.08, 0.055, 0.31), hand=(0.15, 0.09, 0.03), arm_pole=(-1, 0.4, 0),
         fingers=(25, -8), finger_up=(0, 0, 1),
         small_shoulder=(0.1, 0.035, 0.26), small_hand=(0.18, 0.026, 0.28), small_pole=(0, 1, -0.5),
         fruit=Vector((0.19, 0, 0.28)),
-        hip=(-0.14, 0.045, 0.27), ankle=(-0.1, 0.11, 0.035), leg_pole=(1, 0.6, 0.5),
+        hip=(-0.24, 0.045, 0.27), ankle=(-0.225, 0.11, 0.035), leg_pole=(1, 0.6, 0.5),
         toes=(20, -8), toe_up=(0, 0, 1),
-        flank=[(0.06, 0.05, 0.295), (-0.04, 0.036, 0.285)],
+        flank=[(0.06, 0.05, 0.295), (-0.09, 0.036, 0.29)],
         free=_sag((0, 0.3, -1), 0.1, 0.012),
-        tail=[(-0.3, 0, 0.24), (-0.42, 0, 0.22), (-0.53, 0, 0.25)]
-             + _spiral((-0.57, 0, 0.34), ((1, 0, 0), (0, 0, 1)), -90, -400, 0.09, 0.025),
-        tail_up=lambda p, f: (p - Vector((-0.57, 0, 0.34))) if f > 0.45 else Vector((0, 0, 1)),
+        # thin, and level on the cell row z = 0.3125 so it is one voxel thick, ending in a
+        # small upward curl
+        tail=[(-0.4, 0, 0.3125), (-0.52, 0, 0.3125), (-0.64, 0, 0.3125), (-0.72, 0, 0.3125)]
+             + _spiral((-0.75, 0, 0.375), ((1, 0, 0), (0, 0, 1)), -90, -400, 0.0625, 0.02),
+        tail_r=(0.016, 0.004),
+        tail_up=lambda p, f: (p - Vector((-0.75, 0, 0.375))) if f > 0.7 else Vector((0, 0, 1)),
     ),
     # gliding, level and belly down: the big arms spread wide and the knees out, the
     # membranes taut from wrist to knee; the small arms hold the fruit under the chest; the
@@ -1151,6 +1172,10 @@ def loftstrider():
             ell(toe, (0.1, 0.07, 0.05), c("a_foot"), rot=rz(30 + 60 * k + dt))
 
 
+# Models whose parts hang below their z = 0 (the perch under the stand pose's feet): the
+# voxelizer keeps their cells below the ground row (offsets dy < 0).
+BELOW_GROUND = {"seedporter-stand"}
+
 # name: (builder, reference length, width, height in metres). The founders' references are
 # their adult bodies (`assets/voxel-models/source.json`); a specimen is built and baked at
 # its own (the bake's placeholder table), here as its built extent.
@@ -1249,7 +1274,7 @@ def sheets(out, only):
         az, el = VIEWS[name]
         cam = ortho_camera(objs, az, el, W / H)
         L.render(cam, os.path.join(out, f"_{name}-model.png"), W, H)
-        cells = B.voxelize_animal(objs, vox)
+        cells = B.voxelize_animal(objs, vox, None if name in BELOW_GROUND else 0)
         B.reset_scene()
         cubes = voxel_cubes(name, cells, vox)
         cam = ortho_camera(cubes, az, el, W / H)
@@ -1279,10 +1304,17 @@ def voxel_cubes(name, cells, vox):
     for (i, j, k), mat in cells.items():
         slot = slot_of(mat)
         lo, hi = COATS[name].get(slot, COATS[name]["a_main"])
-        t = 1.0 if top <= 0 else round(k / top * 3) / 3
+        t = 1.0 if top <= 0 else round(min(max(k, 0), top) / top * 3) / 3
         key = f"vox:{name}:{slot}:{t:.2f}"
         L.PAL[key] = _mix(lo, hi, t)
         objs.append(box(((i + 0.5) * vox, (j + 0.5) * vox, (k + 0.5) * vox), (vox, vox, vox), key))
+    if name in BELOW_GROUND and cells:
+        # the ground (perch) line, z = 0, through the model: a thin plate in front of it
+        i0, i1 = min(c[0] for c in cells), max(c[0] for c in cells)
+        j0, j1 = min(c[1] for c in cells), max(c[1] for c in cells)
+        L.PAL["vox:ground"] = "#8A6F55"
+        objs.append(box((((i0 + i1) / 2 + 0.5) * vox, ((j0 + j1) / 2 + 0.5) * vox, -0.01),
+                        ((i1 - i0 + 3) * vox, (j1 - j0 + 3) * vox, 0.02), "vox:ground"))
     return objs
 
 

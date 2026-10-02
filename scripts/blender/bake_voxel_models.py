@@ -365,11 +365,12 @@ def bake_plant(sp, vox, out_dir):
     return file, size, meta
 
 
-def voxelize_animal(objs, vox):
+def voxelize_animal(objs, vox, floor=0):
     """{(i, j, k): slot}: `voxelize`'s rule for an animal, whose lofts carry several
     materials on one closed mesh (a flank, a back stripe, a belly): a cell is in or out by
     the whole mesh, and takes the material of the face nearest it. A single-material accent
-    part claims cells as `voxelize`'s accents do."""
+    part claims cells as `voxelize`'s accents do. Cells below `floor` (the ground, k = 0)
+    are dropped; `floor=None` keeps a pose's parts that hang below its perch."""
     parts, accents = [], []
     for ob in objs:
         me = ob.data
@@ -396,7 +397,7 @@ def voxelize_animal(objs, vox):
         for i in rng[0]:
             for j in rng[1]:
                 for k in rng[2]:
-                    if k < 0:
+                    if floor is not None and k < floor:
                         continue
                     c = Vector(((i + 0.5) * vox, (j + 0.5) * vox, (k + 0.5) * vox))
                     best, best_d = None, 1e9
@@ -421,7 +422,8 @@ def voxelize_animal(objs, vox):
         inside = []
         for i in range(math.floor(plo[0] / vox), math.ceil(phi[0] / vox)):
             for j in range(math.floor(plo[1] / vox), math.ceil(phi[1] / vox)):
-                for k in range(max(0, math.floor(plo[2] / vox)), math.ceil(phi[2] / vox)):
+                k0 = math.floor(plo[2] / vox)
+                for k in range(k0 if floor is None else max(floor, k0), math.ceil(phi[2] / vox)):
                     c = Vector(((i + 0.5) * vox, (j + 0.5) * vox, (k + 0.5) * vox))
                     loc, nor, _, _ = bvh.find_nearest(c)
                     if loc is not None and (c - loc).dot(nor) < 0:
@@ -429,16 +431,16 @@ def voxelize_animal(objs, vox):
         if not inside:
             mid = (plo + phi) / 2
             key = (math.floor(mid[0] / vox), math.floor(mid[1] / vox), math.floor(mid[2] / vox))
-            if key[2] >= 0:
+            if floor is None or key[2] >= floor:
                 inside.append(key)
         for key in inside:
             cells[key] = slot
     return cells
 
 
-def animal_cells(objs, vox):
+def animal_cells(objs, vox, floor=0):
     """An animal's cells, as `cells_of` writes them: tag accent or body."""
-    cells = voxelize_animal(objs, vox)
+    cells = voxelize_animal(objs, vox, floor)
     return cells_of(cells, lambda mat, k: 0x30 if animal_role(mat) == "accent" else 0x00)
 
 
@@ -461,7 +463,8 @@ def bake_specimen(name, vox, out_dir):
     """One adult bin at the builder's reference size (the placeholder table above)."""
     _, l0, w0, h0 = A.REF[name]
     reset_scene()
-    cells = animal_cells(A.build(name, 0.5 * vox, 0.5 * vox, l0, w0, h0), vox)
+    floor = None if name in A.BELOW_GROUND else 0
+    cells = animal_cells(A.build(name, 0.5 * vox, 0.5 * vox, l0, w0, h0), vox, floor)
     file = f"{name}.cvm"
     size = write_cvm(os.path.join(out_dir, file), 1, [(l0, w0, [cells])])
     return file, size, [{"length_m": l0, "cells": len(cells)}]
