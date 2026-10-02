@@ -39,6 +39,7 @@
 
 pub mod animal;
 pub mod appearance;
+pub mod candle;
 pub mod chiplet;
 pub mod idle;
 pub mod colours;
@@ -167,6 +168,11 @@ pub struct VoxelConfig {
     /// look): off, every face is a solid voxel as before textures and the latticevine is
     /// plain voxel cells. `--textures` turns it on for one run.
     pub textures: bool,
+    /// Draw the latticevine as its tile layer even with [`textures`] off: terrain and every
+    /// other organism stay plain voxels, and only the vine's tiles are loaded from
+    /// `textures_dir`. Off (the default), the vine is plain voxel cells unless `textures`
+    /// is on. Wrysk, 2026-10-02: textures for the vine alone.
+    pub vine_tiles: bool,
     /// The GPU renderer's face textures ([`textures`]): `masters/`, `lod/<px>/` and
     /// `override/<px>/`. Relative as `models_dir` is. Missing textures are said once and
     /// the faces drawn solid. The CPU presenter never reads them.
@@ -212,6 +218,7 @@ impl Default for VoxelConfig {
             organisms: OrganismLook::Models,
             models_dir: PathBuf::from("assets/voxel-models"),
             textures: false,
+            vine_tiles: false,
             textures_dir: PathBuf::from("assets/voxel-textures"),
             lighting: Lighting::Flat,
             light: LightConfig::default(),
@@ -356,6 +363,8 @@ pub enum Lighting {
 /// day_sky = "warm"     # the lit sky by day: "warm", "mint" or "lilac" (interim variants)
 /// star_bloom = 0.15    # the brightest stars' share into the bloom (0: none)
 /// day_sky_brightness = 1.0  # the day sky and its clouds, times this (dimmer below 1)
+/// candle_min = 0.25    # a glowcap lip's dimmest, of full (1: no candle, every lip full)
+/// candle_period_s = 8.0  # seconds a glowcap's candle takes to wander, about
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -479,6 +488,15 @@ pub struct LightConfig {
     /// (Wrysk, 2026-09-25: the red-dwarf day is too bright on some screens). `1` is the
     /// look as chosen; the terrain's light is not touched.
     pub day_sky_brightness: f32,
+    /// The glowcap candle ([`candle`]): the dimmest a cap's lip gets, as a fraction of its
+    /// full emission (unitless, `0 < candle_min <= 1`). At any moment the caps' brightness
+    /// is spread reciprocally over `[candle_min, 1]` (density ∝ 1/b), so at 0.25 about
+    /// 7.6 % of caps are within 10 % of full. `1` is no candle: every lip at full, the
+    /// picture before it. It multiplies both the lip's drawn emission and its glow light.
+    pub candle_min: f32,
+    /// The glowcap candle's wander, seconds of the presenter's clock: each cap's
+    /// brightness drifts on curves of about this period (each cap its own phase and pace).
+    pub candle_period_s: f32,
 }
 
 /// `[light] day_sky`: [`LightConfig::day_sky`].
@@ -527,6 +545,8 @@ impl Default for LightConfig {
             day_sky: DaySky::Warm,
             star_bloom: cubarium_gpu::weather::STAR_BLOOM_DEFAULT,
             day_sky_brightness: 1.0,
+            candle_min: 0.25,
+            candle_period_s: 8.0,
         }
     }
 }

@@ -1037,6 +1037,7 @@ impl VoxelParams {
                 None => [0.0; 4],
             },
             poses: [[0.0; 4]; POSE_ENTRIES],
+            emit_k: [[1.0; 4]; MAX_STYLES / 4],
         }
     }
 }
@@ -1166,6 +1167,10 @@ struct VoxelUniforms {
     strike_l: [f32; 4],
     /// The pose table of the pack this frame draws, evaluated on its clock ([`pose_rows`]).
     poses: [[f32; 4]; POSE_ENTRIES],
+    /// Each style slot's emission gain this frame: its curve's
+    /// ([`VoxelStaging::emit_curves`], [`VoxelRenderer::set_emit_gains`]), four slots a
+    /// row; `1` draws the style's emissive colour as it is.
+    emit_k: [[f32; 4]; MAX_STYLES / 4],
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -1198,6 +1203,9 @@ pub struct VoxelStaging<'a> {
     /// The pose table ([`PoseTable`]), [`PoseTable::EMPTY`] when handed over: a pack with no
     /// animal posing leaves it so.
     pub poses: &'a mut PoseTable,
+    /// Each style slot's emission curve: `0` (as handed over) draws its emissive colour as
+    /// it is, `k` times curve `k`'s gain this frame ([`VoxelRenderer::set_emit_gains`]).
+    pub emit_curves: &'a mut [u8; MAX_STYLES],
     /// Whether this pack must write [`VoxelStaging::roof`], [`VoxelStaging::glyphs`],
     /// [`VoxelStaging::sky`] and [`VoxelStaging::glow`] (indexed [`PLANE_ROOF`],
     /// [`PLANE_GLYPHS`], [`PLANE_SKY`], [`PLANE_GLOW`]). A
@@ -1507,6 +1515,16 @@ pub struct VoxelRenderer {
     /// Whether any animal poses in the drawn pack: the lit tier then redraws every frame,
     /// because the settle and the breath move on the frame clock.
     posing: bool,
+    /// Each staging buffer's emission curve per style slot, written by its pack; and the
+    /// one the images hold ([`VoxelStaging::emit_curves`]).
+    emit_curve_tables: Vec<[u8; MAX_STYLES]>,
+    drawn_emit_curves: [u8; MAX_STYLES],
+    /// Whether any slot of the drawn pack follows a curve: the lit tier then redraws when
+    /// the curves' gains move.
+    curving: bool,
+    /// Each emission curve's gain this frame ([`VoxelRenderer::set_emit_gains`]); curve 0
+    /// and any past the end are 1.
+    curve_gain: Vec<f32>,
     /// The slot of the last frame that retired, i.e. the one whose timestamps are the
     /// newest complete set. `None` before the first frame finishes.
     last_done: Option<usize>,
@@ -2089,6 +2107,10 @@ impl VoxelRenderer {
             pose_tables: vec![PoseTable::EMPTY; STAGING_RING],
             drawn_poses: PoseTable::EMPTY,
             posing: false,
+            emit_curve_tables: vec![[0; MAX_STYLES]; STAGING_RING],
+            drawn_emit_curves: [0; MAX_STYLES],
+            curving: false,
+            curve_gain: Vec::new(),
             last_done: None,
             ring: StagingRing::new(STAGING_RING),
             slow: SlowPlanes::new(STAGING_RING),
@@ -2230,6 +2252,21 @@ impl VoxelRenderer {
         self.look.sun
     }
 
+    /// Each emission curve's gain from this frame on, by curve index (`gains[0]` is
+    /// ignored: curve 0 is always 1): what a style slot following that curve
+    /// ([`VoxelStaging::emit_curves`]) draws its emissive colour times — the glowcap
+    /// candle. A change redraws the lit tier while the drawn pack has a slot on a curve.
+    pub fn set_emit_gains(&mut self, gains: &[f32]) {
+        if gains != self.curve_gain.as_slice() {
+            self.curve_gain.clear();
+            self.curve_gain.extend_from_slice(gains);
+            if self.params.lit && self.curving {
+                self.raster_current = false;
+                self.version += 1;
+            }
+        }
+    }
+
     /// Whether the world last staged holds any free water: the lit tier redraws on its
     /// clock only while it does.
     pub fn set_water_visible(&mut self, visible: bool) {
@@ -2318,6 +2355,8 @@ impl VoxelRenderer {
         styles.fill(VoxelStyle::default());
         let poses = &mut self.pose_tables[into];
         *poses = PoseTable::EMPTY;
+        let emit_curves = &mut self.emit_curve_tables[into];
+        emit_curves.fill(0);
         fill(VoxelStaging {
             voxels,
             roof,
@@ -2327,6 +2366,7 @@ impl VoxelRenderer {
             canopy,
             glow,
             poses,
+            emit_curves,
             write,
         });
         self.ring.packed(into);
@@ -2428,6 +2468,8 @@ impl VoxelRenderer {
         if upload && let Some(i) = frame.staging {
             self.drawn_poses = self.pose_tables[i];
             self.posing = self.drawn_poses.posing();
+            self.drawn_emit_curves = self.emit_curve_tables[i];
+            self.curving = self.drawn_emit_curves.iter().any(|&c| c != 0);
         }
         let mut block = self.params.uniforms(self.tex_mask, self.vine_on, self.clock, &self.look);
         if self.posing {
@@ -2435,6 +2477,17 @@ impl VoxelRenderer {
         }
         block.vol[3] = self.sunvis.fade();
         block.fog_k[1] = self.fog_floor;
+        if self.curving {
+            let gain = |c: u8| match c {
+                0 => 1.0,
+                c => self.curve_gain.get(usize::from(c)).copied().unwrap_or(1.0),
+            };
+            for (row, curves) in block.emit_k.iter_mut().zip(self.drawn_emit_curves.chunks_exact(4)) {
+                for (g, &c) in row.iter_mut().zip(curves) {
+                    *g = gain(c);
+                }
+            }
+        }
         self.uniforms.write_bytes_at(self.uniform_stride * frame.slot as u64, &[block]);
         // and its own four timestamps.
         let q = frame.slot as u32 * QUERY_SLOTS;

@@ -425,6 +425,22 @@ pub fn load_layers(roots: &[&Path], s: u32, rise: u32) -> Result<(VoxelTextures,
         put_variants(&mut atlas, slot, &found, &mut prov)?;
         prov.species_faces += 1;
     }
+    put_vine_tiles(&mut atlas, roots, s, &mut prov)?;
+    Ok((atlas, prov))
+}
+
+/// The latticevine's tile layer alone, from `roots` as [`load_layers`] reads them: no face
+/// slot is filled, so terrain and every other organism draw solid
+/// (`VoxelConfig::vine_tiles` with textures off).
+pub fn load_vine_layer(roots: &[&Path], s: u32, rise: u32) -> Result<(VoxelTextures, Provenance)> {
+    let mut atlas = VoxelTextures::empty(s, rise);
+    let mut prov = Provenance::default();
+    put_vine_tiles(&mut atlas, roots, s, &mut prov)?;
+    Ok((atlas, prov))
+}
+
+/// Put every vine tile `roots` have at this level into `atlas`'s vine layer.
+fn put_vine_tiles(atlas: &mut VoxelTextures, roots: &[&Path], s: u32, prov: &mut Provenance) -> Result<()> {
     let vine_level = |stem: &str| -> Result<Option<Image>> {
         for root in roots {
             let exact = |path: PathBuf| -> Result<Option<Image>> {
@@ -474,7 +490,7 @@ pub fn load_layers(roots: &[&Path], s: u32, rise: u32) -> Result<(VoxelTextures,
             None => prov.vine_missing += 1,
         }
     }
-    Ok((atlas, prov))
+    Ok(())
 }
 
 /// Mark an accent tile's emitting texels: the opaque ones painted exactly in the accent's

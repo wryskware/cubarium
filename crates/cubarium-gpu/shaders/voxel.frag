@@ -80,6 +80,9 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     // The pose this frame (WX4, `cubarium_gpu::voxel::pose_rows`): entry k's settle and
     // breath dip, in pixel rows, evaluated on the frame's clock.
     vec4 poseK[64];
+    // Each style slot's emission gain this frame (`VoxelRenderer::set_emit_gains`, the
+    // glowcap candle), four slots a row; 1 draws the emissive colour as it is.
+    vec4 emitK[64];
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -341,7 +344,9 @@ vec3 styleAt(int style, int part) { return texelFetch(styleTex, ivec2(part, styl
 // visible texel emits whatever its glyph's tones, carries a quarter in the fractional part
 // of its three pigment columns' alphas, so the pigment fetch every texel makes already
 // says so.
-vec3 styleEmit(int style) { return texelFetch(styleTex, ivec2(3, style), 0).rgb; }
+vec3 styleEmit(int style) {
+    return texelFetch(styleTex, ivec2(3, style), 0).rgb * u.emitK[style >> 2][style & 3];
+}
 bool emitsWhole(float pigmentAlpha) { return fract(pigmentAlpha) > 0.125; }
 
 // The walk's `trans` once it has ended on an emitter: the light the emitter sends to the

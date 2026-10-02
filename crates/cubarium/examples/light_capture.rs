@@ -7,7 +7,7 @@
 //!     [--config config/desktop/terrarium.toml] [--set 'lighting = "lit"']... \
 //!     [--seed 1] [--ticks 0] [--state DIR] [--px 6 --px 13 | --px auto] [--textures] \
 //!     [--frames 60] [--name NAME] [--anim 12 [--anim-hz 60]] [--flow] [--rain]
-//!     [--crop NAME=X0,Y0,X1,Y1]... [--sun-sweep DEG_PER_S] [--frame-times]
+//!     [--crop NAME=X0,Y0,X1,Y1]... [--sun-sweep DEG_PER_S] [--frame-times] [--repack]
 //!     [--weather-preview loop|day|fixed:PHASE[,CLOUD[,RAIN[,FOG]]]]
 //! ```
 //!
@@ -28,7 +28,9 @@
 //! `NAME-<px>px[-tex]-CROP-anim-KK.png`, instead of whole. `--sun-sweep` turns the sun about
 //! the vertical at that many degrees a second of the animation's clock (capture-only; the
 //! light shafts rebake after it, `[light] volumetric_rebake_s`); `--frame-times` prints each
-//! animation frame's draw time and GPU split. `--weather-preview` draws the weather from a
+//! animation frame's draw time and GPU split; `--repack` packs the world again at every
+//! tick the animation's clock crosses, as the live loop does (the glowcaps' candle light
+//! moves at the tick). `--weather-preview` draws the weather from a
 //! scripted loop starting at the state's tick (the still is its first frame, the animation
 //! runs on through it). No window is ever opened.
 
@@ -64,6 +66,7 @@ struct Args {
     crops: Vec<(String, [u32; 4])>,
     sun_sweep: Option<f64>,
     frame_times: bool,
+    repack: bool,
     weather: Option<cubarium::sink::gpu::weather::WeatherPreview>,
 }
 
@@ -86,6 +89,7 @@ fn args() -> Result<Args> {
         crops: Vec::new(),
         sun_sweep: None,
         frame_times: false,
+        repack: false,
         weather: None,
     };
     let mut out = None;
@@ -112,6 +116,7 @@ fn args() -> Result<Args> {
             "--rain" => a.rain = true,
             "--sun-sweep" => a.sun_sweep = Some(v()?.parse()?),
             "--frame-times" => a.frame_times = true,
+            "--repack" => a.repack = true,
             "--weather-preview" => a.weather = Some(v()?.parse()?),
             "--crop" => {
                 let s = v()?;
@@ -307,7 +312,12 @@ fn capture(
         if emitters.len() > 24 {
             at.push("…".into());
         }
-        println!("{tag}: {} emitting voxels: {}", emitters.len(), at.join(" "));
+        let (styles, candles) = sink.styles_used();
+        println!(
+            "{tag}: {} emitting voxels ({styles} style slots, {candles} on candle curves): {}",
+            emitters.len(),
+            at.join(" ")
+        );
     }
     let tick = world.tick();
     sink.set_clock(tick, 0.0);
@@ -327,6 +337,11 @@ fn capture(
             sink.set_sun([x * th.cos() - z * th.sin(), y, x * th.sin() + z * th.cos()])?;
         }
         sink.set_clock(tick + t.floor() as u64, t.fract());
+        // `--repack`: the same world packed again at each tick the clock crosses, as the live
+        // loop packs every tick (the glowcaps' light follows their candles at the tick).
+        if a.repack && k > 0 && t.floor() != (f64::from(k - 1) * per_step).floor() {
+            sink.stage_world(world, flora, fauna);
+        }
         let (_, before) = sink.gpu_stage_totals();
         let drawn = Instant::now();
         sink.render()?;
@@ -371,7 +386,11 @@ fn capture(
     // Timing: every frame packs the world and draws it, as a tick's frame does.
     let (pack0, _) = sink.draw_split();
     let (frames0, stages0) = sink.gpu_stage_totals();
-    for _ in 0..a.frames {
+    for i in 0..a.frames {
+        if a.repack {
+            // A tick apart, as the live loop packs: what moves on the clock is rebuilt.
+            sink.set_clock(tick + 1 + u64::from(i), 0.0);
+        }
         sink.stage_world(world, flora, fauna);
         sink.render()?;
     }
