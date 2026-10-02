@@ -64,6 +64,9 @@ pub use target::{GpuTarget, GpuTargetKind};
 
 #[path = "gpu/light.rs"]
 mod light;
+mod palette;
+#[doc(hidden)]
+pub mod pack_timer;
 
 #[path = "gpu/sunvis.rs"]
 mod sunvis;

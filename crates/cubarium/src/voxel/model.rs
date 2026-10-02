@@ -631,14 +631,20 @@ pub fn keeps(stand_id: u64, offset: [i32; 3], layer: u8, fraction: f64) -> bool 
     if fraction >= 1.0 {
         return true;
     }
+    keep_threshold(stand_id, offset, layer) < fraction
+}
+
+/// The fraction above which [`keeps`] keeps this cell: 24 bits of the cell's hash as a
+/// fraction in `[0, 1)`. Any fraction within 2^-24 of 1 keeps every cell, so a full layer
+/// whose stock is one ulp short of its capacity is full.
+#[inline]
+pub fn keep_threshold(stand_id: u64, offset: [i32; 3], layer: u8) -> f64 {
     let key = (offset[0] as u16 as u64)
         | ((offset[1] as u16 as u64) << 16)
         | ((offset[2] as u16 as u64) << 32)
         | (u64::from(layer) << 48);
     let h = mix64(mix64(stand_id) ^ key);
-    // 24 bits of the hash as a fraction in [0, 1): any fraction within 2^-24 of 1 keeps
-    // every cell, so a full layer whose stock is one ulp short of its capacity is full.
-    ((h >> 40) as f64) * (1.0 / (1u64 << 24) as f64) < fraction
+    ((h >> 40) as f64) * (1.0 / (1u64 << 24) as f64)
 }
 
 // --- stamping ------------------------------------------------------------------------

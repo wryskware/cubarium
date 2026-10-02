@@ -158,12 +158,21 @@ fn nibble(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 15.0).round() as u8
 }
 
-/// One foliage layer's disc as [`Canopy`] keeps it: the stand's column, the disc's radius
-/// squared and drawn cell, and what it lets through.
-#[derive(Clone, Copy, Debug)]
+/// The step each foliage layer's transmission is rounded to before the canopy uses it:
+/// 1/1024, four times finer than the plane's 8-bit step, in the full pack and the
+/// change-only pack alike. A layer whose stock creeps between two steps then leaves the
+/// canopy as it was, so a tick whose rounded transmissions did not move recomputes no
+/// column. Its visible effect is at most a one-step shift of a plane byte or a nibble at
+/// the moment it would round anyway.
+pub(crate) const TRANSMISSION_STEP: f64 = 1.0 / 1024.0;
+
+/// One foliage layer's disc as [`Canopy`] keeps it: the stand's column, the disc's reach
+/// and radius squared, its drawn cell, and what it lets through.
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Disc {
     x: i64,
     z: i64,
+    reach: i64,
     r2: f64,
     cell: i64,
     t: f32,
@@ -187,20 +196,43 @@ struct Step {
 /// merges its two lowest into the lower one's cell, which keeps the product — and so the
 /// ground under all of them — exact and lets only a face between those two layers see
 /// through the upper one.
+///
+/// Built whole every tick ([`Canopy::build`]) or only where a stand's discs moved
+/// ([`Canopy::update`]): a column is recomputed from every disc over it, in stand order,
+/// so the two agree to the bit.
 pub(crate) struct Canopy {
     width: u32,
     depth: u32,
     steps: Vec<[Step; CANOPY_STEPS + 1]>,
     count: Vec<u8>,
-    /// Every stand's foliage discs this build, and each stand's run of them (indexed as
-    /// `FloraView::stands`): what [`Canopy::plant_byte`] divides a stand's own shade out
-    /// with.
-    discs: Vec<Disc>,
-    of_stand: Vec<(u32, u32)>,
+    /// Every stand's foliage discs, by slot, and each stand's slot by its index in
+    /// `FloraView::stands`: what [`Canopy::plant_byte`] divides a stand's own shade out
+    /// with. The full build's slot is the index.
+    discs: Vec<Vec<Disc>>,
+    slot_of: Vec<u32>,
     /// Crown cells drawn in each column, `z · width + x` ([`Canopy::count_crowns`]), and
     /// the pass nibble they share, worked out once per column that has any.
     crowns: Vec<u16>,
     pass: Vec<u8>,
+    /// The change-only update's state.
+    inc: CanopyInc,
+}
+
+/// What [`Canopy::update`] keeps between ticks.
+#[derive(Default)]
+struct CanopyInc {
+    by_id: rustc_hash::FxHashMap<u64, u32>,
+    seen: Vec<u64>,
+    k_of: Vec<u32>,
+    free: Vec<u32>,
+    tick: u64,
+    /// Per column, the slots whose discs reach it; per slot, the columns its discs reach.
+    cover: Vec<Vec<u32>>,
+    foot: Vec<Vec<u32>>,
+    dirty: Vec<u32>,
+    marked: Vec<bool>,
+    scratch: Vec<Disc>,
+    started: bool,
 }
 
 impl Canopy {
@@ -212,55 +244,226 @@ impl Canopy {
             steps: vec![[Step::default(); CANOPY_STEPS + 1]; n],
             count: vec![0; n],
             discs: Vec::new(),
-            of_stand: Vec::new(),
+            slot_of: Vec::new(),
             crowns: vec![0; n],
             pass: vec![0; n],
+            inc: CanopyInc::default(),
         }
+    }
+
+    /// One stand's foliage discs, each layer's transmission rounded to
+    /// [`TRANSMISSION_STEP`].
+    fn stand_discs(flora: FloraView<'_>, stand: &cubarium_voxel_flora::Stand, out: &mut Vec<Disc>) {
+        out.clear();
+        let k = flora.config.shade_k_per_m2;
+        for layer in flora.layers(stand) {
+            let t = (-k * (1.0 - layer.porosity) * layer.stock / layer.area_m2).exp();
+            let t = (t / TRANSMISSION_STEP).round() * TRANSMISSION_STEP;
+            if t.is_nan() || t >= 1.0 || layer.cell <= 0 {
+                continue;
+            }
+            let r = layer.radius_v.max(0.0);
+            out.push(Disc {
+                x: i64::from(stand.site.x),
+                z: i64::from(stand.site.z),
+                reach: r.floor() as i64,
+                // Only whole squared offsets are ever compared with it, so its floor
+                // reaches exactly the cells `r²` does, and moves only when they do.
+                r2: (r * r).floor(),
+                cell: i64::from(layer.cell.min(255) as u8),
+                t: t as f32,
+            });
+        }
+    }
+
+    /// Every column a disc reaches, with each `(dx, dz)` that lands on it, in the full
+    /// build's order.
+    fn each_column(width: u32, depth: u32, disc: &Disc, mut f: impl FnMut(usize)) {
+        let (w, d) = (i64::from(width), i64::from(depth));
+        for dz in -disc.reach..=disc.reach {
+            let z = disc.z + dz;
+            if z < 0 || z >= d {
+                continue;
+            }
+            for dx in -disc.reach..=disc.reach {
+                if ((dx * dx + dz * dz) as f64) > disc.r2 {
+                    continue;
+                }
+                let x = (disc.x + dx).rem_euclid(w);
+                f((z * w + x) as usize);
+            }
+        }
+    }
+
+    /// How many of a disc's `(dx, dz)` land on column `col` ([`Canopy::each_column`]'s
+    /// count of it): one, or more only for a disc wider than the ring.
+    fn hits(width: u32, disc: &Disc, col: usize) -> usize {
+        let w = i64::from(width);
+        let (x, z) = ((col as i64) % w, (col as i64) / w);
+        let dz = z - disc.z;
+        if dz.abs() > disc.reach {
+            return 0;
+        }
+        // The smallest dx ≥ −reach with disc.x + dx ≡ x (mod w), then every w on.
+        let mut dx = -disc.reach + (x - disc.x + disc.reach).rem_euclid(w);
+        let mut n = 0;
+        while dx <= disc.reach {
+            if ((dx * dx + dz * dz) as f64) <= disc.r2 {
+                n += 1;
+            }
+            dx += w;
+        }
+        n
     }
 
     /// Rebuild from `flora`'s foliage layers and write the plane into `out`
     /// ([`cubarium_gpu::voxel::VoxelStaging::canopy`]'s layout).
     pub(crate) fn build(&mut self, flora: FloraView<'_>, out: &mut [u8]) {
         self.count.fill(0);
-        self.discs.clear();
-        self.of_stand.clear();
-        let k = flora.config.shade_k_per_m2;
-        let (w, d) = (i64::from(self.width), i64::from(self.depth));
-        for stand in flora.stands {
-            let first = self.discs.len() as u32;
-            for layer in flora.layers(stand) {
-                let t = (-k * (1.0 - layer.porosity) * layer.stock / layer.area_m2).exp();
-                if t.is_nan() || t >= 1.0 || layer.cell <= 0 {
-                    continue;
+        self.slot_of.clear();
+        self.discs.resize_with(flora.stands.len().max(self.discs.len()), Vec::new);
+        let mut scratch = std::mem::take(&mut self.inc.scratch);
+        for (k, stand) in flora.stands.iter().enumerate() {
+            Canopy::stand_discs(flora, stand, &mut scratch);
+            self.slot_of.push(k as u32);
+            let (w, d) = (self.width, self.depth);
+            for disc in &scratch {
+                let (cell, t) = (disc.cell as u8, disc.t);
+                Canopy::each_column(w, d, disc, |col| self.add(col, cell, t));
+            }
+            self.discs[k].clone_from(&scratch);
+        }
+        self.inc.scratch = scratch;
+        self.write(out);
+    }
+
+    /// The change-only build: each stand's rounded discs against last tick's, and every
+    /// column a moved disc reaches (before or after) recomputed and written into `out`.
+    /// Returns those columns, `z · width + x`. The first call builds every column.
+    pub(crate) fn update(&mut self, flora: FloraView<'_>, out: &mut [u8]) -> &[u32] {
+        let n = self.count.len();
+        let mut inc = std::mem::take(&mut self.inc);
+        inc.dirty.clear();
+        if !inc.started {
+            inc = CanopyInc {
+                cover: vec![Vec::new(); n],
+                marked: vec![false; n],
+                started: true,
+                ..CanopyInc::default()
+            };
+            self.discs.clear();
+            self.count.fill(0);
+            for col in 0..n {
+                inc.marked[col] = true;
+                inc.dirty.push(col as u32);
+            }
+        }
+        inc.tick += 1;
+        self.slot_of.clear();
+        let mut scratch = std::mem::take(&mut inc.scratch);
+        for (k, stand) in flora.stands.iter().enumerate() {
+            let slot = match inc.by_id.get(&stand.id) {
+                Some(&s) => s,
+                None => {
+                    let s = inc.free.pop().unwrap_or_else(|| {
+                        self.discs.push(Vec::new());
+                        inc.seen.push(0);
+                        inc.k_of.push(0);
+                        inc.foot.push(Vec::new());
+                        (self.discs.len() - 1) as u32
+                    });
+                    inc.by_id.insert(stand.id, s);
+                    s
                 }
-                let cell = layer.cell.min(255) as u8;
-                let r = layer.radius_v.max(0.0);
-                let reach = r.floor() as i64;
-                let (x0, z0) = (i64::from(stand.site.x), i64::from(stand.site.z));
-                self.discs.push(Disc {
-                    x: x0,
-                    z: z0,
-                    r2: r * r,
-                    cell: i64::from(cell),
-                    t: t as f32,
-                });
-                for dz in -reach..=reach {
-                    let z = z0 + dz;
-                    if z < 0 || z >= d {
-                        continue;
-                    }
-                    for dx in -reach..=reach {
-                        if ((dx * dx + dz * dz) as f64) > r * r {
-                            continue;
-                        }
-                        let x = (x0 + dx).rem_euclid(w);
-                        self.add((z * w + x) as usize, cell, t as f32);
+            };
+            let si = slot as usize;
+            inc.seen[si] = inc.tick;
+            inc.k_of[si] = k as u32;
+            self.slot_of.push(slot);
+            Canopy::stand_discs(flora, stand, &mut scratch);
+            if scratch != self.discs[si] {
+                self.move_discs(&mut inc, slot, &scratch);
+            }
+        }
+        inc.scratch = scratch;
+        let gone: Vec<(u64, u32)> = inc
+            .by_id
+            .iter()
+            .filter(|(_, s)| inc.seen[**s as usize] != inc.tick)
+            .map(|(&id, &s)| (id, s))
+            .collect();
+        for (id, slot) in gone {
+            inc.by_id.remove(&id);
+            self.move_discs(&mut inc, slot, &[]);
+            inc.free.push(slot);
+        }
+        // Each moved column from every disc over it, in stand order.
+        let mut slots: Vec<u32> = Vec::new();
+        for &col in &inc.dirty {
+            let col = col as usize;
+            inc.marked[col] = false;
+            self.count[col] = 0;
+            slots.clear();
+            slots.extend_from_slice(&inc.cover[col]);
+            slots.sort_unstable_by_key(|&s| inc.k_of[s as usize]);
+            for &slot in &slots {
+                for i in 0..self.discs[slot as usize].len() {
+                    let disc = self.discs[slot as usize][i];
+                    let (cell, t) = (disc.cell as u8, disc.t);
+                    for _ in 0..Canopy::hits(self.width, &disc, col) {
+                        self.add(col, cell, t);
                     }
                 }
             }
-            self.of_stand.push((first, self.discs.len() as u32));
+            self.write_column(col, out);
         }
-        self.write(out);
+        self.inc = inc;
+        &self.inc.dirty
+    }
+
+    /// Give `slot` the discs `new`: its old and new columns are dirty.
+    fn move_discs(&mut self, inc: &mut CanopyInc, slot: u32, new: &[Disc]) {
+        let si = slot as usize;
+        let old_foot = std::mem::take(&mut inc.foot[si]);
+        for &col in &old_foot {
+            inc.cover[col as usize].retain(|&s| s != slot);
+            if !inc.marked[col as usize] {
+                inc.marked[col as usize] = true;
+                inc.dirty.push(col);
+            }
+        }
+        let mut foot: Vec<u32> = Vec::new();
+        for disc in new {
+            Canopy::each_column(self.width, self.depth, disc, |col| foot.push(col as u32));
+        }
+        foot.sort_unstable();
+        foot.dedup();
+        for &col in &foot {
+            inc.cover[col as usize].push(slot);
+            if !inc.marked[col as usize] {
+                inc.marked[col as usize] = true;
+                inc.dirty.push(col);
+            }
+        }
+        inc.foot[si] = foot;
+        self.discs[si].clear();
+        self.discs[si].extend_from_slice(new);
+    }
+
+    /// Recount the crown cells of these columns from `crowns_in` (column `(x, z)`'s crown
+    /// cells) and work their pass nibbles out again: the change-only
+    /// [`Canopy::count_crowns`].
+    pub(crate) fn recount(&mut self, cols: impl Iterator<Item = u32>, crowns_in: impl Fn(u32, u32) -> u16) {
+        let w = self.width as usize;
+        for col in cols {
+            let col = col as usize;
+            let (x, z) = ((col % w) as u32, (col / w) as u32);
+            let n = crowns_in(x, z);
+            self.crowns[col] = n;
+            if n > 0 {
+                self.pass[col] = nibble(self.through(x, z, -1).powf(1.0 / f32::from(n)));
+            }
+        }
     }
 
     /// Count the crown cells drawn in each column, for [`Canopy::plant_byte`]'s pass
@@ -297,12 +500,12 @@ impl Canopy {
     /// What stand `stand`'s own layers let through to a face of a voxel at `y` in column
     /// `(x, z)`.
     fn own(&self, stand: usize, x: u32, z: u32, y: i64) -> f32 {
-        let Some(&(a, b)) = self.of_stand.get(stand) else {
+        let Some(discs) = self.slot_of.get(stand).and_then(|&s| self.discs.get(s as usize)) else {
             return 1.0;
         };
         let w = i64::from(self.width);
         let mut t = 1.0;
-        for disc in &self.discs[a as usize..b as usize] {
+        for disc in discs {
             let mut dx = (i64::from(x) - disc.x).rem_euclid(w);
             if dx > w / 2 {
                 dx -= w;
@@ -365,22 +568,27 @@ impl Canopy {
     }
 
     fn write(&self, out: &mut [u8]) {
+        for col in 0..self.steps.len() {
+            self.write_column(col, out);
+        }
+    }
+
+    fn write_column(&self, col: usize, out: &mut [u8]) {
         let w = self.width as usize;
         let per_row = CANOPY_STEPS / 2;
-        for (col, steps) in self.steps.iter().enumerate() {
-            let (x, z) = (col % w, col / w);
-            let n = self.count[col] as usize;
-            let mut through = 1.0f32;
-            for (k, step) in steps[..CANOPY_STEPS].iter().enumerate() {
-                let at = ((z * per_row + k / 2) * w + x) * 4 + (k % 2) * 2;
-                if k < n {
-                    through *= step.t;
-                    out[at] = step.cell;
-                    out[at + 1] = quantise(f64::from(through));
-                } else {
-                    out[at] = 0;
-                    out[at + 1] = 0;
-                }
+        let steps = &self.steps[col];
+        let (x, z) = (col % w, col / w);
+        let n = self.count[col] as usize;
+        let mut through = 1.0f32;
+        for (k, step) in steps[..CANOPY_STEPS].iter().enumerate() {
+            let at = ((z * per_row + k / 2) * w + x) * 4 + (k % 2) * 2;
+            if k < n {
+                through *= step.t;
+                out[at] = step.cell;
+                out[at + 1] = quantise(f64::from(through));
+            } else {
+                out[at] = 0;
+                out[at + 1] = 0;
             }
         }
     }
@@ -590,6 +798,170 @@ impl Glow {
     }
 }
 
+/// The glow volume split by candle curve: one grid for the steady emitters (curve 0:
+/// every non-glowcap emitter, and every glowcap with the candle off) and one for each
+/// candle curve's lips at full brightness. A grid is spread again only when its own
+/// emitters or the terrain change; each tick the candle's gains mix them
+/// ([`GlowSet::mix`]): `steady + Σ gain_k · curve_k`, which is the one-grid build at
+/// those gains up to float rounding, since the spread is linear in its sources.
+pub(crate) struct GlowSet {
+    /// The volume as the plane holds it: RGBA8, alpha unused.
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) key: u64,
+    /// Grid 0 steady, grid `k` candle curve `k`, each at full brightness.
+    grids: Vec<Glow>,
+    /// Whether each grid holds any light, and the glow cells a curve grid lights.
+    live: Vec<bool>,
+    support: Vec<Vec<u32>>,
+    /// The cells any curve grid lights, ascending, and the gains last mixed at.
+    union: Vec<u32>,
+    gains: Vec<f32>,
+    /// Whether the steady grid or the supports moved since the last mix.
+    stale: bool,
+    buckets: Vec<Vec<((u32, u32, u32), [f32; 3])>>,
+    /// Scratch: the curve cells' sums.
+    sum: Vec<[f32; 3]>,
+}
+
+impl GlowSet {
+    pub(crate) fn new(width: u32, height: u32, depth: u32) -> GlowSet {
+        let n = usize::from(crate::voxel::candle::CLASSES) + 1;
+        let grids: Vec<Glow> = (0..n).map(|_| Glow::new(width, height, depth)).collect();
+        let cells = grids[0].light.len();
+        GlowSet {
+            bytes: vec![0; cells * 4],
+            key: 0,
+            grids,
+            live: vec![false; n],
+            support: vec![Vec::new(); n],
+            union: Vec::new(),
+            gains: Vec::new(),
+            stale: true,
+            buckets: vec![Vec::new(); n],
+            sum: vec![[0.0; 3]; cells],
+        }
+    }
+
+    /// The terrain moved: every grid spreads again at its next update.
+    pub(crate) fn set_terrain(&mut self, config: &Config, material: &[Material]) {
+        self.grids[0].set_terrain(config, material);
+        let (total, air, terrain) = (self.grids[0].total.clone(), self.grids[0].air.clone(), self.grids[0].terrain);
+        for g in &mut self.grids[1..] {
+            g.total.clone_from(&total);
+            g.air.clone_from(&air);
+            g.terrain = terrain;
+        }
+        // An unlit grid stays unlit whatever the terrain; a lit one spreads again.
+        self.stale = true;
+    }
+
+    /// This tick's emitters, each a voxel, its candle curve (0 steady) and its emissive
+    /// colour at full brightness. Spreads the grids whose emitters or terrain moved and
+    /// returns how many it spread.
+    pub(crate) fn update(
+        &mut self,
+        emitters: impl Iterator<Item = ((u32, u32, u32), u8, [f32; 3])>,
+        gain: f32,
+        reach: u32,
+    ) -> usize {
+        for b in &mut self.buckets {
+            b.clear();
+        }
+        let n = self.grids.len();
+        for (v, k, rgb) in emitters {
+            self.buckets[usize::from(k).min(n - 1)].push((v, rgb));
+        }
+        let mut spread = 0;
+        for k in 0..n {
+            let bucket = &self.buckets[k];
+            if bucket.is_empty() && !self.live[k] {
+                continue;
+            }
+            if !self.grids[k].build(bucket.iter().copied(), gain, reach) {
+                continue;
+            }
+            spread += 1;
+            self.live[k] = !bucket.is_empty();
+            self.stale = true;
+            if k > 0 {
+                let support = &mut self.support[k];
+                support.clear();
+                support.extend(
+                    self.grids[k]
+                        .light
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, l)| l.iter().any(|&x| x != 0.0))
+                        .map(|(c, _)| c as u32),
+                );
+            }
+        }
+        if self.stale {
+            self.union.clear();
+            for s in &self.support[1..] {
+                self.union.extend_from_slice(s);
+            }
+            self.union.sort_unstable();
+            self.union.dedup();
+        }
+        spread
+    }
+
+    /// Mix the grids at the curves' gains (`gains[k]` for curve `k`; `gains[0]` unused)
+    /// into [`GlowSet::bytes`], bumping [`GlowSet::key`] when a byte changed. Returns
+    /// whether one did.
+    pub(crate) fn mix(&mut self, gains: &[f32]) -> bool {
+        let quantise = |l: [f32; 3]| l.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let mut changed = false;
+        let mut put = |bytes: &mut [u8], c: usize, rgb: [u8; 3]| {
+            let px = &mut bytes[c * 4..c * 4 + 4];
+            if px[..3] != rgb || px[3] != 255 {
+                px[..3].copy_from_slice(&rgb);
+                px[3] = 255;
+                changed = true;
+            }
+        };
+        let steady = &self.grids[0].light;
+        if self.stale {
+            // Every cell from the steady grid; the curves' cells below.
+            for (c, l) in steady.iter().enumerate() {
+                put(&mut self.bytes, c, quantise(*l));
+            }
+        } else if gains == self.gains.as_slice() {
+            return false;
+        }
+        let gain = |k: usize| gains.get(k).copied().unwrap_or(1.0);
+        // Sum into the curve cells' scratch, each grid over its own lit cells only, in
+        // grid order (the order a cell's terms are added in does not depend on the gains).
+        for &c in &self.union {
+            self.sum[c as usize] = steady[c as usize];
+        }
+        for k in 1..self.grids.len() {
+            if !self.live[k] {
+                continue;
+            }
+            let g = gain(k);
+            let light = &self.grids[k].light;
+            for &c in &self.support[k] {
+                let (l, v) = (&mut self.sum[c as usize], light[c as usize]);
+                for i in 0..3 {
+                    l[i] += v[i] * g;
+                }
+            }
+        }
+        for &c in &self.union {
+            put(&mut self.bytes, c as usize, quantise(self.sum[c as usize]));
+        }
+        self.stale = false;
+        self.gains.clear();
+        self.gains.extend_from_slice(gains);
+        if changed {
+            self.key += 1;
+        }
+        changed
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,6 +1098,63 @@ mod tests {
     /// The ground under a crown is dimmed by exactly the layers whose discs are drawn
     /// above it, as the shade model multiplies them; the crown's own cells and anything
     /// outside its disc are not; two crowns over one column multiply.
+    /// The per-curve grids mixed at a tick's gains are the one-grid build at those gains,
+    /// to a byte; and a tick whose emitters and terrain did not move spreads nothing,
+    /// whatever the gains do.
+    #[test]
+    fn the_curve_grids_mix_to_the_one_grid_build_and_spread_only_on_change() {
+        let c = Config {
+            width: 32,
+            height: 8,
+            depth: 12,
+            ..Config::default()
+        };
+        let material: Vec<Material> = (0..c.width * c.height * c.depth)
+            .map(|i| {
+                let x = i % c.width;
+                if (12..16).contains(&x) { Material::Rock } else { Material::Air }
+            })
+            .collect();
+        let emitters: Vec<((u32, u32, u32), u8, [f32; 3])> = vec![
+            ((6, 4, 6), 0, [0.05, 0.56, 0.94]),
+            ((7, 4, 6), 3, [0.9, 0.6, 0.1]),
+            ((8, 2, 5), 3, [0.9, 0.6, 0.1]),
+            ((20, 1, 2), 1, [0.4, 0.9, 0.2]),
+            ((21, 1, 3), 0, [0.2, 0.2, 0.7]),
+            ((22, 6, 9), 16, [0.7, 0.3, 0.6]),
+        ];
+        let mut set = GlowSet::new(c.width, c.height, c.depth);
+        set.set_terrain(&c, &material);
+        let mut one = Glow::new(c.width, c.height, c.depth);
+        one.set_terrain(&c, &material);
+        let check = |set: &GlowSet, one: &mut Glow, gains: &[f32]| {
+            let scaled = emitters
+                .iter()
+                .map(|&(v, k, rgb)| (v, rgb.map(|x| x * if k == 0 { 1.0 } else { gains[usize::from(k)] })));
+            one.build(scaled, 0.5, 3);
+            for (i, (a, b)) in set.bytes.iter().zip(&one.bytes).enumerate() {
+                assert!(a.abs_diff(*b) <= 1, "byte {i}: mixed {a}, built {b}");
+            }
+        };
+        let mut gains = vec![1.0f32; 17];
+        assert_eq!(set.update(emitters.iter().copied(), 0.5, 3), 4, "steady and curves 1, 3, 16");
+        set.mix(&gains);
+        check(&set, &mut one, &gains);
+        for (k, g) in gains.iter_mut().enumerate() {
+            *g = 0.25 + 0.04 * k as f32;
+        }
+        assert_eq!(set.update(emitters.iter().copied(), 0.5, 3), 0, "nothing moved");
+        let key = set.key;
+        assert!(set.mix(&gains), "the candle moved the light");
+        assert_ne!(set.key, key);
+        check(&set, &mut one, &gains);
+        assert!(!set.mix(&gains), "the same gains, the same bytes");
+        // One curve's emitter moves: only its grid spreads.
+        let mut moved = emitters.clone();
+        moved[3].0 = (19, 1, 2);
+        assert_eq!(set.update(moved.iter().copied(), 0.5, 3), 1);
+    }
+
     #[test]
     fn the_canopy_plane_attenuates_straight_down_by_the_models_layers() {
         let c = Config {

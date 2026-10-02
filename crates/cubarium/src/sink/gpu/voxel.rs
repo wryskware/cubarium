@@ -38,7 +38,7 @@ use anyhow::{Context, Result, bail};
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, POSE_ENTRIES, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
-    PLANE_SKY, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
+    PLANE_CANOPY, PLANE_SKY, PLANE_STYLES, SLOW_PLANES, FrameClock, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
 };
 use cubarium_voxel::{Material, Materials, VoxelView, World};
 use cubarium_voxel_flora::{FaceDraw, Flora, FloraView};
@@ -53,17 +53,25 @@ use crate::voxel::{appearance, colours};
 use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
-use crate::voxel::stand::{Part, Stands, Style};
+use crate::voxel::stand::{Part, Stands};
 use crate::voxel::textures::SpeciesFaces;
 use crate::voxel::vine::{self, VineCell};
 use cubarium_voxel_fauna::{Fauna, FaunaView};
 
-use super::light::{Canopy, Glow, SkyWorker};
+use super::light::{Canopy, Glow, GlowSet, SkyWorker};
+use super::palette::{self, Palette, StyleKey};
+use super::pack_timer::{count, lap};
 use super::sunvis::{Snapshot, SunVisDriver};
 use super::target::{GpuTarget, GpuTargetKind};
 
 // The texel's six entry bits, the renderer's uniform array and the pose's own table agree.
 const _: () = assert!(sleep::POSE_ENTRIES == POSE_ENTRIES && POSE_ENTRIES <= 64);
+
+/// The pack oracle: the change-only pack held to the full one (tests and
+/// `examples/pack_oracle.rs`).
+#[path = "oracle.rs"]
+#[doc(hidden)]
+pub mod oracle;
 
 /// The knobs `cubarium voxel --sink gpu` takes.
 #[derive(Clone, Debug)]
@@ -284,6 +292,7 @@ impl VoxelGpuSink {
             return false;
         }
         let started = Instant::now();
+        super::pack_timer::start();
         let p = self.renderer.params();
         // The candles' light at the frame clock's time (the tick's, before a clock is set).
         let candle_s = if self.clock_s > 0.0 {
@@ -311,9 +320,11 @@ impl VoxelGpuSink {
             }
         }
         let packer = &mut self.packer;
+        lap!("sunvis");
         self.renderer.stage(slow, |out| {
             packer.fill(view, p.width, p.height, p.depth, out)
         });
+        lap!("stage");
         let atmosphere = if p.sky_gradient && view.atmosphere_m3 > 0.0 {
             (view.atmosphere_m3 as f32 / 1.5).clamp(0.1, 1.0)
         } else {
@@ -429,11 +440,25 @@ impl VoxelGpuSink {
         })
     }
 
+    /// Pack the next staged world in full, as a first tick does. For
+    /// `examples/pack_profile.rs`'s check of the change-only uploads.
+    #[doc(hidden)]
+    pub fn pack_next_in_full(&mut self) {
+        self.packer.delta.full = true;
+    }
+
+    /// What the last staged pack will upload, KiB: its voxel bricks (or volume) and the
+    /// slow planes the images lack. For `examples/pack_profile.rs`.
+    pub fn last_upload_kib(&self) -> f64 {
+        self.renderer.last_upload_bytes() as f64 / 1024.0
+    }
+
     /// Style slots the last pack used, of `MAX_STYLES`, and how many follow a candle curve.
     /// For captures.
     pub fn styles_used(&self) -> (usize, usize) {
-        let s = &self.packer.styles;
-        (s.len(), s.iter().filter(|k| k.3.is_some_and(|e| e[3] >> 1 != 0)).count())
+        let p = &self.packer.palette;
+        let keys = (0..MAX_STYLES).filter_map(|s| p.key(s as u8));
+        (p.live(), keys.filter(|k| palette::curve_of(k) != 0).count())
     }
 
     /// The lit tier's emitting voxels in the last pack, with their emissive colours in
@@ -687,14 +712,26 @@ impl Drop for VoxelGpuSink {
 
 /// One tick's world as texels: the stage loop, and what it keeps between ticks.
 ///
-/// **What it keeps.** The roof table is a function of the terrain alone, so it is built
-/// when the terrain moves and copied into a staging buffer only when that buffer does not
-/// hold it yet (`cubarium_gpu::voxel::SlowPlanes`); the glyph atlas is a function of the
-/// projection and is built once. The plant and animal grids clear only what they stamped.
+/// **The full pack.** Every voxel once, in the world's own order, for material and water;
+/// then only the cells a stand or an animal stamped, in texture order; then the vine's
+/// tile cells. It is what a first tick, a terrain edit or another world packs, and what
+/// the oracle packer ([`Packer::full_only`]) packs every tick.
 ///
-/// **What it walks.** Every voxel once, in the world's own order, for material and water;
-/// then only the cells a stand or an animal stamped, in texture order — the order the old
-/// per-voxel loop met them in, so the style slots come out numbered the same.
+/// **The change-only pack** (the live one). The packer keeps the texels it last packed
+/// (`master`, texture order) and the style table as a persistent [`Palette`], so a texel
+/// whose drawing did not change keeps its bytes and its slot. Each tick it gathers the
+/// cells something may have changed in — free water (the world's wet set and the cells
+/// that were wet), pore water (a diff over the porous runs), the stands' dirty cells and
+/// their crown neighbours, the plant cells under canopy columns that moved, the animals'
+/// cells before and after, the vine's cells when its key moved — composes each one
+/// exactly as the full pack would, and marks the brick of every texel that changed. Only
+/// owed bricks go into the staging buffer ([`cubarium_gpu::voxel::write_upload`]).
+///
+/// **What it keeps for both.** The roof table is a function of the terrain alone, so it is
+/// built when the terrain moves and copied into a staging buffer only when that buffer
+/// does not hold it yet (`cubarium_gpu::voxel::SlowPlanes`); the glyph atlas is a
+/// function of the projection and is built once; the style table, the canopy plane and
+/// the glow volume are slow planes keyed by their own versions.
 struct Packer {
     /// The CPU presenter's own stand decomposition, rebuilt once per staged tick.
     stands: Stands,
@@ -704,23 +741,24 @@ struct Packer {
     models: Option<Arc<ModelLibrary>>,
     /// Unsimulated animals drawn from the models' `specimens` (`voxel_specimens` only).
     specimens: Vec<Specimen>,
-    /// GPU style slots, in the order they were first needed this tick, with the texture
-    /// role each draws with (`ROLE_*`) and its species face slots.
-    styles: Vec<StyleKey>,
+    /// The GPU style table: one slot per style some texel draws with.
+    palette: Palette,
     /// Which species face slots each model cell draws with ([`SpeciesFaces`]).
     species: SpeciesFaces,
-    /// `Stands` style index → GPU slot for this tick, so the dedup costs one linear scan
-    /// per stand and not one per voxel.
-    slot_of: Vec<Option<u8>>,
-    /// Plant voxels that had to reuse style 0 because the frame wanted more than
-    /// [`MAX_STYLES`] distinct styles.
+    /// This tick's style key per `Stands` style index, and per `Animals` style index
+    /// (stamped with the tick, `keys_tick`), so a style is resolved once a tick.
+    plant_keys: Vec<(u64, StyleKey)>,
+    animal_keys: Vec<(u64, StyleKey)>,
+    keys_tick: u64,
+    /// Texels that had to draw with slot 0 because the frame wanted more than
+    /// [`MAX_STYLES`] distinct styles at once.
     style_overflow: u64,
     /// The roof table in texture order, for the terrain in [`Packer::roof_materials`].
     roof: Vec<u8>,
     /// The materials `roof` was built from, and their `terrain_version`. The version says
     /// when the terrain moved in one world, but two worlds can share a version (a fresh
     /// world starts at zero, as the empty founding world does), so the materials
-    /// themselves are compared too — a few hundred microseconds, not a rebuild.
+    /// themselves are compared too, as bytes.
     roof_materials: Vec<Material>,
     roof_version: Option<u64>,
     /// Bumped every time `roof` is rebuilt: the key its plane is uploaded under.
@@ -729,8 +767,14 @@ struct Packer {
     glyphs: Vec<u8>,
     /// Scratch: the overlay's texture indices.
     overlay: Vec<u32>,
-    /// This tick's latticevine cells (`crate::voxel::vine`), for the tile layer.
+    /// This tick's latticevine cells (`crate::voxel::vine`), for the tile layer, and the
+    /// tiled ones by texture index.
     vines: Vec<VineCell>,
+    vine_at: rustc_hash::FxHashMap<u32, VineCell>,
+    /// The vine key the tile cells were built under ([`crate::voxel::stand::vine_key`]),
+    /// and whether this tick rebuilt them.
+    vine_key: Option<u64>,
+    vines_moved: bool,
     /// Whether the latticevine is the tile layer (textures on) rather than plain cells.
     vine_tiles: bool,
     /// Faces to draw instead of the flora's own cover: a fixture posing spur phases and
@@ -739,16 +783,81 @@ struct Packer {
     /// The lit tier's planes (`super::light`), or `None` in the flat tier, which packs
     /// neither.
     light: Option<LightPlanes>,
-    /// Whether the last fill wrote any free water (the lit tier animates it).
+    /// Whether the last fill left any free water (the lit tier animates it).
     wet: bool,
     /// The glowcap candle, when it runs (lit tier, emission on, `candle_min` below 1).
     candle: Option<Candle>,
     /// This tick's candle curve for each flora stand (its index in `FloraView::stands`):
     /// a glowcap's ([`Candle::class_of`]), `0` for every other stand.
     candle_class: Vec<u8>,
-    /// The fill's scratch: the slot of each `(base slot, curve)` pair a candle cell took,
-    /// `u16::MAX` for none yet.
-    candle_slots: Vec<u16>,
+    /// Whether a tick packs only what changed (the live pack) or everything (the oracle
+    /// the change-only pack is held to).
+    incremental: bool,
+    /// The change-only pack's state.
+    delta: Delta,
+}
+
+/// What the change-only pack keeps between ticks.
+#[derive(Default)]
+struct Delta {
+    /// The texels last packed, texture order, and which of them draw with a style slot.
+    master: Vec<VoxelTexel>,
+    keyed: Vec<u64>,
+    /// The next fill packs in full (first tick, terrain edit, another world).
+    full: bool,
+    /// The texels whose free water was not zero, texture order; the wet set's cells.
+    wet: Vec<u32>,
+    wet_cells: Vec<usize>,
+    /// The porous runs of the terrain, `(world index, texture index, length)`, and the
+    /// pore byte each of their cells was packed with.
+    porous: Vec<(u32, u32, u32)>,
+    pore: Vec<u8>,
+    /// Last tick's animal cells, texture order.
+    animals: Vec<u32>,
+    /// This tick's cells to compose, and a bit per texel so each is listed once.
+    dirty: Vec<u32>,
+    dirty_bits: Vec<u64>,
+    /// Columns (`z · width + x`) whose plant cells this tick's canopy moved.
+    canopy_cols: Vec<u32>,
+    /// Scratch for the two-phase palette update.
+    changed: Vec<(u32, VoxelTexel, Option<StyleKey>)>,
+    /// Texels that wanted a style when every slot was live, and draw with slot 0 (or a
+    /// candle copy's steady style) meanwhile: composed again every tick a slot is free.
+    overflowed: Vec<u32>,
+}
+
+impl Delta {
+    #[inline]
+    fn mark(&mut self, i: u32) {
+        let (w, b) = ((i / 64) as usize, 1u64 << (i % 64));
+        if self.dirty_bits[w] & b == 0 {
+            self.dirty_bits[w] |= b;
+            self.dirty.push(i);
+        }
+    }
+
+    #[inline]
+    fn is_keyed(&self, i: usize) -> bool {
+        self.keyed[i / 64] & (1 << (i % 64)) != 0
+    }
+
+    #[inline]
+    fn set_keyed(&mut self, i: usize, on: bool) {
+        let b = 1u64 << (i % 64);
+        if on {
+            self.keyed[i / 64] |= b;
+        } else {
+            self.keyed[i / 64] &= !b;
+        }
+    }
+}
+
+/// One texel as the shader resolves it: its material, part, glyph and water bytes, and
+/// what its fourth byte means — a style slot's contents and candle curve, or a raw byte.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Resolved {
+    Styled([u8; 3], VoxelStyle, u8),
+    Raw([u8; 4]),
 }
 
 /// The lit tier's emitters ([`crate::voxel::LightConfig`]'s `emission`, `glow`,
@@ -798,18 +907,31 @@ struct LightPlanes {
     current: bool,
     worker: SkyWorker,
     canopy: Canopy,
-    /// This tick's canopy plane, built in `prepare` from the flora and copied in `fill`.
+    /// The canopy plane, built in `prepare` from the flora and copied in `fill` when its
+    /// key moves.
     canopy_plane: Vec<u8>,
-    /// The emitters' local light, rebuilt in `prepare` when the emitters or the terrain
-    /// moved, and its settings.
+    canopy_key: u64,
+    /// The full pack's glow: one volume of every emitter at its candle's brightness.
     glow: Glow,
+    /// The change-only pack's glow: one grid per candle curve, mixed each tick.
+    glow_set: GlowSet,
     emission: Emission,
-    /// Scratch: this tick's emitting voxels and their colours.
+    /// This tick's emitting voxels and their colours (the full pack: at the candle's
+    /// brightness; the change-only pack: at full, with their curve).
     emitters: Vec<((u32, u32, u32), [f32; 3])>,
+    /// The change-only pack's emitters by source, kept until that source moves.
+    stand_emitters: Vec<((u32, u32, u32), u8, [f32; 3])>,
+    stand_emitter_cells: rustc_hash::FxHashSet<u32>,
+    animal_emitters: Vec<((u32, u32, u32), u8, [f32; 3])>,
+    vine_emitters: Vec<((u32, u32, u32), u8, [f32; 3])>,
 }
 
 /// The glyph plane never changes after construction: one key for the life of a renderer.
 const GLYPHS_KEY: u64 = 0;
+
+/// What [`Packer::overlay`] makes of a cell: its texel (slot byte not yet set) and the
+/// style it draws with, if any.
+type Composed = (VoxelTexel, Option<StyleKey>);
 
 impl Packer {
     /// `tiles`: the vine tile atlas is loaded, so the latticevine is drawn as the tile
@@ -828,6 +950,7 @@ impl Packer {
         appearance::write_atlas(p.s, p.rise, &mut glyphs[..used]);
         let mut stands = Stands::empty(p.width, p.height, p.depth);
         stands.set_vine_cells(!tiles);
+        stands.set_incremental(true);
         if p.lit {
             // The lit tier divides a stand's own shade out of its own cells.
             stands.track_owners();
@@ -835,40 +958,135 @@ impl Packer {
         }
         let mut animals = Animals::empty(p.width, p.height, p.depth);
         animals.set_emission(p.lit && emission.on);
+        let n = p.voxel_count();
         Packer {
             stands,
             vine_tiles: tiles,
             candle: (p.lit && emission.on && emission.candle.on()).then_some(emission.candle),
             candle_class: Vec::new(),
-            candle_slots: vec![u16::MAX; MAX_STYLES * (usize::from(candle::CLASSES) + 1)],
+            incremental: true,
             animals,
             models,
             specimens: Vec::new(),
-            styles: Vec::new(),
+            palette: Palette::new(),
             species,
-            slot_of: Vec::new(),
+            plant_keys: Vec::new(),
+            animal_keys: Vec::new(),
+            keys_tick: 0,
             style_overflow: 0,
-            roof: vec![0; p.voxel_count()],
+            roof: vec![0; n],
             roof_materials: Vec::new(),
             roof_version: None,
             roof_key: 0,
             glyphs,
             overlay: Vec::new(),
             vines: Vec::new(),
+            vine_at: Default::default(),
+            vine_key: None,
+            vines_moved: false,
             cover_override: None,
             wet: false,
             light: p.lit.then(|| LightPlanes {
-                sky: vec![255; p.voxel_count()],
+                sky: vec![255; n],
                 sky_key: 0,
                 submitted: 0,
                 current: false,
                 worker: SkyWorker::spawn(),
                 canopy: Canopy::new(p.width, p.depth),
                 canopy_plane: vec![0; p.canopy_bytes()],
+                canopy_key: 0,
                 glow: Glow::new(p.width, p.height, p.depth),
+                glow_set: GlowSet::new(p.width, p.height, p.depth),
                 emission,
                 emitters: Vec::new(),
+                stand_emitters: Vec::new(),
+                stand_emitter_cells: Default::default(),
+                animal_emitters: Vec::new(),
+                vine_emitters: Vec::new(),
             }),
+            delta: Delta {
+                master: vec![VoxelTexel::default(); n],
+                keyed: vec![0; n.div_ceil(64)],
+                dirty_bits: vec![0; n.div_ceil(64)],
+                full: true,
+                ..Delta::default()
+            },
+        }
+    }
+
+    /// This packer packs every tick in full: the oracle.
+    fn full_only(mut self) -> Packer {
+        self.incremental = false;
+        self.stands.set_incremental(false);
+        self
+    }
+
+    /// Ease the film marks on this clock instead of the wall clock (`None`: the wall
+    /// clock), so two packers fed the same ticks draw the same film.
+    fn set_film_now(&mut self, now: Option<Instant>) {
+        self.stands.set_film_now(now);
+    }
+
+    /// The packed texels, texture order: what the images hold once every owed brick is up.
+    fn master(&self) -> &[VoxelTexel] {
+        &self.delta.master
+    }
+
+    /// Texel `i` of [`Packer::master`] as the shader resolves it.
+    fn resolved(&self, i: usize) -> Resolved {
+        let t = self.delta.master[i];
+        let bytes = [t.0[0], t.0[1], t.0[2]];
+        match self.delta.is_keyed(i).then(|| self.palette.key(t.style())).flatten() {
+            Some(k) => Resolved::Styled(bytes, palette::voxel_style(k), palette::curve_of(k)),
+            None => Resolved::Raw(t.0),
+        }
+    }
+
+    /// The style table and emission curves as the GPU should hold them.
+    fn style_table(&self, styles: &mut [VoxelStyle], curves: &mut [u8; MAX_STYLES]) {
+        self.palette.write(styles, curves);
+    }
+
+    /// Fill every free slot with a style of its own (tests: an overflow).
+    #[cfg(test)]
+    fn fill_palette(&mut self) -> Vec<u8> {
+        let mut held = Vec::new();
+        for n in 0.. {
+            let c = [1e-3 * n as f32, 0.123, 0.456];
+            let key = (crate::voxel::stand::Style { wood: c, crown: c, heart: c }, 0, [None; 2], None);
+            match self.palette.acquire(&key) {
+                Some(s) => held.push(s),
+                None => break,
+            }
+        }
+        held
+    }
+
+    /// Give back what [`Packer::fill_palette`] took.
+    #[cfg(test)]
+    fn empty_palette(&mut self, held: Vec<u8>) {
+        for s in held {
+            self.palette.release(s);
+        }
+    }
+
+    /// Styles given a slot since the packer was made.
+    fn styles_made(&self) -> u64 {
+        self.palette.made()
+    }
+
+    /// The planes as this packer holds them: roof, glyphs, sky, canopy, glow (the last
+    /// three empty in the flat tier).
+    fn planes(&self) -> (&[u8], &[u8], &[u8], &[u8], &[u8]) {
+        match &self.light {
+            Some(l) => (
+                &self.roof,
+                &self.glyphs,
+                &l.sky,
+                &l.canopy_plane,
+                if self.incremental { &l.glow_set.bytes } else { &l.glow.bytes },
+            ),
+            None => (&self.roof, &self.glyphs, &[], &[], &[]),
         }
     }
 
@@ -880,9 +1098,9 @@ impl Packer {
 
     /// Everything that is not a write into the staging buffer: the plant and animal
     /// grids, the roof if the terrain moved, and in the lit tier the canopy, the terrain
-    /// handed to the sky's thread if it moved, and the sky plane if one has arrived.
-    /// Returns the slow planes' keys. `candle_s` is the presenter's clock, seconds: the
-    /// glowcaps' light is built at their candles' brightness then.
+    /// handed to the sky's thread if it moved, the sky plane if one has arrived, and the
+    /// glow. Returns the slow planes' keys. `candle_s` is the presenter's clock, seconds:
+    /// the glowcaps' light is built at their candles' brightness then.
     fn prepare(
         &mut self,
         view: &VoxelView<'_>,
@@ -890,9 +1108,31 @@ impl Packer {
         fauna: FaunaView<'_>,
         candle_s: f64,
     ) -> [u64; SLOW_PLANES] {
+        // The terrain first: a moved terrain (or another world) packs in full.
+        let terrain_moved = self.roof_version != Some(view.terrain_version)
+            || material_bytes(&self.roof_materials) != material_bytes(view.material);
+        if terrain_moved {
+            let c = view.config;
+            roof_table(view.material, c.width, c.height, c.depth, &mut self.roof);
+            self.roof_materials.clear();
+            self.roof_materials.extend_from_slice(view.material);
+            self.roof_version = Some(view.terrain_version);
+            self.roof_key += 1;
+            self.delta.full = true;
+            self.stands.reset_incremental();
+            if let Some(l) = &mut self.light {
+                l.submitted += 1;
+                l.current = false;
+                l.worker.submit(l.submitted, view.config, view.material);
+                l.glow.set_terrain(view.config, view.material);
+                l.glow_set.set_terrain(view.config, view.material);
+            }
+        }
+        lap!("terrain");
         match self.models.as_deref() {
             Some(lib) => {
                 self.stands.rebuild_with(view, flora, lib);
+                lap!("stands");
                 self.animals.rebuild_with(view, Some(fauna), lib);
                 self.animals.stamp_specimens(view, lib, &self.specimens);
             }
@@ -902,6 +1142,7 @@ impl Packer {
             }
         }
         self.animals.stamp_carcasses(view, &flora, fauna.config);
+        lap!("animals");
         self.candle_class.clear();
         if let Some(c) = self.candle {
             self.candle_class.extend(flora.stands.iter().map(|s| {
@@ -912,33 +1153,26 @@ impl Packer {
                 }
             }));
         }
-        self.vines.clear();
+        self.vines_moved = false;
         if self.vine_tiles {
-            let draws = match &self.cover_override {
-                Some(d) => d.clone(),
-                None => flora.cover.draw(),
+            let root = |id| flora.cover.vine(id).map(|v| v.root);
+            let key = match &self.cover_override {
+                Some(d) => crate::voxel::stand::vine_key(d.iter().copied(), root),
+                None => crate::voxel::stand::vine_key(flora.cover.face_draws(), root),
             };
-            self.vines = vine::cells(&draws, view.config, |id| {
-                flora.cover.vine(id).map(|v| v.root)
-            });
-        }
-        if self.roof_version != Some(view.terrain_version)
-            || self.roof_materials.as_slice() != view.material
-        {
-            let c = view.config;
-            roof_table(view.material, c.width, c.height, c.depth, &mut self.roof);
-            self.roof_materials.clear();
-            self.roof_materials.extend_from_slice(view.material);
-            self.roof_version = Some(view.terrain_version);
-            self.roof_key += 1;
-            if let Some(l) = &mut self.light {
-                l.submitted += 1;
-                l.current = false;
-                l.worker.submit(l.submitted, view.config, view.material);
-                l.glow.set_terrain(view.config, view.material);
+            if !self.incremental || self.vine_key != Some(key) {
+                let draws = match &self.cover_override {
+                    Some(d) => d.clone(),
+                    None => flora.cover.draw(),
+                };
+                self.vines = vine::cells(&draws, view.config, root);
+                self.vine_key = Some(key);
+                self.vines_moved = true;
             }
         }
+        lap!("vines");
         let mut keys = [0; SLOW_PLANES];
+        let incremental = self.incremental && !self.delta.full;
         if let Some(l) = &mut self.light {
             // The sky keeps the plane it has until the one for this terrain arrives: a
             // tick or two of the last terrain's sky after an edit, never a blank one.
@@ -949,249 +1183,350 @@ impl Packer {
                 l.sky_key += 1;
                 l.current = true;
             }
-            l.canopy.build(flora, &mut l.canopy_plane);
-            let stands = &self.stands;
-            l.canopy.count_crowns(
-                stands
-                    .cells()
-                    .filter(|&(x, y, z)| {
-                        matches!(stands.at(i64::from(x), i64::from(y), z), Part::Crown { .. })
-                    })
-                    .map(|(x, _, z)| (x, z)),
-            );
             keys[PLANE_SKY] = l.sky_key;
-            // The emitters: every stamped cell whose style emits, and the tile layer's
-            // flowering vine cells. A cell an animal stands in still counts: the glow
-            // volume is coarse.
-            l.emitters.clear();
+            let stands = &self.stands;
+            let crowns = |x, z| stands.crowns_in_column(x, z);
+            self.delta.canopy_cols.clear();
+            if self.incremental {
+                let before = l.canopy_plane.clone();
+                let moved = l.canopy.update(flora, &mut l.canopy_plane).to_vec();
+                // Columns whose crown count may have moved: those under a dirty stand cell.
+                let (w, h) = (view.config.width as usize, view.config.height as usize);
+                let mut cols = moved;
+                cols.extend(stands.dirty().iter().map(|&i| (i as usize / h) as u32));
+                if !incremental {
+                    cols.clear();
+                    cols.extend(0..(w * view.config.depth as usize) as u32);
+                }
+                cols.sort_unstable();
+                cols.dedup();
+                l.canopy.recount(cols.iter().copied(), crowns);
+                if l.canopy_plane != before {
+                    l.canopy_key += 1;
+                }
+                self.delta.canopy_cols = cols;
+            } else {
+                l.canopy.build(flora, &mut l.canopy_plane);
+                l.canopy.count_crowns(
+                    stands
+                        .cells()
+                        .filter(|&(x, y, z)| {
+                            matches!(stands.at(i64::from(x), i64::from(y), z), Part::Crown { .. })
+                        })
+                        .map(|(x, _, z)| (x, z)),
+                );
+                l.canopy_key += 1;
+            }
+            keys[PLANE_CANOPY] = l.canopy_key;
+            lap!("canopy");
             if l.emission.on {
                 // A glowcap's lip lights its cave at its candle's brightness this tick.
                 let gains = candle_gains(self.candle, candle_s);
-                let class = &self.candle_class;
-                l.emitters.extend(stands.cells().filter_map(|(x, y, z)| {
-                    let rgb = stands.emission(stands.at(i64::from(x), i64::from(y), z))?;
-                    let c = stands
-                        .owner(i64::from(x), y, z)
-                        .and_then(|o| class.get(o).copied())
-                        .unwrap_or(0);
-                    Some(((x, y, z), rgb.map(|k| k * gains[usize::from(c)])))
-                }));
-                let animals = &self.animals;
-                l.emitters.extend(animals.cells().filter_map(|(x, y, z)| {
-                    let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
-                    Some(((x, y, z), rgb))
-                }));
-                for c in self.vines.iter().filter(|c| c.kind.tiled()) {
-                    if let Some(rgb) = colours::vine_emission(c.accent) {
-                        l.emitters.push(((c.x, c.y, c.z), srgb_linear(rgb)));
+                if self.incremental {
+                    keys[PLANE_GLOW] = Packer::glow_delta(
+                        l,
+                        stands,
+                        &self.animals,
+                        &self.vines,
+                        &self.candle_class,
+                        incremental,
+                        self.vines_moved,
+                        &gains,
+                    );
+                } else {
+                    // The emitters: every stamped cell whose style emits, and the tile
+                    // layer's flowering vine cells. A cell an animal stands in still
+                    // counts: the glow volume is coarse.
+                    l.emitters.clear();
+                    let class = &self.candle_class;
+                    l.emitters.extend(stands.cells().filter_map(|(x, y, z)| {
+                        let rgb = stands.emission(stands.at(i64::from(x), i64::from(y), z))?;
+                        let c = stands
+                            .owner(i64::from(x), y, z)
+                            .and_then(|o| class.get(o).copied())
+                            .unwrap_or(0);
+                        Some(((x, y, z), rgb.map(|k| k * gains[usize::from(c)])))
+                    }));
+                    let animals = &self.animals;
+                    l.emitters.extend(animals.cells().filter_map(|(x, y, z)| {
+                        let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
+                        Some(((x, y, z), rgb))
+                    }));
+                    for c in self.vines.iter().filter(|c| c.kind.tiled()) {
+                        if let Some(rgb) = colours::vine_emission(c.accent) {
+                            l.emitters.push(((c.x, c.y, c.z), srgb_linear(rgb)));
+                        }
                     }
+                    l.glow.build(l.emitters.iter().copied(), l.emission.glow, l.emission.reach);
+                    keys[PLANE_GLOW] = l.glow.key;
                 }
+            } else {
+                keys[PLANE_GLOW] = if self.incremental { l.glow_set.key } else { l.glow.key };
             }
-            l.glow.build(l.emitters.iter().copied(), l.emission.glow, l.emission.reach);
-            keys[PLANE_GLOW] = l.glow.key;
         }
+        lap!("glow");
         keys[PLANE_ROOF] = self.roof_key;
         keys[PLANE_GLYPHS] = GLYPHS_KEY;
+        keys[PLANE_STYLES] = 0;
         keys
+    }
+
+    /// The change-only pack's glow: the emitter lists rebuilt only from a source that
+    /// moved (the stands' when any stand cell is dirty, the vine's when its cells were
+    /// rebuilt, the animals' every tick, being few), the grids spread only where their
+    /// emitters moved, and the curves mixed at this tick's gains. Returns the glow key.
+    #[allow(clippy::too_many_arguments)]
+    fn glow_delta(
+        l: &mut LightPlanes,
+        stands: &Stands,
+        animals: &Animals,
+        vines: &[VineCell],
+        class: &[u8],
+        incremental: bool,
+        vines_moved: bool,
+        gains: &[f32],
+    ) -> u64 {
+        // A dirty stand cell moves the emitters only if it emits now or did.
+        let moved = !incremental
+            || stands.dirty().iter().any(|&g| {
+                l.stand_emitter_cells.contains(&g) || stands.emission(stands.at_index(g)).is_some()
+            });
+        if moved {
+            l.stand_emitters.clear();
+            l.stand_emitter_cells.clear();
+            for g in stands.stamped() {
+                let Some(rgb) = stands.emission(stands.at_index(g)) else { continue };
+                let (x, y, z) = stands.xyz(g);
+                let c = stands
+                    .owner(i64::from(x), y, z)
+                    .and_then(|o| class.get(o).copied())
+                    .unwrap_or(0);
+                l.stand_emitters.push(((x, y, z), c, rgb));
+                l.stand_emitter_cells.insert(g);
+            }
+        }
+        if !incremental || vines_moved {
+            l.vine_emitters.clear();
+            for c in vines.iter().filter(|c| c.kind.tiled()) {
+                if let Some(rgb) = colours::vine_emission(c.accent) {
+                    l.vine_emitters.push(((c.x, c.y, c.z), 0, srgb_linear(rgb)));
+                }
+            }
+        }
+        let beasts: Vec<_> = animals
+            .cells()
+            .filter_map(|(x, y, z)| {
+                let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
+                Some(((x, y, z), 0u8, rgb))
+            })
+            .collect();
+        // The grids see the emitters again only when some source moved.
+        if moved || !incremental || vines_moved || beasts != l.animal_emitters {
+            l.animal_emitters = beasts;
+            let all: Vec<_> = l
+                .stand_emitters
+                .iter()
+                .chain(&l.animal_emitters)
+                .chain(&l.vine_emitters)
+                .copied()
+                .collect();
+            l.emitters.clear();
+            l.emitters.extend(all.iter().map(|&(v, _, rgb)| (v, rgb)));
+            l.glow_set.update(all.into_iter(), l.emission.glow, l.emission.reach);
+        }
+        lap!("glow emitters");
+        l.glow_set.mix(gains);
+        lap!("glow mix");
+        l.glow_set.key
+    }
+
+    /// The style key a plant part draws with, resolved once a tick.
+    fn plant_key(&mut self, part: Part) -> Option<StyleKey> {
+        let index = usize::from(part.style()?);
+        if let Some((tick, key)) = self.plant_keys.get(index)
+            && *tick == self.keys_tick
+        {
+            return Some(*key);
+        }
+        let stands = &self.stands;
+        let style = stands.style(part)?;
+        let cell = stands.model_cell(part);
+        let faces = cell.map_or([None; 2], |(sp, tag)| self.species.faces(sp, tag));
+        let emit = stands.emission(part).map(|e| emit_key(e, stands.emits_whole(part)));
+        let key = (style, role_of(cell.map(|(_, tag)| tag)), faces, emit);
+        if self.plant_keys.len() <= index {
+            self.plant_keys.resize(index + 1, (0, key));
+        }
+        self.plant_keys[index] = (self.keys_tick, key);
+        Some(key)
+    }
+
+    /// The style key an animal part draws with, resolved once a tick.
+    fn animal_key(&mut self, beast: AnimalPart) -> Option<StyleKey> {
+        let index = usize::from(beast.style()?);
+        if let Some((tick, key)) = self.animal_keys.get(index)
+            && *tick == self.keys_tick
+        {
+            return Some(*key);
+        }
+        let style = self.animals.style(beast)?;
+        let emit = self.animals.emission(beast);
+        let key = (style, 0, [None; 2], emit.map(|e| emit_key(e, false)));
+        if self.animal_keys.len() <= index {
+            self.animal_keys.resize(index + 1, (0, key));
+        }
+        self.animal_keys[index] = (self.keys_tick, key);
+        Some(key)
+    }
+
+    /// A plant or animal cell's texel over its material and water (texture index `i`), or
+    /// `None` where nothing draws over them: the full pack's per-cell rule, shared by the
+    /// change-only pack so the two cannot drift.
+    fn overlay(&mut self, view: &VoxelView<'_>, i: usize, w: u32, h: u32) -> Option<Composed> {
+        let (wu, hu) = (w as usize, h as usize);
+        let (x, y, z) = ((i % wu) as u32, ((i / wu) % hu) as u32, (i / (wu * hu)) as u32);
+        let du = view.config.depth as usize;
+        let src = (y as usize * du + z as usize) * wu + x as usize;
+        let m = view.material[src];
+        if m.is_solid() {
+            return None;
+        }
+        let xi = i64::from(x);
+        let mats = &view.config.materials;
+        let beasts = !self.animals.is_empty();
+        // The animal after the plant in its own cell, as the CPU presenter stamps it: a
+        // body standing in a turf covers the turf.
+        let beast = if beasts {
+            self.animals.at(xi, i64::from(y), z)
+        } else {
+            AnimalPart::None
+        };
+        if let Some(key) = self.animal_key(beast) {
+            // An emitting part (lit tier, `colours::animal_emission`) draws the emissive
+            // animal glyph in its emissive colour.
+            let glyph = match key.3 {
+                Some(_) => appearance::animal_emissive_glyph(beast.glyph()),
+                None => beast.glyph(),
+            };
+            let mut t = texel_of(mats, m, view.free[src], view.pore[src], PART_ANIMAL_INTERIM, glyph.0, 0);
+            // The sleep pose's class and entry (0: not posing; `voxel::sleep`).
+            t.0[2] = self.animals.pose_at(xi, i64::from(y), z);
+            return Some((t, Some(key)));
+        }
+        let p = self.stands.at(xi, i64::from(y), z);
+        // Under a settling torso (WX4): a faceless leg cell, over whatever plant is there,
+        // so the walk looks for the torso from here. Under a dipping head: a faceless torso
+        // cell, where no plant is (`sleep::is_soft_mark`).
+        let under = if beasts { self.animals.pose_at(xi, i64::from(y), z) } else { 0 };
+        if under != 0 && (!sleep::is_soft_mark(under) || appearance::plant_class(p) == PART_NONE) {
+            let mut t = texel_of(mats, m, view.free[src], view.pore[src], PART_ANIMAL_INTERIM, 0, 0);
+            t.0[2] = under;
+            return Some((t, None));
+        }
+        let class = appearance::plant_class(p);
+        if class == PART_NONE {
+            return None;
+        }
+        let stands = &self.stands;
+        let mut glyph = appearance::plant_glyph(
+            p,
+            !stands.crown_continues(p, xi - 1, y, z),
+            !stands.crown_continues(p, xi + 1, y, z),
+        );
+        // An emitting crown or heart cell draws the atlas's emissive variant (only the lit
+        // tier with emission gives a style one).
+        let emits = stands.emission(p).is_some();
+        if matches!(p, Part::Crown { .. }) && emits {
+            glyph = appearance::emissive_glyph(glyph);
+        }
+        // A glowcap's lip takes its candle curve's copy of the style.
+        let curve = if emits && !self.candle_class.is_empty() {
+            stands
+                .owner(xi, y, z)
+                .and_then(|o| self.candle_class.get(o).copied())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let owner = stands.owner(xi, y, z);
+        let mut key = self.plant_key(p);
+        if curve != 0
+            && let Some(k) = &mut key
+            && let Some(emit) = &mut k.3
+        {
+            emit[3] = (emit[3] & 1) | u32::from(curve) << 1;
+        }
+        let mut t = texel_of(mats, m, view.free[src], view.pore[src], class, glyph.0, 0);
+        if let Some(l) = &self.light {
+            let crown = matches!(p, Part::Crown { .. });
+            t.0[2] = l.canopy.plant_byte(owner, crown, x, y, z);
+        }
+        // A part without a style draws with slot 0, as it always has.
+        Some((t, key))
+    }
+
+    /// The vine's tile texel over `t`, if the vine has a cell there that nothing else
+    /// claimed: an organism, a stand or a ground mark in the same voxel wins.
+    #[inline]
+    fn with_vine(t: VoxelTexel, c: &VineCell) -> Option<VoxelTexel> {
+        // A head's faceless cell gives way to a vine as it does to a plant.
+        let soft = t.part() == PART_ANIMAL_INTERIM && t.glyph() == 0 && sleep::is_soft_mark(t.0[2]);
+        if t.material() == 0 && (t.part() == PART_NONE || soft) {
+            let (glyph, b, a) = c.texel_bytes();
+            return Some(t.with_vine(glyph, b, a));
+        }
+        None
+    }
+
+    /// The slot a composed texel (texture index `i`) draws with: its key's, given one if
+    /// new; out of slots, a candle copy falls back to its steady style and anything else
+    /// to slot 0, and the texel is listed to try again. Counts the texel in the palette.
+    /// Returns the slot and whether it is keyed.
+    fn acquire(&mut self, i: u32, key: Option<StyleKey>) -> (u8, bool) {
+        let Some(key) = key else { return (0, false) };
+        if let Some(s) = self.palette.acquire(&key) {
+            return (s, true);
+        }
+        self.delta.overflowed.push(i);
+        if let Some(emit) = key.3
+            && emit[3] >> 1 != 0
+        {
+            let steady = (key.0, key.1, key.2, Some([emit[0], emit[1], emit[2], emit[3] & 1]));
+            if let Some(s) = self.palette.acquire(&steady) {
+                return (s, true);
+            }
+        }
+        self.style_overflow += 1;
+        (0, false)
     }
 
     /// Write the prepared tick into `out`.
     fn fill(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32, out: VoxelStaging<'_>) {
-        self.styles.clear();
-        self.slot_of.clear();
-        if !self.candle_class.is_empty() {
-            self.candle_slots.fill(u16::MAX);
-        }
-        let (wu, hu, du) = (w as usize, h as usize, d as usize);
-        let mut wet = 0u8;
-        // Material and water, every voxel, walking the world's `(y · depth + z) · width
-        // + x` rows into the texture's `(z · height + y) · width + x` rows: both run x
-        // fastest, so each row is one contiguous read and one contiguous write.
-        for y in 0..hu {
-            for z in 0..du {
-                let src = (y * du + z) * wu;
-                let dst = (z * hu + y) * wu;
-                let material = &view.material[src..src + wu];
-                let free = &view.free[src..src + wu];
-                let pore = &view.pore[src..src + wu];
-                for (x, texel) in out.voxels[dst..dst + wu].iter_mut().enumerate() {
-                    *texel = texel_of(
-                        &view.config.materials,
-                        material[x],
-                        free[x],
-                        pore[x],
-                        PART_NONE,
-                        0,
-                        0,
-                    );
-                    wet |= texel.0[1];
-                }
+        self.keys_tick += 1;
+        if self.incremental && !self.delta.full {
+            self.fill_delta(view, w, h, d);
+            for &(i, _, _) in &self.delta.changed {
+                let i = i as usize;
+                let (x, y, z) = (i % w as usize, (i / w as usize) % h as usize, i / (w as usize * h as usize));
+                out.owed.mark(cubarium_gpu::voxel::brick_of(w, h, x as u32, y as u32, z as u32));
             }
+        } else {
+            self.fill_full(view, w, h, d);
+            out.owed.mark_full();
+            lap!("full pack");
         }
-        self.wet = wet != 0;
-        // Then the plants and animals, only where they stand, in texture order.
-        let stands = &self.stands;
-        let animals = &self.animals;
-        let beasts = !animals.is_empty();
-        self.overlay.clear();
-        let index = |(x, y, z): (u32, u32, u32)| VoxelStaging::index(w, h, x, y, z) as u32;
-        self.overlay.extend(stands.cells().map(index));
-        if beasts {
-            self.overlay.extend(animals.cells().map(index));
-        }
-        self.overlay.sort_unstable();
-        self.overlay.dedup();
-        for &i in &self.overlay {
-            let i = i as usize;
-            let (x, y, z) = (
-                (i % wu) as u32,
-                ((i / wu) % hu) as u32,
-                (i / (wu * hu)) as u32,
-            );
-            let src = (y as usize * du + z as usize) * wu + x as usize;
-            let m = view.material[src];
-            if m.is_solid() {
-                continue;
-            }
-            let xi = i64::from(x);
-            // The animal after the plant in its own cell, as the CPU presenter stamps it:
-            // a body standing in a turf covers the turf.
-            let beast = if beasts {
-                animals.at(xi, i64::from(y), z)
-            } else {
-                AnimalPart::None
-            };
-            // In the lit tier a stand's cell carries its canopy and crown pass in `b`.
-            let mut plant = None;
-            let (part, glyph, slot) = if let Some(style) = animals.style(beast) {
-                // An emitting part (lit tier, `colours::animal_emission`) draws the
-                // emissive animal glyph in its emissive colour.
-                let emit = animals.emission(beast);
-                let glyph = match emit {
-                    Some(_) => appearance::animal_emissive_glyph(beast.glyph()),
-                    None => beast.glyph(),
-                };
-                (
-                    PART_ANIMAL_INTERIM,
-                    glyph.0,
-                    slot_for_style(
-                        (style, 0, [None; 2], emit.map(|e| emit_key(e, false))),
-                        &mut self.styles,
-                        &mut self.style_overflow,
-                    ),
-                )
-            } else {
-                let p = stands.at(xi, i64::from(y), z);
-                // Under a settling torso (WX4): a faceless leg cell, over whatever plant is
-                // there, so the walk looks for the torso from here. Under a dipping head: a
-                // faceless torso cell, where no plant is (`sleep::is_soft_mark`).
-                let under = if beasts { animals.pose_at(xi, i64::from(y), z) } else { 0 };
-                if under != 0
-                    && (!sleep::is_soft_mark(under) || appearance::plant_class(p) == PART_NONE)
-                {
-                    out.voxels[i] = texel_of(
-                        &view.config.materials,
-                        m,
-                        view.free[src],
-                        view.pore[src],
-                        PART_ANIMAL_INTERIM,
-                        0,
-                        0,
-                    );
-                    out.voxels[i].0[2] = under;
-                    continue;
-                }
-                match appearance::plant_class(p) {
-                    PART_NONE => continue,
-                    class => {
-                        let s = slot_for(
-                            stands,
-                            &self.species,
-                            p,
-                            &mut self.styles,
-                            &mut self.slot_of,
-                            &mut self.style_overflow,
-                        );
-                        let mut glyph = appearance::plant_glyph(
-                            p,
-                            !stands.crown_continues(p, xi - 1, y, z),
-                            !stands.crown_continues(p, xi + 1, y, z),
-                        );
-                        // An emitting crown or heart cell draws the atlas's emissive
-                        // variant (only the lit tier with emission gives a style one).
-                        let emits = stands.emission(p).is_some();
-                        if matches!(p, Part::Crown { .. }) && emits {
-                            glyph = appearance::emissive_glyph(glyph);
-                        }
-                        // A glowcap's lip takes its candle curve's copy of the style.
-                        let curve = if emits && !self.candle_class.is_empty() {
-                            stands
-                                .owner(xi, y, z)
-                                .and_then(|o| self.candle_class.get(o).copied())
-                                .unwrap_or(0)
-                        } else {
-                            0
-                        };
-                        let s = if curve != 0 {
-                            candle_slot(
-                                s,
-                                curve,
-                                &mut self.styles,
-                                &mut self.candle_slots,
-                                &mut self.style_overflow,
-                            )
-                        } else {
-                            s
-                        };
-                        plant = Some(p);
-                        (class, glyph.0, s)
-                    }
-                }
-            };
-            out.voxels[i] = texel_of(
-                &view.config.materials,
-                m,
-                view.free[src],
-                view.pore[src],
-                part,
-                glyph,
-                slot,
-            );
-            if part == PART_ANIMAL_INTERIM {
-                // The sleep pose's class and entry (0: not posing; `voxel::sleep`).
-                out.voxels[i].0[2] = animals.pose_at(xi, i64::from(y), z);
-            }
-            if let (Some(p), Some(l)) = (plant, &self.light) {
-                let crown = matches!(p, Part::Crown { .. });
-                out.voxels[i].0[2] = l.canopy.plant_byte(stands.owner(xi, y, z), crown, x, y, z);
-            }
-        }
-        // The vines last, into the air cells nothing else claimed: an organism, a stand or
-        // a ground mark in the same voxel wins.
-        for c in self.vines.iter().filter(|c| c.kind.tiled()) {
-            let i = VoxelStaging::index(w, h, c.x, c.y, c.z);
-            let t = out.voxels[i];
-            // A head's faceless cell gives way to a vine as it does to a plant.
-            let soft = t.part() == PART_ANIMAL_INTERIM && t.glyph() == 0 && sleep::is_soft_mark(t.0[2]);
-            if t.material() == 0 && (t.part() == PART_NONE || soft) {
-                let (glyph, b, a) = c.texel_bytes();
-                out.voxels[i] = t.with_vine(glyph, b, a);
-            }
-        }
+        self.delta.full = false;
         // The pose table: the staged tick and its breaths, then this pack's poses.
-        let entries = animals.pose_entries();
+        let entries = self.animals.pose_entries();
         if entries.len() > 1 {
             *out.poses = sleep::table(view.tick, FrameClock::TICK_WRAP, cubarium_voxel_fauna::DT);
             out.poses.entries[1..entries.len()].copy_from_slice(&entries[1..]);
         }
-        for (slot, (style, role, faces, emit)) in self.styles.iter().enumerate() {
-            out.styles[slot] = VoxelStyle::new(style.wood, style.crown, style.heart)
-                .with_role(*role)
-                .with_faces(*faces)
-                .with_emit(emit.map(|e| [e[0], e[1], e[2]].map(f32::from_bits)))
-                .emit_whole(emit.is_some_and(|e| e[3] & 1 != 0));
-            out.emit_curves[slot] = emit.map_or(0, |e| (e[3] >> 1) as u8);
-        }
+        // Every buffer carries the whole style table (16 KiB); the images take it when its
+        // version moved.
+        self.palette.write(out.styles, out.emit_curves);
+        *out.styles_key = self.palette.version();
+        lap!("tables");
         if out.write[PLANE_ROOF] {
             out.roof.copy_from_slice(&self.roof);
         }
@@ -1202,12 +1537,334 @@ impl Packer {
             if out.write[PLANE_SKY] {
                 out.sky.copy_from_slice(&l.sky);
             }
-            out.canopy.copy_from_slice(&l.canopy_plane);
+            if out.write[PLANE_CANOPY] {
+                out.canopy.copy_from_slice(&l.canopy_plane);
+            }
             if out.write[PLANE_GLOW] {
-                out.glow.copy_from_slice(&l.glow.bytes);
+                let glow = if self.incremental { &l.glow_set.bytes } else { &l.glow.bytes };
+                out.glow.copy_from_slice(glow);
             }
         }
+        cubarium_gpu::voxel::write_upload(&self.delta.master, w, h, d, out.owed, out.voxels, out.carried);
+        lap!("upload");
     }
+
+    /// The full pack into `master`, and everything the change-only pack keeps reset to it.
+    fn fill_full(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32) {
+        self.palette.reset();
+        self.delta.overflowed.clear();
+        let (wu, hu, du) = (w as usize, h as usize, d as usize);
+        let mats = &view.config.materials;
+        let master = &mut self.delta.master;
+        // Material and water, every voxel, walking the world's `(y · depth + z) · width
+        // + x` rows into the texture's `(z · height + y) · width + x` rows: both run x
+        // fastest, so each row is one contiguous read and one contiguous write.
+        for y in 0..hu {
+            for z in 0..du {
+                let src = (y * du + z) * wu;
+                let dst = (z * hu + y) * wu;
+                let material = &view.material[src..src + wu];
+                let free = &view.free[src..src + wu];
+                let pore = &view.pore[src..src + wu];
+                for (x, texel) in master[dst..dst + wu].iter_mut().enumerate() {
+                    *texel = texel_of(mats, material[x], free[x], pore[x], PART_NONE, 0, 0);
+                }
+            }
+        }
+        self.delta.keyed.fill(0);
+        // Then the plants and animals, only where they stand, in texture order.
+        self.overlay.clear();
+        let index = |(x, y, z): (u32, u32, u32)| VoxelStaging::index(w, h, x, y, z) as u32;
+        self.overlay.extend(self.stands.cells().map(index));
+        self.overlay.extend(self.animals.cells().map(index));
+        self.overlay.sort_unstable();
+        self.overlay.dedup();
+        let overlay = std::mem::take(&mut self.overlay);
+        for &i in &overlay {
+            let i = i as usize;
+            if let Some((mut t, key)) = self.overlay(view, i, w, h) {
+                let (slot, keyed) = self.acquire(i as u32, key);
+                t.0[3] = slot;
+                self.delta.master[i] = t;
+                self.delta.set_keyed(i, keyed);
+            }
+        }
+        self.overlay = overlay;
+        // The vines last, into the air cells nothing else claimed.
+        self.vine_at.clear();
+        for c in self.vines.iter().filter(|c| c.kind.tiled()) {
+            let i = VoxelStaging::index(w, h, c.x, c.y, c.z);
+            self.vine_at.insert(i as u32, *c);
+            if let Some(t) = Packer::with_vine(self.delta.master[i], c) {
+                self.delta.master[i] = t;
+            }
+        }
+        // What the change-only pack diffs against from here.
+        let delta = &mut self.delta;
+        delta.wet.clear();
+        delta
+            .wet
+            .extend(delta.master.iter().enumerate().filter(|(_, t)| t.0[1] != 0).map(|(i, _)| i as u32));
+        self.wet = !delta.wet.is_empty();
+        delta.porous.clear();
+        delta.pore.clear();
+        for y in 0..hu {
+            for z in 0..du {
+                let row = (y * du + z) * wu;
+                let mut x = 0;
+                while x < wu {
+                    if mats.pore_capacity(view.material[row + x]) > 0.0 {
+                        let start = x;
+                        while x < wu && mats.pore_capacity(view.material[row + x]) > 0.0 {
+                            x += 1;
+                        }
+                        let dst = (z * hu + y) * wu + start;
+                        delta.porous.push(((row + start) as u32, dst as u32, (x - start) as u32));
+                        delta.pore.extend((start..x).map(|x| pore_byte(view.pore[row + x])));
+                    } else {
+                        x += 1;
+                    }
+                }
+            }
+        }
+        delta.animals.clear();
+        delta.animals.extend(self.animals.cells().map(index));
+    }
+
+    /// The change-only pack: compose the cells something may have changed in, and mark
+    /// the brick of every texel that did.
+    fn fill_delta(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32) {
+        let (wu, hu, du) = (w as usize, h as usize, d as usize);
+        let mats = &view.config.materials;
+        let tex = |src: usize| {
+            let (x, rest) = (src % wu, src / wu);
+            let (z, y) = (rest % du, rest / du);
+            ((z * hu + y) * wu + x) as u32
+        };
+        let delta = &mut self.delta;
+        delta.dirty.clear();
+        // The texels that overflowed the style table, while it has room again.
+        if !delta.overflowed.is_empty() && self.palette.live() < MAX_STYLES {
+            for i in std::mem::take(&mut delta.overflowed) {
+                delta.mark(i);
+            }
+        }
+        // Free water: the cells that hold it now and the cells that held it.
+        let wet = std::mem::take(&mut delta.wet);
+        let mut cells = std::mem::take(&mut delta.wet_cells);
+        let trusted = view.wet_cells(&mut cells);
+        if trusted {
+            for &src in &cells {
+                let i = tex(src);
+                if water_byte(view.free[src]) != delta.master[i as usize].0[1] {
+                    delta.mark(i);
+                }
+            }
+        } else {
+            // No trusted wet set (a world loaded and not yet stepped): look at every cell.
+            for src in 0..view.free.len() {
+                let i = tex(src);
+                if water_byte(view.free[src]) != delta.master[i as usize].0[1] {
+                    delta.mark(i);
+                }
+                if view.free[src] > 0.0 {
+                    cells.push(src);
+                }
+            }
+        }
+        for &i in &wet {
+            let i = i as usize;
+            let (x, rest) = (i % wu, i / wu);
+            let (y, z) = (rest % hu, rest / hu);
+            let src = (y * du + z) * wu + x;
+            if water_byte(view.free[src]) != delta.master[i].0[1] {
+                delta.mark(i as u32);
+            }
+        }
+        delta.wet_cells = cells;
+        lap!("free water");
+        // Pore water: the porous runs against the bytes they were packed with, a run's bytes
+        // worked out together and compared whole first.
+        let mut k = 0;
+        let mut run = [0u8; 512];
+        for &(src, dst, len) in &delta.porous {
+            let (src, dst, len) = (src as usize, dst as usize, len as usize);
+            for at in (0..len).step_by(run.len()) {
+                let n = (len - at).min(run.len());
+                for (b, &p) in run[..n].iter_mut().zip(&view.pore[src + at..src + at + n]) {
+                    *b = pore_byte(p);
+                }
+                let held = &mut delta.pore[k + at..k + at + n];
+                if held == &run[..n] {
+                    continue;
+                }
+                for j in 0..n {
+                    if held[j] != run[j] {
+                        held[j] = run[j];
+                        let i = (dst + at + j) as u32;
+                        let (wd, bit) = ((i / 64) as usize, 1u64 << (i % 64));
+                        if delta.dirty_bits[wd] & bit == 0 {
+                            delta.dirty_bits[wd] |= bit;
+                            delta.dirty.push(i);
+                        }
+                    }
+                }
+            }
+            k += len;
+        }
+        lap!("pore water");
+        // The stands' dirty cells and their neighbours along x, whose silhouette glyph
+        // reads them.
+        for &g in self.stands.dirty() {
+            let (x, y, z) = self.stands.xyz(g);
+            for dx in [w - 1, 0, 1] {
+                delta.mark(VoxelStaging::index(w, h, (x + dx) % w, y, z) as u32);
+            }
+        }
+        // The plant cells of every column the canopy or the crown counts moved.
+        let cols = std::mem::take(&mut delta.canopy_cols);
+        for &col in &cols {
+            let (x, z) = (col % w, col / w);
+            for y in 0..h {
+                if self.stands.at(i64::from(x), i64::from(y), z) != Part::None {
+                    delta.mark(VoxelStaging::index(w, h, x, y, z) as u32);
+                }
+            }
+        }
+        delta.canopy_cols = cols;
+        lap!("plant cells");
+        // The animals: where they were and where they are.
+        let index = |(x, y, z): (u32, u32, u32)| VoxelStaging::index(w, h, x, y, z) as u32;
+        let before = std::mem::take(&mut delta.animals);
+        for &i in &before {
+            delta.mark(i);
+        }
+        let mut now = before;
+        now.clear();
+        now.extend(self.animals.cells().map(index));
+        for &i in &now {
+            delta.mark(i);
+        }
+        delta.animals = now;
+        // The vine's tile cells, when they were rebuilt.
+        if self.vines_moved {
+            let old: Vec<u32> = self.vine_at.keys().copied().collect();
+            for i in old {
+                delta.mark(i);
+            }
+            self.vine_at.clear();
+            for c in self.vines.iter().filter(|c| c.kind.tiled()) {
+                let i = VoxelStaging::index(w, h, c.x, c.y, c.z) as u32;
+                self.vine_at.insert(i, *c);
+                delta.mark(i);
+            }
+        }
+
+        lap!("animal+vine cells");
+        // Compose each, and keep what changed.
+        let dirty = std::mem::take(&mut self.delta.dirty);
+        let mut changed = std::mem::take(&mut self.delta.changed);
+        changed.clear();
+        for &i in &dirty {
+            let iu = i as usize;
+            self.delta.dirty_bits[iu / 64] = 0;
+            let (x, rest) = (iu % wu, iu / wu);
+            let (y, z) = (rest % hu, rest / hu);
+            let src = (y * du + z) * wu + x;
+            let base = texel_of(mats, view.material[src], view.free[src], view.pore[src], PART_NONE, 0, 0);
+            let (mut t, key) = self.overlay(view, iu, w, h).unwrap_or((base, None));
+            if let Some(c) = self.vine_at.get(&i)
+                && let Some(v) = Packer::with_vine(t, c)
+            {
+                t = v;
+            }
+            let held = self.delta.master[iu];
+            let same = held.0[..3] == t.0[..3]
+                && match (&key, self.delta.is_keyed(iu)) {
+                    (Some(k), true) => {
+                        self.palette.key(held.style()).is_some_and(|hk| palette::key_bits(hk) == palette::key_bits(k))
+                    }
+                    (None, false) => held.0[3] == t.0[3],
+                    _ => false,
+                };
+            if !same {
+                changed.push((i, t, key));
+            }
+        }
+        lap!("compose");
+        count!("#dirty", dirty.len());
+        count!("#changed", changed.len());
+        count!("#stand dirty", self.stands.dirty().len());
+        count!("#canopy cols", self.delta.canopy_cols.len());
+        // Free what the changed texels drew with before taking what they draw with now, so
+        // a frame needs no more slots than the full pack of it would.
+        for &(i, _, _) in &changed {
+            let iu = i as usize;
+            if self.delta.is_keyed(iu) {
+                self.palette.release(self.delta.master[iu].style());
+            }
+        }
+        for k in 0..changed.len() {
+            let (i, mut t, key) = changed[k];
+            let iu = i as usize;
+            if key.is_some() {
+                let (slot, keyed) = self.acquire(i, key);
+                t.0[3] = slot;
+                self.delta.set_keyed(iu, keyed);
+            } else {
+                self.delta.set_keyed(iu, false);
+            }
+            self.delta.master[iu] = t;
+        }
+        self.delta.dirty = dirty;
+        self.delta.dirty.clear();
+        self.delta.changed = changed;
+        // A texel that overflowed twice while the table stayed full is listed once.
+        if self.delta.overflowed.len() > 1 {
+            self.delta.overflowed.sort_unstable();
+            self.delta.overflowed.dedup();
+        }
+        lap!("palette");
+        // The wet list for next tick: every texel with free water is in the wet set (or in
+        // the full scan's list when the set was not trusted).
+        let delta = &mut self.delta;
+        let mut still_wet = wet;
+        still_wet.clear();
+        for &src in &delta.wet_cells {
+            let i = tex(src);
+            if delta.master[i as usize].0[1] != 0 {
+                still_wet.push(i);
+            }
+        }
+        delta.wet = still_wet;
+        self.wet = !delta.wet.is_empty();
+        lap!("wet list");
+    }
+}
+
+/// The free-water byte a texel holding `free` packs ([`texel_of`]'s `g`).
+#[inline]
+fn water_byte(free: f64) -> u8 {
+    let free = free as f32;
+    VoxelTexel::pack_glyph(0, PART_NONE, 0, free, free <= cpu::WATER_EPSILON, 0.0, 0).0[1]
+}
+
+/// The pore-water byte a porous texel holding `pore` packs ([`texel_of`]'s `b`).
+#[inline]
+fn pore_byte(pore: f64) -> u8 {
+    // `quantise(pore.clamp(0, 1) as f32)` without its branches, so a run vectorises: a NaN
+    // clamps to NaN and casts to 0, as `quantise` answers it.
+    let v = pore.clamp(0.0, 1.0) as f32;
+    (v * 255.0 + 0.5) as u8
+}
+
+/// A slice of materials as its bytes, for a fast whole-terrain compare.
+#[allow(unsafe_code)] // Audited: reinterprets a `#[repr(u8)]` enum slice as its bytes.
+fn material_bytes(m: &[Material]) -> &[u8] {
+    const _: () = assert!(std::mem::size_of::<Material>() == 1);
+    // SAFETY: `Material` is a one-byte fieldless enum, so every value is one initialised
+    // byte.
+    unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<u8>(), m.len()) }
 }
 
 /// One voxel's texel: its material and water, and whatever part stands in it. `mats` is
@@ -1266,10 +1923,6 @@ fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
     }
 }
 
-/// One GPU style slot's contents: the colours, the texture role (`ROLE_*`), the species
-/// face slots (`VoxelStyle::with_faces`) and the emission ([`emit_key`]).
-type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 4]>);
-
 /// The gain of each candle curve at `seconds` (index 0 and every curve with the candle off
 /// at 1): what an emitter on that curve is drawn and casts light times.
 fn candle_gains(candle: Option<Candle>, seconds: f64) -> [f32; candle::CLASSES as usize + 1] {
@@ -1282,57 +1935,11 @@ fn candle_gains(candle: Option<Candle>, seconds: f64) -> [f32; candle::CLASSES a
     gains
 }
 
-/// The slot of `base`'s copy on candle curve `curve` (the curve in its emit key's flag
-/// word, above the whole-cell bit), made on first use. Out of slots, the cell keeps `base`
-/// and burns steady.
-fn candle_slot(base: u8, curve: u8, styles: &mut Vec<StyleKey>, cache: &mut [u16], overflow: &mut u64) -> u8 {
-    let at = usize::from(base) * (usize::from(candle::CLASSES) + 1) + usize::from(curve);
-    if let Some(&slot) = cache.get(at)
-        && slot != u16::MAX
-    {
-        return slot as u8;
-    }
-    let Some(mut key) = styles.get(usize::from(base)).copied() else { return base };
-    let Some(emit) = &mut key.3 else { return base };
-    emit[3] = (emit[3] & 1) | u32::from(curve) << 1;
-    let slot = match styles.iter().position(|s| *s == key) {
-        Some(i) => i as u8,
-        None if styles.len() < MAX_STYLES => {
-            styles.push(key);
-            (styles.len() - 1) as u8
-        }
-        None => {
-            *overflow += 1;
-            base
-        }
-    };
-    if let Some(c) = cache.get_mut(at) {
-        *c = u16::from(slot);
-    }
-    slot
-}
-
 /// An emissive colour and its whole-cell flag as a style key: the colour's bits, then 1
 /// for a whole-cell emitter (`VoxelStyle::emit_whole`); a glowcap lip's candle curve
 /// ([`candle_slot`]) rides above that bit.
 fn emit_key(rgb: [f32; 3], whole: bool) -> [u32; 4] {
     [rgb[0].to_bits(), rgb[1].to_bits(), rgb[2].to_bits(), u32::from(whole)]
-}
-
-/// The GPU slot for a style that has no plant part index to cache under (an animal's),
-/// deduplicated by value against the same table the plants fill.
-fn slot_for_style(style: StyleKey, styles: &mut Vec<StyleKey>, overflow: &mut u64) -> u8 {
-    match styles.iter().position(|s| *s == style) {
-        Some(at) => at as u8,
-        None if styles.len() < MAX_STYLES => {
-            styles.push(style);
-            (styles.len() - 1) as u8
-        }
-        None => {
-            *overflow += 1;
-            0
-        }
-    }
 }
 
 /// The texture role of a baked model cell (`cubarium_gpu::voxel::ROLE_*`); anything that
@@ -1346,45 +1953,6 @@ fn role_of(tag: Option<Tag>) -> u8 {
         Some(Tag::Drape(_)) => ROLE_DRAPE,
         Some(Tag::Accent) => ROLE_ACCENT,
     }
-}
-
-/// The GPU slot for one plant part's style, deduplicated by value.
-fn slot_for(
-    stands: &Stands,
-    species: &SpeciesFaces,
-    part: Part,
-    styles: &mut Vec<StyleKey>,
-    slot_of: &mut Vec<Option<u8>>,
-    overflow: &mut u64,
-) -> u8 {
-    let Some(index) = part.style() else { return 0 };
-    let index = usize::from(index);
-    if slot_of.len() <= index {
-        slot_of.resize(index + 1, None);
-    }
-    if let Some(slot) = slot_of[index] {
-        return slot;
-    }
-    let Some(style) = stands.style(part) else {
-        return 0;
-    };
-    let cell = stands.model_cell(part);
-    let faces = cell.map_or([None; 2], |(sp, tag)| species.faces(sp, tag));
-    let emit = stands.emission(part).map(|e| emit_key(e, stands.emits_whole(part)));
-    let style = (style, role_of(cell.map(|(_, tag)| tag)), faces, emit);
-    let slot = match styles.iter().position(|s| *s == style) {
-        Some(at) => at as u8,
-        None if styles.len() < MAX_STYLES => {
-            styles.push(style);
-            (styles.len() - 1) as u8
-        }
-        None => {
-            *overflow += 1;
-            0
-        }
-    };
-    slot_of[index] = Some(slot);
-    slot
 }
 
 /// The pack before the cheap one, kept as the oracle `Packer` is tested against.
@@ -1633,11 +2201,72 @@ mod tests {
     //! the GPU reads, through the two alternating staging buffers and the slow planes'
     //! keys, across the edits that move what a pack keeps between ticks.
 
+    use super::oracle::{Frame, PackOracle};
     use super::*;
-    use cubarium_gpu::voxel::SlowPlanes;
+    use crate::voxel::stand::Style;
+    use cubarium_gpu::voxel::{BrickOwed, Carried, SlowPlanes, apply_upload};
     use cubarium_voxel::{Command, Config};
     use cubarium_voxel_fauna::{Command as FaunaCommand, FaunaConfig};
     use cubarium_voxel_flora::{Command as FloraCommand, FloraConfig, Species};
+
+    // The old pack's per-tick style table, for the reference pack.
+    type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 4]>);
+
+    /// The GPU slot for a style that has no plant part index to cache under (an animal's),
+    /// deduplicated by value against the same table the plants fill.
+    fn slot_for_style(style: StyleKey, styles: &mut Vec<StyleKey>, overflow: &mut u64) -> u8 {
+        match styles.iter().position(|s| *s == style) {
+            Some(at) => at as u8,
+            None if styles.len() < MAX_STYLES => {
+                styles.push(style);
+                (styles.len() - 1) as u8
+            }
+            None => {
+                *overflow += 1;
+                0
+            }
+        }
+    }
+
+    /// The GPU slot for one plant part's style, deduplicated by value.
+    fn slot_for(
+        stands: &Stands,
+        species: &SpeciesFaces,
+        part: Part,
+        styles: &mut Vec<StyleKey>,
+        slot_of: &mut Vec<Option<u8>>,
+        overflow: &mut u64,
+    ) -> u8 {
+        let Some(index) = part.style() else { return 0 };
+        let index = usize::from(index);
+        if slot_of.len() <= index {
+            slot_of.resize(index + 1, None);
+        }
+        if let Some(slot) = slot_of[index] {
+            return slot;
+        }
+        let Some(style) = stands.style(part) else {
+            return 0;
+        };
+        let cell = stands.model_cell(part);
+        let faces = cell.map_or([None; 2], |(sp, tag)| species.faces(sp, tag));
+        let emit = stands.emission(part).map(|e| emit_key(e, stands.emits_whole(part)));
+        let style = (style, role_of(cell.map(|(_, tag)| tag)), faces, emit);
+        let slot = match styles.iter().position(|s| *s == style) {
+            Some(at) => at as u8,
+            None if styles.len() < MAX_STYLES => {
+                styles.push(style);
+                (styles.len() - 1) as u8
+            }
+            None => {
+                *overflow += 1;
+                0
+            }
+        };
+        slot_of[index] = Some(slot);
+        slot
+    }
+
 
     /// The pack as it was before the cheap one: every voxel through the wrapping
     /// accessors, fresh plant and animal grids, the roof walked per column and the atlas
@@ -1762,10 +2391,16 @@ mod tests {
             }
         }
 
-        /// As `VoxelRenderer::stage` hands it over: the styles zeroed first. The flat
-        /// tier's pack has no sky or canopy plane.
-        fn staging(&mut self, write: [bool; SLOW_PLANES]) -> VoxelStaging<'_> {
-            self.styles.fill(VoxelStyle::default());
+        /// As `VoxelRenderer::stage` hands it over. The flat tier's pack has no sky,
+        /// canopy or glow plane.
+        fn staging<'a>(
+            &'a mut self,
+            write: [bool; SLOW_PLANES],
+            owed: &'a mut BrickOwed,
+            carried: &'a mut Carried,
+            styles_key: &'a mut u64,
+        ) -> VoxelStaging<'a> {
+            *carried = Carried::default();
             VoxelStaging {
                 voxels: &mut self.voxels,
                 roof: &mut self.roof,
@@ -1777,16 +2412,21 @@ mod tests {
                 poses: &mut self.poses,
                 emit_curves: &mut self.emit_curves,
                 write,
+                owed,
+                carried,
+                styles_key,
             }
         }
     }
 
     /// The renderer's side of a pack and an upload, without a device: two buffers
-    /// alternating, and the images holding whatever the slow planes' keys say was copied.
+    /// alternating, the owed bricks, and the images holding whatever was copied.
     struct Rig {
         params: VoxelParams,
         packer: Packer,
         slow: SlowPlanes,
+        owed: BrickOwed,
+        carried: [Carried; 2],
         buffers: [Planes; 2],
         images: Planes,
         ticks: usize,
@@ -1810,6 +2450,8 @@ mod tests {
                     Emission::OFF,
                 ),
                 slow: SlowPlanes::new(2),
+                owed: BrickOwed::new(c.width, c.height, c.depth),
+                carried: Default::default(),
                 buffers: [Planes::junk(&params), Planes::junk(&params)],
                 images: Planes::junk(&params),
                 params,
@@ -1817,7 +2459,8 @@ mod tests {
             }
         }
 
-        /// Pack and upload one tick, and hold the images to the reference pack.
+        /// Pack and upload one tick, and hold the images to the reference pack, each
+        /// texel with its style resolved through its own table.
         fn tick(&mut self, world: &World, flora: &Flora, fauna: &Fauna, what: &str) {
             let p = self.params;
             let view = world.view();
@@ -1825,17 +2468,29 @@ mod tests {
             self.ticks += 1;
             let keys = self.packer.prepare(&view, flora.view(), fauna.view(), 0.0);
             let write = self.slow.pack(b, keys);
+            let mut styles_key = 0;
             self.packer.fill(
                 &view,
                 p.width,
                 p.height,
                 p.depth,
-                self.buffers[b].staging(write),
+                self.buffers[b].staging(write, &mut self.owed, &mut self.carried[b], &mut styles_key),
             );
+            self.slow.restamp(b, PLANE_STYLES, styles_key);
             let copy = self.slow.upload(b);
+            self.owed.taken(&self.carried[b]);
             let buffer = &self.buffers[b];
-            self.images.voxels.clone_from(&buffer.voxels);
-            self.images.styles.clone_from(&buffer.styles);
+            apply_upload(
+                &buffer.voxels,
+                &self.carried[b],
+                p.width,
+                p.height,
+                p.depth,
+                &mut self.images.voxels,
+            );
+            if copy[PLANE_STYLES] {
+                self.images.styles.clone_from(&buffer.styles);
+            }
             if copy[PLANE_ROOF] {
                 self.images.roof.clone_from(&buffer.roof);
             }
@@ -1844,22 +2499,24 @@ mod tests {
             }
 
             let mut want = Planes::junk(&p);
-            reference(&view, flora, fauna, &p, want.staging([true; SLOW_PLANES]));
-            let differ =
-                |a: &[VoxelTexel], b: &[VoxelTexel]| a.iter().zip(b).position(|(a, b)| a != b);
-            if let Some(i) = differ(&self.images.voxels, &want.voxels) {
-                panic!(
-                    "{what}: voxel texel {i} is {:?}, the old pack wrote {:?}",
-                    self.images.voxels[i], want.voxels[i]
+            let (mut owed, mut carried, mut key) = (BrickOwed::new(p.width, p.height, p.depth), Carried::default(), 0);
+            reference(&view, flora, fauna, &p, want.staging([true; SLOW_PLANES], &mut owed, &mut carried, &mut key));
+            // The style a texel draws with, when it draws with one: a faceless animal cell
+            // (glyph 0) and a plain voxel read none.
+            let style = |t: VoxelTexel, styles: &[VoxelStyle]| {
+                let styled = t.part() != PART_NONE && !(t.part() == PART_ANIMAL_INTERIM && t.glyph() == 0);
+                styled.then(|| styles[usize::from(t.style())])
+            };
+            for (i, (got, want_t)) in self.images.voxels.iter().zip(&want.voxels).enumerate() {
+                assert!(
+                    got.0[..3] == want_t.0[..3]
+                        && style(*got, &self.images.styles) == style(*want_t, &want.styles),
+                    "{what}: voxel texel {i} is {got:?}, the old pack wrote {want_t:?}"
                 );
             }
             assert!(
                 self.images.roof == want.roof,
                 "{what}: the roof table differs"
-            );
-            assert!(
-                self.images.styles == want.styles,
-                "{what}: the style table differs"
             );
             assert!(
                 self.images.glyphs == want.glyphs,
@@ -2083,5 +2740,358 @@ mod tests {
         let full = load_textures(&VoxelConfig { textures: true, ..cfg.clone() }, None, &params);
         assert!(full.vine_on && full.mask() != 0);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ---- the change-only pack against the full pack ----
+
+    /// An oracle on the fixture world: the flat tier with the stands' plain vine cells, or
+    /// the lit tier with the vine's tile layer, emission and a running candle.
+    fn oracle(c: &Config, lit: bool) -> PackOracle {
+        oracle_with(c, lit, None)
+    }
+
+    /// The repository's baked plant and animal models.
+    fn models(c: &Config) -> Arc<ModelLibrary> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/voxel-models");
+        Arc::new(ModelLibrary::load(&root, c.voxel_m).expect("the baked models"))
+    }
+
+    fn oracle_with(c: &Config, lit: bool, models: Option<Arc<ModelLibrary>>) -> PackOracle {
+        let mut cfg = VoxelConfig {
+            world: c.clone(),
+            lighting: if lit { Lighting::Lit } else { Lighting::Flat },
+            ..VoxelConfig::default()
+        };
+        cfg.light.candle_min = 0.25;
+        cfg.light.candle_period_s = 2.0;
+        let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
+        let params = params_of(&cfg, proj, true);
+        let emission = if lit { Emission::of(&cfg) } else { Emission::OFF };
+        PackOracle::new(params, models, lit, SpeciesFaces::default(), emission)
+    }
+
+    /// Wait out both packs' first sky planes, so the lit tier's comparison is whole.
+    fn settle(o: &mut PackOracle, world: &World, flora: &Flora, fauna: &Fauna) {
+        for _ in 0..400 {
+            o.tick(&world.view(), flora.view(), fauna.view(), 0.0, Frame::Now)
+                .unwrap_or_else(|e| panic!("settling: {e}"));
+            if !o.light_pending() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the sky planes never arrived");
+    }
+
+    fn site(world: &World, x: i64, z: u32) -> cubarium_voxel_flora::Site {
+        let v = world.view();
+        let y = (0..v.config.height)
+            .rev()
+            .find(|&y| v.material_at(x, y, z).is_solid())
+            .expect("a column with ground");
+        cubarium_voxel_flora::Site {
+            x: x.rem_euclid(i64::from(v.config.width)) as u32,
+            y,
+            z,
+        }
+    }
+
+    fn seed(flora: &mut Flora, world: &World, x: i64, z: u32, species: Species, of_max: f64) {
+        let wood = flora.config().species(species).wood_max * of_max;
+        assert!(
+            flora.apply(world, FloraCommand::Seed { x, z, species, wood }),
+            "a support face for the {species:?} at ({x}, {z})"
+        );
+    }
+
+    fn vine_face(x: u32, y: u32, z: u32, spur: cubarium_voxel_flora::SpurPhase) -> FaceDraw {
+        FaceDraw {
+            face: cubarium_voxel_flora::Face::new(x, y, z, cubarium_voxel_flora::FaceDir::NegX),
+            owner: 1,
+            leafiness: 0.9,
+            rooted: false,
+            dormant: false,
+            spur,
+        }
+    }
+
+    /// The scripted sequence, both tiers: after **every** tick the change-only pack draws
+    /// what the full pack draws. An animal walks; a stand is born, grows a stage and dies;
+    /// a carcass appears and decays to remains; the vine spreads a face and flowers; a
+    /// shower falls and the water flows; the terrain is edited; a glowcap appears and dies;
+    /// and the plants live their own lives (`Flora::step`) throughout.
+    fn scripted(lit: bool, baked: bool) {
+        use cubarium_voxel_flora::{Carcass, Deposit, DepositKind, SpurPhase};
+        let c = config();
+        let mut o = oracle_with(&c, lit, baked.then(|| models(&c)));
+        let mut world = world(&c);
+        // A turf under the frond's crown, whose canopy moves when the frond goes.
+        let mut plants = flora(
+            &world,
+            &[
+                (1, 1, Species::Umbrellafrond, 1.0),
+                (2, 1, Species::Springturf, 1.0),
+                (26, 3, Species::Umbrellafrond, 0.4),
+            ],
+        );
+        let mut beast = grazer(&world, 3, 1);
+        settle(&mut o, &world, &plants, &beast);
+        let tier = if lit { "lit" } else { "flat" };
+        let v = c.voxel_volume();
+        for t in 0..72u32 {
+            match t {
+                4 => seed(&mut plants, &world, 14, 2, Species::Bloomcrown, 0.3),
+                8 => o.set_cover_draws(Some(vec![vine_face(8, 3, 1, SpurPhase::Bare)])),
+                12 => seed(&mut plants, &world, 22, 4, Species::Glowcap, 0.6),
+                14 => {
+                    let at = site(&world, 18, 4);
+                    plants.lay_carcass(at, Carcass { lineage: 0, heading_rad: 0.0, organic: 1.0 });
+                    plants.deposit(at, Deposit { kind: DepositKind::Carrion, organic: 0.8, mineral: 0.0, energy: 0.0 });
+                }
+                18 => o.set_cover_draws(Some(vec![
+                    vine_face(8, 3, 1, SpurPhase::Bare),
+                    vine_face(8, 4, 1, SpurPhase::Bare),
+                ])),
+                // A second frond born beside the first: one canopy, if their styles agree.
+                20 => seed(&mut plants, &world, 29, 3, Species::Umbrellafrond, 0.9),
+                24 => {
+                    assert!(plants.apply(&world, FloraCommand::Clear { x: 14, z: 2 }));
+                    seed(&mut plants, &world, 14, 2, Species::Bloomcrown, 1.0);
+                }
+                28 => o.set_cover_draws(Some(vec![
+                    vine_face(8, 3, 1, SpurPhase::Bare),
+                    vine_face(8, 4, 1, SpurPhase::Flower),
+                ])),
+                30 => {
+                    for x in 0..4 {
+                        set(&mut world, x, 11, 2, Material::Rock);
+                    }
+                }
+                // The vine loses its first face.
+                38 => o.set_cover_draws(Some(vec![vine_face(8, 4, 1, SpurPhase::Flower)])),
+                // The frond over the turf dies.
+                56 => assert!(plants.apply(&world, FloraCommand::Clear { x: 1, z: 1 })),
+                34 => {
+                    // Decayed: the same pool now under the remains fraction of the body.
+                    let at = site(&world, 18, 4);
+                    plants.lay_carcass(at, Carcass { lineage: 0, heading_rad: 0.0, organic: 40.0 });
+                }
+                44 => assert!(plants.apply(&world, FloraCommand::Clear { x: 14, z: 2 })),
+                50 => {
+                    // The glowcap dies now, if its own life has not ended it already.
+                    let _ = plants.apply(&world, FloraCommand::Clear { x: 22, z: 4 });
+                }
+                _ => {}
+            }
+            // A shower over the pool and the bump, then the water's own step.
+            if (10..40).contains(&t) {
+                for x in [2i64, 10, 16] {
+                    world.apply(Command::AddWater { x, y: 12, z: t % c.depth, volume_m3: v * 0.3 });
+                }
+            }
+            world.step_with(1);
+            plants.step(&mut world);
+            // The grazer walks a voxel every other tick.
+            beast = grazer(&world, 3 + i64::from(t / 2), 1);
+            let candle_s = f64::from(t) * 0.05;
+            o.tick(&world.view(), plants.view(), beast.view(), candle_s, Frame::Now)
+                .unwrap_or_else(|e| panic!("{tier}, scripted tick {t}: {e}"));
+        }
+    }
+
+    #[test]
+    fn the_change_only_pack_draws_what_the_full_pack_draws_flat() {
+        scripted(false, false);
+    }
+
+    #[test]
+    fn the_change_only_pack_draws_what_the_full_pack_draws_lit() {
+        scripted(true, false);
+    }
+
+    #[test]
+    fn the_change_only_pack_draws_what_the_full_pack_draws_flat_with_models() {
+        scripted(false, true);
+    }
+
+    #[test]
+    fn the_change_only_pack_draws_what_the_full_pack_draws_lit_with_models() {
+        scripted(true, true);
+    }
+
+    /// The staging ring: a pack overwritten before any frame took it, a frame still on the
+    /// GPU while the next tick packs into the other buffer, and a frame displaced before
+    /// it ran — after each upload the images hold exactly that pack, and it draws what the
+    /// full pack draws.
+    #[test]
+    fn every_buffer_uploads_what_it_owes_through_skips_and_displacements() {
+        let c = config();
+        let mut o = oracle(&c, false);
+        let mut world = world(&c);
+        let mut plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0), (1, 1, Species::Umbrellafrond, 1.0)]);
+        let frames = [
+            Frame::Now,
+            Frame::Unrecorded,
+            Frame::Unrecorded,
+            Frame::Now,
+            Frame::InFlight,
+            Frame::InFlight,
+            Frame::Now,
+            Frame::InFlight,
+            Frame::Now,
+            Frame::InFlight,
+            Frame::Unrecorded,
+            Frame::Now,
+        ];
+        let v = c.voxel_volume();
+        for (t, &frame) in frames.iter().enumerate() {
+            world.apply(Command::AddWater { x: 3 + t as i64, y: 10, z: 2, volume_m3: v * 0.5 });
+            world.step_with(1);
+            plants.step(&mut world);
+            let beast = grazer(&world, 2 + t as i64, 1);
+            o.tick(&world.view(), plants.view(), beast.view(), 0.0, frame)
+                .unwrap_or_else(|e| panic!("tick {t} ({frame:?}): {e}"));
+            if t == 7 || t == 9 {
+                // The frame just recorded is displaced before it runs.
+                o.discard();
+            }
+        }
+    }
+
+    /// Plants living their lives churn styles every tick: hundreds more over time than
+    /// the table holds, a few at once. No slot runs out, and a slot freed and taken by a
+    /// new style leaves no texel drawing the old one (the oracle sees every texel).
+    #[test]
+    fn styles_churning_over_time_never_exhaust_the_table_or_leave_a_stale_texel() {
+        let c = config();
+        let mut o = oracle(&c, false);
+        let mut world = world(&c);
+        let stands = [
+            (1i64, 1u32, Species::Umbrellafrond, 0.5),
+            (12, 1, Species::Bloomcrown, 0.5),
+            (16, 4, Species::Bloomcrown, 0.8),
+            (24, 3, Species::Umbrellafrond, 0.4),
+            (29, 0, Species::Umbrellafrond, 0.7),
+        ];
+        let mut plants = flora(&world, &stands);
+        let none = Fauna::new(FaunaConfig::default());
+        for t in 0..400 {
+            world.step_with(1);
+            plants.step(&mut world);
+            o.tick(&world.view(), plants.view(), none.view(), 0.0, Frame::Now)
+                .unwrap_or_else(|e| panic!("tick {t}: {e}"));
+        }
+        assert!(
+            o.styles_made() > MAX_STYLES as u64,
+            "the plants churned only {} styles",
+            o.styles_made()
+        );
+    }
+
+    /// A tick where nothing changed uploads nothing: no brick and no plane.
+    #[test]
+    fn a_tick_where_nothing_changed_uploads_nothing() {
+        let c = config();
+        let mut o = oracle(&c, false);
+        let world = world(&c);
+        let plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0)]);
+        let beast = grazer(&world, 4, 1);
+        let tick = |o: &mut PackOracle| {
+            o.tick(&world.view(), plants.view(), beast.view(), 0.0, Frame::Now).unwrap()
+        };
+        let first = tick(&mut o);
+        assert_eq!(first.bricks, None, "the first pack carries the whole volume");
+        tick(&mut o);
+        let still = tick(&mut o);
+        assert_eq!(still.bricks, Some(0), "nothing changed, no brick");
+        assert_eq!(still.copied, [false; SLOW_PLANES], "and no plane");
+    }
+
+    /// A frame displaced after a newer pack was made, in the order the presenters make it:
+    /// record A, pack B, displace A, record, run. Nothing either pack changed is lost —
+    /// first with A carrying bricks, then with A the first pack, carrying the whole volume.
+    #[test]
+    fn a_displaced_frame_and_a_newer_pack_lose_no_change() {
+        let c = config();
+        let v = c.voxel_volume();
+        for a_whole in [true, false] {
+            let mut o = oracle(&c, false);
+            let mut world = world(&c);
+            let plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0)]);
+            let mut tick = |o: &mut PackOracle, world: &mut World, x: i64| {
+                world.apply(Command::AddWater { x, y: 10, z: 2, volume_m3: v * 0.5 });
+                world.step_with(1);
+                let beast = grazer(world, x, 1);
+                o.pack(&world.view(), plants.view(), beast.view(), 0.0).unwrap().expect("a buffer");
+            };
+            if !a_whole {
+                tick(&mut o, &mut world, 2);
+                o.record();
+                o.retire();
+            }
+            tick(&mut o, &mut world, 4); // A
+            o.record();
+            tick(&mut o, &mut world, 6); // B, into the other buffer
+            o.discard(); // A never runs
+            o.record();
+            o.retire();
+            o.check_images().unwrap_or_else(|e| panic!("A whole: {a_whole}: {e}"));
+            // The next pack carries what A owed.
+            tick(&mut o, &mut world, 8);
+            o.record();
+            o.retire();
+            o.check_images().unwrap_or_else(|e| panic!("A whole: {a_whole}, the pack after: {e}"));
+        }
+    }
+
+    /// Every interleaving the presenters can make — packs refused while both buffers are
+    /// read, frames recorded, run and displaced in any legal order — through a scripted
+    /// world's life: the images always hold the latest pack outside the owed bricks.
+    #[test]
+    fn random_frame_orders_never_lose_a_change() {
+        let c = config();
+        let v = c.voxel_volume();
+        for seed in [0x9e37_79b9_7f4a_7c15u64, 0x2545_f491_4f6c_dd1d, 7] {
+            let mut rng = seed;
+            let mut o = oracle(&c, false);
+            let mut world = world(&c);
+            let mut plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0), (1, 1, Species::Umbrellafrond, 1.0)]);
+            for t in 0..300u32 {
+                if t % 5 == 0 {
+                    world.apply(Command::AddWater { x: i64::from(t % 30), y: 10, z: t % c.depth, volume_m3: v * 0.5 });
+                }
+                world.step_with(1);
+                plants.step(&mut world);
+                let beast = grazer(&world, 2 + i64::from(t / 3 % 28), 1);
+                o.tick_random(&world.view(), plants.view(), beast.view(), 0.0, &mut rng)
+                    .unwrap_or_else(|e| panic!("seed {seed:#x}, tick {t}: {e}"));
+            }
+        }
+    }
+
+    /// More styles at once than the table holds: the texels that overflowed draw with slot
+    /// 0 for now, and once slots are free again they take their own style at the next
+    /// tick, though nothing about their cells changed.
+    #[test]
+    fn overflowed_texels_take_their_own_style_once_slots_free() {
+        let c = config();
+        let mut o = oracle(&c, false);
+        let world = world(&c);
+        let none = Fauna::new(FaunaConfig::default());
+        let first = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0)]);
+        o.tick(&world.view(), first.view(), none.view(), 0.0, Frame::Now).unwrap();
+        // Every free slot taken by a style no texel draws with.
+        let held = o.fill_palette();
+        let both = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0), (1, 1, Species::Umbrellafrond, 1.0)]);
+        assert!(
+            o.tick(&world.view(), both.view(), none.view(), 0.0, Frame::Now).is_err(),
+            "the new stand overflowed the table"
+        );
+        o.empty_palette(held);
+        // Nothing moves; the overflowed texels resolve to their own style all the same.
+        o.tick(&world.view(), both.view(), none.view(), 0.0, Frame::Now)
+            .unwrap_or_else(|e| panic!("after slots freed: {e}"));
+        o.tick(&world.view(), both.view(), none.view(), 0.0, Frame::Now)
+            .unwrap_or_else(|e| panic!("a tick later: {e}"));
     }
 }
