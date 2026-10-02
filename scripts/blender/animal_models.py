@@ -687,7 +687,7 @@ def lanternjaw():
     # Voxel placement (the bake anchors the origin on a cell centre: cell (i, j, k) centres at
     # x = 0.125 i, y = 0.125 j, z = 0.125 k + 0.0625). The fangs contain the two centres of
     # cell column (4, 0, 0..1), the razor blades (4, +-2, 0), each orb the one cell
-    # (LJ_ORB_CELL, +-1, 3) under the tail tip with its front and sides open. The two tail branches run
+    # (LJ_ORB_CELL, +-1, 3), held from the cell behind it, open on top, in front and beside. The two tail branches run
     # on the cell rows y = +-0.125, thin enough that the row between them stays empty.
     def body_zone(f, s, p):
         return 0 if (p.x > 0.24 and s > -0.2) else 1    # violet helmet; the rest dark under plates
@@ -747,18 +747,18 @@ def lanternjaw():
     for sy in (-1, 1):
         path = [(-0.36, sy * 0.03, 0.31), (-0.38, sy * 0.08, 0.40), (-0.34, sy * 0.11, 0.49),
                 (-0.24, sy * 0.125, 0.53), (-0.10, sy * 0.125, 0.555), (0.06, sy * 0.125, 0.56),
-                (0.20 * ox / 0.375, sy * 0.125, 0.56), (ox - 0.075, sy * 0.125, 0.56), (ox - 0.015, sy * 0.125, 0.55)]
+                (ox - 0.205, sy * 0.125, 0.56), (ox - 0.14, sy * 0.125, 0.545)]
         seg_tail(catmull(path, 12), 0.056, 0.04)
-        # the lure holder: a short down-turned segment, three claws gripping the top half of
-        # the cyan orb that hangs under the tail tip, over the face
+        # the lure holder: the tip turns down behind the orb (Wrysk: the dark cell moves from
+        # above the orb to just behind it), three claws gripping the orb's back half
         end = path[-1]
-        hold = (ox, sy * 0.125, 0.515)
+        hold = (ox - 0.11, sy * 0.125, 0.45)
         cyl(end, hold, 0.032, 0.028, mat=c("a_mark"), seg=10)
         orb = Vector((ox, sy * 0.125, 0.4375))
         ell(tuple(orb), (0.06,) * 3, c("a_lure"))
-        for ang in (90, 210, 330):  # the claws grip the orb's top half only
+        for ang in (90, 210, 330):  # the claws grip the orb's back half only
             a = math.radians(ang)
-            tip = orb + Vector((math.cos(a) * 0.045, math.sin(a) * 0.045, 0.03))
+            tip = orb + Vector((-0.045, math.cos(a) * 0.045, math.sin(a) * 0.045))
             cyl(hold, tuple(tip), 0.012, 0.003, mat=c("a_mark"), seg=6)
 
 
