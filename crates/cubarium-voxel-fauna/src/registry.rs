@@ -235,6 +235,15 @@ fn founder_rows() -> Vec<Row> {
         r("flight.foliage_speed_factor", "x speed cap", fraction, "the speed cap inside a crown's foliage layers").optional().prov("decision"),
         r("flight.shower_rain_reference_m_per_s", "m/s of rain", Range::positive(), "R0: flight costs x (1 + rain rate / R0) in a shower").optional(),
         r("flight.lift_speed_fraction", "x cruise speed", nonneg, "vertical speed at full lift, either way").optional(),
+        // The glider's table (`Glider`, F3): the seedporter's only, optional on the others.
+        r("glider.climb_min_stand_m", "m", nonneg, "the shortest stand whose stem it climbs (crown top over the support)").optional().prov("decision"),
+        r("glider.glide_ratio", "m across per m down", Range::positive(), "a glide's horizontal metres per metre of descent").optional().prov("decision"),
+        r("glider.glide_body_lengths_per_s", "body lengths/s", Range::positive(), "a glide's speed").optional().prov("decision"),
+        r("glider.glide_cost_factor", "x basal upkeep", nonneg, "a second gliding, upkeep included").optional().prov("decision"),
+        r("glider.glide_min_height_m", "m", nonneg, "a glide starts only from this height over the landing surface").optional().prov("decision"),
+        // Gut seeds (`GutSeeds`, F3): the seedporter's only, optional on the others.
+        r("gut_seeds.seeds_per_fruit_organic", "org-units per org-unit of fruit", fraction, "share of a fruit meal that is the source's seeds, carried in the gut").optional(),
+        r("gut_seeds.gut_transit_s", "s", nonneg, "a meal's seeds are voided at the body's face this long after it").optional(),
         // The counter-strike seam (`Counter`): unused, `None` for every lineage.
         r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
         r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),

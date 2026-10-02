@@ -1025,7 +1025,8 @@ fn animals_stamp_their_founder_model_by_size_bin_and_fall_back_to_cells_of() {
             | Founder::Capgnawer
             | Founder::Loftstrider
             | Founder::RippleSnail
-            | Founder::Bellwing => {
+            | Founder::Bellwing
+            | Founder::Seedporter => {
                 let mut seen = BTreeSet::new();
                 for (cell, _) in cells_of(animal, av.config, 0, voxel_m) {
                     if cell.y >= c.height || cell.z >= c.depth {

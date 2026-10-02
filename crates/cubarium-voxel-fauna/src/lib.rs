@@ -45,6 +45,8 @@ mod roster_tests;
 mod snail_tests;
 #[cfg(test)]
 mod flight_tests;
+#[cfg(test)]
+mod seedporter_tests;
 mod flight;
 
 use cubarium_voxel::{VoxelView, World};
@@ -52,7 +54,7 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    BELLWING_MASS_RATIO, Body, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Hunter, StepLimits, birth_readiness,
+    BELLWING_MASS_RATIO, Body, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, GutSeeds, Hunter, StepLimits, birth_readiness,
     effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -1731,16 +1733,23 @@ pub enum Food {
     /// The bellwing's food: a sip is `feed` with a bloom inside the mouth reach while
     /// hovering at it or perched on it.
     Nectar,
+    /// **Fruit** (F3, the seedporter's; predation-and-flight §3.7): a product, not the
+    /// seed parcel — a latticevine face in fruit
+    /// ([`cubarium_voxel_flora::Flora::take_fruit`]) or a lanternberry's hanging fruit
+    /// stock ([`cubarium_voxel_flora::Flora::take_stand_fruit`]). Energy-rich, a little
+    /// mineral. A fruit meal records the source species' seeds in the gut.
+    Fruit,
 }
 
 impl Food {
-    pub const ALL: [Food; 6] = [
+    pub const ALL: [Food; 7] = [
         Food::Litter,
         Food::CapTissue,
         Food::Carrion,
         Food::Foliage,
         Food::Film,
         Food::Nectar,
+        Food::Fruit,
     ];
     pub const COUNT: usize = Food::ALL.len();
 
@@ -1753,6 +1762,7 @@ impl Food {
             Food::Foliage => 3,
             Food::Film => 4,
             Food::Nectar => 5,
+            Food::Fruit => 6,
         }
     }
 
@@ -1779,6 +1789,7 @@ impl Food {
             Food::Foliage => "foliage",
             Food::Film => "film",
             Food::Nectar => "nectar",
+            Food::Fruit => "fruit",
         }
     }
 }
@@ -2267,6 +2278,11 @@ pub enum Command {
     /// [`Command::IntroduceFounder`] is. Refused as that is, and also for a lineage that
     /// cannot fly, a pose whose body would occupy a solid or water cell, and a `y_m` above
     /// the lineage's ceiling over the support face below.
+    ///
+    /// **A glider** (F3, the seedporter) is taken too: gliding ([`MobilityMode::Glide`])
+    /// when its base is in the air at least its `glide_min_height_m` over the landing
+    /// surface below, perched where its base meets a crown top.
+    // F3 stub: a glider is refused like any walker.
     IntroduceAloft {
         pose: Pose,
         founder: Founder,

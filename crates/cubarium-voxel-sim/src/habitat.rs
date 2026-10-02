@@ -1837,7 +1837,7 @@ mod tests {
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
             "one patch is not a route to a second one"
         );
-        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0, 0, 0, 0, 0]);
+        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0, 0, 0, 0, 0, 0]);
         assert_eq!(out.founders[Founder::Browser.index()], 0);
         assert_eq!(
             out.shortfall[Founder::Browser.index()],
@@ -2088,7 +2088,7 @@ mod tests {
             for _ in 0..n {
                 introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
             }
-            accept(&world, &flora, &fauna, [0, n, 0, 0, 0, 0, 0])
+            accept(&world, &flora, &fauna, [0, n, 0, 0, 0, 0, 0, 0])
         };
         let at = with(fits);
         let v = &at.lineages[Founder::Browser.index()];
@@ -2117,12 +2117,12 @@ mod tests {
         ));
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         introduce(&mut fauna, &world, Founder::Blind, at_site);
-        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0, 0, 0]);
         let v = &got.lineages[Founder::Blind.index()];
         assert!(v.components[0].food.stock >= founding.starter_litter_organic - 1e-12, "{got:?}");
         assert!(!v.accepted && !got.accepted, "litter with no producer: {got:?}");
         plant(&mut bare, &world, 12, 2, Species::Springturf, 0.8);
-        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0, 0, 0]);
         assert!(
             got.lineages[Founder::Blind.index()].accepted && got.accepted,
             "a litter-shedding stand rooted in the component: {got:?}"
@@ -2314,7 +2314,7 @@ mod tests {
         }
         let mut flora = Flora::new(flora_cfg.clone());
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
-        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0, 0, 0, 0, 0]);
+        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(seeded.pre_roll, pre.report);
         let drowned_on = |species: Species, site: Site| {
             let i = index_of(&pre.sites, site).expect("a support face");
@@ -2333,7 +2333,7 @@ mod tests {
         let calm_pre = pre_roll(&mut calm, false);
         let mut calm_flora = Flora::new(flora_cfg.clone());
         let mut calm_fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
-        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0, 0, 0, 0, 0]);
+        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0, 0, 0, 0, 0, 0]);
         assert!(
             calm_flora
                 .view()
@@ -2659,6 +2659,85 @@ mod tests {
                 (dx * dx + (a.pose.z - sz).powi(2)).sqrt() <= 4.0
             });
             assert!(near, "a bellwing at {:?} is within 4 m of nectar", a.site);
+        }
+    }
+
+    /// F3 (Brief F3, "Founding"): **a preset of four seedporters founds up to four, at
+    /// food — near a fruiting lanternberry or a latticevine-covered face; the code default
+    /// founds none.** The seedporter eats fruit only; every placed body stands within 4 m
+    /// (horizontally, on the ring) of a lanternberry past its seedling profile or of a
+    /// latticevine-covered face. The other lineages are switched off so the count is its
+    /// own.
+    #[test]
+    fn a_preset_of_four_seedporters_founds_them_near_lanternberry_and_latticevine_and_the_default_none() {
+        let sp = Founder::Seedporter;
+        assert_eq!(
+            cubarium_voxel_fauna::FaunaConfig::default().founder_counts()[sp.index()],
+            0,
+            "the code default founds none"
+        );
+        let file: toml::Table = r#"
+            [fauna.founders.littershredder]
+            founding_count = 0
+            [fauna.founders.frondgrazer]
+            founding_count = 0
+            [fauna.founders.lanternjaw]
+            founding_count = 0
+            [fauna.founders.seedporter]
+            founding_count = 4
+        "#
+        .parse()
+        .unwrap();
+        let params = crate::params::Params::resolve(&crate::params::Layers {
+            file: Some(file),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(params.fauna.founder_counts()[sp.index()], 4, "the preset's count is honoured");
+        assert_eq!(
+            params.fauna.founder(sp).diet,
+            cubarium_voxel_fauna::Diet::only(cubarium_voxel_fauna::Food::Fruit),
+            "a fruit eater"
+        );
+        let mut world = crate::scene::authored(config());
+        let mut flora = Flora::new(Default::default());
+        let mut fauna = Fauna::new(params.fauna.clone());
+        let got = seed(&mut world, &mut flora, &mut fauna);
+        let placed = got.founders[sp.index()];
+        assert!((1..=4).contains(&placed), "up to the preset's four: {got:?}");
+        assert_eq!(got.founders.iter().sum::<usize>(), placed, "nothing else: {got:?}");
+
+        let fv = flora.view();
+        let v = world.config().voxel_m;
+        let ring = f64::from(world.config().width) * v;
+        let mut sources: Vec<(f64, f64)> = fv
+            .stands
+            .iter()
+            .filter(|s| s.species == Species::Lanternberry && s.profile_stage >= 1)
+            .map(|s| ((f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v))
+            .collect();
+        sources.extend(
+            fv.cover
+                .faces()
+                .iter()
+                .map(|c| ((f64::from(c.face.x) + 0.5) * v, (f64::from(c.face.z) + 0.5) * v)),
+        );
+        assert!(!sources.is_empty(), "the authored scene has fruit sources");
+        let porters: Vec<_> = fauna
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(sp))
+            .copied()
+            .collect();
+        assert_eq!(porters.len(), placed);
+        for a in porters {
+            let near = sources.iter().any(|&(sx, sz)| {
+                let dx = (a.pose.x - sx).rem_euclid(ring);
+                let dx = dx.min(ring - dx);
+                (dx * dx + (a.pose.z - sz).powi(2)).sqrt() <= 4.0
+            });
+            assert!(near, "a seedporter at {:?} is within 4 m of fruit", a.site);
         }
     }
 
@@ -2996,7 +3075,7 @@ mod tests {
 
         let mut fauna = Fauna::new(config);
         introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
-        let at = accept(&world, &flora, &fauna, [0, 1, 0, 0, 0, 0, 0]);
+        let at = accept(&world, &flora, &fauna, [0, 1, 0, 0, 0, 0, 0, 0]);
         assert!(
             at.lineages[Founder::Browser.index()].accepted,
             "one heavy founder by a bloomcrown is founded as a light one would be: {at:?}"

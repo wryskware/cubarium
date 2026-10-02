@@ -501,6 +501,7 @@ fn newborn(
         profile_stage: 0,
         defence: 0.0,
         nectar: 0.0,
+        fruit: 0.0,
     };
     // A newborn's foliage goes into its seedling profile bottom-up, like any other tissue.
     born.bin_foliage(sc, config.voxel_m);

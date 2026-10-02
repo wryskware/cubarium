@@ -2063,7 +2063,7 @@ fn founder_feed(
             Food::Litter => flora.take_litter(site, bite),
             Food::Carrion => flora.take_carrion(site, bite),
             Food::Film => flora.take_film(site, bite),
-            Food::CapTissue | Food::Foliage | Food::Nectar => {
+            Food::CapTissue | Food::Foliage | Food::Nectar | Food::Fruit => {
                 unreachable!("a stand's tissue is not a ground pool")
             }
         },

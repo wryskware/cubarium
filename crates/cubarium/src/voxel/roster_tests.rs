@@ -12,6 +12,10 @@
 //! **F1** (the flight brief with the roster brief's "F1 overrides"): the live presets found
 //! bellwings (6 on the desktop and voidrunner terrariums and the desktop voxel preset, 4 on
 //! the Tachyon panel), and a live bellwing draws with its specimen model at its `y_m`.
+//!
+//! **F3** (the roster brief's Brief F3 "Tests first"): the live presets found seedporters
+//! (4 on the desktop and voidrunner terrariums and the desktop voxel preset, 3 on the
+//! Tachyon panel), and a live seedporter draws with its specimen model at its `y_m`.
 
 use std::path::{Path, PathBuf};
 
@@ -347,6 +351,84 @@ fn a_live_bellwing_draws_with_its_specimen_model_at_its_height() {
         .map(|(_, y, _)| y)
         .collect();
     assert!(!rows.is_empty(), "a live bellwing is stamped from its model, not a glyph");
+    let lowest = *rows.iter().min().expect("cells");
+    let base = (y_m / v).floor() as u32;
+    assert!(
+        lowest.abs_diff(base) <= 1,
+        "drawn at its height: lowest model cell {lowest}, its base in cell {base}"
+    );
+}
+
+// ------------------------------------------------------------------ F3: the seedporter
+
+/// F3 (Brief F3, "Founding"): **the live presets found seedporters** — 4 on the desktop
+/// and voidrunner terrariums and the desktop voxel preset, 3 on the Tachyon panel; the
+/// code default (co-training worlds) founds none.
+#[test]
+fn the_live_presets_found_seedporters() {
+    let sp = Founder::Seedporter.index();
+    assert_eq!(FaunaConfig::default().founder_counts()[sp], 0, "training worlds are unchanged");
+    for (file, want) in [
+        ("config/desktop/terrarium.toml", 4),
+        ("config/voidrunner/terrarium.toml", 4),
+        ("config/desktop/voxel.toml", 4),
+        ("config/tachyon/voxel.toml", 3),
+    ] {
+        let path = repo(file).canonicalize().expect("the preset is committed");
+        let cfg = super::load_config(&path).unwrap_or_else(|e| panic!("{file}: {e:#}"));
+        let params = super::params_of(&cfg, &[]).unwrap_or_else(|e| panic!("{file}: {e:#}"));
+        assert_eq!(params.fauna.founder_counts()[sp], want, "{file}: seedporters");
+    }
+}
+
+/// F3 (Brief F3, "Presenter"): **a live seedporter draws with its baked specimen model, at
+/// `y_m`, one pose.** A seedporter put gliding 1.5 m over the 0.125 m plain (its base at
+/// 1.875 m, cell 15) is stamped from its model, not a glyph, wearing its specimen coat,
+/// and the model's lowest cell is the cell its base is in (±1), well clear of the ground's
+/// air cell 3.
+#[test]
+fn a_live_seedporter_draws_with_its_specimen_model_at_its_height() {
+    let f = Founder::Seedporter;
+    assert_eq!(f.name(), "seedporter", "the specimen key");
+    let lib = ModelLibrary::load(&repo("assets/voxel-models"), 0.125).expect("the baked library");
+    let specimen = lib.specimen(f.name()).expect("the baked specimen of its name");
+    let drawn = lib.animal(f).expect("a live body has a model");
+    assert!(std::ptr::eq(drawn, specimen), "the seedporter draws with its specimen");
+    let coat = colours::founder_coat(f);
+    let want = colours::specimen_coat(f.name()).expect("the specimen's coat");
+    assert!(std::ptr::eq(coat, want), "and wears its specimen coat");
+
+    let world = plain();
+    let view = world.view();
+    let v = 0.125;
+    let y_m = 3.0 * v + 1.5;
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(
+        fauna.apply(
+            &world,
+            Command::IntroduceAloft {
+                pose: cubarium_voxel_fauna::Pose {
+                    x: 24.5 * v,
+                    z: 16.5 * v,
+                    heading_rad: 0.0,
+                    y_m,
+                },
+                founder: f,
+                stores: StartingStores::FULL,
+            },
+        ),
+        "a seedporter is put in the air, gliding"
+    );
+    let mut animals = Animals::empty(0, 0, 0);
+    animals.rebuild_with(&view, Some(fauna.view()), &lib);
+    let rows: Vec<u32> = animals
+        .cells()
+        .filter(|&(x, y, z)| {
+            matches!(animals.at(i64::from(x), i64::from(y), z), AnimalPart::Model(_))
+        })
+        .map(|(_, y, _)| y)
+        .collect();
+    assert!(!rows.is_empty(), "a live seedporter is stamped from its model, not a glyph");
     let lowest = *rows.iter().min().expect("cells");
     let base = (y_m / v).floor() as u32;
     assert!(

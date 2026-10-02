@@ -15,7 +15,9 @@ use crate::Flora;
 /// self-describing, so other tags are refused, never migrated.
 // 13: F1 (tests-first stubs) — `Stand::nectar`, `SpeciesConfig::{nectar_per_s, nectar_cap}`.
 // 14: F1 — bloomcrown's nectar is made and taken; `SpeciesConfig::nectar_mineral_fraction`.
-pub const SCHEMA: u32 = 14;
+// 15: F3 (tests-first stubs) — `Stand::fruit`, `SpeciesConfig::{fruit_per_s, fruit_cap,
+// fruit_drop_s, fruit_mineral_fraction}`.
+pub const SCHEMA: u32 = 15;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -411,6 +411,49 @@ pub struct FounderPhysiology {
     /// `None` for every walker.
     #[serde(default)]
     pub flight: Option<Flight>,
+    /// `Some` for a **glider** (F3, predation-and-flight §3.5, the seedporter): it climbs
+    /// the stems of tall stands and latticevine-covered faces, perches in crowns and glides
+    /// down from height; the lineage has the `Climb`, `Glide` and `Perched` modes. Its
+    /// climb pace and cost are [`FounderPhysiology::climb_speed_fraction`] and
+    /// [`FounderPhysiology::wall_climb_cost_factor`]. `None` for every other lineage.
+    // F3 stub: declared, `None` everywhere, read by nothing.
+    #[serde(default)]
+    pub glider: Option<Glider>,
+    /// `Some` for a lineage that **carries seeds in its gut** (F3, the seedporter): a fruit
+    /// meal records the source species' seeds, voided at the body's face after the
+    /// transit time. `None` for every other lineage.
+    // F3 stub: declared, `None` everywhere, read by nothing.
+    #[serde(default)]
+    pub gut_seeds: Option<GutSeeds>,
+}
+
+/// A glider's table ([`FounderPhysiology::glider`], F3; the seedporter's numbers are
+/// predation-and-flight §3.5, §3.9 and the roster brief's Brief F3, placeholders).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Glider {
+    /// The shortest stand whose stem it climbs: the crown top over the support face,
+    /// metres. 1.0.
+    pub climb_min_stand_m: f64,
+    /// Horizontal metres covered per metre of descent in a glide. 2.5.
+    pub glide_ratio: f64,
+    /// The glide's speed, body lengths per second. 3.0.
+    pub glide_body_lengths_per_s: f64,
+    /// What a second gliding costs, × basal upkeep (the whole, upkeep included). 1.2.
+    pub glide_cost_factor: f64,
+    /// A glide starts only from at least this height over the landing surface, metres.
+    /// 1.0.
+    pub glide_min_height_m: f64,
+}
+
+/// A frugivore's gut seeds ([`FounderPhysiology::gut_seeds`], F3).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GutSeeds {
+    /// Seed organic matter per unit of fruit organic matter eaten: the share of a fruit
+    /// meal that is the source species' seeds, carried in the gut (counted out of the
+    /// fruit, not invented).
+    pub seeds_per_fruit_organic: f64,
+    /// Seconds from a meal until its seeds are voided at the body's current face.
+    pub gut_transit_s: f64,
 }
 
 /// A flyer's table ([`FounderPhysiology::flight`], F1; the bellwing's numbers are
@@ -551,7 +594,8 @@ impl Hunter {
         // loftstrider (4) is on no list until the chorister.
         // The ripple-snail (5, roster R2b) is on no hunter's list.
         // The bellwing (6, F1) is on no hunter's list.
-        prey: [true, true, false, true, false, false, false],
+        // F3 stub: the seedporter (7) is not on the list yet; F3 puts a grounded one on it.
+        prey: [true, true, false, true, false, false, false, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
@@ -685,6 +729,8 @@ impl FounderPhysiology {
                     FOLIAGE_YIELD,
                     // F1: nor nectar.
                     FOLIAGE_YIELD,
+                    // F3: nor fruit.
+                    FOLIAGE_YIELD,
                 ],
                 organ_structure_fraction: 0.05,
                 active: crate::Activity::Nocturnal,
@@ -707,6 +753,8 @@ impl FounderPhysiology {
                 water_margin_m: 0.0,
                 egg_site: EggSite::Litter,
                 flight: None,
+                glider: None,
+                gut_seeds: None,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -761,6 +809,8 @@ impl FounderPhysiology {
                 water_margin_m: 0.0,
                 egg_site: EggSite::Litter,
                 flight: None,
+                glider: None,
+                gut_seeds: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
             // scorpid ambusher, 1.0 × 0.25 × 0.45 m, a fifth of the grazer's upkeep.
@@ -840,6 +890,8 @@ impl FounderPhysiology {
                 water_margin_m: 0.0,
                 egg_site: EggSite::Litter,
                 flight: None,
+                glider: None,
+                gut_seeds: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
             // glowcap's grazer, built from the littershredder by **body volume**, the way
@@ -873,6 +925,7 @@ impl FounderPhysiology {
                     // are not its food and carry the cap yield so none is a silent zero.
                     yield_by_food: [
                         0.5 * LITTER_YIELD,
+                        FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
@@ -999,6 +1052,14 @@ impl FounderPhysiology {
                     ..shredder
                 }
             }
+            // F3 stub: the browser's table at a founding count of 0, walking. The
+            // implementer builds the seedporter here (Brief F3): the browser's table scaled
+            // by body volume (0.5 × 0.25 × 0.2 m), diet [fruit], the glider and gut-seed
+            // tables, Diurnal, founding at food.
+            Founder::Seedporter => FounderPhysiology {
+                founding_count: 0,
+                ..FounderPhysiology::placeholder(Founder::Browser)
+            },
             Founder::RippleSnail => {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let grazer = FounderPhysiology::placeholder(Founder::Browser);
@@ -1890,8 +1951,8 @@ fn pool_stock(fv: &FloraView<'_>, site: Site, food: crate::Food) -> f64 {
         // Glassfilm (roster R2b): the film pool at the face.
         crate::Food::Film => g.film,
         // Neither is a ground pool; a mouth never asks this of them. Nectar (F1) is a
-        // flower product, not a pool.
-        crate::Food::CapTissue | crate::Food::Foliage | crate::Food::Nectar => 0.0,
+        // flower product, not a pool, and fruit (F3) a hanging one.
+        crate::Food::CapTissue | crate::Food::Foliage | crate::Food::Nectar | crate::Food::Fruit => 0.0,
     })
 }
 

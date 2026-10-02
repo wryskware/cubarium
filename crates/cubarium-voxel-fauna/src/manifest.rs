@@ -131,10 +131,15 @@ pub enum Founder {
     /// flowers and perches on crowns, vine faces and undersides. Its own manifest with a
     /// fourth action, `lift`. Diet `[nectar]`.
     Bellwing,
+    /// The **seedporter** (F3, `design/handoffs/voxel-roster-2026-10-01.md` Brief F3): a
+    /// diurnal frugivore that climbs stems and vine-covered faces, glides from grove to
+    /// grove and carries seeds in its gut. The browser's 37-input layout with a cone that
+    /// counts fruit in place of foliage. Diet `[fruit]`.
+    Seedporter,
 }
 
 impl Founder {
-    pub const ALL: [Founder; 7] = [
+    pub const ALL: [Founder; 8] = [
         Founder::Blind,
         Founder::Browser,
         Founder::Lanternjaw,
@@ -142,6 +147,7 @@ impl Founder {
         Founder::Loftstrider,
         Founder::RippleSnail,
         Founder::Bellwing,
+        Founder::Seedporter,
     ];
     pub const COUNT: usize = Founder::ALL.len();
 
@@ -156,6 +162,7 @@ impl Founder {
             Founder::Loftstrider => 4,
             Founder::RippleSnail => 5,
             Founder::Bellwing => 6,
+            Founder::Seedporter => 7,
         }
     }
 
@@ -169,6 +176,7 @@ impl Founder {
             Founder::Loftstrider => "loftstrider",
             Founder::RippleSnail => "ripple-snail",
             Founder::Bellwing => "bellwing",
+            Founder::Seedporter => "seedporter",
         }
     }
 
@@ -182,6 +190,7 @@ impl Founder {
             Founder::Loftstrider => "tall_browser",
             Founder::RippleSnail => "film_grazer",
             Founder::Bellwing => "pollinator",
+            Founder::Seedporter => "glider",
         }
     }
 
@@ -195,6 +204,7 @@ impl Founder {
             Founder::Loftstrider => Manifest::loftstrider(),
             Founder::RippleSnail => Manifest::ripple_snail(),
             Founder::Bellwing => Manifest::bellwing(),
+            Founder::Seedporter => Manifest::seedporter(),
         }
     }
 }
@@ -1133,6 +1143,43 @@ impl Manifest {
             visible_classes: &FLYER_VISIBLE_CLASSES,
             ray_pitch_offsets_deg: &FLYER_RAY_PITCH_OFFSETS_DEG,
             cone_range_m: 4.0,
+            ..Manifest::browser()
+        }
+    }
+
+    /// The seedporter (F3): the browser's 37-input layout and three actions, its own
+    /// anchors and `Self` references, and a cone that counts the fruit stock in view
+    /// (lanternberry stands and latticevine faces in fruit) where the browser's counts
+    /// foliage. Interim until P2.
+    // F3 stub: the browser's layout on the seedporter's (stub) physiology; its cone still
+    // counts foliage.
+    pub fn seedporter() -> Manifest {
+        let a = anchors(Founder::Seedporter);
+        let r = SelfReferences::of(Founder::Seedporter);
+        Manifest {
+            founder: Founder::Seedporter,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
+            contact_height_fraction: a.contact,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
+            body_reference: r.body,
+            adult_energy_reference: r.energy,
+            adult_reserve_reference: r.reserve,
+            structural_reference: r.body,
+            cruise_m_per_s: a.cruise,
+            yaw_cap_rad_per_s: a.yaw,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
+            mouth_reach_body_lengths: a.reach,
+            mass_scale: a.mass,
             ..Manifest::browser()
         }
     }

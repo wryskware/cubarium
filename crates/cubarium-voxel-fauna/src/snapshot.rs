@@ -20,7 +20,9 @@ use crate::Fauna;
 // `FounderPhysiology::flight`, the bellwing lineage and the nectar food class.
 // 29: F1 — `Perch::anchor`, `Mobility::falling`, `FounderState::lift`, `Flight::lift_speed_fraction`,
 // the flight ledger lines and the bellwing's own physiology.
-pub const SCHEMA: u32 = 29;
+// 30: F3 (tests-first stubs) — the seedporter lineage, the fruit food class,
+// `FounderPhysiology::{glider, gut_seeds}`.
+pub const SCHEMA: u32 = 30;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

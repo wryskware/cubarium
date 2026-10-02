@@ -349,6 +349,14 @@ pub struct Stand {
     /// [`Stand::mineral`] until it is taken, and it falls to litter when the stand dies.
     #[serde(default)]
     pub nectar: f64,
+    /// **Fruit** hanging on the stand, organic units (F3, the seedporter's food;
+    /// predation-and-flight §3.7): paid from the reserve in daylight up to the species'
+    /// `fruit_cap` on an adult stand, taken by [`Flora::take_stand_fruit`], falling to
+    /// litter at the stand's site when left uneaten past `fruit_drop_s`. Like nectar, the
+    /// stand's material, not its tissue.
+    // F3 stub: declared; nothing makes, drops or counts it yet.
+    #[serde(default)]
+    pub fruit: f64,
 }
 
 impl Stand {
@@ -1005,6 +1013,23 @@ pub struct SpeciesConfig {
     /// by what it holds). Latticevine nectar does not read this: it is mineral-free.
     #[serde(default)]
     pub nectar_mineral_fraction: f64,
+    /// **Fruit** (F3, the roster brief's Brief F3; predation-and-flight §3.7): organic
+    /// matter an adult stand moves from its reserve into its [`Stand::fruit`] stock per
+    /// second, in daylight only, until the stock reaches [`SpeciesConfig::fruit_cap`].
+    /// Zero makes none: every species but lanternberry.
+    // F3 stub: declared, 0 everywhere, read by nothing.
+    #[serde(default)]
+    pub fruit_per_s: f64,
+    /// The most fruit an adult stand holds, organic units.
+    #[serde(default)]
+    pub fruit_cap: f64,
+    /// Ripe fruit left uneaten this long, seconds, falls to the litter at the stand's site.
+    #[serde(default)]
+    pub fruit_drop_s: f64,
+    /// The **mineral** a unit of fruit carries, a fraction of its organic matter: small
+    /// but not zero (energy-rich fruit). Drawn from the stand's own mineral when taken.
+    #[serde(default)]
+    pub fruit_mineral_fraction: f64,
     /// **A runner's reach**: how many columns sideways, in `x` and `z`, a runner or rhizome
     /// daughter may root from the parent (the square ring around the home column); the
     /// support face is then the one at the parent's height or a voxel above or below. A
@@ -1315,6 +1340,11 @@ impl SpeciesConfig {
             nectar_per_s: 0.0,
             nectar_cap: 0.0,
             nectar_mineral_fraction: 0.0,
+            // F3 stub: no species makes fruit yet (lanternberry will).
+            fruit_per_s: 0.0,
+            fruit_cap: 0.0,
+            fruit_drop_s: 0.0,
+            fruit_mineral_fraction: 0.0,
             // A runner roots on the next column over (the eight neighbours).
             runner_reach: 1,
             // No founders: every preset that is seeded says so.
@@ -4215,6 +4245,7 @@ impl Flora {
             profile_stage: 0,
             defence: 0.0,
             nectar: 0.0,
+            fruit: 0.0,
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);
@@ -4411,6 +4442,17 @@ impl Flora {
         )?;
         g.clear_spent_carcass(self.config.carcass_gone_fraction);
         Some(self.book_consumed(taken))
+    }
+
+    /// Eat up to `want` of the fruit hanging on the stand on `site` (F3, the seedporter's
+    /// lanternberry fruit): `None` when there is no stand or it holds no fruit. Booked as
+    /// `consumed_*_out`, with the mineral and energy the fruit carries: the species'
+    /// `fruit_mineral_fraction` of the organic matter out of the stand's mineral (never
+    /// more than it holds), and its `energy_density`.
+    // F3 stub: no stand holds fruit yet; always `None`.
+    pub fn take_stand_fruit(&mut self, site: Site, want: f64) -> Option<Taken> {
+        let _ = (site, want);
+        None
     }
 
     /// Drink up to `want` of the nectar of the stand on `site` (F1, §3.7): `None` when

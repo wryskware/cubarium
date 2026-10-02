@@ -183,6 +183,11 @@ fn species_rows() -> Vec<Row> {
             .grade("N").prov("decision"),
         r("nectar_cap", "org-units per stand", nonneg, "the most nectar an adult stand holds").grade("N").prov("decision"),
         r("nectar_mineral_fraction", "fraction of organic", fraction, "mineral a unit of nectar carries (pollen lumped in)").grade("N").prov("decision"),
+        r("fruit_per_s", "org-units/s per stand", nonneg, "reserve an adult stand moves into hanging fruit per second, in daylight")
+            .grade("N").prov("decision"),
+        r("fruit_cap", "org-units per stand", nonneg, "the most fruit an adult stand holds").grade("N").prov("decision"),
+        r("fruit_drop_s", "s", nonneg, "ripe fruit left uneaten this long falls to the litter at the stand's site").grade("N").prov("decision"),
+        r("fruit_mineral_fraction", "fraction of organic", fraction, "mineral a unit of fruit carries (small, not zero)").grade("N").prov("decision"),
         r("runner_reach", "voxels (not rescaled)", nonneg, "columns sideways a runner daughter may root from its parent")
             .search(1.0, 3.0),
         r("founder_per_m2", "founders per m2 of habitat", nonneg, "founding: stands per square metre of ground the species' own gates pass on")

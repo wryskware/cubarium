@@ -503,6 +503,11 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         }
         // F1: the hover-sip teacher.
         Founder::Bellwing => Box::new(HoverSip::with_config(teachers)),
+        // F3 stub: the browser's forager on the seedporter's manifest. F3 builds its own
+        // heuristic (Brief F3: climb to fruit, eat, glide on, sleep in a crown).
+        Founder::Seedporter => {
+            Box::new(BrowserForager::for_founder(Founder::Seedporter, teachers))
+        }
     }
 }
 
