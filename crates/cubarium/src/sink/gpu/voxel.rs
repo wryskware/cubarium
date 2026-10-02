@@ -47,6 +47,7 @@ use crate::present::srgb_linear;
 use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::{Lighting, VoxelConfig};
 use crate::voxel::animal::{AnimalPart, Animals, Specimen};
+use crate::voxel::candle::{self, Candle};
 use crate::voxel::sleep;
 use crate::voxel::{appearance, colours};
 use crate::voxel::model::{ModelLibrary, Tag};
@@ -284,7 +285,13 @@ impl VoxelGpuSink {
         }
         let started = Instant::now();
         let p = self.renderer.params();
-        let slow = self.packer.prepare(view, flora, fauna);
+        // The candles' light at the frame clock's time (the tick's, before a clock is set).
+        let candle_s = if self.clock_s > 0.0 {
+            self.clock_s
+        } else {
+            view.tick as f64 / f64::from(cubarium_voxel::TICK_HZ)
+        };
+        let slow = self.packer.prepare(view, flora, fauna, candle_s);
         if let Some(sv) = &mut self.sunvis {
             let packer = &self.packer;
             let snapshot = || {
@@ -368,6 +375,11 @@ impl VoxelGpuSink {
             f64::from(cubarium_voxel::TICK_HZ),
             self.water_smooth,
         ));
+        // The glowcaps' candles move on the frame clock; the light they cast follows at the
+        // tick (`Packer::prepare`).
+        if let Some(c) = self.packer.candle {
+            self.renderer.set_emit_gains(&candle_gains(Some(c), self.clock_s));
+        }
     }
 
     /// Capture-only: draw the lit tier's derived water flow field over the water instead
@@ -415,6 +427,13 @@ impl VoxelGpuSink {
         self.sunvis.as_ref().map(|s| {
             (s.baked, s.bake_ms / s.baked.max(1) as f64, s.unchanged, s.threads)
         })
+    }
+
+    /// Style slots the last pack used, of `MAX_STYLES`, and how many follow a candle curve.
+    /// For captures.
+    pub fn styles_used(&self) -> (usize, usize) {
+        let s = &self.packer.styles;
+        (s.len(), s.iter().filter(|k| k.3.is_some_and(|e| e[3] >> 1 != 0)).count())
     }
 
     /// The lit tier's emitting voxels in the last pack, with their emissive colours in
@@ -722,6 +741,14 @@ struct Packer {
     light: Option<LightPlanes>,
     /// Whether the last fill wrote any free water (the lit tier animates it).
     wet: bool,
+    /// The glowcap candle, when it runs (lit tier, emission on, `candle_min` below 1).
+    candle: Option<Candle>,
+    /// This tick's candle curve for each flora stand (its index in `FloraView::stands`):
+    /// a glowcap's ([`Candle::class_of`]), `0` for every other stand.
+    candle_class: Vec<u8>,
+    /// The fill's scratch: the slot of each `(base slot, curve)` pair a candle cell took,
+    /// `u16::MAX` for none yet.
+    candle_slots: Vec<u16>,
 }
 
 /// The lit tier's emitters ([`crate::voxel::LightConfig`]'s `emission`, `glow`,
@@ -731,6 +758,8 @@ pub(crate) struct Emission {
     on: bool,
     glow: f32,
     reach: u32,
+    /// The glowcap candle (`[light] candle_min`, `candle_period_s`).
+    candle: Candle,
 }
 
 impl Emission {
@@ -739,6 +768,10 @@ impl Emission {
         on: false,
         glow: 0.0,
         reach: 0,
+        candle: Candle {
+            min: 1.0,
+            period_s: 0.0,
+        },
     };
 
     fn of(cfg: &VoxelConfig) -> Emission {
@@ -746,6 +779,7 @@ impl Emission {
             on: cfg.lighting == Lighting::Lit && cfg.light.emission,
             glow: cfg.light.glow.max(0.0),
             reach: cfg.light.glow_reach,
+            candle: Candle::of(&cfg.light),
         }
     }
 }
@@ -804,6 +838,9 @@ impl Packer {
         Packer {
             stands,
             vine_tiles: tiles,
+            candle: (p.lit && emission.on && emission.candle.on()).then_some(emission.candle),
+            candle_class: Vec::new(),
+            candle_slots: vec![u16::MAX; MAX_STYLES * (usize::from(candle::CLASSES) + 1)],
             animals,
             models,
             specimens: Vec::new(),
@@ -844,12 +881,14 @@ impl Packer {
     /// Everything that is not a write into the staging buffer: the plant and animal
     /// grids, the roof if the terrain moved, and in the lit tier the canopy, the terrain
     /// handed to the sky's thread if it moved, and the sky plane if one has arrived.
-    /// Returns the slow planes' keys.
+    /// Returns the slow planes' keys. `candle_s` is the presenter's clock, seconds: the
+    /// glowcaps' light is built at their candles' brightness then.
     fn prepare(
         &mut self,
         view: &VoxelView<'_>,
         flora: FloraView<'_>,
         fauna: FaunaView<'_>,
+        candle_s: f64,
     ) -> [u64; SLOW_PLANES] {
         match self.models.as_deref() {
             Some(lib) => {
@@ -863,6 +902,16 @@ impl Packer {
             }
         }
         self.animals.stamp_carcasses(view, &flora, fauna.config);
+        self.candle_class.clear();
+        if let Some(c) = self.candle {
+            self.candle_class.extend(flora.stands.iter().map(|s| {
+                if s.species == cubarium_voxel_flora::Species::Glowcap {
+                    c.class_of(s.id)
+                } else {
+                    0
+                }
+            }));
+        }
         self.vines.clear();
         if self.vine_tiles {
             let draws = match &self.cover_override {
@@ -916,9 +965,16 @@ impl Packer {
             // volume is coarse.
             l.emitters.clear();
             if l.emission.on {
+                // A glowcap's lip lights its cave at its candle's brightness this tick.
+                let gains = candle_gains(self.candle, candle_s);
+                let class = &self.candle_class;
                 l.emitters.extend(stands.cells().filter_map(|(x, y, z)| {
                     let rgb = stands.emission(stands.at(i64::from(x), i64::from(y), z))?;
-                    Some(((x, y, z), rgb))
+                    let c = stands
+                        .owner(i64::from(x), y, z)
+                        .and_then(|o| class.get(o).copied())
+                        .unwrap_or(0);
+                    Some(((x, y, z), rgb.map(|k| k * gains[usize::from(c)])))
                 }));
                 let animals = &self.animals;
                 l.emitters.extend(animals.cells().filter_map(|(x, y, z)| {
@@ -943,6 +999,9 @@ impl Packer {
     fn fill(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32, out: VoxelStaging<'_>) {
         self.styles.clear();
         self.slot_of.clear();
+        if !self.candle_class.is_empty() {
+            self.candle_slots.fill(u16::MAX);
+        }
         let (wu, hu, du) = (w as usize, h as usize, d as usize);
         let mut wet = 0u8;
         // Material and water, every voxel, walking the world's `(y · depth + z) · width
@@ -1060,9 +1119,30 @@ impl Packer {
                         );
                         // An emitting crown or heart cell draws the atlas's emissive
                         // variant (only the lit tier with emission gives a style one).
-                        if matches!(p, Part::Crown { .. }) && stands.emission(p).is_some() {
+                        let emits = stands.emission(p).is_some();
+                        if matches!(p, Part::Crown { .. }) && emits {
                             glyph = appearance::emissive_glyph(glyph);
                         }
+                        // A glowcap's lip takes its candle curve's copy of the style.
+                        let curve = if emits && !self.candle_class.is_empty() {
+                            stands
+                                .owner(xi, y, z)
+                                .and_then(|o| self.candle_class.get(o).copied())
+                                .unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        let s = if curve != 0 {
+                            candle_slot(
+                                s,
+                                curve,
+                                &mut self.styles,
+                                &mut self.candle_slots,
+                                &mut self.style_overflow,
+                            )
+                        } else {
+                            s
+                        };
                         plant = Some(p);
                         (class, glyph.0, s)
                     }
@@ -1109,7 +1189,8 @@ impl Packer {
                 .with_role(*role)
                 .with_faces(*faces)
                 .with_emit(emit.map(|e| [e[0], e[1], e[2]].map(f32::from_bits)))
-                .emit_whole(emit.is_some_and(|e| e[3] != 0));
+                .emit_whole(emit.is_some_and(|e| e[3] & 1 != 0));
+            out.emit_curves[slot] = emit.map_or(0, |e| (e[3] >> 1) as u8);
         }
         if out.write[PLANE_ROOF] {
             out.roof.copy_from_slice(&self.roof);
@@ -1189,8 +1270,51 @@ fn roof_table(material: &[Material], w: u32, h: u32, d: u32, out: &mut [u8]) {
 /// face slots (`VoxelStyle::with_faces`) and the emission ([`emit_key`]).
 type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 4]>);
 
+/// The gain of each candle curve at `seconds` (index 0 and every curve with the candle off
+/// at 1): what an emitter on that curve is drawn and casts light times.
+fn candle_gains(candle: Option<Candle>, seconds: f64) -> [f32; candle::CLASSES as usize + 1] {
+    let mut gains = [1.0; candle::CLASSES as usize + 1];
+    if let Some(c) = candle {
+        for (k, g) in gains.iter_mut().enumerate().skip(1) {
+            *g = c.class_brightness(k as u8, seconds);
+        }
+    }
+    gains
+}
+
+/// The slot of `base`'s copy on candle curve `curve` (the curve in its emit key's flag
+/// word, above the whole-cell bit), made on first use. Out of slots, the cell keeps `base`
+/// and burns steady.
+fn candle_slot(base: u8, curve: u8, styles: &mut Vec<StyleKey>, cache: &mut [u16], overflow: &mut u64) -> u8 {
+    let at = usize::from(base) * (usize::from(candle::CLASSES) + 1) + usize::from(curve);
+    if let Some(&slot) = cache.get(at)
+        && slot != u16::MAX
+    {
+        return slot as u8;
+    }
+    let Some(mut key) = styles.get(usize::from(base)).copied() else { return base };
+    let Some(emit) = &mut key.3 else { return base };
+    emit[3] = (emit[3] & 1) | u32::from(curve) << 1;
+    let slot = match styles.iter().position(|s| *s == key) {
+        Some(i) => i as u8,
+        None if styles.len() < MAX_STYLES => {
+            styles.push(key);
+            (styles.len() - 1) as u8
+        }
+        None => {
+            *overflow += 1;
+            base
+        }
+    };
+    if let Some(c) = cache.get_mut(at) {
+        *c = u16::from(slot);
+    }
+    slot
+}
+
 /// An emissive colour and its whole-cell flag as a style key: the colour's bits, then 1
-/// for a whole-cell emitter (`VoxelStyle::emit_whole`).
+/// for a whole-cell emitter (`VoxelStyle::emit_whole`); a glowcap lip's candle curve
+/// ([`candle_slot`]) rides above that bit.
 fn emit_key(rgb: [f32; 3], whole: bool) -> [u32; 4] {
     [rgb[0].to_bits(), rgb[1].to_bits(), rgb[2].to_bits(), u32::from(whole)]
 }
@@ -1417,7 +1541,7 @@ pub fn load_textures(
     under: Option<&std::path::Path>,
     params: &VoxelParams,
 ) -> VoxelTextures {
-    if !cfg.textures {
+    if !cfg.textures && !cfg.vine_tiles {
         return VoxelTextures::empty(params.s, params.rise);
     }
     let dir = &cfg.textures_dir;
@@ -1429,6 +1553,28 @@ pub fn load_textures(
         return VoxelTextures::empty(params.s, params.rise);
     }
     let roots: Vec<&std::path::Path> = std::iter::once(dir.as_path()).chain(under).collect();
+    if !cfg.textures {
+        // `vine_tiles` alone: the vine's tile layer, every face solid.
+        return match crate::voxel::textures::load_vine_layer(&roots, params.s, params.rise) {
+            Ok((atlas, p)) => {
+                eprintln!(
+                    "cubarium voxel: vine tiles at {} px from {}: {} ({} missing); faces solid",
+                    params.s,
+                    dir.display(),
+                    p.vine_tiles,
+                    p.vine_missing,
+                );
+                atlas
+            }
+            Err(e) => {
+                eprintln!(
+                    "cubarium voxel: the vine tiles in {} did not load ({e:#}); drawing plain vine cells",
+                    dir.display()
+                );
+                VoxelTextures::empty(params.s, params.rise)
+            }
+        };
+    }
     match crate::voxel::textures::load_layers(&roots, params.s, params.rise) {
         Ok((atlas, p)) => {
             let slots = atlas.mask().count_ones();
@@ -1600,6 +1746,7 @@ mod tests {
         styles: Vec<VoxelStyle>,
         glyphs: Vec<u8>,
         poses: cubarium_gpu::voxel::PoseTable,
+        emit_curves: [u8; MAX_STYLES],
     }
 
     impl Planes {
@@ -1611,6 +1758,7 @@ mod tests {
                 styles: vec![VoxelStyle::new([0.5; 3], [0.5; 3], [0.5; 3]); MAX_STYLES],
                 glyphs: vec![0xAB; p.glyph_bytes()],
                 poses: cubarium_gpu::voxel::PoseTable::EMPTY,
+                emit_curves: [0; MAX_STYLES],
             }
         }
 
@@ -1627,6 +1775,7 @@ mod tests {
                 canopy: &mut [],
                 glow: &mut [],
                 poses: &mut self.poses,
+                emit_curves: &mut self.emit_curves,
                 write,
             }
         }
@@ -1674,7 +1823,7 @@ mod tests {
             let view = world.view();
             let b = self.ticks % 2;
             self.ticks += 1;
-            let keys = self.packer.prepare(&view, flora.view(), fauna.view());
+            let keys = self.packer.prepare(&view, flora.view(), fauna.view(), 0.0);
             let write = self.slow.pack(b, keys);
             self.packer.fill(
                 &view,
