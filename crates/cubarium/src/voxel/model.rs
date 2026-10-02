@@ -54,7 +54,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_fauna::{FaunaConfig, Founder};
+use cubarium_voxel_fauna::{FaunaConfig, Founder, MobilityMode};
 use cubarium_voxel_flora::{FloraConfig, Layer, Species};
 use serde::{Deserialize, Serialize};
 
@@ -198,6 +198,24 @@ fn nearest(values: impl Iterator<Item = f64>, want: f64) -> Option<usize> {
     best.map(|(i, _)| i)
 }
 
+// --- models by mode -------------------------------------------------------------------
+
+/// **Which baked model a lineage wears in a mode** (F3; the seedporter's poses,
+/// `design/animal-body-reimagining-2026-09-24.md` §Seedporter "Poses"): a specimen name, or
+/// `None` for the lineage's one model. The seedporter climbs in its `seedporter` model,
+/// perches in `seedporter-stand` (its z = 0 is the perch under its feet), walks in
+/// `seedporter-ground` and glides in `seedporter-glide`. Every other lineage has one pose
+/// (a bellwing's perched pose is owed, F1).
+pub fn mode_model(founder: Founder, mode: MobilityMode) -> Option<&'static str> {
+    match (founder, mode) {
+        (Founder::Seedporter, MobilityMode::Climb) => Some("seedporter"),
+        (Founder::Seedporter, MobilityMode::Perched) => Some("seedporter-stand"),
+        (Founder::Seedporter, MobilityMode::Ground) => Some("seedporter-ground"),
+        (Founder::Seedporter, MobilityMode::Glide) => Some("seedporter-glide"),
+        _ => None,
+    }
+}
+
 // --- the library ---------------------------------------------------------------------
 
 /// Every model the presenter can stamp: at most one per species and one per founder.
@@ -234,6 +252,15 @@ impl ModelLibrary {
         self.animals[founder.index()]
             .as_ref()
             .or_else(|| self.specimen(founder.name()))
+    }
+
+    /// A live founder's model **in its current mode** (F3): its lineage's mode-to-model
+    /// table ([`mode_model`]) names a specimen for the mode, and that specimen draws when
+    /// the library has it; any other mode, or a missing specimen, is [`Self::animal`].
+    pub fn animal_in_mode(&self, founder: Founder, mode: MobilityMode) -> Option<&AnimalModel> {
+        mode_model(founder, mode)
+            .and_then(|name| self.specimen(name))
+            .or_else(|| self.animal(founder))
     }
 
     pub fn insert_specimen(&mut self, name: &str, model: AnimalModel) {

@@ -436,3 +436,52 @@ fn a_live_seedporter_draws_with_its_specimen_model_at_its_height() {
         "drawn at its height: lowest model cell {lowest}, its base in cell {base}"
     );
 }
+
+/// F3 (Fable's addition, the seedporter's poses): **each mode draws its own model** — a
+/// climbing seedporter its `seedporter` model, a perched one `seedporter-stand`, a walking
+/// one `seedporter-ground`, a gliding one `seedporter-glide` — four different models, and a
+/// mode with no pose of its own (`Fly`) draws `seedporter`.
+#[test]
+fn a_live_seedporter_draws_each_mode_with_its_own_model() {
+    use cubarium_voxel_fauna::MobilityMode;
+    let f = Founder::Seedporter;
+    let lib = ModelLibrary::load(&repo("assets/voxel-models"), 0.125).expect("the baked library");
+    let world = plain();
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(fauna.apply(
+        &world,
+        Command::IntroduceFounder {
+            x: 24,
+            z: 16,
+            founder: f,
+            stores: StartingStores::FULL,
+            heading_rad: 0.0,
+        },
+    ));
+    let body = fauna.view().animals[0];
+    let config = fauna.config().clone();
+    let length = config.founder(f).body_at(body.body).length_m;
+    let mut seen = Vec::new();
+    for (mode, name) in [
+        (MobilityMode::Climb, "seedporter"),
+        (MobilityMode::Perched, "seedporter-stand"),
+        (MobilityMode::Ground, "seedporter-ground"),
+        (MobilityMode::Glide, "seedporter-glide"),
+        (MobilityMode::Fly, "seedporter"),
+    ] {
+        let mut a = body;
+        a.mobility.mode = mode;
+        let drawn = super::animal::model_cells(&lib, &config, &a).expect("a model");
+        let want = lib
+            .specimen(name)
+            .unwrap_or_else(|| panic!("the baked {name}"))
+            .select(length)
+            .expect("an adult bin");
+        assert!(std::ptr::eq(drawn, want), "{mode:?} draws {name}");
+        seen.push(drawn.as_ptr());
+    }
+    seen.truncate(4);
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 4, "four poses, four models");
+}

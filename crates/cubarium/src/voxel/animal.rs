@@ -61,15 +61,17 @@ fn rider_lift(fauna: &FaunaView<'_>, host: u64, voxel_m: f64) -> Option<u32> {
     Some(((height / voxel_m).ceil() as u32).max(1))
 }
 
-/// The cells of `animal`'s founder model at its body's length, if the library has one.
-fn model_cells<'l>(
+/// The cells of `animal`'s founder model for its mode ([`ModelLibrary::animal_in_mode`]) at
+/// its body's length, if the library has one.
+pub(super) fn model_cells<'l>(
     lib: &'l ModelLibrary,
     config: &FaunaConfig,
     animal: &Animal,
 ) -> Option<&'l [ModelCell]> {
     let founder = animal.founder?;
     let length = config.founder(founder).body_at(animal.body).length_m;
-    lib.animal(founder)?.select(length)
+    // The model for the body's mode (F3: the seedporter's poses), else its one model.
+    lib.animal_in_mode(founder, animal.mobility.mode)?.select(length)
 }
 
 /// The unit `(dx, dz)` from a climbing body's column into the face it is on: the wall
