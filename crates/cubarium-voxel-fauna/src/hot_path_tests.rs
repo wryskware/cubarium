@@ -14,7 +14,9 @@
 //! - item 3 in the body: the motion sweep on the support lookup — the step rule's nearest
 //!   face, the disc's ground and its clearance — moves every body exactly as the sweep at
 //!   `main` a31ecdc did (kept verbatim below, reading `material` directly), walls,
-//!   risers, ledges, water and the bisection against a wall included.
+//!   risers, ledges, water and the bisection against a wall included; plus the
+//!   step-down landing check added to the rule on 2026-10-01 (fix 1 of
+//!   `design/handoffs/browser-stuck-in-crags-2026-10-01.md`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -544,6 +546,14 @@ fn ref_advance_candidate(
         ref_disc_ground_layer(view, nx, nz, r, standing_y, step_limits).max(standing_y.max(ny));
     if (1..=headroom).any(|d| ref_disc_hits_solid(view, nx, nz, clearance + d, r)) {
         return None;
+    }
+    // Added with the rule (fix 1, 2026-10-01, design/handoffs/browser-stuck-in-crags-2026-10-01.md):
+    // a step down is checked again as the landed body's next sub-step sees it.
+    if ny < standing_y {
+        let landed = ref_disc_ground_layer(view, nx, nz, r, ny, step_limits).max(ny);
+        if (1..=headroom).any(|d| ref_disc_hits_solid(view, nx, nz, landed + d, r)) {
+            return None;
+        }
     }
     let there = view.water_depth_m(cx, ny, cz as u32);
     if there > wade_depth_m {

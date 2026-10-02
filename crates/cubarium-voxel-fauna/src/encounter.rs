@@ -379,9 +379,45 @@ pub fn route_components(
 /// body's disc clear of solid over its headroom there, and in the **largest** walkable
 /// component of such faces under the lineage's route rule (fix 2,
 /// `design/handoffs/browser-stuck-in-crags-2026-10-01.md`).
+///
+/// The disc test is [`crate::disc_clear_on_face`]: a body founded with its disc in a wall
+/// can move nowhere. The largest component, not merely one with enough food: a founder
+/// in a pocket of a few square metres eats it bare and cannot leave.
 pub fn founding_faces(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> Vec<Site> {
-    let _ = (view, phys);
-    todo!("founding_faces: tests first")
+    let body = phys.adult_body();
+    let v = view.config.voxel_m;
+    let step = phys.step_limits(v);
+    let faces: Vec<Site> = standable_faces(view, &body, phys.wade_depth_m(&body))
+        .into_iter()
+        .filter(|f| crate::disc_clear_on_face(view, &body, *f, step))
+        .collect();
+    let comps = route_components(
+        view,
+        &faces,
+        RouteRule {
+            step,
+            climbs_walls: phys.climbs_walls,
+        },
+        body.headroom_voxels(v),
+    );
+    let mut size: FxHashMap<usize, usize> = FxHashMap::default();
+    for c in &comps {
+        *size.entry(*c).or_default() += 1;
+    }
+    // The largest; a tie goes to the lowest component id, so the answer is one component.
+    let Some(big) = size
+        .iter()
+        .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+        .map(|(c, _)| *c)
+    else {
+        return Vec::new();
+    };
+    faces
+        .into_iter()
+        .zip(comps)
+        .filter(|(_, c)| *c == big)
+        .map(|(f, _)| f)
+        .collect()
 }
 
 /// One lineage's **route map** over a world: every face its adult body can stand on,

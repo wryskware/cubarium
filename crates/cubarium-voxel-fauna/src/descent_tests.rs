@@ -86,7 +86,8 @@ fn the_fixture_is_the_one_the_spec_describes() {
     assert!((body.footprint_radius() / V - 1.5).abs() < 1e-9);
 }
 
-/// (a) Ground at 3, a ledge at 6 over `x < 8`, and beside the way down (`x` 8..11,
+/// (a) Ground at 3, a ledge at 6 over `x < 8` (and `x >= 16`, so the strip's wrap on
+/// `x` continues the ledge westward), and beside the way down (`x` 8..11,
 /// `z` 0..=1) a pillar topped at 8: within the climb of the ledge, out of it from the
 /// ground below. A browser walking east off the ledge with its disc over the pillar's
 /// edge would land on 3 with the pillar's solid inside its headroom and nowhere to go.
@@ -94,7 +95,7 @@ fn the_fixture_is_the_one_the_spec_describes() {
 #[test]
 fn a_step_down_that_would_leave_the_disc_in_a_wall_is_refused() {
     let w = world(24, 8, |x, z| {
-        if x < 8 {
+        if x < 8 || x >= 16 {
             6
         } else if x < 11 && z <= 1 {
             8
@@ -127,8 +128,10 @@ fn a_step_down_that_would_leave_the_disc_in_a_wall_is_refused() {
     // ... and walk away on the upper layer.
     let west = drive(&w, &mut pose, &mut y, FORWARD, 30);
     assert!(west.iter().all(|&l| l == 6), "{west:?}");
+    // West on the wrapped strip: the distance from where it stopped, modulo the width.
+    let walked = (stopped_x - pose.x).rem_euclid(24.0 * V);
     assert!(
-        pose.x < stopped_x - 4.0 * V,
+        walked > 4.0 * V && walked < 12.0 * V,
         "it walked back west from {stopped_x} to {}",
         pose.x
     );

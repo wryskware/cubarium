@@ -48,7 +48,7 @@ use serde::{Deserialize, Serialize};
 
 pub use body::{
     Body, Counter, Face, FounderPhysiology, Hunter, StepLimits, birth_readiness,
-    effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
+    disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,

@@ -897,6 +897,17 @@ fn step_advance(
 /// only faces are outside the climb — a wall, a cliff — contributes nothing, so its
 /// solid is checked and refuses exactly as before.
 ///
+/// **A step down is also checked as the next sub-step will see it** (fix 1,
+/// `design/handoffs/browser-stuck-in-crags-2026-10-01.md`): when the destination's layer
+/// is below `standing_y`, the disc's ground is taken again from the landing layer —
+/// [`disc_ground_layer`] from `ny`, never below `ny` — and the disc must be clear over
+/// the `headroom` layers above that too ([`pose_clear`]). Otherwise a column within the
+/// climb of the upper layer but out of it from the lower one counts as ground on the way
+/// down and as a wall once there: the landed body could move nowhere, only turn. The
+/// ledge it came down from is within the climb of the landing layer (a step down is at
+/// most `down`, and every lineage's `up == down`), so a plain riser still descends. Only
+/// descents run the second pass.
+///
 /// The standing water at the destination must be within the body's wade depth, **or
 /// shallower than the water at the column the sub-step starts from**: a body caught deeper than it can wade may always step toward the
 /// shallows, and never deeper; it may also move about the face it stands on.
@@ -944,6 +955,9 @@ fn advance_candidate(
     {
         return None;
     }
+    if ny < standing_y && !pose_clear(view, nx, nz, ny, r, headroom, step_limits) {
+        return None;
+    }
     let there = view.water_depth_m(cx, ny, cz as u32);
     if there > wade_depth_m {
         // The escape: within the face it stands on, or to a face shallower than it.
@@ -963,6 +977,43 @@ fn advance_candidate(
         dx += width_m;
     }
     Some((nx, nz, (dx * fx + (nz - pz) * fz).max(0.0), ny))
+}
+
+/// Whether a disc of radius `r` centred at `(cx, cz)`, standing on `standing_y`, is clear
+/// of solid over its `headroom` layers above the highest within-step ground under it:
+/// the clearance [`advance_candidate`] asks of a sub-step that stays on its layer, asked
+/// of the pose itself.
+pub(crate) fn pose_clear(
+    view: &VoxelView<'_>,
+    cx: f64,
+    cz: f64,
+    standing_y: u32,
+    r: f64,
+    headroom: u32,
+    step: StepLimits,
+) -> bool {
+    if headroom == 0 {
+        return true;
+    }
+    let cells = disc_box(view.config.voxel_m, cx, cz, r);
+    let ground = disc_ground_layer(view, cells, cx, cz, r, standing_y, step).max(standing_y);
+    !disc_hits_solid(view, cells, cx, cz, ground + 1, ground + headroom, r)
+}
+
+/// Whether `body`, placed on `face` as the model places one ([`crate::Pose::at_site`]),
+/// stands with its whole disc clear of solid over its headroom ([`pose_clear`]). The
+/// column rule ([`has_headroom`]) checks the face's own column only.
+pub fn disc_clear_on_face(view: &VoxelView<'_>, body: &Body, face: Site, step: StepLimits) -> bool {
+    let pose = crate::Pose::at_site(face, view.config.voxel_m);
+    pose_clear(
+        view,
+        pose.x,
+        pose.z,
+        face.y,
+        body.footprint_radius(),
+        body.headroom_voxels(view.config.voxel_m),
+        step,
+    )
 }
 
 /// The support face of column `(x, z)` a body standing on `standing_y` could put its
