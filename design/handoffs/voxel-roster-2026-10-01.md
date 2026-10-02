@@ -309,6 +309,19 @@ those.
 
 Commit your own paths only. Stop every background shell before you return.
 
+## F1 overrides (the flight brief stands except for these)
+
+- **Worktree:** `roster`, after R1. Build on R0's tables: diet `[Nectar]`, founding count
+  in config.
+- **Founding:** the code default is 0. The live presets found 6 (desktop and voidrunner
+  terrarium) and 4 (Tachyon). `--introduce bellwing:N` stays.
+- **Presenter (item 10):** the bellwing is already baked as a specimen; draw it with that
+  model through R0's fallback, at `y_m`. One pose, as for every animal. The vane beat
+  and the folded perch pose are owed, and they need more baked poses. Note it; don't
+  invent them.
+- **Measure:** 8 seeds × 60 min (WORKING_POLICY "Verification runs"), not 4 h. Presets:
+  the desktop terrarium and the Tachyon voxel config. The MP4 stays.
+
 ## Brief R2b (outline; written in full when R1 lands): the ripple-snail
 
 - **Food:** `Food::Film` from `take_film`. Diet `[Film]`.
