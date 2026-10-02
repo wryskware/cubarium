@@ -1238,10 +1238,25 @@ pub fn accept(
         let u = founding_upkeep_per_hour(&phys);
         // A carnivore arrives from its egg bank, not as a placed body: the seeder places
         // none of it and the verdict asks for none (its count is the bank's clutches).
-        let wanted_bodies = if phys.founding == cubarium_voxel_fauna::Founding::Clutches {
-            0
-        } else {
-            wanted[founder.index()]
+        // A pack lineage (R3) is counted in packs: the verdict asks for their adults, and
+        // its food is its prey's bodies — a component is habitable while something it
+        // hunts stands in it (carrion, its diet, is nowhere at founding).
+        let pack = phys.founding == cubarium_voxel_fauna::Founding::Pack;
+        let wanted_bodies = match phys.founding {
+            cubarium_voxel_fauna::Founding::Clutches => 0,
+            cubarium_voxel_fauna::Founding::Pack => {
+                wanted[founder.index()] * phys.pack.map_or(0, |t| t.pack_size)
+            }
+            cubarium_voxel_fauna::Founding::Bodies => wanted[founder.index()],
+        };
+        let prey_here: std::collections::BTreeSet<usize> = match (pack, phys.hunter) {
+            (true, Some(h)) => av
+                .animals
+                .iter()
+                .filter(|a| a.founder.is_some_and(|f| h.hunts(f)))
+                .filter_map(|a| map.component_of(a.site))
+                .collect(),
+            _ => Default::default(),
         };
         let accept_hours = fauna.config().founding.accept_founder_hours;
         let mut v = LineageVerdict {
@@ -1262,9 +1277,18 @@ pub fn accept(
         let mut worst = f64::INFINITY;
         for (c, n) in count {
             let f = food.get(&c).copied().unwrap_or_default();
-            let habitable =
-                covers(&phys, f, accept_hours * u, n) && (!v.needs_producer || f.producers > 0);
-            worst = worst.min(if u > 0.0 { f.stock / (u * n as f64) } else { f64::INFINITY });
+            let habitable = if pack {
+                prey_here.contains(&c)
+            } else {
+                covers(&phys, f, accept_hours * u, n) && (!v.needs_producer || f.producers > 0)
+            };
+            worst = worst.min(if pack {
+                if habitable { f64::INFINITY } else { 0.0 }
+            } else if u > 0.0 {
+                f.stock / (u * n as f64)
+            } else {
+                f64::INFINITY
+            });
             v.components.push(ComponentVerdict {
                 component: c,
                 founders: n,

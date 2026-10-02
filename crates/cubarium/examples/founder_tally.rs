@@ -37,6 +37,13 @@
 //! `GROVE_M` of another adult lanternberry (`other_grove`), and the median and max
 //! distance of the away ones.
 //!
+//! An optional `choristers=N` (roster R3's measure) sets the chorister's founding count —
+//! **packs** — on the asked seed. The run prints a `packs@0` line (each pack's den choice:
+//! covered, most_overhead or founding_point, and its members) and, at the end, a
+//! `chorister:` line — pack chases started and those that ended in a kill (the success
+//! rate), strikes and hits, kills by prey lineage, litters and pups born, provisioning
+//! given and received, and lanternjaws displaced from carcasses (the yield).
+//!
 //! At t = 0 it reports the roster R1 check: the glowcap caps standing (count and stock)
 //! and the foliage standing in a loftstrider's mouth band over each stand's support face
 //! (the adult band, `mouth_floor..mouth_ceiling × height`).
@@ -61,11 +68,14 @@ fn main() {
     let mut snails: Option<usize> = None;
     let mut bellwings: Option<usize> = None;
     let mut seedporters: Option<usize> = None;
+    let mut choristers: Option<usize> = None;
     // `trace=S`: every S seconds, one line per bellwing (a diagnostic).
     let mut trace: Option<u64> = None;
     for a in args.iter().skip(4) {
         if let Some(n) = a.strip_prefix("snails=") {
             snails = Some(n.parse().expect("snails=N"));
+        } else if let Some(n) = a.strip_prefix("choristers=") {
+            choristers = Some(n.parse().expect("choristers=N"));
         } else if let Some(n) = a.strip_prefix("seedporters=") {
             seedporters = Some(n.parse().expect("seedporters=N"));
         } else if let Some(n) = a.strip_prefix("bellwings=") {
@@ -90,7 +100,10 @@ fn main() {
     if let Some(n) = seedporters {
         counts[Founder::Seedporter.index()] = n;
     }
-    let asked = snails.is_some() || bellwings.is_some() || seedporters.is_some();
+    if let Some(n) = choristers {
+        counts[Founder::Chorister.index()] = n;
+    }
+    let asked = snails.is_some() || bellwings.is_some() || seedporters.is_some() || choristers.is_some();
     let founded = found(
         &world_cfg,
         &LayerConfig::new(&params, world_cfg.voxel_m),
@@ -119,6 +132,24 @@ fn main() {
     );
     sim.set_overlap(false);
     t0_report(&sim, &params);
+    {
+        let f = sim.fauna();
+        let packs: Vec<String> = f
+            .packs()
+            .iter()
+            .map(|p| {
+                let members = f.view().animals.iter().filter(|a| a.pack.is_some_and(|m| m.pack == p.id)).count();
+                let how = match p.den_choice {
+                    Some(cubarium_voxel_fauna::DenChoice::Covered) => "covered",
+                    Some(cubarium_voxel_fauna::DenChoice::MostOverhead) => "most_overhead",
+                    Some(cubarium_voxel_fauna::DenChoice::FoundingPoint) => "founding_point",
+                    None => "given",
+                };
+                format!("pack{}:den={},{},{}:{how}:members={members}", p.id, p.den.x, p.den.y, p.den.z)
+            })
+            .collect();
+        println!("packs@0 n={} {}", packs.len(), packs.join(" "));
+    }
     println!("film@0 {}", film_line(&sim));
     println!("fruit@0 {}", fruit_line(&sim));
     let mut seen: HashSet<u64> = sim.fauna().view().animals.iter().map(|a| a.id).collect();
@@ -314,6 +345,27 @@ fn main() {
             stands.iter().filter(|s| s.profile_stage >= 1).count(),
             stands.iter().map(|s| s.wood).sum::<f64>(),
             stands.iter().map(|s| s.nectar).sum::<f64>(),
+        );
+        let c = Founder::Chorister;
+        let kills: Vec<String> = Founder::ALL
+            .iter()
+            .filter(|&&f| params.fauna.founder(c).hunter.is_some_and(|h| h.hunts(f)))
+            .map(|&f| format!("{}={}", f.name(), l.departed_founder(f, Departure::Killed { by: c })))
+            .collect();
+        println!(
+            "chorister: pack_chases={} chase_kills={} chase_success={:.3} strikes={} hits={} kills=[{}] litters={} pups_born={} provision_given={:.6} provision_received={:.6} lanternjaws_displaced={} packs_left={}",
+            l.pack_chases,
+            l.pack_chase_kills,
+            if l.pack_chases > 0 { l.pack_chase_kills as f64 / l.pack_chases as f64 } else { f64::NAN },
+            l.strikes_by_founder[c.index()],
+            l.hits_by_founder[c.index()],
+            kills.join(" "),
+            l.litters,
+            l.pups_born,
+            l.provision_given_organic,
+            l.provision_received_organic,
+            l.carcass_yields,
+            sim.fauna().packs().len(),
         );
         let sp_ticks: u64 = sp_modes.iter().sum();
         let sp_share = |n: u64| if sp_ticks > 0 { n as f64 / sp_ticks as f64 } else { 0.0 };
