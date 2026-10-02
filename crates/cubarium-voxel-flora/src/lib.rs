@@ -2322,6 +2322,12 @@ pub struct FloraConfig {
     /// Glassfilm: energy per unit of film tissue (springturf's `energy_density` by
     /// default).
     pub film_energy_density: f64,
+    /// **Glassfilm at founding** (roster R2b): when `true`, the habitat founding calls
+    /// [`Flora::seed_film`] on the pre-rolled world before the animals are founded.
+    /// Default **false**, so co-training worlds do not change; the live presets set it.
+    /// Not a number, so it has no registry row.
+    // R2b stub: declared, unread (the founding does not call `seed_film` yet).
+    pub seed_film_at_founding: bool,
 }
 
 impl Default for FloraConfig {
@@ -2373,6 +2379,7 @@ impl Default for FloraConfig {
             film_seed_per_m2: 0.02,
             film_n_tissue: SpeciesConfig::springturf().n_tissue,
             film_energy_density: SpeciesConfig::springturf().energy_density,
+            seed_film_at_founding: false,
         }
     }
 }

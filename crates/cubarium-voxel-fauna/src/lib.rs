@@ -41,13 +41,15 @@ mod cone_speed_tests;
 mod hot_path_tests;
 #[cfg(test)]
 mod roster_tests;
+#[cfg(test)]
+mod snail_tests;
 
 use cubarium_voxel::{VoxelView, World};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    Body, Counter, Face, FounderPhysiology, Founding, FoundingSite, Hunter, StepLimits, birth_readiness,
+    Body, Counter, EggSite, Face, FounderPhysiology, Founding, FoundingSite, Hunter, StepLimits, birth_readiness,
     effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -1525,10 +1527,20 @@ pub enum Food {
     /// The foliage of a vascular ([`cubarium_voxel_flora::Trophic::Photo`]) stand: the
     /// browser's whole diet, and nothing the shredder eats.
     Foliage,
+    /// **Glassfilm** (roster R2b): the ground film pool at the standing face
+    /// ([`cubarium_voxel_flora::Flora::take_film`]), the ripple-snail's food. Fresh tissue,
+    /// not detritus.
+    Film,
 }
 
 impl Food {
-    pub const ALL: [Food; 4] = [Food::Litter, Food::CapTissue, Food::Carrion, Food::Foliage];
+    pub const ALL: [Food; 5] = [
+        Food::Litter,
+        Food::CapTissue,
+        Food::Carrion,
+        Food::Foliage,
+        Food::Film,
+    ];
     pub const COUNT: usize = Food::ALL.len();
 
     /// Index into a per-food array, in [`Food::ALL`] order.
@@ -1538,13 +1550,14 @@ impl Food {
             Food::CapTissue => 1,
             Food::Carrion => 2,
             Food::Foliage => 3,
+            Food::Film => 4,
         }
     }
 
     /// Whether a mouth takes this food from a **ground pool** at its standing face
-    /// (litter, carrion) rather than from a stand's tissue (cap tissue, foliage).
+    /// (litter, carrion, film) rather than from a stand's tissue (cap tissue, foliage).
     pub const fn is_pool(self) -> bool {
-        matches!(self, Food::Litter | Food::Carrion)
+        matches!(self, Food::Litter | Food::Carrion | Food::Film)
     }
 
     /// The food class of a stand's tissue, by its species' income rule: a saprotroph's is
@@ -1562,6 +1575,7 @@ impl Food {
             Food::CapTissue => "cap_tissue",
             Food::Carrion => "carrion",
             Food::Foliage => "foliage",
+            Food::Film => "film",
         }
     }
 }

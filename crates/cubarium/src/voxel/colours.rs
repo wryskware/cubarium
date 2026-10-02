@@ -335,6 +335,12 @@ pub const CROPPING_FLASH: Rgb = 0xFF_F27A;
 /// The starving tint of a sense patch (dossier D3/D4).
 pub const STARVED_ACCENT: Rgb = 0x7A_2A78;
 
+/// **Glassfilm's interim floor mark** (roster R2b): the "thin green-gold coating" of
+/// `design/theoretical-biosphere-2026-09-16.md`, until the art direction says what the
+/// film looks like. A film site's mark is this tint at a strength that follows its stock.
+// R2b stub: an interim value; nothing paints with it yet.
+pub const FILM_INTERIM: Rgb = 0xB4_C048;
+
 /// Bloomcrown's core (D9's rounded mass between the vanes): the pick's blush pod, sampled
 /// 2026-10-01 (`design/art-direction/species-colours-2026-09-24.md`).
 /// Its unripe bloom paints the same colour. It glows (package L5).

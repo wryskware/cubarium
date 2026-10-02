@@ -1623,7 +1623,7 @@ mod tests {
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
             "one patch is not a route to a second one"
         );
-        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0, 0, 0]);
+        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0, 0, 0, 0]);
         assert_eq!(out.founders[Founder::Browser.index()], 0);
         assert_eq!(
             out.shortfall[Founder::Browser.index()],
@@ -1874,7 +1874,7 @@ mod tests {
             for _ in 0..n {
                 introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
             }
-            accept(&world, &flora, &fauna, [0, n, 0, 0, 0])
+            accept(&world, &flora, &fauna, [0, n, 0, 0, 0, 0])
         };
         let at = with(fits);
         let v = &at.lineages[Founder::Browser.index()];
@@ -1903,12 +1903,12 @@ mod tests {
         ));
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
         introduce(&mut fauna, &world, Founder::Blind, at_site);
-        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0]);
         let v = &got.lineages[Founder::Blind.index()];
         assert!(v.components[0].food.stock >= founding.starter_litter_organic - 1e-12, "{got:?}");
         assert!(!v.accepted && !got.accepted, "litter with no producer: {got:?}");
         plant(&mut bare, &world, 12, 2, Species::Springturf, 0.8);
-        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0]);
+        let got = accept(&world, &bare, &fauna, [1, 0, 0, 0, 0, 0]);
         assert!(
             got.lineages[Founder::Blind.index()].accepted && got.accepted,
             "a litter-shedding stand rooted in the component: {got:?}"
@@ -2100,7 +2100,7 @@ mod tests {
         }
         let mut flora = Flora::new(flora_cfg.clone());
         let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
-        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0, 0, 0]);
+        let seeded = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, [0, 0, 0, 0, 0, 0]);
         assert_eq!(seeded.pre_roll, pre.report);
         let drowned_on = |species: Species, site: Site| {
             let i = index_of(&pre.sites, site).expect("a support face");
@@ -2119,7 +2119,7 @@ mod tests {
         let calm_pre = pre_roll(&mut calm, false);
         let mut calm_flora = Flora::new(flora_cfg.clone());
         let mut calm_fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
-        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0, 0, 0]);
+        seed_pre_rolled(&mut calm, &mut calm_flora, &mut calm_fauna, &calm_pre, [0, 0, 0, 0, 0, 0]);
         assert!(
             calm_flora
                 .view()
@@ -2282,6 +2282,90 @@ mod tests {
                 dx <= 2 && dz <= 2 && g.y.abs_diff(c.y) <= 2
             });
             assert!(near, "a capgnawer at {g:?} stands near a glowcap: {caps:?}");
+        }
+    }
+
+    /// Roster R2b: **film at founding is a flora knob, and the ripple-snail is founded on
+    /// it.** With `seed_film_at_founding` false (the code default, so co-training worlds do
+    /// not change) a founded world has no film, and a preset asking for eight snails places
+    /// none and reports the shortfall. With it true the founding seeds the film
+    /// (`Flora::seed_film`), and the same preset founds up to eight snails, every one on a
+    /// face holding film. The other lineages are switched off so the count is its own.
+    #[test]
+    fn film_at_founding_is_a_knob_and_a_preset_of_eight_founds_snails_on_film() {
+        assert!(
+            !cubarium_voxel_flora::FloraConfig::default().seed_film_at_founding,
+            "the code default seeds no film"
+        );
+        let snail = Founder::RippleSnail;
+        assert_eq!(
+            cubarium_voxel_fauna::FaunaConfig::default().founder_counts()[snail.index()],
+            0,
+            "the code default founds no snail"
+        );
+        let resolve = |film: bool| {
+            let file: toml::Table = format!(
+                r#"
+                [flora]
+                seed_film_at_founding = {film}
+                [fauna.founders.littershredder]
+                founding_count = 0
+                [fauna.founders.frondgrazer]
+                founding_count = 0
+                [fauna.founders.lanternjaw]
+                founding_count = 0
+                [fauna.founders."ripple-snail"]
+                founding_count = 8
+            "#
+            )
+            .parse()
+            .unwrap();
+            crate::params::Params::resolve(&crate::params::Layers {
+                file: Some(file),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+
+        // Off: no film, no snail, the shortfall reported.
+        let params = resolve(false);
+        assert!(!params.flora.seed_film_at_founding);
+        assert_eq!(params.fauna.founder_counts()[snail.index()], 8, "the preset's count");
+        let mut world = crate::scene::authored(config());
+        let mut flora = Flora::new(params.flora.clone());
+        let mut fauna = Fauna::new(params.fauna.clone());
+        let got = seed(&mut world, &mut flora, &mut fauna);
+        assert_eq!(flora.view().film_sites().count(), 0, "no film without the knob");
+        assert_eq!(got.founders[snail.index()], 0, "no film, no snail: {got:?}");
+        assert_eq!(got.shortfall[snail.index()], 8, "the shortfall is reported: {got:?}");
+        // The fixture is not vacuous: the founded world has wet-eligible faces.
+        let mut probe = Flora::new(params.flora.clone());
+        assert!(probe.seed_film(&world) > 0, "the authored scene has film-eligible faces");
+
+        // On: film seeded, and the snails stand on it.
+        let params = resolve(true);
+        assert!(params.flora.seed_film_at_founding, "the preset sets the knob");
+        let mut world = crate::scene::authored(config());
+        let mut flora = Flora::new(params.flora.clone());
+        let mut fauna = Fauna::new(params.fauna.clone());
+        let got = seed(&mut world, &mut flora, &mut fauna);
+        let fv = flora.view();
+        assert!(fv.film_sites().count() > 0, "the founding seeded film");
+        assert!(fv.ledger.film_seeded > 0.0, "booked as seeded");
+        let placed = got.founders[snail.index()];
+        assert!((1..=8).contains(&placed), "up to the preset's eight: {got:?}");
+        assert_eq!(got.shortfall[snail.index()], 8 - placed);
+        assert_eq!(got.founders.iter().sum::<usize>(), placed, "nothing else: {got:?}");
+        let snails: Vec<Site> = fauna
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(snail))
+            .map(|a| a.site)
+            .collect();
+        assert_eq!(snails.len(), placed);
+        for s in snails {
+            assert!(fv.film_at(s) > 0.0, "a snail at {s:?} stands on film");
         }
     }
 
@@ -2619,7 +2703,7 @@ mod tests {
 
         let mut fauna = Fauna::new(config);
         introduce(&mut fauna, &world, Founder::Browser, Site { x: 6, y: 2, z: 3 });
-        let at = accept(&world, &flora, &fauna, [0, 1, 0, 0, 0]);
+        let at = accept(&world, &flora, &fauna, [0, 1, 0, 0, 0, 0]);
         assert!(
             at.lineages[Founder::Browser.index()].accepted,
             "one heavy founder by a bloomcrown is founded as a light one would be: {at:?}"

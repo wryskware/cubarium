@@ -364,6 +364,32 @@ pub struct FounderPhysiology {
     /// preset turns it on (`[fauna.founders.<lineage>] founding_count = N`). Shredder 8,
     /// browser 8, lanternjaw 3 clutches.
     pub founding_count: usize,
+    /// **A water-bound body** (roster R2b, the ripple-snail): it never drowns, pays no
+    /// wade refusal, and refuses a step whose destination support face has no standing
+    /// water within [`FounderPhysiology::water_margin_m`]. `false` for every other
+    /// lineage. Not a number, so it has no registry row.
+    // R2b stub: declared, unread.
+    pub aquatic: bool,
+    /// An aquatic body's reach out of the water, metres: a step's destination face must
+    /// have standing water within this distance (0.25 for the ripple-snail). Unread for a
+    /// lineage that is not [`FounderPhysiology::aquatic`].
+    // R2b stub: declared, unread.
+    pub water_margin_m: f64,
+    /// **Where an egg-layer's clutch goes** ([`EggSite`]): a face holding litter (the
+    /// shredder, the capgnawer) or a face holding film (the ripple-snail). Not a number,
+    /// so it has no registry row.
+    // R2b stub: declared, unread (the laying still asks for litter).
+    pub egg_site: EggSite,
+}
+
+/// Where an egg-laying lineage lays ([`FounderPhysiology::egg_site`], roster R2b).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EggSite {
+    /// On a face whose litter is over the rule's `litter_min`: the litter it lives in.
+    Litter,
+    /// On a face holding glassfilm (the ripple-snail).
+    Film,
 }
 
 /// How a fresh world is founded with a lineage ([`FounderPhysiology::founding`]).
@@ -435,7 +461,8 @@ impl Hunter {
     pub const LANTERNJAW: Hunter = Hunter {
         // Shredder, grazer and (roster R1) the capgnawer; the size window decides. The
         // loftstrider (4) is on no list until the chorister.
-        prey: [true, true, false, true, false],
+        // The ripple-snail (5, roster R2b) is on no hunter's list.
+        prey: [true, true, false, true, false, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
@@ -560,7 +587,14 @@ impl FounderPhysiology {
                 // carrion takes the litter yield. `Foliage` is the browser's class and
                 // the shredder never takes one, so it carries the same number its
                 // fungal foliage does.
-                yield_by_food: [LITTER_YIELD, FOLIAGE_YIELD, LITTER_YIELD, FOLIAGE_YIELD],
+                yield_by_food: [
+                    LITTER_YIELD,
+                    FOLIAGE_YIELD,
+                    LITTER_YIELD,
+                    FOLIAGE_YIELD,
+                    // R2b: film is not its food; the foliage yield so it is not a zero.
+                    FOLIAGE_YIELD,
+                ],
                 organ_structure_fraction: 0.05,
                 active: crate::Activity::Nocturnal,
                 sleep_upkeep: SLEEP_UPKEEP,
@@ -577,6 +611,9 @@ impl FounderPhysiology {
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::LitterBed,
                 founding_count: 8,
+                aquatic: false,
+                water_margin_m: 0.0,
+                egg_site: EggSite::Litter,
             },
             Founder::Browser => FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
@@ -626,6 +663,9 @@ impl FounderPhysiology {
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 8,
+                aquatic: false,
+                water_margin_m: 0.0,
+                egg_site: EggSite::Litter,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
             // scorpid ambusher, 1.0 × 0.25 × 0.45 m, a fifth of the grazer's upkeep.
@@ -700,6 +740,9 @@ impl FounderPhysiology {
                 founding: Founding::Clutches,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 3,
+                aquatic: false,
+                water_margin_m: 0.0,
+                egg_site: EggSite::Litter,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
             // glowcap's grazer, built from the littershredder by **body volume**, the way
@@ -733,6 +776,7 @@ impl FounderPhysiology {
                     // are not its food and carry the cap yield so none is a silent zero.
                     yield_by_food: [
                         0.5 * LITTER_YIELD,
+                        FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
                         FOLIAGE_YIELD,
@@ -801,6 +845,14 @@ impl FounderPhysiology {
                     ..grazer
                 }
             }
+            // R2b stub: the shredder's table at a founding count of 0. The implementer
+            // builds the ripple-snail here (roster R2b): its body, film diet and yield,
+            // pace, the volume scaling, `aquatic`, `water_margin_m`, `egg_site` and its
+            // founding site.
+            Founder::RippleSnail => FounderPhysiology {
+                founding_count: 0,
+                ..FounderPhysiology::placeholder(Founder::Blind)
+            },
         }
     }
 
@@ -1543,6 +1595,8 @@ fn pool_stock(fv: &FloraView<'_>, site: Site, food: crate::Food) -> f64 {
     fv.ground_at(site).map_or(0.0, |g| match food {
         crate::Food::Litter => g.litter,
         crate::Food::Carrion => g.carrion,
+        // R2b stub: the film pool is not offered to a mouth yet.
+        crate::Food::Film => 0.0,
         // Neither is a ground pool; a mouth never asks this of them.
         crate::Food::CapTissue | crate::Food::Foliage => 0.0,
     })

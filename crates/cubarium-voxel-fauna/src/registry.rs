@@ -195,6 +195,8 @@ fn founder_rows() -> Vec<Row> {
             .prov("decision"),
         r("founding_count", "bodies (clutches for an egg bank)", nonneg, "how many a fresh world founds (a new lineage's default 0)")
             .prov("decision"),
+        r("water_margin_m", "m", nonneg, "an aquatic body's step needs standing water within this of its destination face")
+            .prov("decision"),
         r("contact_height_fraction", "x body height", nonneg, "the contact receptors' height").digest(),
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),

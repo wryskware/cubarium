@@ -217,6 +217,24 @@ pub fn carrion_style() -> Style {
     }
 }
 
+/// **A glassfilm floor mark** (roster R2b): one per site holding film, on its support
+/// face, drawn in [`colours::FILM_INTERIM`] at `strength`, the site's film over its
+/// capacity (`film_capacity_per_m2 × cell area`, the plant layer's own), in `[0, 1]`. A
+/// grazed trail shows as less tint; the drawn strength fades toward this on the frame
+/// clock, so nothing pops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FilmMark {
+    pub site: cubarium_voxel_flora::Site,
+    pub strength: f32,
+}
+
+/// Every film site's floor mark, in site order ([`FilmMark`]).
+// R2b stub: no marks yet.
+pub fn film_marks(flora: FloraView<'_>) -> Vec<FilmMark> {
+    let _ = flora;
+    Vec::new()
+}
+
 /// What a voxel holds, if anything: which part of which drawn stand or substrate feature.
 ///
 /// The index is into [`Stands::styles`], not into the flora's stands: two stands of one

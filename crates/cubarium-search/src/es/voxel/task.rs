@@ -173,7 +173,11 @@ pub fn arena_protocol(founder: Founder, stage: Stage, band: Band) -> String {
     };
     let base = format!("{base}+{P5_ARENA_REVISION}");
     match founder {
-        Founder::Blind | Founder::Lanternjaw | Founder::Capgnawer | Founder::Loftstrider => base,
+        Founder::Blind
+        | Founder::Lanternjaw
+        | Founder::Capgnawer
+        | Founder::Loftstrider
+        | Founder::RippleSnail => base,
         Founder::Browser => format!("{base}+{BROWSER_CROWN_HEIGHT_REVISION}"),
     }
 }
@@ -218,7 +222,7 @@ pub const BLIND_CUE_REACH_M: f64 = 1.5;
 /// fan simply stops there — so the number is read from the manifest rather than copied.
 pub fn sensed_radius_m(founder: Founder) -> f64 {
     match founder {
-        Founder::Blind | Founder::Capgnawer => BLIND_CUE_REACH_M,
+        Founder::Blind | Founder::Capgnawer | Founder::RippleSnail => BLIND_CUE_REACH_M,
         Founder::Browser | Founder::Lanternjaw | Founder::Loftstrider => {
             founder.manifest().cone_range_m
         }

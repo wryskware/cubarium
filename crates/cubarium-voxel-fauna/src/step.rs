@@ -1745,6 +1745,8 @@ fn founder_feed(
         body::Meal::Pool { site, food } => match food {
             Food::Litter => flora.take_litter(site, bite),
             Food::Carrion => flora.take_carrion(site, bite),
+            // R2b stub: the mouth never offers film yet (`body::pool_stock`).
+            Food::Film => None,
             Food::CapTissue | Food::Foliage => {
                 unreachable!("a stand's tissue is not a ground pool")
             }

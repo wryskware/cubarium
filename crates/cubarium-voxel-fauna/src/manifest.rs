@@ -122,15 +122,20 @@ pub enum Founder {
     /// 0.8–3.5 m up. The browser's 37-input layout with a cone that counts only foliage
     /// inside its mouth band. Diet `[foliage]`, a sloppy feeder.
     Loftstrider,
+    /// The **ripple-snail** (roster R2b): a slow, water-bound film grazer on glassfilm.
+    /// The shredder's blind 23-input layout with its `Chem` reading a film field (the
+    /// film stock per site) in place of the detritus field. Diet `[film]`.
+    RippleSnail,
 }
 
 impl Founder {
-    pub const ALL: [Founder; 5] = [
+    pub const ALL: [Founder; 6] = [
         Founder::Blind,
         Founder::Browser,
         Founder::Lanternjaw,
         Founder::Capgnawer,
         Founder::Loftstrider,
+        Founder::RippleSnail,
     ];
     pub const COUNT: usize = Founder::ALL.len();
 
@@ -143,6 +148,7 @@ impl Founder {
             Founder::Lanternjaw => 2,
             Founder::Capgnawer => 3,
             Founder::Loftstrider => 4,
+            Founder::RippleSnail => 5,
         }
     }
 
@@ -154,6 +160,7 @@ impl Founder {
             Founder::Lanternjaw => "lanternjaw",
             Founder::Capgnawer => "capgnawer",
             Founder::Loftstrider => "loftstrider",
+            Founder::RippleSnail => "ripple-snail",
         }
     }
 
@@ -165,6 +172,7 @@ impl Founder {
             Founder::Lanternjaw => "hunter",
             Founder::Capgnawer => "fungivore",
             Founder::Loftstrider => "tall_browser",
+            Founder::RippleSnail => "film_grazer",
         }
     }
 
@@ -176,6 +184,7 @@ impl Founder {
             Founder::Lanternjaw => Manifest::lanternjaw(),
             Founder::Capgnawer => Manifest::capgnawer(),
             Founder::Loftstrider => Manifest::loftstrider(),
+            Founder::RippleSnail => Manifest::ripple_snail(),
         }
     }
 }
@@ -437,6 +446,15 @@ const MODULE_CHEM_FUNGAL: Module = Module {
     channels: &CHEM_DETRITUS_CHANNELS,
 };
 
+// R2b stub: the module exists so the manifest has its own `Chem(film)` slot; nothing
+// samples it yet (the observation leaves it zero with validity 0).
+const MODULE_CHEM_FILM: Module = Module {
+    name: "Chem(film)",
+    offset: 18,
+    width: 3,
+    channels: &CHEM_DETRITUS_CHANNELS,
+};
+
 const LIGHT_CHANNELS: [&str; 2] = ["response", "valid"];
 
 const MODULE_LIGHT: Module = Module {
@@ -489,6 +507,14 @@ const CAPGNAWER_MODULES: [Module; 6] = [
     MODULE_WET,
     MODULE_TASTE1,
     MODULE_CHEM_FUNGAL,
+    MODULE_LIGHT,
+];
+const RIPPLE_SNAIL_MODULES: [Module; 6] = [
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CHEM_FILM,
     MODULE_LIGHT,
 ];
 const BROWSER_MODULES: [Module; 5] = [
@@ -897,6 +923,42 @@ impl Manifest {
             mass_scale: a.mass,
             cone_banded_to_mouth: true,
             ..Manifest::browser()
+        }
+    }
+
+    /// The ripple-snail (roster R2b): the blind 23-input layout with `Chem(film)` — the
+    /// film field, sourced by the film stock per site — in the shredder's
+    /// `Chem(detritus)` slot; its own anchors and `Self` references.
+    // R2b stub: the capgnawer's shape on the ripple-snail's (stub) physiology.
+    pub fn ripple_snail() -> Manifest {
+        let a = anchors(Founder::RippleSnail);
+        let r = SelfReferences::of(Founder::RippleSnail);
+        Manifest {
+            founder: Founder::RippleSnail,
+            modules: &RIPPLE_SNAIL_MODULES,
+            body_length_m: a.length,
+            body_width_m: a.width,
+            body_height_m: a.height,
+            eye_height_fraction: a.eye,
+            mouth_ceiling_fraction: a.mouth_ceiling,
+            mouth_floor_fraction: a.mouth_floor,
+            contact_height_fraction: a.contact,
+            step_up_m: a.step_up,
+            step_down_m: a.step_down,
+            climbs_walls: a.walls,
+            wade_height_fraction: a.wade,
+            drown_height_fraction: a.drown,
+            drown_after_s: a.drown_after,
+            body_reference: r.body,
+            adult_energy_reference: r.energy,
+            adult_reserve_reference: r.reserve,
+            structural_reference: r.body,
+            cruise_m_per_s: a.cruise,
+            yaw_cap_rad_per_s: a.yaw,
+            forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
+            mouth_reach_body_lengths: a.reach,
+            mass_scale: a.mass,
+            ..Manifest::blind()
         }
     }
 

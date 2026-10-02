@@ -463,6 +463,10 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         Founder::Loftstrider => {
             Box::new(BrowserForager::for_founder(Founder::Loftstrider, teachers))
         }
+        // Roster R2b: the blind forager on the ripple-snail's own `Chem(film)`.
+        Founder::RippleSnail => {
+            Box::new(BlindForager::for_founder(Founder::RippleSnail, teachers))
+        }
     }
 }
 
