@@ -749,6 +749,42 @@ pub fn seed_pre_rolled(
                 want.saturating_sub(seeded.founders[founder.index()]);
             continue;
         }
+        // A glider (F3, the seedporter) is founded on the ground within its roost reach of
+        // a fruit source (a fruiting stand past its seedling profile or a latticevine-
+        // covered face): its food hangs in crowns and on walls, out of a walker's
+        // components.
+        if let Some(glider) = phys.glider {
+            let room = phys.adult_body().headroom_voxels(world.config().voxel_m);
+            let drown = phys.drown_depth_m(&phys.adult_body());
+            let pool: Vec<Site> = {
+                let view = world.view();
+                let fv = flora.view();
+                let sources = fruit_sources(&view, &fv);
+                sites
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .filter(|(i, s)| {
+                        !taken.contains(s)
+                            && wettest[*i] <= drown
+                            && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+                            && has_headroom(&view, i64::from(s.x), s.y, s.z, room)
+                            && near_nectar(&view, &sources, *s, glider.roost_search_m)
+                    })
+                    .map(|(_, s)| s)
+                    .collect()
+            };
+            let chosen = place(&pool, want, |_| Some(0), |_, _| true);
+            for (k, site) in chosen.into_iter().enumerate() {
+                if introduce_founder(world, fauna, founder, site, spread_heading(k, want)) {
+                    taken.push(site);
+                    seeded.founders[founder.index()] += 1;
+                }
+            }
+            seeded.shortfall[founder.index()] =
+                want.saturating_sub(seeded.founders[founder.index()]);
+            continue;
+        }
         let need = founding.accept_founder_hours * founding_upkeep_per_hour(&phys);
         let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, founder);
         match phys.founding_site {
@@ -877,8 +913,28 @@ fn nectar_sources(view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<(f64, f64)> {
     out
 }
 
+/// **Fruit sources** (F3): the column centres, metres, of every stand of a species that
+/// hangs fruit once past its seedling profile (lanternberry), and of every
+/// latticevine-covered face (its beads).
+fn fruit_sources(view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<(f64, f64)> {
+    let v = view.config.voxel_m;
+    let mut out: Vec<(f64, f64)> = fv
+        .stands
+        .iter()
+        .filter(|s| s.profile_stage >= 1 && fv.config.species(s.species).fruit_per_s > 0.0)
+        .map(|s| ((f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v))
+        .collect();
+    out.extend(
+        fv.cover
+            .faces()
+            .iter()
+            .map(|c| ((f64::from(c.face.x) + 0.5) * v, (f64::from(c.face.z) + 0.5) * v)),
+    );
+    out
+}
+
 /// Whether the face `site`'s centre is within `reach` (horizontally, on the ring) of a
-/// nectar source.
+/// nectar (or fruit) source.
 fn near_nectar(view: &VoxelView<'_>, sources: &[(f64, f64)], site: Site, reach: f64) -> bool {
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
@@ -1089,11 +1145,37 @@ pub fn accept(
     for founder in Founder::ALL {
         let phys = *fauna.config().founder(founder);
         // A flyer (F1): one verdict over the world, each placed body within its fan's
-        // range of a nectar source; the food is the sources' nectar now and per hour.
-        if phys.founding_site == cubarium_voxel_fauna::FoundingSite::NearNectar {
+        // range of a nectar source; the food is the sources' nectar now and per hour. A
+        // glider (F3) likewise over fruit, within its roost reach of a fruit source.
+        let product = if phys.founding_site == cubarium_voxel_fauna::FoundingSite::NearNectar {
+            Some((
+                nectar_sources(&view, &fv),
+                founder.manifest().cone_range_m,
+                fv.stands.iter().map(|s| s.nectar).sum::<f64>()
+                    + fv.cover.faces().iter().map(|c| c.nectar).sum::<f64>(),
+                fv.stands
+                    .iter()
+                    .filter(|s| s.profile_stage >= 1)
+                    .map(|s| fv.config.species(s.species).nectar_per_s * 3600.0)
+                    .sum::<f64>(),
+            ))
+        } else {
+            phys.glider.map(|g| {
+                (
+                    fruit_sources(&view, &fv),
+                    g.roost_search_m,
+                    fv.stands.iter().map(|s| s.fruit).sum::<f64>()
+                        + fv.cover.faces().iter().map(|c| c.fruit).sum::<f64>(),
+                    fv.stands
+                        .iter()
+                        .filter(|s| s.profile_stage >= 1)
+                        .map(|s| fv.config.species(s.species).fruit_per_s * 3600.0)
+                        .sum::<f64>(),
+                )
+            })
+        };
+        if let Some((sources, reach, stock, production_per_h)) = product {
             let u = founding_upkeep_per_hour(&phys);
-            let sources = nectar_sources(&view, &fv);
-            let reach = founder.manifest().cone_range_m;
             let mut v = LineageVerdict {
                 wanted: wanted[founder.index()],
                 upkeep_per_h: u,
@@ -1110,16 +1192,10 @@ pub fn accept(
                 }
             }
             let food = ComponentFood {
-                stock: fv.stands.iter().map(|s| s.nectar).sum::<f64>()
-                    + fv.cover.faces().iter().map(|c| c.nectar).sum::<f64>(),
+                stock,
                 stands: sources.len(),
                 producers: sources.len(),
-                production_per_h: fv
-                    .stands
-                    .iter()
-                    .filter(|s| s.profile_stage >= 1)
-                    .map(|s| fv.config.species(s.species).nectar_per_s * 3600.0)
-                    .sum(),
+                production_per_h,
             };
             if near > 0 {
                 v.components.push(ComponentVerdict {
