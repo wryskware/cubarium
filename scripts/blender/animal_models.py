@@ -125,15 +125,16 @@ COATS = {
         "a_head": ("#B691BF", "#E5D6ED"), "a_eye": ("#B71984", "#E437C1"),
         "a_lure": ("#63EEFC", "#ADFAFD"), "a_mark": ("#4A4452", "#695787"),
     },
-    # body (teal low -> lilac high), neck, legs, feet, knee and hip bulbs and the pink head,
+    # body (teal low -> violet high), neck, legs, feet, knee and hip bulbs and the pink head,
     # eyes (magenta), tusks (bone), frond blades (lilac), frond edges (cyan), pupils and the
-    # mouth hole. Sampled 2026-10-01 from the reference (k-means per body region).
+    # mouth hole. Sampled 2026-10-01 from the reference (k-means per body region), then
+    # pushed brighter and more saturated to match its vividness (Wrysk).
     "loftstrider": {
-        "a_main": ("#45A5C2", "#8577C2"), "a_pale": ("#8F7CB8", "#BEA6D6"),
-        "a_limb": ("#2F7996", "#8070B7"), "a_foot": ("#359BAB", "#56CECE"),
-        "a_mark": ("#B36E7F", "#DEA8B2"), "a_eye": ("#D3479F", "#E63C99"),
-        "a_head": ("#E0CDB0", "#F6E4C2"), "a_membrane": ("#B3A6E4", "#DFD1F6"),
-        "a_glow": ("#0AA9C9", "#0AC5E3"), "a_dark": ("#1A0E1A", "#3A1C2A"),
+        "a_main": ("#22B4D2", "#8A62E6"), "a_pale": ("#A07CE0", "#D2A8F4"),
+        "a_limb": ("#18A2C8", "#8C5CDC"), "a_foot": ("#2ED2D8", "#6CF2E8"),
+        "a_mark": ("#D466B8", "#F79AD6"), "a_eye": ("#F02E9E", "#FF4CBA"),
+        "a_head": ("#EEDAB4", "#FFF0CC"), "a_membrane": ("#C6AEFF", "#EADCFF"),
+        "a_glow": ("#00C6F2", "#36E8FF"), "a_dark": ("#1A0E1A", "#3A1C2A"),
         # the eyes' slit pupils: smaller than a voxel, and not in the bake's palette, so
         # they are drawn in Blender only and never cover an eye's magenta cell
         "a_pupil": ("#120810", "#120810"),
@@ -823,6 +824,11 @@ def ribbon(path, widths, side, mat, th=0.02):
     return L.mk("ribbon", bm, mat)
 
 
+# The fronds' size, from the root: 1 as the reference draws them; Wrysk asked to see them
+# smaller (`LS_FROND=0.75` in the environment).
+LS_FROND = float(os.environ.get("LS_FROND", "1"))
+
+
 def loftstrider():
     def zone(f, s, p):
         return 0 if p.z < 1.98 else (1 if p.z < 2.62 else 2)   # body, neck, pink head
@@ -848,8 +854,9 @@ def loftstrider():
         # frond: rises from the rim, arcs outward and droops, its edges frilled cyan
         prof = [(0.22, 2.76), (0.36, 3.02), (0.56, 3.27), (0.82, 3.37), (1.04, 3.27), (1.17, 3.03),
                 (1.2, 2.78), (1.14, 2.6)]
+        prof = [(0.22 + (r - 0.22) * LS_FROND, 2.76 + (z - 2.76) * LS_FROND) for r, z in prof]
         path = [(r * cb, r * sb, z) for r, z in catmull(prof, 16)]
-        widths = [0.07 + 0.3 * math.sin(math.pi * min(1.0, t / 15 * 1.12)) for t in range(16)]
+        widths = [0.07 + 0.3 * LS_FROND * math.sin(math.pi * min(1.0, t / 15 * 1.12)) for t in range(16)]
         side = Vector((-sb, cb, 0))
         ribbon(path, widths, side, c("a_membrane"), th=0.035)
         for sgn in (-1, 1):
