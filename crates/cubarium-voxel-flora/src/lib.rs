@@ -343,8 +343,10 @@ pub struct Stand {
     pub profile_stage: u8,
     /// **Nectar** held in the stand's flowers, organic units (F1, §3.7): paid from the
     /// reserve in daylight up to the species' `nectar_cap`, taken by
-    /// [`Flora::take_stand_nectar`]. Not the seed parcel.
-    // F1 stub: declared, always 0.
+    /// [`Flora::take_stand_nectar`]. Not the seed parcel. Like the parcel it is no longer
+    /// tissue (it earns and pays nothing) but it is still the stand's material
+    /// ([`Stand::material`]): its energy is the species' density, its mineral stays in
+    /// [`Stand::mineral`] until it is taken, and it falls to litter when the stand dies.
     #[serde(default)]
     pub nectar: f64,
 }
@@ -429,7 +431,7 @@ impl Stand {
     /// `W + P + Q + parcel`: every unit of organic matter this stand holds, which is what
     /// the ledger has to account for and what the stand's mineral is a stock against.
     pub fn material(&self) -> f64 {
-        self.organic() + self.parcel
+        self.organic() + self.parcel + self.nectar
     }
 }
 
@@ -991,12 +993,18 @@ pub struct SpeciesConfig {
     /// **Nectar** (F1, predation-and-flight §3.7, decision 6): organic matter an adult
     /// stand moves from its reserve into its [`Stand::nectar`] stock per second, in
     /// daylight only, until the stock reaches [`SpeciesConfig::nectar_cap`]. Zero makes
-    /// none: every species but bloomcrown.
-    // F1 stub: declared, unread.
+    /// none: every species but bloomcrown. "Adult" is past the seedling profile
+    /// (`profile_stage >= 1`); "daylight" is the world's `life_daylight` above zero.
     pub nectar_per_s: f64,
     /// The most nectar an adult stand holds, organic units. Unvisited nectar stays.
-    // F1 stub: declared, unread.
     pub nectar_cap: f64,
+    /// The **mineral** a unit of nectar carries, a fraction of its organic matter: pollen
+    /// lumped in until pollen exists (§3.7). Small but not zero, because the animals'
+    /// assimilation rule `min(yield · organic, mineral / n_tissue)` would starve a pure
+    /// sugar eater. Drawn from the stand's own mineral when the nectar is taken (bounded
+    /// by what it holds). Latticevine nectar does not read this: it is mineral-free.
+    #[serde(default)]
+    pub nectar_mineral_fraction: f64,
     /// **A runner's reach**: how many columns sideways, in `x` and `z`, a runner or rhizome
     /// daughter may root from the parent (the square ring around the home column); the
     /// support face is then the one at the parent's height or a voxel above or below. A
@@ -1303,9 +1311,10 @@ impl SpeciesConfig {
             graze_refuge: 0.15,
             defence_per_bite: DEFENCE_PER_BITE,
             defence_half_life_s: DEFENCE_HALF_LIFE_S,
-            // F1 stub: no species makes nectar yet; F1 gives bloomcrown its numbers.
+            // F1: no species but bloomcrown makes nectar ([`SpeciesConfig::bloomcrown`]).
             nectar_per_s: 0.0,
             nectar_cap: 0.0,
+            nectar_mineral_fraction: 0.0,
             // A runner roots on the next column over (the eight neighbours).
             runner_reach: 1,
             // No founders: every preset that is seeded says so.
@@ -1402,6 +1411,15 @@ impl SpeciesConfig {
                     ],
                 },
             ],
+            // F1 (predation-and-flight §3.7): the flower's nectar, paid from the reserve in
+            // daylight. 1e-4 a second is about 2 % of a full-grown stand's gross income at
+            // full light (assimilation 0.004/s × foliage 1.2); the cap, 0.02, is 200 s of
+            // it and under a tenth of the reserve cap (0.3), so an unvisited flower costs
+            // the plant a bounded, small store. The mineral share 0.01 is half the
+            // bellwing's tissue mineral (0.02): a sip funds half its organic matter.
+            nectar_per_s: 1e-4,
+            nectar_cap: 0.02,
+            nectar_mineral_fraction: 0.01,
             ..SpeciesConfig::v1_base()
         }
     }
@@ -4397,10 +4415,33 @@ impl Flora {
 
     /// Drink up to `want` of the nectar of the stand on `site` (F1, §3.7): `None` when
     /// there is no stand or it holds no nectar. Booked as `consumed_*_out`, with the
-    /// mineral and energy the nectar carries.
-    // F1 stub: no stand holds nectar yet.
-    pub fn take_stand_nectar(&mut self, _site: Site, _want: f64) -> Option<Taken> {
-        None
+    /// mineral and energy the nectar carries: the species' `nectar_mineral_fraction` of
+    /// the organic matter out of the stand's mineral (never more than it holds), and its
+    /// `energy_density`.
+    pub fn take_stand_nectar(&mut self, site: Site, want: f64) -> Option<Taken> {
+        if !(want > 0.0) || !want.is_finite() {
+            return None;
+        }
+        let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
+        let sc = self.config.species(self.stands[i].species);
+        let (fraction, e_v) = (sc.nectar_mineral_fraction.max(0.0), sc.energy_density);
+        let stand = &mut self.stands[i];
+        if !(stand.nectar > 0.0) {
+            return None;
+        }
+        let took = if want >= stand.nectar {
+            std::mem::replace(&mut stand.nectar, 0.0)
+        } else {
+            stand.nectar -= want;
+            want
+        };
+        let mineral = (fraction * took).min(stand.mineral.max(0.0));
+        stand.mineral -= mineral;
+        Some(self.book_consumed(Taken {
+            organic: took,
+            mineral,
+            energy: e_v * took,
+        }))
     }
 
     /// **Glassfilm founding** (R2a): put `film_seed_per_m2` of film on every wet-eligible

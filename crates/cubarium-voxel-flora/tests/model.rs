@@ -529,6 +529,9 @@ fn frozen(sc: &mut cubarium_voxel_flora::SpeciesConfig) {
     sc.assimilation = 0.0;
     sc.maintenance = 0.0;
     sc.senescence = 0.0;
+    // F1: a bloomcrown's nectar draws on the reserve in daylight; these books are the
+    // propagule's alone.
+    sc.nectar_per_s = 0.0;
 }
 
 /// Two species reaching the same two bare sites. Round 3b's donors save for one recipient

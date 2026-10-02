@@ -427,6 +427,9 @@ fn a_package_keeps_all_its_mineral_through_construction_respiration() {
     sc.senescence = 0.0;
     sc.hop = 1;
     sc.propagule_rate = 0.18;
+    // F1: bloomcrown's nectar draws on the reserve in daylight; this test books the
+    // propagule's draw alone.
+    sc.nectar_per_s = 0.0;
     let build = config.bloomcrown.build;
     let n_tissue = config.bloomcrown.n_tissue;
     let rate = config.bloomcrown.propagule_rate;
@@ -716,6 +719,9 @@ fn a_stressed_donor_asks_every_tick_and_its_parcel_never_grows() {
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.maintenance = 0.0;
+    // F1: bloomcrown's nectar draws on the reserve in daylight; this test books the
+    // propagule's draw alone.
+    config.bloomcrown.nectar_per_s = 0.0;
     let mut world = strip(5, 1, 0.6);
     let mut flora = Flora::new(config);
     assert!(flora.apply(
@@ -784,6 +790,9 @@ fn a_parcel_dies_with_its_donor_and_reaches_the_litter() {
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.senescence = 0.0;
     config.bloomcrown.propagule_rate = 0.06;
+    // F1: bloomcrown's nectar draws on the reserve in daylight; this test books the
+    // propagule's draw alone.
+    config.bloomcrown.nectar_per_s = 0.0;
     config.decomposition = 0.0;
     config.wood_decomposition = 0.0;
     let e_v = config.bloomcrown.energy_density;

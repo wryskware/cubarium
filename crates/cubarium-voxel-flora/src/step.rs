@@ -2650,6 +2650,19 @@ fn grow_stand(
     book.respired(respired);
     book.heat(e_v * respired);
 
+    // ---- 4.4b nectar (F1, predation-and-flight §3.7): an adult stand of a species that
+    // makes it moves `nectar_per_s` of its reserve into its flowers in daylight, up to
+    // `nectar_cap`. A move inside the stand's material: no ledger line, and the mineral
+    // stays in `stand.mineral` until a consumer takes the nectar.
+    if sc.nectar_per_s > 0.0 && daylight > 0.0 && stand.profile_stage >= 1 {
+        let room = (sc.nectar_cap - stand.nectar).max(0.0);
+        let make = (sc.nectar_per_s * DT).min(room).min(stand.reserve.max(0.0));
+        if make > 0.0 {
+            stand.reserve -= make;
+            stand.nectar += make;
+        }
+    }
+
     // The tissue built out of this tick's income settles its mineral: `n_tissue` per
     // unit, met from what arrived with the income first, the excess released to the
     // site's pool and a shortfall drawn from it. Only this stand draws on this site.
@@ -2777,7 +2790,7 @@ pub(crate) fn die(
     }
     // A parcel dies with its donor: material saved for a package that will never be sent
     // falls where the foliage and the reserve fall, and its mineral goes with it.
-    let shed = stand.foliage + stand.reserve + stand.parcel;
+    let shed = stand.foliage + stand.reserve + stand.parcel + stand.nectar;
     let shed_mineral = (stand.mineral - wood_mineral).max(0.0);
     let gi = ground_slot(ground, stand.site);
     add_litter_cap(

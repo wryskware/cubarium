@@ -14,7 +14,8 @@ use crate::Flora;
 /// inside the snapshot, or what a saved field means changes. Postcard is not
 /// self-describing, so other tags are refused, never migrated.
 // 13: F1 (tests-first stubs) — `Stand::nectar`, `SpeciesConfig::{nectar_per_s, nectar_cap}`.
-pub const SCHEMA: u32 = 13;
+// 14: F1 — bloomcrown's nectar is made and taken; `SpeciesConfig::nectar_mineral_fraction`.
+pub const SCHEMA: u32 = 14;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

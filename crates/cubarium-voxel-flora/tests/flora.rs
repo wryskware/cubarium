@@ -848,6 +848,9 @@ fn a_donor_saves_a_parcel_and_lands_one_whole_package_on_one_site() {
     config.bloomcrown.maintenance = 0.0;
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.propagule_rate = 0.18;
+    // F1: bloomcrown's nectar draws on the reserve in daylight; this test books the
+    // propagule's draw alone.
+    config.bloomcrown.nectar_per_s = 0.0;
     let mut world = plain(8, 8, 0.6);
     let mut flora = Flora::new(config);
     // Wood 0.4 is over bloomcrown's donor_min of 0.3, and `Seed` fills the reserve.
