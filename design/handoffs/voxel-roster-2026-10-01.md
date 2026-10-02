@@ -32,7 +32,7 @@ founder, one package at a time, in one worktree (one fauna worker at a time).
 | R1 | Capgnawer + loftstrider (walkers, existing food), shredder loses caps | written when R0 lands |
 | R2b | Ripple-snail (glassfilm R2a already merged) | below |
 | F1 | Flight substrate + bellwing | `voxel-flight-2026-09-28.md` F1 (worktree overridden to this one) |
-| F3 | Seedporter: climb, glide, lanternberry fruit, gut seeds | `voxel-flight-2026-09-28.md` F3 outline |
+| F3 | Seedporter: climb, glide, lanternberry fruit, gut seeds | below |
 | R3 | Chorister: pack, den, live birth, provisioning, territory | below |
 
 ---
@@ -442,6 +442,123 @@ Run 8 seeds × 60 min on the desktop terrarium with heuristics. Report:
 - **Film:** total film with snails against a no-snail control.
 
 Then one headless GPU capture showing snails and film, as absolute paths.
+
+### Return (≤ 40 lines)
+
+- Commits.
+- The table.
+- Capture paths.
+- Anything undecided.
+
+Commit your own paths only. Stop every background shell before you return.
+
+---
+
+## Brief F3: the seedporter (after F1)
+
+**Objective.** Seedporters climb fruiting stands and vine faces, eat fruit, glide from
+grove to grove, and carry seeds in the gut. They run on a heuristic and are drawn with
+their specimen model. The spec is `predation-and-flight-2026-09-28.md` §3.5, §3.7 and
+§3.9 and the F3 outline in `voxel-flight-2026-09-28.md`. It builds on F1's `y_m`,
+modes and perches.
+
+**F3 is a model-rule change.** A separate test pass comes first, then the implementer.
+Commit before the measure.
+
+### Decisions (Fable; implement, don't revisit)
+
+**Lineage and body**
+
+- `Founder::Seedporter`, named `seedporter`, with role `glider`.
+- **Body:** 0.5 × 0.25 × 0.2 m.
+- **Template:** the browser's table scaled by body volume as in R1
+  (r = 0.025 / 0.105 ≈ 0.24, so `body_max` ≈ 0.012, matching §3.9).
+- **Activity:** diurnal; it sleeps perched in a crown.
+
+**Movement**
+
+- Modes `Ground`, `Climb`, `Glide` and `Perched`. Fill in F1's `Climb` and `Glide`
+  stubs.
+- **Pace:** walk 1 BL/s, climb 0.5, glide 3 BL/s.
+- **Climbing:** on the stem of any stand at least 1 m tall (vaulttree, lanternberry,
+  umbrellafrond) and on latticevine-covered faces. It uses the shredder's wall-climb
+  cost factor and may perch in the crown at the top.
+- **Gliding:** only from at least 1 m above the landing surface, at `glide_ratio` 2.5,
+  steered by `turn`, costing 1.2 × basal. It lands on the first support face, crown or
+  covered face it meets.
+- All of these numbers are knobs.
+
+**Food**
+
+- **New `Food::Fruit`**, with diet `[Fruit]`.
+  - Latticevine fruit comes through `take_fruit`.
+  - Lanternberry gets a `fruit` stock on adult stands. It is paid from reserve in
+    daylight up to `fruit_cap`.
+  - Ripe fruit left too long falls to litter after `fruit_drop_s`.
+  - Fruit is energy-rich, with `fruit_mineral_fraction` small but not zero.
+  - These are flora knobs.
+
+**Gut seeds**
+
+- A fruit meal records the source species' seeds in the gut: `seeds_per_fruit_organic`.
+- They are voided at the body's current face after `gut_transit_s`.
+  - Lanternberry seeds go into the site's seed bank (`SeedCohort`).
+  - Latticevine seeds go into the vine's seeding path if one exists (`VineSeed`).
+    Otherwise they are dropped and noted as owed.
+- Seeds are counted, not invented: they come out of the fruit's organic matter, and
+  the books close.
+
+**Senses**
+
+- The browser's 37-input layout. Its cone counts fruit stock in view (stands and vine
+  faces), where the browser's counts foliage, as the loftstrider's banded cone did.
+  That makes it a manifest of its own, `seedporter`. Interim until P2.
+
+**Heuristic**
+
+1. Walk or climb to the nearest fruit it can see, then eat until the source is empty
+   or its reserve is full.
+2. Then glide toward another visible fruit source within glide reach
+   (height × ratio), or climb down.
+3. With nothing seen, wander on the ground.
+4. Sleep perched in a crown at night, and shelter perched under a crown in a downpour.
+
+**Prey and founding**
+
+- **Predation:** a grounded seedporter (mode `Ground`) is on the lanternjaw's and the
+  chorister's prey lists. A climbing, perched or gliding one isn't.
+- **Founding:** `at_food`, near lanternberry and latticevine. The code default is 0.
+  - Desktop and voidrunner terrarium, and desktop `voxel.toml`: 4.
+  - Tachyon: 3.
+- **Presenter:** the specimen model at `y_m`, one pose.
+
+### Tests first (separate worker; short function tests, ≤ 200 ticks)
+
+- It climbs a 1 m lanternberry stem at half walking pace and perches in the crown. It
+  won't climb a stand under 1 m.
+- A glide from 2 m covers about 5 m before landing, at 1.2 × basal. No glide starts
+  below 1 m.
+- A lanternberry grows fruit in daylight up to its cap, from its reserve, and none at
+  night. Uneaten fruit falls to litter.
+- A seedporter takes latticevine fruit and lanternberry fruit, and both books close.
+- Gut seeds are voided after the transit time at the current face, into the seed bank.
+- The cone reads fruit and doesn't read plain foliage.
+- A grounded seedporter is lanternjaw prey; a climbing one isn't.
+- Snapshot round trip for a climbing, a gliding and a perched seedporter.
+- It draws with its specimen model at `y_m`.
+
+### Measure
+
+Run 8 seeds × 60 min on the desktop terrarium with heuristics. Report:
+
+- seedporters alive at 15, 30 and 60 min;
+- fruit eaten by source;
+- glides started;
+- seeds voided, and for lanternberry seeds landing in a grove other than their source:
+  how many and how far;
+- the time shares on the ground, climbing, gliding and perched.
+
+Then one headless capture of a seedporter in a crown.
 
 ### Return (≤ 40 lines)
 
