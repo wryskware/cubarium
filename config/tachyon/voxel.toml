@@ -61,31 +61,289 @@ preset = "tropical_jungle"
 # is 0, so training worlds are unchanged.
 [fauna.founders.capgnawer]
 founding_count = 4
+# The curiosity gate's ecology (the block at the end of this file).
+core.bite_per_s = 0.0418689542316302
+core.growth_max_per_s = 0.0002847088887750853
+core.lifespan_median_s = 8782.60292735481
+core.maintenance_per_s = 0.0016396050372662204
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.incubation_s = 182.97089431989187
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0016396050372662204
 
 [fauna.founders.loftstrider]
 founding_count = 1
+# The curiosity gate's ecology (the block at the end of this file).
+core.bite_per_s = 0.3462845838706257
+core.growth_max_per_s = 0.0016448517733854723
+core.lifespan_median_s = 26347.80878206443
+core.maintenance_per_s = 0.0016396050372662204
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.gestation_s = 329.3476097758054
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0016396050372662204
 
 # Roster R2b: glassfilm is seeded at founding and the ripple-snail (a water-bound film
 # grazer) is founded on it; both code defaults are off, so training worlds are unchanged.
 [flora]
 seed_film_at_founding = true
+# The curiosity gate's ecology (the block at the end of this file).
+carrion_decomposition = 0.0001928075350251471
+decomposition = 0.0006885983393755254
+wood_decomposition = 0.00006885983393755254
 
 [fauna.founders."ripple-snail"]
 founding_count = 6
+# The curiosity gate's ecology (the block at the end of this file).
+core.bite_per_s = 0.009546121564811686
+core.growth_max_per_s = 0.00006491362664071946
+core.lifespan_median_s = 8782.60292735481
+core.maintenance_per_s = 0.0016396050372662204
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.incubation_s = 182.97089431989187
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0016396050372662204
 
 # F1: the bellwing, a diurnal nectar flyer, founded perched within its fan's reach of
 # nectar (bloomcrown flowers, latticevine faces); the code default is 0, so training
 # worlds are unchanged.
 [fauna.founders.bellwing]
 founding_count = 4
+# The curiosity gate's ecology (the block at the end of this file).
+core.bite_per_s = 0.0019675260447194645
+core.growth_max_per_s = 0.000013379177104092358
+core.lifespan_median_s = 8782.60292735481
+core.maintenance_per_s = 0.0016396050372662204
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.incubation_s = 182.97089431989187
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0016396050372662204
 
 # F3: the seedporter, a diurnal fruit eater that climbs stems and vine faces and glides
 # between groves, founded on the ground within its roost reach of fruit (lanternberry
 # crowns, latticevine faces); the code default is 0, so training worlds are unchanged.
 [fauna.founders.seedporter]
 founding_count = 3
+# The curiosity gate's ecology (the block at the end of this file).
+core.bite_per_s = 0.023318827196675135
+core.growth_max_per_s = 0.0001107644291842069
+core.lifespan_median_s = 8782.60292735481
+core.maintenance_per_s = 0.0016396050372662204
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.gestation_s = 109.78253659193513
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0016396050372662204
 
 # R3: no chorister packs on the panel (Wrysk: bigger worlds only); the code default is
 # already 0, stated here so the panel says it.
 [fauna.founders.chorister]
 founding_count = 0
+# The curiosity gate's ecology (the block at the end of this file).
+core.bite_per_s = 0.17996304889034032
+core.growth_max_per_s = 0.00032136258730417914
+core.lifespan_median_s = 26347.80878206443
+core.maintenance_per_s = 0.0006558420149064882
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.gestation_s = 109.78253659193513
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0006558420149064882
+
+# ---------------------------------------------------------------------------
+# The live ecology: the 2026-10-02 curiosity gate (design/cotraining-plan-2026-10-01.md,
+# "Result, 2026-10-02"; Wrysk: "lets get the new defaults locked in now"). Desktop run
+# C2's ecology, config/training/curiosity-2026-10-02/C2-mean.toml (41 genes), baked in
+# as plain registry values: each one is this preset's dump with `--params C2-mean.toml`
+# (`cargo run -p cubarium-voxel-sim --example params`), group genes expanded per
+# species. Tables this preset already declares above carry their share in place.
+# Code defaults are unchanged; co-training worlds still build from them.
+
+[flora.bloomcrown]
+alpha = 3.194679386878516
+assimilation = 0.006558420149064882
+defence_half_life_s = 439.18820662503924
+defence_per_bite = 0.002975200559889063
+foliage_rate = 0.0015956992506552662
+maintenance = 0.0003279210074532441
+propagule_rate = 0.0006558420149064882
+seed_attrition_per_s = 0.00005693073046063266
+seed_max_age_s = 17565.20585470962
+senescence = 0.0017932039887126894
+wood_rate = 0.0016396050372662204
+
+[flora.glowcap]
+defence_half_life_s = 731.8835772795675
+foliage_rate = 0.006558420149064882
+maintenance = 0.0003279210074532441
+propagule_rate = 0.0008198025186331102
+seed_attrition_per_s = 0.00022772292184253064
+seed_max_age_s = 4391.301463677405
+senescence = 0.0016396050372662204
+substrate_uptake_per_s = 0.032792100745324404
+wood_rate = 0.003279210074532441
+
+[flora.lanternberry]
+alpha = 3.194679386878516
+assimilation = 0.006558420149064882
+defence_half_life_s = 439.18820662503924
+defence_per_bite = 0.002975200559889063
+foliage_rate = 0.0015956992506552662
+maintenance = 0.0003279210074532441
+propagule_rate = 0.001967526044719464
+seed_attrition_per_s = 0.00005693073046063266
+seed_max_age_s = 17565.20585470962
+senescence = 0.0017932039887126894
+wood_rate = 0.0016396050372662204
+
+[flora.latticevine]
+assimilation = 0.0004426933600618795
+bud_s = 36.59417886397838
+dry_spell_s = 365.94178863978374
+flower_s = 73.18835772795676
+fruit_s = 146.3767154559135
+leaf_upkeep = 0.000016396050372662205
+regrow_rate = 0.003279210074532441
+spent_s = 36.59417886397838
+wet_spell_s = 182.97089431989187
+wood_upkeep = 0.0000032792100745324405
+
+[flora.siphonreed]
+alpha = 1.2852762203479797
+assimilation = 0.006558420149064882
+defence_half_life_s = 439.18820662503924
+defence_per_bite = 0.002975200559889063
+foliage_rate = 0.0006785472361051138
+maintenance = 0.0006558420149064882
+propagule_rate = 0.000491881511179866
+seed_attrition_per_s = 0.00004554458436850613
+seed_max_age_s = 21956.507318387026
+senescence = 0.0015582388047764115
+wood_rate = 0.0016396050372662204
+
+[flora.springturf]
+alpha = 1.2852762203479797
+assimilation = 0.013116840298129763
+defence_half_life_s = 439.18820662503924
+defence_per_bite = 0.002975200559889063
+foliage_rate = 0.0067854723610511385
+maintenance = 0.003279210074532441
+propagule_rate = 0.003279210074532441
+seed_attrition_per_s = 0.00003795382030708844
+seed_max_age_s = 26347.80878206443
+senescence = 0.0015582388047764115
+wood_rate = 0.016396050372662202
+
+[flora.stonecushion]
+alpha = 4.0
+assimilation = 0.006558420149064882
+defence_half_life_s = 439.18820662503924
+defence_per_bite = 0.002975200559889063
+foliage_rate = 0.000763337683381761
+maintenance = 0.00008198025186331102
+propagule_rate = 0.00008198025186331102
+seed_attrition_per_s = 0.00003795382030708844
+seed_max_age_s = 26347.80878206443
+senescence = 0.00034846728275725504
+wood_rate = 0.0003279210074532441
+
+[flora.umbrellafrond]
+alpha = 3.194679386878516
+assimilation = 0.006558420149064882
+defence_half_life_s = 439.18820662503924
+defence_per_bite = 0.002975200559889063
+foliage_rate = 0.0015956992506552662
+maintenance = 0.0003279210074532441
+propagule_rate = 0.0003279210074532441
+seed_attrition_per_s = 0.00011386146092126532
+seed_max_age_s = 8782.60292735481
+senescence = 0.0017932039887126894
+wood_rate = 0.0016396050372662204
+
+[flora.vaulttree]
+alpha = 0.8259819502241197
+assimilation = 0.006558420149064882
+defence_half_life_s = 439.18820662503924
+defence_per_bite = 0.002975200559889063
+foliage_rate = 0.001436784840637648
+maintenance = 0.00016396050372662204
+propagule_rate = 0.0013116840298129763
+seed_attrition_per_s = 0.00007590764061417688
+seed_max_age_s = 13173.904391032214
+senescence = 0.0009469072535054164
+wood_rate = 0.000491881511179866
+
+[flora.velvetpad]
+alpha = 4.0
+assimilation = 0.006558420149064882
+defence_half_life_s = 439.18820662503924
+defence_per_bite = 0.002975200559889063
+foliage_rate = 0.006106701467054088
+maintenance = 0.0003279210074532441
+propagule_rate = 0.0008198025186331102
+seed_attrition_per_s = 0.00015181528122835375
+seed_max_age_s = 6586.952195516107
+senescence = 0.0005807788045954251
+wood_rate = 0.003279210074532441
+
+[fauna.founders.littershredder]
+core.bite_per_s = 0.025860602855884852
+core.growth_max_per_s = 0.00011628709313735143
+core.lifespan_median_s = 10877.308082479305
+core.maintenance_per_s = 0.0014719458196294176
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.incubation_s = 158.4026610179037
+core.reproduction.surplus_floor = 0.025121007560289194
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0012552921269913253
+yield_by_food.litter = 0.4781518604723609
+yield_by_food.cap_tissue = 0.4781518604723609
+yield_by_food.carrion = 0.4781518604723609
+yield_by_food.foliage = 0.4781518604723609
+yield_by_food.film = 0.4781518604723609
+yield_by_food.nectar = 0.4781518604723609
+yield_by_food.fruit = 0.4781518604723609
+
+[fauna.founders.frondgrazer]
+core.bite_per_s = 0.17210922371486315
+core.growth_max_per_s = 0.0003080440982147086
+core.lifespan_median_s = 13765.390064602563
+core.maintenance_per_s = 0.0016710203947893206
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.gestation_s = 84.27969521067645
+core.reproduction.surplus_floor = 0.15212538349735227
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0021275827456040384
+yield_by_food.litter = 0.3364781725258478
+yield_by_food.cap_tissue = 0.3364781725258478
+yield_by_food.carrion = 0.3364781725258478
+yield_by_food.foliage = 0.3364781725258478
+yield_by_food.film = 0.3364781725258478
+yield_by_food.nectar = 0.3364781725258478
+yield_by_food.fruit = 0.3364781725258478
+
+[fauna.founders.lanternjaw]
+core.bite_per_s = 0.06695552905050606
+core.growth_max_per_s = 0.00010069939815158275
+core.lifespan_median_s = 14562.8960979726
+core.maintenance_per_s = 0.000523011226573213
+core.reproduction.birth_interval_s = 1097.8253659193513
+core.reproduction.surplus_floor = 0.2876163048484828
+core.reproduction.surplus_hold_s = 548.9126829596756
+motor_respiration_per_s = 0.0006647357287165604
+yield_by_food.litter = 0.46905315573017675
+yield_by_food.cap_tissue = 0.46905315573017675
+yield_by_food.carrion = 0.46905315573017675
+yield_by_food.foliage = 0.46905315573017675
+yield_by_food.film = 0.46905315573017675
+yield_by_food.nectar = 0.46905315573017675
+yield_by_food.fruit = 0.46905315573017675
+
+[fauna.founding]
+starter_litter_organic = 0.13232116851858008
+
+[fauna.frondgrazer]
+lifespan_median_s = 13765.390064602563
+
+[fauna.predation]
+egg_upkeep_per_s = 0.000008198025186331102
+egg_viability_median_s = 26347.80878206443
+wound_heal_per_s = 0.00045544584368506117

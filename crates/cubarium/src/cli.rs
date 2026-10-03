@@ -141,7 +141,7 @@ pub struct Voxel {
     /// of the trained centre built into the binary:
     /// `--founder-policy littershredder=centre.json`. Repeatable, at most once per
     /// lineage; the lineage the file declares must be the one named. Lineages left out
-    /// run `crates/cubarium/assets/policies`' P3-C centre, which is the default for both.
+    /// run their centre in `crates/cubarium/assets/policies` (the 2026-10-02 curiosity gate's C1).
     #[arg(long, value_name = "FOUNDER=FILE", conflicts_with = "arena")]
     pub founder_policy: Vec<String>,
     /// Put one founder lineage of the **ambient** run back on its observation-only
