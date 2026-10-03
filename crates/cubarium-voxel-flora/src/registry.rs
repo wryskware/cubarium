@@ -274,6 +274,8 @@ fn vine_rows() -> Vec<Row> {
         r("nectar", "org-units per reference face", nonneg, "a flower's organic matter").scale(area).evolve().grade("C"),
         r("fruit", "org-units per reference face", nonneg, "a bead bunch's organic matter").scale(area).evolve().grade("C"),
         r("energy_density", "energy per org-unit", nonneg, "vine tissue energy").grade("D"),
+        r("mineral_fraction", "mineral per org-unit", Range::fraction(), "vine tissue mineral: the store it draws from its root, and what its leaf, nectar and fruit carry")
+            .prov("decision"),
         r("founders", "vines", nonneg, "founder vines rooted on a fresh world: the floor under the area count").evolve().grade("C"),
         r("founders_per_m2", "vines per m2 of world floor", nonneg, "founder vines per square metre: max(founders, round(this * area))")
             .search(0.0, 0.25),

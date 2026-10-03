@@ -117,6 +117,8 @@ const EMERGENCY_CLEAR_HUNGER: f64 = 0.6;
 const APPETITE_FLOOR: f64 = 0.15;
 /// [`Gut::full_tolerance`], every lineage: the full event (repair 2 item 3).
 const FULL_TOLERANCE: f64 = 0.98;
+/// [`Gut::refill_gap`], every lineage (repair 3 item 3).
+const REFILL_GAP: f64 = 0.1;
 /// The ecological day the daily needs and lifespans below are written in, seconds
 /// ([`crate::LifeConfig::ecological_day_s`]'s default): a unit for stating defaults.
 const DAY_S: f64 = 7200.0;
@@ -825,6 +827,16 @@ pub struct Gut {
     pub s0: f64,
     /// The full event: the eating latch goes off at `S ≥ full_tolerance · K`.
     pub full_tolerance: f64,
+    /// **The refill gap** (repair 3 item 3), a fraction of `K`: `s_start` is capped at
+    /// `full_tolerance − refill_gap`, so the appetite band never overlaps the full event
+    /// and a starving body just declared full waits for its stomach to empty this much
+    /// before it wants food again. 0.1.
+    #[serde(default = "default_refill_gap")]
+    pub refill_gap: f64,
+}
+
+fn default_refill_gap() -> f64 {
+    REFILL_GAP
 }
 
 impl Gut {
@@ -837,6 +849,7 @@ impl Gut {
             digestion_s: [tau_s; crate::Food::COUNT],
             s0: APPETITE_FLOOR,
             full_tolerance: FULL_TOLERANCE,
+            refill_gap: REFILL_GAP,
         }
     }
 
@@ -845,10 +858,11 @@ impl Gut {
         self.stomach_k * body
     }
 
-    /// `s_start` at reserve hunger `hunger`: `s0 + (1 − s0) · max(0, (h − 0.5) / 0.5)`.
+    /// `s_start` at reserve hunger `hunger`: `s0 + (1 − s0) · max(0, (h − 0.5) / 0.5)`,
+    /// capped at `full_tolerance − refill_gap` (repair 3 item 3).
     pub fn s_start(&self, hunger: f64) -> f64 {
         let over = ((hunger - 0.5) / 0.5).clamp(0.0, 1.0);
-        self.s0 + (1.0 - self.s0) * over
+        (self.s0 + (1.0 - self.s0) * over).min(self.full_tolerance - self.refill_gap)
     }
 }
 

@@ -150,6 +150,18 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
                 ));
             }
         }
+        // The minimal gut (repair 3, Astra's finding 9): every stomach pool's three
+        // currencies are finite nonnegative stocks too.
+        for (k, p) in a.stomach.pools.iter().enumerate() {
+            for (field, value) in [("organic", p.organic), ("mineral", p.mineral), ("energy", p.energy)] {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!(
+                        "animal #{}'s stomach pool {k} {field} is {value}, not a finite nonnegative stock",
+                        a.id
+                    ));
+                }
+            }
+        }
         if !a.pose.is_finite() {
             return Err(format!("animal #{}'s pose is not finite", a.id));
         }

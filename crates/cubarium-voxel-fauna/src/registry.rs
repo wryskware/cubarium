@@ -219,6 +219,8 @@ fn founder_rows() -> Vec<Row> {
             .search(0.0, 0.8).prov("decision"),
         r("gut.full_tolerance", "fraction of K", Range::closed(0.0, 1.0).open_lo(), "the eating latch goes off at S >= this x K")
             .prov("decision"),
+        r("gut.refill_gap", "fraction of K", fraction, "s_start is capped at full_tolerance - this, so appetite never overlaps the full event")
+            .search(0.0, 0.5).prov("decision"),
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")

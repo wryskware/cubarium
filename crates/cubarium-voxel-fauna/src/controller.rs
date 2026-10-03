@@ -121,6 +121,14 @@ pub trait Controller: Send + Sync {
     fn at_carcass(&self) -> bool {
         false
     }
+
+    /// Whether this controller's body **rests when fed** (the minimal gut's repair 3 item
+    /// 8): the bellwing's hover-sip teacher answers yes, and the tick's controller stage
+    /// then perches and rests the body while its eating latch is off — the satiety the
+    /// teacher cannot observe. Every other controller answers `false`.
+    fn rests_when_fed(&self) -> bool {
+        false
+    }
 }
 
 /// The shared action adapter: transfer, clamp, deadband — in that order, identically
@@ -241,6 +249,14 @@ impl FounderControllers {
             .binary_search_by_key(&id, |e| e.0)
             .ok()
             .is_some_and(|at| self.entries[at].1.pack_tactic())
+    }
+
+    /// Whether a body's controller rests when fed ([`Controller::rests_when_fed`]).
+    pub fn rests_when_fed(&self, id: u64) -> bool {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .is_some_and(|at| self.entries[at].1.rests_when_fed())
     }
 
     /// Whether a body's controller is at a carcass ([`Controller::at_carcass`]).
@@ -1119,6 +1135,10 @@ impl Controller for HoverSip {
 
     fn lift(&self) -> f64 {
         self.lift
+    }
+
+    fn rests_when_fed(&self) -> bool {
+        true
     }
 }
 
