@@ -1,154 +1,198 @@
 ---
 design_status: proposal
-last_reviewed: 2026-10-02
+last_reviewed: 2026-10-03
 decision_refs: []
 ---
 
-# Realistic metabolism and meals
+# Realistic metabolism and a minimal gut
 
-A proposal by Fable. Wrysk, 2026-10-02:
+A proposal by Fable. This is **revision 2**: the gut version. It answers Astra's review
+`design/7_Research/astra-metabolism-meals-review-2026-10-02.md`, findings [M1]…[M11].
 
-> food isnt filling enough for anyone … if it were they would just take less frequent bites
-> … you can sleep through the night because youre still digesting and because you have
-> reserves … you only need to eat a few times a day … [the gut is] not the highest priority
-> … we should be sure that the expected behavior still drops out — like choristers only need
-> to eat one big meal every 1-2 days.
+## What Wrysk asked for
 
-It sits beside `design/ecology-timescales-2026-10-02.md` (revision 3, accepted in parts).
-Numbers come from `design/7_Research/timescales-inventory-2026-10-02.md` unless marked
-otherwise.
+On 2026-10-02 and 10-03:
+- Food should be filling.
+- Animals eat a few meals a day and take breaks between them.
+- They sleep through the night "because you're still digesting and because you have
+  reserves".
+- **The gut, not a coded meal rule,** should make meal-then-stop happen.
+- Hunger should also respond to the fat reserve, "but maybe that's overcomplicating the first
+  pass".
+- **The test that matters:** the expected behaviour has to drop out, for example "choristers
+  only need to eat one big meal every 1–2 days".
 
-## The fault
+## The faults
 
-Basal upkeep is 0.001 of body per second for seven lineages. Over one 120-min world day
-that is **7.2 bodies**; real animals use about 2–10 % of their body per day. Three things
-follow:
-- The reserve (0.5 body) lasts 8 min.
-- A bite is sized by current hunger, so animals nibble a little every few minutes, forever.
-- There are no meals, no rests between them, and no night to sleep through.
+1. **Basal upkeep is about 100× too high.**
+   - Seven lineages burn 0.001 of their body per second. At mass scale 30 that is 7.2 bodies
+     per 120-min world day.
+   - Real field metabolism is about 2–10 % of body per day [M1]. The comparison is with
+     mammals; ectotherms run lower.
+2. **Intake goes straight into the reserve,** sized by the current hunger. So animals nibble
+   continuously, and there are no meals.
 
 ## The model
 
-Two changes. There is no gut.
+### 1. Daily need per lineage
 
-### 1. Metabolism per world day
+`maintenance_per_s = f / 7200 s`. Motor stays tied to basal by its existing ratio.
 
-Each lineage's basal upkeep is set by a **daily need** `f`, the fraction of adult body
-burned per world day awake at rest:
-- `maintenance_per_s = f / day_length_s`;
-- motor stays tied to basal by its existing ratio.
-
-| lineage | `f` (proposed) | why |
-|---|---|---|
-| bellwing | 0.15 | tiny endotherm flyer: the highest mass-specific rate |
-| seedporter | 0.08 | small endotherm-like glider |
-| frondgrazer | 0.06 | mid-size herbivore |
-| loftstrider | 0.04 | large herbivore: rate falls with size |
-| chorister | 0.08 | active pack predator |
-| lanternjaw | 0.04 | ambusher, low standing metabolism |
-| littershredder | 0.03 | ectotherm-like |
-| capgnawer | 0.03 | ectotherm-like |
-| ripple-snail | 0.02 | ectotherm-like, slow |
-
-- Today's 0.001/s is `f` = 7.2, so this cuts basal 50–360×.
-- **Anchors:** about 2–10 % per day is the field-metabolic band for mammals by size (audit §2).
-  Ectotherms and ambushers run lower (Secor; Geiser for torpor).
-- **What it buys:** a 0.5-body reserve lasts 3–25 days of rest, so nights are trivial and
-  the Part 1a night screen passes with a wide margin.
-
-### 2. Meals: eat a meal-sized amount, then stop
-
-Each lineage gets a **meal size** `C`, a fraction of adult body. Eating is gated by a
-hysteresis on the reserve:
-- **Hungry:** reserve ≤ cap − `C`. The body seeks food, and bites run at the full bite rate,
-  not scaled by hunger.
-- **Sated:** reserve = cap. Bites stop and the body does other things.
-
-| term | meaning |
-|---|---|
-| `f` | daily need: fraction of adult body burned per world day at rest |
-| `C` | meal size: fraction of adult body eaten per meal |
-| `b` | bite rate: fraction of body taken per second while eating |
-| meals per day | about `f / C` (more while growing or breeding) |
-| one meal takes | about `C / b` |
-
-| lineage | `C` | meals per day | target |
+| lineage | `f` | sleep | rhythm-aware daily spend `E` |
 |---|---|---|---|
-| bellwing | 0.03 | 5 | several small nectar meals |
-| seedporter | 0.027 | 3 | a few fruit meals |
-| frondgrazer | 0.03 | 2 | a few grazing bouts |
-| loftstrider | 0.03 | 1.3 | one or two long browses |
-| littershredder | 0.015 | 2 | a couple of feeds |
-| capgnawer | 0.015 | 2 | a couple of feeds |
-| ripple-snail | 0.01 | 2 | a couple of feeds |
-| **chorister** | 0.12 | **one meal per 1.5 days** | Wrysk: one big meal every 1–2 days |
-| **lanternjaw** | 0.10 | **one meal per 2.5 days** | proposal 1c: every 2+ days |
+| bellwing | 0.15 | 0.5 | 0.126 |
+| seedporter | 0.08 | 0.5 | 0.067 |
+| frondgrazer | 0.06 | 0.5 | 0.050 |
+| loftstrider | 0.04 | 0.5 | 0.034 |
+| chorister | 0.08 | 0.5 | 0.067 |
+| lanternjaw | 0.04 | 0.3 | 0.021 |
+| littershredder | 0.03 | 0.3 | 0.016 |
+| capgnawer | 0.03 | 0.3 | 0.016 |
+| ripple-snail | 0.02 | 0.3 | 0.010 |
 
-**Predators share kills.** A pack of 3 choristers eats 3 × 0.12 × 2.74 ≈ 1.0 ou of a
-loftstrider's 4 ou. The rest is carrion for scavengers (the 1 h decay is unchanged). So the
-next hunt comes when the reserve has fallen by `C`, after about 1.5 world days.
+- `f` is the fraction of adult body burned per world day, awake and at rest.
+- **`E` counts sleep:** about 68 % of the day awake and 32 % asleep for diurnal lineages, the
+  reverse for nocturnal ones [M3]. It is basal only; walking, breeding, provisioning and
+  luring add to it, so they are reported separately.
 
-**One rule replaces the satiated-rest thresholds.** It supersedes the hunters' separate
-`rest_at` and `wake_at` (0.9 and 0.5 today).
+### 2. The stomach
 
-**Growth and breeding** draw on the reserve, as today:
-- Juveniles and breeders refill more often: they are visibly the ones feeding most.
-- Life histories stay fast (growth about 45 min, births every 30 min when funded). Their
-  food comes from meals, not from resting cost.
+Each body has a stomach `S`, holding raw food in organic units [M2]. Its capacity is
+`K = k × current body` [M9], so a juvenile has a juvenile-sized stomach.
 
-**Bite rate** sets how long a meal takes, about `C / b`. The targets:
-- 1–5 min for herbivores;
-- under a minute for nectar;
-- 1–3 min of feeding at a carcass.
+- **Eating:**
+  - Bites add raw food to `S` at `b × current body` per second.
+  - They are capped by the stock, the mineral budget and the room `K − S`.
+  - **A full stomach stops eating physically.**
+- **Digestion:**
+  - `S` empties at `S / τ_food` per second.
+  - The digested food times the existing diet `yield` goes into the reserve; the rest takes
+    the existing dung and litter path.
+  - **Digestion runs only while the reserve has room.** A well-fed animal's stomach stays
+    full until its body has burned room for it. That is why meals are spaced: no rule spaces
+    them.
+  - Stomach content is in the books, so organic matter is conserved.
+- **Appetite, the only behavioural trigger:** a body *wants* food when
+  `S ≤ s_start × K`, where `s_start = s0 + (1 − s0) × max(0, (h − 0.5) / 0.5)`.
+  - `h` is the reserve hunger.
+  - A fed animal starts at a nearly empty stomach (`s0`, default 0.15).
+  - A depleted one eats whenever there is room. That is Wrysk's fat-reserve term, kept to
+    one line.
+  - It wants food until the stomach is full or food runs out.
 
-Juvenile growth needs about 2.25 body per day, so `b` can't fall too low. The build sets
-`b` per lineage so a growing juvenile can fund its growth while eating at most about 60 % of
-its waking time.
+**Meal interval for a non-breeding adult** (the only cadence claim [M3]):
 
-**Sleep:**
-- `wake_hunger` 0.9 and the night envelope stay.
-- A body goes to sleep sated and wakes for food only if it becomes hungry.
-- The `resleep_hunger` hysteresis on the hysteresis branch is folded into this rule.
+`interval ≈ (1 − s0) × k × yield / E` world days.
 
-**Brains and senses are untouched.** The brains still observe hunger as today, through the
-sense contract; the gate decides only whether a bite happens.
+Each meal fills `k`; the body burns `E` a day; digestion runs only into the room that
+burning makes.
+
+| lineage | food | `k` | `τ` | interval (yield 0.5) | target |
+|---|---|---|---|---|---|
+| bellwing | nectar | 0.03 | 30 s | 0.10 day: about 10 meals a day | many small sips |
+| seedporter | fruit | 0.05 | 60 s | 0.32 day: about 3 a day | a few |
+| frondgrazer | foliage | 0.06 | 120 s | 0.51 day: about 2 a day | a few grazing bouts |
+| loftstrider | foliage | 0.05 | 120 s | 0.63 day: about 1.6 a day | one or two long browses |
+| littershredder | litter | 0.02 | 120 s | 0.53 day: about 2 a day | a couple of feeds |
+| capgnawer | caps | 0.02 | 120 s | 0.53 day | a couple |
+| ripple-snail | film | 0.012 | 120 s | 0.51 day | a couple |
+| **chorister** | meat | 0.20 | 300 s | **1.27 days** | Wrysk: one big meal per 1–2 days |
+| **lanternjaw** | meat | 0.15 | 300 s | **3.0 days** | one meal per 2+ days |
+
+- A wolf eats about 20 % of its body at a kill; ambushing snakes take large meals rarely.
+- **Bite rate:** `b` is set so a meal takes about `k / b` ≈ 1–2 min for grazers, 20–40 s
+  for nectar and 2 min at a carcass.
+
+### 3. What eats, and when (one precedence) [M7]
+
+1. **Off-phase:** the body sleeps, whatever its stomach holds.
+2. **Emergency:** a sleeper wakes only if its reserve hunger reaches `wake_hunger` (0.9). It
+   then stays awake and eating until its stomach is full **and** its hunger is below 0.6, or
+   its own phase begins. This latch replaces `resleep_hunger` and ends the flicker.
+3. **Alert:** unchanged.
+4. **On-phase, wanting food:** it seeks food and eats.
+   - Hunters may lure, target and strike **only** in this state.
+   - Pack target acquisition reads the pack's members.
+   - Flyers' sipping uses the same gate.
+5. **On-phase, not wanting food:** it doesn't bite and doesn't hunt. It rests, wanders or
+   explores, which the curiosity-trained brains already like.
+
+This removes the hunters' satiated rest (`rest_at`, `wake_at`, `torpor_upkeep` between
+meals) [M3].
+
+### 4. Predators and young
+
+- **Packs [M6].** "One big meal per 1–2 days" is the **non-breeding pack** target.
+  - Choristers provision pups **from the stomach first** (regurgitation, as wolves do), then
+    from reserve above the 60 % floor.
+  - A pack raising a litter therefore empties its stomachs sooner and hunts more often. That
+    is expected and tested separately.
+  - At a carcass each adult takes up to its stomach's room, about 0.55 ou raw. The rest stays
+    carrion, with its existing about 1.4 h e-fold decay. A pack that wants food may return to
+    leftovers rather than kill.
+- **Lanternjaw riders [M8].** Rider income is re-tied from the host's basal (now tiny) to the
+  host's body.
+  - The rider takes `parasite_take_per_day` × host body per world day, from the host's
+    reserve, then from its body.
+  - The default is sized so a rider on an adult frondgrazer reaches drop-off in about 1–1.5
+    world days.
+  - On a littershredder (a quarter of the body) it is about 4× slower. Host size then matters
+    without a host-size rule.
+  - The host pays, and eats more often.
+- **Juveniles and breeders [M4, M5].**
+  - Growth and births still draw on the reserve. Juveniles and breeders refill more often:
+    the young graze nearly continuously, and pregnant animals eat more.
+  - Digestion throughput (`k × yield / τ` per second) now limits growth.
+  - **Juveniles grow slower:** about 1–2 world days to breeding size, against 44 min today.
+    This is the one life-history change, and it is the cost of real meals. Faster growth
+    would need faster digestion, and then there are no meals.
 
 ## What changes elsewhere
 
-- **Plants become relatively richer.** Animal demand falls 50–360×, so populations are
-  bounded by:
-  - births;
-  - lifespans;
-  - predation;
-  - the meal gate;
+- **The plant–animal balance [M10].** Animal demand falls 50–360×, so plants are relatively
+  plentiful. Populations are bounded by births, lifespans, predators and meals, not by
+  starvation.
+- **The roster search is re-based:**
+  - upkeep genes are ×1 at `f`;
+  - new genes: stomach `k`, digestion `τ` per food, `s0`, `parasite_take_per_day`;
+  - bite rate becomes the intake gene;
+  - the night screen stays as a guard;
+  - R/S/F stays a readout or soft;
+  - the big-lever grid (master metabolism × plant productivity) runs first.
 
-  not by starvation. The search's plant genes and band target rebalance this.
-- **The night endurance screen** passes trivially, so it stays as a guard.
-- **The search's upkeep genes** re-base on the new `f` (×1 = this table). Intake becomes a
-  bite-rate gene.
-- **R/S/F** stays a readout or soft.
+## Acceptance (tests first, then measure) [M11]
 
-## Acceptance (the build's tests and measure)
-
-1. **Meal cadence, for each lineage, in a fixture with ample food:** a sated adult's meals
-   per world day are within ±30 % of `f / C`. Only the chorister and lanternjaw rows are
-   checked as single meals over 1–3 world days.
-2. **No nibbling:** between meals a sated adult takes no bites, even when standing on food.
-3. **The night:** a diurnal adult that goes to sleep sated sleeps through the night with no
-   hunger wake. A nocturnal one does the same through the day.
-4. **Chorister:** a fed pack makes no further kill attempt until about `C / f` world days
-   have passed, ±30 %. After a kill each adult eats about `C` and leaves the rest as carrion.
-5. **Growth:** a juvenile with food in reach reaches adult size within 1.5× today's growth
-   time.
-6. **Measure:** the desktop terrarium on main's live defaults, seeds 1–8 × 2 h, all nine
-   lineages:
-   - alive at 60 and 120 min;
-   - meals per day per lineage;
-   - deaths by cause;
-   - sleep wakes.
+1. **Cadence:** for each lineage, a non-breeding adult on ample food under its own rhythm.
+   - **Pass:** meals per world day within ±30 % of the formula, counted over 3 world days.
+     The chorister and lanternjaw are counted over 6.
+2. **The stomach caps a sitting:** a starved adult eats at most `K` per sitting; famine
+   recovery takes several meals.
+3. **A full stomach on food takes no bite.**
+4. **Sleep:**
+   - A fed diurnal adult sleeps through the night, and a fed nocturnal one through the day.
+   - A starving sleeper wakes, refills, and doesn't flicker (≤ 2 sleep flips per hour).
+5. **Hunters:** a chorister or lanternjaw with a full stomach starts no lure, target or
+   strike. With an empty stomach, it does.
+6. **Packs:**
+   - A non-breeding pack's next kill attempt comes at the formula's interval, ±30 %.
+   - With pups, provisioning draws on the stomach first, and the pack hunts sooner.
+7. **Riders:** an adult-grazer host brings a rider to drop-off in 1–1.5 world days, ±30 %.
+   A shredder host is slower, and the host's spending rises by the take.
+8. **Juveniles:** a frondgrazer reaches breeding size in 1–2 world days with food in reach.
+9. **Books:** food eaten = assimilated + dung or litter + Δstomach, to the existing
+   tolerance.
+10. **Measure:** desktop terrarium, seeds 1–8 × 2 h, plus one 8 h run for predators and
+    riders. Report per lineage:
+    - meals per day;
+    - stomach fullness over the day;
+    - sleep wakes;
+    - alive;
+    - births;
+    - kills;
+    - rider growth.
 
 ## Not now
 
-- **A gut:** food-type digestion, bulky foliage against dense nectar, visible dozing after
-  a big meal. Wrysk keeps it as later flavour.
-- **Hunt-event cues** for watching: a separate design thread with Wrysk.
+- Food-type quality (dense nectar against bulky foliage beyond `τ`).
+- Visible dozing after a meal.
+- Hunt-event cues.
