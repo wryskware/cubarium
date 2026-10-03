@@ -406,7 +406,8 @@ pub struct CoveredFace {
     /// Whether the owner's root arch is on this face (the face next to its root).
     pub rooted: bool,
     pub spur: SpurPhase,
-    /// Seconds left in the current spur phase (or of the jittered delay before a start).
+    /// Seconds left in the current spur phase, or, bare, of its random rest before the next
+    /// start (0 until one is drawn).
     pub spur_timer_s: f64,
     /// Organic matter in the flower. Positive only in [`SpurPhase::Flower`].
     pub nectar: f64,
