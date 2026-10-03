@@ -196,3 +196,106 @@ meals) [M3].
 - Food-type quality (dense nectar against bulky foliage beyond `τ`).
 - Visible dozing after a meal.
 - Hunt-event cues.
+
+## Repair 2: the implementation spec (answers Astra's repair-1 check, [M1]–[M12])
+
+Astra's repair-1 status was "revise". It accepts the minimal gut and asks for executable
+detail. This section **overrides** any line above that it contradicts. The build package
+implements this section, and Astra reviews the implementation, not another draft.
+
+1. **The diagnosis [M1].** The 50–360× is the cut to the **basal reference rate** only.
+   - Growing, breeding, parasitised and food-starved animals still spend more.
+   - Starvation still limits a population whose food is out of reach.
+   - The 2–10 %/day figure is an analogy to mammals, not a calibration.
+   - Today's defaults and the live preset's values are reported separately.
+2. **Digestion [M2].** Per tick, the raw food digested is
+   `min(S, S·dt/τ, room / y_eff)`, where:
+   - `room` = reserve cap − reserve;
+   - `y_eff` is the effective, mineral-limited yield. At `y_eff` = 0 the stomach holds.
+
+   The undigested food stays in the stomach.
+3. **The eating latch [M2, M7].**
+   - **On** when `S ≤ s_start·K`, in the states rule 7 allows.
+   - **Off** only at a full event, `S ≥ 0.98·K`.
+   - While it's on, the body seeks food and bites at food. Losing access to food doesn't clear
+     it.
+   - The latch is saved with the body. A newborn starts with it off and an empty stomach;
+     a founder starts with it off and a stomach at `s0·K`.
+4. **Bite rate [M4].** `b = 2k / τ` per unit current body. Then a meal fills in about
+   `0.69 τ` with digestion running: about 83 s for a grazer, 3.5 min at a carcass. It is one
+   gene per lineage, independent of upkeep; only motor stays tied to upkeep [M10].
+5. **Juveniles and lifespans [M4, M11].**
+   - Maturation is measured, not promised. The plan expects about 1.5 world days at the
+     grazer's maximum digestion throughput (1.8 current bodies a day).
+   - Lifespans rise so that maturation is at most a quarter of the median life:
+     - small lineages (shredder, snail, capgnawer, bellwing, seedporter): 6 world days;
+     - frondgrazer, loftstrider: 8 world days;
+     - lanternjaw, chorister: 12 world days.
+   - The live medians are 1.22 world days (small) and 2.02 (lanternjaw).
+6. **Provisioning [M6].**
+   - **Regurgitation** moves raw stomach food from giver to pup stomach.
+     - It is capped by the pup's room, and the food keeps its composition.
+     - It needs the giver's `S > 0` and a pup that wants food. The giver's reserve floor
+       does not apply.
+   - **Fallback:** the existing reserve-to-reserve transfer, at 70 % efficiency above the
+     60 % floor. It is booked separately.
+7. **Precedence, executable [M7].**
+
+   | | state | rule |
+   |---|---|---|
+   | a | safety and alert | awake, as today: submerged, falling, attached, flying, mid-strike, alerted |
+   | b | emergency latch | **on** at reserve hunger ≥ `wake_hunger` (0.9), **off** below 0.6 |
+   | c | ordinary off-phase | asleep |
+   | d | on-phase | the eating latch on means seek, eat and (hunters) hunt; off means rest, wander or explore |
+
+   - **While the emergency latch is on:**
+     - The body is awake, even off-phase.
+     - It may seek and eat when its eating latch is on. Hunters may lure, target and strike
+       then too.
+     - With a full stomach it stays awake but doesn't eat, waiting for digestion.
+   - **Packs:** the pack starts a hunt when at least half its adults have the eating latch on,
+     or any adult is in emergency. Members join if their latch is on or they are in
+     emergency.
+8. **Bouts [M9].** The stomach bounds its **contents** (`0 ≤ S ≤ K`), not a sitting's
+   intake.
+   - Juveniles, famine recovery and provisioning may feed in long continuous bouts.
+   - Bouts are recorded by kind: normal, emergency, growth, provisioning.
+9. **Riders [M8].** `parasite_take_per_day` defaults to 0.09 of host body per world day. It
+   goes straight into the rider's reserve.
+   - **Sizing:** on a 1.5-ou grazer, about 1.19 world days to drop-off (Astra's integration).
+   - The host's spending includes the take. That is about 2.8× a grazer's basal, so infested
+     hosts visibly eat more.
+10. **The stomach's contents [M12].**
+    - **Pools:** a small per-food-class store of raw organic matter, mineral and energy. Each
+      class digests at its own `τ` and yield; there is no mixing rule beyond proportional
+      transfer.
+    - **Separate from egesta:** the existing `gut` is egesta and stays apart.
+    - **On death or removal,** the contents go to the carcass or litter as raw matter, with no
+      extra carcass yield.
+    - **Saved state:** serialised, with a fauna schema bump.
+    - **Books, for organic matter, mineral and energy:**
+      food in + transfers in = assimilated + egesta + respiration + transfers out
+      + Δstomach.
+11. **Search rebase [M10]** (a second package, after the gut lands):
+    - write the resolved new values into the live presets;
+    - upkeep genes are ×1 at the new `f`;
+    - new genes: `k`, `τ` per food class, `b`, `s0`, `parasite_take_per_day`;
+    - the night guard counts digestible stomach stock, or is soft;
+    - replenishment counts reserve plus digestible stomach, so moving food around is not
+      income.
+12. **Tests [M11].** Use controlled fixtures:
+    - fixed adult body, breeding off, lifespan off, ample reachable food.
+    - **Interval:** measure at least 3 completed meal intervals per lineage, against the
+      formula with the unrounded `E` (Astra's exact intervals: 0.1012, 0.3162, 0.5060,
+      0.6324, 0.5407, 0.5407, 0.4866, 1.2649 and 3.0415 days), mean within ±30 %.
+    - **Separate tests:**
+      - no prey, hungry: lures or seeks, but no strike without eligible prey;
+      - emergency and alert precedence;
+      - interrupted food access keeps the latch on;
+      - famine recovery: `0 ≤ S ≤ K`, books close, bout duration recorded;
+      - a juvenile reaches breeding size, with time measured against the 1.5-day expectation;
+      - regurgitation conserves and keeps composition;
+      - a rider's budget on a fixed host;
+      - books close over a full day for organic matter, mineral and energy.
+    - **Measure:** seeds 1–8 × 2 h for access and survival, and one 8 h world as
+      exploration, not cadence statistics.
