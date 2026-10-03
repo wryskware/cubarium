@@ -241,6 +241,8 @@ fn founder_rows() -> Vec<Row> {
         r("flight.foliage_speed_factor", "x speed cap", fraction, "the speed cap inside a crown's foliage layers").optional().prov("decision"),
         r("flight.shower_rain_reference_m_per_s", "m/s of rain", Range::positive(), "R0: flight costs x (1 + rain rate / R0) in a shower").optional(),
         r("flight.lift_speed_fraction", "x cruise speed", nonneg, "vertical speed at full lift, either way").optional(),
+        r("flight.egg_headroom_m", "m", nonneg, "a flyer lays only on a face with this clear over its hatchling's body").optional(),
+        r("flight.egg_air_refresh_s", "s", nonneg, "the open air a flyer's egg site must reach is rebuilt at most this often").optional(),
         // The glider's table (`Glider`, F3): the seedporter's only, optional on the others.
         r("glider.climb_min_stand_m", "m", nonneg, "the shortest stand whose stem it climbs (crown top over the support)").optional().prov("decision"),
         r("glider.glide_ratio", "m across per m down", Range::positive(), "a glide's horizontal metres per metre of descent").optional().prov("decision"),
@@ -266,6 +268,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.territory_radius_m", "m", nonneg, "a pack never paths within this of another pack's den").optional().prov("decision"),
         r("pack.flank_offset_m", "m", nonneg, "flankers go this far either side of the target").optional(),
         r("pack.chase_give_up_s", "s", nonneg, "a chase is dropped after this").optional().prov("decision"),
+        r("pack.route_reach_fraction", "fraction", fraction, "prey is taken only within this share of cruise x chase_give_up_s by route").optional(),
         r("pack.route_refresh_s", "s", nonneg, "a pack's walking route components (only prey in its own is taken) are rebuilt at most this often").optional(),
         r("pack.chase_reserve_floor", "fraction of reserve cap", fraction, "a chase is dropped when a member's reserve falls under this").optional(),
         r("pack.call_s", "s", nonneg, "a member calls this long after the target changes or it strikes").optional().prov("decision"),

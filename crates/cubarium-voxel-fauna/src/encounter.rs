@@ -394,18 +394,189 @@ pub fn route_components(
     cubarium_voxel::walk::components_linked(&cells, c.width, rule.step.mutual(), &links)
 }
 
-/// A founder lineage's **walking route components**, by face: [`RouteMap::for_founder`]'s
+/// A founder lineage's **walking route graph** (bellwing3 item 1): [`RouteMap::for_founder`]'s
 /// faces and components (its adult body, wade depth, step and walls) without the mouth
-/// columns, for a question asked per tick ("is that body in my component?").
-pub fn route_component_index(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> FxHashMap<Site, usize> {
-    let body = phys.adult_body();
-    let faces = standable_faces(view, &body, phys.wade_depth_m(&body));
-    let rule = RouteRule {
-        step: phys.step_limits(view.config.voxel_m),
-        climbs_walls: phys.climbs_walls,
-    };
-    let components = route_components(view, &faces, rule, body.headroom_voxels(view.config.voxel_m));
-    faces.into_iter().zip(components).collect()
+/// columns, with the step rule's edges kept so a route can be walked: route distances
+/// ([`RouteGraph::distances`]), the next face toward a goal ([`RouteGraph::next_toward`])
+/// and whether a straight line is walkable ([`RouteGraph::walk_line`]).
+#[derive(Debug)]
+pub struct RouteGraph {
+    /// The standable faces, in [`standable_faces`] order.
+    pub faces: Vec<Site>,
+    /// The walkable component of each face.
+    pub components: Vec<usize>,
+    index: FxHashMap<Site, usize>,
+    /// A climber's wall edges, both ways.
+    links: FxHashMap<usize, Vec<usize>>,
+    climb: u32,
+    width: u32,
+    depth: u32,
+    voxel_m: f64,
+}
+
+impl RouteGraph {
+    /// The route graph of a founder lineage's adult body.
+    pub fn for_founder(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> RouteGraph {
+        let c = view.config;
+        let body = phys.adult_body();
+        let faces = standable_faces(view, &body, phys.wade_depth_m(&body));
+        let rule = RouteRule {
+            step: phys.step_limits(c.voxel_m),
+            climbs_walls: phys.climbs_walls,
+        };
+        let headroom = body.headroom_voxels(c.voxel_m);
+        let components = route_components(view, &faces, rule, headroom);
+        let index: FxHashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
+        let mut links: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+        if rule.climbs_walls {
+            for (i, f) in faces.iter().enumerate() {
+                for dir in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+                    let crate::Face::Climb(top) =
+                        crate::wall_ascent(view, i64::from(f.x), f.y, f.z, dir, headroom, rule.step.up)
+                    else {
+                        continue;
+                    };
+                    let to = Site {
+                        x: (i64::from(f.x) + dir.0).rem_euclid(i64::from(c.width)) as u32,
+                        y: top,
+                        z: (i64::from(f.z) + dir.1) as u32,
+                    };
+                    if let Some(&j) = index.get(&to) {
+                        links.entry(i).or_default().push(j);
+                        links.entry(j).or_default().push(i);
+                    }
+                }
+            }
+        }
+        RouteGraph {
+            faces,
+            components,
+            index,
+            links,
+            climb: rule.step.mutual(),
+            width: c.width,
+            depth: c.depth,
+            voxel_m: c.voxel_m,
+        }
+    }
+
+    /// The index of `site` among the faces, if the body can stand there.
+    pub fn face(&self, site: Site) -> Option<usize> {
+        self.index.get(&site).copied()
+    }
+
+    /// The walkable component a body standing on `site` is in.
+    pub fn component_of(&self, site: Site) -> Option<usize> {
+        self.face(site).map(|i| self.components[i])
+    }
+
+    /// The face on column `(x, z)` within the step of layer `y`, the nearest layer first.
+    fn face_near(&self, x: u32, y: u32, z: u32) -> Option<usize> {
+        let climb = i64::from(self.climb);
+        (0..=climb).flat_map(|d| if d == 0 { vec![0] } else { vec![-d, d] }).find_map(|dy| {
+            let yy = i64::from(y) + dy;
+            if yy < 0 {
+                return None;
+            }
+            self.face(Site { x, y: yy as u32, z })
+        })
+    }
+
+    /// Face `i`'s neighbours under the step rule (and its wall edges).
+    fn neighbours(&self, i: usize, out: &mut Vec<usize>) {
+        out.clear();
+        let f = self.faces[i];
+        let climb = i64::from(self.climb);
+        for (dx, dz) in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+            let nz = i64::from(f.z) + dz;
+            if nz < 0 || nz >= i64::from(self.depth) {
+                continue;
+            }
+            let nx = (i64::from(f.x) + dx).rem_euclid(i64::from(self.width)) as u32;
+            for dy in -climb..=climb {
+                let ny = i64::from(f.y) + dy;
+                if ny < 0 {
+                    continue;
+                }
+                if let Some(j) = self.face(Site { x: nx, y: ny as u32, z: nz as u32 }) {
+                    out.push(j);
+                }
+            }
+        }
+        if let Some(l) = self.links.get(&i) {
+            out.extend(l.iter().copied());
+        }
+    }
+
+    /// Route distances in face steps from face `from`, out to `max_steps`: a step is one
+    /// face to a neighbouring column (one voxel across).
+    pub fn distances(&self, from: usize, max_steps: u32) -> FxHashMap<usize, u32> {
+        let mut dist: FxHashMap<usize, u32> = FxHashMap::default();
+        let mut queue = std::collections::VecDeque::new();
+        dist.insert(from, 0);
+        queue.push_back(from);
+        let mut nb = Vec::new();
+        while let Some(i) = queue.pop_front() {
+            let d = dist[&i];
+            if d >= max_steps {
+                continue;
+            }
+            self.neighbours(i, &mut nb);
+            for &j in &nb {
+                if let std::collections::hash_map::Entry::Vacant(e) = dist.entry(j) {
+                    e.insert(d + 1);
+                    queue.push_back(j);
+                }
+            }
+        }
+        dist
+    }
+
+    /// The neighbour of face `i` one step nearer the goal of `field` (a
+    /// [`RouteGraph::distances`] from the goal), the lowest index among equals; `None` at
+    /// the goal or off the field.
+    pub fn next_toward(&self, field: &FxHashMap<usize, u32>, i: usize) -> Option<usize> {
+        let d = *field.get(&i)?;
+        let mut nb = Vec::new();
+        self.neighbours(i, &mut nb);
+        nb.into_iter()
+            .filter_map(|j| field.get(&j).map(|&dj| (dj, j)))
+            .filter(|&(dj, _)| dj < d)
+            .min()
+            .map(|(_, j)| j)
+    }
+
+    /// The centre of face `i`, metres `(x, z)`.
+    pub fn centre(&self, i: usize) -> (f64, f64) {
+        let f = self.faces[i];
+        ((f64::from(f.x) + 0.5) * self.voxel_m, (f64::from(f.z) + 0.5) * self.voxel_m)
+    }
+
+    /// Whether the straight line from `(x0, z0)` (a body standing on `from`) to `(x1, z1)`
+    /// is walkable on the route graph: every column it crosses, sampled each half voxel,
+    /// holds a standable face within the step of the last one.
+    pub fn walk_line(&self, from: Site, (x0, z0): (f64, f64), (x1, z1): (f64, f64)) -> bool {
+        let v = self.voxel_m;
+        let ring = f64::from(self.width) * v;
+        let (dx, dz) = crate::pose::wrapped_delta(x0, z0, x1, z1, ring);
+        let len = (dx * dx + dz * dz).sqrt();
+        let n = ((len / (0.5 * v)).ceil() as usize).max(1);
+        let mut y = from.y;
+        for k in 1..=n {
+            let t = k as f64 / n as f64;
+            let (x, z) = (x0 + dx * t, z0 + dz * t);
+            let cz = (z / v).floor();
+            if !(0.0..f64::from(self.depth)).contains(&cz) {
+                return false;
+            }
+            let cx = ((x / v).floor() as i64).rem_euclid(i64::from(self.width)) as u32;
+            match self.face_near(cx, y, cz as u32) {
+                Some(j) => y = self.faces[j].y,
+                None => return false,
+            }
+        }
+        true
+    }
 }
 
 /// The faces a lineage's founders may be placed on (fix 2,

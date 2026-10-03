@@ -1158,7 +1158,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1086 rows)
+**`fauna.*`** (1113 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1261,6 +1261,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.littershredder.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.littershredder.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.littershredder.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.littershredder.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.littershredder.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.littershredder.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.littershredder.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1283,6 +1285,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.littershredder.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.littershredder.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.littershredder.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.littershredder.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.littershredder.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1369,6 +1372,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.frondgrazer.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.frondgrazer.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.frondgrazer.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.frondgrazer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.frondgrazer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.frondgrazer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.frondgrazer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1391,6 +1396,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.frondgrazer.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.frondgrazer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.frondgrazer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.frondgrazer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.frondgrazer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1477,6 +1483,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.lanternjaw.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.lanternjaw.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.lanternjaw.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.lanternjaw.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.lanternjaw.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.lanternjaw.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.lanternjaw.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1499,6 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.lanternjaw.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.lanternjaw.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.lanternjaw.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.lanternjaw.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.lanternjaw.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1585,6 +1594,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.capgnawer.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.capgnawer.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.capgnawer.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.capgnawer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.capgnawer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.capgnawer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.capgnawer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1607,6 +1618,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.capgnawer.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.capgnawer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.capgnawer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.capgnawer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.capgnawer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1693,6 +1705,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.loftstrider.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.loftstrider.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.loftstrider.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.loftstrider.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.loftstrider.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.loftstrider.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.loftstrider.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1715,6 +1729,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.loftstrider.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.loftstrider.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.loftstrider.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.loftstrider.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.loftstrider.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1801,6 +1816,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.ripple-snail.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.ripple-snail.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.ripple-snail.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.ripple-snail.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.ripple-snail.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.ripple-snail.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.ripple-snail.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1823,6 +1840,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.ripple-snail.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.ripple-snail.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.ripple-snail.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.ripple-snail.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.ripple-snail.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1909,6 +1927,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flight.foliage_speed_factor` | 0.5 | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.bellwing.flight.shower_rain_reference_m_per_s` | 0.000002777777777777778 | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.bellwing.flight.lift_speed_fraction` | 0.5 | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.bellwing.flight.egg_headroom_m` | 1.0 | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.bellwing.flight.egg_air_refresh_s` | 600.0 | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.bellwing.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.bellwing.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.bellwing.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1931,6 +1951,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.bellwing.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.bellwing.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.bellwing.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.bellwing.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.bellwing.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -2017,6 +2038,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.seedporter.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.seedporter.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.seedporter.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.seedporter.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.seedporter.glider.glide_body_lengths_per_s` | 3.0 | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -2039,6 +2062,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.seedporter.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.seedporter.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.seedporter.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.seedporter.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.seedporter.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -2125,6 +2149,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.chorister.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.chorister.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.chorister.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.chorister.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.chorister.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -2147,6 +2173,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.territory_radius_m` | 10.0 | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.chorister.pack.flank_offset_m` | 1.5 | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.chorister.pack.chase_give_up_s` | 20.0 | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.chorister.pack.route_reach_fraction` | 0.8 | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.chorister.pack.route_refresh_s` | 60.0 | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.chorister.pack.call_s` | 1.0 | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |

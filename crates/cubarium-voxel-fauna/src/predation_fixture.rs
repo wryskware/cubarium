@@ -32,10 +32,15 @@ pub(super) const WEST: f64 = -FRAC_PI_2;
 
 /// A flat soil plain 12 m around the ring and 3 m deep, at 0.25 m, with the given clock.
 pub(super) fn plain(day: DayClock, seed: u64) -> World {
+    plain_of_height(day, seed, 8)
+}
+
+/// [`plain`] with `height` rows of world (for terrain a body must stand on high up).
+pub(super) fn plain_of_height(day: DayClock, seed: u64, height: u32) -> World {
     let (width, depth) = (48u32, 12u32);
     let mut w = World::empty(VoxelConfig {
         width,
-        height: 8,
+        height,
         depth,
         voxel_m: VOXEL_M,
         seed,

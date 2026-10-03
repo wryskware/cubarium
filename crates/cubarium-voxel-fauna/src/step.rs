@@ -2563,7 +2563,7 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
             crate::BirthMode::Gestation => {
                 gestate(fauna, i, &sc, &rule, view.config.seed, &mut newborns);
             }
-            crate::BirthMode::Eggs => lay(fauna, i, flora, &sc, &rule, view.config.seed),
+            crate::BirthMode::Eggs => lay(fauna, i, view, flora, &sc, &rule),
         }
     }
     hatch(fauna, view, &mut newborns);
@@ -2898,11 +2898,12 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 fn lay(
     fauna: &mut Fauna,
     i: usize,
+    view: &VoxelView<'_>,
     flora: &Flora,
     sc: &SpeciesConfig,
     rule: &crate::Reproduction,
-    seed: u64,
 ) {
+    let seed = view.config.seed;
     if !rule.hold_met(&fauna.animals[i].reproduction) {
         return;
     }
@@ -2924,6 +2925,22 @@ fn lay(
             crate::EggSite::Film => ground.is_some_and(|g| g.film > 0.0),
         };
         if !fits {
+            return;
+        }
+    }
+    // A flyer's egg needs room to fly from (bellwing3 item 2): its hatchling appears in
+    // the air on this face, so the face needs `egg_headroom_m` clear over the hatchling's
+    // body, and its air must reach the open air.
+    if let Some(flight) = fauna.config.founder(lineage).flight {
+        let phys = *fauna.config.founder(lineage);
+        let shape = crate::flight::Shape::of(&phys, &flight, sc.body_min);
+        let v = view.config.voxel_m;
+        let (x, z) = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
+        let room = crate::flight::overhead_clear(view, shape, x, z, crate::surface_m(site.y, v), flight.egg_headroom_m);
+        if room + crate::flight::EPS < flight.egg_headroom_m {
+            return;
+        }
+        if !fauna.open_air(view, &flight).over_face_is_open(site) {
             return;
         }
     }

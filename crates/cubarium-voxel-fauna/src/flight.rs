@@ -968,3 +968,93 @@ pub fn flyer_sheltered(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, ban
         .iter()
         .any(|(_, l)| l.cell as f64 * v >= head - EPS && l.cell as f64 * v <= base + band_max_m)
 }
+
+/// **The open air** a flyer can reach (bellwing3 item 2): cells that are not solid, not
+/// under standing water, and no higher than `band_max_m` over the support face below them,
+/// split into 6-connected components (a point body), with the largest named the open air.
+/// `founder_tally reach`'s rule.
+pub(crate) struct OpenAir {
+    width: usize,
+    height: usize,
+    comp: Vec<u32>,
+    open: u32,
+}
+
+impl std::fmt::Debug for OpenAir {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "OpenAir {{ cells: {}, open: {} }}", self.comp.len(), self.open)
+    }
+}
+
+impl OpenAir {
+    pub(crate) fn build(view: &VoxelView<'_>, band_max_m: f64) -> OpenAir {
+        let c = view.config;
+        let v = c.voxel_m;
+        let (w, d, h) = (c.width as usize, c.depth as usize, c.height as usize);
+        let idx = |x: usize, y: usize, z: usize| (z * h + y) * w + x;
+        let air = |x: usize, y: usize, z: usize| -> bool {
+            if y == 0 || view.is_solid(x as i64, y as u32, z as u32) {
+                return false;
+            }
+            let Some(s) = view.highest_support_in(x as i64, z as u32, 0, (y - 1) as u32) else {
+                return false;
+            };
+            let top = surface_m(s, v);
+            let water = view.standing_depth_m(x as i64, s, z as u32);
+            let base = y as f64 * v;
+            base <= top + band_max_m + EPS && base + EPS >= top + water
+        };
+        let mut comp = vec![u32::MAX; w * h * d];
+        let mut sizes: Vec<u64> = Vec::new();
+        let mut stack = Vec::new();
+        for z in 0..d {
+            for y in 0..h {
+                for x in 0..w {
+                    if comp[idx(x, y, z)] != u32::MAX || !air(x, y, z) {
+                        continue;
+                    }
+                    let id = sizes.len() as u32;
+                    comp[idx(x, y, z)] = id;
+                    stack.push((x, y, z));
+                    let mut n = 0u64;
+                    while let Some((x, y, z)) = stack.pop() {
+                        n += 1;
+                        let mut visit = |a: usize, b: usize, cc: usize, stack: &mut Vec<(usize, usize, usize)>| {
+                            if comp[idx(a, b, cc)] == u32::MAX && air(a, b, cc) {
+                                comp[idx(a, b, cc)] = id;
+                                stack.push((a, b, cc));
+                            }
+                        };
+                        visit((x + 1) % w, y, z, &mut stack);
+                        visit((x + w - 1) % w, y, z, &mut stack);
+                        if y + 1 < h {
+                            visit(x, y + 1, z, &mut stack);
+                        }
+                        if y > 0 {
+                            visit(x, y - 1, z, &mut stack);
+                        }
+                        if z + 1 < d {
+                            visit(x, y, z + 1, &mut stack);
+                        }
+                        if z > 0 {
+                            visit(x, y, z - 1, &mut stack);
+                        }
+                    }
+                    sizes.push(n);
+                }
+            }
+        }
+        let open = (0..sizes.len()).max_by_key(|&k| sizes[k]).map_or(u32::MAX, |k| k as u32);
+        OpenAir { width: w, height: h, comp, open }
+    }
+
+    /// Whether the air cell over support face `site` is in the open air.
+    pub(crate) fn over_face_is_open(&self, site: Site) -> bool {
+        let y = site.y as usize + 1;
+        if y >= self.height || self.open == u32::MAX {
+            return false;
+        }
+        let k = (site.z as usize * self.height + y) * self.width + site.x as usize;
+        self.comp.get(k).is_some_and(|&c| c == self.open)
+    }
+}

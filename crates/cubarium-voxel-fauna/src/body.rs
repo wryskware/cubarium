@@ -531,6 +531,10 @@ pub struct Pack {
     /// placeholder: the terrain and its water change slowly). 60.
     #[serde(default = "pack_route_refresh_s")]
     pub route_refresh_s: f64,
+    /// A pack takes prey only within this share of what it covers in a chase on foot:
+    /// route distance at most `cruise × chase_give_up_s × route_reach_fraction`. 0.8.
+    #[serde(default = "pack_route_reach_fraction")]
+    pub route_reach_fraction: f64,
     /// ...or when a member's reserve falls under this fraction of its reserve cap. A
     /// placeholder.
     pub chase_reserve_floor: f64,
@@ -553,6 +557,10 @@ fn pack_route_refresh_s() -> f64 {
     Pack::CHORISTER.route_refresh_s
 }
 
+fn pack_route_reach_fraction() -> f64 {
+    Pack::CHORISTER.route_reach_fraction
+}
+
 impl Pack {
     /// The chorister's table (Brief R3).
     pub const CHORISTER: Pack = Pack {
@@ -570,6 +578,7 @@ impl Pack {
         flank_offset_m: 1.5,
         chase_give_up_s: 20.0,
         route_refresh_s: 60.0,
+        route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,
         call_s: 1.0,
         den_search_m: 8.0,
@@ -680,10 +689,31 @@ pub struct Flight {
     /// half a metre a second, a full band (2.5 m) in five seconds.
     #[serde(default = "half")]
     pub lift_speed_fraction: f64,
+    /// **An egg needs room to fly from**: a flyer lays only on a face with at least this
+    /// clear over its hatchling's body (the hatchling's disc, `body_min`'s height),
+    /// metres. Bellwing 1.0, derived from the hatchling's flight clearance: the hover-sip
+    /// teacher treats cover closer than `bellwing_roost_ceiling` (0.4) × `band_max_m`
+    /// (2.5) = 1.0 m over its body as low (it neither climbs toward it nor over a wall
+    /// under it), so a hatchling with 1.0 m clear sees open sky and climbs out.
+    #[serde(default = "egg_headroom")]
+    pub egg_headroom_m: f64,
+    /// A flyer lays only where the air over the face reaches the **open air** (the
+    /// largest connected region of air under its band, a point body); that region is
+    /// rebuilt from the terrain at most this often, seconds. A placeholder: 600.
+    #[serde(default = "egg_air_refresh")]
+    pub egg_air_refresh_s: f64,
 }
 
 fn half() -> f64 {
     0.5
+}
+
+fn egg_headroom() -> f64 {
+    Flight::BELLWING.egg_headroom_m
+}
+
+fn egg_air_refresh() -> f64 {
+    Flight::BELLWING.egg_air_refresh_s
 }
 
 impl Flight {
@@ -703,6 +733,8 @@ impl Flight {
         // Heavy rain (10 mm/h) doubles the cost of a second aloft.
         shower_rain_reference_m_per_s: 10.0 / 1000.0 / 3600.0,
         lift_speed_fraction: 0.5,
+        egg_headroom_m: 1.0,
+        egg_air_refresh_s: 600.0,
     };
 }
 

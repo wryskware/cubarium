@@ -369,6 +369,17 @@ fn head(a: &Animal, want: f64, forward: f64, feed: f64) -> Actions {
     }
 }
 
+/// A pack's reach on foot in route steps (one voxel each): what it covers in a chase,
+/// `cruise × chase_give_up_s`, times `route_reach_fraction`.
+fn reach_steps(t: &Pack, cruise_m_per_s: f64, voxel_m: f64) -> u32 {
+    let m = cruise_m_per_s * t.chase_give_up_s * t.route_reach_fraction;
+    if m.is_finite() && m > 0.0 && voxel_m > 0.0 {
+        (m / voxel_m).floor().min(f64::from(u32::MAX)) as u32
+    } else {
+        0
+    }
+}
+
 /// Walk to a point; stop (turning to face it) within `stop_m`.
 fn go_to(a: &Animal, x: f64, z: f64, ring: f64, stop_m: f64, feed: f64) -> Actions {
     let (dx, dz, d) = delta(a, x, z, ring);
@@ -625,15 +636,14 @@ pub(crate) fn steer(
         let mates = near.len();
         let participating = near.iter().filter(|b| participates(b, own)).count();
         if mates > 0 {
-            // Only prey it can reach: standing in the taker's own walking route
-            // component (bellwing-finding item 3: grazers on a cliff top 3 m over the pack
-            // drew 74 timed-out chases in seed 1).
-            let routes = fauna.pack_routes(view, founder);
-            let own_component = routes.get(&a.site).copied();
+            // Only prey it can reach on foot within the chase: on the taker's walking
+            // route graph, at most `cruise × chase_give_up_s × route_reach_fraction` away by
+            // route (bellwing-finding item 3, bellwing3 item 1: grazers on a cliff top 3 m
+            // over the pack drew 74 timed-out chases in seed 1).
             let window = window_body(fauna, i, ring);
             let sight = manifest.cone_range_m;
             let (fx, fz) = a.pose.forward();
-            let mut best: Option<(f64, u64, Site)> = None;
+            let mut candidates: Vec<(f64, u64, Site)> = Vec::new();
             for o in &fauna.animals {
                 if o.id == a.id || o.mobility.climb.is_some() {
                     continue;
@@ -641,12 +651,8 @@ pub(crate) fn steer(
                 let (dx, dz, d) = delta(&a, o.pose.x, o.pose.z, ring);
                 if d > sight
                     || dx * fx + dz * fz < 0.0
-                    || best.is_some_and(|(b, _, _)| d >= b)
                     || fauna.pack(own).and_then(|p| p.abandoned) == Some(o.id)
                 {
-                    continue;
-                }
-                if own_component.is_none() || routes.get(&o.site).copied() != own_component {
                     continue;
                 }
                 if !crate::predation::is_prey_in_window(&fauna.config, &a, o, window)
@@ -654,7 +660,18 @@ pub(crate) fn steer(
                 {
                     continue;
                 }
-                best = Some((d, o.id, o.site));
+                candidates.push((d, o.id, o.site));
+            }
+            let mut best: Option<(f64, u64, Site)> = None;
+            if !candidates.is_empty() {
+                candidates.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+                let routes = fauna.pack_routes(view, founder);
+                if let Some(from) = routes.face(a.site) {
+                    let field = routes.distances(from, reach_steps(&t, manifest.cruise_m_per_s, v));
+                    best = candidates
+                        .into_iter()
+                        .find(|c| routes.face(c.2).is_some_and(|j| field.contains_key(&j)));
+                }
             }
             if let Some((_, tid, site)) = best {
                 if let Some(p) = fauna.pack_mut(own) {
@@ -711,8 +728,25 @@ pub(crate) fn steer(
             }
             let driver_id = driver.map(|(_, id)| id);
             let stop = 0.5 * geometry.length_m;
+            // On the route (bellwing3 item 1): a member that cannot walk straight to
+            // where it is going goes to the next face on its route to the target's face.
+            let routed = |fauna: &mut Fauna, gx: f64, gz: f64| -> Option<(f64, f64)> {
+                let graph = fauna.pack_routes(view, founder);
+                if graph.walk_line(a.site, (a.pose.x, a.pose.z), (gx, gz)) {
+                    return None;
+                }
+                let goal = graph.face(o.site)?;
+                let from = graph.face(a.site)?;
+                let (graph, field) = fauna.pack_path(view, founder, own, goal, reach_steps(&t, manifest.cruise_m_per_s, v));
+                graph.next_toward(&field, from).map(|j| graph.centre(j))
+            };
             let act = if driver_id == Some(a.id) {
-                go_to(&a, o.pose.x, o.pose.z, ring, stop, 1.0)
+                match routed(fauna, o.pose.x, o.pose.z) {
+                    Some((nx, nz)) => go_to(&a, nx, nz, ring, 0.0, 1.0),
+                    None => go_to(&a, o.pose.x, o.pose.z, ring, stop, 1.0),
+                }
+            } else if let Some((nx, nz)) = routed(fauna, o.pose.x, o.pose.z) {
+                go_to(&a, nx, nz, ring, 0.0, 1.0)
             } else {
                 let rank = hunters
                     .iter()
