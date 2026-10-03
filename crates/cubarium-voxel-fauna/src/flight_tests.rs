@@ -1294,3 +1294,44 @@ fn the_hover_sip_teacher_climbs_over_a_step_inside_its_band() {
     assert!(animal(&fauna, id).eating, "the bellwing is hungry, so it searches");
     assert!(over < 1200, "the bellwing flew over the 1.5 m step: it is at {:?}", animal(&fauna, id).pose);
 }
+
+/// **A hatchling under low cover gets off the floor** (`design/handoffs/
+/// bellwing-finding-2026-10-03.md` follow-up 2): a bellwing hatches in the air at its
+/// face's top, and eggs are laid under the parent's perch — often an overhang. Here it
+/// hatches in a hollow ringed by a one-voxel lip, under a rock roof 0.75 m over its face
+/// (cover inside the teacher's `bellwing_roost_ceiling`, so it never climbs toward it). In
+/// the terrarium every starved hatchling (14 of 14 in seed 5) hung at its hatching face
+/// for its whole life, turning in place, base on the floor, never sipping. It must rise
+/// off the floor under the roof and leave the hollow: within 30 s its column is outside
+/// the lip.
+#[test]
+fn a_hatchling_under_low_cover_rises_off_the_floor_and_leaves_its_hollow() {
+    let mut world = plain(32, 20, 9);
+    // The lip: rock at y = 3 on the ring of columns around (8..=10, 3..=5).
+    for z in 2..=6u32 {
+        for x in 7..=11i64 {
+            if (8..=10).contains(&x) && (3..=5).contains(&z) {
+                continue;
+            }
+            world.apply(WorldCommand::SetMaterial { x, y: 3, z, material: Material::Rock });
+        }
+    }
+    // The roof: rock at y = 6 over columns 4..=14 (its underside 0.75 m over the face).
+    for z in 0..9u32 {
+        for x in 4..=14i64 {
+            world.apply(WorldCommand::SetMaterial { x, y: 6, z, material: Material::Rock });
+        }
+    }
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(9, 4);
+    // A hatchling's stores: body_min (a quarter of body_max) and its egg's remainder.
+    let id = aloft(&mut fauna, &world, x, z, SURFACE, EAST, StartingStores { body: 0.25, reserve: 0.5 });
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(BW, teachers)));
+    let out = until(&mut fauna, &world, &mut flora, 600, |f| {
+        f.view().animal(id).is_some_and(|a| !(7..=11).contains(&a.site.x) || !(2..=6).contains(&a.site.z))
+    });
+    let a = animal(&fauna, id);
+    assert!(out < 600, "the hatchling left its hollow: it is at {:?}, {:?}", a.pose, a.mobility.mode);
+}
