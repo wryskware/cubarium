@@ -187,8 +187,14 @@ fn main() {
         .collect();
     let mut prev_deaths = sim.fauna().view().ledger.deaths_by_founder_cause;
     let started = std::time::Instant::now();
+    // The minimal gut's readouts: body-ticks per lineage, and the stomach's fill `S / K`
+    // summed per lineage over six bins of the clock day (four clock hours each).
+    let mut gut = GutTally::default();
+    let start_hour = params.world.day.start_hour;
+    let day_s = params.world.day.day_s();
     for tick in 1..=ticks {
         sim.step();
+        gut.observe(&sim, &params, start_hour, day_s, tick);
         night.observe(&sim, &params, &mut prev_asleep, &mut prev_deaths);
         {
             use cubarium_voxel_fauna::MobilityMode;
@@ -476,6 +482,7 @@ fn main() {
         );
     }
     night.print(&sim);
+    gut.print(&sim, &params, &born);
     let foods: Vec<String> = Food::ALL
         .iter()
         .map(|f| format!("{}={}", f.name(), l.bites_by_food[f.index()]))
@@ -583,6 +590,100 @@ fn t0_report(sim: &Sim, params: &cubarium_voxel_sim::params::Params) {
 }
 
 /// Whether a body is in the sleep rest (not a carnivore's satiated torpor).
+/// **The minimal gut's readouts** (`design/handoffs/gut-meals-2026-10-03.md`), one `gut:`
+/// line per lineage: meals per world day (completed bouts over body-days of the
+/// 7,200-s ecological day), the bouts by kind and their mean length, the stomach's fill
+/// over the clock day (mean `S / K` in six four-hour bins from midnight), the share of
+/// body-ticks with the eating latch on, emergency wakes, sleep flips per body-hour, the
+/// measured maturations (count and mean, world days), births, kills by this lineage, and
+/// deaths by cause. A `riders:` line: attached, dropped off, and the organic riders took.
+#[derive(Default)]
+struct GutTally {
+    body_ticks: [u64; Founder::COUNT],
+    eating_ticks: [u64; Founder::COUNT],
+    fill: [[f64; 6]; Founder::COUNT],
+    fill_n: [[u64; 6]; Founder::COUNT],
+}
+
+impl GutTally {
+    fn observe(&mut self, sim: &Sim, params: &cubarium_voxel_sim::params::Params, start_hour: f64, day_s: f64, tick: u64) {
+        let t = tick as f64 / f64::from(cubarium_voxel::TICK_HZ);
+        let hour = (start_hour + 24.0 * t / day_s).rem_euclid(24.0);
+        let bin = ((hour / 4.0) as usize).min(5);
+        for a in sim.fauna().view().animals {
+            let Some(f) = a.founder else { continue };
+            let i = f.index();
+            self.body_ticks[i] += 1;
+            if a.eating {
+                self.eating_ticks[i] += 1;
+            }
+            let k = params.fauna.founder(f).gut.capacity(a.body);
+            if k > 0.0 {
+                self.fill[i][bin] += a.stomach.organic() / k;
+                self.fill_n[i][bin] += 1;
+            }
+        }
+    }
+
+    fn print(&self, sim: &Sim, params: &cubarium_voxel_sim::params::Params, born: &[u64; Founder::COUNT]) {
+        let l = sim.fauna().view().ledger;
+        let hz = f64::from(cubarium_voxel::TICK_HZ);
+        let eco_day = params.fauna.life.ecological_day_s;
+        for f in Founder::ALL {
+            let i = f.index();
+            if self.body_ticks[i] == 0 && born[i] == 0 {
+                continue;
+            }
+            let body_s = self.body_ticks[i] as f64 / hz;
+            let meals: u64 = l.meals_by_founder_kind[i].iter().sum();
+            let kinds: Vec<String> = cubarium_voxel_fauna::BoutKind::ALL
+                .iter()
+                .map(|k| {
+                    let n = l.meals_by_founder_kind[i][k.index()];
+                    let s = l.meal_ticks_by_founder_kind[i][k.index()] as f64 / hz;
+                    format!("{}={n}/{:.0}s", k.name(), if n > 0 { s / n as f64 } else { 0.0 })
+                })
+                .collect();
+            let fill: Vec<String> = (0..6)
+                .map(|b| {
+                    let n = self.fill_n[i][b];
+                    if n > 0 { format!("{:.2}", self.fill[i][b] / n as f64) } else { "-".into() }
+                })
+                .collect();
+            let kills: u64 = Founder::ALL
+                .iter()
+                .map(|&p| l.departed_founder(p, Departure::Killed { by: f }))
+                .sum();
+            let matured = l.matured_by_founder[i];
+            let mat_days = if matured > 0 {
+                l.maturation_ticks_by_founder[i] as f64 / hz / eco_day / matured as f64
+            } else {
+                f64::NAN
+            };
+            println!(
+                "gut: {:15} body_days={:.3} meals={} meals_per_day={:.3} bouts=[{}] fill_by_4h=[{}] eating_share={:.3} emergency_wakes={} sleep_flips_per_h={:.2} matured={} maturation_days={:.3} born={} kills={}",
+                f.name(),
+                body_s / eco_day,
+                meals,
+                if body_s > 0.0 { meals as f64 / (body_s / eco_day) } else { f64::NAN },
+                kinds.join(" "),
+                fill.join(" "),
+                if self.body_ticks[i] > 0 { self.eating_ticks[i] as f64 / self.body_ticks[i] as f64 } else { 0.0 },
+                l.emergency_wakes_by_founder[i],
+                if body_s > 0.0 { l.sleep_flips_by_founder[i] as f64 / (body_s / 3600.0) } else { f64::NAN },
+                matured,
+                mat_days,
+                born[i],
+                kills,
+            );
+        }
+        println!(
+            "riders: attached={} dropoffs={} freed={} taken_organic={:.6}",
+            l.riders_attached, l.rider_dropoffs, l.riders_freed, l.parasite_taken_organic
+        );
+    }
+}
+
 fn is_sleeping(a: &cubarium_voxel_fauna::Animal) -> bool {
     a.state == cubarium_voxel_fauna::State::Asleep && a.rest == Some(cubarium_voxel_fauna::Rest::Sleep)
 }
