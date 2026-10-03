@@ -1808,13 +1808,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
 const BUILT_IN_POLICIES: [(Founder, &str, &str); 2] = [
     (
         Founder::Blind,
-        "littershredder-p3c-wander-gen441.json",
-        include_str!("../../assets/policies/littershredder-p3c-wander-gen441.json"),
+        "littershredder-curio-c1-2026-10-02.json",
+        include_str!("../../assets/policies/littershredder-curio-c1-2026-10-02.json"),
     ),
     (
         Founder::Browser,
-        "frondgrazer-p3d-reach-gen390.json",
-        include_str!("../../assets/policies/frondgrazer-p3d-reach-gen390.json"),
+        "frondgrazer-curio-c1-2026-10-02.json",
+        include_str!("../../assets/policies/frondgrazer-curio-c1-2026-10-02.json"),
     ),
 ];
 
