@@ -2,6 +2,9 @@
 # roster.toml with these genes moved, hand-picked to pass every analytic screen (R a readout;
 # plants at x1; sleep and wake hunger the night defaults).
 # Training only; the live defaults are unchanged. Generated; see the commit message.
+# The minimal gut (2026-10-03): upkeep at x1 (the gut's daily need f), no `intake` gene
+# (bite_per_s is gone), the rider's take as `rider_take`; the gut genes it leaves out
+# start at x1.
 
 [base]
 file = "config/desktop/terrarium.toml"
@@ -47,110 +50,56 @@ share_weight_unestablished = 0.2
 [[gene]]
 name = "upkeep@littershredder"
 path = "fauna.founders.littershredder.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@frondgrazer"
 path = "fauna.founders.frondgrazer.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@lanternjaw"
 path = "fauna.founders.lanternjaw.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.4
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@capgnawer"
 path = "fauna.founders.capgnawer.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.22
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@loftstrider"
 path = "fauna.founders.loftstrider.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@ripple-snail"
 path = "fauna.founders.ripple-snail.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.22
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@bellwing"
 path = "fauna.founders.bellwing.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@seedporter"
 path = "fauna.founders.seedporter.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@chorister"
 path = "fauna.founders.chorister.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.2
-
-[[gene]]
-name = "intake@littershredder"
-path = "fauna.founders.littershredder.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-
-[[gene]]
-name = "intake@frondgrazer"
-path = "fauna.founders.frondgrazer.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-
-[[gene]]
-name = "intake@lanternjaw"
-path = "fauna.founders.lanternjaw.core.bite_per_s"
-range = [0.1, 10.0]
-value = 2.5
-
-[[gene]]
-name = "intake@capgnawer"
-path = "fauna.founders.capgnawer.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.5
-
-[[gene]]
-name = "intake@loftstrider"
-path = "fauna.founders.loftstrider.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-
-[[gene]]
-name = "intake@ripple-snail"
-path = "fauna.founders.ripple-snail.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.5
-
-[[gene]]
-name = "intake@bellwing"
-path = "fauna.founders.bellwing.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-
-[[gene]]
-name = "intake@seedporter"
-path = "fauna.founders.seedporter.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-
-[[gene]]
-name = "intake@chorister"
-path = "fauna.founders.chorister.core.bite_per_s"
-range = [0.1, 10.0]
-value = 5.0
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "yield"
@@ -381,10 +330,10 @@ range = [0.1, 4.0]
 what = "litter decay (dead wood and carrion follow)"
 
 [[gene]]
-name = "rider_drain"
-path = "fauna.parasite_drain_of_host_basal"
-range = [0.2, 10.0]
-what = "a rider's take, x host basal upkeep (0.05 -> 0.01-0.5, the row's interval)"
+name = "rider_take"
+path = "fauna.parasite_take_per_day"
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "rider_attach_radius"

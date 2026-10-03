@@ -11,8 +11,8 @@
 //!    to the gut** by the same fraction, and every `GUT_VOID_S` the gut is voided onto
 //!    the ground as litter (dung). Ages
 //!    advance here, so `age_ticks` is the number of maintenance payments it has made.
-//!    A parasite rider then **drains** its host (`parasite_drain_of_host_basal` × the
-//!    host's basal upkeep, by the same pro-rata rule). Then **growth**: the reserve pays
+//!    A parasite rider then **takes** from its host (`parasite_take_per_day` × the
+//!    host's body per ecological day, by the same pro-rata rule). Then **growth**: the reserve pays
 //!    for new structure at no more than `growth_max_per_s`, scaled by how full it is,
 //!    until `body_max`; a rider grown to its detach size **drops off**.
 //! 3. **Cue field.** On due ticks, update emission, decay and diffusion after maintenance

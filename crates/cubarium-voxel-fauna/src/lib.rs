@@ -1604,15 +1604,6 @@ pub struct SpeciesConfig {
     /// Organic matter respired per unit of body per second, standing still. Paid from the
     /// reserve, then from the body.
     pub maintenance_per_s: f64,
-    /// Organic matter a mouth can take per second, spread over the stands in reach in site
-    /// order. The bound on what a bite *asks* for; the plant layer bounds what it gets.
-    ///
-    /// It is the *hungry* rate: a bite asks for `bite_per_s · period · effort · hunger`, where
-    /// hunger is the reserve's shortfall from `reserve_cap · body`, then takes
-    /// `E / (E + bite_half_stock)` of that from food holding `E`, and never more than
-    /// `room / yield`, the reserve's room after yield — so nothing it eats is respired as
-    /// surplus.
-    pub bite_per_s: f64,
     /// **`K`, the stock at which a bite is half of what the mouth asked for** (package G,
     /// decision 2): a bite from food holding `E` at the mouth — a plant's edible foliage
     /// in the mouth band, or a detritus pool's stock — is `want · E / (E + K)`. A stripped
@@ -1702,7 +1693,6 @@ impl SpeciesConfig {
     pub fn frondgrazer() -> SpeciesConfig {
         SpeciesConfig {
             maintenance_per_s: 0.001,
-            bite_per_s: 0.002,
             // A turf grazed nearly to its floor: 0.005 is 6 % of a full-grown springturf's
             // edible foliage (0.7 · 2 · 0.06 = 0.084), so any plant worth the name gives
             // ~90 % of a bite and only one stripped to within crumbs of its refuge gives
@@ -1726,8 +1716,8 @@ impl SpeciesConfig {
         }
     }
 
-    /// Multiply the **eight absolute quantities** — `body_max`, `body_min`, `birth_body`,
-    /// `birth_cost`, the reproduction `surplus_floor` and `egg_organic`, `bite_per_s` and
+    /// Multiply the **seven absolute quantities** — `body_max`, `body_min`, `birth_body`,
+    /// `birth_cost`, the reproduction `surplus_floor` and `egg_organic`, and
     /// `growth_max_per_s` — by `k` (audit §1.4): the animal is `k` times heavier against
     /// the plants, and every per-unit rate, clock and metre stays. The bite's
     /// half-saturation `bite_half_stock` stays too: it is measured in the food's stock at
@@ -1740,7 +1730,6 @@ impl SpeciesConfig {
         self.birth_cost *= k;
         self.reproduction.surplus_floor *= k;
         self.reproduction.egg_organic *= k;
-        self.bite_per_s *= k;
         self.growth_max_per_s *= k;
     }
 
@@ -1775,22 +1764,12 @@ pub struct FaunaConfig {
     pub parasite_attach_radius_m: f64,
     /// Riders one host can carry at once, count. Default 1.
     pub parasite_max_per_host: u32,
-    /// **Unread since the minimal gut** (2026-10-03; [`FaunaConfig::parasite_take_per_day`]
-    /// replaces it). Kept as a field and a row only until the search's rebase, whose
-    /// roster file still names it. It was: a rider's drain, as a fraction of its host's awake basal upkeep
-    /// (`maintenance_per_s × body`, organic units per second, whatever the host's activity),
-    /// moved host → rider each tick through the three-currency pro-rata path (reserve
-    /// first, then structure; mineral and energy at the host's own density). Default
-    /// 0.05: at the brief's 0.01 a hatchling's take (about 1.5e-5/s on a shipped grazer)
-    /// is below its own upkeep (about 2e-5/s), so no rider would ever reach drop-off.
-    pub parasite_drain_of_host_basal: f64,
     /// **A rider's take** (the minimal gut, repair 2 item 9): host body per world day
     /// ([`LifeConfig::ecological_day_s`]) a rider takes out of its host — reserve first,
     /// then structure, all three currencies at the host's density — straight into its
     /// own reserve. Default 0.09: on a 1.5-ou grazer a hatchling reaches drop-off in about
     /// 1.19 world days (Astra's integration). Replaces the basal-tied drain, which the
-    /// cut to basal upkeep left unable to grow a rider; `parasite_drain_of_host_basal` is
-    /// no longer read.
+    /// cut to basal upkeep left unable to grow a rider.
     pub parasite_take_per_day: f64,
     /// A rider drops off when its body reaches this fraction of its lineage's adult
     /// `body_max`, dimensionless within `(0, 1]`. Default 0.24.
@@ -1810,7 +1789,7 @@ pub struct FaunaConfig {
 /// **The shipped org-unit mass scale** (Wrysk, 2026-09-29; audit
 /// `design/7_Research/ecology-parameter-audit-2026-09-28.md` §1.4): both lineages are
 /// built this many times heavier against the plants than the placeholder tables
-/// ([`SpeciesConfig::scale_mass`]: the eight absolute quantities, nothing per unit), so one
+/// ([`SpeciesConfig::scale_mass`]: the seven absolute quantities, nothing per unit), so one
 /// plant no longer feeds a parked animal for ever. Plants are to be re-tuned for day and
 /// night later; this is not a measured optimum.
 pub const SHIPPED_MASS_SCALE: f64 = 30.0;
@@ -1826,7 +1805,6 @@ impl Default for FaunaConfig {
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
             parasite_max_per_host: 1,
-            parasite_drain_of_host_basal: 0.05,
             parasite_take_per_day: 0.09,
             parasite_detach_body_fraction: 0.24,
             predation: PredationConfig::default(),

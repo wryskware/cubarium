@@ -312,13 +312,6 @@ pub struct TeacherConfig {
     pub ambush_wander_turn: f64,
     /// Samples the ambush's wander holds a side before flipping, count.
     pub ambush_wander_flip: u32,
-    /// **The hover-sip teacher** (F1, the bellwing): it stops sipping and goes to rest
-    /// once `Self.reserve` reaches this (a fraction of the adult reserve reference).
-    #[serde(default = "bw_full")]
-    pub bellwing_full_at: f64,
-    /// A resting bellwing takes off to forage once `Self.reserve` falls below this.
-    #[serde(default = "bw_hungry")]
-    pub bellwing_hungry_at: f64,
     /// The height it searches at, a fraction of its band (`Self.altitude`).
     #[serde(default = "bw_altitude")]
     pub bellwing_cruise_altitude: f64,
@@ -342,22 +335,8 @@ pub struct TeacherConfig {
     /// below; searching it never climbs toward it; taking off under it, it goes out level.
     #[serde(default = "bw_roost_ceiling")]
     pub bellwing_roost_ceiling: f64,
-    /// **The seedporter's heuristic** (F3): it stops eating once `Self.reserve` reaches
-    /// this (a fraction of the adult reserve reference) and moves on.
-    #[serde(default = "sp_full")]
-    pub seedporter_full_at: f64,
 }
 
-fn sp_full() -> f64 {
-    0.9
-}
-
-fn bw_full() -> f64 {
-    0.9
-}
-fn bw_hungry() -> f64 {
-    0.6
-}
 fn bw_altitude() -> f64 {
     0.4
 }
@@ -413,8 +392,6 @@ impl Default for TeacherConfig {
             ambush_gaze_turn: 0.8,
             ambush_wander_turn: 0.4,
             ambush_wander_flip: 8,
-            bellwing_full_at: bw_full(),
-            bellwing_hungry_at: bw_hungry(),
             bellwing_cruise_altitude: bw_altitude(),
             bellwing_altitude_gain: bw_gain(),
             bellwing_bloom_gate: bw_bloom_gate(),
@@ -422,7 +399,6 @@ impl Default for TeacherConfig {
             bellwing_gaze_turn: bw_gaze(),
             bellwing_wander_forward: bw_wander_forward(),
             bellwing_roost_ceiling: bw_roost_ceiling(),
-            seedporter_full_at: sp_full(),
         }
     }
 }

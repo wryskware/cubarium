@@ -66,14 +66,18 @@ fn refusals_naming(r: &super::screen::RosterScreen, what: &str, who: &str) -> Ve
 /// usable 0.35 body of reserve: 700 s at s 0.5 and 1,166.67 s at s 0.3. Exact.
 #[test]
 fn night_endurance_matches_the_worked_numbers() {
-    let a = night_endurance_s(0.5, 0.001, 0.5, 0.9, 0.8);
-    let b = night_endurance_s(0.5, 0.001, 0.3, 0.9, 0.8);
+    // An empty stomach: the reserve alone.
+    let a = night_endurance_s(0.5, 0.001, 0.5, 0.9, 0.8, 0.0);
+    let b = night_endurance_s(0.5, 0.001, 0.3, 0.9, 0.8, 0.0);
     assert!((a - 700.0).abs() < 1e-9, "{a}");
     assert!((b - 3500.0 / 3.0).abs() < 1e-9, "{b}");
     // Woken at 0.5 hunger from 0.8: only 0.3 of the reserve is usable.
-    assert!((night_endurance_s(0.5, 0.001, 0.5, 0.5, 0.8) - 300.0).abs() < 1e-9);
+    assert!((night_endurance_s(0.5, 0.001, 0.5, 0.5, 0.8, 0.0) - 300.0).abs() < 1e-9);
     // Hunger already past waking at onset: no sleep at all, never negative.
-    assert_eq!(night_endurance_s(0.5, 0.001, 0.5, 0.1, 0.8), 0.0);
+    assert_eq!(night_endurance_s(0.5, 0.001, 0.5, 0.1, 0.8, 0.0), 0.0);
+    // The stomach adds what it digests: 0.01 body more at a burn of 5e-4 /s is 20 s.
+    assert!((night_endurance_s(0.5, 0.001, 0.5, 0.9, 0.8, 0.01) - 720.0).abs() < 1e-9);
+    assert!((night_endurance_s(0.5, 0.001, 0.5, 0.1, 0.8, 0.01) - 20.0).abs() < 1e-9);
 }
 
 /// The sleeping phase is the clock's, by the activity's own lines (0.3; crepuscular
@@ -99,16 +103,20 @@ fn sleeping_phases_follow_the_clock_and_the_activity_lines() {
     assert!(sleep_bouts_s(&off.day, Activity::Diurnal, &life).is_empty());
 }
 
-/// The pre-night frondgrazer (c 0.5, m 0.001, s 0.5, h 0.5) outlasts 300 s of its 2,304-s
-/// night: refused, by name. Upkeep /5 and wake hunger 0.9 give 3,500 s >= 1.2 x 2,304:
-/// passes.
+/// The pre-night frondgrazer (c 0.5, m 0.001, s 0.5, h 0.5, an empty stomach) outlasts
+/// 300 s of its 2,304-s night: refused, by name. Upkeep /5 and wake hunger 0.9 give
+/// 3,500 s >= 1.2 x 2,304: passes. (The gut's stomach in the guard:
+/// `gut_screen_tests::the_night_guard_counts_the_digestible_stomach`.)
 #[test]
 fn the_night_screen_refuses_a_short_sleeper_and_passes_a_long_one() {
     let w = world();
     let mut fauna = fauna_with(&[(Founder::Browser, 8)]);
-    // Hand-built: the pre-night frondgrazer (the code default is 0.9 since `night`).
+    // Hand-built: the pre-night frondgrazer (the code default is 0.9 since `night`), at
+    // the pre-gut upkeep (0.001 /s), with nothing in its stomach.
     fauna.founders[Founder::Browser.index()].wake_hunger = 0.5;
     fauna.founders[Founder::Browser.index()].sleep_upkeep = 0.5;
+    fauna.founders[Founder::Browser.index()].core.maintenance_per_s = 0.001;
+    fauna.founders[Founder::Browser.index()].gut.s0 = 0.0;
     let r = roster(&flora(), &fauna, &w, &spec());
     let night = refusals_naming(&r, "night", "frondgrazer");
     assert_eq!(night.len(), 1, "{:?}", r.refusals());
@@ -271,7 +279,9 @@ fn predator_balance_is_a_readout_not_a_refusal() {
         food: Some(FoodSpec { min_ratio: 0.0, ..FoodSpec::default() }),
         ..ScreenSpec::default()
     };
-    let fauna = fauna_with(&[(Founder::Chorister, 3), (Founder::Browser, 2)]);
+    // At the gut's daily need two grazers' carrion supports ~23 choristers: eight packs
+    // of four are more than that.
+    let fauna = fauna_with(&[(Founder::Chorister, 8), (Founder::Browser, 2)]);
     let r = roster(&flora(), &fauna, &w, &s);
     let b = r.balance.iter().find(|b| b.predator == "chorister").expect("a balance row");
     assert!(b.supported < b.predators as f64, "{b:?}");
@@ -505,21 +515,28 @@ fn roster_decode_touches_exactly_the_listed_paths() {
         for q in [
             "core.maintenance_per_s",
             "motor_respiration_per_s",
-            "core.bite_per_s",
             "core.reserve_cap",
             "sleep_upkeep",
             "wake_hunger",
+            "gut.stomach_k",
+            "gut.bite_per_body_s",
+            "gut.s0",
         ] {
             want.insert(format!("{at}.{q}"));
         }
         for food in cubarium_voxel_fauna::Food::ALL {
             want.insert(format!("{at}.yield_by_food.{}", food.name()));
         }
+        // Digestion time per food class it eats (the minimal gut).
+        for food in base.fauna.founder(f).diet.foods() {
+            want.insert(format!("{at}.gut.digestion_s.{}", food.name()));
+        }
         let _ = core;
     }
     want.insert("fauna.founders.chorister.pack.pack_size".into());
-    // The parasite hatchling's knobs (lanternjaw recruitment, 2026-10-02).
-    for q in ["parasite_drain_of_host_basal", "parasite_attach_radius_m", "parasite_detach_body_fraction"] {
+    // The parasite hatchling's knobs (lanternjaw recruitment, 2026-10-02; the take per
+    // host body since the minimal gut).
+    for q in ["parasite_take_per_day", "parasite_attach_radius_m", "parasite_detach_body_fraction"] {
         want.insert(format!("fauna.{q}"));
     }
     let group = |names: &[Species]| names.iter().map(|s| s.name()).collect::<Vec<_>>();
@@ -542,41 +559,91 @@ fn roster_decode_touches_exactly_the_listed_paths() {
 }
 
 /// Fable 2026-10-02: life histories frozen (lifespan, growth, surplus floor, gestation),
-/// motor tied to upkeep; per lineage only upkeep, intake, yield, reserve, sleep and wake
-/// hunger, plus the three parasite genes, pack size, the 15 plant groups and the night
-/// bloom (night, 2c7fd076): 74.
+/// motor tied to upkeep; per lineage upkeep, yield, reserve, sleep and wake hunger, and
+/// since the minimal gut (repair 2 item 11) the stomach k, the bite b and the appetite
+/// floor s0, with tau per food class each lineage eats (11: the shredder and capgnawer eat
+/// two); the three parasite genes (the take per host body), pack size, the 15 plant
+/// groups and the night bloom (night, 2c7fd076): 103. No `intake`: the bite is its own.
 #[test]
 fn roster_genes_are_the_agreed_set() {
     let e = roster_file();
     let g = e.genome().expect("a genome");
-    assert_eq!(g.genes.len(), 6 * 9 + 3 + 1 + 15 + 1, "{:?}", g.names());
-    for frozen in ["lifespan", "maturity", "breed_reserve", "gestation", "motor"] {
-        assert!(!g.names().iter().any(|n| n.starts_with(&format!("{frozen}@"))), "{frozen} is frozen");
+    assert_eq!(g.genes.len(), 8 * 9 + 11 + 3 + 1 + 15 + 1, "{:?}", g.names());
+    for frozen in ["lifespan", "maturity", "breed_reserve", "gestation", "motor", "intake"] {
+        assert!(!g.names().iter().any(|n| n.starts_with(&format!("{frozen}@"))), "{frozen} is not a gene");
     }
+    let base = e.base_params().expect("the base");
+    for f in Founder::ALL {
+        for kind in ["upkeep", "yield", "reserve", "sleep", "wake_hunger", "stomach", "bite", "s0"] {
+            let name = format!("{kind}@{}", f.name());
+            assert!(g.names().iter().any(|n| *n == name), "{name}");
+        }
+        for food in base.fauna.founder(f).diet.foods() {
+            let name = format!("tau_{}@{}", food.name(), f.name());
+            assert!(g.names().iter().any(|n| *n == name), "{name}");
+        }
+    }
+    assert!(g.names().iter().any(|n| n == "rider_take"));
 }
 
-/// The search ranges reach the proposal's targets: upkeep to /5 for every prey lineage,
-/// and the lanternjaw and chorister to ~7e-5 and ~8e-5 /s; an intake gene that undoes the
-/// upkeep tie on the bite; reserve per body to x4.
+/// The search ranges hold the design's defaults with room on both sides (the minimal
+/// gut, repair 2 item 11): every multiplier's box holds x1 strictly inside, and the gut's
+/// genes and upkeep reach x4 each way, so upkeep is centred on the gut's daily need f,
+/// not on the old upkeep. Reserve per body still reaches x4.
 #[test]
-fn roster_ranges_reach_the_targets() {
+fn roster_ranges_hold_the_defaults_with_room() {
     let e = roster_file();
     let g = e.genome().expect("a genome");
-    let base = e.base_params().expect("the base");
-    let range = |name: &str| g.genes.iter().find(|x| x.name == name).map(|x| x.range).expect(name);
-    for f in Founder::ALL {
-        let (lo, _) = range(&format!("upkeep@{}", f.name()));
-        let m = base.fauna.founder(f).core.maintenance_per_s;
-        assert!(lo * m <= m / 5.0, "{}: {} x {m}", f.name(), lo);
-        let (_, hi) = range(&format!("intake@{}", f.name()));
-        assert!(hi >= 1.0 / 0.12, "{}: intake to {hi}", f.name());
-        let (_, rhi) = range(&format!("reserve@{}", f.name()));
-        assert!(rhi >= 4.0, "{}: reserve to x{rhi}", f.name());
+    for gene in g.genes.iter().filter(|x| x.mode == cubarium_voxel::genome::Mode::Scale) {
+        let (lo, hi) = gene.range;
+        assert!(lo < 1.0 && hi > 1.0, "{}: [{lo}, {hi}]", gene.name);
     }
-    let lj = base.fauna.founder(Founder::Lanternjaw).core.maintenance_per_s;
-    assert!(range("upkeep@lanternjaw").0 * lj <= 7e-5, "lanternjaw upkeep reaches 7e-5");
-    let ch = base.fauna.founder(Founder::Chorister).core.maintenance_per_s;
-    assert!(range("upkeep@chorister").0 * ch <= 8e-5, "chorister upkeep reaches 8e-5");
+    for f in Founder::ALL {
+        let range = |kind: &str| {
+            let name = format!("{kind}@{}", f.name());
+            g.genes.iter().find(|x| x.name == name).map(|x| x.range).expect("a gene")
+        };
+        for kind in ["upkeep", "stomach", "bite", "s0"] {
+            assert!(range(kind).0 <= 0.25 && range(kind).1 >= 4.0, "{kind}@{}", f.name());
+        }
+        assert!(range("reserve").1 >= 4.0, "{}: reserve to x4", f.name());
+        let base = e.base_params().expect("the base");
+        for food in base.fauna.founder(f).diet.foods() {
+            let r = range(&format!("tau_{}", food.name()));
+            assert!(r.0 <= 0.25 && r.1 >= 4.0, "tau_{}@{}", food.name(), f.name());
+        }
+    }
+    let take = g.genes.iter().find(|x| x.name == "rider_take").expect("rider_take").range;
+    assert!(take.0 <= 0.25 && take.1 >= 4.0, "{take:?}");
+}
+
+/// Every fauna leaf a roster gene moves stays inside its registry row's search interval at
+/// both ends of the gene's box (the rows were widened where the gut's defaults needed it).
+#[test]
+fn roster_gene_boxes_sit_inside_the_registry_search_intervals() {
+    let e = roster_file();
+    let base = e.base_params().expect("the base");
+    let fauna_v = cubarium_voxel::registry::to_value(&base.fauna).expect("fauna");
+    let flora_v = cubarium_voxel::registry::to_value(&base.flora).expect("flora");
+    let reg = cubarium_voxel_fauna::registry();
+    for end in [0, 1] {
+        let mut g = e.genome().expect("a genome").clone();
+        for gene in &mut g.genes {
+            gene.value = if end == 0 { gene.range.0 } else { gene.range.1 };
+        }
+        let edits = g
+            .resolve(&[(cubarium_voxel_flora::registry(), &flora_v), (reg, &fauna_v)])
+            .expect("resolves");
+        for (path, v) in &edits[1] {
+            let gut = path.contains(".gut.") || path.contains("maintenance_per_s") || path.contains("parasite_take");
+            if !gut {
+                continue;
+            }
+            let Some((lo, hi)) = reg.row_for(path).and_then(|r| r.search) else { continue };
+            let v = v.as_float().or_else(|| v.as_integer().map(|i| i as f64)).expect("a number");
+            assert!(v >= lo * (1.0 - 1e-9) && v <= hi * (1.0 + 1e-9), "{path} = {v} outside [{lo}, {hi}]");
+        }
+    }
 }
 
 /// **Study** (Fable 2026-10-02): latticevine faces per vine on the founded terrarium,
@@ -694,9 +761,15 @@ fn food_short_of_need_is_soft_and_only_zero_supply_refuses() {
     let w = world();
     let mut s = spec();
     s.night = None;
-    let mut fauna = fauna_with(&[(Founder::Seedporter, 4)]);
-    fauna.founders[Founder::Seedporter.index()].core.maintenance_per_s *= 100.0;
-    let r = roster(&flora(), &fauna, &w, &s);
+    let fauna = fauna_with(&[(Founder::Seedporter, 4)]);
+    // Short but real: at the gut's daily need the terrarium's fruit feeds four ~140x
+    // over, so every fruit source is cut to a thousandth.
+    let mut short = flora();
+    for sp in Species::ALL {
+        short.species_mut(sp).fruit_per_s *= 1e-3;
+    }
+    short.latticevine.fruit *= 1e-3;
+    let r = roster(&short, &fauna, &w, &s);
     let row = r.food.iter().find(|x| x.lineage == "seedporter").expect("row");
     assert!(row.ratio > 0.0 && row.ratio < 1.0, "{row:?}");
     assert!(r.refusals().is_empty(), "{:?}", r.refusals());
@@ -717,29 +790,37 @@ fn pilot_file() -> EcologyParams {
 }
 
 /// F1, F7, F10 / F11(c): the pilot file reaches the intended score and serialization
-/// path: 54 searched genes (the three feeders and pack size frozen at the exhibit's
-/// values), the feeders readout-only, R a readout, S and F soft, the night envelope
-/// hard, food soft; it round-trips through a saved genome; and the launch script runs
-/// it with the agreed settings.
+/// path: 74 searched genes since the minimal gut (six searched lineages x upkeep, yield,
+/// reserve, sleep, wake hunger, stomach, bite and s0, their 8 tau genes, and 18 plant
+/// and rider genes; the three feeders and pack size frozen at the exhibit's values), the
+/// feeders readout-only, R a readout, S and F soft, the night envelope hard, food soft;
+/// it round-trips through a saved genome; and the launch script runs it with the agreed
+/// settings.
 #[test]
 fn the_pilot_launch_is_the_agreed_experiment() {
     let e = pilot_file();
     let g = e.genome().expect("a genome");
-    assert_eq!(g.search_bounds().len(), 54, "searched: {}", g.genes.iter().filter(|x| !x.frozen).count());
-    assert_eq!(g.to_search().len(), 54);
+    assert_eq!(g.search_bounds().len(), 74, "searched: {}", g.genes.iter().filter(|x| !x.frozen).count());
+    assert_eq!(g.to_search().len(), 74);
+    let base = e.base_params().expect("base");
     for f in [Founder::Bellwing, Founder::Seedporter, Founder::Chorister] {
-        for kind in ["upkeep", "intake", "yield", "reserve", "sleep", "wake_hunger"] {
+        let mut kinds: Vec<String> = ["upkeep", "yield", "reserve", "sleep", "wake_hunger", "stomach", "bite", "s0"]
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
+        kinds.extend(base.fauna.founder(f).diet.foods().map(|food| format!("tau_{}", food.name())));
+        for kind in kinds {
             let name = format!("{kind}@{}", f.name());
             let gene = g.genes.iter().find(|x| x.name == name).unwrap_or_else(|| panic!("{name}"));
             assert!(gene.frozen, "{name} is frozen");
         }
     }
+    assert!(!g.names().iter().any(|n| n.starts_with("intake@")), "no intake gene: the bite is its own");
     assert!(g.genes.iter().find(|x| x.name == "pack_size@chorister").expect("pack").frozen);
-    // The exhibit's values: chorister upkeep x0.2, pack of three.
+    // Upkeep is x1 at the gut's daily need (the exhibit's cuts are gone); a pack of three.
     let p = e.params().expect("decodes");
-    let base = e.base_params().expect("base");
     let ch = |q: &cubarium_voxel_fauna::FaunaConfig| q.founder(Founder::Chorister).core.maintenance_per_s;
-    assert!((ch(&p.fauna) / ch(&base.fauna) - 0.2).abs() < 1e-9);
+    assert!((ch(&p.fauna) / ch(&base.fauna) - 1.0).abs() < 1e-12);
     assert_eq!(p.fauna.founder(Founder::Chorister).pack.expect("pack").pack_size, 3);
     // Targets: the three feeders readout-only.
     let band = super::search::BandSpec::default().with_targets(&g.rest).expect("targets");
@@ -757,7 +838,7 @@ fn the_pilot_launch_is_the_agreed_experiment() {
     assert!(sc.soft(&rsf) > 0.0);
     // A saved nominee keeps its frozen genes frozen and decodes the same.
     let back = EcologyParams::parse(&g.to_toml("t")).expect("a saved genome");
-    assert_eq!(back.genome().expect("g").search_bounds().len(), 54);
+    assert_eq!(back.genome().expect("g").search_bounds().len(), 74);
     assert_eq!(back.fauna(), e.fauna());
     // The launch script.
     let sh = std::fs::read_to_string(
@@ -809,3 +890,4 @@ fn stage_replenishment_and_combined_verdicts_are_apart() {
     judge(&mut o, &s, true);
     assert!(o.replenishment_met && o.met, "{o:?}");
 }
+

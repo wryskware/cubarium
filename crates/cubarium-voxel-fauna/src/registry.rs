@@ -31,17 +31,16 @@ pub fn registry() -> &'static Registry {
     })
 }
 
-/// The eight absolute quantities a body's org-unit mass scale carries
+/// The seven absolute quantities a body's org-unit mass scale carries
 /// ([`crate::SpeciesConfig::scale_mass`]), relative to a `SpeciesConfig`. Not
 /// `bite_half_stock`: it is in the food's stock units, and the food is not scaled.
-pub const MASS_SCALED: [&str; 8] = [
+pub const MASS_SCALED: [&str; 7] = [
     "body_max",
     "body_min",
     "birth_body",
     "birth_cost",
     "reproduction.surplus_floor",
     "reproduction.egg_organic",
-    "bite_per_s",
     "growth_max_per_s",
 ];
 
@@ -49,8 +48,9 @@ pub const MASS_SCALED: [&str; 8] = [
 /// when a genome moves the others.
 /// - Walking is priced against upkeep (audit §8.1): `motor_respiration_per_s =
 ///   motor_factor × maintenance_per_s`, the factor today's ratio.
-/// - The mouth too: `bite_per_s = intake_factor × maintenance_per_s × body`.
-/// - The eight absolute quantities follow the lineage's mass scale (audit §1.4); the bite's
+/// - The bite is not tied: the minimal gut's `gut.bite_per_body_s` is its own number, per
+///   unit of body, so the mass scale does not carry it either.
+/// - The seven absolute quantities follow the lineage's mass scale (audit §1.4); the bite's
 ///   half-saturation, in food units, does not.
 /// - The placeholder species is the browser's body: its mass and lifespan follow the
 ///   browser's.
@@ -59,11 +59,6 @@ pub fn ties() -> Vec<Tie> {
         Tie::new(
             "motor_follows_upkeep",
             "fauna.founders.*.motor_respiration_per_s",
-            "fauna.founders.*.core.maintenance_per_s",
-        ),
-        Tie::new(
-            "intake_follows_upkeep",
-            "fauna.founders.*.core.bite_per_s",
             "fauna.founders.*.core.maintenance_per_s",
         ),
     ];
@@ -121,9 +116,7 @@ fn species_rows() -> Vec<Row> {
     let nonneg = Range::nonneg();
     vec![
         r("maintenance_per_s", "org-units/s per unit body", nonneg, "basal upkeep, paid from reserve then body: daily need f / 7200 s")
-            .search(2e-6, 4e-3).log().grade("B"),
-        r("bite_per_s", "org-units/s", nonneg, "UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase")
-            .search(2e-4, 4e-3).log().grade("N"),
+            .search(5e-7, 4e-3).log().grade("B"),
         r("bite_half_stock", "org-units at the mouth", nonneg, "K: a bite is want * E / (E + K)")
             .search(1e-4, 5e-2).log().grade("C").prov("tuned"),
         r("n_tissue", "mineral per org-unit", nonneg, "tissue stoichiometry: a bite builds at most mineral / n_tissue")
@@ -210,11 +203,11 @@ fn founder_rows() -> Vec<Row> {
             .search(0.0, 0.9).prov("decision"),
         // The minimal gut (`Gut`, design/metabolism-meals-2026-10-02.md repair 2).
         r("gut.stomach_k", "raw org-units per unit current body", nonneg, "k: stomach capacity K = k x body")
-            .search(0.005, 0.5).log().prov("decision"),
+            .search(0.002, 1.0).log().prov("decision"),
         r("gut.bite_per_body_s", "raw org-units/s per unit current body", nonneg, "b: a bite's rate at full effort (default 2k / tau)")
             .search(1e-5, 1e-2).log().prov("derived"),
         r("gut.digestion_s.*", "s", Range::positive(), "tau: a food class's pool empties at S / tau into the reserve's room")
-            .search(10.0, 1200.0).log().prov("decision"),
+            .search(5.0, 2000.0).log().prov("decision"),
         r("gut.s0", "fraction of K", fraction, "appetite floor: a fed body wants food at S <= s0 K")
             .search(0.0, 0.8).prov("decision"),
         r("gut.full_tolerance", "fraction of K", Range::closed(0.0, 1.0).open_lo(), "the eating latch goes off at S >= this x K")
@@ -296,8 +289,6 @@ fn rows() -> Vec<Row> {
         r("fauna.parasite_attach_radius_m", "m", Range::nonneg(), "host search radius from a hatching egg").search(0.25, 2.0).grade("N"),
         r("fauna.parasite_max_per_host", "count", Range::nonneg(), "riders one host carries (0: dormant eggs never hatch)")
             .search(0.0, 4.0).grade("N"),
-        r("fauna.parasite_drain_of_host_basal", "x host basal upkeep", Range::nonneg(), "UNREAD since the minimal gut (parasite_take_per_day); kept for the search rebase")
-            .search(0.01, 0.5).log().grade("N"),
         r("fauna.parasite_take_per_day", "host body per ecological day", Range::nonneg(), "a rider's take from its host, into its reserve")
             .search(0.01, 0.5).log().grade("N").prov("derived"),
         r("fauna.parasite_detach_body_fraction", "fraction of lineage body_max", Range::closed(0.0, 1.0).open_lo(), "a rider drops off at this size")
@@ -422,15 +413,12 @@ fn knob_rows() -> Vec<Row> {
         t("ambush_gaze_turn", "effort", fraction, "the ambush's turn toward foliage while seeking a crown").search(0.2, 1.0),
         t("ambush_wander_turn", "effort", fraction, "the ambush's no-signal wander turn").search(0.1, 1.0),
         t("ambush_wander_flip", "samples", count, "samples the ambush's wander holds a side before flipping").search(2.0, 24.0),
-        t("bellwing_full_at", "fraction of adult reserve", fraction, "UNREAD since the minimal gut (the eating latch decides); the hover-sip teacher rested at this reserve").search(0.5, 1.0),
-        t("bellwing_hungry_at", "fraction of adult reserve", fraction, "UNREAD since the minimal gut; a resting bellwing took off below this reserve").search(0.1, 0.9),
         t("bellwing_cruise_altitude", "fraction of band", fraction, "the height the bellwing searches at").search(0.1, 0.9),
         t("bellwing_altitude_gain", "effort per band fraction", nonneg, "lift effort per unit of altitude error").search(1.0, 10.0),
         t("bellwing_bloom_gate", "fraction of rays", fraction, "a fan sector sees blooms above this fraction of its rays").search(0.005, 0.2).log(),
         t("bellwing_bloom_near", "1 - d/range", fraction, "a bloom this near: slow and come down to it").search(0.3, 0.9),
         t("bellwing_gaze_turn", "effort", fraction, "turn effort toward the sector with the most bloom").search(0.2, 1.0),
         t("bellwing_wander_forward", "effort", fraction, "forward effort of the bellwing's no-signal wander").search(0.2, 1.0),
-        t("seedporter_full_at", "fraction of adult reserve", fraction, "UNREAD since the minimal gut (the eating latch decides); the seedporter's heuristic stopped eating at this reserve").search(0.5, 1.0),
         t("bellwing_roost_ceiling", "fraction of band", fraction, "going to rest, cover closer than this overhead is an underside to rise into").search(0.1, 0.8),
     ]);
 

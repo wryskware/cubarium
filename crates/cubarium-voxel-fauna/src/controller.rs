@@ -868,7 +868,7 @@ impl Controller for BrowserForager {
 /// 1. **eats** (stops, `feed`) while fruit is in the mouth's reach (`Taste`) — until the
 ///    source is empty. Whether it wants food is the body's eating latch, which no sense
 ///    reads: since the minimal gut a fed body's reserve sits at its cap, so the old
-///    reserve line ([`TeacherConfig::seedporter_full_at`]) is no longer read;
+///    reserve line (`seedporter_full_at`) is gone;
 /// 2. else **turns toward** the cone sector with the most fruit in view and goes forward
 ///    — walking to a stem and up it, or off a crown in a glide aimed at it;
 /// 3. else **wanders** forward (on a perch, that glides it off or takes it down), backing
@@ -970,8 +970,8 @@ impl Controller for FruitForager {
 ///   eating latch decides whether the sip is taken (the minimal gut);
 /// - the rest when full (rise into cover close overhead, else come down, and rest perched
 ///   until hungry) is kept but **no longer triggered**: since the minimal gut a fed body's
-///   reserve sits at its cap, so [`TeacherConfig::bellwing_full_at`] and
-///   [`TeacherConfig::bellwing_hungry_at`] are no longer read;
+///   reserve sits at its cap, so the old reserve lines (`bellwing_full_at`,
+///   `bellwing_hungry_at`) are gone;
 /// - a bloom in the fan: turn toward the sector with the most, fly at it, and come down
 ///   when it is near;
 /// - nothing in sight: a correlated wander at its search height within the band;

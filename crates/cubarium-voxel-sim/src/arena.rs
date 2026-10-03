@@ -75,7 +75,8 @@ const LITTER_PER_TILE: f64 = 0.2;
 /// Organic matter in Stage B's successor litter patch.
 ///
 /// Stage B only means anything if the first patch actually runs out inside the horizon.
-/// The blind founder bites `bite_per_s = 0.0005` organic per second at full effort, so
+/// The blind founder bit 0.0005 organic per second at full effort (the placeholder mouth
+/// before the minimal gut, which these patches are still sized in), so
 /// 0.015 is thirty seconds of uninterrupted feeding. The initial patch is half this
 /// size so acquisition and depletion leave enough of the 120-second horizon for the
 /// successor leg; the successor remains the larger confirmation patch.
@@ -1456,9 +1457,13 @@ mod tests {
     fn the_stage_b_initial_patch_is_half_the_successor() {
         for founder in ARENA_FOUNDERS {
             let stage = reacquisition(founder, 6);
-            // The patches are sized in the placeholder body's bites (mass 1).
-            let config = cubarium_voxel_fauna::FaunaConfig::placeholder();
-            let bite_per_s = config.founder(founder).core.bite_per_s;
+            // The patches are sized in the placeholder body's bites (mass 1): the mouths
+            // before the minimal gut (the shredder's 0.0005 /s, the browser's 0.002 /s),
+            // kept here as the sizing unit now that `bite_per_s` is gone.
+            let bite_per_s = match founder {
+                Founder::Blind => 0.0005,
+                _ => 0.002,
+            };
             let initial = stage.arena.patch_stock(stage.initial_patch);
             let successor = stage.arena.patch_stock(stage.successor_patch);
             assert!((initial / successor - 0.5).abs() < 1e-12, "{founder:?}");

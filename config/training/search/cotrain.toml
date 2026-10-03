@@ -6,9 +6,11 @@
 # baseline each was sized for is in its `what`. Not genes: the digest rows (mass scale,
 # body size, the eye and mouth anchors, cruise, cone, taste) - mass stays at x30.
 #
-# Derived fields follow their bases (fauna and flora `ties()`): walking and the mouth keep
-# their ratio to upkeep (`motor` and `intake` are those ratios), dead wood and carrion rot
-# with the litter, a seed bank's attrition follows its age limit.
+# Derived fields follow their bases (fauna and flora `ties()`): walking keeps its ratio to
+# upkeep (`motor` is that ratio), dead wood and carrion rot with the litter, a seed bank's
+# attrition follows its age limit. Since the minimal gut (2026-10-03) the bite is its own
+# gene (`bite`, the stomach's body-scaled rate), not tied to upkeep; the upkeep gene is x1
+# at the gut's daily need f / 7,200 s.
 
 [screen]
 # The R/S/F pre-screen (audit §1.4): a candidate outside these takes, unrun,
@@ -26,6 +28,10 @@ k_soft = 5.0
 # foliage a walker harvests in passing (invariants.py's 0.67 and 0.2).
 light_moisture = 0.67
 harvest = 0.2
+# R is a readout (the minimal gut, design/metabolism-meals-2026-10-02.md "What changes
+# elsewhere": R/S/F stays a readout or soft): its band was set for the old upkeep, and at
+# the gut's daily need f every terrarium candidate's R is ~100x over it. S and F stay hard.
+r_readout = true
 
 [targets]
 # Persistence only (bodies plus viable eggs; no share, no late-breeding target): none.
@@ -68,11 +74,11 @@ range = [0.5, 10.0]
 what = "walking cost / upkeep (motor_factor); real: mammal x1-2.5, shredder x3-8"
 
 [[gene]]
-name = "intake"
-path = "fauna.founders.*.core.bite_per_s"
+name = "bite"
+path = "fauna.founders.*.gut.bite_per_body_s"
 tie = "each"
-range = [0.05, 2.0]
-what = "max intake / upkeep (intake_factor); real: x0.1-0.25 (2-4x upkeep, not 16-40x)"
+range = [0.25, 4.0]
+what = "the stomach's bite rate b, raw food per unit body per second (default 2k / tau); its own gene since the minimal gut, replacing `intake` on the unread bite_per_s"
 
 [[gene]]
 name = "yield"

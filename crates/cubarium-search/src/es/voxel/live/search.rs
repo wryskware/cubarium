@@ -483,6 +483,8 @@ struct Snap {
     pack_kills: u64,
     /// Body, reserve and open escrow over each lineage's living bodies.
     biomass: [f64; Founder::COUNT],
+    /// Their stomachs' digestible organic ([`super::targets::digestible_stomach`]).
+    stomach: [f64; Founder::COUNT],
 }
 
 impl Snap {
@@ -490,10 +492,13 @@ impl Snap {
         let view = sim.fauna().view();
         let l = view.ledger;
         let mut biomass = [0.0; Founder::COUNT];
+        let mut stomach = [0.0; Founder::COUNT];
         for a in view.animals.iter() {
             let Some(f) = a.founder else { continue };
             biomass[f.index()] +=
                 a.body + a.reserve + a.reproduction.escrow.map_or(0.0, |e| e.organic);
+            stomach[f.index()] +=
+                super::targets::digestible_stomach(a, sim.fauna().config().founder(f));
         }
         Snap {
             assimilated: l.assimilated_by_founder,
@@ -509,6 +514,7 @@ impl Snap {
             provision_received: l.provision_received_organic,
             pack_kills: l.pack_chase_kills,
             biomass,
+            stomach,
         }
     }
 }
@@ -1053,11 +1059,16 @@ fn outcomes(
             o.provision_received = now.provision_received - start.provision_received;
             o.pack_kills = now.pack_kills - start.pack_kills;
         }
-        o.biomass_start = start.biomass[i];
+        o.biomass_start = start.biomass[i] + start.stomach[i];
         if let Some(c) = cycle {
             o.cycle_complete = true;
-            o.intake_cycle = c.assimilated[i] - start.assimilated[i];
-            o.biomass_cycle = c.biomass[i];
+            (o.intake_cycle, o.biomass_start, o.biomass_cycle) = super::targets::cycle_books(
+                c.assimilated[i] - start.assimilated[i],
+                start.biomass[i],
+                c.biomass[i],
+                start.stomach[i],
+                c.stomach[i],
+            );
         }
         judge(&mut o, stage, reached_half);
         out.push(o);

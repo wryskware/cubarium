@@ -1252,7 +1252,7 @@ pub(super) fn walk_toward(a: &Animal, dx: f64, dz: f64, feed: f64) -> Actions {
 
 /// **The fruit search** (roster mechanics fix 4; Fable's call, 2026-10-02): a glider
 /// driven by its own heuristic, on the ground, wanting food (its eating latch on; the
-/// reserve line [`crate::TeacherConfig::seedporter_full_at`] is no longer read) and with no fruit at its
+/// old reserve line `seedporter_full_at` is gone) and with no fruit at its
 /// mouth, walks to the stem of the nearest stand it can climb that hangs fruit within
 /// [`Glider::fruit_search_m`] — the roost reflex's world query over the plant layer, not a
 /// sense — and walking into it climbs it. `None` leaves its heuristic's actions. No

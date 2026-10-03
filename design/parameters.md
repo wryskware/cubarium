@@ -1149,12 +1149,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1082 rows)
+**`fauna.*`** (1068 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `fauna.frondgrazer.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.frondgrazer.bite_per_s` | 0.06 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.frondgrazer.maintenance_per_s` | 0.001 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.frondgrazer.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.frondgrazer.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.frondgrazer.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1176,8 +1175,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.egg_organic` | 0.0 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
 | `fauna.frondgrazer.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.frondgrazer.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
-| `fauna.founders.littershredder.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.littershredder.core.bite_per_s` | 0.015 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.littershredder.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.littershredder.core.body_max` | 0.375 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1225,9 +1223,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.littershredder.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.littershredder.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.littershredder.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.littershredder.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.littershredder.gut.bite_per_body_s` | 0.0003333333333333333 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.littershredder.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.littershredder.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.littershredder.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.littershredder.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -1283,8 +1281,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.frondgrazer.core.maintenance_per_s` | 0.000008333333333333334 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.frondgrazer.core.bite_per_s` | 0.06 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.frondgrazer.core.maintenance_per_s` | 0.000008333333333333334 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.frondgrazer.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.frondgrazer.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.frondgrazer.core.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1332,9 +1329,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.frondgrazer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.frondgrazer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.frondgrazer.gut.stomach_k` | 0.06 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.frondgrazer.gut.stomach_k` | 0.06 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.frondgrazer.gut.bite_per_body_s` | 0.001 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.frondgrazer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.frondgrazer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.frondgrazer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.frondgrazer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -1390,8 +1387,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.lanternjaw.core.maintenance_per_s` | 0.000005555555555555556 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.lanternjaw.core.bite_per_s` | 0.042 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.lanternjaw.core.maintenance_per_s` | 0.000005555555555555556 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.lanternjaw.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.lanternjaw.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1439,9 +1435,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.lanternjaw.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.lanternjaw.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.lanternjaw.gut.stomach_k` | 0.15 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.lanternjaw.gut.stomach_k` | 0.15 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.lanternjaw.gut.bite_per_body_s` | 0.001 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.lanternjaw.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.lanternjaw.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.lanternjaw.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.lanternjaw.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -1497,8 +1493,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.capgnawer.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.capgnawer.core.bite_per_s` | 0.025536 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.capgnawer.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.capgnawer.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.capgnawer.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.capgnawer.core.body_max` | 0.6384 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1546,9 +1541,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.capgnawer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.capgnawer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.capgnawer.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.capgnawer.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.capgnawer.gut.bite_per_body_s` | 0.0003333333333333333 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.capgnawer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.capgnawer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.capgnawer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.capgnawer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -1604,8 +1599,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.capgnawer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.loftstrider.core.maintenance_per_s` | 0.000005555555555555556 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.loftstrider.core.bite_per_s` | 0.2112 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.loftstrider.core.maintenance_per_s` | 0.000005555555555555556 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.loftstrider.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.loftstrider.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.loftstrider.core.body_max` | 5.28 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1653,9 +1647,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.loftstrider.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.loftstrider.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.loftstrider.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.loftstrider.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.loftstrider.gut.bite_per_body_s` | 0.0008333333333333334 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.loftstrider.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.loftstrider.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.loftstrider.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.loftstrider.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -1711,8 +1705,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.ripple-snail.core.maintenance_per_s` | 0.000002777777777777778 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.ripple-snail.core.bite_per_s` | 0.005822208 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.ripple-snail.core.maintenance_per_s` | 0.000002777777777777778 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.ripple-snail.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.ripple-snail.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.ripple-snail.core.body_max` | 0.1455552 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1760,9 +1753,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.ripple-snail.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.ripple-snail.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.ripple-snail.gut.stomach_k` | 0.012 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.ripple-snail.gut.stomach_k` | 0.012 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.ripple-snail.gut.bite_per_body_s` | 0.0002 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.ripple-snail.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.ripple-snail.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.ripple-snail.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.ripple-snail.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -1818,8 +1811,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.ripple-snail.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.bellwing.core.maintenance_per_s` | 0.000020833333333333333 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.bellwing.core.bite_per_s` | 0.0012000000000000001 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.bellwing.core.maintenance_per_s` | 0.000020833333333333333 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.bellwing.core.bite_half_stock` | 0.002 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.bellwing.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.bellwing.core.body_max` | 0.03 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1867,9 +1859,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.bellwing.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.bellwing.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.bellwing.gut.stomach_k` | 0.03 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.bellwing.gut.stomach_k` | 0.03 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.bellwing.gut.bite_per_body_s` | 0.002 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.bellwing.gut.digestion_s.*` | 30.0, 30.0, 30.0, 30.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.bellwing.gut.digestion_s.*` | 30.0, 30.0, 30.0, 30.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.bellwing.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.bellwing.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -1925,8 +1917,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.seedporter.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.seedporter.core.bite_per_s` | 0.014222222222222223 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.seedporter.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.seedporter.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.seedporter.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.seedporter.core.body_max` | 0.35555555555555557 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -1974,9 +1965,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.seedporter.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.seedporter.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.seedporter.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.seedporter.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.seedporter.gut.bite_per_body_s` | 0.0016666666666666668 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.seedporter.gut.digestion_s.*` | 60.0, 60.0, 60.0, 60.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.seedporter.gut.digestion_s.*` | 60.0, 60.0, 60.0, 60.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.seedporter.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.seedporter.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -2032,8 +2023,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
-| `fauna.founders.chorister.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.000002–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
-| `fauna.founders.chorister.core.bite_per_s` | 0.10975999999999998 | org-units/s | [0, inf) | 0.0002–0.004 log | N | placeholder | UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase |
+| `fauna.founders.chorister.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.chorister.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.chorister.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.chorister.core.body_max` | 2.7439999999999998 | org-units | [0, inf) |  | D | placeholder | adult structure |
@@ -2081,9 +2071,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.chorister.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.chorister.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
-| `fauna.founders.chorister.gut.stomach_k` | 0.2 | raw org-units per unit current body | [0, inf) | 0.005–0.5 log | - | decision | k: stomach capacity K = k x body |
+| `fauna.founders.chorister.gut.stomach_k` | 0.2 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.chorister.gut.bite_per_body_s` | 0.0013333333333333335 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.chorister.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 10–1200 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.chorister.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.chorister.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.chorister.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
@@ -2212,15 +2202,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.ambush_gaze_turn` | 0.8 | effort | [0, 1] | 0.2–1 | - | placeholder | the ambush's turn toward foliage while seeking a crown |
 | `fauna.teachers.ambush_wander_turn` | 0.4 | effort | [0, 1] | 0.1–1 | - | placeholder | the ambush's no-signal wander turn |
 | `fauna.teachers.ambush_wander_flip` | 8 | samples | [0, inf) | 2–24 | - | placeholder | samples the ambush's wander holds a side before flipping |
-| `fauna.teachers.bellwing_full_at` | 0.9 | fraction of adult reserve | [0, 1] | 0.5–1 | - | placeholder | UNREAD since the minimal gut (the eating latch decides); the hover-sip teacher rested at this reserve |
-| `fauna.teachers.bellwing_hungry_at` | 0.6 | fraction of adult reserve | [0, 1] | 0.1–0.9 | - | placeholder | UNREAD since the minimal gut; a resting bellwing took off below this reserve |
 | `fauna.teachers.bellwing_cruise_altitude` | 0.4 | fraction of band | [0, 1] | 0.1–0.9 | - | placeholder | the height the bellwing searches at |
 | `fauna.teachers.bellwing_altitude_gain` | 4.0 | effort per band fraction | [0, inf) | 1–10 | - | placeholder | lift effort per unit of altitude error |
 | `fauna.teachers.bellwing_bloom_gate` | 0.02 | fraction of rays | [0, 1] | 0.005–0.2 log | - | placeholder | a fan sector sees blooms above this fraction of its rays |
 | `fauna.teachers.bellwing_bloom_near` | 0.6 | 1 - d/range | [0, 1] | 0.3–0.9 | - | placeholder | a bloom this near: slow and come down to it |
 | `fauna.teachers.bellwing_gaze_turn` | 0.8 | effort | [0, 1] | 0.2–1 | - | placeholder | turn effort toward the sector with the most bloom |
 | `fauna.teachers.bellwing_wander_forward` | 0.7 | effort | [0, 1] | 0.2–1 | - | placeholder | forward effort of the bellwing's no-signal wander |
-| `fauna.teachers.seedporter_full_at` | 0.9 | fraction of adult reserve | [0, 1] | 0.5–1 | - | placeholder | UNREAD since the minimal gut (the eating latch decides); the seedporter's heuristic stopped eating at this reserve |
 | `fauna.teachers.bellwing_roost_ceiling` | 0.4 | fraction of band | [0, 1] | 0.1–0.8 | - | placeholder | going to rest, cover closer than this overhead is an underside to rise into |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
@@ -2232,6 +2219,5 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.hatch_chance_per_dusk` | 0.3333333333333333 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
 | `fauna.parasite_attach_radius_m` | 0.75 | m | [0, inf) | 0.25–2 | N | placeholder | host search radius from a hatching egg |
 | `fauna.parasite_max_per_host` | 1 | count | [0, inf) | 0–4 | N | placeholder | riders one host carries (0: dormant eggs never hatch) |
-| `fauna.parasite_drain_of_host_basal` | 0.05 | x host basal upkeep | [0, inf) | 0.01–0.5 log | N | placeholder | UNREAD since the minimal gut (parasite_take_per_day); kept for the search rebase |
 | `fauna.parasite_take_per_day` | 0.09 | host body per ecological day | [0, inf) | 0.01–0.5 log | N | derived | a rider's take from its host, into its reserve |
 | `fauna.parasite_detach_body_fraction` | 0.24 | fraction of lineage body_max | (0, 1] | 0.15–0.5 | N | placeholder | a rider drops off at this size |

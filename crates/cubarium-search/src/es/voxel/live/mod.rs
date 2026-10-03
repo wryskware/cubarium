@@ -44,6 +44,8 @@ mod breeding_tests;
 #[cfg(test)]
 mod curiosity_tests;
 #[cfg(test)]
+mod gut_screen_tests;
+#[cfg(test)]
 mod knob_wiring_tests;
 #[cfg(test)]
 mod lineage_params_tests;

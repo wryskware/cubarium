@@ -259,7 +259,6 @@ fn the_r2b_physiology_table_is_the_briefs() {
         ("body_max", snail.core.body_max, shredder.core.body_max * r),
         ("body_min", snail.core.body_min, shredder.core.body_min * r),
         ("birth_body", snail.core.birth_body, shredder.core.birth_body * r),
-        ("bite_per_s", snail.core.bite_per_s, shredder.core.bite_per_s * r),
         ("growth_max_per_s", snail.core.growth_max_per_s, shredder.core.growth_max_per_s * r),
         ("egg_organic", snail.core.reproduction.egg_organic, shredder.core.reproduction.egg_organic * r),
         // The minimal gut: its own daily need (f 0.02 over 7,200 s), motor at its ratio.

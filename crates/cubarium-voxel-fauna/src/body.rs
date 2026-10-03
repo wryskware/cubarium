@@ -416,7 +416,7 @@ pub struct FounderPhysiology {
     /// for every lineage until the loftstrider's kick.
     pub counter: Option<Counter>,
     /// **The org-unit mass scale this physiology was built at** ([`FounderPhysiology::scale_mass`]
-    /// multiplies the eight absolute quantities of [`FounderPhysiology::core`] and records
+    /// multiplies the seven absolute quantities of [`FounderPhysiology::core`] and records
     /// the factor here). The senses read it: the `Self` references and taste's reference
     /// are the manifest's times this (`manifest::SELF_REFERENCE_RULE`,
     /// `TASTE_REFERENCE_RULE`), so a heavier body reads "a fraction of an adult" and a
@@ -865,7 +865,7 @@ fn one() -> f64 {
 }
 
 impl FounderPhysiology {
-    /// Make this lineage `k` times heavier in org-units: the eight absolute quantities of
+    /// Make this lineage `k` times heavier in org-units: the seven absolute quantities of
     /// its core ([`crate::SpeciesConfig::scale_mass`]) times `k`, and the recorded
     /// [`FounderPhysiology::mass_scale`] with them. Per-unit rates, clocks and metres stay.
     pub fn scale_mass(&mut self, k: f64) {
@@ -899,7 +899,6 @@ impl FounderPhysiology {
             Founder::Blind => FounderPhysiology {
                 core: SpeciesConfig {
                     maintenance_per_s: DAILY_SHREDDER / DAY_S,
-                    bite_per_s: 0.0005,
                     // The browser's K scaled by body (0.0125 / 0.05): a fortieth of the
                     // litter cue's reference stock `emit_reference`, so a litter film gives crumbs
                     // and a real pile nearly a whole bite.
@@ -1061,10 +1060,6 @@ impl FounderPhysiology {
             Founder::Lanternjaw => FounderPhysiology {
                 core: SpeciesConfig {
                     maintenance_per_s: DAILY_LANTERNJAW / DAY_S,
-                    // The other two lineages' mouth, 0.04 body per second, at its body: a
-                    // grazer carcass fills it in a few minutes of feeding (§2.6, "handling
-                    // time is how long filling its reserve takes").
-                    bite_per_s: 0.0014,
                     // The browser's K scaled by body (0.005 × 0.035 / 0.05).
                     bite_half_stock: 0.0035,
                     // Set from carrion's own composition, as the shredder's is from
@@ -1147,8 +1142,8 @@ impl FounderPhysiology {
             // Volume ratio: its adult body 0.25 × 0.21 × 0.19 m = 0.009975 m³ over the
             // shredder's 0.375 × 0.125 × 0.125 m = 0.005859 m³, **r = 1.7024**
             // ([`CAPGNAWER_VOLUME_RATIO`]). Every stock (body_max, body_min, birth_body,
-            // the clutch: egg_organic and surplus_floor) and every absolute rate
-            // (bite_per_s, growth_max_per_s) is the shredder's × r
+            // the clutch: egg_organic and surplus_floor) and the absolute growth rate
+            // (growth_max_per_s) is the shredder's × r
             // ([`SpeciesConfig::scale_mass`], which scales exactly those). Upkeep and the
             // motor are already per unit of body per second, so they stay and the absolute
             // upkeep scales with the body: specific rates equal the shredder's. The reserve

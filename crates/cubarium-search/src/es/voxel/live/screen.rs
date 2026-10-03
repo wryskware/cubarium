@@ -33,8 +33,9 @@ use cubarium_voxel_flora::{FloraConfig, Species, Trophic};
 use serde::{Deserialize, Serialize};
 
 /// **The night envelope** (proposal 1a, Astra A2; the search file's `[screen.night]`): an
-/// optimistic adult that goes to sleep at reserve fraction `f0` must outlast `margin` x its
-/// longest sleeping bout. A chosen **design envelope** (uninterrupted sleep from 80 %), not
+/// optimistic adult that goes to sleep at reserve fraction `f0`, with its stomach at the
+/// appetite floor `s0 · K` (the minimal gut), must outlast `margin` x its longest sleeping
+/// bout. A chosen **design envelope** (uninterrupted sleep from 80 %), not
 /// biological impossibility: an animal that wakes to feed could live outside it (Astra F7).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -337,11 +338,21 @@ pub fn rsf(flora: &FloraConfig, fauna: &FaunaConfig, voxel_m: f64, spec: &Screen
 // --- The roster screens (`design/handoffs/roster-search-groundwork-2026-10-02.md`) ------
 
 /// **Uninterrupted sleep from onset reserve fraction `f0`** (proposal 1a, Astra A2),
-/// seconds: `max(0, f0 − (1 − h)) × c / (m × s)` — reserve per body `c`, basal upkeep `m`
-/// per second, the sleep multiplier `s`, wake hunger `h` (it wakes once the reserve falls
-/// to `1 − h` of its cap). Optimistic: an adult, no rider, no alert, no den travel.
-pub fn night_endurance_s(reserve_cap: f64, upkeep: f64, sleep_upkeep: f64, wake_hunger: f64, f0: f64) -> f64 {
-    let usable = (f0 - (1.0 - wake_hunger)).max(0.0) * reserve_cap;
+/// seconds: `(max(0, f0 − (1 − h)) × c + d) / (m × s)` — reserve per body `c`, basal upkeep
+/// `m` per second, the sleep multiplier `s`, wake hunger `h` (the emergency latch wakes it
+/// once the reserve falls to `1 − h` of its cap), and `d` the **digestible stomach** per
+/// unit body at dusk ([`digestible_stomach_per_body`]). The stomach digests into the room
+/// upkeep makes, so the reserve only starts to fall once it is empty: what it holds adds to
+/// the night. Optimistic: an adult, no rider, no alert, no den travel.
+pub fn night_endurance_s(
+    reserve_cap: f64,
+    upkeep: f64,
+    sleep_upkeep: f64,
+    wake_hunger: f64,
+    f0: f64,
+    stomach: f64,
+) -> f64 {
+    let usable = (f0 - (1.0 - wake_hunger)).max(0.0) * reserve_cap + stomach.max(0.0);
     let burn = upkeep * sleep_upkeep;
     if usable <= 0.0 {
         0.0
@@ -350,6 +361,30 @@ pub fn night_endurance_s(reserve_cap: f64, upkeep: f64, sleep_upkeep: f64, wake_
     } else {
         f64::INFINITY
     }
+}
+
+/// **A stomach at the appetite floor, digested** (the minimal gut; the night guard), per
+/// unit adult body: `s0 · k · y`, with `y` the best yield of its diet (optimistic, as the
+/// rest of the guard). What a fed body carries into the night beside its reserve.
+pub fn digestible_stomach_per_body(p: &FounderPhysiology) -> f64 {
+    let y = p.diet.foods().map(|f| p.yield_by_food[f.index()]).fold(0.0, f64::max);
+    p.gut.s0 * p.gut.stomach_k * y.max(0.0)
+}
+
+/// **The daily need `f`** (the minimal gut, `design/metabolism-meals-2026-10-02.md` §1):
+/// the share of its adult body a lineage burns per ecological day awake and at rest,
+/// `maintenance_per_s × ecological_day_s`.
+pub fn daily_need(p: &FounderPhysiology, life: &LifeConfig) -> f64 {
+    p.core.maintenance_per_s * life.ecological_day_s
+}
+
+/// **A body's basal demand over one day of the world's clock**, organic (assimilated)
+/// units: the daily need `f` of its adult body, spread over the ecological day and paid
+/// awake for `awake_s` and at the sleep multiplier for `asleep_s` (the design's
+/// rhythm-aware `E` on the default 120-min cycle).
+pub fn basal_demand_per_day(p: &FounderPhysiology, life: &LifeConfig, awake_s: f64, asleep_s: f64) -> f64 {
+    let day = life.ecological_day_s.max(1e-12);
+    daily_need(p, life) * p.core.body_max * (awake_s + p.sleep_upkeep * asleep_s) / day
 }
 
 /// The day's length, seconds, and its sunrise and sunset phases (`None` with the clock
@@ -598,7 +633,8 @@ fn band_between(sc: &cubarium_voxel_flora::SpeciesConfig, floor_m: f64, ceiling_
 /// (Astra F3): stands at founding are `min(founder_cap, founder_per_m2
 /// × floor area)` (the whole floor counted as habitat), harvested continuously, with no
 /// competition between lineages, no stock caps, no fruit drop, no plant reserve limit;
-/// need is basal only (no motion, growth or breeding). Short supply is a soft term; only
+/// need is basal only (the gut's daily need `f`, [`basal_demand_per_day`]; no motion,
+/// growth, breeding or rider take). Short supply is a soft term; only
 /// a lineage with no supply path is refused. One passed may still starve.
 /// - foliage: each photosynthetic species' regrowth (R's rule) where its adult crown meets
 ///   the lineage's mouth band;
@@ -636,6 +672,7 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
                 p.sleep_upkeep,
                 p.wake_hunger,
                 night.f0,
+                digestible_stomach_per_body(p),
             );
             let need = night.margin * sleep;
             let ratio = if need > 0.0 { endurance / need } else { f64::INFINITY };
@@ -678,10 +715,8 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
         let p = fauna.founder(f);
         let (_, awake_s, asleep_s) = phases(p);
         let bodies = bodies_at_founding(p, false);
-        let need = bodies
-            * p.core.maintenance_per_s
-            * p.core.body_max
-            * (awake_s + p.sleep_upkeep * asleep_s);
+        // Demand is the gut's daily need f (the design's E over the world's day).
+        let need = bodies * basal_demand_per_day(p, &fauna.life, awake_s, asleep_s);
         let floor_m = p.mouth_floor_fraction * p.adult_height_m;
         let ceiling_m = p.mouth_ceiling_fraction * p.adult_height_m;
         let mut foods = Vec::new();
@@ -762,7 +797,7 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
         });
         if p.hunter.is_some() {
             let y = p.yield_by_food[Food::Carrion.index()];
-            let one = p.core.maintenance_per_s * p.core.body_max * (awake_s + p.sleep_upkeep * asleep_s);
+            let one = basal_demand_per_day(p, &fauna.life, awake_s, asleep_s);
             let prey = carrion_of(f);
             out.balance.push(BalanceRow {
                 predator: f.name(),

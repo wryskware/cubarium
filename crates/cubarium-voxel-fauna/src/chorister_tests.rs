@@ -210,7 +210,6 @@ fn the_r3_chorister_table_is_the_briefs() {
         ("body_max", ch.core.body_max, lj.core.body_max),
         ("body_min", ch.core.body_min, lj.core.body_min),
         ("birth_body", ch.core.birth_body, lj.core.birth_body),
-        ("bite_per_s", ch.core.bite_per_s, lj.core.bite_per_s),
         (
             "growth_max_per_s",
             ch.core.growth_max_per_s,

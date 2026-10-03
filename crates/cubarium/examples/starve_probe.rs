@@ -141,7 +141,7 @@ fn main() {
             p.core.body_max,
             p.core.maintenance_per_s,
             p.motor_respiration_per_s,
-            p.core.bite_per_s,
+            p.gut.bite_per_body_s * p.core.body_max,
             p.yield_for(food),
             p.core.bite_half_stock,
             p.core.reserve_cap,
@@ -216,7 +216,8 @@ fn main() {
         let p = cfgf.founder(f);
         let hours = e.body_ticks as f64 * dt / 3600.0;
         let food = if f == Founder::Browser { Food::Foliage } else { Food::Litter };
-        let cap_h = p.core.bite_per_s * p.yield_for(food) * 3600.0;
+        // The adult's raw bite rate (the minimal gut's body-scaled bite) at the yield.
+        let cap_h = p.gut.bite_per_body_s * p.core.body_max * p.yield_for(food) * 3600.0;
         let tot = e.body_ticks.max(1) as f64;
         let starved = deaths1[f.index()][Departure::Starved.index()] - deaths0[f.index()][Departure::Starved.index()];
         println!(

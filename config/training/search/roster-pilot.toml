@@ -7,7 +7,12 @@
 # - F1: the bellwing, seedporter and chorister stay in the food web and the readouts but are
 #   READOUT-ONLY: no stage, replenishment or loss penalty, their loss stops nothing, their
 #   bodies are out of the population band (and the lanternjaw share's denominator), and
-#   their six genes each plus the pack size are FROZEN at the exhibit's values. 54 searched.
+#   their genes each plus the pack size are FROZEN at the exhibit's values.
+# - The minimal gut (2026-10-03, design/metabolism-meals-2026-10-02.md repair 2 item 11):
+#   upkeep is x1 at the gut's daily need f / 7,200 s (the exhibit's old cuts are gone);
+#   `intake` (on the unread bite_per_s) is replaced by the gut's own genes per lineage:
+#   stomach k, bite b, appetite floor s0 and tau per food class eaten; the rider's take is
+#   `rider_take` (parasite_take_per_day). Gut genes start at x1. 74 searched.
 # - F7: R is a readout; S and F are soft (run_margin 1e6: every miss runs and pays k_soft x
 #   its log-distance); the night envelope stays hard (a design envelope, not impossibility).
 # - F3: food access is soft; only a lineage with no supply path at all is refused.
@@ -60,115 +65,58 @@ readout_only = ["bellwing", "seedporter", "chorister"]
 [[gene]]
 name = "upkeep@littershredder"
 path = "fauna.founders.littershredder.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@frondgrazer"
 path = "fauna.founders.frondgrazer.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@lanternjaw"
 path = "fauna.founders.lanternjaw.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.4
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@capgnawer"
 path = "fauna.founders.capgnawer.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.22
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@loftstrider"
 path = "fauna.founders.loftstrider.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@ripple-snail"
 path = "fauna.founders.ripple-snail.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.22
+range = [0.25, 4.0]
+value = 1.0
 
 [[gene]]
 name = "upkeep@bellwing"
 path = "fauna.founders.bellwing.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 frozen = true
 
 [[gene]]
 name = "upkeep@seedporter"
 path = "fauna.founders.seedporter.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.25
+range = [0.25, 4.0]
+value = 1.0
 frozen = true
 
 [[gene]]
 name = "upkeep@chorister"
 path = "fauna.founders.chorister.core.maintenance_per_s"
-range = [0.05, 4.0]
-value = 0.2
-frozen = true
-
-[[gene]]
-name = "intake@littershredder"
-path = "fauna.founders.littershredder.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-
-[[gene]]
-name = "intake@frondgrazer"
-path = "fauna.founders.frondgrazer.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-
-[[gene]]
-name = "intake@lanternjaw"
-path = "fauna.founders.lanternjaw.core.bite_per_s"
-range = [0.1, 10.0]
-value = 2.5
-
-[[gene]]
-name = "intake@capgnawer"
-path = "fauna.founders.capgnawer.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.5
-
-[[gene]]
-name = "intake@loftstrider"
-path = "fauna.founders.loftstrider.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-
-[[gene]]
-name = "intake@ripple-snail"
-path = "fauna.founders.ripple-snail.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.5
-
-[[gene]]
-name = "intake@bellwing"
-path = "fauna.founders.bellwing.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-frozen = true
-
-[[gene]]
-name = "intake@seedporter"
-path = "fauna.founders.seedporter.core.bite_per_s"
-range = [0.1, 10.0]
-value = 4.0
-frozen = true
-
-[[gene]]
-name = "intake@chorister"
-path = "fauna.founders.chorister.core.bite_per_s"
-range = [0.1, 10.0]
-value = 5.0
+range = [0.25, 4.0]
+value = 1.0
 frozen = true
 
 [[gene]]
@@ -409,6 +357,246 @@ value = 0.9
 frozen = true
 
 [[gene]]
+name = "stomach@littershredder"
+path = "fauna.founders.littershredder.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "bite@littershredder"
+path = "fauna.founders.littershredder.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "s0@littershredder"
+path = "fauna.founders.littershredder.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "tau_litter@littershredder"
+path = "fauna.founders.littershredder.gut.digestion_s.litter"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "tau_carrion@littershredder"
+path = "fauna.founders.littershredder.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "stomach@frondgrazer"
+path = "fauna.founders.frondgrazer.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "bite@frondgrazer"
+path = "fauna.founders.frondgrazer.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "s0@frondgrazer"
+path = "fauna.founders.frondgrazer.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "tau_foliage@frondgrazer"
+path = "fauna.founders.frondgrazer.gut.digestion_s.foliage"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "stomach@lanternjaw"
+path = "fauna.founders.lanternjaw.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "bite@lanternjaw"
+path = "fauna.founders.lanternjaw.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "s0@lanternjaw"
+path = "fauna.founders.lanternjaw.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "tau_carrion@lanternjaw"
+path = "fauna.founders.lanternjaw.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "stomach@capgnawer"
+path = "fauna.founders.capgnawer.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "bite@capgnawer"
+path = "fauna.founders.capgnawer.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "s0@capgnawer"
+path = "fauna.founders.capgnawer.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "tau_cap_tissue@capgnawer"
+path = "fauna.founders.capgnawer.gut.digestion_s.cap_tissue"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "tau_litter@capgnawer"
+path = "fauna.founders.capgnawer.gut.digestion_s.litter"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "stomach@loftstrider"
+path = "fauna.founders.loftstrider.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "bite@loftstrider"
+path = "fauna.founders.loftstrider.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "s0@loftstrider"
+path = "fauna.founders.loftstrider.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "tau_foliage@loftstrider"
+path = "fauna.founders.loftstrider.gut.digestion_s.foliage"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "stomach@ripple-snail"
+path = "fauna.founders.ripple-snail.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "bite@ripple-snail"
+path = "fauna.founders.ripple-snail.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "s0@ripple-snail"
+path = "fauna.founders.ripple-snail.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "tau_film@ripple-snail"
+path = "fauna.founders.ripple-snail.gut.digestion_s.film"
+range = [0.25, 4.0]
+value = 1.0
+
+[[gene]]
+name = "stomach@bellwing"
+path = "fauna.founders.bellwing.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "bite@bellwing"
+path = "fauna.founders.bellwing.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "s0@bellwing"
+path = "fauna.founders.bellwing.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "tau_nectar@bellwing"
+path = "fauna.founders.bellwing.gut.digestion_s.nectar"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "stomach@seedporter"
+path = "fauna.founders.seedporter.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "bite@seedporter"
+path = "fauna.founders.seedporter.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "s0@seedporter"
+path = "fauna.founders.seedporter.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "tau_fruit@seedporter"
+path = "fauna.founders.seedporter.gut.digestion_s.fruit"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "stomach@chorister"
+path = "fauna.founders.chorister.gut.stomach_k"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "bite@chorister"
+path = "fauna.founders.chorister.gut.bite_per_body_s"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "s0@chorister"
+path = "fauna.founders.chorister.gut.s0"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
+name = "tau_carrion@chorister"
+path = "fauna.founders.chorister.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+value = 1.0
+frozen = true
+
+[[gene]]
 name = "pack_size@chorister"
 path = "fauna.founders.chorister.pack.pack_size"
 range = [0.5, 1.5]
@@ -522,10 +710,9 @@ what = "litter decay (dead wood and carrion follow)"
 value = 1.0
 
 [[gene]]
-name = "rider_drain"
-path = "fauna.parasite_drain_of_host_basal"
-range = [0.2, 10.0]
-what = "a rider's take, x host basal upkeep (0.05 -> 0.01-0.5, the row's interval)"
+name = "rider_take"
+path = "fauna.parasite_take_per_day"
+range = [0.25, 4.0]
 value = 1.0
 
 [[gene]]

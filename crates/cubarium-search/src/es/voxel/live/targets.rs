@@ -19,12 +19,14 @@
 //!   success, the next is six hours off), pups provisioned, pup survival at least
 //!   `chorister_pup_survival`, and the pack's own intake (a kill or carcass feeding; a
 //!   pack kill in finalist validation). A quarter each; met at all four.
-//! - **Replenishment** (`replenish`): over one whole day-cycle, assimilated intake over the
-//!   cycle's measured spending, `intake / (intake − Δbiomass)` with biomass every living
-//!   body's structure, reserve and open escrow. At least 1; a rise after one meal cannot
-//!   hide a negative day.
+//! - **Replenishment** (`replenish`): over one whole day-cycle, intake over the cycle's
+//!   measured spending, `intake / (intake − Δstock)` with the stock every living body's
+//!   structure, reserve, open escrow and **digestible stomach** (the minimal gut,
+//!   [`digestible_stomach`]), and intake the assimilation plus the stomach's digestible
+//!   change ([`cycle_books`]): food moved from stomach to reserve is not income. At least
+//!   1; a rise after one meal cannot hide a negative day.
 
-use cubarium_voxel_fauna::Founder;
+use cubarium_voxel_fauna::{Animal, Food, Founder, FounderPhysiology};
 use serde::Serialize;
 
 /// The v3 targets as a search file's `[targets]` sets them.
@@ -198,8 +200,10 @@ pub struct LineageOutcome {
     pub pups_alive: usize,
     pub pups_independent: usize,
     pub provision_received: f64,
-    /// One whole day-cycle from founding: assimilated intake, and the lineage's biomass at
-    /// its start and its end. `cycle_complete` false when the world stopped first.
+    /// One whole day-cycle from founding ([`cycle_books`]): intake (assimilated plus the
+    /// stomach's digestible change), and the lineage's stock (biomass plus digestible
+    /// stomach) at its start and its end. `cycle_complete` false when the world stopped
+    /// first.
     pub intake_cycle: f64,
     pub biomass_start: f64,
     pub biomass_cycle: f64,
@@ -274,6 +278,44 @@ impl LineageOutcome {
     pub fn lost(&self) -> bool {
         self.founded > 0 && self.alive_end + self.eggs_end == 0
     }
+}
+
+/// **What a body's stomach is worth to its reserve** (the minimal gut), organic units: each
+/// food class's raw organic times the yield it digests at, mineral-limited as digestion
+/// limits it (`min(yield, mineral / (n_tissue · organic))`). Zero for a body with no
+/// lineage.
+pub fn digestible_stomach(a: &Animal, p: &FounderPhysiology) -> f64 {
+    let n = p.core.n_tissue;
+    Food::ALL
+        .iter()
+        .map(|&f| {
+            let pool = a.stomach.pools[f.index()];
+            if !(pool.organic > 0.0) {
+                return 0.0;
+            }
+            let funded = if n > 0.0 { pool.mineral / (n * pool.organic) } else { f64::INFINITY };
+            pool.organic * p.yield_for(f).min(funded).max(0.0)
+        })
+        .sum()
+}
+
+/// **The cycle's books under the minimal gut**: `(intake, stock_start, stock_end)` from the
+/// lineage's assimilation over the cycle, its biomass at both ends and its digestible
+/// stomach at both ends. The stomach is counted as stock, and food entering it as intake,
+/// so digesting what was already held moves nothing: spending (`intake − Δstock`) is
+/// `assimilated − Δbiomass` either way.
+pub fn cycle_books(
+    assimilated: f64,
+    biomass_start: f64,
+    biomass_end: f64,
+    stomach_start: f64,
+    stomach_end: f64,
+) -> (f64, f64, f64) {
+    (
+        assimilated + (stomach_end - stomach_start),
+        biomass_start + stomach_start,
+        biomass_end + stomach_end,
+    )
 }
 
 /// **Replenishment**: intake over spending, `intake / (intake − (end − start))`; 0 with no
