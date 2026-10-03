@@ -369,6 +369,45 @@ fn head(a: &Animal, want: f64, forward: f64, feed: f64) -> Actions {
     }
 }
 
+/// How far from a body's own face its node may be, and how far from a prey's face the
+/// node a hunter takes it from, columns: the disc's radius, and the radius plus the
+/// strike's reach (a prey is struck from beside it, not stood on).
+fn node_radii(geometry: &crate::Body, h: &crate::Hunter, v: f64) -> (u32, u32) {
+    let r = geometry.footprint_radius();
+    let reach = h.strike_reach_length_fraction * geometry.length_m;
+    let cols = |m: f64| if m.is_finite() && v > 0.0 { (m / v).ceil().max(0.0) as u32 } else { 0 };
+    (cols(r), cols(r + reach))
+}
+
+/// **The next step on the route** (bellwing3 item 1, bellwing4): `None` when the member
+/// can walk straight to `goal` on the disc's graph (or is off the graph); else the centre
+/// of the next node on its route to the node it would strike the target from.
+#[allow(clippy::too_many_arguments)]
+fn route_step(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    founder: crate::Founder,
+    own: u64,
+    t: &Pack,
+    cruise_m_per_s: f64,
+    a: &Animal,
+    o: &Animal,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    goal: (f64, f64),
+) -> Option<(f64, f64)> {
+    let v = view.config.voxel_m;
+    let (own_r, prey_r) = node_radii(geometry, h, v);
+    let graph = fauna.pack_routes(view, founder);
+    let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r)?;
+    if graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
+        return None;
+    }
+    let target = graph.node_near(o.site, (o.pose.x, o.pose.z), prey_r)?;
+    let (graph, field) = fauna.pack_path(view, founder, own, target, reach_steps(t, cruise_m_per_s, v));
+    graph.next_toward(&field, from).map(|j| graph.centre(j))
+}
+
 /// A pack's reach on foot in route steps (one voxel each): what it covers in a chase,
 /// `cruise × chase_give_up_s`, times `route_reach_fraction`.
 fn reach_steps(t: &Pack, cruise_m_per_s: f64, voxel_m: f64) -> u32 {
@@ -643,7 +682,7 @@ pub(crate) fn steer(
             let window = window_body(fauna, i, ring);
             let sight = manifest.cone_range_m;
             let (fx, fz) = a.pose.forward();
-            let mut candidates: Vec<(f64, u64, Site)> = Vec::new();
+            let mut candidates: Vec<(f64, u64, Site, (f64, f64))> = Vec::new();
             for o in &fauna.animals {
                 if o.id == a.id || o.mobility.climb.is_some() {
                     continue;
@@ -660,17 +699,19 @@ pub(crate) fn steer(
                 {
                     continue;
                 }
-                candidates.push((d, o.id, o.site));
+                candidates.push((d, o.id, o.site, (o.pose.x, o.pose.z)));
             }
             let mut best: Option<(f64, u64, Site)> = None;
             if !candidates.is_empty() {
                 candidates.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
                 let routes = fauna.pack_routes(view, founder);
-                if let Some(from) = routes.face(a.site) {
+                let (own_r, prey_r) = node_radii(&geometry, &h, v);
+                if let Some(from) = routes.node_near(a.site, (a.pose.x, a.pose.z), own_r) {
                     let field = routes.distances(from, reach_steps(&t, manifest.cruise_m_per_s, v));
                     best = candidates
                         .into_iter()
-                        .find(|c| routes.face(c.2).is_some_and(|j| field.contains_key(&j)));
+                        .find(|c| routes.node_near(c.2, c.3, prey_r).is_some_and(|j| field.contains_key(&j)))
+                        .map(|c| (c.0, c.1, c.2));
                 }
             }
             if let Some((_, tid, site)) = best {
@@ -689,12 +730,23 @@ pub(crate) fn steer(
     }
 
     // Its motor was refused over the last interval (a wall, a ledge, a pocket): its own
-    // heuristic's escape backs it off and turns it this sampling.
+    // heuristic's escape backs it off and turns it this sampling — unless it is chasing on
+    // a route, whose next step is a move its body fits (bellwing4: the escape held members
+    // in `Resting` beside a route; the route's step is the way out).
     let fb = a.founder_state.feedback;
     if fb.attempted_equivalent > 1e-12
         && fb.delivered_equivalent / fb.attempted_equivalent < fauna.config.teachers.motor_refused
     {
-        return Some(clamp(fauna, held));
+        let on_route = fauna
+            .pack(own)
+            .and_then(|p| p.target)
+            .and_then(|tid| fauna.view().animal(tid).copied())
+            .filter(|o| joins && distance(&a, o.pose.x, o.pose.z, ring) <= 2.0 * t.pack_radius_m)
+            .and_then(|o| route_step(fauna, view, founder, own, &t, manifest.cruise_m_per_s, &a, &o, &geometry, &h, (o.pose.x, o.pose.z)));
+        match on_route {
+            Some((nx, nz)) => return Some(clamp(fauna, go_to(&a, nx, nz, ring, 0.0, 1.0))),
+            None => return Some(clamp(fauna, held)),
+        }
     }
 
     // The chase: the adult nearest the target drives straight at it; the others go to
@@ -731,14 +783,7 @@ pub(crate) fn steer(
             // On the route (bellwing3 item 1): a member that cannot walk straight to
             // where it is going goes to the next face on its route to the target's face.
             let routed = |fauna: &mut Fauna, gx: f64, gz: f64| -> Option<(f64, f64)> {
-                let graph = fauna.pack_routes(view, founder);
-                if graph.walk_line(a.site, (a.pose.x, a.pose.z), (gx, gz)) {
-                    return None;
-                }
-                let goal = graph.face(o.site)?;
-                let from = graph.face(a.site)?;
-                let (graph, field) = fauna.pack_path(view, founder, own, goal, reach_steps(&t, manifest.cruise_m_per_s, v));
-                graph.next_toward(&field, from).map(|j| graph.centre(j))
+                route_step(fauna, view, founder, own, &t, manifest.cruise_m_per_s, &a, &o, &geometry, &h, (gx, gz))
             };
             let act = if driver_id == Some(a.id) {
                 match routed(fauna, o.pose.x, o.pose.z) {

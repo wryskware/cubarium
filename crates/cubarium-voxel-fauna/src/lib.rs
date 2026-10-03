@@ -2933,7 +2933,7 @@ impl Fauna {
                 return map.clone();
             }
         }
-        let map = std::sync::Arc::new(encounter::RouteGraph::for_founder(view, &phys));
+        let map = std::sync::Arc::new(encounter::RouteGraph::for_founder(view, &phys, self.config.founding.clearance_margin_m));
         self.pack_routes.insert(founder.index(), (tick, map.clone()));
         map
     }

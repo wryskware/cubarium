@@ -1449,14 +1449,45 @@ fn a_pack_never_targets_prey_on_a_ledge_it_cannot_climb() {
 /// 41..=43; the hungry pack stands west of the cliff and its grazer on the cliff top 1.6 m
 /// ahead, about 10.5 m away on foot (west round the ring and up the stair).
 fn cliff_with_stair_scene() -> (World, Flora, Fauna, Vec<u64>, u64) {
+    cliff_scene(true, false)
+}
+
+/// The cliff of [`cliff_with_stair_scene`], with the wide stair round (`wide`) and/or a
+/// **narrow stair** (`narrow`) up its near face, right in front of the pack: one column
+/// wide (z = 6, 0.25 m) at x = 10..=12, between rock walls at z = 5 and z = 7 that rise to
+/// the world's top. The column step rule climbs it; the chorister's disc (radius about
+/// 0.2 m with the founding's clearance margin) does not fit between the walls.
+fn cliff_scene(wide: bool, narrow: bool) -> (World, Flora, Fauna, Vec<u64>, u64) {
     let tall = plain_of_height(DayClock { mode: DayMode::Off, ..DayClock::default() }, 25, 16);
     let (mut world, flora, mut fauna, adults, prey) =
         pack_scene_on(tall, &[(2.0, 1.5, true), (2.0, 2.3, true)], (3.6, 1.5));
+    let rock = |world: &mut World, x: i64, y: u32, z: u32| {
+        world.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material: cubarium_voxel::Material::Rock });
+    };
+    if narrow {
+        for x in 9..=12i64 {
+            for z in [5u32, 7] {
+                for y in SURFACE_Y + 1..16 {
+                    rock(&mut world, x, y, z);
+                }
+            }
+        }
+        for (x, top) in [(10i64, SURFACE_Y + 1), (11, SURFACE_Y + 2), (12, SURFACE_Y + 3)] {
+            for y in SURFACE_Y + 1..=top {
+                rock(&mut world, x, y, 6);
+            }
+        }
+    }
+    let stair: &[(std::ops::RangeInclusive<i64>, u32)] = if wide {
+        &[(41..=41, SURFACE_Y + 3), (42..=42, SURFACE_Y + 2), (43..=43, SURFACE_Y + 1)]
+    } else {
+        &[]
+    };
     for z in 0..12u32 {
-        for (xs, top) in [(13..=40i64, SURFACE_Y + 4), (41..=41, SURFACE_Y + 3), (42..=42, SURFACE_Y + 2), (43..=43, SURFACE_Y + 1)] {
+        for (xs, top) in std::iter::once((13..=40i64, SURFACE_Y + 4)).chain(stair.iter().cloned()) {
             for x in xs {
                 for y in SURFACE_Y + 1..=top {
-                    world.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material: cubarium_voxel::Material::Rock });
+                    rock(&mut world, x, y, z);
                 }
             }
         }
@@ -1496,6 +1527,36 @@ fn a_pack_chases_along_the_route_not_into_the_cliff() {
     });
     let at: Vec<_> = adults.iter().filter_map(|&id| fauna.view().animal(id).map(|a| (a.site, a.pose.x))).collect();
     assert!(up.is_some(), "an adult reached the cliff top by the stair: {at:?}");
+}
+
+/// **The route fits the body** (bellwing4): the only way onto the cliff is a stair one
+/// column wide between walls. The column step rule climbs it, so the grazer on top was
+/// in reach; the chorister's disc does not fit, so on the disc rule it is in no route of
+/// the pack's: never targeted.
+#[test]
+fn a_pack_skips_prey_reached_only_by_a_stair_too_narrow_for_its_body() {
+    let (world, mut flora, mut fauna, _adults, _prey) = cliff_scene(false, true);
+    let pack = fauna.packs()[0].id;
+    let set = step_until(&mut fauna, &world, &mut flora, 60, |f| f.pack(pack).is_some_and(|p| p.target.is_some()));
+    assert!(set.is_none(), "the grazer up a stair too narrow for the pack is not taken");
+}
+
+/// **The pack takes the wider way round** (bellwing4): the narrow stair is right in front
+/// of the pack and the wide one 10 m round the ring. On the column rule the route ran up
+/// the narrow one, where the pack wedged; on the disc rule it goes round, and within 20 s
+/// an adult stands on the cliff top (or the grazer is killed).
+#[test]
+fn a_pack_takes_the_wide_way_round_not_the_narrow_stair() {
+    let (world, mut flora, mut fauna, adults, _prey) = cliff_scene(true, true);
+    let pack = fauna.packs()[0].id;
+    let set = step_until(&mut fauna, &world, &mut flora, 60, |f| f.pack(pack).is_some_and(|p| p.target.is_some()));
+    assert!(set.is_some(), "the grazer within reach by the wide stair is taken");
+    let up = step_until(&mut fauna, &world, &mut flora, 400, |f| {
+        f.ledger.pack_chase_kills > 0
+            || adults.iter().any(|&id| f.view().animal(id).is_some_and(|a| a.site.y == SURFACE_Y + 4))
+    });
+    let at: Vec<_> = adults.iter().filter_map(|&id| fauna.view().animal(id).map(|a| (a.site, a.pose.x))).collect();
+    assert!(up.is_some(), "an adult reached the cliff top by the wide stair: {at:?}");
 }
 
 /// **The reserve fallback is the old transfer** (repair 3 item 6): a pup whose stomach is
