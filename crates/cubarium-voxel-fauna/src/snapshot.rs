@@ -31,7 +31,9 @@ use crate::Fauna;
 // ledger lines, `PredationConfig::{carcass_yield_radius_m, threat_clear_m}`.
 // 34: merge with main's crag fixes — `LifeConfig::wall_friction`,
 // `FoundingConfig::clearance_margin_m` in the saved config.
-pub const SCHEMA: u32 = 34;
+// 35: roster mechanics — `LifeConfig::shallows_search_m`, `Glider::fruit_search_m` in
+//     the saved config.
+pub const SCHEMA: u32 = 35;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

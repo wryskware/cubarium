@@ -25,7 +25,7 @@
 //! of perched body-ticks in downpours — and a `bloomcrown:` line (seed output: propagule
 //! organic funded and seeds landed, stands, nectar standing) and the wall time per tick.
 //!
-//! `trace=S` lines cover bellwings and seedporters.
+//! `trace=S` lines cover bellwings, seedporters and loftstriders (with the water at the site).
 //!
 //! An optional `seedporters=N` (F3's measure) does the same for the seedporter (its count
 //! on the asked seed). The run then prints a `seedporter:` census line — body-hours, the
@@ -211,12 +211,31 @@ fn main() {
                 }
             }
         }
+        if trace.is_some() {
+            // Every tick a body is under water deeper than it drowns in: the drown count.
+            let wv = sim.world().view();
+            for a in sim.fauna().view().animals.iter().filter(|a| a.mobility.submerged_ticks > 0) {
+                println!(
+                    "submerged tick={tick} id={} {} n={} water={:.2} site=({},{},{}) z={:.2} climb={:?} mode={:?}",
+                    a.id,
+                    a.founder.map_or("-", |f| f.name()),
+                    a.mobility.submerged_ticks,
+                    wv.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z),
+                    a.site.x,
+                    a.site.y,
+                    a.site.z,
+                    a.pose.z,
+                    a.mobility.climb,
+                    a.mobility.mode,
+                );
+            }
+        }
         if let Some(every) = trace {
             if tick % (every * u64::from(cubarium_voxel::TICK_HZ)) == 0 {
                 let fv = sim.flora().view();
                 let v = sim.world().config().voxel_m;
                 let ring = f64::from(sim.world().config().width) * v;
-                for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(bw) || a.founder == Some(Founder::Seedporter)) {
+                for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(bw) || a.founder == Some(Founder::Seedporter) || a.founder == Some(Founder::Loftstrider)) {
                     let near = fv
                         .stands
                         .iter()
@@ -240,9 +259,14 @@ fn main() {
                     });
                     print!("fan_blooms={fan} ");
                     println!(
-                        "trace t={} id={} x={:.2} z={:.2} y={:.2} over={:.2} mode={:?} perch={:?} state={:?} held=({:.2},{:.2},{:.2}) lift={:.2} reserve={:.5} body={:.5} bloom_m={:.2}",
+                        "trace t={} id={} {} water={:.2} site=({},{},{}) x={:.2} z={:.2} y={:.2} over={:.2} mode={:?} perch={:?} state={:?} held=({:.2},{:.2},{:.2}) lift={:.2} reserve={:.5} body={:.5} bloom_m={:.2}",
                         tick / u64::from(cubarium_voxel::TICK_HZ),
                         a.id,
+                        a.founder.map_or("-", |f| f.name()),
+                        sim.world().view().water_depth_m(i64::from(a.site.x), a.site.y, a.site.z),
+                        a.site.x,
+                        a.site.y,
+                        a.site.z,
                         a.pose.x,
                         a.pose.z,
                         a.pose.y_m,

@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (755 rows)
+**`flora.*`** (756 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1088,6 +1088,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.founder_reserve` | 0.1 | org-units per reference face | [0, inf) | yes | C | placeholder | each founder's starting reserve |
 | `flora.latticevine.founder_spacing` | 8 | voxels (not rescaled) | [0, inf) | 2–24 | - | placeholder | the fewest voxels between two founders' roots |
 | `flora.latticevine.founder_spread_m` | 3.0 | m of floor | [0, inf) | 0–8 | - | placeholder | floor distance founders keep while the walls allow it; the rest fill at founder_spacing; 0 off |
+| `flora.latticevine.seed_max_age_s` | 28800.0 | s | [0, inf) | yes | C | placeholder | a banked latticevine seed (voided from a gut) older than this at its check falls to litter |
 | `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
 | `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
 | `flora.wood_decomposition` | 0.0001 | /s | [0, inf) | yes | C | placeholder | k_w: dead-wood decomposition |
@@ -1121,7 +1122,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1043 rows)
+**`fauna.*`** (1053 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1199,7 +1200,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.littershredder.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.littershredder.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.littershredder.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1228,6 +1229,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.littershredder.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.littershredder.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.littershredder.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.littershredder.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.littershredder.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.littershredder.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -1302,7 +1304,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.frondgrazer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.frondgrazer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.frondgrazer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1331,6 +1333,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.frondgrazer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.frondgrazer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.frondgrazer.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.frondgrazer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.frondgrazer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.frondgrazer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -1405,7 +1408,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.lanternjaw.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.lanternjaw.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.lanternjaw.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1434,6 +1437,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.lanternjaw.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.lanternjaw.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.lanternjaw.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.lanternjaw.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.lanternjaw.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.lanternjaw.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -1508,7 +1512,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.capgnawer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.capgnawer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.capgnawer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1537,6 +1541,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.capgnawer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.capgnawer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.capgnawer.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.capgnawer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.capgnawer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.capgnawer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -1611,7 +1616,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.loftstrider.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.loftstrider.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.loftstrider.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1640,6 +1645,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.loftstrider.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.loftstrider.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.loftstrider.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.loftstrider.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.loftstrider.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.loftstrider.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -1714,7 +1720,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.ripple-snail.taste_reference` | 0.00625 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.ripple-snail.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.ripple-snail.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.ripple-snail.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1743,6 +1749,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.ripple-snail.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.ripple-snail.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.ripple-snail.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.ripple-snail.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.ripple-snail.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.ripple-snail.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -1817,7 +1824,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.bellwing.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.bellwing.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.bellwing.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1846,6 +1853,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.bellwing.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.bellwing.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.bellwing.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.bellwing.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.bellwing.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.bellwing.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -1920,7 +1928,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.seedporter.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.seedporter.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.seedporter.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1949,6 +1957,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.glider.glide_cost_factor` | 1.2 | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.seedporter.glider.glide_min_height_m` | 1.0 | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.seedporter.glider.roost_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.seedporter.glider.fruit_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.seedporter.gut_seeds.seeds_per_fruit_organic` | 0.1 | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.seedporter.gut_seeds.gut_transit_s` | 900.0 | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.seedporter.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2023,7 +2032,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale) |
+| `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
 | `fauna.founders.chorister.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.chorister.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.chorister.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2052,6 +2061,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.chorister.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.chorister.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
+| `fauna.founders.chorister.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
 | `fauna.founders.chorister.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.chorister.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.chorister.pack.pack_radius_m` | 6.0 | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2111,6 +2121,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.life.lifespan_draw_span` | 0.4 | x median | [0, inf) | 0–1 | C | placeholder | width of the lifespan draw, in medians |
 | `fauna.life.arriving_share_min` | 0.5 | fraction | [0, 1] |  | N | placeholder | an arriving body keeps a uniform [this, 1) share of a draw |
 | `fauna.life.wall_friction` | 0.0 | fraction | [0, 1] | 0–1 | - | placeholder | share of a walk's along-wall component a wall takes away (0 slides freely, 1 stops) |
+| `fauna.life.shallows_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | a heuristic walker in water deeper than it wades heads for the nearest wadeable face within this (a world query, not a sense) |
 | `fauna.cue.emit_reference` | 0.05 | organic units | (0, inf) |  | C | placeholder | detritus stock at which a source emits at full strength; the taste reference |
 | `fauna.cue.half_life_s` | 2.0 | s | (0, inf) | 0.5–60 log | C | placeholder | cue half-life |
 | `fauna.cue.diffuse_fraction` | 0.4 | fraction per update | [0, 1] | 0.05–0.9 | C | placeholder | convex nearest-neighbour diffusion mix |

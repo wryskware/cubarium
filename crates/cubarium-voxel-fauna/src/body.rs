@@ -141,10 +141,6 @@ pub const CAPGNAWER_VOLUME_RATIO: f64 = (0.25 * 0.21 * 0.19) / (0.375 * 0.125 * 
 /// The ripple-snail's body volume over the littershredder's (roster R2b): 0.19 × 0.19 ×
 /// 0.063 m over 0.375 × 0.125 × 0.125 m. A derivation, not a knob, as
 /// [`CAPGNAWER_VOLUME_RATIO`] is.
-/// The site edge the ripple-snail's taste reference is computed at (the live worlds'
-/// 0.125 m voxel): its `taste_reference` is the film capacity of one such site.
-const SNAIL_SITE_M: f64 = 0.125;
-
 pub const RIPPLE_SNAIL_VOLUME_RATIO: f64 = (0.19 * 0.19 * 0.063) / (0.375 * 0.125 * 0.125);
 
 /// The loftstrider's **hull** volume over the frondgrazer's body (roster R1): 1.5 × 0.55
@@ -544,10 +540,22 @@ pub struct Glider {
     /// a downpour). Twice the browser cone's 2 m range: 4.0.
     #[serde(default = "roost_search_m")]
     pub roost_search_m: f64,
+    /// **The fruit search's reach** (roster mechanics fix 4): a hungry grounded glider
+    /// driven by its own heuristic, with no fruit at its mouth, walks to the nearest
+    /// fruiting stand within this horizontal distance, metres, and climbs it. A
+    /// **heuristic world query, not a sense**: the roost reflex's kind of lookup over the
+    /// plant layer, read by the body's reflex only; it enters no observation and no brain
+    /// input. 8.0.
+    #[serde(default = "fruit_search_m")]
+    pub fruit_search_m: f64,
 }
 
 fn roost_search_m() -> f64 {
     4.0
+}
+
+fn fruit_search_m() -> f64 {
+    8.0
 }
 
 impl Glider {
@@ -560,6 +568,7 @@ impl Glider {
         glide_cost_factor: 1.2,
         glide_min_height_m: 1.0,
         roost_search_m: 4.0,
+        fruit_search_m: 8.0,
     };
 }
 
@@ -1307,15 +1316,9 @@ impl FounderPhysiology {
                     water_margin_m: 0.25,
                     // Its clutch goes on film, under water.
                     egg_site: EggSite::Film,
-                    // Taste reads film against the film's own capacity per site: the
-                    // plant layer's `film_capacity_per_m2` (0.4) × a 0.125 m site's area
-                    // (0.015625 m²) = 6.25e-3 organic units, so a full film tastes 1 and a
-                    // half-capacity pond 0.5 (`taste_reference`).
-                    taste_reference: Some(
-                        cubarium_voxel_flora::FloraConfig::default().film_capacity_per_m2
-                            * SNAIL_SITE_M
-                            * SNAIL_SITE_M,
-                    ),
+                    // Taste reads film against the film's own capacity per site, derived on
+                    // the world's cell (`taste_reference_on`): so no fixed stock here.
+                    taste_reference: None,
                     // On a film site (the diet-driven food filter).
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
@@ -1331,6 +1334,18 @@ impl FounderPhysiology {
     /// manifest rule `emit_reference × mass_scale`.
     pub fn taste_reference_stock(&self, emit_reference: f64) -> f64 {
         self.taste_reference.unwrap_or(emit_reference * self.mass_scale)
+    }
+
+    /// Taste's reference stock **on a world** of cell edge `voxel_m` under the plant layer's
+    /// `flora` config (roster mechanics, the coordinator's item 6): a lineage that eats
+    /// only film and sets no `taste_reference` tastes against one site's film capacity,
+    /// `film_capacity_per_m2 × voxel_m²` (`manifest::TASTE_REFERENCE_FILM_RULE`), so a full
+    /// site tastes 1 on any grid; every other lineage is [`Self::taste_reference_stock`].
+    pub fn taste_reference_on(&self, emit_reference: f64, voxel_m: f64, flora: &cubarium_voxel_flora::FloraConfig) -> f64 {
+        match self.taste_reference {
+            None if self.diet == crate::Diet::only(crate::Food::Film) => flora.film_capacity_per_m2 * voxel_m * voxel_m,
+            _ => self.taste_reference_stock(emit_reference),
+        }
     }
 
     /// Total structure a `core` non-sensory budget buys, with sensor allocation `f`:
@@ -1796,9 +1811,10 @@ pub(crate) fn water_within(view: &VoxelView<'_>, x: i64, y: u32, z: u32, margin_
 /// most `down`, and every lineage's `up == down`), so a plain riser still descends. Only
 /// descents run the second pass.
 ///
-/// The standing water at the destination must be within the body's wade depth, **or
-/// shallower than the water at the column the sub-step starts from**: a body caught deeper than it can wade may always step toward the
-/// shallows, and never deeper; it may also move about the face it stands on.
+/// The standing water at the destination must be within the body's wade depth, **or no
+/// deeper than the water at the column the sub-step starts from**: a body caught deeper
+/// than it can wade may always step toward the shallows or across a pool's level floor,
+/// and never deeper; it may also move about the face it stands on.
 #[allow(clippy::too_many_arguments)]
 fn advance_candidate(
     view: &VoxelView<'_>,
@@ -1863,7 +1879,9 @@ fn advance_candidate(
         let hz = ((pz / v).floor().max(0.0) as u32).min(c.depth.saturating_sub(1));
         let hx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
         let same_face = (hx, hz) == (cx, cz as u32) && ny == standing_y;
-        if !same_face && !(there < view.water_depth_m(hx, standing_y, hz)) {
+        // No deeper (roster mechanics fix 2): across a flat-bottomed pool every face is as
+        // deep as the next, and "strictly shallower" held a body in place until it drowned.
+        if !same_face && !(there <= view.water_depth_m(hx, standing_y, hz)) {
             return None;
         }
     }
@@ -2815,8 +2833,11 @@ pub(crate) fn taste_reading(
         body,
         FounderPhysiology::placeholder(founder).diet,
         // The unit tests' bodies are the placeholder tables' (mass 1).
-        FounderPhysiology::placeholder(founder)
-            .taste_reference_stock(crate::CueConfig::default().emit_reference),
+        FounderPhysiology::placeholder(founder).taste_reference_on(
+            crate::CueConfig::default().emit_reference,
+            view.config.voxel_m,
+            fv.config,
+        ),
     )
 }
 
@@ -2958,13 +2979,13 @@ pub(crate) fn observation(
         manifest,
         &body,
         phys.diet,
-        phys.taste_reference_stock(fauna.config.cue.emit_reference),
+        phys.taste_reference_on(fauna.config.cue.emit_reference, view.config.voxel_m, fv.config),
     );
     // A fruit taste (F3, the seedporter): the fruit in the mouth's reach — the stand it
     // climbs or perches on, else the nearest fruiting crown cell or vine face in fruit —
     // against the lineage's reference; nothing in reach is a valid zero.
     let taste = if manifest.taste_cue == "fruit" {
-        let reference = phys.taste_reference_stock(fauna.config.cue.emit_reference);
+        let reference = phys.taste_reference_on(fauna.config.cue.emit_reference, view.config.voxel_m, fv.config);
         let sat = manifest.tunings.chem_saturation;
         match crate::step::glider_fruit_in_reach(view, fv, a, phys) {
             Some((_, stock)) => {
@@ -3130,7 +3151,7 @@ fn flyer_observation(
     if let Some((_, stock)) =
         crate::flight::bloom_in_reach(view, fv, crate::flight::mouth_point(a, shape), reach)
     {
-        let reference = phys.taste_reference_stock(fauna.config.cue.emit_reference);
+        let reference = phys.taste_reference_on(fauna.config.cue.emit_reference, view.config.voxel_m, fv.config);
         let c = if reference > 0.0 { (stock / reference).min(1.0) } else { 1.0 };
         let sat = manifest.tunings.chem_saturation;
         obs[tm.offset] = clamp01(c / (c + sat));

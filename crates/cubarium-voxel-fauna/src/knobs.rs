@@ -165,6 +165,16 @@ pub struct LifeConfig {
     /// the wall. The refused remainder is paid for either way.
     #[serde(default = "default_wall_friction")]
     pub wall_friction: f64,
+    /// **The shallows reflex's reach** (roster mechanics fix 2), metres: a walker driven by
+    /// its own heuristic that stands in water deeper than it wades (dropped in, the water
+    /// rose, or a starving body shrank under it) heads for the nearest face within this
+    /// horizontal distance whose water it wades. A heuristic world query, not a sense.
+    #[serde(default = "default_shallows_search_m")]
+    pub shallows_search_m: f64,
+}
+
+fn default_shallows_search_m() -> f64 {
+    LifeConfig::default().shallows_search_m
 }
 
 fn default_wall_friction() -> f64 {
@@ -182,6 +192,7 @@ impl Default for LifeConfig {
             lifespan_draw_span: 0.4,
             arriving_share_min: 0.5,
             wall_friction: 0.0,
+            shallows_search_m: 8.0,
         }
     }
 }

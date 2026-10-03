@@ -38,7 +38,8 @@
 //! three currencies, pro rata) goes into a **gut seed lot** instead of the gut; the lot is
 //! voided at the body's support face no sooner than `gut_transit_s` after its last meal:
 //! a stand's seeds into that face's seed bank ([`Flora::deposit_seeds`]), a latticevine's
-//! to its litter (no path founds a vine from a seed yet: owed).
+//! into its vine seed bank ([`Flora::deposit_vine_seeds`]), which founds a vine at the
+//! site's bank check where one can root.
 //!
 //! **A glider sleeps only perched** (step's `circadian`), and the roost reflex
 //! ([`roost_reflex`]) takes a heuristic-driven one to a crown at its rest hour and in a
@@ -410,7 +411,7 @@ fn ground_tick(
                 fauna.ledger.climbs += 1;
                 return;
             }
-            if let Some((x, z)) = glide_off_edge(view, &a, s, &glider, phys.wade_depth_m(&phys.body_at(a.body))) {
+            if let Some((x, z)) = glide_off_edge(view, &fv, &a, s, &glider, &phys) {
                 let a = &mut fauna.animals[i];
                 a.pose.x = x;
                 a.pose.z = z;
@@ -427,9 +428,18 @@ fn ground_tick(
 
 /// Where a glide off the edge ahead starts: the first point along the heading, up to two
 /// radii and a voxel on, where the disc is clear and every floor under it is at least
-/// `glide_min_height_m` below the base. `None` when there is no such drop, or the water
-/// on the floor below is deeper than it wades (it does not jump out over a pond).
-fn glide_off_edge(view: &VoxelView<'_>, a: &Animal, shape: Shape, glider: &Glider, wade_m: f64) -> Option<(f64, f64)> {
+/// `glide_min_height_m` below the base. `None` when there is no such drop, or the glide
+/// from there would end in water deeper than it wades ([`glide_ends_deep`]; roster
+/// mechanics fix 1: the end cell decides, not the water it starts out over).
+#[allow(clippy::too_many_arguments)]
+fn glide_off_edge(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    a: &Animal,
+    shape: Shape,
+    glider: &Glider,
+    phys: &crate::FounderPhysiology,
+) -> Option<(f64, f64)> {
     let v = view.config.voxel_m;
     let base = a.pose.y_m;
     let (fx, fz) = a.pose.forward();
@@ -445,11 +455,162 @@ fn glide_off_edge(view: &VoxelView<'_>, a: &Animal, shape: Shape, glider: &Glide
             continue;
         };
         if base - (top - water) >= glider.glide_min_height_m - EPS {
-            // It does not jump out over water deeper than it wades.
-            return (water <= wade_m).then_some((x, z));
+            let from = crate::Pose { x, z, ..a.pose };
+            return (!glide_ends_deep(view, fv, glider, phys, a.body, from)).then_some((x, z));
         }
     }
     None
+}
+
+/// Where a glide comes down ([`glide_motion`]).
+#[derive(Clone, Copy, Debug)]
+enum GlideEnd {
+    /// On the top of a climbable stand's crown layer: `(the stand, the layer)`.
+    Crown(Site, StandLayer),
+    /// On the floor of its centre column: the face.
+    Floor(Site),
+    /// Against a covered wall face.
+    Vine(VineFace),
+}
+
+/// **One gliding tick's motion** on `pose` (its heading already turned): `distance`
+/// along the heading through the air, then `fall` down its centre column onto the first
+/// crown top of a climbable stand, the floor, or a covered face it is pressed against.
+/// The metres it covered and where it came down, if it did. Pure: the glide itself and its
+/// prediction ([`glide_end`]) are this one rule.
+#[allow(clippy::too_many_arguments)]
+fn glide_motion(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    glider: &Glider,
+    s: Shape,
+    puddle: f64,
+    distance: f64,
+    fall: f64,
+    pose: &mut crate::Pose,
+) -> (f64, Option<GlideEnd>) {
+    let v = view.config.voxel_m;
+    let moved = flight::move_through_air(view, fv, s, f64::INFINITY, puddle, pose, distance, 0.0);
+    // The descent, against its centre column.
+    let y0 = pose.y_m;
+    let floor = floor_at(view, pose.x, pose.z, y0);
+    let floor_top = floor.map_or(0.0, |(t, _)| t);
+    let y = (y0 - fall).max(floor_top);
+    let cz = (pose.z / v).floor().clamp(0.0, f64::from(view.config.depth) - 1.0) as u32;
+    let cx = (pose.x / v).floor() as i64;
+    let crown = flight::crown_layers_at(view, fv, cx, cz)
+        .into_iter()
+        .filter(|(site, _)| fv.stand_at(*site).is_some_and(|st| climbable(fv, st, glider)))
+        .map(|(site, l)| ((l.cell + 1) as f64 * v, site, l))
+        .filter(|&(top, _, _)| top < y0 - EPS && top >= y - EPS && top >= floor_top - EPS)
+        .max_by(|p, q| p.0.total_cmp(&q.0));
+    if let Some((top, site, l)) = crown {
+        pose.y_m = top;
+        return (moved.distance_m, Some(GlideEnd::Crown(site, l)));
+    }
+    if let Some((top, site)) = floor.filter(|&(t, _)| y <= t + EPS) {
+        pose.y_m = top;
+        return (moved.distance_m, Some(GlideEnd::Floor(site)));
+    }
+    pose.y_m = y;
+    let end = flight::vine_contact(view, fv, s, pose.x, pose.z, y).map(GlideEnd::Vine);
+    (moved.distance_m, end)
+}
+
+/// A glide's per-tick `(distance, fall)` for a body of `body` on `phys`.
+fn glide_pace(glider: &Glider, phys: &crate::FounderPhysiology, body: f64) -> (f64, f64) {
+    let distance = glider.glide_body_lengths_per_s * phys.body_at(body).length_m * DT;
+    let fall = if glider.glide_ratio > 0.0 {
+        distance / glider.glide_ratio
+    } else {
+        distance
+    };
+    (distance, fall)
+}
+
+/// **Where a glide from `from` comes down** if its heading holds: [`glide_motion`] tick by
+/// tick until it lands. `None` when it never does (a bottomless column).
+fn glide_end(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    glider: &Glider,
+    phys: &crate::FounderPhysiology,
+    body: f64,
+    mut from: crate::Pose,
+) -> Option<GlideEnd> {
+    let s = shape(phys, body);
+    let puddle = phys.drown_depth_m(&phys.body_at(body));
+    let (distance, fall) = glide_pace(glider, phys, body);
+    if !(fall > 0.0) {
+        return None;
+    }
+    // It falls `fall` a tick until it meets something: never more ticks than its height.
+    let cap = (from.y_m.max(0.0) / fall).ceil() as usize + 2;
+    for _ in 0..cap {
+        if let (_, Some(end)) = glide_motion(view, fv, glider, s, puddle, distance, fall, &mut from) {
+            return Some(end);
+        }
+    }
+    None
+}
+
+/// **Whether a glide from `from` ends in water deeper than the body wades** (roster
+/// mechanics fix 1): only its end cell decides — the floor it comes down on — not the water
+/// it crosses. A crown or a covered face is dry.
+fn glide_ends_deep(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    glider: &Glider,
+    phys: &crate::FounderPhysiology,
+    body: f64,
+    from: crate::Pose,
+) -> bool {
+    let wade = phys.wade_depth_m(&phys.body_at(body));
+    match glide_end(view, fv, glider, phys, body, from) {
+        Some(GlideEnd::Floor(site)) => view.water_depth_m(i64::from(site.x), site.y, site.z) > wade,
+        _ => false,
+    }
+}
+
+/// The heading a glider in the air steers by (roster mechanics fix 1): the one it asks for
+/// when that glide ends dry; else the one it holds when that does; else, of 16 headings
+/// round the compass, the dry one nearest what it asked for, turned toward at its yaw cap;
+/// with none, what it asked for.
+#[allow(clippy::too_many_arguments)]
+fn steer_dry(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    glider: &Glider,
+    phys: &crate::FounderPhysiology,
+    a: &Animal,
+    asked: f64,
+    yaw_step: f64,
+) -> f64 {
+    let dry = |h: f64| !glide_ends_deep(view, fv, glider, phys, a.body, crate::Pose { heading_rad: h, ..a.pose });
+    if dry(asked) {
+        return asked;
+    }
+    let held = a.pose.heading_rad;
+    if dry(held) {
+        return held;
+    }
+    let tau = std::f64::consts::TAU;
+    let gap = |h: f64| {
+        let d = (h - asked).rem_euclid(tau);
+        d.min(tau - d)
+    };
+    let mut best: Option<f64> = None;
+    for k in 0..16 {
+        let h = f64::from(k) * tau / 16.0;
+        if dry(h) && best.is_none_or(|b| gap(h) < gap(b)) {
+            best = Some(h);
+        }
+    }
+    let Some(target) = best else {
+        return asked;
+    };
+    let d = (target - held + std::f64::consts::PI).rem_euclid(tau) - std::f64::consts::PI;
+    (held + d.clamp(-yaw_step, yaw_step)).rem_euclid(tau)
 }
 
 /// One gliding tick.
@@ -488,50 +649,29 @@ fn glide_tick(
     let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
     fauna.ledger.respired_flight_out += paid;
     let s = shape(phys, fauna.animals[i].body);
-    let geometry = phys.body_at(fauna.animals[i].body);
-    let speed = glider.glide_body_lengths_per_s * geometry.length_m;
-    let distance = speed * DT;
-    let fall = if glider.glide_ratio > 0.0 {
-        distance / glider.glide_ratio
-    } else {
-        distance
-    };
-    let puddle = phys.drown_depth_m(&geometry);
+    let (distance, fall) = glide_pace(&glider, phys, fauna.animals[i].body);
+    let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
     let fv = flora.view();
+    let asked = (fauna.animals[i].pose.heading_rad + held.turn * manifest.yaw_cap_rad_per_s * DT)
+        .rem_euclid(std::f64::consts::TAU);
+    // It steers clear of an end in water deeper than it wades (roster mechanics fix 1).
+    let heading = steer_dry(view, &fv, &glider, phys, &fauna.animals[i], asked, manifest.yaw_cap_rad_per_s * DT);
     let a = &mut fauna.animals[i];
-    a.pose.heading_rad =
-        (a.pose.heading_rad + held.turn * manifest.yaw_cap_rad_per_s * DT).rem_euclid(std::f64::consts::TAU);
-    let moved = flight::move_through_air(view, &fv, s, f64::INFINITY, puddle, &mut a.pose, distance, 0.0);
-    // The descent, against its centre column.
-    let y0 = a.pose.y_m;
-    let floor = floor_at(view, a.pose.x, a.pose.z, y0);
-    let floor_top = floor.map_or(0.0, |(t, _)| t);
-    let mut y = (y0 - fall).max(floor_top);
-    let cz = (a.pose.z / v).floor().clamp(0.0, f64::from(view.config.depth) - 1.0) as u32;
-    let cx = (a.pose.x / v).floor() as i64;
-    let crown = flight::crown_layers_at(view, &fv, cx, cz)
-        .into_iter()
-        .filter(|(site, _)| fv.stand_at(*site).is_some_and(|st| climbable(&fv, st, &glider)))
-        .map(|(site, l)| ((l.cell + 1) as f64 * v, site, l))
-        .filter(|&(top, _, _)| top < y0 - EPS && top >= y - EPS && top >= floor_top - EPS)
-        .max_by(|p, q| p.0.total_cmp(&q.0));
-    let mut landed = false;
-    if let Some((top, site, l)) = crown {
-        y = top;
-        a.pose.y_m = y;
-        set_mode(a, MobilityMode::Perched, Some(stand_perch(PerchKind::CrownTop, site, &l)), false);
-        landed = true;
-        fauna.ledger.landings_by_perch[PerchKind::CrownTop.index()] += 1;
-    } else if let Some((top, site)) = floor.filter(|&(t, _)| y <= t + EPS) {
-        a.pose.y_m = top;
-        a.site = site;
-        set_mode(a, MobilityMode::Ground, None, false);
-        settle(view, a, phys);
-        landed = true;
-        fauna.ledger.landings_by_perch[PerchKind::Face.index()] += 1;
-    } else {
-        a.pose.y_m = y;
-        if let Some(face) = flight::vine_contact(view, &fv, s, a.pose.x, a.pose.z, y) {
+    a.pose.heading_rad = heading;
+    let (moved, end) = glide_motion(view, &fv, &glider, s, puddle, distance, fall, &mut a.pose);
+    let landed = end.is_some();
+    match end {
+        Some(GlideEnd::Crown(site, l)) => {
+            set_mode(a, MobilityMode::Perched, Some(stand_perch(PerchKind::CrownTop, site, &l)), false);
+            fauna.ledger.landings_by_perch[PerchKind::CrownTop.index()] += 1;
+        }
+        Some(GlideEnd::Floor(site)) => {
+            a.site = site;
+            set_mode(a, MobilityMode::Ground, None, false);
+            settle(view, a, phys);
+            fauna.ledger.landings_by_perch[PerchKind::Face.index()] += 1;
+        }
+        Some(GlideEnd::Vine(face)) => {
             a.pose.heading_rad = into_face(face);
             set_mode(
                 a,
@@ -542,14 +682,14 @@ fn glide_tick(
                 }),
                 false,
             );
-            landed = true;
             fauna.ledger.landings_by_perch[PerchKind::VineFace.index()] += 1;
         }
+        None => {}
     }
     let fb = &mut a.founder_state.feedback;
     fb.attempted_equivalent += distance;
-    fb.delivered_equivalent += moved.distance_m;
-    fb.delivered_forward += moved.distance_m;
+    fb.delivered_equivalent += moved;
+    fb.delivered_forward += moved;
     fb.motor_respiration += paid;
     fb.structural_loss += body;
     a.state = if landed && a.mobility.mode == MobilityMode::Perched {
@@ -785,19 +925,47 @@ fn perched_tick(
     if held.forward > 0.0 {
         let floor = floor_at(view, a.pose.x, a.pose.z, a.pose.y_m).map_or(0.0, |(t, _)| t);
         let high = a.pose.y_m - floor >= glider.glide_min_height_m - EPS;
+        // A glide that would end in water deeper than it wades is refused, as a refused
+        // walk is (roster mechanics fix 1): nothing delivered of what it asked, so its
+        // heuristic's escape turns it; a wall face's perch climbs down instead.
+        let refused = |fauna: &mut Fauna| {
+            let asked = held.forward * manifest.cruise_m_per_s * DT;
+            let a = &mut fauna.animals[i];
+            a.founder_state.feedback.attempted_equivalent += asked;
+            a.state = State::Resting;
+        };
         match perch.anchor {
             PerchAnchor::Vine(face) => {
-                if high {
+                let from = crate::Pose {
+                    heading_rad: away_from(face),
+                    ..a.pose
+                };
+                if high && !glide_ends_deep(view, &flora.view(), &glider, phys, a.body, from) {
                     fauna.animals[i].pose.heading_rad = away_from(face);
                     start_glide(fauna, i, false);
                 } else {
+                    if high {
+                        refused(fauna);
+                    }
                     let m = &mut fauna.animals[i].mobility;
                     m.mode = MobilityMode::Climb;
                     m.falling = true;
                 }
             }
             PerchAnchor::Stand { .. } => {
+                // On a crown it turns as it asks, then goes.
+                let heading = (a.pose.heading_rad + held.turn * manifest.yaw_cap_rad_per_s * DT)
+                    .rem_euclid(std::f64::consts::TAU);
+                fauna.animals[i].pose.heading_rad = heading;
+                let from = crate::Pose {
+                    heading_rad: heading,
+                    ..a.pose
+                };
                 if high {
+                    if glide_ends_deep(view, &flora.view(), &glider, phys, a.body, from) {
+                        refused(fauna);
+                        return;
+                    }
                     start_glide(fauna, i, false);
                 } else {
                     // Down from a crown top; on up from under a crown.
@@ -808,7 +976,9 @@ fn perched_tick(
             }
             _ => start_glide(fauna, i, true),
         }
-        fauna.animals[i].state = State::Walking;
+        if fauna.animals[i].state != State::Resting || fauna.animals[i].mobility.mode != MobilityMode::Perched {
+            fauna.animals[i].state = State::Walking;
+        }
         return;
     }
     // At rest it may turn on a crown (a wall face holds its heading), and eat.
@@ -953,8 +1123,8 @@ fn stow_seeds(a: &mut Animal, plant: SeedPlant, seeds: Taken, source: Site, now:
 }
 
 /// Step 2, after the gut: **every due gut seed lot is voided** at the body's support face
-/// — a stand's seeds into its seed bank, a latticevine's to its litter (no seed path
-/// founds a vine yet: owed) — booked `deposited_*`.
+/// — a stand's seeds into its seed bank, a latticevine's into the vine seed bank
+/// ([`Flora::deposit_vine_seeds`]) — booked `deposited_*`.
 pub(super) fn void_gut_seeds(fauna: &mut Fauna, flora: &mut Flora) {
     let now = fauna.tick;
     for i in 0..fauna.animals.len() {
@@ -988,9 +1158,17 @@ pub(super) fn void_gut_seeds(fauna: &mut Fauna, flora: &mut Flora) {
                         false
                     }
                 }
+                // Roster mechanics fix 3: the vine's own seed bank, by the same path.
                 SeedPlant::Latticevine => {
-                    fauna.book_deposit(flora, site, DepositKind::Litter, seeds);
-                    false
+                    if flora.deposit_vine_seeds(site, seeds.organic, seeds.mineral, seeds.energy) {
+                        fauna.ledger.deposited_organic_out += seeds.organic;
+                        fauna.ledger.deposited_mineral_out += seeds.mineral;
+                        fauna.ledger.deposited_energy_out += seeds.energy;
+                        true
+                    } else {
+                        fauna.book_deposit(flora, site, DepositKind::Litter, seeds);
+                        false
+                    }
                 }
             };
             fauna.ledger.seeds_voided_by_source[plant.source_index()] += seeds.organic;
@@ -1056,20 +1234,66 @@ pub(super) fn roost_reflex(
                 }
             }
             let (_, dx, dz) = best?;
-            let (fx, fz) = a.pose.forward();
-            // Signed angle from the heading to the stem: `forward` is (sin h, cos h), so a
-            // positive turn (heading up) swings toward +x from +z.
-            let cross = fz * dx - fx * dz;
-            let dot = fx * dx + fz * dz;
-            let angle = cross.atan2(dot);
-            Some(Actions {
-                forward: if angle.abs() < std::f64::consts::FRAC_PI_2 { 1.0 } else { 0.0 },
-                turn: (angle * 2.0).clamp(-1.0, 1.0),
-                feed: 0.0,
-            })
+            Some(walk_toward(a, dx, dz, 0.0))
         }
         _ => None,
     }
+}
+
+/// Actions that walk a body at `(dx, dz)` from it: turn toward it and go forward when it
+/// is ahead (the roost reflex's steering).
+pub(super) fn walk_toward(a: &Animal, dx: f64, dz: f64, feed: f64) -> Actions {
+    let (fx, fz) = a.pose.forward();
+    // Signed angle from the heading to the target: `forward` is (sin h, cos h), so a
+    // positive turn (heading up) swings toward +x from +z.
+    let cross = fz * dx - fx * dz;
+    let dot = fx * dx + fz * dz;
+    let angle = cross.atan2(dot);
+    Actions {
+        forward: if angle.abs() < std::f64::consts::FRAC_PI_2 { 1.0 } else { 0.0 },
+        turn: (angle * 2.0).clamp(-1.0, 1.0),
+        feed,
+    }
+}
+
+/// **The fruit search** (roster mechanics fix 4; Fable's call, 2026-10-02): a glider
+/// driven by its own heuristic, on the ground, short of full (`Self.reserve` under
+/// [`crate::TeacherConfig::seedporter_full_at`] of its cap) and with no fruit at its
+/// mouth, walks to the stem of the nearest stand it can climb that hangs fruit within
+/// [`Glider::fruit_search_m`] — the roost reflex's world query over the plant layer, not a
+/// sense — and walking into it climbs it. `None` leaves its heuristic's actions. No
+/// observation channel carries fruit beyond the cone's 2 m (`design/voxel-senses.md` is
+/// unchanged).
+pub(super) fn fruit_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    let glider = phys.glider?;
+    if a.mobility.mode != MobilityMode::Ground || a.state == State::Asleep {
+        return None;
+    }
+    let cap = phys.core.reserve_of(a.body);
+    if !(cap > 0.0) || a.reserve >= fauna.config.teachers.seedporter_full_at * cap {
+        return None;
+    }
+    if glider_fruit_in_reach(view, fv, a, phys).is_some() {
+        return None;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let ring = f64::from(c.width) * v;
+    let mut best: Option<(f64, f64, f64)> = None;
+    for stand in fv.stands.iter().filter(|s| s.fruit > 0.0 && climbable(fv, s, &glider)) {
+        let sx = (f64::from(stand.site.x) + 0.5) * v;
+        let sz = (f64::from(stand.site.z) + 0.5) * v;
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+        let d = (dx * dx + dz * dz).sqrt();
+        if d <= glider.fruit_search_m && best.is_none_or(|(b, _, _)| d < b) {
+            best = Some((d, dx, dz));
+        }
+    }
+    let (_, dx, dz) = best?;
+    Some(walk_toward(a, dx, dz, 1.0))
 }
 
 impl Fauna {
