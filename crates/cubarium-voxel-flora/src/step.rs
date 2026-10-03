@@ -986,7 +986,7 @@ fn shade_layers_into(config: &FloraConfig, stand: &Stand, voxel_m: f64, out: &mu
 
 /// `L_eff = L (1 + light_half) / (L + light_half)`: a species with a small `light_half`
 /// earns nearly its full income in shade, one with a large value needs open sky.
-fn light_response(sc: &SpeciesConfig, l: f64) -> f64 {
+pub(crate) fn light_response(sc: &SpeciesConfig, l: f64) -> f64 {
     let half = sc.light_half.max(0.0);
     if l <= 0.0 {
         return 0.0;
@@ -2428,8 +2428,8 @@ fn grow(
 /// folding them stand by stand adds every number to the ledger exactly where the one-pass
 /// loop did.
 #[derive(Clone, Copy, Default)]
-struct Booked {
-    fixed: f64,
+pub(crate) struct Booked {
+    pub(crate) fixed: f64,
     light: f64,
     /// The seep's organic matter, mineral and energy ([`SpeciesConfig::dark_uptake_per_s`]).
     seep: [f64; 3],
@@ -2541,7 +2541,7 @@ fn saprotrophy(substrate: Substrate, e_v: f64, book: &mut Booked) -> (f64, f64) 
 
 /// §4.1–4.6 for one stand on its own site's ground `g`: the loop body of [`grow`]. Its
 /// ledger lines go into `book`. Returns whether the stand dies (§4.7).
-fn grow_stand(
+pub(crate) fn grow_stand(
     config: &FloraConfig,
     stand: &mut Stand,
     g: &mut Ground,
