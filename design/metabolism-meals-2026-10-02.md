@@ -339,3 +339,35 @@ says merge with fixes. These are Fable's calls on the spec gaps it found. They o
      - a real-vine sip case;
      - a non-empty snapshot round trip;
      - bout-completion checks in the cadence studies.
+
+## Measure after repair 3 (2026-10-03)
+
+The setup: eidolon, gut b396d423 (now on main at 72a732a7), the live terrarium preset,
+8 distinct worlds (seeds 1, 3, 5, 6, 8, 9, 12, 14) × 2 h. The raw output is in eidolon
+`~/gut-measure/r3`.
+
+**Starvation:** none outside bellwings. Bellwings starved in 5 of 8 worlds, 1–5 per world.
+- In 5 of 8 worlds they swallowed almost no nectar and logged 0 sip misses, so they never
+  reached a flower.
+- The lineage's reserve went from full to empty within the world day.
+- In the 3 worlds where they found flowers, they swallowed 0.05–0.20 ou.
+- Diagnosis: they can't find food. This is not a gut defect.
+
+**Choristers:**
+- Kills fell to 1–6 per world, most often 1–3. Grazers lost 0–4 per world, where one world
+  had gone from 18 to 1 before.
+- Seven worlds had a single pack chase, ending in a kill.
+- World 1 had 76 chases; 74 ended at the timeout.
+- The `feasts` readout is empty everywhere, so either it isn't recorded or the pack doesn't
+  feast after a kill. Unexplained.
+
+**Shredders, capgnawers and snails:**
+- Every founder had one emergency wake, and each lineage had one birth per founder.
+- Shredders completed few meal bouts: 0–19 per world across 16 bodies.
+- These figures read as founders spending their reserve on a birth, then refilling slowly.
+  The new balance line (B, R̂, sated share) will tell food from rule.
+
+**Others:**
+- Loftstriders: in seed 6, both were killed by choristers before 60 min.
+- Lanternjaws: 1–4 riders per world, none dropped off. That's expected: drop-off takes about
+  1.19 world days.
