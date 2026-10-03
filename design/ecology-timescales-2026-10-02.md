@@ -323,3 +323,20 @@ finalist-only validation. Decide after Part 4.
    1–2 days.
 4. The order in Part 4, including the lanternjaw recruitment diagnosis before any predator
    tuning.
+
+## Wrysk's answers (2026-10-02)
+
+1. Part 1, 2 h day survival: **yes**.
+2. Real time: **drop the real-time sky requirement for now**. `cycle` stays.
+3. Predator targets: **agreed**. He added: plan an animation, or some way of noticing, for
+   hunts. They are rare events, once every few hours in real time, and fun to watch. This is
+   a separate design thread; the look is Wrysk's.
+4. Order of work: **ok**.
+
+He also asked: the loftstrider's step is about a third of its height (1+ m). Done at
+33de2771: 1.15 m up and down.
+
+Packages dispatched:
+- `design/handoffs/night-survival-2026-10-02.md`
+- `design/handoffs/lanternjaw-recruitment-2026-10-02.md`
+- `design/handoffs/roster-search-groundwork-2026-10-02.md`
