@@ -373,10 +373,11 @@ fn eating_the_tile_underfoot_lowers_both_the_taste_and_the_field_reading() {
         .ground_at(stand_on)
         .expect("the tile")
         .litter;
-    // A tenth, not a fifth: since package G a bite shrinks with the stock at the mouth and
-    // with the reserve's fill, so twelve bites of a small tile take less than they did.
+    // A few per cent: since the minimal gut a bite is `b · body · period` (b = 2k / τ, a
+    // meal's fill over minutes), diminished by the stock at the mouth, so twelve bites of
+    // a small tile take a few per cent of it.
     assert!(
-        end_stock < start_stock * 0.9,
+        end_stock < start_stock * 0.98,
         "twelve bites only took the tile from {start_stock} to {end_stock}"
     );
 

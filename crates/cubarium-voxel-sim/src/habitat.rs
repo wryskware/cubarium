@@ -1445,14 +1445,12 @@ pub fn introduce_lanternjaws(
         .filter(|(_, c)| prey.contains_key(c))
         .map(|(f, _)| *f)
         .collect();
-    let wake_at = fauna
-        .config()
-        .founder(Founder::Lanternjaw)
-        .hunter
-        .map_or(0.5, |h| h.wake_at);
+    // The minimal gut: a founder arrives with its stomach at `s0 K` and wants food at
+    // once, so an introduction shows a hunt soon at the ordinary arrival stores (the
+    // satiated rest's wake line, which this used to arrive at, is gone).
     let stores = StartingStores {
         body: fauna.config().founding.arrival_body,
-        reserve: wake_at,
+        reserve: fauna.config().founding.arrival_reserve,
     };
     let mut ids = Vec::new();
     for (k, site) in strided(&faces, n).into_iter().enumerate() {
@@ -1483,8 +1481,8 @@ pub fn introduce_lanternjaws(
 /// point, with the lineage's controllers installed. The new packs' ids, or why none could
 /// be founded.
 ///
-/// Adults arrive **hungry**, as `--introduce lanternjaw:N`'s do (full structure, the
-/// reserve at the wake line), so an introduction shows a hunt soon.
+/// Adults arrive at the ordinary arrival stores, as `--introduce lanternjaw:N`'s do,
+/// wanting food from their `s0` stomachs, so an introduction shows a hunt soon.
 pub fn introduce_packs(
     world: &World,
     flora: &Flora,
@@ -1493,10 +1491,11 @@ pub fn introduce_packs(
     n: usize,
 ) -> Result<Vec<u64>, String> {
     let _ = flora;
-    let wake_at = fauna.config().founder(founder).hunter.map_or(0.5, |h| h.wake_at);
+    // The minimal gut: adults arrive wanting food (a stomach at `s0 K`), so a hunt shows
+    // soon at the ordinary arrival stores.
     let stores = StartingStores {
         body: fauna.config().founding.arrival_body,
-        reserve: wake_at,
+        reserve: fauna.config().founding.arrival_reserve,
     };
     found_packs(world, fauna, founder, n, stores)
 }

@@ -1559,8 +1559,10 @@ mod tests {
             .animal(before_animal.id)
             .expect("the idle body survives ten ticks");
         assert_eq!(after.age_ticks, before_animal.age_ticks + 10);
+        // The minimal gut: a founder's `s0` stomach digests into its reserve, so weigh
+        // everything it holds.
         assert!(
-            after.organic() < before_animal.organic(),
+            after.stored_organic() < before_animal.stored_organic(),
             "maintenance was paid out of the body's own organic matter"
         );
         assert_eq!(after.site, before_animal.site, "the idle body moved");
