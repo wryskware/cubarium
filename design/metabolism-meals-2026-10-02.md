@@ -301,3 +301,41 @@ implements this section, and Astra reviews the implementation, not another draft
       - books close over a full day for organic matter, mineral and energy.
     - **Measure:** seeds 1–8 × 2 h for access and survival, and one 8 h world as
       exploration, not cadence statistics.
+
+## Repair 3: after the implementation review (2026-10-03)
+
+Astra's review of the build (`design/7_Research/astra-gut-implementation-review-2026-10-03.md`)
+says merge with fixes. These are Fable's calls on the spec gaps it found. They override items
+2, 3, 6, 7 and 10 where those differ.
+
+1. **Passage, not holding (item 2).** Raw food whose effective yield is zero does not hold in
+   the stomach. It passes at `S·dt/τ` through the one assimilation rule: no reserve gain,
+   undigested matter to egesta, the unfunded share respired. The reserve-room cap applies to
+   the assimilable part only. No mineral is invented.
+2. **Vine products carry mineral.** Vine foliage, nectar and fruit withdraw mineral pro
+   rata from the vine stand's store, as the other stands' products do. A depleted stand
+   still yields mineral-free food, which then passes.
+3. **The appetite band doesn't overlap the full event (item 3).** `s_start` is capped at
+   `full_tolerance − refill_gap`. `refill_gap` is a named knob per lineage, default 0.1.
+4. **Safety (item 7a).** Attached and falling bodies are awake, as the table says.
+5. **Packs (item 7).**
+   - One participant set: adults that are awake, nearby, and wanting food or in emergency.
+     It picks the driver and flankers and sets the body window for prey size.
+   - A usable feast comes before a new target.
+   - The `spent` floor doesn't apply to a hungry member; the chase timeout still does.
+6. **The reserve fallback (item 6)** is the old transfer, unchanged: pup reserve room and the
+   giver's floor. It doesn't need the pup's eating latch. Regurgitation still does.
+7. **Removal is export (item 10).** A removed body leaves as an export of the whole animal,
+   stomach included. Only death deposits the stomach as carrion or litter.
+8. **Fed perching.** A bellwing whose eating latch is off perches and rests, read from the
+   latch, not the old reserve lines.
+9. **Tests.**
+   - Long runs (sleep through a phase, the hour-long emergency case, the rider budget, the
+     day's books) become named studies (`#[ignore = "study: run by name"]`). Short tests
+     cover the transitions, transfers and caps.
+   - Add, from Astra's list:
+     - a two-pool numeric digestion test with a mineral-limited yield;
+     - flora withdrawal into the stomach for real nectar, fruit and film;
+     - a real-vine sip case;
+     - a non-empty snapshot round trip;
+     - bout-completion checks in the cadence studies.
