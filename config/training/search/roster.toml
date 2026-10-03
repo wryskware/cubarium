@@ -144,7 +144,8 @@ range = [0.3, 0.95]
 what = "hunger that wakes a sleeper (set, not scaled); the night default 0.9"
 
 # --- The minimal gut (repair 2 item 11): per lineage the stomach k, the bite b, the
-# appetite floor s0 and the digestion time tau of each food class it eats. ---
+# appetite floor s0, the refill gap (repair 3) and the digestion time tau of each food
+# class it eats. ---
 
 [[gene]]
 name = "stomach"
@@ -166,6 +167,13 @@ path = "fauna.founders.*.gut.s0"
 tie = "each"
 range = [0.25, 4.0]
 what = "s0: a fed body wants food at S <= s0 K (0.15 -> 0.0375-0.6)"
+
+[[gene]]
+name = "refill_gap"
+path = "fauna.founders.*.gut.refill_gap"
+tie = "each"
+range = [0.25, 4.0]
+what = "appetite is capped at full_tolerance - refill_gap (repair 3; 0.1 -> 0.025-0.4)"
 
 [[gene]]
 name = "tau_litter@littershredder"

@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (783 rows)
+**`flora.*`** (784 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1110,6 +1110,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.nectar` | 0.002 | org-units per reference face | [0, inf) | yes | C | placeholder | a flower's organic matter |
 | `flora.latticevine.fruit` | 0.005 | org-units per reference face | [0, inf) | yes | C | placeholder | a bead bunch's organic matter |
 | `flora.latticevine.energy_density` | 1.0 | energy per org-unit | [0, inf) |  | D | placeholder | vine tissue energy |
+| `flora.latticevine.mineral_fraction` | 0.01 | mineral per org-unit | [0, 1] |  | - | decision | vine tissue mineral: the store it draws from its root, and what its leaf, nectar and fruit carry |
 | `flora.latticevine.founders` | 6 | vines | [0, inf) | yes | C | placeholder | founder vines rooted on a fresh world: the floor under the area count |
 | `flora.latticevine.founders_per_m2` | 0.0625 | vines per m2 of world floor | [0, inf) | 0–0.25 | - | placeholder | founder vines per square metre: max(founders, round(this * area)) |
 | `flora.latticevine.founder_reserve` | 0.1 | org-units per reference face | [0, inf) | yes | C | placeholder | each founder's starting reserve |
@@ -1149,7 +1150,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1068 rows)
+**`fauna.*`** (1077 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1228,6 +1229,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.littershredder.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.littershredder.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.littershredder.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1334,6 +1336,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.frondgrazer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.frondgrazer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.frondgrazer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1440,6 +1443,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.lanternjaw.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.lanternjaw.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.lanternjaw.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1546,6 +1550,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.capgnawer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.capgnawer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.capgnawer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1652,6 +1657,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.loftstrider.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.loftstrider.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.loftstrider.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1758,6 +1764,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.ripple-snail.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.ripple-snail.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.ripple-snail.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1864,6 +1871,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.gut.digestion_s.*` | 30.0, 30.0, 30.0, 30.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.bellwing.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.bellwing.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.bellwing.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1970,6 +1978,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.gut.digestion_s.*` | 60.0, 60.0, 60.0, 60.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.seedporter.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.seedporter.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.seedporter.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -2076,6 +2085,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.chorister.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.chorister.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
+| `fauna.founders.chorister.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |

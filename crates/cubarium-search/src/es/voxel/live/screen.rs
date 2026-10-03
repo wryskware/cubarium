@@ -474,11 +474,22 @@ pub struct NightRow {
     pub passes: bool,
 }
 
-/// One food of a lineage's diet: its optimistic supply over a day, food units.
+/// One food of a lineage's diet: its optimistic supply over a day, food units, and what
+/// that supply is worth assimilated: the lineage's yield, limited for nectar and fruit by
+/// the mineral each source's product carries ([`mineral_limited_yield`]).
 #[derive(Clone, Debug, Serialize)]
 pub struct FoodSupply {
     pub food: &'static str,
     pub per_day: f64,
+    pub assimilable_per_day: f64,
+}
+
+/// **The yield a product's mineral can fund** (the minimal gut's digestion rule): `min(y,
+/// mineral_fraction / n_tissue)`. Food whose mineral funds nothing passes undigested
+/// (repair 3 item 1), so a mineral-free product feeds nothing.
+pub fn mineral_limited_yield(yield_: f64, mineral_fraction: f64, n_tissue: f64) -> f64 {
+    let funded = if n_tissue > 0.0 { mineral_fraction.max(0.0) / n_tissue } else { f64::INFINITY };
+    yield_.min(funded).max(0.0)
 }
 
 /// One lineage's food access: its founders' basal need and its foods' supply over a day,
@@ -624,6 +635,11 @@ fn band_between(sc: &cubarium_voxel_flora::SpeciesConfig, floor_m: f64, ceiling_
         .sum()
 }
 
+/// A food whose yield is the lineage's own: `(per_day, per_day x y)`.
+fn with_yield(y: f64, per_day: f64) -> (f64, f64) {
+    (per_day, per_day * y)
+}
+
 /// **The roster screens** of `flora` (at the world's cell size) and `fauna` on `world`:
 /// the night envelope per founded lineage, food access per lineage over its diet (soft
 /// unless absent), and the predator balance readout. Founded means `founding_count` above
@@ -722,8 +738,12 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
         let mut foods = Vec::new();
         let mut reach = None;
         for fd in p.diet.foods() {
-            let per_day = match fd {
-                Food::Foliage => Species::ALL
+            let y = p.yield_by_food[fd.index()];
+            // Nectar and fruit carry their sources' mineral fractions (stands' own, the
+            // vine's `mineral_fraction` since repair 3): the yield they fund per source.
+            let y_of = |fraction: f64| mineral_limited_yield(y, fraction, p.core.n_tissue);
+            let (per_day, assimilable) = match fd {
+                Food::Foliage => with_yield(y, Species::ALL
                     .iter()
                     .map(|s| flora.species(*s))
                     .filter(|sc| sc.trophic == Trophic::Photo && band_between(sc, floor_m, ceiling_m) > 0.0)
@@ -733,18 +753,18 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
                         let g = (sc.foliage_rate * w).min(((income - sc.maintenance * w) / (1.0 + sc.build)).max(0.0));
                         stands(sc) * g * len_s
                     })
-                    .sum(),
-                Food::CapTissue => Species::ALL
+                    .sum()),
+                Food::CapTissue => with_yield(y, Species::ALL
                     .iter()
                     .map(|s| flora.species(*s))
                     .filter(|sc| sc.trophic == Trophic::Saprotroph && band_between(sc, floor_m, ceiling_m) > 0.0)
                     .map(|sc| stands(sc) * sc.foliage_rate * sc.wood_max * len_s)
-                    .sum(),
-                Food::Litter => Species::ALL
+                    .sum()),
+                Food::Litter => with_yield(y, Species::ALL
                     .iter()
                     .map(|s| flora.species(*s))
                     .map(|sc| stands(sc) * sc.senescence * sc.alpha * sc.wood_max * len_s)
-                    .sum(),
+                    .sum()),
                 Food::Film => {
                     let r = flora.film_growth_per_s * up_s / len_s.max(1e-12);
                     let m = flora.film_maintenance_per_s;
@@ -755,33 +775,37 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
                     let walk = (p.core.maintenance_per_s + p.motor_respiration_per_s) * p.core.body_max / y.max(1e-12);
                     let net_live = if flora.film_growth_per_s > 0.0 { k } else { 0.0 };
                     reach = Some(net_live * v * p.adult_width_m * spec.harvest / walk.max(1e-300));
-                    area * net * len_s
+                    let d = area * net * len_s;
+                    (d, d * y)
                 }
                 Food::Nectar => {
-                    Species::ALL
-                        .iter()
-                        .map(|s| flora.species(*s))
-                        .map(|sc| stands(sc) * stand_product_per_day(sc.nectar_per_s, up_s, down_s, sc.night_bloom_scale))
-                        .sum::<f64>()
-                        + vine_per_day(vine.nectar)
+                    let (mut raw, mut got) = (vine_per_day(vine.nectar), 0.0);
+                    got += raw * y_of(vine.mineral_fraction);
+                    for sc in Species::ALL.iter().map(|s| flora.species(*s)) {
+                        let d = stands(sc) * stand_product_per_day(sc.nectar_per_s, up_s, down_s, sc.night_bloom_scale);
+                        raw += d;
+                        got += d * y_of(sc.nectar_mineral_fraction);
+                    }
+                    (raw, got)
                 }
                 Food::Fruit => {
-                    Species::ALL
-                        .iter()
-                        .map(|s| flora.species(*s))
-                        .map(|sc| stands(sc) * stand_product_per_day(sc.fruit_per_s, up_s, down_s, sc.night_bloom_scale))
-                        .sum::<f64>()
-                        + vine_per_day(vine.fruit)
+                    let (mut raw, mut got) = (vine_per_day(vine.fruit), 0.0);
+                    got += raw * y_of(vine.mineral_fraction);
+                    for sc in Species::ALL.iter().map(|s| flora.species(*s)) {
+                        let d = stands(sc) * stand_product_per_day(sc.fruit_per_s, up_s, down_s, sc.night_bloom_scale);
+                        raw += d;
+                        got += d * y_of(sc.fruit_mineral_fraction);
+                    }
+                    (raw, got)
                 }
-                Food::Carrion => carrion_of(f),
+                Food::Carrion => {
+                    let d = carrion_of(f);
+                    (d, d * y)
+                }
             };
-            foods.push(FoodSupply { food: fd.name(), per_day });
+            foods.push(FoodSupply { food: fd.name(), per_day, assimilable_per_day: assimilable });
         }
-        let supply: f64 = foods
-            .iter()
-            .zip(p.diet.foods())
-            .map(|(s, fd)| s.per_day * p.yield_by_food[fd.index()])
-            .sum();
+        let supply: f64 = foods.iter().map(|s| s.assimilable_per_day).sum();
         let ratio = if need > 0.0 { supply / need } else { f64::INFINITY };
         let passes = ratio >= food.min_ratio && reach.is_none_or(|r| r >= food.min_ratio);
         out.food.push(FoodRow {

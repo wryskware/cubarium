@@ -14,7 +14,7 @@ use cubarium_voxel_flora::{FloraConfig, Species};
 
 use super::screen::{
     FoodSpec, NightSpec, ScreenSpec, basal_demand_per_day, daily_need, digestible_stomach_per_body,
-    roster,
+    mineral_limited_yield, roster,
 };
 use super::targets::{cycle_books, digestible_stomach, replenishment};
 
@@ -152,6 +152,35 @@ fn the_food_screen_judges_supply_against_the_daily_need() {
     let row = r.food.iter().find(|x| x.lineage == "seedporter").expect("a row");
     assert!(!row.passes && row.ratio > 0.0 && row.ratio < 1.0, "{row:?}");
     assert!(r.refusals().is_empty() && r.soft(5.0) > 0.0);
+}
+
+/// Vine products carry the vine's mineral (repair 3 item 2), and what a product's mineral
+/// cannot fund passes undigested (item 1). The seedporter (yield 0.6, n_tissue 0.05) on
+/// latticevine fruit alone: at the vine's 0.01 mineral the fruit funds a yield of 0.2 (a
+/// third of its 0.6), enough for one seedporter (four would be short); mineral-free, it
+/// feeds nothing and the seedporter is refused.
+#[test]
+fn vine_fruit_feeds_at_the_yield_its_mineral_funds() {
+    assert!((mineral_limited_yield(0.6, 0.01, 0.05) - 0.2).abs() < 1e-15);
+    assert_eq!(mineral_limited_yield(0.5, 0.01, 0.02), 0.5, "the bellwing's nectar is fully funded");
+    assert_eq!(mineral_limited_yield(0.6, 0.0, 0.05), 0.0);
+    let w = world();
+    let fauna = only(Founder::Seedporter, 1);
+    let mut vine_only = FloraConfig::for_voxel_size(VOXEL_M);
+    for sp in Species::ALL {
+        vine_only.species_mut(sp).fruit_per_s = 0.0;
+    }
+    assert_eq!(vine_only.latticevine.mineral_fraction, 0.01);
+    let r = roster(&vine_only, &fauna, &w, &food_spec());
+    let row = r.food.iter().find(|x| x.lineage == "seedporter").expect("a row");
+    let fruit = &row.foods[0];
+    assert!(fruit.per_day > 0.0, "{row:?}");
+    assert!((fruit.assimilable_per_day - 0.2 * fruit.per_day).abs() < 1e-12 * fruit.per_day, "{row:?}");
+    assert!(row.passes, "{row:?}");
+    let mut bare = vine_only.clone();
+    bare.latticevine.mineral_fraction = 0.0;
+    let r = roster(&bare, &fauna, &w, &food_spec());
+    assert!(r.refusals().iter().any(|x| x.starts_with("food") && x.contains("seedporter")), "{:?}", r.refusals());
 }
 
 // --- Replenishment: reserve plus digestible stomach -----------------------------------

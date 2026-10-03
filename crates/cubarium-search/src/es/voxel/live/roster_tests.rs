@@ -521,6 +521,7 @@ fn roster_decode_touches_exactly_the_listed_paths() {
             "gut.stomach_k",
             "gut.bite_per_body_s",
             "gut.s0",
+            "gut.refill_gap",
         ] {
             want.insert(format!("{at}.{q}"));
         }
@@ -560,21 +561,22 @@ fn roster_decode_touches_exactly_the_listed_paths() {
 
 /// Fable 2026-10-02: life histories frozen (lifespan, growth, surplus floor, gestation),
 /// motor tied to upkeep; per lineage upkeep, yield, reserve, sleep and wake hunger, and
-/// since the minimal gut (repair 2 item 11) the stomach k, the bite b and the appetite
-/// floor s0, with tau per food class each lineage eats (11: the shredder and capgnawer eat
-/// two); the three parasite genes (the take per host body), pack size, the 15 plant
-/// groups and the night bloom (night, 2c7fd076): 103. No `intake`: the bite is its own.
+/// since the minimal gut (repair 2 item 11) the stomach k, the bite b, the appetite
+/// floor s0 and the refill gap (repair 3), with tau per food class each lineage eats (11:
+/// the shredder and capgnawer eat two); the three parasite genes (the take per host
+/// body), pack size, the 15 plant groups and the night bloom (night, 2c7fd076): 112. No
+/// `intake`: the bite is its own.
 #[test]
 fn roster_genes_are_the_agreed_set() {
     let e = roster_file();
     let g = e.genome().expect("a genome");
-    assert_eq!(g.genes.len(), 8 * 9 + 11 + 3 + 1 + 15 + 1, "{:?}", g.names());
+    assert_eq!(g.genes.len(), 9 * 9 + 11 + 3 + 1 + 15 + 1, "{:?}", g.names());
     for frozen in ["lifespan", "maturity", "breed_reserve", "gestation", "motor", "intake"] {
         assert!(!g.names().iter().any(|n| n.starts_with(&format!("{frozen}@"))), "{frozen} is not a gene");
     }
     let base = e.base_params().expect("the base");
     for f in Founder::ALL {
-        for kind in ["upkeep", "yield", "reserve", "sleep", "wake_hunger", "stomach", "bite", "s0"] {
+        for kind in ["upkeep", "yield", "reserve", "sleep", "wake_hunger", "stomach", "bite", "s0", "refill_gap"] {
             let name = format!("{kind}@{}", f.name());
             assert!(g.names().iter().any(|n| *n == name), "{name}");
         }
@@ -603,7 +605,7 @@ fn roster_ranges_hold_the_defaults_with_room() {
             let name = format!("{kind}@{}", f.name());
             g.genes.iter().find(|x| x.name == name).map(|x| x.range).expect("a gene")
         };
-        for kind in ["upkeep", "stomach", "bite", "s0"] {
+        for kind in ["upkeep", "stomach", "bite", "s0", "refill_gap"] {
             assert!(range(kind).0 <= 0.25 && range(kind).1 >= 4.0, "{kind}@{}", f.name());
         }
         assert!(range("reserve").1 >= 4.0, "{}: reserve to x4", f.name());
@@ -790,9 +792,9 @@ fn pilot_file() -> EcologyParams {
 }
 
 /// F1, F7, F10 / F11(c): the pilot file reaches the intended score and serialization
-/// path: 74 searched genes since the minimal gut (six searched lineages x upkeep, yield,
-/// reserve, sleep, wake hunger, stomach, bite and s0, their 8 tau genes, and 18 plant
-/// and rider genes; the three feeders and pack size frozen at the exhibit's values), the
+/// path: 80 searched genes since the minimal gut (six searched lineages x upkeep, yield,
+/// reserve, sleep, wake hunger, stomach, bite, s0 and refill gap, their 8 tau genes, and
+/// 18 plant and rider genes; the three feeders and pack size frozen at the exhibit's values), the
 /// feeders readout-only, R a readout, S and F soft, the night envelope hard, food soft;
 /// it round-trips through a saved genome; and the launch script runs it with the agreed
 /// settings.
@@ -800,11 +802,11 @@ fn pilot_file() -> EcologyParams {
 fn the_pilot_launch_is_the_agreed_experiment() {
     let e = pilot_file();
     let g = e.genome().expect("a genome");
-    assert_eq!(g.search_bounds().len(), 74, "searched: {}", g.genes.iter().filter(|x| !x.frozen).count());
-    assert_eq!(g.to_search().len(), 74);
+    assert_eq!(g.search_bounds().len(), 80, "searched: {}", g.genes.iter().filter(|x| !x.frozen).count());
+    assert_eq!(g.to_search().len(), 80);
     let base = e.base_params().expect("base");
     for f in [Founder::Bellwing, Founder::Seedporter, Founder::Chorister] {
-        let mut kinds: Vec<String> = ["upkeep", "yield", "reserve", "sleep", "wake_hunger", "stomach", "bite", "s0"]
+        let mut kinds: Vec<String> = ["upkeep", "yield", "reserve", "sleep", "wake_hunger", "stomach", "bite", "s0", "refill_gap"]
             .iter()
             .map(|k| k.to_string())
             .collect();
@@ -838,7 +840,7 @@ fn the_pilot_launch_is_the_agreed_experiment() {
     assert!(sc.soft(&rsf) > 0.0);
     // A saved nominee keeps its frozen genes frozen and decodes the same.
     let back = EcologyParams::parse(&g.to_toml("t")).expect("a saved genome");
-    assert_eq!(back.genome().expect("g").search_bounds().len(), 74);
+    assert_eq!(back.genome().expect("g").search_bounds().len(), 80);
     assert_eq!(back.fauna(), e.fauna());
     // The launch script.
     let sh = std::fs::read_to_string(
