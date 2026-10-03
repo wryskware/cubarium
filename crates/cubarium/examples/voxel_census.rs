@@ -970,13 +970,13 @@ fn print_header() {
         header.push_str(&format!(",asleep_{}", f.name()));
     }
     // Predation (P1), per lineage: strikes, hits and dodges by the striker's lineage;
-    // wound units healed; deaths killed (by any lineage); bodies in a satiated rest and
+    // wound units healed; deaths killed (by any lineage); bodies fed (eating latch off) and
     // wounded now; carrion eaten; eggs laid and hatched — all cumulative but the two
     // "now" counts. Then kills by killer and prey lineage, and the world's carrion
     // stock, carcass records, dormant eggs, eggs died and eggs buried.
     for f in Founder::ALL {
         header.push_str(&format!(
-            ",strikes_{0},hits_{0},dodges_{0},healed_{0},killed_{0},satiated_{0},wounded_{0},carrion_eaten_{0},eggs_laid_{0},eggs_hatched_{0}",
+            ",strikes_{0},hits_{0},dodges_{0},healed_{0},killed_{0},fed_{0},wounded_{0},carrion_eaten_{0},eggs_laid_{0},eggs_hatched_{0}",
             f.name()
         ));
     }
@@ -1163,7 +1163,8 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
         row.push(l.dodges_by_founder[i].to_string());
         row.push(format!("{:.4}", l.healed_by_founder[i]));
         row.push(killed.to_string());
-        row.push(of(&|an| an.rest == Some(cubarium_voxel_fauna::Rest::Satiated)).to_string());
+        // The minimal gut: fed (the eating latch off) where the satiated rest was.
+        row.push(of(&|an| !an.eating).to_string());
         row.push(of(&|an| an.wound > 0.0).to_string());
         row.push(format!("{:.6}", l.eaten_carrion_by_founder[i]));
         row.push(l.eggs_laid_by_founder[i].to_string());

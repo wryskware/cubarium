@@ -71,19 +71,16 @@ fn residuals(fauna: &Fauna, flora: &Flora) {
     }
 }
 
-/// The shipped median is four simulated hours for every body kind.
+/// The shipped medians, **changed by the minimal gut** (repair 2 item 5, with Wrysk's
+/// 2026-10-03 change), in 7,200-s world days: the placeholder species keeps four hours;
+/// the shredder 6, the frondgrazer 8, the lanternjaw 12.
 #[test]
 fn the_shipped_median_is_four_hours() {
     let c = FaunaConfig::placeholder();
     assert_eq!(c.frondgrazer.lifespan_median_s, 4.0 * 3600.0);
-    for f in [Founder::Blind, Founder::Browser] {
-        assert_eq!(c.founder(f).core.lifespan_median_s, 4.0 * 3600.0);
+    for (f, days) in [(Founder::Blind, 6.0), (Founder::Browser, 8.0), (Founder::Lanternjaw, 12.0)] {
+        assert_eq!(c.founder(f).core.lifespan_median_s, days * 7200.0, "{f:?}");
     }
-    // The lanternjaw lives three times as long (predation §2.12).
-    assert_eq!(
-        c.founder(Founder::Lanternjaw).core.lifespan_median_s,
-        3.0 * 4.0 * 3600.0
-    );
 }
 
 /// A body past its lifespan departs as `Aged`, leaves its whole body as carrion, and both

@@ -408,10 +408,9 @@ fn the_f3_seedporter_table_is_the_briefs() {
     let r = (0.5 * 0.25 * 0.2) / (grazer.adult_length_m * grazer.adult_width_m * grazer.adult_height_m);
     assert!(close(x1.core.body_max, grazer.core.body_max * r), "the browser's by volume");
     assert!((x1.core.body_max - 0.012).abs() <= 0.0006, "body_max ≈ 0.012: {}", x1.core.body_max);
-    assert!(
-        close(x1.core.maintenance_per_s, grazer.core.maintenance_per_s),
-        "upkeep is per unit of body"
-    );
+    // The minimal gut: its own daily need, f 0.08 over the 7,200-s day.
+    assert!(close(x1.core.maintenance_per_s * 7200.0, 0.08), "upkeep is its own daily need");
+    let _ = &grazer;
     assert!(close(sp.cruise_body_lengths_per_s, 1.0), "walk 1 BL/s");
     assert!(close(sp.climb_speed_fraction, 0.5), "climb at half its walking pace");
     assert!(close(sp.wall_climb_cost_factor, shredder.wall_climb_cost_factor), "the shredder's climb cost");
@@ -959,4 +958,45 @@ fn a_snapshot_round_trip_keeps_a_climbing_a_gliding_and_a_perched_seedporter() {
         assert_eq!(b.mobility, a.mobility, "{id}: its mode and perch");
     }
     assert_eq!(back.view().ledger, fauna.view().ledger, "the same ledger");
+}
+
+/// **Fruit into the stomach** (the minimal gut; Astra's finding 8): a seedporter with an
+/// empty stomach perched on a fruiting lanternberry takes a bite; on that tick its fruit
+/// pool and its gut seeds together hold exactly what the stand gave, in all three
+/// currencies, the seeds their `seeds_per_fruit_organic` share.
+#[test]
+fn a_fruit_bite_lands_in_the_stomach_and_the_gut_seeds() {
+    let mut world = noon_plain(16, 20, 8);
+    let mut flora = Flora::new(fruit_flora());
+    let site = fruiting(&mut flora, &mut world, 8, 4, 60);
+    let top = crown_top(&flora, site);
+    let mut config = FaunaConfig::default();
+    config.founders[SP.index()].gut.s0 = 0.0;
+    let share = config.founders[SP.index()].gut_seeds.expect("seeds").seeds_per_fruit_organic;
+    let mut fauna = Fauna::new(config);
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, top, HUNGRY_ADULT);
+    steps(&mut fauna, &world, &mut flora, 1);
+    hold(&mut fauna, id, 0.0, 1.0);
+    let consumed = flora.view().ledger.consumed_organic_out;
+    let mut t = 0;
+    while fauna.view().ledger.bites == 0 && t < 40 {
+        fauna.step(&world, &mut flora);
+        t += 1;
+    }
+    let l = fauna.view().ledger;
+    assert_eq!(l.bites, 1, "one fruit bite");
+    let a = animal(&fauna, id);
+    let pool = a.stomach.pools[Food::Fruit.index()];
+    let seeds = a.gut_seeds.total();
+    for (got, want, what) in [
+        (pool.organic + seeds.organic, l.eaten_organic_in, "organic"),
+        (pool.mineral + seeds.mineral, l.eaten_mineral_in, "mineral"),
+        (pool.energy + seeds.energy, l.eaten_energy_in, "energy"),
+    ] {
+        assert!((got - want).abs() <= 1e-15 * want.max(1e-12), "{what}: {got} against {want}");
+    }
+    assert!((seeds.organic - share * l.eaten_organic_in).abs() <= 1e-15);
+    assert!(pool.mineral > 0.0, "stand fruit carries mineral");
+    assert!((flora.view().ledger.consumed_organic_out - consumed - l.eaten_organic_in).abs() <= 1e-15);
 }

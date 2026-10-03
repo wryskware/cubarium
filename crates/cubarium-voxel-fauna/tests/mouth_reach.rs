@@ -153,7 +153,9 @@ fn browser_feeding(fauna: &mut Fauna, world: &World, x: i64, z: u32) -> u64 {
 }
 
 /// One controller period of the frondgrazer's frozen bite rate.
-const ONE_BITE: f64 = 0.002 * 0.25;
+/// The minimal gut's bite at the fixture's browser (0.8 of the placeholder's 0.05 adult):
+/// `b · body · period`, `b = 2k / τ` = 2 · 0.06 / 120 s.
+const ONE_BITE: f64 = (2.0 * 0.06 / 120.0) * 0.04 * 0.25;
 
 /// (a) A browser bites a crown at its **own head layer** — the whole of the band on a
 /// 0.25 m world. The stock moves by exactly one bite of the frozen rate, and the mouth
@@ -187,7 +189,7 @@ fn a_browser_bites_a_crown_at_its_head_layer() {
     let after = flora.view().stand_at(site(2, 2)).expect("alive").foliage;
     assert_eq!(fauna.view().ledger.bites, 1, "one attempt, one bite");
     assert!(
-        ((before - after) - ONE_BITE).abs() < 1e-12,
+        ((before - after) - ONE_BITE).abs() < 1e-6 * ONE_BITE,
         "foliage at the head moved by {}",
         before - after
     );
@@ -227,7 +229,7 @@ fn a_crown_one_voxel_above_the_head_is_inside_the_physical_band() {
     let after = flora.view().stand_at(site(2, 2)).expect("alive").foliage;
     assert_eq!(fauna.view().ledger.bites, 1, "one attempt, one bite");
     assert!(
-        ((before - after) - ONE_BITE).abs() < 1e-12,
+        ((before - after) - ONE_BITE).abs() < 1e-6 * ONE_BITE,
         "foliage one voxel up moved by {}",
         before - after
     );
@@ -318,7 +320,8 @@ fn the_blind_founders_litter_mouth_and_digest_are_unchanged() {
     let after = flora.view().ground_at(site(2, 2)).expect("ground").litter;
     assert_eq!(fauna.view().ledger.bites, 1);
     assert!(
-        ((before - after) - 0.0005 * 0.25).abs() < 1e-12,
+        // The minimal gut's bite: `2k / τ` (k 0.02, τ 120 s) × 0.8 × 0.0125 × 0.25 s.
+        ((before - after) - (2.0 * 0.02 / 120.0) * 0.01 * 0.25).abs() < 1e-6 * 8.4e-7,
         "the blind bite moved {}",
         before - after
     );
@@ -395,7 +398,7 @@ fn the_mouth_diagnostic_agrees_with_the_stepping_rule_at_three_crown_heights() {
         );
         if bit {
             assert!(
-                ((before[i] - after) - ONE_BITE).abs() < 1e-12,
+                ((before[i] - after) - ONE_BITE).abs() < 1e-6 * ONE_BITE,
                 "crown at head + {rise} moved by {}",
                 before[i] - after
             );

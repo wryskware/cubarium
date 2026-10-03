@@ -50,8 +50,17 @@ fn plain(width: u32) -> World {
 }
 
 fn config_with(edit: impl FnOnce(&mut SpeciesConfig)) -> FaunaConfig {
-    let mut c = FaunaConfig::placeholder();
+    let mut c = no_meal(FaunaConfig::placeholder());
     edit(&mut c.founders[Founder::Browser.index()].core);
+    c
+}
+
+/// The minimal gut: founders arrive with an empty stomach (`s0` 0), so no digestion adds
+/// to a gut or reserve these cases weigh exactly.
+fn no_meal(mut c: FaunaConfig) -> FaunaConfig {
+    for p in c.founders.iter_mut() {
+        p.gut.s0 = 0.0;
+    }
     c
 }
 
@@ -203,7 +212,7 @@ fn a_mineral_only_gut_voids_into_the_soluble_pool() {
 #[test]
 fn respiration_keeps_the_body_s_mineral_to_organic_ratio() {
     let world = plain(6);
-    let mut fauna = Fauna::new(FaunaConfig::placeholder());
+    let mut fauna = Fauna::new(no_meal(FaunaConfig::placeholder()));
     let i = grazer(&mut fauna, &world, 2);
     let start = fauna.animals[i];
     assert!(start.reserve > 0.0 && start.mineral > 0.0);
@@ -301,7 +310,7 @@ fn a_feed_and_void_cycle_conserves_the_three_currencies() {
             wood
         }
     ));
-    let mut fauna = Fauna::new(FaunaConfig::placeholder());
+    let mut fauna = Fauna::new(no_meal(FaunaConfig::placeholder()));
     let i = grazer(&mut fauna, &world, 3);
     // Feed on every tick, standing still.
     let id = fauna.animals[i].id;
@@ -327,11 +336,15 @@ fn a_feed_and_void_cycle_conserves_the_three_currencies() {
     assert!(fed.gut.organic > 0.0, "and its gut holds the undigested share");
     assert_eq!(fauna.ledger.deposited_organic_out, 0.0, "not voided yet");
 
+    let digested0 = fauna.ledger.digested.organic;
     fauna.step(&world, &mut flora);
     assert_eq!(fauna.animals[i].age_ticks % period(), 0, "the void tick");
-    // The void is taken after the tick's upkeep and before its bite: the organic matter is
-    // exactly what the gut held, the mineral that plus the upkeep's shed share.
-    assert_eq!(fauna.ledger.deposited_organic_out, fed.gut.organic);
+    // The void is taken after the tick's upkeep and digestion and before its bite: the
+    // organic matter is what the gut held plus what that tick's digestion egested (the
+    // minimal gut), the mineral that plus the upkeep's shed share.
+    let egested_now = fauna.ledger.digested.organic - digested0;
+    assert!(fauna.ledger.deposited_organic_out >= fed.gut.organic);
+    assert!(fauna.ledger.deposited_organic_out <= fed.gut.organic + egested_now * (1.0 + 1e-12));
     assert!(fauna.ledger.deposited_mineral_out >= fed.gut.mineral);
     for _ in 0..2 * cadence {
         fauna.step(&world, &mut flora);

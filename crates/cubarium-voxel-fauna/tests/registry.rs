@@ -62,12 +62,11 @@ fn the_old_fauna_validator_refusals_still_refuse() {
             assert!(e.contains(w), "{words:?}: {e}");
         }
     };
-    // `SpeciesConfig::validate`: twelve finite, nonnegative numbers, on the placeholder
+    // `SpeciesConfig::validate`: eleven finite, nonnegative numbers, on the placeholder
     // species and on every founder's core.
     type Edit = fn(&mut cubarium_voxel_fauna::SpeciesConfig, f64);
-    let fields: [(&str, Edit); 12] = [
+    let fields: [(&str, Edit); 11] = [
         ("maintenance_per_s", |s, v| s.maintenance_per_s = v),
-        ("bite_per_s", |s, v| s.bite_per_s = v),
         ("bite_half_stock", |s, v| s.bite_half_stock = v),
         ("growth_max_per_s", |s, v| s.growth_max_per_s = v),
         ("n_tissue", |s, v| s.n_tissue = v),
@@ -126,10 +125,8 @@ fn the_old_fauna_validator_refusals_still_refuse() {
     // `FaunaConfig::validate`'s own.
     refuse(&["parasite_attach_radius_m"], &|c| c.parasite_attach_radius_m = -0.1);
     refuse(&["parasite_attach_radius_m"], &|c| c.parasite_attach_radius_m = f64::NAN);
-    refuse(&["parasite_drain_of_host_basal"], &|c| c.parasite_drain_of_host_basal = -0.01);
-    refuse(&["parasite_drain_of_host_basal"], &|c| {
-        c.parasite_drain_of_host_basal = f64::INFINITY
-    });
+    refuse(&["parasite_take_per_day"], &|c| c.parasite_take_per_day = -0.01);
+    refuse(&["parasite_take_per_day"], &|c| c.parasite_take_per_day = f64::INFINITY);
     refuse(&["parasite_detach_body_fraction"], &|c| c.parasite_detach_body_fraction = 0.0);
     refuse(&["parasite_detach_body_fraction"], &|c| c.parasite_detach_body_fraction = 1.5);
     refuse(&["hatch_chance_per_dusk"], &|c| c.hatch_chance_per_dusk = 1.5);

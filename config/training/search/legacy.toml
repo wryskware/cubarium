@@ -5,10 +5,11 @@
 # `[ecology]` files (config/training/ecology-tuned-*.toml) load through these names.
 #
 # The routing it reproduces kept the mouth, dead wood and carrion off the upkeep and the
-# litter rate, so those ties are free here; and it moved the mass scale, a digest row.
+# litter rate, so those ties are free here (the mouth has no tie since the minimal gut);
+# and it moved the mass scale, a digest row.
 
 retrain = true
-free = ["intake_follows_upkeep", "wood_decay_follows_litter", "carrion_decay_follows_litter"]
+free = ["wood_decay_follows_litter", "carrion_decay_follows_litter"]
 
 [[gene]]
 name = "flora.foliage_rate"

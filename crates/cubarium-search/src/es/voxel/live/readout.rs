@@ -55,6 +55,11 @@ pub struct LineageStats {
     pub novelty_sum: f64,
     pub curiosity_sum: f64,
     pub novelty_bodies: u64,
+    /// Adult body-ticks in the window ([`super::balance::is_adult`]).
+    pub adult_ticks: u64,
+    /// The window's books and balance measures ([`super::balance`]).
+    pub books: super::balance::Books,
+    pub balance: super::balance::Measures,
 }
 
 impl LineageStats {
@@ -211,6 +216,14 @@ pub const WORLD_FACTORS: &[WorldFactor] = &[
 
 /// One lineage's factors, one line each; named `<lineage>.<factor>`.
 pub const LINEAGE_FACTORS: &[LineageFactor] = &[
+    // The balance measures (the search rebase's addendum): B, days to empty (NaN at
+    // B >= 1), surplus per adult per world day, R̂ (optimistic), access.
+    ("energy_balance", Pool::Mean, |c, f| c.lineages[f.index()].balance.energy_balance),
+    ("days_to_empty", Pool::Mean, |c, f| c.lineages[f.index()].balance.days_to_empty.unwrap_or(f64::NAN)),
+    ("surplus_per_adult_day", Pool::Mean, |c, f| c.lineages[f.index()].balance.surplus_per_adult_day),
+    ("r_hat", Pool::Mean, |c, f| c.lineages[f.index()].balance.r_hat),
+    ("access", Pool::Mean, |c, f| c.lineages[f.index()].balance.access),
+    ("sated_share", Pool::Mean, |c, f| c.lineages[f.index()].balance.sated_share),
     ("population", Pool::Sum, |c, f| {
         lineage_bodies(c, f).len() as f64
     }),

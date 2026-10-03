@@ -101,8 +101,9 @@ fn lanternjaws_arrive_only_in_a_prey_component_and_only_by_the_controls() {
         assert_eq!(a.founder, Some(Founder::Lanternjaw));
         assert!(in_prey_half(a.site), "a lanternjaw at {:?}, away from the prey", a.site);
         assert_eq!(a.body, phys.core.body_max, "an adult");
-        let wake_at = phys.hunter.expect("the lanternjaw hunts").wake_at;
-        assert_eq!(a.reserve, wake_at * phys.core.reserve_of(a.body), "hungry, at the wake line");
+        // The minimal gut: the ordinary arrival stores; it wants food from its s0 stomach.
+        let r = fauna.config().founding.arrival_reserve;
+        assert_eq!(a.reserve, r * phys.core.reserve_of(a.body), "at the arrival reserve");
         assert_ne!(a.state, cubarium_voxel_fauna::State::Asleep, "awake");
     }
     let eggs = bury_founding_clutches(&world, &flora, &mut fauna, Founder::Lanternjaw, 2).expect("prey live here");

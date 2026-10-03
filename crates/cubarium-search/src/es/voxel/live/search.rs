@@ -106,7 +106,8 @@ impl BandSpec {
             match k.as_str() {
                 "version" | "birth_required" | "progress" | "replenish" | "birth_credit_max"
                 | "lanternjaw_progress" | "chorister_pup_survival" | "replenish_weight"
-                | "share_weight_unestablished" | "balance_share" | "readout_only"
+                | "share_weight_unestablished" | "balance_share" | "readout_only" | "balance"
+                | "balance_weight" | "counts_readout"
                     if self.stage.is_some() => {}
                 "persist_only" => {
                     let names = v.as_array().ok_or("persist_only is a list of lineages")?;
@@ -236,6 +237,14 @@ pub struct Trace {
     /// lanternjaw lives free).
     #[serde(default)]
     pub share_discount: f64,
+    /// The balance term ([`super::balance::shortfall`] summed over the lineages scored on
+    /// it), already weighted.
+    #[serde(default)]
+    pub balance: f64,
+    /// Alive counts are readouts: the band, its peak and the lanternjaw share are reported
+    /// in the penalty but left out of its total ([`StageSpec::counts_readout`]).
+    #[serde(default)]
+    pub counts_readout: bool,
 }
 
 /// The penalty and its parts.
@@ -252,6 +261,9 @@ pub struct Penalty {
     pub stage: f64,
     #[serde(default)]
     pub replenish: f64,
+    /// The balance term ([`Trace::balance`]).
+    #[serde(default)]
+    pub balance: f64,
     pub total: f64,
 }
 
@@ -306,6 +318,7 @@ pub fn penalty(t: &Trace, band: &Band) -> Penalty {
     let share = share * (1.0 - t.share_discount).clamp(0.0, 1.0);
     let stage = band.missing_cost * t.stage;
     let persist = band.missing_cost * (t.missing as f64 + t.silent_lineages) + stage;
+    let counts = if t.counts_readout { 0.0 } else { bound + peak + share };
     Penalty {
         bound,
         peak,
@@ -314,7 +327,8 @@ pub fn penalty(t: &Trace, band: &Band) -> Penalty {
         persist,
         stage,
         replenish: t.replenish,
-        total: bound + peak + lively + share + persist + t.replenish,
+        balance: t.balance,
+        total: counts + lively + persist + t.replenish + t.balance,
     }
 }
 
@@ -483,6 +497,10 @@ struct Snap {
     pack_kills: u64,
     /// Body, reserve and open escrow over each lineage's living bodies.
     biomass: [f64; Founder::COUNT],
+    /// The whole ledger, for the balance measures' books and kills.
+    ledger: Box<cubarium_voxel_fauna::FaunaLedger>,
+    /// Their stomachs' digestible organic ([`super::targets::digestible_stomach`]).
+    stomach: [f64; Founder::COUNT],
 }
 
 impl Snap {
@@ -490,10 +508,13 @@ impl Snap {
         let view = sim.fauna().view();
         let l = view.ledger;
         let mut biomass = [0.0; Founder::COUNT];
+        let mut stomach = [0.0; Founder::COUNT];
         for a in view.animals.iter() {
             let Some(f) = a.founder else { continue };
             biomass[f.index()] +=
                 a.body + a.reserve + a.reproduction.escrow.map_or(0.0, |e| e.organic);
+            stomach[f.index()] +=
+                super::targets::digestible_stomach(a, sim.fauna().config().founder(f));
         }
         Snap {
             assimilated: l.assimilated_by_founder,
@@ -509,6 +530,8 @@ impl Snap {
             provision_received: l.provision_received_organic,
             pack_kills: l.pack_chase_kills,
             biomass,
+            stomach,
+            ledger: Box::new(*l),
         }
     }
 }
@@ -637,6 +660,8 @@ pub struct EvalRun {
     births_all: [u64; Founder::COUNT],
     births_late: [u64; Founder::COUNT],
     body_minutes: [u64; Founder::COUNT],
+    /// Adult body-ticks per lineage over the run (the balance measures' adult-days).
+    adult_ticks: [u64; Founder::COUNT],
 }
 
 impl EvalRun {
@@ -700,6 +725,7 @@ impl EvalRun {
             births_all: [0; Founder::COUNT],
             births_late: [0; Founder::COUNT],
             body_minutes: [0; Founder::COUNT],
+            adult_ticks: [0; Founder::COUNT],
         }
     }
 
@@ -808,6 +834,7 @@ impl EvalRun {
         }
         for f in Founder::ALL {
             self.body_minutes[f.index()] += r.lineages[f.index()].body_minutes;
+            self.adult_ticks[f.index()] += r.lineages[f.index()].adult_ticks;
         }
         self.body_scores.extend(r.scores.iter().copied());
         self.readouts.push(r.readout);
@@ -841,6 +868,7 @@ impl EvalRun {
             births_all,
             births_late,
             body_minutes,
+            adult_ticks,
             ..
         } = self;
         let readiness: Vec<f64> = readiness
@@ -894,6 +922,8 @@ impl EvalRun {
             &births_late,
             &stage,
             reached_half,
+            &adult_ticks,
+            elapsed,
         );
         if let Some(stage) = &spec.band.stage {
             trace.silent_lineages = 0.0;
@@ -906,6 +936,9 @@ impl EvalRun {
             });
             trace.share_discount =
                 if lj_free { 0.0 } else { 1.0 - stage.share_weight_unestablished.clamp(0.0, 1.0) };
+            trace.balance =
+                stage.balance_weight * lineages.iter().map(|o| o.balance_shortfall).sum::<f64>();
+            trace.counts_readout = stage.counts_readout;
         }
         let balance = balance_readout(
             &sim,
@@ -980,8 +1013,14 @@ fn outcomes(
     births_late: &[u64; Founder::COUNT],
     stage: &StageSpec,
     reached_half: bool,
+    adult_ticks: &[u64; Founder::COUNT],
+    elapsed: u64,
 ) -> Vec<LineageOutcome> {
     let now = Snap::of(sim);
+    let run_days = super::balance::days(
+        elapsed as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ),
+        sim.fauna().config(),
+    );
     let fauna = sim.fauna();
     let animals = &fauna.view().animals;
     let mut out = Vec::new();
@@ -1053,11 +1092,30 @@ fn outcomes(
             o.provision_received = now.provision_received - start.provision_received;
             o.pack_kills = now.pack_kills - start.pack_kills;
         }
-        o.biomass_start = start.biomass[i];
+        o.biomass_start = start.biomass[i] + start.stomach[i];
         if let Some(c) = cycle {
             o.cycle_complete = true;
-            o.intake_cycle = c.assimilated[i] - start.assimilated[i];
-            o.biomass_cycle = c.biomass[i];
+            (o.intake_cycle, o.biomass_start, o.biomass_cycle) = super::targets::cycle_books(
+                c.assimilated[i] - start.assimilated[i],
+                start.biomass[i],
+                c.biomass[i],
+                start.stomach[i],
+                c.stomach[i],
+            );
+        }
+        // The balance measures over the run (the search rebase's addendum).
+        let adult_days = super::balance::days(
+            adult_ticks[i] as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ),
+            cfg,
+        );
+        o.books = super::balance::Books::of(&now.ledger, f).since(&super::balance::Books::of(&start.ledger, f));
+        let ctx = super::balance::context(animals, cfg, f, adult_days, run_days);
+        o.balance = super::balance::measures(&o.books, &ctx);
+        if let Some(h) = cfg.founder(f).hunter {
+            let k = super::balance::kills(&start.ledger, &now.ledger, f) as f64;
+            let prey: u64 = Founder::ALL.iter().filter(|q| h.prey[q.index()]).map(|q| births_all[q.index()]).sum();
+            o.kills_per_adult_day = (adult_days > 0.0).then(|| k / adult_days);
+            o.prey_births_per_day = (run_days > 0.0).then(|| prey as f64 / run_days);
         }
         judge(&mut o, stage, reached_half);
         out.push(o);

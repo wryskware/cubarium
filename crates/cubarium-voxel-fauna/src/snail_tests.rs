@@ -259,12 +259,11 @@ fn the_r2b_physiology_table_is_the_briefs() {
         ("body_max", snail.core.body_max, shredder.core.body_max * r),
         ("body_min", snail.core.body_min, shredder.core.body_min * r),
         ("birth_body", snail.core.birth_body, shredder.core.birth_body * r),
-        ("bite_per_s", snail.core.bite_per_s, shredder.core.bite_per_s * r),
         ("growth_max_per_s", snail.core.growth_max_per_s, shredder.core.growth_max_per_s * r),
         ("egg_organic", snail.core.reproduction.egg_organic, shredder.core.reproduction.egg_organic * r),
-        // Per unit of body: the specific rates are the shredder's.
-        ("maintenance_per_s", snail.core.maintenance_per_s, shredder.core.maintenance_per_s),
-        ("motor_respiration_per_s", snail.motor_respiration_per_s, shredder.motor_respiration_per_s),
+        // The minimal gut: its own daily need (f 0.02 over 7,200 s), motor at its ratio.
+        ("maintenance_per_s", snail.core.maintenance_per_s * 7200.0, 0.02),
+        ("motor_respiration_per_s", snail.motor_respiration_per_s, snail.core.maintenance_per_s),
         ("reserve_cap", snail.core.reserve_cap, shredder.core.reserve_cap),
     ] {
         assert!(close(got, want), "{what}: {got} against {want}");
@@ -643,4 +642,32 @@ fn a_snail_lays_only_on_a_film_face() {
     assert_eq!(v.ledger.eggs_laid_by_founder[SNAIL.index()], 1);
     let a = v.animal(on_litter).expect("alive");
     assert_eq!(a.reproduction.refractory_ticks, 0, "the litter is no place to lay");
+}
+
+/// **Film into the stomach** (the minimal gut; Astra's finding 8): a snail with an empty
+/// stomach takes a film bite, and on that tick its film pool holds exactly what the plant
+/// layer gave and the animal layer booked eaten, in all three currencies.
+#[test]
+fn a_film_bite_lands_in_the_stomach_whole() {
+    let world = pond(16, 6, |_| 1.0);
+    let mut flora = Flora::new(FloraConfig::default());
+    assert!(flora.seed_film(&world) > 0);
+    let mut config = FaunaConfig::default();
+    config.founders[SNAIL.index()].gut.s0 = 0.0;
+    let mut fauna = Fauna::new(config);
+    let id = feeding(&mut fauna, &world, SNAIL, 4, 2);
+    let consumed = flora.view().ledger.consumed_organic_out;
+    let mut t = 0;
+    while fauna.view().ledger.bites == 0 && t < 40 {
+        fauna.step(&world, &mut flora);
+        t += 1;
+    }
+    let l = fauna.view().ledger;
+    assert_eq!(l.bites, 1, "one film bite");
+    let pool = fauna.view().animal(id).expect("alive").stomach.pools[Food::Film.index()];
+    assert_eq!(pool.organic, l.eaten_organic_in);
+    assert_eq!(pool.mineral, l.eaten_mineral_in);
+    assert_eq!(pool.energy, l.eaten_energy_in);
+    assert!(pool.mineral > 0.0, "film carries mineral");
+    assert!((flora.view().ledger.consumed_organic_out - consumed - pool.organic).abs() <= 1e-15);
 }

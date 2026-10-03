@@ -62,7 +62,7 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, GutSeeds, Hunter, Pack, StepLimits, birth_readiness,
+    BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, StepLimits, birth_readiness,
     disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -839,6 +839,106 @@ pub struct Animal {
     /// away. `false` for every other body.
     #[serde(default)]
     pub yielding: bool,
+    /// **The stomach** (the minimal gut, `design/metabolism-meals-2026-10-02.md` repair 2
+    /// item 10): raw food eaten and not yet digested, per food class, in all three
+    /// currencies. Separate from [`Animal::gut`], which is egesta. Counted in the stored
+    /// totals and laid with the corpse at death.
+    #[serde(default)]
+    pub stomach: Stomach,
+    /// **The eating latch** (repair 2 item 3): on when the stomach falls to
+    /// `s_start · K` in a state that may eat, off only at a full event (`S ≥
+    /// full_tolerance · K`). While on, the body seeks food and bites, and a hunter lures,
+    /// targets and strikes. Losing access to food does not clear it.
+    #[serde(default)]
+    pub eating: bool,
+    /// **The emergency latch** (repair 2 item 7b): on at reserve hunger `wake_hunger`, off
+    /// below [`FounderPhysiology::emergency_clear_hunger`]. While on, the body is awake
+    /// in any phase.
+    #[serde(default)]
+    pub emergency: bool,
+    /// The feeding bout in progress: from the eating latch going on to its full event.
+    #[serde(default)]
+    pub bout: Option<Bout>,
+}
+
+/// **The stomach** (repair 2 item 10): one raw-food pool per [`Food`] class, each in all
+/// three currencies. A class digests at its own `τ` and yield; a transfer between
+/// stomachs moves every pool by the same fraction, so the food keeps its composition.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Stomach {
+    pub pools: [Taken; Food::COUNT],
+}
+
+impl Stomach {
+    /// Everything the stomach holds, summed over the classes.
+    pub fn total(&self) -> Taken {
+        let mut t = Taken::default();
+        for p in &self.pools {
+            t.organic += p.organic;
+            t.mineral += p.mineral;
+            t.energy += p.energy;
+        }
+        t
+    }
+
+    /// Raw organic matter held, `S`.
+    pub fn organic(&self) -> f64 {
+        self.pools.iter().map(|p| p.organic).sum()
+    }
+
+    /// Whether nothing is held in any currency.
+    pub fn is_empty(&self) -> bool {
+        self.pools.iter().all(|p| p.organic <= 0.0 && p.mineral <= 0.0 && p.energy <= 0.0)
+    }
+}
+
+/// What kind of feeding bout a meal was (repair 2 item 8), decided at its close by the
+/// strongest reason that held during it: an emergency, then provisioning (it fed young
+/// or carried an escrow), then growth (it was a juvenile), else normal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum BoutKind {
+    Normal,
+    Growth,
+    Provisioning,
+    Emergency,
+}
+
+impl BoutKind {
+    pub const ALL: [BoutKind; 4] = [
+        BoutKind::Normal,
+        BoutKind::Emergency,
+        BoutKind::Growth,
+        BoutKind::Provisioning,
+    ];
+    pub const COUNT: usize = 4;
+
+    /// Its index in [`BoutKind::ALL`] (the ledger's order).
+    pub const fn index(self) -> usize {
+        match self {
+            BoutKind::Normal => 0,
+            BoutKind::Emergency => 1,
+            BoutKind::Growth => 2,
+            BoutKind::Provisioning => 3,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            BoutKind::Normal => "normal",
+            BoutKind::Emergency => "emergency",
+            BoutKind::Growth => "growth",
+            BoutKind::Provisioning => "provisioning",
+        }
+    }
+}
+
+/// A feeding bout in progress ([`Animal::bout`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Bout {
+    /// The tick the eating latch went on.
+    pub start_tick: u64,
+    /// The strongest kind it has been so far ([`BoutKind`]'s order).
+    pub kind: BoutKind,
 }
 
 /// A body's place in a pack (roster R3).
@@ -877,7 +977,7 @@ pub enum DenChoice {
 
 /// A pack (roster R3): its den, its breeder, and the scripted pack tactic's state (its
 /// target, its chase clock, its carcass). Saved with the layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PackRecord {
     /// Its id, never reused.
     pub id: u64,
@@ -910,6 +1010,10 @@ pub struct PackRecord {
     /// gone. Pups eat at it too when it is within [`Pack::den_radius_m`] of the den.
     #[serde(default)]
     pub feast: Option<Site>,
+    /// Carrion the pack's members have eaten at its current feast, organic (the minimal
+    /// gut's repair 3 measure): reset when the feast changes.
+    #[serde(default)]
+    pub feast_eaten: f64,
     /// The last target the pack gave up on (late, spent, or into another territory): not
     /// taken again until the pack has taken another.
     #[serde(default)]
@@ -1070,6 +1174,7 @@ impl Animal {
             + self.gut.organic
             + self.reproduction.escrow.map_or(0.0, |e| e.organic)
             + self.gut_seeds.total().organic
+            + self.stomach.organic()
     }
 
     /// Mineral in this body, its gut and the escrowed offspring's included.
@@ -1078,6 +1183,7 @@ impl Animal {
             + self.gut.mineral
             + self.reproduction.escrow.map_or(0.0, |e| e.mineral)
             + self.gut_seeds.total().mineral
+            + self.stomach.total().mineral
     }
 
     /// Energy in this body, its gut and the escrowed offspring's included.
@@ -1086,6 +1192,7 @@ impl Animal {
             + self.gut.energy
             + self.reproduction.escrow.map_or(0.0, |e| e.energy)
             + self.gut_seeds.total().energy
+            + self.stomach.total().energy
     }
 }
 
@@ -1501,15 +1608,6 @@ pub struct SpeciesConfig {
     /// Organic matter respired per unit of body per second, standing still. Paid from the
     /// reserve, then from the body.
     pub maintenance_per_s: f64,
-    /// Organic matter a mouth can take per second, spread over the stands in reach in site
-    /// order. The bound on what a bite *asks* for; the plant layer bounds what it gets.
-    ///
-    /// It is the *hungry* rate: a bite asks for `bite_per_s · period · effort · hunger`, where
-    /// hunger is the reserve's shortfall from `reserve_cap · body`, then takes
-    /// `E / (E + bite_half_stock)` of that from food holding `E`, and never more than
-    /// `room / yield`, the reserve's room after yield — so nothing it eats is respired as
-    /// surplus.
-    pub bite_per_s: f64,
     /// **`K`, the stock at which a bite is half of what the mouth asked for** (package G,
     /// decision 2): a bite from food holding `E` at the mouth — a plant's edible foliage
     /// in the mouth band, or a detritus pool's stock — is `want · E / (E + K)`. A stripped
@@ -1599,7 +1697,6 @@ impl SpeciesConfig {
     pub fn frondgrazer() -> SpeciesConfig {
         SpeciesConfig {
             maintenance_per_s: 0.001,
-            bite_per_s: 0.002,
             // A turf grazed nearly to its floor: 0.005 is 6 % of a full-grown springturf's
             // edible foliage (0.7 · 2 · 0.06 = 0.084), so any plant worth the name gives
             // ~90 % of a bite and only one stripped to within crumbs of its refuge gives
@@ -1623,8 +1720,8 @@ impl SpeciesConfig {
         }
     }
 
-    /// Multiply the **eight absolute quantities** — `body_max`, `body_min`, `birth_body`,
-    /// `birth_cost`, the reproduction `surplus_floor` and `egg_organic`, `bite_per_s` and
+    /// Multiply the **seven absolute quantities** — `body_max`, `body_min`, `birth_body`,
+    /// `birth_cost`, the reproduction `surplus_floor` and `egg_organic`, and
     /// `growth_max_per_s` — by `k` (audit §1.4): the animal is `k` times heavier against
     /// the plants, and every per-unit rate, clock and metre stays. The bite's
     /// half-saturation `bite_half_stock` stays too: it is measured in the food's stock at
@@ -1637,7 +1734,6 @@ impl SpeciesConfig {
         self.birth_cost *= k;
         self.reproduction.surplus_floor *= k;
         self.reproduction.egg_organic *= k;
-        self.bite_per_s *= k;
         self.growth_max_per_s *= k;
     }
 
@@ -1672,13 +1768,13 @@ pub struct FaunaConfig {
     pub parasite_attach_radius_m: f64,
     /// Riders one host can carry at once, count. Default 1.
     pub parasite_max_per_host: u32,
-    /// A rider's drain, as a fraction of its host's awake basal upkeep
-    /// (`maintenance_per_s × body`, organic units per second, whatever the host's activity),
-    /// moved host → rider each tick through the three-currency pro-rata path (reserve
-    /// first, then structure; mineral and energy at the host's own density). Default
-    /// 0.05: at the brief's 0.01 a hatchling's take (about 1.5e-5/s on a shipped grazer)
-    /// is below its own upkeep (about 2e-5/s), so no rider would ever reach drop-off.
-    pub parasite_drain_of_host_basal: f64,
+    /// **A rider's take** (the minimal gut, repair 2 item 9): host body per world day
+    /// ([`LifeConfig::ecological_day_s`]) a rider takes out of its host — reserve first,
+    /// then structure, all three currencies at the host's density — straight into its
+    /// own reserve. Default 0.09: on a 1.5-ou grazer a hatchling reaches drop-off in about
+    /// 1.19 world days (Astra's integration). Replaces the basal-tied drain, which the
+    /// cut to basal upkeep left unable to grow a rider.
+    pub parasite_take_per_day: f64,
     /// A rider drops off when its body reaches this fraction of its lineage's adult
     /// `body_max`, dimensionless within `(0, 1]`. Default 0.24.
     pub parasite_detach_body_fraction: f64,
@@ -1697,7 +1793,7 @@ pub struct FaunaConfig {
 /// **The shipped org-unit mass scale** (Wrysk, 2026-09-29; audit
 /// `design/7_Research/ecology-parameter-audit-2026-09-28.md` §1.4): both lineages are
 /// built this many times heavier against the plants than the placeholder tables
-/// ([`SpeciesConfig::scale_mass`]: the eight absolute quantities, nothing per unit), so one
+/// ([`SpeciesConfig::scale_mass`]: the seven absolute quantities, nothing per unit), so one
 /// plant no longer feeds a parked animal for ever. Plants are to be re-tuned for day and
 /// night later; this is not a measured optimum.
 pub const SHIPPED_MASS_SCALE: f64 = 30.0;
@@ -1713,7 +1809,7 @@ impl Default for FaunaConfig {
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
             parasite_max_per_host: 1,
-            parasite_drain_of_host_basal: 0.05,
+            parasite_take_per_day: 0.09,
             parasite_detach_body_fraction: 0.24,
             predation: PredationConfig::default(),
             life: LifeConfig::default(),
@@ -2325,6 +2421,85 @@ pub struct FaunaLedger {
     pub litters: u64,
     #[serde(default)]
     pub pups_born: u64,
+    /// **The minimal gut's books** (repair 2 item 10). Raw food into stomachs (every bite,
+    /// after any spill), out of them by digestion (into assimilation, egesta and the
+    /// unfunded share's respiration), moved stomach to stomach by regurgitation (inside
+    /// the layer, so it nets to zero), and leaving with a body that died or was removed.
+    /// `swallowed − digested − stomach_out` is the change in what stomachs hold over the
+    /// layer's life **less the founding stock**: a founder's `s0` stomach and any stomach
+    /// food a test or tool introduces are booked `introduced_*_in`, not swallowed, so a
+    /// diagnostic of the stomach stock adds them (or, like the books test, starts from a
+    /// measured baseline).
+    #[serde(default)]
+    pub swallowed: Taken,
+    #[serde(default)]
+    pub digested: Taken,
+    #[serde(default)]
+    pub regurgitated: Taken,
+    #[serde(default)]
+    pub stomach_out: Taken,
+    /// What riders took out of their hosts ([`FaunaConfig::parasite_take_per_day`]),
+    /// organic: a transfer inside the layer.
+    #[serde(default)]
+    pub parasite_taken_organic: f64,
+    /// **Meals**: feeding bouts completed (the eating latch's full event), by lineage and
+    /// [`BoutKind`] in [`BoutKind::ALL`] order, and their summed durations in ticks.
+    #[serde(default)]
+    pub meals_by_founder_kind: [[u64; BoutKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub meal_ticks_by_founder_kind: [[u64; BoutKind::COUNT]; Founder::COUNT],
+    /// Sleepers the emergency latch woke (it went on while the body was asleep), by lineage.
+    #[serde(default)]
+    pub emergency_wakes_by_founder: [u64; Founder::COUNT],
+    /// Sleep flips — a change of [`State::Asleep`] either way — by lineage.
+    #[serde(default)]
+    pub sleep_flips_by_founder: [u64; Founder::COUNT],
+    /// Bodies that grew through their lineage's `birth_body`, and their summed ages then,
+    /// ticks: the measured maturation time.
+    #[serde(default)]
+    pub matured_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub maturation_ticks_by_founder: [u64; Founder::COUNT],
+    /// Raw food swallowed and digested (organic), by lineage (repair 3's measure).
+    #[serde(default)]
+    pub swallowed_by_founder: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub digested_by_founder: [f64; Founder::COUNT],
+    /// Sip attempts with the eating latch on and `feed` held but no bloom in the mouth's
+    /// reach, by lineage (repair 3's measure: a flyer's reach failures).
+    #[serde(default)]
+    pub sip_misses_by_founder: [u64; Founder::COUNT],
+    /// **Spend by lineage** (the search rebase's balance measures; counters only, no
+    /// rule reads them), organic. Upkeep paid, the sleep factor applied.
+    #[serde(default)]
+    pub upkeep_by_founder: [f64; Founder::COUNT],
+    /// Motor paid: walking, flying, climbing, and a hunter's lure and strike costs.
+    #[serde(default)]
+    pub motor_by_founder: [f64; Founder::COUNT],
+    /// Structure built out of the reserve (growth).
+    #[serde(default)]
+    pub growth_by_founder: [f64; Founder::COUNT],
+    /// Reproduction invested: gestation instalments into an escrow, and clutches laid.
+    #[serde(default)]
+    pub reproduction_by_founder: [f64; Founder::COUNT],
+    /// Provisioning given by the giver's lineage: reserve transferred to young, and raw
+    /// food regurgitated into their stomachs (raw organic).
+    #[serde(default)]
+    pub provision_by_founder: [f64; Founder::COUNT],
+    /// What riders took out of hosts of this lineage (the host's loss).
+    #[serde(default)]
+    pub rider_take_lost_by_founder: [f64; Founder::COUNT],
+    /// Ticks a free founder body was awake with its eating latch on ("wanting"), and the
+    /// ticks it spent eating: each bite swallowed credits its controller interval's
+    /// ticks (a bite covers one interval).
+    #[serde(default)]
+    pub wanting_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub eating_ticks_by_founder: [u64; Founder::COUNT],
+    /// Ticks a free founder body was awake, latch on or off (the sated share's
+    /// denominator).
+    #[serde(default)]
+    pub awake_ticks_by_founder: [u64; Founder::COUNT],
 }
 
 impl FaunaLedger {
@@ -2665,6 +2840,11 @@ pub struct Fauna {
     /// not world state, so not saved; bounded at [`SEED_VOID_LOG_MAX`] (the oldest go).
     #[serde(skip)]
     seed_voids: Vec<SeedVoid>,
+    /// Pack hunt and feast events since the last [`Fauna::take_pack_events`] (repair 3's
+    /// measure): a census's events, not world state, so not saved; bounded like the seed
+    /// voids.
+    #[serde(skip)]
+    pack_events: Vec<PackEvent>,
     /// The packs standing in the world (roster R3), by id.
     #[serde(default)]
     packs: Vec<PackRecord>,
@@ -2675,6 +2855,42 @@ pub struct Fauna {
 
 /// The most gut-seed void events [`Fauna`] keeps undrained.
 pub const SEED_VOID_LOG_MAX: usize = 65_536;
+
+/// One pack hunt or feast event (the minimal gut's repair 3 measure); not world state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PackEvent {
+    /// A pack took a target, with this many participants (the taker and its
+    /// participating mates within `pack_radius_m`).
+    ChaseStart { tick: u64, pack: u64, participants: u32 },
+    /// A pack's target was dropped, and why.
+    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd },
+    /// A pack's feast ended, with the carrion its members ate there, and why.
+    FeastEnd { tick: u64, pack: u64, site: Site, eaten: f64, why: FeastEnd },
+}
+
+/// Why a chase ended ([`PackEvent::ChaseEnd`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChaseEnd {
+    /// The target is gone and carrion lies where it was last seen.
+    Killed,
+    /// The target is gone with no carrion there (it left the world otherwise).
+    Gone,
+    /// `chase_give_up_s` passed.
+    Late,
+    /// A member that wants no food was under the chase floor.
+    Spent,
+    /// The target stood in another pack's territory.
+    Trespass,
+}
+
+/// Why a feast ended ([`PackEvent::FeastEnd`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeastEnd {
+    /// Its carrion was gone (eaten or decayed).
+    Emptied,
+    /// A new kill elsewhere became the pack's feast.
+    Replaced,
+}
 
 impl Fauna {
     /// An animal layer on a **valid** config. Panics with the offending field named if
@@ -2704,6 +2920,7 @@ impl Fauna {
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
             seed_voids: Vec::new(),
+            pack_events: Vec::new(),
             packs: Vec::new(),
             next_pack: 0,
         })
@@ -2712,6 +2929,18 @@ impl Fauna {
     /// The gut-seed voids since the last call (F3), oldest first.
     pub fn take_seed_voids(&mut self) -> Vec<SeedVoid> {
         std::mem::take(&mut self.seed_voids)
+    }
+
+    /// Drain the pack hunt and feast events ([`PackEvent`]).
+    pub fn take_pack_events(&mut self) -> Vec<PackEvent> {
+        std::mem::take(&mut self.pack_events)
+    }
+
+    pub(crate) fn log_pack_event(&mut self, e: PackEvent) {
+        if self.pack_events.len() >= SEED_VOID_LOG_MAX {
+            self.pack_events.drain(..SEED_VOID_LOG_MAX / 2);
+        }
+        self.pack_events.push(e);
     }
 
     pub(crate) fn log_seed_void(&mut self, v: SeedVoid) {
@@ -2905,6 +3134,7 @@ impl Fauna {
             chase_since_tick: 0,
             target_site: None,
             feast: None,
+            feast_eaten: 0.0,
             abandoned: None,
         });
         Some(id)
@@ -3228,17 +3458,38 @@ impl Fauna {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            stomach: Stomach::default(),
+            eating: false,
+            emergency: false,
+            bout: None,
         };
         let mut animal = animal;
+        // A founder arrives with its eating latch off and a stomach at `s0 · K` of its own
+        // first food (repair 2 item 3), at its own tissue's mineral and energy densities
+        // (so no yield up to 1 is mineral-limited), booked introduced with the rest of it.
+        if let Some(f) = founder {
+            let p = self.config.founder(f);
+            if let Some(food) = p.diet.foods().next() {
+                let organic = p.gut.s0 * p.gut.capacity(body);
+                if organic > 0.0 {
+                    animal.stomach.pools[food.index()] = Taken {
+                        organic,
+                        mineral: sc.n_tissue * organic,
+                        energy: sc.energy_density * organic,
+                    };
+                }
+            }
+        }
         // A flyer on a face is perched on it (F1).
         if founder.is_some_and(|f| self.config.founder(f).flight.is_some()) {
             flight::perch_on_face(&mut animal, site);
         }
         self.ledger.births += 1;
         self.ledger.introduced += 1;
-        self.ledger.introduced_organic_in += organic;
-        self.ledger.introduced_mineral_in += animal.mineral;
-        self.ledger.introduced_energy_in += animal.energy;
+        let fed = animal.stomach.total();
+        self.ledger.introduced_organic_in += organic + fed.organic;
+        self.ledger.introduced_mineral_in += animal.mineral + fed.mineral;
+        self.ledger.introduced_energy_in += animal.energy + fed.energy;
         self.insert(animal);
         true
     }
@@ -3312,8 +3563,14 @@ impl Fauna {
 
     /// An animal leaving the world without a corpse takes **everything it holds**, the
     /// escrowed offspring included: an unborn package is not left behind on an empty
-    /// face, and it is not a death, so it is not carrion either.
+    /// face, and it is not a death, so it is not carrion either. **Removal is export**
+    /// (the minimal gut's repair 3 item 7): its stomach leaves with it, booked
+    /// `removed_*` (and `stomach_out`); only a death deposits a stomach.
     fn book_removed(&mut self, a: &Animal) {
+        let fed = a.stomach.total();
+        self.ledger.stomach_out.organic += fed.organic;
+        self.ledger.stomach_out.mineral += fed.mineral;
+        self.ledger.stomach_out.energy += fed.energy;
         self.ledger.removed_organic_out += a.stored_organic();
         self.ledger.removed_mineral_out += a.stored_mineral();
         self.ledger.removed_energy_out += a.stored_energy();

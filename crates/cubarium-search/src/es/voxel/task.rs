@@ -752,9 +752,12 @@ impl Prepared {
 
 /// The training layout seeds, as [`Prepared`] layouts of `stage`, in the frozen order.
 pub fn training_layouts(founder: Founder, stage: Stage, band: Band) -> Vec<Prepared> {
+    // Built straight onto the heap: sixteen `Prepared` in a stack array overflowed a
+    // test thread's 2 MiB once the minimal gut grew the fauna config.
     TRAINING_LAYOUT_SEEDS
-        .map(|seed| Prepared::build_stage_in(founder, seed, stage, band))
-        .into()
+        .iter()
+        .map(|&seed| Prepared::build_stage_in(founder, seed, stage, band))
+        .collect()
 }
 
 /// P5-C's arena half (C1): the sixteen training seeds as Stage-`stage` layouts in

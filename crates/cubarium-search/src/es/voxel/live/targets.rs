@@ -19,12 +19,16 @@
 //!   success, the next is six hours off), pups provisioned, pup survival at least
 //!   `chorister_pup_survival`, and the pack's own intake (a kill or carcass feeding; a
 //!   pack kill in finalist validation). A quarter each; met at all four.
-//! - **Replenishment** (`replenish`): over one whole day-cycle, assimilated intake over the
-//!   cycle's measured spending, `intake / (intake − Δbiomass)` with biomass every living
-//!   body's structure, reserve and open escrow. At least 1; a rise after one meal cannot
-//!   hide a negative day.
+//! - **Replenishment** (`replenish`): over one whole day-cycle, intake over the cycle's
+//!   measured spending, `intake / (intake − Δstock)` with the stock every living body's
+//!   structure, reserve, open escrow and **digestible stomach** (the minimal gut,
+//!   [`digestible_stomach`]), and intake the assimilation plus the stomach's digestible
+//!   change ([`cycle_books`]): food moved from stomach to reserve is not income. At least
+//!   1; a rise after one meal cannot hide a negative day.
 
-use cubarium_voxel_fauna::Founder;
+use cubarium_voxel_fauna::{Animal, Food, Founder, FounderPhysiology};
+
+use super::balance::{Books, Measures};
 use serde::Serialize;
 
 /// The v3 targets as a search file's `[targets]` sets them.
@@ -54,6 +58,14 @@ pub struct StageSpec {
     /// The measured predator balance's share of prey births per hunter lineage (a
     /// readout, Astra A6's 50 %).
     pub balance_share: f64,
+    /// **Scored on balance** (`balance`, the search rebase's addendum): each listed
+    /// lineage not readout-only pays `balance_weight x` its soft shortfall on `B >= 1` and
+    /// `R̂ >= 1` ([`super::balance::shortfall`]).
+    pub balance: [bool; Founder::COUNT],
+    pub balance_weight: f64,
+    /// **Alive counts are readouts** (`counts_readout = true`): the population band, its
+    /// peak and the lanternjaw share are reported, not scored. Persistence stays hard.
+    pub counts_readout: bool,
 }
 
 impl Default for StageSpec {
@@ -71,6 +83,9 @@ impl Default for StageSpec {
             share_weight_unestablished: 1.0,
             balance_share: 0.5,
             chorister_kill_required: false,
+            balance: [false; Founder::COUNT],
+            balance_weight: 5.0,
+            counts_readout: false,
         }
     }
 }
@@ -133,6 +148,11 @@ impl StageSpec {
                 "replenish_weight" => s.replenish_weight = number(v, k)?,
                 "share_weight_unestablished" => s.share_weight_unestablished = number(v, k)?,
                 "balance_share" => s.balance_share = number(v, k)?,
+                "balance" => s.balance = lineages(v, k)?,
+                "balance_weight" => s.balance_weight = number(v, k)?,
+                "counts_readout" => {
+                    s.counts_readout = v.as_bool().ok_or("[targets] counts_readout is true or false")?
+                }
                 _ => {}
             }
         }
@@ -198,8 +218,10 @@ pub struct LineageOutcome {
     pub pups_alive: usize,
     pub pups_independent: usize,
     pub provision_received: f64,
-    /// One whole day-cycle from founding: assimilated intake, and the lineage's biomass at
-    /// its start and its end. `cycle_complete` false when the world stopped first.
+    /// One whole day-cycle from founding ([`cycle_books`]): intake (assimilated plus the
+    /// stomach's digestible change), and the lineage's stock (biomass plus digestible
+    /// stomach) at its start and its end. `cycle_complete` false when the world stopped
+    /// first.
     pub intake_cycle: f64,
     pub biomass_start: f64,
     pub biomass_cycle: f64,
@@ -220,6 +242,15 @@ pub struct LineageOutcome {
     pub met: bool,
     /// The replenishment term, 0 to 1 (0 for a lineage not held to it).
     pub replenish_shortfall: f64,
+    /// **The balance measures over the run** ([`super::balance`]): the books, `B`, days to
+    /// empty, surplus, `R̂` and access.
+    pub books: Books,
+    pub balance: Measures,
+    /// A hunter's kills per adult per world day, against its prey's births per world day.
+    pub kills_per_adult_day: Option<f64>,
+    pub prey_births_per_day: Option<f64>,
+    /// The balance term, 0 to 2 (0 for a lineage not scored on it).
+    pub balance_shortfall: f64,
 }
 
 impl LineageOutcome {
@@ -267,6 +298,11 @@ impl LineageOutcome {
             replenishment_met: true,
             met: true,
             replenish_shortfall: 0.0,
+            books: Books::default(),
+            balance: Measures::default(),
+            kills_per_adult_day: None,
+            prey_births_per_day: None,
+            balance_shortfall: 0.0,
         }
     }
 
@@ -274,6 +310,44 @@ impl LineageOutcome {
     pub fn lost(&self) -> bool {
         self.founded > 0 && self.alive_end + self.eggs_end == 0
     }
+}
+
+/// **What a body's stomach is worth to its reserve** (the minimal gut), organic units: each
+/// food class's raw organic times the yield it digests at, mineral-limited as digestion
+/// limits it (`min(yield, mineral / (n_tissue · organic))`). Zero for a body with no
+/// lineage.
+pub fn digestible_stomach(a: &Animal, p: &FounderPhysiology) -> f64 {
+    let n = p.core.n_tissue;
+    Food::ALL
+        .iter()
+        .map(|&f| {
+            let pool = a.stomach.pools[f.index()];
+            if !(pool.organic > 0.0) {
+                return 0.0;
+            }
+            let funded = if n > 0.0 { pool.mineral / (n * pool.organic) } else { f64::INFINITY };
+            pool.organic * p.yield_for(f).min(funded).max(0.0)
+        })
+        .sum()
+}
+
+/// **The cycle's books under the minimal gut**: `(intake, stock_start, stock_end)` from the
+/// lineage's assimilation over the cycle, its biomass at both ends and its digestible
+/// stomach at both ends. The stomach is counted as stock, and food entering it as intake,
+/// so digesting what was already held moves nothing: spending (`intake − Δstock`) is
+/// `assimilated − Δbiomass` either way.
+pub fn cycle_books(
+    assimilated: f64,
+    biomass_start: f64,
+    biomass_end: f64,
+    stomach_start: f64,
+    stomach_end: f64,
+) -> (f64, f64, f64) {
+    (
+        assimilated + (stomach_end - stomach_start),
+        biomass_start + stomach_start,
+        biomass_end + stomach_end,
+    )
 }
 
 /// **Replenishment**: intake over spending, `intake / (intake − (end − start))`; 0 with no
@@ -373,8 +447,10 @@ pub fn judge(o: &mut LineageOutcome, spec: &StageSpec, reached_second_half: bool
     o.replenishment_met =
         !spec.replenish[i] || o.founded == 0 || (o.cycle_complete && o.replenishment >= 1.0);
     o.met = o.stage_met && o.replenishment_met;
+    o.balance_shortfall = if spec.balance[i] && o.founded > 0 { super::balance::shortfall(&o.balance) } else { 0.0 };
     if o.readout {
         o.shortfall = 0.0;
         o.replenish_shortfall = 0.0;
+        o.balance_shortfall = 0.0;
     }
 }

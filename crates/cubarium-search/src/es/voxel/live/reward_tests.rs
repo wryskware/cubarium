@@ -146,6 +146,14 @@ fn breeding_does_not_lower_the_parents_score() {
         // Awake in both arms: a lighter reserve after laying must not decide whether the
         // body sleeps, which would change its upkeep, not its intake or motor.
         cfg.founders[Founder::Blind.index()].wake_hunger = 0.0;
+        // The minimal gut: `wake_hunger` turns the emergency latch on and
+        // `emergency_clear_hunger` turns it off; at 0 both, it never clears, so both arms
+        // stay awake whatever their reserve.
+        cfg.founders[Founder::Blind.index()].emergency_clear_hunger = 0.0;
+        // Not feeding means nothing to digest either: an empty founding stomach (`s0` 0).
+        // With the minimal gut's `s0 K`, the laying arm would digest into the room its
+        // clutch left and the full arm could not, so their intake would differ.
+        cfg.founders[Founder::Blind.index()].gut.s0 = 0.0;
         let rule = &mut cfg.founders[Founder::Blind.index()].core.reproduction;
         // A hold of one tick, so a full founder lays at once.
         rule.surplus_hold_s = 0.05;

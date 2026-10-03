@@ -3750,6 +3750,7 @@ impl<'a> FloraView<'a> {
     /// and the seed banks, and the mineral standing in living tissue.
     pub fn mineral(&self) -> f64 {
         self.stands.iter().map(|s| s.mineral).sum::<f64>()
+            + self.cover.vines().iter().map(|v| v.mineral).sum::<f64>()
             + self
                 .ground
                 .iter()

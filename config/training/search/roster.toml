@@ -11,10 +11,9 @@
 # base's (all nine), not the code defaults' three.
 #
 # Ties (`derive()`, fauna and flora `ties()`), in force unless freed:
-# - motor_respiration_per_s and bite_per_s follow maintenance_per_s by ratio: the UPKEEP
-#   gene also moves walking cost (no motor gene: frozen ratio) and the bite.
-#   Lowering upkeep x0.12 lowers the bite x0.12 unless `intake` rises to compensate, so
-#   `intake` reaches x10.
+# - motor_respiration_per_s follows maintenance_per_s by ratio: the UPKEEP gene also moves
+#   walking cost (no motor gene: frozen ratio). The bite does not: since the minimal gut
+#   (design/metabolism-meals-2026-10-02.md repair 2 item 11) it is its own gene, `bite`.
 # - wood_decomposition and carrion_decomposition follow `decomposition`.
 # - The mass ties (eight stocks follow mass_scale) are idle: mass is not a gene.
 #
@@ -53,15 +52,17 @@ harvest = 0.2
 # and the movement target and the curiosity brains handle parking. S and F stay hard.
 r_readout = true
 
-# Night endurance, optimistic adult (proposal 1a; Astra A2): from onset reserve f0,
-# max(0, f0 - (1 - h)) x c / (m x s) >= margin x the lineage's longest sleeping bout on the
-# world's clock (daylight lines 0.3; crepuscular 0.05 / 0.95). Exact, not rounded.
+# Night endurance, optimistic adult (proposal 1a; Astra A2): from onset reserve f0 and a
+# stomach at the appetite floor s0 K digested at its best yield y (the minimal gut),
+# (max(0, f0 - (1 - h)) x c + s0 k y) / (m x s) >= margin x the lineage's longest sleeping
+# bout on the world's clock (daylight lines 0.3; crepuscular 0.05 / 0.95). Exact.
 [screen.night]
 f0 = 0.8
 margin = 1.2
 
 # Food access per food type (proposal Part 3; Astra A5, A11): each founded lineage's basal
-# need over a day (awake plus asleep at sleep_upkeep, assimilated units) against its foods'
+# need over a day (the gut's daily need f, awake plus asleep at sleep_upkeep, assimilated
+# units) against its foods'
 # optimistic supply at founding (stands min(founder_cap, founder_per_m2 x floor area),
 # continuous harvest, no competition, no stock caps). Necessary, not sufficient.
 [screen.food]
@@ -90,14 +91,28 @@ ready_target = 0.5
 progress = ["lanternjaw", "chorister"]
 lanternjaw_progress = 0.5
 chorister_pup_survival = 0.5
-# Replenishment over one whole day-cycle: assimilated intake over the cycle's measured
-# spending (intake minus the lineage's change in body, reserve and escrow), at least 1.
+# Replenishment over one whole day-cycle: intake over the cycle's measured spending, at
+# least 1. The stock is body, reserve, escrow and the digestible stomach, and intake is
+# assimilation plus the stomach's digestible change (the minimal gut), so food moved from
+# stomach to reserve is not income.
 replenish = ["littershredder", "frondgrazer", "capgnawer", "loftstrider", "ripple-snail", "bellwing", "seedporter", "chorister"]
 replenish_weight = 5.0
 # Kept: persistence, the band, browsers moving >= 0.30, lanternjaw share 5-15 % scored
 # softly while it cannot establish (its weight x this until a free-living hunter exists).
 lively_weight = 10.0
 share_weight_unestablished = 0.2
+# Continuous balance (the search rebase's addendum, Wrysk 2026-10-03): with the gut a full
+# adult lasts 3-25 world days, so alive counts after 2 h no longer show starvation.
+# - Each lineage in `balance` pays balance_weight x its soft shortfall on B >= 1 and
+#   R-hat >= 1 (live/balance.rs); persistence stays hard.
+# - counts_readout: the population band, its peak and the lanternjaw share are readouts.
+# - The chorister, lanternjaw and loftstrider are readout-only: a founders-only world has
+#   not established their food (too few prey; no vaulttree groves). Staged arrival is a
+#   separate proposal.
+readout_only = ["chorister", "lanternjaw", "loftstrider"]
+balance = ["littershredder", "frondgrazer", "capgnawer", "ripple-snail", "bellwing", "seedporter"]
+balance_weight = 5.0
+counts_readout = true
 
 # --- Animals: per lineage (tie = "each" over the nine founded lineages). Frozen at x1 by
 # Fable 2026-10-02 (life histories stay fast; Wrysk): lifespan, growth, surplus floor,
@@ -107,15 +122,8 @@ share_weight_unestablished = 0.2
 name = "upkeep"
 path = "fauna.founders.*.core.maintenance_per_s"
 tie = "each"
-range = [0.05, 4.0]
-what = "basal upkeep (moves bite and motor by the ties); proposal: prey /4-5 for night endurance, lanternjaw to ~7e-5-1e-4, chorister to ~8e-5 (base x0.12-0.19)"
-
-[[gene]]
-name = "intake"
-path = "fauna.founders.*.core.bite_per_s"
-tie = "each"
-range = [0.1, 10.0]
-what = "max intake / upkeep (the intake tie's ratio); reaches x10 to undo an upkeep cut on the bite"
+range = [0.25, 4.0]
+what = "basal upkeep, x1 at the minimal gut's daily need f / 7,200 s (moves motor by the tie)"
 
 [[gene]]
 name = "yield"
@@ -129,7 +137,7 @@ name = "reserve"
 path = "fauna.founders.*.core.reserve_cap"
 tie = "each"
 range = [0.5, 5.0]
-what = "reserve per body (0.5 -> 0.25-2.5; 1.0 -> 0.5-5); proposal: the alternative to /4-5 upkeep"
+what = "reserve per body (0.5 -> 0.25-2.5; 1.0 -> 0.5-5)"
 
 [[gene]]
 name = "sleep"
@@ -146,6 +154,104 @@ mode = "value"
 value = 0.9
 range = [0.3, 0.95]
 what = "hunger that wakes a sleeper (set, not scaled); the night default 0.9"
+
+# --- The minimal gut (repair 2 item 11): per lineage the stomach k, the bite b, the
+# appetite floor s0, the refill gap (repair 3) and the digestion time tau of each food
+# class it eats. ---
+
+[[gene]]
+name = "stomach"
+path = "fauna.founders.*.gut.stomach_k"
+tie = "each"
+range = [0.25, 4.0]
+what = "k: stomach capacity per unit current body (0.012-0.20 -> 0.003-0.8)"
+
+[[gene]]
+name = "bite"
+path = "fauna.founders.*.gut.bite_per_body_s"
+tie = "each"
+range = [0.25, 4.0]
+what = "b: raw food a bite takes per unit body per second (default 2k / tau); its own gene, not tied to upkeep"
+
+[[gene]]
+name = "s0"
+path = "fauna.founders.*.gut.s0"
+tie = "each"
+range = [0.25, 4.0]
+what = "s0: a fed body wants food at S <= s0 K (0.15 -> 0.0375-0.6)"
+
+[[gene]]
+name = "refill_gap"
+path = "fauna.founders.*.gut.refill_gap"
+tie = "each"
+range = [0.25, 4.0]
+what = "appetite is capped at full_tolerance - refill_gap (repair 3; 0.1 -> 0.025-0.4)"
+
+[[gene]]
+name = "tau_litter@littershredder"
+path = "fauna.founders.littershredder.gut.digestion_s.litter"
+range = [0.25, 4.0]
+what = "tau: the litter pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_carrion@littershredder"
+path = "fauna.founders.littershredder.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+what = "tau: the carrion pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_foliage@frondgrazer"
+path = "fauna.founders.frondgrazer.gut.digestion_s.foliage"
+range = [0.25, 4.0]
+what = "tau: the foliage pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_carrion@lanternjaw"
+path = "fauna.founders.lanternjaw.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+what = "tau: the carrion pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_cap_tissue@capgnawer"
+path = "fauna.founders.capgnawer.gut.digestion_s.cap_tissue"
+range = [0.25, 4.0]
+what = "tau: the cap_tissue pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_litter@capgnawer"
+path = "fauna.founders.capgnawer.gut.digestion_s.litter"
+range = [0.25, 4.0]
+what = "tau: the litter pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_foliage@loftstrider"
+path = "fauna.founders.loftstrider.gut.digestion_s.foliage"
+range = [0.25, 4.0]
+what = "tau: the foliage pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_film@ripple-snail"
+path = "fauna.founders.ripple-snail.gut.digestion_s.film"
+range = [0.25, 4.0]
+what = "tau: the film pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_nectar@bellwing"
+path = "fauna.founders.bellwing.gut.digestion_s.nectar"
+range = [0.25, 4.0]
+what = "tau: the nectar pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_fruit@seedporter"
+path = "fauna.founders.seedporter.gut.digestion_s.fruit"
+range = [0.25, 4.0]
+what = "tau: the fruit pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_carrion@chorister"
+path = "fauna.founders.chorister.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+what = "tau: the carrion pool empties at S / tau into the reserve's room"
 
 [[gene]]
 name = "pack_size@chorister"
@@ -248,13 +354,14 @@ what = "litter decay (dead wood and carrion follow)"
 
 # --- The lanternjaw's recruitment (Fable, 2026-10-02 readouts: riders grow 0.05-0.14
 # body/h on frondgrazers toward a 0.25 drop-off line; small hosts cannot feed one).
-# No host-size rule (with Wrysk). ---
+# No host-size rule (with Wrysk). Since the minimal gut the take is per host body
+# (parasite_take_per_day), so host size matters without one. ---
 
 [[gene]]
-name = "rider_drain"
-path = "fauna.parasite_drain_of_host_basal"
-range = [0.2, 10.0]
-what = "a rider's take, x host basal upkeep (0.05 -> 0.01-0.5, the row's interval)"
+name = "rider_take"
+path = "fauna.parasite_take_per_day"
+range = [0.25, 4.0]
+what = "a rider's take, host body per ecological day, into its reserve (0.09 -> 0.0225-0.36)"
 
 [[gene]]
 name = "rider_attach_radius"

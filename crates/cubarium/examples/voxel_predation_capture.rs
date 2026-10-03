@@ -81,7 +81,8 @@ fn note(sim: &Sim, tick: u64, ev: &mut Events) {
     }
     if ev.eat.is_some() && ev.rest.is_none() {
         let satiated = sim.fauna().view().animals.iter().any(|a| {
-            a.founder == Some(Founder::Lanternjaw) && a.rest == Some(cubarium_voxel_fauna::Rest::Satiated)
+            // The minimal gut: fed (its eating latch off) where the satiated rest was.
+            a.founder == Some(Founder::Lanternjaw) && !a.eating
         });
         if satiated {
             ev.rest = Some(tick);

@@ -89,11 +89,20 @@ pub(crate) fn window_body(fauna: &Fauna, i: usize, ring: f64) -> f64 {
         .iter()
         .filter(|o| {
             o.id == a.id
-                || o.pack.is_some_and(|om| om.pack == m.pack && !om.pup)
+                || participates(o, m.pack)
                     && distance(a, o.pose.x, o.pose.z, ring) <= t.pack_radius_m
         })
         .map(|o| o.body)
         .sum()
+}
+
+/// **A hunt participant** (repair 3 item 5): an adult of pack `pack` that is awake and
+/// wants food or is in an emergency. The one set the driver and flankers are picked from
+/// and the body window sums (within `pack_radius_m`).
+pub(crate) fn participates(o: &Animal, pack: u64) -> bool {
+    o.pack.is_some_and(|om| om.pack == pack && !om.pup)
+        && o.state != crate::State::Asleep
+        && (o.eating || o.emergency)
 }
 
 /// After maintenance: calls count down, pups come of age, succession, empty packs dropped,
@@ -151,14 +160,22 @@ pub(crate) fn upkeep(fauna: &mut Fauna, view: &VoxelView<'_>) {
     provision(fauna, view);
 }
 
-/// **Provisioning** (Brief R3): every adult within `den_radius_m` of its den whose reserve
-/// is above `provision_reserve_fraction` of its cap passes `provision_rate_per_s` × its
-/// body per second out of its reserve to the hungriest pup of its pack there (the pup
-/// with the lowest reserve fraction, lowest id on a tie, with room), never below the
-/// fraction and never more than the pup can take. The pup receives
-/// `provision_efficiency` of it — organic matter, mineral and energy alike — and the rest
-/// is respired: its organic matter booked respired, its energy as heat, its mineral shed
-/// to the giver's gut, as every respiration sheds it.
+/// **Provisioning** (Brief R3; the minimal gut's repair 2 item 6): every adult within
+/// `den_radius_m` of its den feeds a pup of its pack there, at most
+/// `provision_rate_per_s` × its body per second.
+///
+/// 1. **Regurgitation first**: while its stomach holds raw food it passes that, raw, into
+///    the stomach of the hungriest pup that **wants food** (its eating latch on) with
+///    stomach room (lowest reserve fraction,
+///    lowest id on a tie), capped by the pup's room `K − S`. Every food class moves by the
+///    same fraction, so the food keeps its composition and its yield applies once, at the
+///    pup's digestion. The giver's reserve floor does not apply. Booked `regurgitated`.
+/// 2. **The reserve fallback**: with an empty stomach, an adult whose reserve is above
+///    `provision_reserve_fraction` of its cap passes reserve to the hungriest pup with
+///    reserve room (the old transfer, unchanged: no eating latch needed, repair 3 item 6), never below the fraction and never more than the pup can take.
+///    The pup receives `provision_efficiency` of it — organic matter, mineral and energy
+///    alike — and the rest is respired: its organic matter booked respired, its energy as
+///    heat, its mineral shed to the giver's gut, as every respiration sheds it.
 fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
@@ -177,39 +194,84 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
         if distance(&giver, cx, cz, ring) > t.den_radius_m {
             continue;
         }
+        let rate = t.provision_rate_per_s * giver.body * DT;
+        // The hungriest pup of its pack at the den that wants food, with room by `room`.
+        let hungriest = |fauna: &Fauna, room: &dyn Fn(&Fauna, &Animal) -> f64, wanting: bool| -> Option<usize> {
+            let mut best: Option<(f64, usize)> = None;
+            for (k, p) in fauna.animals.iter().enumerate() {
+                if !p.pack.is_some_and(|pm| pm.pack == m.pack && pm.pup)
+                    || (wanting && !p.eating)
+                    || distance(p, cx, cz, ring) > t.den_radius_m
+                    || !(room(fauna, p) > 0.0)
+                {
+                    continue;
+                }
+                let f = reserve_fraction(fauna, p);
+                if best.is_none_or(|(bf, _)| f < bf) {
+                    best = Some((f, k));
+                }
+            }
+            best.map(|(_, k)| k)
+        };
+        let stomach_room = |fauna: &Fauna, p: &Animal| -> f64 {
+            let gut = p.founder.map(|f| fauna.config.founder(f).gut);
+            gut.map_or(0.0, |gut| gut.capacity(p.body) - p.stomach.organic())
+        };
+        let held = giver.stomach.organic();
+        if held > 0.0 {
+            let Some(k) = hungriest(fauna, &stomach_room, true) else {
+                continue;
+            };
+            let amount = rate.min(held).min(stomach_room(fauna, &fauna.animals[k]));
+            if !(amount > 0.0) {
+                continue;
+            }
+            let share = (amount / held).min(1.0);
+            let mut moved = cubarium_voxel_flora::Taken::default();
+            for food in crate::Food::ALL {
+                let pool = &mut fauna.animals[g].stomach.pools[food.index()];
+                let want = if share >= 1.0 { pool.organic } else { pool.organic * share };
+                let part = crate::step::take_from_pool(pool, want);
+                let to = &mut fauna.animals[k].stomach.pools[food.index()];
+                to.organic += part.organic;
+                to.mineral += part.mineral;
+                to.energy += part.energy;
+                moved.organic += part.organic;
+                moved.mineral += part.mineral;
+                moved.energy += part.energy;
+            }
+            let l = &mut fauna.ledger;
+            l.regurgitated.organic += moved.organic;
+            l.regurgitated.mineral += moved.mineral;
+            l.regurgitated.energy += moved.energy;
+            if let Some(f) = fauna.animals[g].founder {
+                l.provision_by_founder[f.index()] += moved.organic;
+            }
+            if let Some(b) = fauna.animals[g].bout.as_mut() {
+                b.kind = b.kind.max(crate::BoutKind::Provisioning);
+            }
+            crate::step::settle_full(fauna, k);
+            continue;
+        }
+        // The reserve fallback: the old transfer, unchanged (repair 3 item 6) — pup reserve
+        // room and the giver's floor; it does not need the pup's eating latch.
         let sc = crate::body::effective_config(&fauna.config, &giver);
         let floor = t.provision_reserve_fraction * sc.reserve_of(giver.body);
         if !(giver.reserve > floor) {
             continue;
         }
-        // The hungriest pup of its pack at the den, with room.
-        let mut best: Option<(f64, usize)> = None;
-        for (k, p) in fauna.animals.iter().enumerate() {
-            if !p.pack.is_some_and(|pm| pm.pack == m.pack && pm.pup)
-                || distance(p, cx, cz, ring) > t.den_radius_m
-            {
-                continue;
-            }
-            let psc = crate::body::effective_config(&fauna.config, p);
-            let cap = psc.reserve_of(p.body);
-            if !(cap > p.reserve) {
-                continue;
-            }
-            let f = if cap > 0.0 { p.reserve / cap } else { 1.0 };
-            if best.is_none_or(|(bf, _)| f < bf) {
-                best = Some((f, k));
-            }
-        }
-        let Some((_, k)) = best else { continue };
+        let reserve_room = |fauna: &Fauna, p: &Animal| -> f64 {
+            crate::body::effective_config(&fauna.config, p).reserve_of(p.body) - p.reserve
+        };
+        let Some(k) = hungriest(fauna, &reserve_room, false) else {
+            continue;
+        };
         let eff = t.provision_efficiency.clamp(0.0, 1.0);
         if !(eff > 0.0) {
             continue;
         }
-        let pup = fauna.animals[k];
-        let room = crate::body::effective_config(&fauna.config, &pup).reserve_of(pup.body) - pup.reserve;
-        let give = (t.provision_rate_per_s * giver.body * DT)
-            .min(giver.reserve - floor)
-            .min(room / eff);
+        let room = reserve_room(fauna, &fauna.animals[k]);
+        let give = rate.min(giver.reserve - floor).min(room / eff);
         if !(give > 0.0) {
             continue;
         }
@@ -226,22 +288,41 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
         fauna.animals[g].gut.mineral += lost_mineral;
         crate::step::book_provision_loss(fauna, lost_organic, lost_energy);
         fauna.ledger.provision_given_organic += taken.organic;
+        if let Some(f) = fauna.animals[g].founder {
+            fauna.ledger.provision_by_founder[f.index()] += taken.organic;
+        }
         fauna.ledger.provision_received_organic += taken.organic - lost_organic;
     }
 }
 
-/// Whether body `i` wants a rest now: a hunter at its satiated line, or out of its
-/// activity phase and not hungry — the circadian stage's own reading for an awake body.
+/// Whether body `i` wants to sleep now: out of its activity phase and not in an emergency
+/// — the circadian stage's own reading for an awake body (the satiated rest went with the
+/// minimal gut).
 pub(crate) fn wants_rest(fauna: &Fauna, i: usize, clock_on: bool, daylight: f64) -> bool {
     let a = &fauna.animals[i];
     let Some(founder) = a.founder else {
         return false;
     };
     let phys = fauna.config.founder(founder);
-    let frac = reserve_fraction(fauna, a);
-    let hungry = (1.0 - frac).clamp(0.0, 1.0);
-    phys.hunter.is_some_and(|h| frac >= h.rest_at)
-        || (!phys.active.awake(clock_on, daylight, &fauna.config.life) && hungry < phys.wake_hunger)
+    !phys.active.awake(clock_on, daylight, &fauna.config.life) && !a.emergency
+}
+
+/// A member under the chase floor (`chase_reserve_floor` of its cap) that neither wants
+/// food nor is in an emergency: it stops a chase. Since the minimal gut a hungry member
+/// is the reason for the hunt (repair 2 item 7: any adult in an emergency starts one), so
+/// a member that wants food or is in an emergency does not count as spent (repair 3
+/// item 5). **Deliberately**, a hungry member therefore has no exhaustion stop of its own:
+/// only the chase timeout (`chase_give_up_s`) ends its chase; a stamina rule belongs to
+/// predator-cadence tuning.
+fn spent(fauna: &Fauna, b: &Animal, t: &Pack) -> bool {
+    !b.eating && !b.emergency && reserve_fraction(fauna, b) < t.chase_reserve_floor
+}
+
+/// **The pack's hunt start** (repair 2 item 7): at least half its adults want food (the
+/// eating latch), or any adult is in an emergency.
+fn pack_wants(adults: &[Animal]) -> bool {
+    let wanting = adults.iter().filter(|b| b.eating).count();
+    !adults.is_empty() && (2 * wanting >= adults.len() || adults.iter().any(|b| b.emergency))
 }
 
 /// The circadian stage's den rule (Brief R3: "adults rest and sleep within
@@ -354,7 +435,7 @@ pub(crate) fn steer(
     let ring = f64::from(view.config.width) * v;
     let (dcx, dcz) = centre(rec.den, v);
     let d_den = distance(&a, dcx, dcz, ring);
-    let frac = reserve_fraction(fauna, &a);
+
     let carrion_at = |s: Site| fv.ground_at(s).map_or(0.0, |g| g.carrion);
     let eating = held.forward == 0.0 && held.feed > 0.0;
 
@@ -366,7 +447,7 @@ pub(crate) fn steer(
                 let (dx, dz) = crate::pose::wrapped_delta(dcx, dcz, fx, fz, ring);
                 (dx, dz, (dx * dx + dz * dz).sqrt())
             };
-            if from_den <= t.den_radius_m && carrion_at(fs) > 0.0 && frac < h.rest_at {
+            if from_den <= t.den_radius_m && carrion_at(fs) > 0.0 && a.eating {
                 if eating {
                     return Some(held);
                 }
@@ -390,7 +471,7 @@ pub(crate) fn steer(
     let own = m.pack;
     let clamp = |fauna: &Fauna, act: Actions| keep_out(fauna, i, own, act, &t, guard, v, ring);
 
-    // Home to rest: satiated, or out of its phase.
+    // Home to sleep: out of its phase.
     if wants_rest(fauna, i, clock_on, daylight)
         && d_den > t.den_radius_m
         && u64::from(a.homing_ticks) < cubarium_voxel::ticks_at_least_one(t.home_give_up_s)
@@ -414,27 +495,54 @@ pub(crate) fn steer(
         let mut keep = false;
         match target {
             None => {
+                let mut killed = false;
                 if let Some(ts) = rec.target_site {
                     if carrion_at(ts) > 0.0 {
+                        killed = true;
                         fauna.ledger.pack_chase_kills += 1;
+                        if let Some(old) = rec.feast.filter(|&f| f != ts) {
+                            let eaten = rec.feast_eaten;
+                            fauna.log_pack_event(crate::PackEvent::FeastEnd {
+                                tick: now,
+                                pack: own,
+                                site: old,
+                                eaten,
+                                why: crate::FeastEnd::Replaced,
+                            });
+                        }
                         if let Some(p) = fauna.pack_mut(own) {
+                            if p.feast != Some(ts) {
+                                p.feast_eaten = 0.0;
+                            }
                             p.feast = Some(ts);
                         }
                     }
                 }
+                fauna.log_pack_event(crate::PackEvent::ChaseEnd {
+                    tick: now,
+                    pack: own,
+                    why: if killed { crate::ChaseEnd::Killed } else { crate::ChaseEnd::Gone },
+                });
             }
             Some(o) => {
                 let late = now.saturating_sub(rec.chase_since_tick)
                     >= cubarium_voxel::ticks_at_least_one(t.chase_give_up_s);
-                let spent = adults
-                    .iter()
-                    .any(|b| reserve_fraction(fauna, b) < t.chase_reserve_floor);
+                let spent = adults.iter().any(|b| spent(fauna, b, &t));
                 let out = trespass(fauna, own, o.pose.x, o.pose.z, &t, v, ring);
                 keep = !(late || spent || out);
                 if keep {
                     if let Some(p) = fauna.pack_mut(own) {
                         p.target_site = Some(o.site);
                     }
+                } else {
+                    let why = if late {
+                        crate::ChaseEnd::Late
+                    } else if spent {
+                        crate::ChaseEnd::Spent
+                    } else {
+                        crate::ChaseEnd::Trespass
+                    };
+                    fauna.log_pack_event(crate::PackEvent::ChaseEnd { tick: now, pack: own, why });
                 }
             }
         }
@@ -450,6 +558,36 @@ pub(crate) fn steer(
         }
     }
 
+    // The pack's carcass first (repair 3 item 5): while it has carrion, a member that wants
+    // food eats there, and no new target is taken.
+    let joins = a.eating || a.emergency;
+    let mut feast_usable = false;
+    if let Some(fs) = fauna.pack(own).and_then(|p| p.feast) {
+        if carrion_at(fs) > 0.0 {
+            feast_usable = true;
+            if joins {
+                if eating {
+                    return Some(clamp(fauna, held));
+                }
+                let (fx, fz) = centre(fs, v);
+                return Some(clamp(fauna, go_to(&a, fx, fz, ring, 0.25, 1.0)));
+            }
+        } else {
+            let eaten = fauna.pack(own).map_or(0.0, |p| p.feast_eaten);
+            fauna.log_pack_event(crate::PackEvent::FeastEnd {
+                tick: now,
+                pack: own,
+                site: fs,
+                eaten,
+                why: crate::FeastEnd::Emptied,
+            });
+            if let Some(p) = fauna.pack_mut(own) {
+                p.feast = None;
+                p.feast_eaten = 0.0;
+            }
+        }
+    }
+
     // A new target: a member that is hungry, with every adult above the floor and a packmate within
     // `pack_radius_m` takes the nearest prey it sees ahead (its cone's range) inside the
     // pack's window and outside every other territory. Alone, it hunts as the lanternjaw.
@@ -457,14 +595,19 @@ pub(crate) fn steer(
     // The floor reads as the drop does: no chase begins while any adult is under it (else
     // a spent packmate drops each new target at the next sampling and the pack flips
     // between targets).
-    let spent = adults
-        .iter()
-        .any(|b| reserve_fraction(fauna, b) < t.chase_reserve_floor);
-    if current.is_none() && frac < h.rest_at && !spent {
-        let mates = adults
+    let spent = adults.iter().any(|b| spent(fauna, b, &t));
+    // Repair 2 item 7: the pack starts a hunt when at least half its adults want food or
+    // any is in an emergency, and a member joins (here: takes the target) only if it
+    // wants food or is in an emergency itself.
+    if current.is_none() && !feast_usable && joins && pack_wants(&adults) && !spent {
+        // A packmate nearby, as before (repair 2 item 7: any adult in an emergency starts
+        // a hunt); the participants among them are counted for the measure.
+        let near: Vec<&Animal> = adults
             .iter()
             .filter(|b| b.id != a.id && distance(&a, b.pose.x, b.pose.z, ring) <= t.pack_radius_m)
-            .count();
+            .collect();
+        let mates = near.len();
+        let participating = near.iter().filter(|b| participates(b, own)).count();
         if mates > 0 {
             let window = window_body(fauna, i, ring);
             let sight = manifest.cone_range_m;
@@ -497,6 +640,8 @@ pub(crate) fn steer(
                     p.abandoned = None;
                 }
                 fauna.ledger.pack_chases += 1;
+                let participants = 1 + participating as u32;
+                fauna.log_pack_event(crate::PackEvent::ChaseStart { tick: now, pack: own, participants });
                 call(fauna, i);
             }
         }
@@ -519,11 +664,22 @@ pub(crate) fn steer(
         .pack(own)
         .and_then(|p| p.target)
         .and_then(|tid| fauna.view().animal(tid).copied())
+        .filter(|_| joins)
     {
         let d_target = distance(&a, o.pose.x, o.pose.z, ring);
         if d_target <= 2.0 * t.pack_radius_m {
+            // Repair 3 item 5: the driver and the flankers are the participants near the
+            // target — awake and wanting food or in an emergency — never a fed adult.
+            let hunters: Vec<Animal> = adults
+                .iter()
+                .filter(|b| {
+                    (b.id == a.id || participates(b, own))
+                        && distance(b, o.pose.x, o.pose.z, ring) <= 2.0 * t.pack_radius_m
+                })
+                .copied()
+                .collect();
             let mut driver: Option<(f64, u64)> = None;
-            for b in &adults {
+            for b in &hunters {
                 let d = distance(b, o.pose.x, o.pose.z, ring);
                 if driver.is_none_or(|(bd, bid)| d < bd || (d == bd && b.id < bid)) {
                     driver = Some((d, b.id));
@@ -534,13 +690,13 @@ pub(crate) fn steer(
             let act = if driver_id == Some(a.id) {
                 go_to(&a, o.pose.x, o.pose.z, ring, stop, 1.0)
             } else {
-                let rank = adults
+                let rank = hunters
                     .iter()
                     .filter(|b| Some(b.id) != driver_id && b.id < a.id)
                     .count();
                 let side = if rank % 2 == 0 { 1.0 } else { -1.0 };
                 let d_ref = driver_id
-                    .and_then(|id| adults.iter().find(|b| b.id == id))
+                    .and_then(|id| hunters.iter().find(|b| b.id == id))
                     .copied()
                     .unwrap_or(a);
                 let (lx, lz, ld) = delta(&d_ref, o.pose.x, o.pose.z, ring);
@@ -557,21 +713,6 @@ pub(crate) fn steer(
                 }
             };
             return Some(clamp(fauna, act));
-        }
-    }
-
-    // The kill: the pack eats at its carcass until the carrion is gone or it is full.
-    if let Some(fs) = fauna.pack(own).and_then(|p| p.feast) {
-        if carrion_at(fs) > 0.0 {
-            if frac < h.rest_at {
-                if eating {
-                    return Some(clamp(fauna, held));
-                }
-                let (fx, fz) = centre(fs, v);
-                return Some(clamp(fauna, go_to(&a, fx, fz, ring, 0.25, 1.0)));
-            }
-        } else if let Some(p) = fauna.pack_mut(own) {
-            p.feast = None;
         }
     }
 

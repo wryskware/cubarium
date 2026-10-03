@@ -62,7 +62,7 @@ use serde::{Deserialize, Serialize};
 
 use super::controller::EpisodeDriver;
 use super::landscape::PreparedLandscape;
-use super::score::{BodyMeter, ScoreComponents};
+use super::score::{BodyMeter, ScoreComponents, credit_unseen_intake};
 use super::task::{self, DEPLETION_FRACTION, Prepared, PreparedArena};
 
 /// How often the shared cancellation flag and the deadline are read inside an episode.
@@ -734,8 +734,8 @@ struct Tracked {
 impl Tracked {
     /// Fold one post-step reading of the living body in ([`BodyMeter::observe`] and the
     /// episode's own diagnostics).
-    fn observe(&mut self, a: &Animal, view: &cubarium_voxel::VoxelView<'_>) {
-        self.meter.observe(a);
+    fn observe(&mut self, a: &Animal, view: &cubarium_voxel::VoxelView<'_>) -> f64 {
+        let seen = self.meter.observe(a).intake;
         let v = view.config.voxel_m;
         if let Some((cx, cz)) = a.pose.column(v, view.config.depth) {
             self.visited
@@ -753,6 +753,7 @@ impl Tracked {
         self.last_energy = a.energy;
         self.last_pose = a.pose;
         self.ticks_alive += 1;
+        seen
     }
 
     fn diagnostics(&self, cell_area: f64) -> BodyDiagnostics {
@@ -929,6 +930,7 @@ fn drive(
             }
         }
         let deaths_before = sim.fauna().view().ledger.deaths_by_founder_cause[founder.index()];
+        let assimilated_before = sim.fauna().view().ledger.assimilated_by_founder[founder.index()];
 
         // S1: the world's replayed litter production, through the ordinary deposit and
         // withdrawal paths, and its dead pools rotting at the model's rates — the plant
@@ -956,10 +958,11 @@ fn drive(
         let view = world.view();
         let fv = fauna.view();
         let mut gone: Vec<usize> = Vec::new();
+        let mut seen_intake = 0.0;
         for (k, t) in tracked.iter_mut().enumerate().filter(|(_, t)| t.alive) {
             match fv.animal(t.id) {
                 Some(a) => {
-                    t.observe(a, &view);
+                    seen_intake += t.observe(a, &view);
                     // Post-depletion approach to the successor, read after the step and
                     // never summed into the score.
                     if k == 0
@@ -974,6 +977,13 @@ fn drive(
                     gone.push(k);
                 }
             }
+        }
+        // Every body of the acting lineage is tracked (bystanders are the other lineage,
+        // births are off), so the ledger's assimilation the meters missed this tick is the
+        // sampled bodies' digestion (`credit_unseen_intake`). Not on a tick a body left.
+        if gone.is_empty() {
+            let residual = fv.ledger.assimilated_by_founder[founder.index()] - assimilated_before - seen_intake;
+            credit_unseen_intake(tracked.iter_mut().filter(|t| t.alive).map(|t| &mut t.meter), residual);
         }
         if !gone.is_empty() {
             // The ledger's own cause for each body that left this tick, in cause order.
@@ -1116,6 +1126,25 @@ mod tests {
     use super::*;
     use crate::es::voxel::controller::VoxelControl;
     use crate::es::voxel::task::{Prepared, PreparedArena, Stage, TRAINING_LAYOUT_SEEDS};
+
+    /// The minimal gut: a founder arrives with a stomach at `s0 K` and digests it, which is
+    /// intake. A fixture that needs a body that takes **nothing in** founds with an empty
+    /// stomach (`s0` 0) on the training layers.
+    fn empty_stomach_arena(founder: Founder, seed: u64, stage: Stage) -> Prepared {
+        let grid = ArenaGrid::Standard;
+        let mut layers = super::super::training_world::layers(grid.voxel_m());
+        for p in layers.fauna.founders.iter_mut() {
+            p.gut.s0 = 0.0;
+        }
+        Prepared::Arena(PreparedArena::build_stage_with(
+            founder,
+            seed,
+            stage,
+            crate::es::voxel::task::Band::Landed,
+            grid,
+            layers,
+        ))
+    }
 
     fn gru(founder: Founder) -> EpisodeDriver {
         let theta = if founder == Founder::Blind {
@@ -1303,7 +1332,8 @@ mod tests {
     #[test]
     fn the_epilogue_reconciles_for_a_non_feeding_body() {
         let cancel = AtomicBool::new(false);
-        let prepared = Prepared::build(Founder::Blind, TRAINING_LAYOUT_SEEDS[3]);
+        // An empty founding stomach: a founder's own `s0 K` would digest into intake.
+        let prepared = empty_stomach_arena(Founder::Blind, TRAINING_LAYOUT_SEEDS[3], Stage::A);
         // The no-intake control never feeds, whatever the horizon.
         let e = run_prepared(
             &prepared,
@@ -1369,7 +1399,8 @@ mod tests {
                 "Stage A has no patch pair to account for"
             );
 
-            let b = Prepared::build_stage(founder, TRAINING_LAYOUT_SEEDS[0], Stage::B);
+            // An empty founding stomach: the founder's own `s0 K` would digest into intake.
+            let b = empty_stomach_arena(founder, TRAINING_LAYOUT_SEEDS[0], Stage::B);
             let (initial, successor) = b.patches().expect("Stage B names its patches");
             assert_ne!(initial, successor);
             let e = run_prepared(

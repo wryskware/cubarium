@@ -1,5 +1,5 @@
 //! The audit round's mass scale (`design/handoffs/voxel-audit-round-2026-09-28.md` §2,
-//! audit §1.4): `founder.mass_scale` multiplies the eight absolute animal quantities and
+//! audit §1.4): `founder.mass_scale` multiplies the seven absolute animal quantities and
 //! nothing else; the heuristic parker; the opt-in mass-relative Self senses. Each at most
 //! 200 ticks.
 
@@ -44,10 +44,11 @@ fn with(name: &str, v: f64) -> EcologyParams {
     e
 }
 
-/// The eight absolute quantities a body's mass carries, as `(name, value)`. The bite's
+/// The seven absolute quantities a body's mass carries, as `(name, value)`. The bite's
 /// half-saturation `bite_half_stock` is in food-stock units, not the body's, and is not
-/// one of them (units correction, 2026-10-01).
-fn absolutes(sc: &cubarium_voxel_fauna::SpeciesConfig) -> [(&'static str, f64); 8] {
+/// one of them (units correction, 2026-10-01); the minimal gut's bite is per unit of
+/// body, so it is not one either.
+fn absolutes(sc: &cubarium_voxel_fauna::SpeciesConfig) -> [(&'static str, f64); 7] {
     [
         ("body_max", sc.body_max),
         ("body_min", sc.body_min),
@@ -55,18 +56,17 @@ fn absolutes(sc: &cubarium_voxel_fauna::SpeciesConfig) -> [(&'static str, f64); 
         ("birth_cost", sc.birth_cost),
         ("surplus_floor", sc.reproduction.surplus_floor),
         ("egg_organic", sc.reproduction.egg_organic),
-        ("bite_per_s", sc.bite_per_s),
         ("growth_max_per_s", sc.growth_max_per_s),
     ]
 }
 
-/// `founder.mass_scale@frondgrazer` = 100 multiplies the browser's eight absolute
+/// `founder.mass_scale@frondgrazer` = 100 multiplies the browser's seven absolute
 /// quantities (and its placeholder species', which is the same body) by 100; per-unit
 /// rates, yields, the reserve cap, the life history's clocks and the body in metres are
 /// untouched, and the shredder is not moved at all. The shared key reaches both, and the
 /// two multiply. The scaled config validates.
 #[test]
-fn mass_scale_multiplies_the_eight_absolute_quantities_and_nothing_else() {
+fn mass_scale_multiplies_the_seven_absolute_quantities_and_nothing_else() {
     let base = FaunaConfig::default();
     let c = with("founder.mass_scale@frondgrazer", 100.0).fauna();
     c.validate().expect("a scaled world validates");
@@ -127,7 +127,13 @@ fn mass_scale_multiplies_the_eight_absolute_quantities_and_nothing_else() {
 fn resting_reserve_fraction(e: &EcologyParams, founder: Founder, ticks: u32) -> f64 {
     let world = flat_world();
     let mut flora = Flora::new(e.flora(0.25));
-    let mut fauna = Fauna::new(e.fauna());
+    // The minimal gut: an empty founding stomach (`s0` 0). A full reserve with `s0 K`
+    // in the stomach refills from digestion, so the reserve would not fall at all.
+    let mut config = e.fauna();
+    for p in config.founders.iter_mut() {
+        p.gut.s0 = 0.0;
+    }
+    let mut fauna = Fauna::new(config);
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {

@@ -210,7 +210,6 @@ fn the_r3_chorister_table_is_the_briefs() {
         ("body_max", ch.core.body_max, lj.core.body_max),
         ("body_min", ch.core.body_min, lj.core.body_min),
         ("birth_body", ch.core.birth_body, lj.core.birth_body),
-        ("bite_per_s", ch.core.bite_per_s, lj.core.bite_per_s),
         (
             "growth_max_per_s",
             ch.core.growth_max_per_s,
@@ -791,7 +790,11 @@ fn an_adult_at_the_den_feeds_the_hungriest_pup_at_seventy_percent() {
     let run = |adult_reserve: f64, adult_off_m: f64| -> Fauna {
         let world = lane(48, 11);
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(config_with(|p| p.pack_size = 1));
+        // The minimal gut: empty founding stomachs, so the adult has nothing to
+        // regurgitate and the reserve route (the fallback) is what this case weighs.
+        let mut config = config_with(|p| p.pack_size = 1);
+        config.founders[C.index()].gut.s0 = 0.0;
+        let mut fauna = Fauna::new(config);
         fauna.set_births_enabled(false);
         let den = face_at(STRIKER_X, LANE_Z);
         let pack = found_pack(

@@ -1130,3 +1130,141 @@ fn a_snapshot_round_trip_keeps_a_flying_and_a_perched_bellwing() {
     assert_eq!(back.view().animal(perched).expect("the percher").mobility.perch, animal(&fauna, perched).mobility.perch);
     assert_eq!(back.view().ledger, fauna.view().ledger, "the same ledger");
 }
+
+/// **The bellwing's meal interval** (the minimal gut's repair 2 item 12; the walker
+/// fixture in `step::gut_tests` covers the other eight lineages): a fixed adult bellwing,
+/// breeding and lifespan off, perched on a bloomcrown whose nectar never runs short,
+/// under its own diurnal rhythm, completes at least three meal intervals, and their mean
+/// is within ±30 % of Astra's exact 0.1012 world days. Nectar's mineral (0.01) against
+/// the bellwing's tissue (0.02) gives an effective yield of exactly its 0.5.
+#[test]
+#[ignore = "study: run by name (multi-day cadence)"]
+fn meal_interval_bellwing() {
+    let want = 0.1012;
+    let day_s = 7200.0;
+    let mut world = plain_with(config(16, 20, 8, clock_at(10.0)));
+    let mut fc = nectar_flora();
+    fc.bloomcrown.nectar_per_s = 1e-2;
+    fc.bloomcrown.nectar_cap = 0.05;
+    let mut flora = Flora::new(fc);
+    let site = blooming(&mut flora, &mut world, 8, 4, 60);
+    let top = crown_top(&flora, site);
+    let mut c = FaunaConfig::default();
+    c.founders[BW.index()].core.lifespan_median_s = 0.0;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 1.0, -1.0);
+    let body0 = animal(&fauna, id).body;
+    let max_ticks = ((3.0 * 1.3 + 1.5) * want * day_s / DT) as u64 + (day_s / DT) as u64;
+    let mut starts: Vec<u64> = Vec::new();
+    let mut was = animal(&fauna, id).eating;
+    for t in 1..=max_ticks {
+        world.step();
+        flora.step(&mut world);
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, id);
+        if a.eating && !was {
+            starts.push(t);
+        }
+        was = a.eating;
+        if starts.len() >= 4 {
+            break;
+        }
+    }
+    let a = animal(&fauna, id);
+    assert_eq!(a.mobility.mode, MobilityMode::Perched, "it stayed on the crown");
+    assert!((a.body - body0).abs() <= 1e-9 * body0, "a fixed adult body");
+    assert!(starts.len() >= 4, "{} meal starts", starts.len());
+    let intervals: Vec<f64> = starts.windows(2).map(|w| (w[1] - w[0]) as f64 * DT / day_s).collect();
+    let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
+    eprintln!(
+        "bellwing: intervals {intervals:.4?} days, mean {mean:.4} against {want} ({:+.1} %)",
+        100.0 * (mean / want - 1.0)
+    );
+    assert!((mean / want - 1.0).abs() <= 0.30, "mean interval {mean:.4} days, Astra's {want}");
+}
+
+/// **Nectar into the stomach** (the minimal gut; Astra's finding 8): a bellwing with an
+/// empty stomach sips a bloomcrown; on that tick its nectar pool holds exactly what the
+/// stand gave, in all three currencies.
+#[test]
+fn a_bloomcrown_sip_lands_in_the_stomach_whole() {
+    let mut world = plain_with(config(16, 20, 8, clock_at(12.0)));
+    let mut flora = Flora::new(nectar_flora());
+    let site = blooming(&mut flora, &mut world, 8, 4, 60);
+    let top = crown_top(&flora, site);
+    let mut c = FaunaConfig::default();
+    c.founders[BW.index()].gut.s0 = 0.0;
+    let mut fauna = Fauna::new(c);
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, StartingStores::HUNGRY);
+    fly(&mut fauna, id, 0.0, 1.0, -1.0);
+    let consumed = flora.view().ledger.consumed_organic_out;
+    let mut t = 0;
+    while fauna.view().ledger.bites == 0 && t < 80 {
+        fauna.step(&world, &mut flora);
+        t += 1;
+    }
+    let l = fauna.view().ledger;
+    assert_eq!(l.bites, 1, "one sip");
+    let pool = animal(&fauna, id).stomach.pools[Food::Nectar.index()];
+    assert_eq!(pool.organic, l.eaten_organic_in);
+    assert_eq!(pool.mineral, l.eaten_mineral_in);
+    assert_eq!(pool.energy, l.eaten_energy_in);
+    assert!(pool.mineral > 0.0, "bloomcrown nectar carries mineral");
+    assert!((flora.view().ledger.consumed_organic_out - consumed - pool.organic).abs() <= 1e-15);
+}
+
+/// **A real vine sip** (the minimal gut's repair 3 items 1–2; Astra's finding 2): a
+/// bellwing sips a flowering latticevine whose store holds mineral; the nectar it swallows
+/// carries mineral, and with feeding then stopped the pool digests into the reserve rather
+/// than holding.
+#[test]
+fn a_vine_sip_carries_mineral_and_digests() {
+    let (mut sky, mut flora, faces) = vine_wall(true, flowering_vines());
+    let mut rain = {
+        let mut c = sky.config().clone();
+        c.rain_m_per_s = 1e-6;
+        let mut wet = World::empty(c);
+        soil(&mut wet);
+        rock(&mut wet, 6..=6, 1..=12);
+        wet
+    };
+    flora.step(&mut rain);
+    let flowering = |flora: &Flora| {
+        faces.iter().copied().find(|&f| {
+            flora.view().cover.face(f).is_some_and(|c| c.spur == SpurPhase::Flower && c.nectar > 0.0)
+        })
+    };
+    let mut t = 0;
+    while flowering(&flora).is_none() && t < 160 {
+        flora.step(&mut sky);
+        t += 1;
+    }
+    let face = flowering(&flora).expect("fixture: a face flowers");
+    let mut c = FaunaConfig::default();
+    c.founders[BW.index()].gut.s0 = 0.0;
+    c.founders[BW.index()].core.maintenance_per_s = 0.0;
+    let mut fauna = Fauna::new(c);
+    let r = bellwing_flight(&fauna).span_m / 2.0;
+    let (_, z) = centre(0, WALL_Z);
+    let y = f64::from(face.y) * V + 0.05;
+    let id = aloft(&mut fauna, &sky, WALL_FACE_M - r - 0.005, z, y, EAST, StartingStores::HUNGRY);
+    fly(&mut fauna, id, 0.0, 1.0, 0.0);
+    let mut t = 0;
+    while fauna.view().ledger.bites == 0 && t < 40 {
+        fauna.step(&sky, &mut flora);
+        t += 1;
+    }
+    assert!(fauna.view().ledger.bites >= 1, "a vine sip");
+    let pool = animal(&fauna, id).stomach.pools[Food::Nectar.index()];
+    assert!(pool.mineral > 0.0, "vine nectar carries mineral: {pool:?}");
+    fly(&mut fauna, id, 0.0, 0.0, 0.0);
+    let r0 = animal(&fauna, id).reserve;
+    steps(&mut fauna, &sky, &mut flora, 40);
+    let a = animal(&fauna, id);
+    assert!(a.stomach.pools[Food::Nectar.index()].organic < pool.organic, "the pool digests");
+    assert!(a.reserve > r0, "into the reserve");
+}

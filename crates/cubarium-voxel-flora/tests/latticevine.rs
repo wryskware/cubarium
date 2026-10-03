@@ -1890,3 +1890,64 @@ fn t22_every_side_direction_climbs_stairs_across_the_x_seam_and_stops_at_the_z_w
         }
     }
 }
+
+/// **Vine products carry mineral** (the minimal gut's repair 3 item 2): a vine draws
+/// soluble mineral from its root's site into its own store, up to
+/// `VineConfig::mineral_fraction` of its tissue; its nectar (and fruit and cropped leaf)
+/// carry `mineral_fraction` of their organic matter out of that store, never more than it
+/// holds; a vine whose store and root are empty gives mineral-free food. The books close
+/// throughout.
+#[test]
+fn t_mineral_vine_products_carry_mineral_from_the_vines_store() {
+    let plan = Plan::wall(12, 16, 1, 12);
+    let mut sky = plan.world(1.0, false);
+    let mut rain = plan.world(1.0, true);
+    let mut config = fixed_cover();
+    config.latticevine.flower_s = 1.0;
+    config.latticevine.fruit_s = 1.0;
+    let fraction = config.latticevine.mineral_fraction;
+    assert!(fraction > 0.0, "a vine's tissue carries mineral");
+    let mut flora = Flora::new(config);
+    let id = seed(&mut flora, &sky, foot(0), wf(3, 0), 100.0);
+    cover_column(&mut flora, &sky, id, 0, 4..=10);
+    assert_eq!(vine(&flora, id).mineral, 0.0, "a founder arrives with no mineral");
+    flora.step(&mut rain);
+    for _ in 0..ticks(1.0) {
+        flora.step(&mut sky);
+    }
+    let v = vine(&flora, id);
+    assert!(v.mineral > 0.0, "it drew mineral from its root: {}", v.mineral);
+    assert_residuals(&flora, "after drawing mineral");
+
+    // A flower somewhere on the wall: its nectar carries the fraction out of the store.
+    let flowering = (3..=10).map(|y| wf(y, 0)).find(|&f| {
+        face(&flora, f).is_some_and(|c| c.spur == SpurPhase::Flower && c.nectar > 0.0)
+    });
+    let mut t = 0;
+    let mut flowering = flowering;
+    while flowering.is_none() && t < ticks(10.0) {
+        flora.step(&mut sky);
+        flowering = (3..=10).map(|y| wf(y, 0)).find(|&f| {
+            face(&flora, f).is_some_and(|c| c.spur == SpurPhase::Flower && c.nectar > 0.0)
+        });
+        t += 1;
+    }
+    let f = flowering.expect("fixture: a face flowers after the shower");
+    let store = vine(&flora, id).mineral;
+    let took = flora.take_nectar(f, 1e9).expect("nectar");
+    let want = (fraction * took.organic).min(store);
+    assert!(took.mineral > 0.0, "nectar carries mineral");
+    assert!((took.mineral - want).abs() <= 1e-15, "{} against {want}", took.mineral);
+    assert!(
+        (vine(&flora, id).mineral - (store - took.mineral)).abs() <= 1e-15,
+        "out of the vine's store"
+    );
+    assert_residuals(&flora, "after a sip");
+
+    // An empty store and an empty root: mineral-free food.
+    let mut flora2 = Flora::new(fixed_cover());
+    let id2 = seed(&mut flora2, &sky, foot(0), wf(3, 0), 100.0);
+    cover_column(&mut flora2, &sky, id2, 0, 4..=10);
+    let leaf = flora2.crop(wf(5, 0), 1e-3).expect("a crop");
+    assert_eq!(leaf.mineral, 0.0, "a vine with nothing in its store gives mineral-free leaf");
+}

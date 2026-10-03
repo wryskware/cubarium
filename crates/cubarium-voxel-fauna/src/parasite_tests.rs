@@ -272,7 +272,7 @@ fn the_four_parasite_knobs_are_serde_config_fields_with_the_briefs_defaults() {
     for name in [
         "parasite_attach_radius_m",
         "parasite_max_per_host",
-        "parasite_drain_of_host_basal",
+        "parasite_take_per_day",
         "parasite_detach_body_fraction",
     ] {
         assert!(
@@ -281,7 +281,7 @@ fn the_four_parasite_knobs_are_serde_config_fields_with_the_briefs_defaults() {
         );
     }
     assert_eq!(c.parasite_max_per_host, 1);
-    assert_eq!(c.parasite_drain_of_host_basal, 0.05);
+    assert_eq!(c.parasite_take_per_day, 0.09);
     assert_eq!(c.parasite_detach_body_fraction, 0.24);
     // "About one prey body length": between the shredder's and the lanternjaw's own.
     let r = c.parasite_attach_radius_m;
@@ -303,14 +303,14 @@ fn the_parasite_knobs_are_validated() {
     };
     assert!(bad(&|c| c.parasite_attach_radius_m = -0.1));
     assert!(bad(&|c| c.parasite_attach_radius_m = f64::NAN));
-    assert!(bad(&|c| c.parasite_drain_of_host_basal = -0.01));
-    assert!(bad(&|c| c.parasite_drain_of_host_basal = f64::INFINITY));
+    assert!(bad(&|c| c.parasite_take_per_day = -0.01));
+    assert!(bad(&|c| c.parasite_take_per_day = f64::INFINITY));
     assert!(bad(&|c| c.parasite_detach_body_fraction = 0.0));
     assert!(bad(&|c| c.parasite_detach_body_fraction = 1.5));
     assert!(bad(&|c| c.parasite_detach_body_fraction = f64::NAN));
     assert!(
-        !bad(&|c| c.parasite_drain_of_host_basal = 0.0),
-        "no drain is a knob setting"
+        !bad(&|c| c.parasite_take_per_day = 0.0),
+        "no take is a knob setting"
     );
 }
 
@@ -550,8 +550,8 @@ fn a_rider_cannot_be_struck_on_its_own() {
 
 // ------------------------------------------------------------------ the drain
 
-/// Each tick a rider takes `parasite_drain_of_host_basal × maintenance_per_s × body ×
-/// DT` from its host — read against an identical grazer standing out of reach — and the
+/// Each tick a rider takes `parasite_take_per_day × host body × DT / ecological_day_s`
+/// from its host — read against an identical grazer standing out of reach — and the
 /// three ledgers close.
 #[test]
 fn a_rider_drains_its_hosts_basal_share_and_the_books_close() {
@@ -572,9 +572,10 @@ fn a_rider_drains_its_hosts_basal_share_and_the_books_close() {
     let (h1, t1) = (animal(&s.fauna, host), animal(&s.fauna, twin));
     let extra =
         (h0.stored_organic() - h1.stored_organic()) - (t0.stored_organic() - t1.stored_organic());
+    // The minimal gut: the take is `parasite_take_per_day` of the host's body per
+    // ecological day, whatever its upkeep.
     let c = s.fauna.config;
-    let basal = c.founder(Founder::Browser).core.maintenance_per_s * h0.body * DT;
-    let want = c.parasite_drain_of_host_basal * basal;
+    let want = c.parasite_take_per_day / c.life.ecological_day_s * h0.body * DT;
     assert!(want > 0.0);
     assert!(
         (extra - want).abs() <= 1e-6 * want,
@@ -589,7 +590,7 @@ fn a_rider_drains_its_hosts_basal_share_and_the_books_close() {
 #[test]
 fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
     let (mut s, _host, rider) = ride(FaunaConfig {
-        parasite_drain_of_host_basal: 0.0,
+        parasite_take_per_day: 0.0,
         ..config()
     });
     let a0 = animal(&s.fauna, rider);
@@ -606,7 +607,7 @@ fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
     s.assert_closes("undrained");
 
     let (mut s, _host, rider) = ride(FaunaConfig {
-        parasite_drain_of_host_basal: 1.0,
+        parasite_take_per_day: 7.2,
         ..config()
     });
     let cap = s
@@ -637,7 +638,7 @@ fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
 #[test]
 fn a_drained_host_starves_as_usual() {
     let (mut s, host, rider) = ride(FaunaConfig {
-        parasite_drain_of_host_basal: 1.0,
+        parasite_take_per_day: 7.2,
         ..config()
     });
     let min = s.fauna.config.founder(Founder::Browser).core.body_min;
@@ -671,7 +672,7 @@ fn a_drained_host_starves_as_usual() {
 #[test]
 fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
     let (mut s, host, rider) = ride(FaunaConfig {
-        parasite_drain_of_host_basal: 0.0,
+        parasite_take_per_day: 0.0,
         ..config()
     });
     let c = s.fauna.config;

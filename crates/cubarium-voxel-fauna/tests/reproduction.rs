@@ -101,8 +101,14 @@ fn turf(flora: &mut Flora, world: &World, x: i64) {
 }
 
 /// A config whose founders run the reproduction tables this case needs.
+///
+/// The minimal gut: founders here arrive with an **empty stomach** (`s0` 0), so no
+/// digestion moves a reserve these cases weigh to the last place.
 fn config(edit: impl FnOnce(&mut FaunaConfig)) -> FaunaConfig {
     let mut c = FaunaConfig::placeholder();
+    for p in c.founders.iter_mut() {
+        p.gut.s0 = 0.0;
+    }
     edit(&mut c);
     c
 }

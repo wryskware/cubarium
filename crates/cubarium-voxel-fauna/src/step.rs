@@ -11,8 +11,8 @@
 //!    to the gut** by the same fraction, and every `GUT_VOID_S` the gut is voided onto
 //!    the ground as litter (dung). Ages
 //!    advance here, so `age_ticks` is the number of maintenance payments it has made.
-//!    A parasite rider then **drains** its host (`parasite_drain_of_host_basal` × the
-//!    host's basal upkeep, by the same pro-rata rule). Then **growth**: the reserve pays
+//!    A parasite rider then **takes** from its host (`parasite_take_per_day` × the
+//!    host's body per ecological day, by the same pro-rata rule). Then **growth**: the reserve pays
 //!    for new structure at no more than `growth_max_per_s`, scaled by how full it is,
 //!    until `body_max`; a rider grown to its detach size **drops off**.
 //! 3. **Cue field.** On due ticks, update emission, decay and diffusion after maintenance
@@ -166,6 +166,9 @@ fn tick_inner(
             circadian(fauna, &view, clock_on, daylight);
             maintenance(fauna);
             drain_riders(fauna);
+            // The minimal gut: the stomach digests into the room upkeep and the rider's
+            // take just made.
+            digest(fauna);
             heal(fauna);
             egg_upkeep(fauna);
             grow(fauna);
@@ -193,6 +196,19 @@ fn tick_inner(
             // Strike outcomes are events: the act only reads other bodies, and the hits
             // are applied here, serially, in the order the strikers acted.
             let mut hits: Vec<Hit> = Vec::new();
+            // The balance measures: a free founder awake with its eating latch on wants
+            // food this tick (a counter only).
+            for a in fauna.animals.iter() {
+                if let Some(f) = a.founder
+                    && a.state != State::Asleep
+                    && a.attached.is_none()
+                {
+                    fauna.ledger.awake_ticks_by_founder[f.index()] += 1;
+                    if a.eating {
+                        fauna.ledger.wanting_ticks_by_founder[f.index()] += 1;
+                    }
+                }
+            }
             act(fauna, &view, flora, seed, tick, &sky, &mut hits);
             for hit in hits {
                 apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
@@ -255,8 +271,17 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
     // The mineral that organic matter held is shed to the gut, so a body's mineral stays
     // in proportion to its tissue instead of banking for life; the energy leaves as heat.
     a.gut.mineral += out.mineral;
+    let founder = a.founder;
     book_respired(fauna, paid, kind);
     fauna.ledger.heat_out += out.energy;
+    // The balance measures' spend by lineage (counters only).
+    if let Some(f) = founder {
+        match kind {
+            Respiration::Maintenance => fauna.ledger.upkeep_by_founder[f.index()] += paid,
+            Respiration::Motor | Respiration::Hunt => fauna.ledger.motor_by_founder[f.index()] += paid,
+            _ => {}
+        }
+    }
     (paid, from_body)
 }
 
@@ -317,16 +342,17 @@ pub(crate) fn take_from_reserve(a: &mut Animal, organic: f64) -> Taken {
     }
 }
 
-/// Step 2: **the parasites' drain** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`
-/// §3). Each rider takes `parasite_drain_of_host_basal` × its host's awake basal upkeep
-/// (`maintenance_per_s × body`, whatever the host's activity) out of the host by
+/// Step 2: **the parasites' take** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`
+/// §3, re-tied by the minimal gut's repair 2 item 9). Each rider takes
+/// `parasite_take_per_day` × its host's body per ecological day out of the host by
 /// [`withdraw`]'s pro-rata rule, into its own reserve, mineral and energy. A transfer
 /// inside this layer, so no boundary flow moves; the host's structural share is its
 /// `Self` channel's loss, as an upkeep's is. Nothing protects the host: one drained below
 /// `body_min` starves as any other.
 fn drain_riders(fauna: &mut Fauna) {
-    let fraction = fauna.config.parasite_drain_of_host_basal;
-    if !(fraction > 0.0) {
+    let day = fauna.config.life.ecological_day_s;
+    let per_s = if day > 0.0 { fauna.config.parasite_take_per_day / day } else { 0.0 };
+    if !(per_s > 0.0) {
         return;
     }
     for r in 0..fauna.animals.len() {
@@ -336,12 +362,15 @@ fn drain_riders(fauna: &mut Fauna) {
         let Ok(h) = fauna.animals.binary_search_by_key(&hold.host, |a| a.id) else {
             continue;
         };
-        let sc = body::effective_config(&fauna.config, &fauna.animals[h]);
-        let want = fraction * sc.maintenance_per_s * fauna.animals[h].body * DT;
+        let want = per_s * fauna.animals[h].body * DT;
         let host = &mut fauna.animals[h];
         let (taken, from_body) = withdraw(host, want);
         if host.founder.is_some() && from_body > 0.0 {
             host.founder_state.feedback.structural_loss += from_body;
+        }
+        fauna.ledger.parasite_taken_organic += taken.organic;
+        if let Some(f) = fauna.animals[h].founder {
+            fauna.ledger.rider_take_lost_by_founder[f.index()] += taken.organic;
         }
         let rider = &mut fauna.animals[r];
         rider.reserve += taken.organic;
@@ -431,53 +460,64 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
     }
 }
 
-/// Step 1b: who sleeps this tick. A founder sleeps when its lineage's
-/// [`Activity`](crate::Activity) says it is not its hour, unless a wake rule fires: it is
-/// hungry (its reserve short of its cap by at least `wake_hunger`), it is on a wall face,
-/// or it is under water. It sleeps where it stands. Waking is the same test failing, so
-/// there is nothing else to time: the phase's own change, or a rule, wakes it at once.
-/// A body that falls asleep drops its held actions, so waking does not replay a stale
-/// stride; heuristic bodies carry no lineage and never sleep.
+/// Step 1b: who sleeps this tick, and the two latches — **one precedence**
+/// (`design/metabolism-meals-2026-10-02.md` repair 2 item 7):
 ///
-/// **A rest with a reason** (predation §2.8): the same state carries the [`Rest::Sleep`]
-/// and a carnivore's [`Rest::Satiated`] — down in any phase once its reserve is at
-/// `rest_at` of its cap, up again below `wake_at` (or by the hunger rule), at its
-/// `torpor_upkeep`. A body a hit woke stays up for [`crate::PredationConfig::alert_s`]; a body mid-strike
-/// does not lie down, and a recovery is dropped by a rest that outlasts it.
+/// - **a. Safety and alert**: a body on a wall, flying, not perched (a glider), under
+///   water, mid-strike or alerted by a hit ([`crate::PredationConfig::alert_s`]) stays
+///   awake, as before.
+/// - **b. The emergency latch** ([`Animal::emergency`]): on at reserve hunger
+///   `wake_hunger`, off below `emergency_clear_hunger`. While on, the body is awake in any
+///   phase; it may seek and eat when its eating latch is on, and with a full stomach it
+///   stays up waiting for digestion.
+/// - **c. Off-phase**: otherwise a body sleeps when its lineage's
+///   [`Activity`](crate::Activity) says it is not its hour, where it stands.
+/// - **d. On-phase**: awake. The eating latch decides whether it eats and hunts.
+///
+/// **The eating latch** ([`Animal::eating`]) goes on here, in an awake body that is
+/// on-phase or in an emergency, once its stomach is at or under `s_start · K`; it goes off
+/// only at a full event, where the intake is. A body that falls asleep drops its held
+/// actions, so waking does not replay a stale stride; heuristic bodies carry no lineage
+/// and never sleep. A recovery is dropped by a sleep that outlasts it.
 fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: f64) {
     let life = fauna.config.life;
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
+    let tick = fauna.tick;
+    // The packs raising pups: an adult's bout there is a provisioning one.
+    let mut nurseries: Vec<u64> = fauna
+        .animals
+        .iter()
+        .filter_map(|a| a.pack.filter(|m| m.pup).map(|m| m.pack))
+        .collect();
+    nurseries.sort_unstable();
+    nurseries.dedup();
     for i in 0..fauna.animals.len() {
         let Some(founder) = fauna.animals[i].founder else {
             continue;
         };
-        let phys = fauna.config.founder(founder);
+        let phys = *fauna.config.founder(founder);
         let a = &fauna.animals[i];
         let hungry = hunger(a, &phys.core);
+        let emergency = if a.emergency {
+            hungry >= phys.emergency_clear_hunger
+        } else {
+            hungry >= phys.wake_hunger
+        };
+        let on_phase = phys.active.awake(clock_on, daylight, &life);
         let free = a.alert_ticks == 0
             && a.mobility.climb.is_none()
             && a.mobility.mode != crate::MobilityMode::Fly
             // A glider (F3) sleeps only perched.
             && (phys.glider.is_none() || a.mobility.mode == crate::MobilityMode::Perched)
             && a.mobility.submerged_ticks == 0
+            // Repair 3 item 4: attached (a rider) and falling bodies are awake.
+            && a.attached.is_none()
+            && !a.mobility.falling
             && !a
                 .strike
                 .is_some_and(|s| s.phase != StrikePhase::Recovery);
-        let satiated = phys.hunter.is_some_and(|h| {
-            let cap = phys.core.reserve_of(a.body);
-            let fraction = if cap > 0.0 { a.reserve / cap } else { 0.0 };
-            if a.rest == Some(Rest::Satiated) {
-                fraction >= h.wake_at && hungry < phys.wake_hunger
-            } else {
-                fraction >= h.rest_at
-            }
-        });
-        let rest = if !free {
-            None
-        } else if satiated {
-            Some(Rest::Satiated)
-        } else if !phys.active.awake(clock_on, daylight, &life) && hungry < phys.wake_hunger {
+        let rest = if free && !on_phase && !emergency {
             Some(Rest::Sleep)
         } else {
             None
@@ -494,6 +534,11 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
         };
         let a = &mut fauna.animals[i];
         a.alert_ticks = a.alert_ticks.saturating_sub(1);
+        let was_asleep = a.state == State::Asleep;
+        if emergency && !a.emergency && was_asleep {
+            fauna.ledger.emergency_wakes_by_founder[founder.index()] += 1;
+        }
+        a.emergency = emergency;
         match rest {
             Some(reason) => {
                 if a.state != State::Asleep {
@@ -514,6 +559,193 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
                 a.rest = None;
             }
         }
+        if was_asleep != (a.state == State::Asleep) {
+            fauna.ledger.sleep_flips_by_founder[founder.index()] += 1;
+        }
+        // The eating latch goes on (rule 7: on-phase, or in an emergency; awake; not
+        // riding a host).
+        let nursing = a
+            .pack
+            .is_some_and(|m| !m.pup && nurseries.binary_search(&m.pack).is_ok());
+        let kind = bout_kind_now(a, &phys, nursing);
+        if !a.eating
+            && a.state != State::Asleep
+            && (on_phase || emergency)
+            && a.attached.is_none()
+            && a.stomach.organic() <= phys.gut.s_start(hungry) * phys.gut.capacity(a.body)
+        {
+            a.eating = true;
+            a.bout = Some(crate::Bout {
+                start_tick: tick,
+                kind,
+            });
+        }
+        if let Some(b) = a.bout.as_mut() {
+            b.kind = b.kind.max(kind);
+        }
+    }
+}
+
+/// The reason a bout has this tick (repair 2 item 8): an emergency, then a body feeding
+/// young (carrying an escrow, or a pack adult whose pack has pups; a giver's bout is also
+/// marked where it regurgitates, [`crate::pack`]), then a juvenile under its lineage's
+/// `birth_body`, else normal.
+fn bout_kind_now(a: &Animal, phys: &crate::FounderPhysiology, nursing: bool) -> crate::BoutKind {
+    if a.emergency {
+        crate::BoutKind::Emergency
+    } else if a.reproduction.escrow.is_some() || nursing {
+        crate::BoutKind::Provisioning
+    } else if a.body < phys.core.birth_body {
+        crate::BoutKind::Growth
+    } else {
+        crate::BoutKind::Normal
+    }
+}
+
+/// **The full event** (repair 2 item 3): an eating body whose stomach has reached
+/// `full_tolerance · K` stops wanting food, and its bout is booked as a meal of its kind
+/// with its duration. Called wherever food enters a stomach.
+pub(crate) fn settle_full(fauna: &mut Fauna, i: usize) {
+    let a = &fauna.animals[i];
+    let Some(f) = a.founder else {
+        return;
+    };
+    if !a.eating {
+        return;
+    }
+    let gut = fauna.config.founder(f).gut;
+    if a.stomach.organic() < gut.full_tolerance * gut.capacity(a.body) {
+        return;
+    }
+    let tick = fauna.tick;
+    let a = &mut fauna.animals[i];
+    a.eating = false;
+    if let Some(b) = a.bout.take() {
+        let k = b.kind.index();
+        fauna.ledger.meals_by_founder_kind[f.index()][k] += 1;
+        fauna.ledger.meal_ticks_by_founder_kind[f.index()][k] += tick.saturating_sub(b.start_tick);
+    }
+}
+
+/// Raw food into a body's stomach, booked swallowed, then the full event.
+pub(crate) fn swallow(fauna: &mut Fauna, i: usize, food: Food, t: Taken) {
+    let p = &mut fauna.animals[i].stomach.pools[food.index()];
+    p.organic += t.organic;
+    p.mineral += t.mineral;
+    p.energy += t.energy;
+    let l = &mut fauna.ledger;
+    l.swallowed.organic += t.organic;
+    l.swallowed.mineral += t.mineral;
+    l.swallowed.energy += t.energy;
+    if let Some(f) = fauna.animals[i].founder {
+        l.swallowed_by_founder[f.index()] += t.organic;
+        // A bite covers its controller interval: the balance measures' eating ticks.
+        l.eating_ticks_by_founder[f.index()] += fauna.config.manifest(f).cadence_ticks();
+    }
+    settle_full(fauna, i);
+}
+
+/// `organic` of raw food out of a pool, with its mineral and energy pro rata; the whole
+/// pool when that is all of it, so no float dust is left.
+pub(crate) fn take_from_pool(pool: &mut Taken, organic: f64) -> Taken {
+    if !(organic > 0.0) || !(pool.organic > 0.0) {
+        return Taken::default();
+    }
+    if organic >= pool.organic {
+        return std::mem::take(pool);
+    }
+    let t = Taken {
+        organic,
+        mineral: pro_rata(pool.mineral, organic, pool.organic),
+        energy: pro_rata(pool.energy, organic, pool.organic),
+    };
+    pool.organic -= t.organic;
+    pool.mineral -= t.mineral;
+    pool.energy -= t.energy;
+    t
+}
+
+/// **The gut's bite** (repair 2 item 4): `b · body · period · effort` of raw food at the
+/// mouth, diminished `E / (E + bite_half_stock)` by the stock `E` there, and never more
+/// than reaches the stomach's room `K − S` after the share a sloppy feeder spills. Zero
+/// unless the eating latch is on: a body that does not want food takes no bite, and a
+/// full stomach stops the mouth.
+fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, period_s: f64, effort: f64, stock: f64) -> f64 {
+    if !a.eating || !(stock > 0.0) {
+        return 0.0;
+    }
+    let want = phys.gut.bite_per_body_s * a.body * period_s * effort;
+    if !(want > 0.0) {
+        return 0.0;
+    }
+    let k = phys.core.bite_half_stock;
+    let diminished = if k > 0.0 { want * (stock / (stock + k)) } else { want };
+    let room = (phys.gut.capacity(a.body) - a.stomach.organic()).max(0.0);
+    let reaches = (1.0 - phys.bite_spill_fraction.clamp(0.0, 1.0)).max(1e-12);
+    diminished.min(room / reaches).max(0.0)
+}
+
+/// Step 2, after upkeep: **digestion** (repair 2 item 2, repair 3 item 1). Each food
+/// class's pool empties at `S_c · dt / τ_c`, as far as the reserve has room for what it
+/// yields: the assimilable classes' raw digestion is scaled down together so that their
+/// effective, mineral-limited yields `y_eff` sum to at most `room = reserve cap −
+/// reserve`. A class whose `y_eff` is zero (no mineral) **passes** at `S_c · dt / τ_c`
+/// whatever the room: it places nothing, so the cap does not apply to it. Everything
+/// digested or passed goes through the one assimilation rule ([`assimilate`]): the yield
+/// into the reserve as far as its mineral funds it, the undigested share to egesta, the
+/// unfunded share respired; what is not digested stays in the stomach. No mineral is
+/// invented.
+fn digest(fauna: &mut Fauna) {
+    for i in 0..fauna.animals.len() {
+        let a = &fauna.animals[i];
+        let Some(f) = a.founder else {
+            continue;
+        };
+        if a.stomach.is_empty() {
+            continue;
+        }
+        let phys = *fauna.config.founder(f);
+        let sc = phys.core;
+        let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
+        let mut raw = [0.0f64; Food::COUNT];
+        let mut passing = [0.0f64; Food::COUNT];
+        let mut yields = 0.0;
+        for food in Food::ALL {
+            let p = a.stomach.pools[food.index()];
+            if !(p.organic > 0.0) {
+                continue;
+            }
+            let tau = phys.gut.digestion_s[food.index()];
+            let d = if tau > 0.0 { (p.organic * DT / tau).min(p.organic) } else { p.organic };
+            let funded = if sc.n_tissue > 0.0 {
+                p.mineral / (sc.n_tissue * p.organic)
+            } else {
+                f64::INFINITY
+            };
+            let y_eff = phys.yield_for(food).min(funded).max(0.0);
+            if !(y_eff > 0.0) {
+                passing[food.index()] = d;
+                continue;
+            }
+            raw[food.index()] = d;
+            yields += d * y_eff;
+        }
+        let scale = if yields > room { room / yields } else { 1.0 };
+        for food in Food::ALL {
+            let d = raw[food.index()] * scale + passing[food.index()];
+            if !(d > 0.0) {
+                continue;
+            }
+            let t = take_from_pool(&mut fauna.animals[i].stomach.pools[food.index()], d);
+            let l = &mut fauna.ledger;
+            l.digested.organic += t.organic;
+            l.digested.mineral += t.mineral;
+            l.digested.energy += t.energy;
+            l.digested_by_founder[f.index()] += t.organic;
+            let placed = assimilate(fauna, i, &sc, t, phys.yield_for(food));
+            fauna.ledger.assimilated_by_founder[f.index()] += placed;
+            fauna.animals[i].founder_state.feedback.intake += placed;
+        }
     }
 }
 
@@ -522,15 +754,10 @@ fn maintenance(fauna: &mut Fauna) {
         // A founder body pays upkeep under its own physiology's rate.
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let is_founder = fauna.animals[i].founder.is_some();
-        // Asleep it pays the lineage's fraction of it: its sleep factor, or a
-        // carnivore's torpor in a satiated rest (predation §2.8).
+        // Asleep it pays its lineage's sleep factor of it.
         let rest = match fauna.animals[i].founder {
             Some(founder) if fauna.animals[i].state == State::Asleep => {
-                let phys = fauna.config.founder(founder);
-                match (fauna.animals[i].rest, phys.hunter) {
-                    (Some(Rest::Satiated), Some(h)) => h.torpor_upkeep,
-                    _ => phys.sleep_upkeep,
-                }
+                fauna.config.founder(founder).sleep_upkeep
             }
             _ => 1.0,
         };
@@ -619,53 +846,31 @@ fn grow(fauna: &mut Fauna) {
         };
         // The organism budget's build out of a held reserve, at par: a body's structure
         // costs no construction respiration and its mineral is already in it.
+        let before = a.body;
         a.body += build_from(
             &mut a.reserve,
             (sc.growth_max_per_s * DT * fullness).min(room),
             1.0,
         );
+        // The measured maturation: the tick it grows through its breeding size.
+        if let Some(f) = a.founder {
+            fauna.ledger.growth_by_founder[f.index()] += a.body - before;
+            if before < sc.birth_body && a.body >= sc.birth_body {
+                fauna.ledger.matured_by_founder[f.index()] += 1;
+                fauna.ledger.maturation_ticks_by_founder[f.index()] += a.age_ticks;
+            }
+        }
     }
 }
 
 /// **Hunger**: how far the reserve is short of its cap `reserve_cap · body`, from 0 (full)
 /// to 1 (empty). A newborn's paid endowment above the cap reads as sated.
-fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
+pub(crate) fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
     let cap = sc.reserve_of(a.body);
     if !(cap > 0.0) {
         return 0.0;
     }
     (1.0 - a.reserve / cap).clamp(0.0, 1.0)
-}
-
-/// **The sated bite**: `want · E / (E + K)` from food
-/// holding `E` at the mouth, and never more than `room / yield` — the organic matter
-/// whose assimilated share exactly fills the reserve's room. Assimilation is at most
-/// `yield ·` the bite (less when the bite's mineral binds), so what is built always fits
-/// and nothing is respired as surplus.
-fn sated_bite(want: f64, stock: f64, sc: &SpeciesConfig, a: &Animal, yield_fraction: f64) -> f64 {
-    if !(want > 0.0) || !(stock > 0.0) {
-        return 0.0;
-    }
-    let k = sc.bite_half_stock;
-    let diminished = if k > 0.0 {
-        want * (stock / (stock + k))
-    } else {
-        want
-    };
-    diminished
-        .min(room_after_yield(a, sc, yield_fraction))
-        .max(0.0)
-}
-
-/// The most organic matter a bite may take: the reserve's room over the yield, so that
-/// what the bite builds exactly fills it. Unbounded for a food that builds nothing.
-fn room_after_yield(a: &Animal, sc: &SpeciesConfig, yield_fraction: f64) -> f64 {
-    let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
-    if yield_fraction > 0.0 {
-        room / yield_fraction
-    } else {
-        f64::INFINITY
-    }
 }
 
 /// Step 3: the **controller stage** — sample every founder whose controller period is
@@ -842,6 +1047,18 @@ fn controllers(
             if let Some(roost) = glider::roost_reflex(fauna, i, view, &fv, sky) {
                 actions = roost;
             }
+        }
+        // Fed perching (the minimal gut's repair 3 item 8): a body whose controller rests
+        // when fed (the bellwing's hover-sip teacher) and whose eating latch is off holds
+        // still on its perch, or comes down onto what is below it, read from the latch.
+        if driven && fauna.controllers.rests_when_fed(id) && !fauna.animals[i].eating {
+            actions = Actions { forward: 0.0, turn: 0.0, feed: 0.0 };
+            lure = 0.0;
+            lift = if fauna.animals[i].mobility.mode == crate::MobilityMode::Perched {
+                0.0
+            } else {
+                -1.0
+            };
         }
         // The shallows reflex (roster mechanics fix 2): a body in water deeper than it wades
         // heads for the nearest face it wades, over everything its heuristic asked.
@@ -1074,8 +1291,12 @@ fn founder_act(
     let sc = phys.core;
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
 
-    // A carnivore's lit lure costs `lure_power` × its awake upkeep (predation §2.2).
+    // A carnivore's lit lure costs `lure_power` × its awake upkeep (predation §2.2). It
+    // lures only while it wants food (repair 2 item 7): a fed hunter's lure is dark.
     if let Some(h) = phys.hunter {
+        if !fauna.animals[i].eating {
+            fauna.animals[i].founder_state.lure = 0.0;
+        }
         if fauna.animals[i].founder_state.lure > 0.0 {
             let cost = h.lure_power * sc.maintenance_per_s * fauna.animals[i].body * DT;
             respire(fauna, i, cost, Respiration::Hunt);
@@ -1209,10 +1430,12 @@ fn founder_act(
     if due && held.feed > 0.0 {
         // A carnivore's `feed` is a strike when a prey is in its capsule (predation
         // §2.3), and a mouthful of carrion otherwise.
-        // R3: a pup's strike is refused, whatever its controller asks.
+        // R3: a pup's strike is refused, whatever its controller asks; and a hunter strikes
+        // only while it wants food (repair 2 item 7).
         let pup = fauna.animals[i].pack.is_some_and(|m| m.pup);
+        let wants = fauna.animals[i].eating;
         let target = match phys.hunter {
-            Some(h) if fauna.animals[i].strike.is_none() && !pup => {
+            Some(h) if fauna.animals[i].strike.is_none() && !pup && wants => {
                 prey_in_capsule(fauna, i, view, &geometry, &h)
             }
             _ => None,
@@ -1233,7 +1456,7 @@ fn founder_act(
             crate::pack::call(fauna, i);
             return;
         }
-        fed = founder_feed(fauna, i, view, flora, &manifest, &geometry, &sc, held.feed);
+        fed = founder_feed(fauna, i, view, flora, &manifest, &geometry, &phys, held.feed);
     }
 
     fauna.animals[i].state = if fed {
@@ -1295,8 +1518,7 @@ fn flyer_act(
     let shape = flight::Shape::of(&phys, &flight, fauna.animals[i].body);
     let basal = sc.maintenance_per_s * fauna.animals[i].body;
     let takeoff_cost = flight.takeoff_s * flight.flight_factor * basal;
-    let sleepy = !phys.active.awake(sky.clock_on, sky.daylight, &life)
-        && hunger(&fauna.animals[i], &sc) < phys.wake_hunger;
+    let sleepy = !phys.active.awake(sky.clock_on, sky.daylight, &life) && !fauna.animals[i].emergency;
     let grounded = sky.downpour || sleepy;
     let can_pay = |a: &Animal| a.reserve >= takeoff_cost;
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
@@ -1451,11 +1673,11 @@ fn flyer_takeoff(fauna: &mut Fauna, i: usize, cost: f64) {
     a.mobility.falling = false;
 }
 
-/// **A sip** (F1, §3.7): the sated bite out of the nearest bloom within the mouth's reach
-/// (the body's radius plus its mouth reach, from its middle) — a bloomcrown's nectar
-/// through [`Flora::take_stand_nectar`], a latticevine face's through
-/// [`Flora::take_nectar`] — assimilated at nectar's yield as far as its mineral pays, and
-/// the bloom recorded on the body (the pollen seam).
+/// **A sip** (F1, §3.7): the gut's bite ([`gut_bite`]) out of the nearest bloom within the
+/// mouth's reach (the body's radius plus its mouth reach, from its middle) — a
+/// bloomcrown's nectar through [`Flora::take_stand_nectar`], a latticevine face's through
+/// [`Flora::take_nectar`] — into the stomach's nectar pool, and the bloom recorded on the
+/// body (the pollen seam). Only while the eating latch is on.
 #[allow(clippy::too_many_arguments)]
 fn flyer_sip(
     fauna: &mut Fauna,
@@ -1467,19 +1689,17 @@ fn flyer_sip(
     shape: crate::flight::Shape,
     effort: f64,
 ) -> bool {
-    let sc = phys.core;
-    let want = sc.bite_per_s * manifest.controller_period_s * effort * hunger(&fauna.animals[i], &sc);
-    if !(want > 0.0) {
+    if !fauna.animals[i].eating {
         return false;
     }
     let founder = fauna.animals[i].founder.expect("a founder body");
     let reach = shape.r + phys.body_at(fauna.animals[i].body).mouth_reach_m;
     let p = crate::flight::mouth_point(&fauna.animals[i], shape);
     let Some((bloom, stock)) = crate::flight::bloom_in_reach(view, &flora.view(), p, reach) else {
+        fauna.ledger.sip_misses_by_founder[founder.index()] += 1;
         return false;
     };
-    let yield_fraction = phys.yield_for(Food::Nectar);
-    let bite = sated_bite(want, stock, &sc, &fauna.animals[i], yield_fraction);
+    let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
     }
@@ -1491,18 +1711,15 @@ fn flyer_sip(
         return false;
     };
     let taken = fauna.book_eaten(taken, Food::Nectar);
-    let placed = assimilate(fauna, i, &sc, taken, yield_fraction);
     let l = &mut fauna.ledger;
     l.bites_by_founder[founder.index()] += 1;
     l.bites_by_founder_food[founder.index()][Food::Nectar.index()] += 1;
-    l.assimilated_by_founder[founder.index()] += placed;
     l.sips_by_bloom[match bloom {
         crate::Bloom::Stand(_) => 0,
         crate::Bloom::Vine(_) => 1,
     }] += 1;
-    let a = &mut fauna.animals[i];
-    a.founder_state.feedback.intake += placed;
-    a.last_bloom = Some(bloom);
+    fauna.animals[i].last_bloom = Some(bloom);
+    swallow(fauna, i, Food::Nectar, taken);
     true
 }
 
@@ -1749,6 +1966,9 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
     }
     if a.state == State::Asleep {
         a.state = State::Resting;
+        if let Some(f) = a.founder {
+            fauna.ledger.sleep_flips_by_founder[f.index()] += 1;
+        }
     }
     a.rest = None;
     a.alert_ticks = u32::try_from(cubarium_voxel::ticks_at_least_one(alert_s)).unwrap_or(u32::MAX);
@@ -1766,7 +1986,7 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     let a = fauna.animals.remove(j);
     fauna.controllers.take(a.id);
     fauna.free_riders(&a);
-    let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic;
+    let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     let laid = bury_corpse(fauna, flora, &a, cause);
     if laid && matches!(cause, Departure::Killed { .. }) {
         if let Some(f) = a.founder {
@@ -1788,16 +2008,22 @@ fn bury_corpse(fauna: &mut Fauna, flora: &mut Flora, a: &Animal, cause: Departur
     // The whole animal, whatever is left of it: a corpse with no organic matter left is
     // still a corpse with mineral in it, and keeping an inert remainder on a dead animal
     // is how a ledger stops closing.
+    // The stomach's raw food goes with it, as raw matter: no carcass yield of its own.
+    let fed = a.stomach.total();
     let laid = fauna.book_deposit(
         flora,
         a.site,
         DepositKind::Carrion,
         Taken {
-            organic: a.organic() + a.gut.organic + a.gut_seeds.total().organic,
-            mineral: a.mineral + a.gut.mineral + a.gut_seeds.total().mineral,
-            energy: a.energy + a.gut.energy + a.gut_seeds.total().energy,
+            organic: a.organic() + a.gut.organic + a.gut_seeds.total().organic + fed.organic,
+            mineral: a.mineral + a.gut.mineral + a.gut_seeds.total().mineral + fed.mineral,
+            energy: a.energy + a.gut.energy + a.gut_seeds.total().energy + fed.energy,
         },
     );
+    let l = &mut fauna.ledger;
+    l.stomach_out.organic += fed.organic;
+    l.stomach_out.mineral += fed.mineral;
+    l.stomach_out.energy += fed.energy;
     fauna.ledger.deaths += 1;
     fauna.book_departure(a, cause);
     laid
@@ -2082,9 +2308,9 @@ fn climb_tick(
 /// Decisions §3 gave the shredder its three foods; since R0 every lineage's foods are its
 /// physiology's diet list. There is no new action: `bite` still means "take what is at
 /// the mouth", and [`body::mouth_meal`] resolves which of the diet's foods that is (the
-/// richest available, ties in [`Food::ALL`] order). The
-/// assimilation rule is unchanged; what the food class chooses is the `yield` it reads
-/// ([`crate::FounderPhysiology::yield_for`]).
+/// richest available, ties in [`Food::ALL`] order). Since the minimal gut the bite goes
+/// raw into that food class's stomach pool ([`swallow`]); digestion ([`digest`]) applies
+/// the class's `yield` ([`crate::FounderPhysiology::yield_for`]) later.
 #[allow(clippy::too_many_arguments)]
 fn founder_feed(
     fauna: &mut Fauna,
@@ -2093,13 +2319,11 @@ fn founder_feed(
     flora: &mut Flora,
     manifest: &crate::Manifest,
     geometry: &crate::Body,
-    sc: &SpeciesConfig,
+    phys: &crate::FounderPhysiology,
     effort: f64,
 ) -> bool {
-    // The hungry rate, scaled by hunger: a full reserve asks for nothing at all.
-    let want =
-        sc.bite_per_s * manifest.controller_period_s * effort * hunger(&fauna.animals[i], sc);
-    if !(want > 0.0) {
+    // Only a body that wants food bites (the eating latch, repair 2 item 3).
+    if !fauna.animals[i].eating || !(effort > 0.0) {
         return false;
     }
     let (founder, pose, site_y, supported) = {
@@ -2130,9 +2354,8 @@ fn founder_feed(
         return false;
     };
     let food = meal.food();
-    // The bite this hunger, this stock and this room allow.
-    let yield_fraction = fauna.config.founder(founder).yield_for(food);
-    let bite = sated_bite(want, stock, sc, &fauna.animals[i], yield_fraction);
+    // The bite this body, this stock and this stomach's room allow.
+    let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
     }
@@ -2189,12 +2412,16 @@ fn founder_feed(
     }
     if food == Food::Carrion {
         fauna.ledger.eaten_carrion_by_founder[founder.index()] += taken.organic;
+        // A pack member eating at its pack's feast (repair 3's measure).
+        if let (body::Meal::Pool { site, .. }, Some(m)) = (meal, fauna.animals[i].pack) {
+            if let Some(p) = fauna.pack_mut(m.pack).filter(|p| p.feast == Some(site)) {
+                p.feast_eaten += taken.organic;
+            }
+        }
     }
-    let placed = assimilate(fauna, i, sc, taken, yield_fraction);
     fauna.ledger.bites_by_founder[founder.index()] += 1;
     fauna.ledger.bites_by_founder_food[founder.index()][food.index()] += 1;
-    fauna.ledger.assimilated_by_founder[founder.index()] += placed;
-    fauna.animals[i].founder_state.feedback.intake += placed;
+    swallow(fauna, i, food, taken);
     true
 }
 
@@ -2238,8 +2465,10 @@ fn assimilate(
     // Egested: the share the yield never absorbs goes to the gut, not to heat. Only the
     // absorbed matter the bite's mineral cannot fund (and the reserve backstop) is
     // respired.
-    let egested = ((1.0 - yield_fraction) * t.organic).clamp(0.0, t.organic - assimilated);
-    let unfunded = (t.organic - assimilated - egested).max(0.0);
+    // The absorbed share its mineral cannot fund, exactly zero when the mineral pays for
+    // the whole yield; the egested share is the remainder, so the three add up.
+    let unfunded = (yield_fraction * t.organic - assimilated).clamp(0.0, t.organic - assimilated);
+    let egested = (t.organic - assimilated - unfunded).max(0.0);
 
     // The organism budget: the income stored into the reserve, up to `reserve_cap · body`.
     // Structure is built out of the reserve at the growth rate ([`grow`]), never straight
@@ -2441,6 +2670,10 @@ fn gestate(
         }
         let a = &mut fauna.animals[i];
         let paid = take_from_reserve(a, want);
+        if let Some(f) = a.founder {
+            fauna.ledger.reproduction_by_founder[f.index()] += paid.organic;
+        }
+        let a = &mut fauna.animals[i];
         let e = a.reproduction.escrow.as_mut().expect("an open escrow");
         e.organic += paid.organic;
         e.mineral += paid.mineral;
@@ -2623,6 +2856,12 @@ fn newborn(
         pack: None,
         homing_ticks: 0,
         yielding: false,
+        // A newborn starts with an empty stomach and its eating latch off (repair 2
+        // item 3).
+        stomach: crate::Stomach::default(),
+        eating: false,
+        emergency: false,
+        bout: None,
     }
 }
 
@@ -2747,6 +2986,7 @@ fn lay(
     }
     fauna.ledger.clutches_laid += 1;
     fauna.ledger.eggs_laid_by_founder[lineage.index()] += u64::from(rule.clutch_size);
+    fauna.ledger.reproduction_by_founder[lineage.index()] += cost;
 }
 
 /// A clutch whose face the terrain took away, or that standing water has covered deeper
@@ -3197,3 +3437,6 @@ mod chorister_tests;
 #[cfg(test)]
 #[path = "night_survival_tests.rs"]
 mod night_survival_tests;
+#[cfg(test)]
+#[path = "gut_tests.rs"]
+mod gut_tests;

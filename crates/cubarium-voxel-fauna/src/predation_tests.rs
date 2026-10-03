@@ -64,7 +64,8 @@ fn the_lanternjaw_and_its_prey_carry_the_notes_numbers() {
     let lj = c.founder(Founder::Lanternjaw);
     assert_eq!(Founder::Lanternjaw.name(), "lanternjaw");
     assert!((lj.core.body_max - 0.035 * crate::SHIPPED_MASS_SCALE).abs() < 1e-12, "x30 since main");
-    assert_eq!(lj.core.maintenance_per_s, 0.0002);
+    // The minimal gut: daily need f 0.04 over the 7,200-s day.
+    assert!((lj.core.maintenance_per_s * 7200.0 - 0.04).abs() < 1e-15);
     assert_eq!(lj.core.reserve_cap, 1.0);
     assert_eq!(
         (lj.adult_length_m, lj.adult_width_m, lj.adult_height_m),
@@ -85,7 +86,6 @@ fn the_lanternjaw_and_its_prey_carry_the_notes_numbers() {
     assert_eq!(h.jaw_band_height_fraction, 0.6);
     assert_eq!((h.windup_s, h.lunge_s, h.recovery_s), (0.15, 0.25, 3.0));
     assert_eq!(h.strike_cost_s, 100.0);
-    assert_eq!((h.rest_at, h.torpor_upkeep, h.wake_at), (0.9, 0.25, 0.5));
     assert!(h.hunts(Founder::Browser) && h.hunts(Founder::Blind));
     assert!(!h.hunts(Founder::Lanternjaw), "not in its own prey list");
 
@@ -526,7 +526,8 @@ fn a_kill_departs_killed_leaves_the_whole_body_and_two_wounds_add() {
     assert_eq!(l.deaths_accounted(), l.deaths);
     // The whole body, on its own face, once: what it held a tick before, less at most
     // that tick's upkeep.
-    let whole = last.organic() + last.gut.organic;
+    // The minimal gut: its stomach's raw food goes with it.
+    let whole = last.organic() + last.gut.organic + last.stomach.organic();
     let laid = carrion_at(&flora, last.site) - before;
     assert!(
         (laid - whole).abs() <= 1e-3 * whole,
@@ -554,6 +555,8 @@ fn a_wound_heals_at_the_set_rate_paying_reserve_and_the_speed_cap_follows_it() {
     // Twins with the clock off: one wounded, one whole.
     let run = |wound: f64, reserve: f64| -> Fauna {
         let (world, mut flora, mut fauna) = arena(None, 8);
+        // The minimal gut: an empty founding stomach, so a starving body stays at zero.
+        fauna.config.founders[Founder::Browser.index()].gut.s0 = 0.0;
         let g = introduce(
             &mut fauna,
             &world,

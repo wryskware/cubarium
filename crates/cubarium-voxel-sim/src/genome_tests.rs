@@ -169,15 +169,16 @@ range = [0.25, 8.0]
     );
 }
 
-/// A derived field follows its base gene — walking and the mouth keep their ratio to
-/// upkeep, an absolute body quantity its mass scale, a seed bank's attrition its age —
-/// and stays put when the search frees it, by path or by the tie's name. A gene on the
-/// derived field itself multiplies on top.
+/// A derived field follows its base gene — walking keeps its ratio to upkeep, an
+/// absolute body quantity its mass scale, a seed bank's attrition its age — and stays put
+/// when the search frees it, by path or by the tie's name. A gene on the derived field
+/// itself multiplies on top. The minimal gut's bite is its own number: upkeep does not
+/// move it.
 #[test]
 fn a_derived_field_follows_its_base_gene_and_stays_put_when_freed() {
     let d = Params::defaults();
     let motor = |p: &Params, f: Founder| p.fauna.founder(f).motor_respiration_per_s;
-    let bite = |p: &Params, f: Founder| p.fauna.founder(f).core.bite_per_s;
+    let bite = |p: &Params, f: Founder| p.fauna.founder(f).gut.bite_per_body_s;
     let upkeep = r#"
 [[gene]]
 name = "upkeep"
@@ -190,10 +191,11 @@ value = 2.0
         motor(&follows, Founder::Browser),
         2.0 * motor(&d, Founder::Browser)
     ));
-    assert!(close(
+    assert_eq!(
         bite(&follows, Founder::Browser),
-        2.0 * bite(&d, Founder::Browser)
-    ));
+        bite(&d, Founder::Browser),
+        "the bite is not tied to upkeep"
+    );
     assert_eq!(motor(&follows, Founder::Blind), motor(&d, Founder::Blind));
 
     let freed = decoded(&genome(&format!(
@@ -204,22 +206,18 @@ value = 2.0
         motor(&d, Founder::Browser),
         "freed by path"
     );
-    assert!(close(
-        bite(&freed, Founder::Browser),
-        2.0 * bite(&d, Founder::Browser)
-    ));
 
     let by_name = decoded(&genome(&format!(
-        "free = [\"intake_follows_upkeep\"]\n{upkeep}"
+        "free = [\"motor_follows_upkeep\"]\n{upkeep}"
     )));
     assert_eq!(
-        bite(&by_name, Founder::Browser),
-        bite(&d, Founder::Browser),
+        motor(&by_name, Founder::Browser),
+        motor(&d, Founder::Browser),
         "freed by name"
     );
     assert!(close(
-        motor(&by_name, Founder::Browser),
-        2.0 * motor(&d, Founder::Browser)
+        by_name.fauna.founder(Founder::Browser).core.maintenance_per_s,
+        2.0 * d.fauna.founder(Founder::Browser).core.maintenance_per_s
     ));
 
     let on_top = decoded(&genome(&format!(
@@ -236,7 +234,7 @@ value = 3.0
         6.0 * motor(&d, Founder::Browser)
     ));
 
-    // The mass scale (a digest row, so only with `retrain`) carries the eight absolute
+    // The mass scale (a digest row, so only with `retrain`) carries the seven absolute
     // quantities with it, and the placeholder species follows the browser's body.
     let heavy = decoded(&genome(
         r#"

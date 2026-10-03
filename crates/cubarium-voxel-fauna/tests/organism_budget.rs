@@ -107,7 +107,13 @@ fn animals_close_both_ledgers_through_feeding_growth_upkeep_and_starvation() {
     {
         let core = &mut config.founders[Founder::Browser.index()].core;
         core.growth_max_per_s = (core.birth_body - core.body_min) / (100.0 * DT);
-        core.bite_per_s = 0.05;
+        // The pre-gut upkeep, so starvation shows within the run's 300 ticks (the gut's
+        // per-day upkeep would take hours).
+        core.maintenance_per_s = 0.001;
+        // The minimal gut: a mouth and a digestion fast enough to keep up with growth.
+        let gut = &mut config.founders[Founder::Browser.index()].gut;
+        gut.bite_per_body_s = 50.0;
+        gut.digestion_s = [0.05; cubarium_voxel_fauna::Food::COUNT];
     }
     let sc = config.founder(Founder::Browser).core;
     assert!(sc.maintenance_per_s > 0.0, "the fixture needs an upkeep");

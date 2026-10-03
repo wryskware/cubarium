@@ -54,6 +54,11 @@
 //! One `night_spend:` line per plant species: the night budget's reserve spent on the
 //! reflush (with its construction respiration), nectar and fruit, organic units.
 //!
+//! **Balance** (the search rebase's addendum): one `balance:` line per lineage over the
+//! run — `B`, days to empty, surplus per adult per world day, `R̂` (optimistic), access,
+//! the sated share (awake with the eating latch off),
+//! the books behind them, and a hunter's kills per adult-day against its prey's births.
+//!
 //! At t = 0 it reports the roster R1 check: the glowcap caps standing (count and stock)
 //! and the foliage standing in a loftstrider's mouth band over each stand's support face
 //! (the adult band, `mouth_floor..mouth_ceiling × height`).
@@ -187,8 +192,17 @@ fn main() {
         .collect();
     let mut prev_deaths = sim.fauna().view().ledger.deaths_by_founder_cause;
     let started = std::time::Instant::now();
+    // The minimal gut's readouts: body-ticks per lineage, and the stomach's fill `S / K`
+    // summed per lineage over six bins of the clock day (four clock hours each).
+    let mut gut = GutTally::default();
+    gut.bellwing_reserve0 = bellwing_reserve(&sim, &params);
+    let mut pack_events: Vec<cubarium_voxel_fauna::PackEvent> = Vec::new();
+    let start_hour = params.world.day.start_hour;
+    let day_s = params.world.day.day_s();
     for tick in 1..=ticks {
         sim.step();
+        gut.observe(&sim, &params, start_hour, day_s, tick);
+        pack_events.extend(sim.fauna_mut().take_pack_events());
         night.observe(&sim, &params, &mut prev_asleep, &mut prev_deaths);
         {
             use cubarium_voxel_fauna::MobilityMode;
@@ -476,6 +490,8 @@ fn main() {
         );
     }
     night.print(&sim);
+    gut.print(&sim, &params, &born);
+    print_packs(&pack_events);
     let foods: Vec<String> = Food::ALL
         .iter()
         .map(|f| format!("{}={}", f.name(), l.bites_by_food[f.index()]))
@@ -583,6 +599,225 @@ fn t0_report(sim: &Sim, params: &cubarium_voxel_sim::params::Params) {
 }
 
 /// Whether a body is in the sleep rest (not a carnivore's satiated torpor).
+/// **The minimal gut's readouts** (`design/handoffs/gut-meals-2026-10-03.md`), one `gut:`
+/// line per lineage: meals per world day (completed bouts over body-days of the
+/// 7,200-s ecological day), the bouts by kind and their mean length, the stomach's fill
+/// over the clock day (mean `S / K` in six four-hour bins from midnight), the share of
+/// body-ticks with the eating latch on, emergency wakes, sleep flips per body-hour, the
+/// measured maturations (count and mean, world days), births, kills by this lineage, and
+/// deaths by cause. A `riders:` line: attached, dropped off, and the organic riders took.
+#[derive(Default)]
+struct GutTally {
+    /// Mean bellwing reserve fraction at t = 0 (repair 3's measure).
+    bellwing_reserve0: f64,
+    body_ticks: [u64; Founder::COUNT],
+    eating_ticks: [u64; Founder::COUNT],
+    fill: [[f64; 6]; Founder::COUNT],
+    fill_n: [[u64; 6]; Founder::COUNT],
+    /// Adult body-ticks (free, at `birth_body` or more): the balance line's adult-days.
+    adult_ticks: [u64; Founder::COUNT],
+}
+
+impl GutTally {
+    fn observe(&mut self, sim: &Sim, params: &cubarium_voxel_sim::params::Params, start_hour: f64, day_s: f64, tick: u64) {
+        let t = tick as f64 / f64::from(cubarium_voxel::TICK_HZ);
+        let hour = (start_hour + 24.0 * t / day_s).rem_euclid(24.0);
+        let bin = ((hour / 4.0) as usize).min(5);
+        for a in sim.fauna().view().animals {
+            let Some(f) = a.founder else { continue };
+            let i = f.index();
+            self.body_ticks[i] += 1;
+            if cubarium_search::es::voxel::live::balance::is_adult(a, &params.fauna) {
+                self.adult_ticks[i] += 1;
+            }
+            if a.eating {
+                self.eating_ticks[i] += 1;
+            }
+            let k = params.fauna.founder(f).gut.capacity(a.body);
+            if k > 0.0 {
+                self.fill[i][bin] += a.stomach.organic() / k;
+                self.fill_n[i][bin] += 1;
+            }
+        }
+    }
+
+    fn print(&self, sim: &Sim, params: &cubarium_voxel_sim::params::Params, born: &[u64; Founder::COUNT]) {
+        let l = sim.fauna().view().ledger;
+        let hz = f64::from(cubarium_voxel::TICK_HZ);
+        let eco_day = params.fauna.life.ecological_day_s;
+        for f in Founder::ALL {
+            let i = f.index();
+            if self.body_ticks[i] == 0 && born[i] == 0 {
+                continue;
+            }
+            let body_s = self.body_ticks[i] as f64 / hz;
+            let meals: u64 = l.meals_by_founder_kind[i].iter().sum();
+            let kinds: Vec<String> = cubarium_voxel_fauna::BoutKind::ALL
+                .iter()
+                .map(|k| {
+                    let n = l.meals_by_founder_kind[i][k.index()];
+                    let s = l.meal_ticks_by_founder_kind[i][k.index()] as f64 / hz;
+                    format!("{}={n}/{:.0}s", k.name(), if n > 0 { s / n as f64 } else { 0.0 })
+                })
+                .collect();
+            let fill: Vec<String> = (0..6)
+                .map(|b| {
+                    let n = self.fill_n[i][b];
+                    if n > 0 { format!("{:.2}", self.fill[i][b] / n as f64) } else { "-".into() }
+                })
+                .collect();
+            let kills: u64 = Founder::ALL
+                .iter()
+                .map(|&p| l.departed_founder(p, Departure::Killed { by: f }))
+                .sum();
+            let matured = l.matured_by_founder[i];
+            let mat_days = if matured > 0 {
+                l.maturation_ticks_by_founder[i] as f64 / hz / eco_day / matured as f64
+            } else {
+                f64::NAN
+            };
+            println!(
+                "gut: {:15} body_days={:.3} meals={} meals_per_day={:.3} bouts=[{}] fill_by_4h=[{}] eating_share={:.3} emergency_wakes={} sleep_flips_per_h={:.2} matured={} maturation_days={:.3} born={} kills={}",
+                f.name(),
+                body_s / eco_day,
+                meals,
+                if body_s > 0.0 { meals as f64 / (body_s / eco_day) } else { f64::NAN },
+                kinds.join(" "),
+                fill.join(" "),
+                if self.body_ticks[i] > 0 { self.eating_ticks[i] as f64 / self.body_ticks[i] as f64 } else { 0.0 },
+                l.emergency_wakes_by_founder[i],
+                if body_s > 0.0 { l.sleep_flips_by_founder[i] as f64 / (body_s / 3600.0) } else { f64::NAN },
+                matured,
+                mat_days,
+                born[i],
+                kills,
+            );
+        }
+        // The continuous balance measures over the run (the search rebase's addendum):
+        // B, days to empty (at B < 1), surplus per adult per world day, R-hat (optimistic:
+        // every juvenile survives), access; a hunter's kills per adult-day against its
+        // prey's births per world day.
+        {
+            use cubarium_search::es::voxel::live::balance;
+            let v = sim.fauna().view();
+            let run_s = sim.fauna().view().tick as f64 / hz;
+            let days = balance::days(run_s, v.config);
+            for f in Founder::ALL {
+                let i = f.index();
+                if self.body_ticks[i] == 0 && born[i] == 0 {
+                    continue;
+                }
+                let books = balance::Books::of(l, f);
+                let adult_days = balance::days(self.adult_ticks[i] as f64 / hz, v.config);
+                let ctx = balance::context(v.animals, v.config, f, adult_days, days);
+                let m = balance::measures(&books, &ctx);
+                let predator = v.config.founder(f).hunter.map(|h| {
+                    let kills: u64 = Founder::ALL
+                        .iter()
+                        .map(|&p| l.departed_founder(p, Departure::Killed { by: f }))
+                        .sum();
+                    let prey: u64 = Founder::ALL.iter().filter(|q| h.prey[q.index()]).map(|q| born[q.index()]).sum();
+                    format!(
+                        " kills_per_adult_day={:.3} prey_births_per_day={:.3}",
+                        if adult_days > 0.0 { kills as f64 / adult_days } else { f64::NAN },
+                        if days > 0.0 { prey as f64 / days } else { f64::NAN },
+                    )
+                });
+                println!(
+                    "balance: {:15} B={:.3} days_to_empty={} surplus_per_adult_day={:.5} r_hat={:.3} access={:.3} sated_share={:.3} assimilated={:.6} upkeep={:.6} motor={:.6} rider_take_lost={:.6} growth={:.6} reproduction={:.6} provision={:.6} stores={:.6} adult_days={:.3}{}",
+                    f.name(),
+                    m.energy_balance,
+                    m.days_to_empty.map_or("-".to_string(), |d| format!("{d:.2}")),
+                    m.surplus_per_adult_day,
+                    m.r_hat,
+                    m.access,
+                    m.sated_share,
+                    books.assimilated,
+                    books.upkeep,
+                    books.motor,
+                    books.rider_take_lost,
+                    books.growth,
+                    books.reproduction,
+                    books.provision,
+                    ctx.stores,
+                    adult_days,
+                    predator.unwrap_or_default(),
+                );
+            }
+        }
+        let bw = Founder::Bellwing.index();
+        let dig = l.digested_by_founder[bw];
+        println!(
+            "bellwing_gut: swallowed={:.6} digested={:.6} assimilated={:.6} y_eff={:.3} sip_misses={} reserve_frac={:.3}->{:.3}",
+            l.swallowed_by_founder[bw],
+            dig,
+            l.assimilated_by_founder[bw],
+            if dig > 0.0 { l.assimilated_by_founder[bw] / dig } else { f64::NAN },
+            l.sip_misses_by_founder[bw],
+            self.bellwing_reserve0,
+            bellwing_reserve(sim, params),
+        );
+        println!(
+            "riders: attached={} dropoffs={} freed={} taken_organic={:.6}",
+            l.riders_attached, l.rider_dropoffs, l.riders_freed, l.parasite_taken_organic
+        );
+    }
+}
+
+/// The mean reserve fraction of the living bellwings.
+fn bellwing_reserve(sim: &Sim, params: &cubarium_voxel_sim::params::Params) -> f64 {
+    let p = params.fauna.founder(Founder::Bellwing);
+    let v: Vec<f64> = sim
+        .fauna()
+        .view()
+        .animals
+        .iter()
+        .filter(|a| a.founder == Some(Founder::Bellwing))
+        .map(|a| a.reserve / p.core.reserve_of(a.body).max(1e-300))
+        .collect();
+    if v.is_empty() { f64::NAN } else { v.iter().sum::<f64>() / v.len() as f64 }
+}
+
+/// Per pack (repair 3's measure): chases started with their participant counts, chase
+/// ends by reason, and each feast's carrion eaten and why it ended.
+fn print_packs(events: &[cubarium_voxel_fauna::PackEvent]) {
+    use cubarium_voxel_fauna::PackEvent;
+    let mut packs: Vec<u64> = events
+        .iter()
+        .map(|e| match e {
+            PackEvent::ChaseStart { pack, .. } | PackEvent::ChaseEnd { pack, .. } | PackEvent::FeastEnd { pack, .. } => *pack,
+        })
+        .collect();
+    packs.sort_unstable();
+    packs.dedup();
+    for p in packs {
+        let parts: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                PackEvent::ChaseStart { pack, participants, .. } if *pack == p => Some(participants.to_string()),
+                _ => None,
+            })
+            .collect();
+        let mut ends = std::collections::BTreeMap::<String, u32>::new();
+        let mut feasts: Vec<String> = Vec::new();
+        for e in events {
+            match e {
+                PackEvent::ChaseEnd { pack, why, .. } if *pack == p => *ends.entry(format!("{why:?}")).or_default() += 1,
+                PackEvent::FeastEnd { pack, eaten, why, .. } if *pack == p => feasts.push(format!("{eaten:.3}:{why:?}")),
+                _ => {}
+            }
+        }
+        let ends: Vec<String> = ends.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        println!(
+            "pack{p}: chases={} participants=[{}] chase_ends=[{}] feasts=[{}]",
+            parts.len(),
+            parts.join(","),
+            ends.join(" "),
+            feasts.join(" ")
+        );
+    }
+}
+
 fn is_sleeping(a: &cubarium_voxel_fauna::Animal) -> bool {
     a.state == cubarium_voxel_fauna::State::Asleep && a.rest == Some(cubarium_voxel_fauna::Rest::Sleep)
 }
