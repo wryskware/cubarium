@@ -169,7 +169,7 @@ fn founder_rows() -> Vec<Row> {
         r("motor_respiration_per_s", "org-units/s per unit body at full cruise", nonneg, "paid motion")
             .search(2.5e-4, 1e-2).log().grade("B"),
         r("step_up_m", "m", nonneg, "tallest riser stepped (rounded down to voxels)")
-            .search(0.1, 1.0).digest().grade("B").prov("measured"),
+            .search(0.1, 1.5).digest().grade("B").prov("measured"),
         r("step_down_m", "m", nonneg, "deepest drop stepped").evolve().digest().grade("C").prov("measured"),
         r("wall_climb_cost_factor", "x walking cost", nonneg, "motor cost of a second on a wall").prov("derived"),
         r("climb_speed_fraction", "x cruise", Range::positive(), "pace of a wall climb, a fraction of the cruise")

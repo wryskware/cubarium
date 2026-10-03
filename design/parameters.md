@@ -1173,7 +1173,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.littershredder.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.littershredder.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.littershredder.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
@@ -1277,7 +1277,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.frondgrazer.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.frondgrazer.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.frondgrazer.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
@@ -1381,7 +1381,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.lanternjaw.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.0002 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.lanternjaw.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.lanternjaw.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
@@ -1485,7 +1485,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.capgnawer.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.capgnawer.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.capgnawer.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.capgnawer.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.capgnawer.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.capgnawer.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.capgnawer.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
@@ -1589,8 +1589,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.loftstrider.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.loftstrider.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.loftstrider.step_up_m` | 0.5 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
-| `fauna.founders.loftstrider.step_down_m` | 0.5 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
+| `fauna.founders.loftstrider.step_up_m` | 1.15 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.loftstrider.step_down_m` | 1.15 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.loftstrider.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.loftstrider.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
 | `fauna.founders.loftstrider.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
@@ -1693,7 +1693,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.ripple-snail.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.ripple-snail.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.ripple-snail.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.ripple-snail.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.ripple-snail.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.ripple-snail.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.ripple-snail.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
@@ -1797,7 +1797,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.bellwing.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.bellwing.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.bellwing.step_up_m` | 0.0 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.bellwing.step_up_m` | 0.0 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.bellwing.step_down_m` | 0.0 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.bellwing.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.bellwing.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
@@ -1901,7 +1901,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.seedporter.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.seedporter.motor_respiration_per_s` | 0.001 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.seedporter.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.seedporter.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
@@ -2005,7 +2005,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.chorister.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
 | `fauna.founders.chorister.motor_respiration_per_s` | 0.0004 | org-units/s per unit body at full cruise | [0, inf) | 0.00025–0.01 log | B | placeholder | paid motion |
-| `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
+| `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.chorister.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.chorister.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |

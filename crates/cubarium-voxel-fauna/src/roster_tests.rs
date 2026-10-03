@@ -241,7 +241,11 @@ fn the_r1_physiology_tables_are_the_briefs() {
     assert!(close(strider.mouth_ceiling_fraction, 1.03));
     let band = strider.adult_body();
     assert!((band.mouth_floor_m - 0.8).abs() < 0.01 && (band.mouth_ceiling_m - 3.5).abs() < 0.01);
-    assert!(close(strider.step_up_m, 0.5));
+    // Wrysk 2026-10-02: a step of about a third of its height, 1+ m (the R1 brief had 0.5).
+    assert!(
+        strider.step_up_m >= 1.0 && (strider.step_up_m - 3.4 / 3.0).abs() < 0.05,
+        "a third of its 3.4 m height"
+    );
     let grazer_adult = grazer.adult_body();
     assert!(
         strider.wade_depth_m(&strider.adult_body()) >= grazer.drown_depth_m(&grazer_adult),

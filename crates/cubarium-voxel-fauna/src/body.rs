@@ -1105,9 +1105,11 @@ impl FounderPhysiology {
                 core.lifespan_median_s *= 3.0;
                 FounderPhysiology {
                     core,
-                    // Long legs: a 0.5 m step both ways, no wall climbing.
-                    step_up_m: 0.5,
-                    step_down_m: 0.5,
+                    // Long legs: a step of a third of its 3.4 m height both ways (Wrysk
+                    // 2026-10-02: "on the order of like 1/3 of its height based on its leg
+                    // anatomy, so 1+ m"); 1.0 m on a 0.25 m voxel. No wall climbing.
+                    step_up_m: 1.15,
+                    step_down_m: 1.15,
                     climbs_walls: false,
                     // It wades to a quarter of its height (0.85 m adult, under the hull)
                     // where the grazer drowns at 0.375 m, and is under at the eye ring.
