@@ -2850,6 +2850,11 @@ pub struct Fauna {
     /// Per pack lineage ([`Founder::index`]): its walking route components by face
     /// ([`encounter::route_component_index`]) and the tick they were built, refreshed
     /// after [`Pack::route_refresh_s`]. Derived from the terrain, so not saved.
+    /// The open air a flyer's egg site must reach ([`flight::OpenAir`]) and the tick it was
+    /// built, refreshed after [`Flight::egg_air_refresh_s`]. Derived from the terrain, so
+    /// not saved.
+    #[serde(skip)]
+    open_air: Option<(u64, std::sync::Arc<flight::OpenAir>)>,
     #[serde(skip)]
     pack_routes: FxHashMap<usize, (u64, std::sync::Arc<FxHashMap<Site, usize>>)>,
     /// The packs standing in the world (roster R3), by id.
@@ -2920,6 +2925,20 @@ impl Fauna {
         map
     }
 
+    /// The open air under `flight`'s band, rebuilt from `view` when older than its
+    /// `egg_air_refresh_s` (or never built).
+    pub(crate) fn open_air(&mut self, view: &VoxelView<'_>, flight: &Flight) -> std::sync::Arc<flight::OpenAir> {
+        let tick = self.tick;
+        if let Some((built, air)) = &self.open_air {
+            if tick.saturating_sub(*built) < cubarium_voxel::ticks_at_least_one(flight.egg_air_refresh_s) {
+                return air.clone();
+            }
+        }
+        let air = std::sync::Arc::new(flight::OpenAir::build(view, flight.band_max_m));
+        self.open_air = Some((tick, air.clone()));
+        air
+    }
+
     /// An animal layer on a **valid** config. Panics with the offending field named if
     /// [`FaunaConfig::validate`] refuses it, exactly as
     /// [`cubarium_voxel_flora::Flora::new`] does and for the same reason: a preset that
@@ -2949,6 +2968,7 @@ impl Fauna {
             seed_voids: Vec::new(),
             pack_events: Vec::new(),
             pack_routes: FxHashMap::default(),
+            open_air: None,
             packs: Vec::new(),
             next_pack: 0,
         })

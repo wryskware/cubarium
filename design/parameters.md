@@ -1158,7 +1158,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1086 rows)
+**`fauna.*`** (1104 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1261,6 +1261,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.littershredder.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.littershredder.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.littershredder.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.littershredder.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.littershredder.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.littershredder.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.littershredder.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1369,6 +1371,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.frondgrazer.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.frondgrazer.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.frondgrazer.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.frondgrazer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.frondgrazer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.frondgrazer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.frondgrazer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1477,6 +1481,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.lanternjaw.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.lanternjaw.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.lanternjaw.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.lanternjaw.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.lanternjaw.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.lanternjaw.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.lanternjaw.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1585,6 +1591,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.capgnawer.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.capgnawer.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.capgnawer.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.capgnawer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.capgnawer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.capgnawer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.capgnawer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1693,6 +1701,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.loftstrider.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.loftstrider.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.loftstrider.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.loftstrider.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.loftstrider.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.loftstrider.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.loftstrider.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1801,6 +1811,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.ripple-snail.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.ripple-snail.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.ripple-snail.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.ripple-snail.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.ripple-snail.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.ripple-snail.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.ripple-snail.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -1909,6 +1921,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flight.foliage_speed_factor` | 0.5 | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.bellwing.flight.shower_rain_reference_m_per_s` | 0.000002777777777777778 | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.bellwing.flight.lift_speed_fraction` | 0.5 | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.bellwing.flight.egg_headroom_m` | 1.0 | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.bellwing.flight.egg_air_refresh_s` | 600.0 | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.bellwing.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.bellwing.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.bellwing.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -2017,6 +2031,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.seedporter.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.seedporter.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.seedporter.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.seedporter.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.seedporter.glider.glide_body_lengths_per_s` | 3.0 | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
@@ -2125,6 +2141,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flight.foliage_speed_factor` | (absent) | x speed cap | [0, 1] |  | - | decision | the speed cap inside a crown's foliage layers |
 | `fauna.founders.chorister.flight.shower_rain_reference_m_per_s` | (absent) | m/s of rain | (0, inf) |  | - | placeholder | R0: flight costs x (1 + rain rate / R0) in a shower |
 | `fauna.founders.chorister.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
+| `fauna.founders.chorister.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
+| `fauna.founders.chorister.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.chorister.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |

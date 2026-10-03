@@ -1335,3 +1335,73 @@ fn a_hatchling_under_low_cover_rises_off_the_floor_and_leaves_its_hollow() {
     let a = animal(&fauna, id);
     assert!(out < 600, "the hatchling left its hollow: it is at {:?}, {:?}", a.pose, a.mobility.mode);
 }
+
+/// **No egg under a low perch** (`design/handoffs/bellwing-finding-2026-10-03.md`,
+/// bellwing3 item 2): a bellwing's egg goes on the face below it, and its hatchling
+/// appears there in the air. Three bellwings ready to lay, each over a littered face:
+/// - **low:** hanging under a rock roof whose underside is 0.25 m over the face — never
+///   lays (the terrarium's starved hatchlings hatched into such slots and never left);
+/// - **boxed:** in a closed rock box with 1.75 m of headroom — never lays (its air does
+///   not reach the open air);
+/// - **open:** over a face in the open — lays.
+#[test]
+fn a_bellwing_never_lays_under_a_low_perch_or_in_closed_air() {
+    let mut world = plain_with(config(40, 20, 9, clock_at(12.0)));
+    // The low roof: rock at y = 4 over columns 2..=8 (underside 1.0 m, 0.25 m over the face).
+    for z in 0..9u32 {
+        for x in 2..=8i64 {
+            world.apply(WorldCommand::SetMaterial { x, y: 4, z, material: Material::Rock });
+        }
+    }
+    // The box: walls at columns 14 and 22 and rows z = 0 and z = 8 up to y = 10, a lid at
+    // y = 10 (interior faces y = 2, headroom 1.75 m: rows 3..=9).
+    for z in 0..9u32 {
+        for x in 14..=22i64 {
+            for y in 3..=10u32 {
+                let wall = x == 14 || x == 22 || z == 0 || z == 8 || y == 10;
+                if wall {
+                    world.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Rock });
+                }
+            }
+        }
+    }
+    let mut flora = Flora::new(FloraConfig::default());
+    let (low, boxed, open) = (Site { x: 5, y: 2, z: 4 }, Site { x: 18, y: 2, z: 4 }, Site { x: 30, y: 2, z: 4 });
+    for s in [low, boxed, open] {
+        assert!(flora.deposit(
+            s,
+            cubarium_voxel_flora::Deposit { kind: cubarium_voxel_flora::DepositKind::Litter, organic: 0.2, mineral: 0.004, energy: 0.4 }
+        ));
+    }
+    let mut config = FaunaConfig::default();
+    {
+        let core = &mut config.founders[BW.index()].core;
+        core.reserve_cap = 1.0;
+        core.reproduction = crate::Reproduction {
+            surplus_floor: 0.0,
+            surplus_hold_s: DT,
+            birth_interval_s: 20.0 * DT,
+            clutch_size: 1,
+            egg_organic: core.body_min,
+            incubation_s: 1000.0 * DT,
+            litter_min: 0.0,
+            ..core.reproduction
+        };
+        assert_eq!(core.reproduction.mode, crate::BirthMode::Eggs, "an egg-layer");
+    }
+    let mut fauna = Fauna::new(config);
+    let mut ids = Vec::new();
+    for (s, y) in [(low, 1.0 - 0.1), (boxed, SURFACE + 0.5), (open, SURFACE + 0.5)] {
+        let (x, z) = centre(s.x, s.z);
+        let id = aloft(&mut fauna, &world, x, z, y, EAST, StartingStores::FULL);
+        // The low one rises into its roof and hangs there; the others hover.
+        fly(&mut fauna, id, 0.0, 0.0, if s == low { 1.0 } else { 0.0 });
+        ids.push(id);
+    }
+    steps(&mut fauna, &world, &mut flora, 40);
+    assert_eq!(perch_kind(&fauna, ids[0]), Some(PerchKind::Underside), "the low one hangs under its roof");
+    let laid: Vec<Site> = fauna.view().clutches.iter().filter(|c| c.lineage == BW).map(|c| c.site).collect();
+    assert!(laid.contains(&open), "the open one lays: {laid:?}");
+    assert!(!laid.contains(&low), "no egg under the low roof: {laid:?}");
+    assert!(!laid.contains(&boxed), "no egg in the closed box: {laid:?}");
+}
