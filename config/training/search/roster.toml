@@ -72,7 +72,7 @@ margin = 1.2
 min_ratio = 1.0
 # Latticevine faces per founded vine, flowering back to back: the founding roots each vine
 # on one face, and the founded terrarium has exactly that (12 vines, 12 faces, seeds 1-8).
-vine_faces = 1.0
+vine_faces_founded = 1.0
 # Nectar and fruit at night as a share of the day rate: 0 until `night` lands.
 night_bloom_scale = 0.0
 # Predator balance (a READOUT, never a refusal; Astra A6): the share of prey production

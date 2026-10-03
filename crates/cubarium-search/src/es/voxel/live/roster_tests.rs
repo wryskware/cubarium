@@ -350,7 +350,8 @@ fn the_lanternjaw_is_held_to_progress_not_a_birth() {
     rider.riders_now = 1;
     rider.alive_end = 1;
     judge(&mut rider, &s, true);
-    assert!(rider.met && rider.score == 0.5 && rider.shortfall == 0.0, "{rider:?}");
+    // Met at the 2-h pass line, but still graded above it (Astra F2): CMA sees the rest.
+    assert!(rider.met && rider.score == 0.5 && rider.shortfall == 0.5, "{rider:?}");
     // Rider growth is progress inside 2 h (riders take 1-3 h to reach the drop-off line,
     // Fable 2026-10-02): a rider halfway there scores between attached and detached.
     let mut growing = rider.clone();
@@ -582,4 +583,178 @@ fn vine_faces_founded_on_the_terrarium() {
     }
     per_vine.sort_by(f64::total_cmp);
     println!("median faces per vine: {:.2}", 0.5 * (per_vine[3] + per_vine[4]));
+}
+
+
+// --- Astra's review (2026-10-02): the pilot's repairs -----------------------------
+
+/// F2 / F11(b): a live, growing rider beats attach-and-die with eggs left, which earns no
+/// attachment credit; a host-death release earns no juvenile credit; a free adult is
+/// apart from a free juvenile.
+#[test]
+fn a_growing_rider_beats_attach_and_die() {
+    let mut s = stage();
+    s.progress[Founder::Lanternjaw.index()] = true;
+    let mut dead = outcome(Founder::Lanternjaw);
+    dead.bank_hatches = 2;
+    dead.riders_attached = 2;
+    dead.eggs_end = 5;
+    judge(&mut dead, &s, true);
+    assert_eq!(dead.score, 0.0, "attach-and-die: {dead:?}");
+    assert!(!dead.met);
+    let mut alive = outcome(Founder::Lanternjaw);
+    alive.bank_hatches = 2;
+    alive.riders_attached = 2;
+    alive.riders_now = 2;
+    alive.alive_end = 2;
+    alive.eggs_end = 3;
+    alive.rider_progress = 0.6;
+    judge(&mut alive, &s, true);
+    assert!(alive.met && alive.shortfall < dead.shortfall, "{alive:?} vs {dead:?}");
+    // Half the riders dead: less than all alive at the same growth.
+    let mut half = alive.clone();
+    half.riders_now = 1;
+    half.alive_end = 1;
+    judge(&mut half, &s, true);
+    assert!(half.score < alive.score && half.score > 0.5, "{half:?}");
+    // Released by a dying host, no healthy drop-off: a live hatchling, no juvenile rung.
+    let mut freed = outcome(Founder::Lanternjaw);
+    freed.riders_attached = 1;
+    freed.riders_freed = 1;
+    freed.free_living = 1;
+    freed.alive_end = 1;
+    judge(&mut freed, &s, true);
+    assert_eq!(freed.score, 0.25, "{freed:?}");
+    // A healthy drop-off living free: the juvenile rung, growing toward birth size.
+    let mut juvenile = freed.clone();
+    juvenile.rider_dropoffs = 1;
+    juvenile.free_progress = 0.5;
+    judge(&mut juvenile, &s, true);
+    assert!((juvenile.score - 0.85).abs() < 1e-12, "{juvenile:?}");
+    // A free adult tops it.
+    let mut adult = juvenile.clone();
+    adult.free_adults = 1;
+    judge(&mut adult, &s, true);
+    assert_eq!(adult.score, 1.0, "{adult:?}");
+}
+
+/// F1 / F11(a): a readout-only lineage keeps its outcome but pays nothing, and its loss
+/// neither counts as missing nor stops the world.
+#[test]
+fn a_readout_only_feeder_is_scored_by_nobody() {
+    let mut s = stage();
+    s.birth_required[Founder::Seedporter.index()] = true;
+    s.replenish[Founder::Seedporter.index()] = true;
+    s.readout_only[Founder::Seedporter.index()] = true;
+    let mut o = outcome(Founder::Seedporter);
+    o.cycle_complete = true;
+    o.intake_cycle = 0.1;
+    o.biomass_start = 3.0;
+    judge(&mut o, &s, true);
+    assert!(o.readout && !o.met, "still judged for the readout: {o:?}");
+    assert_eq!((o.shortfall, o.replenish_shortfall), (0.0, 0.0), "{o:?}");
+    let founded = vec![8, 8, 9, 6, 2, 8, 6, 4, 3];
+    let mut bodies = vec![5usize; Founder::COUNT];
+    bodies[Founder::Seedporter.index()] = 0;
+    let eggs = vec![0usize; Founder::COUNT];
+    assert_eq!(super::search::lost_lineages(&founded, &bodies, &eggs), 1);
+    assert_eq!(super::search::scored_lost(&founded, &bodies, &eggs, &s.readout_only), 0);
+    bodies[Founder::Browser.index()] = 0;
+    assert_eq!(super::search::scored_lost(&founded, &bodies, &eggs, &s.readout_only), 1);
+    // The band counts scored lineages only.
+    let pop = [10usize; Founder::COUNT];
+    assert_eq!(super::search::scored_animals(&pop, &s.readout_only), 60);
+}
+
+/// F3: food access refuses only where every supply path is absent; a short but real
+/// supply runs and pays a soft term.
+#[test]
+fn food_short_of_need_is_soft_and_only_zero_supply_refuses() {
+    let w = world();
+    let mut s = spec();
+    s.night = None;
+    let mut fauna = fauna_with(&[(Founder::Seedporter, 4)]);
+    fauna.founders[Founder::Seedporter.index()].core.maintenance_per_s *= 100.0;
+    let r = roster(&flora(), &fauna, &w, &s);
+    let row = r.food.iter().find(|x| x.lineage == "seedporter").expect("row");
+    assert!(row.ratio > 0.0 && row.ratio < 1.0, "{row:?}");
+    assert!(r.refusals().is_empty(), "{:?}", r.refusals());
+    assert!(r.soft(5.0) > 0.0);
+    let mut none = flora();
+    for sp in Species::ALL {
+        none.species_mut(sp).fruit_per_s = 0.0;
+    }
+    none.latticevine.fruit = 0.0;
+    let r = roster(&none, &fauna, &w, &s);
+    assert_eq!(refusals_naming(&r, "food", "seedporter").len(), 1);
+}
+
+fn pilot_file() -> EcologyParams {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../config/training/search/roster-pilot.toml");
+    EcologyParams::load(&path).expect("roster-pilot.toml loads")
+}
+
+/// F1, F7, F10 / F11(c): the pilot file reaches the intended score and serialization
+/// path: 54 searched genes (the three feeders and pack size frozen at the exhibit's
+/// values), the feeders readout-only, R a readout, S and F soft, the night envelope
+/// hard, food soft; it round-trips through a saved genome; and the launch script runs
+/// it with the agreed settings.
+#[test]
+fn the_pilot_launch_is_the_agreed_experiment() {
+    let e = pilot_file();
+    let g = e.genome().expect("a genome");
+    assert_eq!(g.search_bounds().len(), 54, "searched: {}", g.genes.iter().filter(|x| !x.frozen).count());
+    assert_eq!(g.to_search().len(), 54);
+    for f in [Founder::Bellwing, Founder::Seedporter, Founder::Chorister] {
+        for kind in ["upkeep", "intake", "yield", "reserve", "sleep", "wake_hunger"] {
+            let name = format!("{kind}@{}", f.name());
+            let gene = g.genes.iter().find(|x| x.name == name).unwrap_or_else(|| panic!("{name}"));
+            assert!(gene.frozen, "{name} is frozen");
+        }
+    }
+    assert!(g.genes.iter().find(|x| x.name == "pack_size@chorister").expect("pack").frozen);
+    // The exhibit's values: chorister upkeep x0.2, pack of three.
+    let p = e.params().expect("decodes");
+    let base = e.base_params().expect("base");
+    let ch = |q: &cubarium_voxel_fauna::FaunaConfig| q.founder(Founder::Chorister).core.maintenance_per_s;
+    assert!((ch(&p.fauna) / ch(&base.fauna) - 0.2).abs() < 1e-9);
+    assert_eq!(p.fauna.founder(Founder::Chorister).pack.expect("pack").pack_size, 3);
+    // Targets: the three feeders readout-only.
+    let band = super::search::BandSpec::default().with_targets(&g.rest).expect("targets");
+    let st = band.stage.expect("v3");
+    for f in Founder::ALL {
+        let feeder = matches!(f, Founder::Bellwing | Founder::Seedporter | Founder::Chorister);
+        assert_eq!(st.readout_only[f.index()], feeder, "{}", f.name());
+    }
+    // Screens: R a readout, S/F soft (every miss runs), the night envelope hard.
+    let sc = ScreenSpec::from_rest(&g.rest).expect("[screen]");
+    assert!(sc.r_readout && sc.night.is_some() && sc.food.is_some());
+    let mut rsf = super::screen::rsf(&flora(), &FaunaConfig::default(), VOXEL_M, &sc);
+    (rsf.r, rsf.s, rsf.f) = (0.5, 50.0, 0.01);
+    assert_eq!(sc.verdict(&rsf), super::screen::Verdict::Margin, "S/F misses run");
+    assert!(sc.soft(&rsf) > 0.0);
+    // A saved nominee keeps its frozen genes frozen and decodes the same.
+    let back = EcologyParams::parse(&g.to_toml("t")).expect("a saved genome");
+    assert_eq!(back.genome().expect("g").search_bounds().len(), 54);
+    assert_eq!(back.fauna(), e.fauna());
+    // The launch script.
+    let sh = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/search/roster-pilot.sh"),
+    )
+    .expect("the launch script");
+    for want in [
+        "--search config/training/search/roster-pilot.toml",
+        "--world config/desktop/terrarium.toml",
+        "--lambda 8",
+        "--seeds-per-generation 3",
+        "--hours 2",
+        "--sigma0 0.08",
+        "--water-every 1",
+        "CUBARIUM_THREADS=1",
+        "nice -n 10",
+        "ulimit -v",
+    ] {
+        assert!(sh.contains(want), "roster-pilot.sh lacks `{want}`");
+    }
 }
