@@ -643,3 +643,31 @@ fn a_snail_lays_only_on_a_film_face() {
     let a = v.animal(on_litter).expect("alive");
     assert_eq!(a.reproduction.refractory_ticks, 0, "the litter is no place to lay");
 }
+
+/// **Film into the stomach** (the minimal gut; Astra's finding 8): a snail with an empty
+/// stomach takes a film bite, and on that tick its film pool holds exactly what the plant
+/// layer gave and the animal layer booked eaten, in all three currencies.
+#[test]
+fn a_film_bite_lands_in_the_stomach_whole() {
+    let world = pond(16, 6, |_| 1.0);
+    let mut flora = Flora::new(FloraConfig::default());
+    assert!(flora.seed_film(&world) > 0);
+    let mut config = FaunaConfig::default();
+    config.founders[SNAIL.index()].gut.s0 = 0.0;
+    let mut fauna = Fauna::new(config);
+    let id = feeding(&mut fauna, &world, SNAIL, 4, 2);
+    let consumed = flora.view().ledger.consumed_organic_out;
+    let mut t = 0;
+    while fauna.view().ledger.bites == 0 && t < 40 {
+        fauna.step(&world, &mut flora);
+        t += 1;
+    }
+    let l = fauna.view().ledger;
+    assert_eq!(l.bites, 1, "one film bite");
+    let pool = fauna.view().animal(id).expect("alive").stomach.pools[Food::Film.index()];
+    assert_eq!(pool.organic, l.eaten_organic_in);
+    assert_eq!(pool.mineral, l.eaten_mineral_in);
+    assert_eq!(pool.energy, l.eaten_energy_in);
+    assert!(pool.mineral > 0.0, "film carries mineral");
+    assert!((flora.view().ledger.consumed_organic_out - consumed - pool.organic).abs() <= 1e-15);
+}

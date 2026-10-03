@@ -977,7 +977,7 @@ pub enum DenChoice {
 
 /// A pack (roster R3): its den, its breeder, and the scripted pack tactic's state (its
 /// target, its chase clock, its carcass). Saved with the layer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PackRecord {
     /// Its id, never reused.
     pub id: u64,
@@ -1010,6 +1010,10 @@ pub struct PackRecord {
     /// gone. Pups eat at it too when it is within [`Pack::den_radius_m`] of the den.
     #[serde(default)]
     pub feast: Option<Site>,
+    /// Carrion the pack's members have eaten at its current feast, organic (the minimal
+    /// gut's repair 3 measure): reset when the feast changes.
+    #[serde(default)]
+    pub feast_eaten: f64,
     /// The last target the pack gave up on (late, spent, or into another territory): not
     /// taken again until the pack has taken another.
     #[serde(default)]
@@ -2421,7 +2425,11 @@ pub struct FaunaLedger {
     /// after any spill), out of them by digestion (into assimilation, egesta and the
     /// unfunded share's respiration), moved stomach to stomach by regurgitation (inside
     /// the layer, so it nets to zero), and leaving with a body that died or was removed.
-    /// `swallowed − digested − stomach_out` is what stomachs hold now, in every currency.
+    /// `swallowed − digested − stomach_out` is the change in what stomachs hold over the
+    /// layer's life **less the founding stock**: a founder's `s0` stomach and any stomach
+    /// food a test or tool introduces are booked `introduced_*_in`, not swallowed, so a
+    /// diagnostic of the stomach stock adds them (or, like the books test, starts from a
+    /// measured baseline).
     #[serde(default)]
     pub swallowed: Taken,
     #[serde(default)]
@@ -2452,6 +2460,15 @@ pub struct FaunaLedger {
     pub matured_by_founder: [u64; Founder::COUNT],
     #[serde(default)]
     pub maturation_ticks_by_founder: [u64; Founder::COUNT],
+    /// Raw food swallowed and digested (organic), by lineage (repair 3's measure).
+    #[serde(default)]
+    pub swallowed_by_founder: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub digested_by_founder: [f64; Founder::COUNT],
+    /// Sip attempts with the eating latch on and `feed` held but no bloom in the mouth's
+    /// reach, by lineage (repair 3's measure: a flyer's reach failures).
+    #[serde(default)]
+    pub sip_misses_by_founder: [u64; Founder::COUNT],
 }
 
 impl FaunaLedger {
@@ -2792,6 +2809,11 @@ pub struct Fauna {
     /// not world state, so not saved; bounded at [`SEED_VOID_LOG_MAX`] (the oldest go).
     #[serde(skip)]
     seed_voids: Vec<SeedVoid>,
+    /// Pack hunt and feast events since the last [`Fauna::take_pack_events`] (repair 3's
+    /// measure): a census's events, not world state, so not saved; bounded like the seed
+    /// voids.
+    #[serde(skip)]
+    pack_events: Vec<PackEvent>,
     /// The packs standing in the world (roster R3), by id.
     #[serde(default)]
     packs: Vec<PackRecord>,
@@ -2802,6 +2824,42 @@ pub struct Fauna {
 
 /// The most gut-seed void events [`Fauna`] keeps undrained.
 pub const SEED_VOID_LOG_MAX: usize = 65_536;
+
+/// One pack hunt or feast event (the minimal gut's repair 3 measure); not world state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PackEvent {
+    /// A pack took a target, with this many participants (the taker and its
+    /// participating mates within `pack_radius_m`).
+    ChaseStart { tick: u64, pack: u64, participants: u32 },
+    /// A pack's target was dropped, and why.
+    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd },
+    /// A pack's feast ended, with the carrion its members ate there, and why.
+    FeastEnd { tick: u64, pack: u64, site: Site, eaten: f64, why: FeastEnd },
+}
+
+/// Why a chase ended ([`PackEvent::ChaseEnd`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChaseEnd {
+    /// The target is gone and carrion lies where it was last seen.
+    Killed,
+    /// The target is gone with no carrion there (it left the world otherwise).
+    Gone,
+    /// `chase_give_up_s` passed.
+    Late,
+    /// A member that wants no food was under the chase floor.
+    Spent,
+    /// The target stood in another pack's territory.
+    Trespass,
+}
+
+/// Why a feast ended ([`PackEvent::FeastEnd`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeastEnd {
+    /// Its carrion was gone (eaten or decayed).
+    Emptied,
+    /// A new kill elsewhere became the pack's feast.
+    Replaced,
+}
 
 impl Fauna {
     /// An animal layer on a **valid** config. Panics with the offending field named if
@@ -2831,6 +2889,7 @@ impl Fauna {
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
             seed_voids: Vec::new(),
+            pack_events: Vec::new(),
             packs: Vec::new(),
             next_pack: 0,
         })
@@ -2839,6 +2898,18 @@ impl Fauna {
     /// The gut-seed voids since the last call (F3), oldest first.
     pub fn take_seed_voids(&mut self) -> Vec<SeedVoid> {
         std::mem::take(&mut self.seed_voids)
+    }
+
+    /// Drain the pack hunt and feast events ([`PackEvent`]).
+    pub fn take_pack_events(&mut self) -> Vec<PackEvent> {
+        std::mem::take(&mut self.pack_events)
+    }
+
+    pub(crate) fn log_pack_event(&mut self, e: PackEvent) {
+        if self.pack_events.len() >= SEED_VOID_LOG_MAX {
+            self.pack_events.drain(..SEED_VOID_LOG_MAX / 2);
+        }
+        self.pack_events.push(e);
     }
 
     pub(crate) fn log_seed_void(&mut self, v: SeedVoid) {
@@ -3032,6 +3103,7 @@ impl Fauna {
             chase_since_tick: 0,
             target_site: None,
             feast: None,
+            feast_eaten: 0.0,
             abandoned: None,
         });
         Some(id)
@@ -3460,7 +3532,9 @@ impl Fauna {
 
     /// An animal leaving the world without a corpse takes **everything it holds**, the
     /// escrowed offspring included: an unborn package is not left behind on an empty
-    /// face, and it is not a death, so it is not carrion either.
+    /// face, and it is not a death, so it is not carrion either. **Removal is export**
+    /// (the minimal gut's repair 3 item 7): its stomach leaves with it, booked
+    /// `removed_*` (and `stomach_out`); only a death deposits a stomach.
     fn book_removed(&mut self, a: &Animal) {
         let fed = a.stomach.total();
         self.ledger.stomach_out.organic += fed.organic;

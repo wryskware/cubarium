@@ -486,6 +486,9 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
             // A glider (F3) sleeps only perched.
             && (phys.glider.is_none() || a.mobility.mode == crate::MobilityMode::Perched)
             && a.mobility.submerged_ticks == 0
+            // Repair 3 item 4: attached (a rider) and falling bodies are awake.
+            && a.attached.is_none()
+            && !a.mobility.falling
             && !a
                 .strike
                 .is_some_and(|s| s.phase != StrikePhase::Recovery);
@@ -609,6 +612,9 @@ pub(crate) fn swallow(fauna: &mut Fauna, i: usize, food: Food, t: Taken) {
     l.swallowed.organic += t.organic;
     l.swallowed.mineral += t.mineral;
     l.swallowed.energy += t.energy;
+    if let Some(f) = fauna.animals[i].founder {
+        l.swallowed_by_founder[f.index()] += t.organic;
+    }
     settle_full(fauna, i);
 }
 
@@ -652,13 +658,16 @@ fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, period_s: f64, effort: 
     diminished.min(room / reaches).max(0.0)
 }
 
-/// Step 2, after upkeep: **digestion** (repair 2 item 2). Each food class's pool empties
-/// at `S_c · dt / τ_c`, as far as the reserve has room for what it yields: the classes'
-/// raw digestion is scaled down together so that their effective, mineral-limited yields
-/// `y_eff` sum to at most `room = reserve cap − reserve`. A class whose `y_eff` is zero
-/// holds. What is digested goes through the one assimilation rule ([`assimilate`]): the
-/// yield into the reserve, the undigested share to egesta, the unfunded share respired;
-/// the undigested raw food stays in the stomach.
+/// Step 2, after upkeep: **digestion** (repair 2 item 2, repair 3 item 1). Each food
+/// class's pool empties at `S_c · dt / τ_c`, as far as the reserve has room for what it
+/// yields: the assimilable classes' raw digestion is scaled down together so that their
+/// effective, mineral-limited yields `y_eff` sum to at most `room = reserve cap −
+/// reserve`. A class whose `y_eff` is zero (no mineral) **passes** at `S_c · dt / τ_c`
+/// whatever the room: it places nothing, so the cap does not apply to it. Everything
+/// digested or passed goes through the one assimilation rule ([`assimilate`]): the yield
+/// into the reserve as far as its mineral funds it, the undigested share to egesta, the
+/// unfunded share respired; what is not digested stays in the stomach. No mineral is
+/// invented.
 fn digest(fauna: &mut Fauna) {
     for i in 0..fauna.animals.len() {
         let a = &fauna.animals[i];
@@ -671,10 +680,8 @@ fn digest(fauna: &mut Fauna) {
         let phys = *fauna.config.founder(f);
         let sc = phys.core;
         let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
-        if !(room > 0.0) {
-            continue;
-        }
         let mut raw = [0.0f64; Food::COUNT];
+        let mut passing = [0.0f64; Food::COUNT];
         let mut yields = 0.0;
         for food in Food::ALL {
             let p = a.stomach.pools[food.index()];
@@ -690,17 +697,15 @@ fn digest(fauna: &mut Fauna) {
             };
             let y_eff = phys.yield_for(food).min(funded).max(0.0);
             if !(y_eff > 0.0) {
+                passing[food.index()] = d;
                 continue;
             }
             raw[food.index()] = d;
             yields += d * y_eff;
         }
-        if !(yields > 0.0) {
-            continue;
-        }
         let scale = if yields > room { room / yields } else { 1.0 };
         for food in Food::ALL {
-            let d = raw[food.index()] * scale;
+            let d = raw[food.index()] * scale + passing[food.index()];
             if !(d > 0.0) {
                 continue;
             }
@@ -709,6 +714,7 @@ fn digest(fauna: &mut Fauna) {
             l.digested.organic += t.organic;
             l.digested.mineral += t.mineral;
             l.digested.energy += t.energy;
+            l.digested_by_founder[f.index()] += t.organic;
             let placed = assimilate(fauna, i, &sc, t, phys.yield_for(food));
             fauna.ledger.assimilated_by_founder[f.index()] += placed;
             fauna.animals[i].founder_state.feedback.intake += placed;
@@ -1013,6 +1019,18 @@ fn controllers(
             if let Some(roost) = glider::roost_reflex(fauna, i, view, &fv, sky) {
                 actions = roost;
             }
+        }
+        // Fed perching (the minimal gut's repair 3 item 8): a body whose controller rests
+        // when fed (the bellwing's hover-sip teacher) and whose eating latch is off holds
+        // still on its perch, or comes down onto what is below it, read from the latch.
+        if driven && fauna.controllers.rests_when_fed(id) && !fauna.animals[i].eating {
+            actions = Actions { forward: 0.0, turn: 0.0, feed: 0.0 };
+            lure = 0.0;
+            lift = if fauna.animals[i].mobility.mode == crate::MobilityMode::Perched {
+                0.0
+            } else {
+                -1.0
+            };
         }
         // The shallows reflex (roster mechanics fix 2): a body in water deeper than it wades
         // heads for the nearest face it wades, over everything its heuristic asked.
@@ -1650,6 +1668,7 @@ fn flyer_sip(
     let reach = shape.r + phys.body_at(fauna.animals[i].body).mouth_reach_m;
     let p = crate::flight::mouth_point(&fauna.animals[i], shape);
     let Some((bloom, stock)) = crate::flight::bloom_in_reach(view, &flora.view(), p, reach) else {
+        fauna.ledger.sip_misses_by_founder[founder.index()] += 1;
         return false;
     };
     let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
@@ -2365,6 +2384,12 @@ fn founder_feed(
     }
     if food == Food::Carrion {
         fauna.ledger.eaten_carrion_by_founder[founder.index()] += taken.organic;
+        // A pack member eating at its pack's feast (repair 3's measure).
+        if let (body::Meal::Pool { site, .. }, Some(m)) = (meal, fauna.animals[i].pack) {
+            if let Some(p) = fauna.pack_mut(m.pack).filter(|p| p.feast == Some(site)) {
+                p.feast_eaten += taken.organic;
+            }
+        }
     }
     fauna.ledger.bites_by_founder[founder.index()] += 1;
     fauna.ledger.bites_by_founder_food[founder.index()][food.index()] += 1;

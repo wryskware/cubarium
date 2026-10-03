@@ -24,7 +24,8 @@ use crate::Flora;
 //     `VineConfig::seed_max_age_s`.
 // 20: night survival 1b — `SpeciesConfig::{night_bloom_scale, night_floor, night_min_s}`,
 //     `FloraLedger::night_spend`; a stand spends its reserve at night.
-pub const SCHEMA: u32 = 20;
+// 21: the minimal gut's repair 3 — `Vine::mineral`, `VineConfig::mineral_fraction`.
+pub const SCHEMA: u32 = 21;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

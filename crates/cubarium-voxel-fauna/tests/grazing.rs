@@ -122,7 +122,11 @@ fn a_full_animal_takes_nothing_and_the_plant_keeps_its_foliage() {
     turf(&mut flora, &world, 2, 2);
     turf(&mut flora, &world, 2, 3);
 
-    let config = still_browser(|_| {});
+    // A fast gut (τ 2 s, b = 2k/τ), so the meal fills in a few dozen ticks.
+    let mut config = still_browser(|_| {});
+    let g = &mut config.founders[Founder::Browser.index()].gut;
+    g.digestion_s = [2.0; Food::COUNT];
+    g.bite_per_body_s = 2.0 * g.stomach_k / 2.0;
     let sc = config.founder(Founder::Browser).core;
     let mut fauna = Fauna::new(config);
     let id = feeding_browser(&mut fauna, &world, StartingStores::FULL);
@@ -137,7 +141,7 @@ fn a_full_animal_takes_nothing_and_the_plant_keeps_its_foliage() {
         "the fixture puts food at the mouth"
     );
     let mut full = false;
-    for _ in 0..(20 * 60 * 10) {
+    for _ in 0..400 {
         fauna.step(&world, &mut flora);
         if fauna.view().ledger.bites > 0 && !fauna.view().animal(id).unwrap().eating {
             full = true;

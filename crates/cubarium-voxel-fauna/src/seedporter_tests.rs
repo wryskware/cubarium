@@ -959,3 +959,44 @@ fn a_snapshot_round_trip_keeps_a_climbing_a_gliding_and_a_perched_seedporter() {
     }
     assert_eq!(back.view().ledger, fauna.view().ledger, "the same ledger");
 }
+
+/// **Fruit into the stomach** (the minimal gut; Astra's finding 8): a seedporter with an
+/// empty stomach perched on a fruiting lanternberry takes a bite; on that tick its fruit
+/// pool and its gut seeds together hold exactly what the stand gave, in all three
+/// currencies, the seeds their `seeds_per_fruit_organic` share.
+#[test]
+fn a_fruit_bite_lands_in_the_stomach_and_the_gut_seeds() {
+    let mut world = noon_plain(16, 20, 8);
+    let mut flora = Flora::new(fruit_flora());
+    let site = fruiting(&mut flora, &mut world, 8, 4, 60);
+    let top = crown_top(&flora, site);
+    let mut config = FaunaConfig::default();
+    config.founders[SP.index()].gut.s0 = 0.0;
+    let share = config.founders[SP.index()].gut_seeds.expect("seeds").seeds_per_fruit_organic;
+    let mut fauna = Fauna::new(config);
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, top, HUNGRY_ADULT);
+    steps(&mut fauna, &world, &mut flora, 1);
+    hold(&mut fauna, id, 0.0, 1.0);
+    let consumed = flora.view().ledger.consumed_organic_out;
+    let mut t = 0;
+    while fauna.view().ledger.bites == 0 && t < 40 {
+        fauna.step(&world, &mut flora);
+        t += 1;
+    }
+    let l = fauna.view().ledger;
+    assert_eq!(l.bites, 1, "one fruit bite");
+    let a = animal(&fauna, id);
+    let pool = a.stomach.pools[Food::Fruit.index()];
+    let seeds = a.gut_seeds.total();
+    for (got, want, what) in [
+        (pool.organic + seeds.organic, l.eaten_organic_in, "organic"),
+        (pool.mineral + seeds.mineral, l.eaten_mineral_in, "mineral"),
+        (pool.energy + seeds.energy, l.eaten_energy_in, "energy"),
+    ] {
+        assert!((got - want).abs() <= 1e-15 * want.max(1e-12), "{what}: {got} against {want}");
+    }
+    assert!((seeds.organic - share * l.eaten_organic_in).abs() <= 1e-15);
+    assert!(pool.mineral > 0.0, "stand fruit carries mineral");
+    assert!((flora.view().ledger.consumed_organic_out - consumed - l.eaten_organic_in).abs() <= 1e-15);
+}

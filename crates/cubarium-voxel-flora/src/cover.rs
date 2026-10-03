@@ -47,7 +47,8 @@
 //!
 //! A vine's organic matter is its reserve plus, per face, `leafiness · leaf_mass`, the
 //! runner's `runner_mass`, and any nectar and fruit; its energy is `energy_density` times
-//! that, and it holds no mineral. Income is `fixed_in`, upkeep and construction are
+//! that, and its mineral is its own store ([`Vine::mineral`], drawn from its root's soluble
+//! pool, the minimal gut's repair 3). Income is `fixed_in`, upkeep and construction are
 //! `respired_out`, leaf fall, spent fruit, dropped runners and a dead vine's reserve are
 //! litter on the ground below, grazing and feeding are `consumed_*_out`, founders and
 //! hand-built cover are `seeded_*_in`, and terrain edits are `removed_*_out`. Regrowth,
@@ -343,6 +344,12 @@ pub struct Vine {
     pub wet_s: f64,
     /// Flora tick at which it rooted.
     pub born_tick: u64,
+    /// **Mineral in the vine's tissue** (the minimal gut's repair 3 item 2): drawn from
+    /// the soluble pool of its root's site up to [`VineConfig::mineral_fraction`] of its
+    /// tissue, and carried out pro rata by its leaf, nectar and fruit when they are eaten.
+    /// A founder arrives with none.
+    #[serde(default)]
+    pub mineral: f64,
 }
 
 /// One covered rock face.
@@ -802,6 +809,13 @@ pub struct VineConfig {
     pub fruit: f64,
     /// Energy per unit of organic matter in the vine's tissue.
     pub energy_density: f64,
+    /// **Mineral per unit of the vine's tissue** (the minimal gut's repair 3 item 2): the
+    /// vine draws soluble mineral from its root's site up to this fraction of its tissue
+    /// (reserve, leaf and runners), and its leaf, nectar and fruit carry this fraction of
+    /// their organic matter out of that store, never more than it holds. 0.01, the
+    /// bloomcrown's nectar fraction.
+    #[serde(default = "default_vine_mineral_fraction")]
+    pub mineral_fraction: f64,
     /// Founder vines [`Flora::seed_vine_founders`] roots on a fresh world: the **floor**
     /// under the area count `founders_per_m2` ([`VineConfig::founder_count`]).
     pub founders: u32,
@@ -887,6 +901,7 @@ impl Default for VineConfig {
             nectar: 0.002,
             fruit: 0.005,
             energy_density: 1.0,
+            mineral_fraction: 0.01,
             founders: 6,
             founders_per_m2: 0.0625,
             founder_reserve: 0.1,
@@ -910,6 +925,10 @@ impl VineConfig {
 
 /// The site a face's litter lands on: the first solid under its front voxel, which is a
 /// support face by construction; `fallback` when there is none.
+fn default_vine_mineral_fraction() -> f64 {
+    VineConfig::default().mineral_fraction
+}
+
 fn litter_site(view: &VoxelView<'_>, f: Face, fallback: Site) -> Site {
     if let Some((x, y, z)) = front_in(view.config, f) {
         for yy in (0..y).rev() {
@@ -1022,6 +1041,7 @@ pub(crate) fn prep(flora: &mut Flora, world: &World) {
             ledger.vine_faces_lost += 1;
         }
         book_removed(ledger, e, v.reserve);
+        ledger.removed_mineral_out += v.mineral;
         cover.remove_vine(vi);
         ledger.vine_deaths += 1;
     }
@@ -1265,6 +1285,24 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
         let short = budget.upkeep(&mut v.reserve, upkeep).unpaid;
         v.reserve += budget.store(f64::INFINITY);
         book_respired(ledger, e, budget.close());
+        // The mineral store (the minimal gut's repair 3 item 2): toward
+        // `mineral_fraction` of its tissue, drawn from (or, above it, returned to) the
+        // soluble pool of its root's site. A transfer inside the layer.
+        let tissue = v.reserve + a.leaf * vc.leaf_mass + f64::from(a.faces) * vc.runner_mass;
+        let target = vc.mineral_fraction * tissue;
+        if (v.mineral - target).abs() > 1e-18 {
+            let gi = step::provisioned_slot(config, ground, v.root, ledger);
+            let g = &mut ground[gi];
+            if v.mineral < target {
+                let draw = (target - v.mineral).min(g.mineral.max(0.0));
+                g.mineral -= draw;
+                v.mineral += draw;
+            } else {
+                let back = v.mineral - target;
+                v.mineral -= back;
+                g.mineral += back;
+            }
+        }
         let aux = &mut cover.rt.aux[vi];
         aux.leaf_scale = 1.0;
         aux.starving = false;
@@ -1490,6 +1528,11 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
         }
         let v = cover.remove_vine(vi);
         deposit_litter(config, ground, ledger, v.root, v.reserve);
+        // Its mineral goes back to its root's soluble pool (inside the layer).
+        if v.mineral > 0.0 {
+            let gi = step::provisioned_slot(config, ground, v.root, ledger);
+            ground[gi].mineral += v.mineral;
+        }
         ledger.vine_deaths += 1;
     }
 }
@@ -1728,6 +1771,7 @@ fn root_sister(
         dry_s: 0.0,
         wet_s: 0.0,
         born_tick: tick,
+        mineral: 0.0,
     });
     let sister_vi = cover.vines.len() - 1;
     // The parent's distances are fresh from this check's walk.
@@ -1830,6 +1874,7 @@ impl Flora {
             dry_s: 0.0,
             wet_s: 0.0,
             born_tick: self.tick,
+            mineral: 0.0,
         });
         cover.add_face(
             CoveredFace {
@@ -1899,6 +1944,7 @@ impl Flora {
             dry_s: 0.0,
             wet_s: 0.0,
             born_tick: self.tick,
+            mineral: 0.0,
         });
         let cf = CoveredFace {
             face: seed.first,
@@ -1986,6 +2032,7 @@ impl Flora {
             return None;
         }
         let before = f.leafiness;
+        let owner = f.owner;
         let took = if want >= leaf {
             f.leafiness = 0.0;
             leaf
@@ -1996,10 +2043,13 @@ impl Flora {
         if before >= vc.contest_threshold && f.leafiness < vc.contest_threshold && !f.rooted {
             cover.contest_queue.push(face);
         }
+        let fraction = vc.mineral_fraction;
+        let energy = vc.energy_density * took;
+        let mineral = self.vine_mineral_out(owner, fraction * took);
         let taken = Taken {
             organic: took,
-            mineral: 0.0,
-            energy: vc.energy_density * took,
+            mineral,
+            energy,
         };
         Some(self.book_vine_consumed(taken))
     }
@@ -2041,12 +2091,26 @@ impl Flora {
             *stock -= want;
             want
         };
+        let owner = f.owner;
+        let mineral = self.vine_mineral_out(owner, self.config.latticevine.mineral_fraction * took);
         let taken = Taken {
             organic: took,
-            mineral: 0.0,
+            mineral,
             energy: e * took,
         };
         Some(self.book_vine_consumed(taken))
+    }
+
+    /// Up to `want` of mineral out of vine `owner`'s store (all it holds when that is
+    /// less): what an eaten product carries.
+    fn vine_mineral_out(&mut self, owner: VineId, want: f64) -> f64 {
+        let Some(vi) = vine_at(&self.cover.vines, owner) else {
+            return 0.0;
+        };
+        let v = &mut self.cover.vines[vi];
+        let m = want.max(0.0).min(v.mineral);
+        v.mineral -= m;
+        m
     }
 
     fn book_vine_consumed(&mut self, taken: Taken) -> Taken {
