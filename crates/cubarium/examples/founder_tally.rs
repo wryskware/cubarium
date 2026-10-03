@@ -25,7 +25,15 @@
 //! of perched body-ticks in downpours — and a `bloomcrown:` line (seed output: propagule
 //! organic funded and seeds landed, stands, nectar standing) and the wall time per tick.
 //!
-//! `trace=S` lines cover bellwings, seedporters and loftstriders (with the water at the site).
+//! `trace=S` lines cover bellwings, seedporters and loftstriders (with the water at the site);
+//! a bellwing's line also gives the nearest nectar-holding flower head (horizontal distance,
+//! height over the body, height over its own root) and its fan's first hits by class.
+//!
+//! `reach` (bellwing-finding, 2026-10-03) prints at t = 0 and every 15 minutes which
+//! nectar-holding flower heads a bellwing can fly to through air under its band ceiling
+//! (and with no ceiling): a point body, so an upper bound. `packtrace=S` prints, every S
+//! seconds, each pack's target and feast (carrion left, carcass record) and each member's
+//! state, latch and distances.
 //!
 //! An optional `seedporters=N` (F3's measure) does the same for the seedporter (its count
 //! on the asked seed). The run then prints a `seedporter:` census line — body-hours, the
@@ -86,6 +94,10 @@ fn main() {
     let mut choristers: Option<usize> = None;
     // `trace=S`: every S seconds, one line per bellwing (a diagnostic).
     let mut trace: Option<u64> = None;
+    // `packtrace=S`: every S seconds, one line per pack and per member (a diagnostic).
+    let mut packtrace: Option<u64> = None;
+    // `reach`: at t = 0 and every 15 minutes, which bloom heads a bellwing can fly to.
+    let mut reach = false;
     for a in args.iter().skip(4) {
         if let Some(n) = a.strip_prefix("snails=") {
             snails = Some(n.parse().expect("snails=N"));
@@ -95,6 +107,10 @@ fn main() {
             seedporters = Some(n.parse().expect("seedporters=N"));
         } else if let Some(n) = a.strip_prefix("bellwings=") {
             bellwings = Some(n.parse().expect("bellwings=N"));
+        } else if a == "reach" {
+            reach = true;
+        } else if let Some(n) = a.strip_prefix("packtrace=") {
+            packtrace = Some(n.parse().expect("packtrace=SECONDS"));
         } else if let Some(n) = a.strip_prefix("trace=") {
             trace = Some(n.parse().expect("trace=SECONDS"));
         } else {
@@ -164,6 +180,9 @@ fn main() {
             })
             .collect();
         println!("packs@0 n={} {}", packs.len(), packs.join(" "));
+    }
+    if reach {
+        print_reach(&sim, &params, 0);
     }
     println!("film@0 {}", film_line(&sim));
     println!("fruit@0 {}", fruit_line(&sim));
@@ -265,6 +284,11 @@ fn main() {
                 );
             }
         }
+        if let Some(every) = packtrace {
+            if tick % (every * u64::from(cubarium_voxel::TICK_HZ)) == 0 {
+                print_pack_trace(&sim, tick);
+            }
+        }
         if let Some(every) = trace {
             if tick % (every * u64::from(cubarium_voxel::TICK_HZ)) == 0 {
                 let fv = sim.flora().view();
@@ -293,6 +317,35 @@ fn main() {
                         c.rays.iter().filter(|r| r.hit == cubarium_voxel_fauna::ConeHit::Bloom).count()
                     });
                     print!("fan_blooms={fan} ");
+                    if a.founder == Some(bw) {
+                        // The nearest nectar stand's flower head in 3-D: its layer's band
+                        // and radius against the body's height, and the fan's hits by class.
+                        let head = fv
+                            .stands
+                            .iter()
+                            .filter(|s| s.nectar > 0.0)
+                            .filter_map(|s| {
+                                let l = fv.profile_layers(s).into_iter().filter(|l| l.kind.bears_foliage()).max_by_key(|l| l.cell)?;
+                                let dx = ((f64::from(s.site.x) + 0.5) * v - a.pose.x).rem_euclid(ring);
+                                let dx = dx.min(ring - dx);
+                                let dz = (f64::from(s.site.z) + 0.5) * v - a.pose.z;
+                                let h = (dx * dx + dz * dz).sqrt();
+                                let cy = (l.cell as f64 + 0.5) * v;
+                                Some((h, cy - a.pose.y_m, l.radius_m, s.nectar, s.species, (l.cell - i64::from(s.site.y)) as f64 * v, s.profile_stage))
+                            })
+                            .min_by(|x, y| x.0.total_cmp(&y.0));
+                        let census = cubarium_voxel_fauna::flyer_fan_census(&sim.world().view(), &fv, &sim.fauna().view(), a, &[]);
+                        let mut classes = std::collections::BTreeMap::<String, u32>::new();
+                        if let Some(c) = &census {
+                            for r in &c.rays {
+                                *classes.entry(format!("{:?}", r.hit)).or_default() += 1;
+                            }
+                        }
+                        if let Some((h, dy, r, n, sp, above, stage)) = head {
+                            print!("head=[h={h:.2} dy={dy:.2} r={r:.2} nectar={n:.4} {sp:?} above_root={above:.2} stage={stage}] ");
+                        }
+                        print!("fan={classes:?} ");
+                    }
                     println!(
                         "trace t={} id={} {} water={:.2} site=({},{},{}) x={:.2} z={:.2} y={:.2} over={:.2} mode={:?} perch={:?} state={:?} held=({:.2},{:.2},{:.2}) lift={:.2} reserve={:.5} body={:.5} bloom_m={:.2}",
                         tick / u64::from(cubarium_voxel::TICK_HZ),
@@ -354,6 +407,9 @@ fn main() {
             println!("alive@{minute} {}", alive.join(" "));
             println!("film@{minute} {}", film_line(&sim));
             println!("fruit@{minute} {}", fruit_line(&sim));
+            if reach {
+                print_reach(&sim, &params, minute);
+            }
         }
         for a in sim.fauna().view().animals {
             if seen.insert(a.id) {
@@ -491,7 +547,7 @@ fn main() {
     }
     night.print(&sim);
     gut.print(&sim, &params, &born);
-    print_packs(&pack_events);
+    print_packs(&sim, &pack_events);
     let foods: Vec<String> = Food::ALL
         .iter()
         .map(|f| format!("{}={}", f.name(), l.bites_by_food[f.index()]))
@@ -779,8 +835,9 @@ fn bellwing_reserve(sim: &Sim, params: &cubarium_voxel_sim::params::Params) -> f
 }
 
 /// Per pack (repair 3's measure): chases started with their participant counts, chase
-/// ends by reason, and each feast's carrion eaten and why it ended.
-fn print_packs(events: &[cubarium_voxel_fauna::PackEvent]) {
+/// ends by reason, and each feast's carrion eaten and why it ended; a feast still open at
+/// the end is listed as `eaten:Open(carrion left)`.
+fn print_packs(sim: &Sim, events: &[cubarium_voxel_fauna::PackEvent]) {
     use cubarium_voxel_fauna::PackEvent;
     let mut packs: Vec<u64> = events
         .iter()
@@ -788,6 +845,7 @@ fn print_packs(events: &[cubarium_voxel_fauna::PackEvent]) {
             PackEvent::ChaseStart { pack, .. } | PackEvent::ChaseEnd { pack, .. } | PackEvent::FeastEnd { pack, .. } => *pack,
         })
         .collect();
+    packs.extend(sim.fauna().packs().iter().filter(|p| p.feast.is_some()).map(|p| p.id));
     packs.sort_unstable();
     packs.dedup();
     for p in packs {
@@ -807,6 +865,12 @@ fn print_packs(events: &[cubarium_voxel_fauna::PackEvent]) {
                 _ => {}
             }
         }
+        if let Some(open) = sim.fauna().packs().iter().find(|r| r.id == p) {
+            if let Some(fs) = open.feast {
+                let left = sim.flora().view().ground_at(fs).map_or(0.0, |g| g.carrion);
+                feasts.push(format!("{:.3}:Open({left:.3})", open.feast_eaten));
+            }
+        }
         let ends: Vec<String> = ends.iter().map(|(k, v)| format!("{k}={v}")).collect();
         println!(
             "pack{p}: chases={} participants=[{}] chase_ends=[{}] feasts=[{}]",
@@ -815,6 +879,236 @@ fn print_packs(events: &[cubarium_voxel_fauna::PackEvent]) {
             ends.join(" "),
             feasts.join(" ")
         );
+    }
+}
+
+/// `reach`: the air a bellwing can fly through — cells that are not solid, not under
+/// standing water, and no higher than `band` over the support face below them (§3.2's
+/// ceiling) — split into 6-connected components, a point body (so an upper bound on the
+/// real disc's reach). Prints, for the band and for a band without a ceiling: the
+/// bloomcrown flower heads holding nectar, those with a reachable cell beside or over
+/// them, and per bellwing its component's share of the heads; plus the head heights over
+/// the bellwings.
+fn print_reach(sim: &Sim, params: &cubarium_voxel_sim::params::Params, minute: u64) {
+    let view = sim.world().view();
+    let fv = sim.flora().view();
+    let c = view.config;
+    let v = c.voxel_m;
+    let (w, d, h) = (c.width as usize, c.depth as usize, c.height as usize);
+    let idx = |x: usize, y: usize, z: usize| (z * h + y) * w + x;
+    let bw = Founder::Bellwing;
+    let band = params.fauna.founder(bw).flight.map_or(2.5, |f| f.band_max_m);
+    // The flower heads: (cells of the head disc's row, the stand).
+    let heads: Vec<Vec<(usize, usize, usize)>> = fv
+        .stands
+        .iter()
+        .filter(|s| s.nectar > 0.0)
+        .filter_map(|s| {
+            let l = fv.profile_layers(s).into_iter().filter(|l| l.kind.bears_foliage()).max_by_key(|l| l.cell)?;
+            let span = l.radius_v.floor() as i64;
+            let mut cells = Vec::new();
+            for dz in -span..=span {
+                for dx in -span..=span {
+                    if ((dx * dx + dz * dz) as f64) > l.radius_v * l.radius_v {
+                        continue;
+                    }
+                    let z = i64::from(s.site.z) + dz;
+                    if z < 0 || z >= d as i64 || l.cell < 0 || l.cell >= h as i64 {
+                        continue;
+                    }
+                    let x = (i64::from(s.site.x) + dx).rem_euclid(w as i64) as usize;
+                    cells.push((x, l.cell as usize, z as usize));
+                }
+            }
+            Some(cells)
+        })
+        .collect();
+    let birds: Vec<(usize, usize, usize)> = sim
+        .fauna()
+        .view()
+        .animals
+        .iter()
+        .filter(|a| a.founder == Some(bw))
+        .map(|a| {
+            (
+                ((a.pose.x / v).floor() as i64).rem_euclid(w as i64) as usize,
+                ((a.pose.y_m / v).floor().max(0.0) as usize).min(h - 1),
+                ((a.pose.z / v).floor().max(0.0) as usize).min(d - 1),
+            )
+        })
+        .collect();
+    for (label, ceiling) in [("band", band), ("no_ceiling", f64::INFINITY)] {
+        let air = |x: usize, y: usize, z: usize| -> bool {
+            if y == 0 || view.is_solid(x as i64, y as u32, z as u32) {
+                return false;
+            }
+            let Some(s) = view.highest_support_in(x as i64, z as u32, 0, (y - 1) as u32) else {
+                return false;
+            };
+            let top = (f64::from(s) + 1.0) * v;
+            let water = view.standing_depth_m(x as i64, s, z as u32);
+            let base = y as f64 * v;
+            base <= top + ceiling + 1e-9 && base + 1e-9 >= top + water
+        };
+        let mut comp = vec![u32::MAX; w * h * d];
+        let mut next = 0u32;
+        let mut stack = Vec::new();
+        let mut sizes = Vec::new();
+        for z in 0..d {
+            for y in 0..h {
+                for x in 0..w {
+                    if comp[idx(x, y, z)] != u32::MAX || !air(x, y, z) {
+                        continue;
+                    }
+                    comp[idx(x, y, z)] = next;
+                    stack.push((x, y, z));
+                    let mut n = 0u64;
+                    while let Some((x, y, z)) = stack.pop() {
+                        n += 1;
+                        let mut nb = vec![((x + 1) % w, y, z), ((x + w - 1) % w, y, z)];
+                        if y + 1 < h {
+                            nb.push((x, y + 1, z));
+                        }
+                        if y > 0 {
+                            nb.push((x, y - 1, z));
+                        }
+                        if z + 1 < d {
+                            nb.push((x, y, z + 1));
+                        }
+                        if z > 0 {
+                            nb.push((x, y, z - 1));
+                        }
+                        for (a, b, cc) in nb {
+                            if comp[idx(a, b, cc)] == u32::MAX && air(a, b, cc) {
+                                comp[idx(a, b, cc)] = next;
+                                stack.push((a, b, cc));
+                            }
+                        }
+                    }
+                    sizes.push(n);
+                    next += 1;
+                }
+            }
+        }
+        // Each head's components: any air cell in the head's row band (one row under to
+        // two over) within one cell of its disc.
+        let head_comps: Vec<Vec<u32>> = heads
+            .iter()
+            .map(|cells| {
+                let mut out = Vec::new();
+                for &(x, y, z) in cells {
+                    for dy in -1i64..=2 {
+                        for dz in -1i64..=1 {
+                            for dx in -1i64..=1 {
+                                let (yy, zz) = (y as i64 + dy, z as i64 + dz);
+                                if yy < 0 || yy >= h as i64 || zz < 0 || zz >= d as i64 {
+                                    continue;
+                                }
+                                let xx = (x as i64 + dx).rem_euclid(w as i64) as usize;
+                                let k = comp[idx(xx, yy as usize, zz as usize)];
+                                if k != u32::MAX && !out.contains(&k) {
+                                    out.push(k);
+                                }
+                            }
+                        }
+                    }
+                }
+                out
+            })
+            .collect();
+        let per_bird: Vec<String> = birds
+            .iter()
+            .map(|&(x, y, z)| {
+                // The bird's cell, or the nearest air cell above it.
+                let k = (y..h).map(|yy| comp[idx(x, yy, z)]).find(|&k| k != u32::MAX);
+                match k {
+                    Some(k) => format!(
+                        "{}/{}@{}",
+                        head_comps.iter().filter(|hc| hc.contains(&k)).count(),
+                        heads.len(),
+                        sizes[k as usize]
+                    ),
+                    None => "-".into(),
+                }
+            })
+            .collect();
+        let reachable_any = head_comps
+            .iter()
+            .filter(|hc| hc.iter().any(|k| birds.iter().any(|&(x, y, z)| (y..h).map(|yy| comp[idx(x, yy, z)]).find(|&q| q != u32::MAX) == Some(*k))))
+            .count();
+        println!(
+            "reach@{minute} {label} heads={} reachable_by_some_bellwing={} per_bellwing(heads/total@cells)=[{}]",
+            heads.len(),
+            reachable_any,
+            per_bird.join(" ")
+        );
+    }
+}
+
+/// `packtrace=S`: each pack's target and feast, and each member's state.
+fn print_pack_trace(sim: &Sim, tick: u64) {
+    let f = sim.fauna();
+    let fv = sim.flora().view();
+    let v = sim.world().config().voxel_m;
+    let ring = f64::from(sim.world().config().width) * v;
+    let dist = |a: &cubarium_voxel_fauna::Animal, s: cubarium_voxel_flora::Site| {
+        let dx = ((f64::from(s.x) + 0.5) * v - a.pose.x).rem_euclid(ring);
+        let dx = dx.min(ring - dx);
+        let dz = (f64::from(s.z) + 0.5) * v - a.pose.z;
+        (dx * dx + dz * dz).sqrt()
+    };
+    let t = tick / u64::from(cubarium_voxel::TICK_HZ);
+    for p in f.packs() {
+        let feast = p.feast.map(|s| {
+            let g = fv.ground_at(s);
+            format!(
+                "({},{},{}) carrion={:.5} carcass={}",
+                s.x,
+                s.y,
+                s.z,
+                g.map_or(0.0, |g| g.carrion),
+                g.is_some_and(|g| g.carcass.is_some())
+            )
+        });
+        let target = p.target.and_then(|id| f.view().animal(id).copied());
+        println!(
+            "packtrace t={t} pack{} target={:?} {} since={}s target_site={:?} feast={} eaten={:.4} abandoned={:?}",
+            p.id,
+            p.target,
+            target.map_or(String::new(), |o| format!(
+                "{} site=({},{},{}) mode={:?} state={:?}",
+                o.founder.map_or("-", |f| f.name()),
+                o.site.x,
+                o.site.y,
+                o.site.z,
+                o.mobility.mode,
+                o.state
+            )),
+            tick.saturating_sub(p.chase_since_tick) / u64::from(cubarium_voxel::TICK_HZ),
+            p.target_site.map(|s| (s.x, s.y, s.z)),
+            feast.unwrap_or_else(|| "-".into()),
+            p.feast_eaten,
+            p.abandoned,
+        );
+        for a in f.view().animals.iter().filter(|a| a.pack.is_some_and(|m| m.pack == p.id)) {
+            let pup = a.pack.is_some_and(|m| m.pup);
+            println!(
+                "  member id={} pup={pup} site=({},{},{}) state={:?} eating={} emergency={} reserve={:.4} held=({:.2},{:.2},{:.2}) d_feast={} d_target={}",
+                a.id,
+                a.site.x,
+                a.site.y,
+                a.site.z,
+                a.state,
+                a.eating,
+                a.emergency,
+                a.reserve,
+                a.founder_state.held.forward,
+                a.founder_state.held.turn,
+                a.founder_state.held.feed,
+                p.feast.map_or("-".into(), |s| format!("{:.2}", dist(a, s))),
+                target.map_or("-".into(), |o| format!("{:.2}", dist(a, o.site))),
+            );
+        }
     }
 }
 

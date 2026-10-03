@@ -991,6 +991,8 @@ impl Controller for FruitForager {
 /// - a bloom in the fan: turn toward the sector with the most, fly at it, and come down
 ///   when it is near;
 /// - nothing in sight: a correlated wander at its search height within the band;
+/// - blocked: climb while there is room to rise (under the band's top, open overhead),
+///   else turn away;
 /// - a downpour: keep moving while the sky is open overhead, stop over cover (the body
 ///   is brought down regardless); at night the body roosts by itself.
 pub struct HoverSip {
@@ -1014,6 +1016,9 @@ pub struct HoverSip {
 
 /// Ticks between the hover-sip teacher's decisions: the walkers' controller period.
 const HOVER_SIP_REPLAN: u32 = 5;
+
+/// `Self.altitude` within this of 1 is at the band's top: a float tolerance, not a knob.
+const BAND_TOP_TOLERANCE: f64 = 1e-3;
 
 impl HoverSip {
     pub fn with_config(cfg: TeacherConfig) -> HoverSip {
@@ -1101,9 +1106,19 @@ impl Controller for HoverSip {
             let lift = if overhead < cfg.bellwing_roost_ceiling { 1.0 } else { -1.0 };
             return self.act(0.0, 0.0, 0.0, lift);
         }
-        // Blocked (a wall, the ceiling over lower ground): turn away and climb a little.
+        // Blocked by a wall with room to rise — under the band's top and open overhead —
+        // climb it, pressing on: a step taller than its search height is no wall to a
+        // flyer whose band clears it (bellwing-finding item 1: turning away from every
+        // one held the bellwings to the low strip, under flowers on the terraces).
+        let blocked = delivery < cfg.motor_refused;
+        if blocked && altitude < 1.0 - BAND_TOP_TOLERANCE && overhead >= cfg.bellwing_roost_ceiling {
+            self.escape = 0;
+            return self.act(cfg.bellwing_wander_forward, 0.0, 0.0, 1.0);
+        }
+        // Blocked with no room to rise (the band's top, cover overhead, the strip's
+        // edge): turn away, holding its height.
         let side = self.wander.side();
-        if let Some((forward, turn)) = escape(&cfg, &mut self.escape, delivery < cfg.motor_refused, side) {
+        if let Some((forward, turn)) = escape(&cfg, &mut self.escape, blocked, side) {
             self.wander.interrupt(&cfg);
             return self.act(forward, turn, 0.0, hold(altitude));
         }

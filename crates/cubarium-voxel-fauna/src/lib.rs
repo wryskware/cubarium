@@ -1006,8 +1006,9 @@ pub struct PackRecord {
     /// The target's face when last seen: where its carcass lies if it was killed.
     #[serde(default)]
     pub target_site: Option<Site>,
-    /// **The pack's carcass**: the face of a kill it is eating, until the carrion there is
-    /// gone. Pups eat at it too when it is within [`Pack::den_radius_m`] of the den.
+    /// **The pack's carcass**: the face of a kill it is eating, until the carcass there is
+    /// gone (no carrion, or the plant layer's carcass record cleared at its
+    /// `carcass_gone_fraction`). Pups eat at it too when it is within [`Pack::den_radius_m`] of the den.
     #[serde(default)]
     pub feast: Option<Site>,
     /// Carrion the pack's members have eaten at its current feast, organic (the minimal
@@ -2886,7 +2887,7 @@ pub enum ChaseEnd {
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FeastEnd {
-    /// Its carrion was gone (eaten or decayed).
+    /// Its carcass was gone: eaten or decayed to the plant layer's `carcass_gone_fraction`.
     Emptied,
     /// A new kill elsewhere became the pack's feast.
     Replaced,

@@ -1267,6 +1267,19 @@ fn pack_scene(at: &[(f64, f64, bool)], prey: (f64, f64)) -> (World, Flora, Fauna
     (world, flora, fauna, adults, pid)
 }
 
+/// A kill's remains on `site`: `organic` of carrion and the carcass record a body's
+/// death lays with it.
+fn lay_kill(flora: &mut Flora, site: Site, organic: f64) {
+    assert!(flora.deposit(
+        site,
+        Deposit { kind: DepositKind::Carrion, organic, mineral: 0.1 * organic, energy: 2.0 * organic }
+    ));
+    assert!(flora.lay_carcass(
+        site,
+        cubarium_voxel_flora::Carcass { lineage: Founder::Browser.index() as u8, heading_rad: 0.0, organic }
+    ));
+}
+
 /// **One participant set** (repair 3 item 5): the nearest adult to the prey is fed; the
 /// two that want food are the participants. The driver is the nearest participant, which
 /// heads straight at the prey, and the body window counts the participants only.
@@ -1301,16 +1314,91 @@ fn a_hungry_pack_at_its_feast_starts_no_new_chase() {
         pack_scene(&[(2.0, 1.5, true), (2.0, 2.3, true)], (3.6, 1.5));
     let pack = fauna.packs()[0].id;
     let feast = Site { x: 8, y: SURFACE_Y, z: 6 };
-    assert!(flora.deposit(
-        feast,
-        Deposit { kind: DepositKind::Carrion, organic: 2.0, mineral: 0.1 * 2.0, energy: 4.0 }
-    ));
+    lay_kill(&mut flora, feast, 2.0);
     fauna.pack_mut(pack).expect("the pack").feast = Some(feast);
     for _ in 0..60 {
         fauna.step_with(&world, &mut flora, 1);
     }
     assert_eq!(fauna.ledger.pack_chases, 0, "no new chase while the feast lasts");
     let _ = adults;
+}
+
+/// **The pack eats its kill** (`design/handoffs/bellwing-finding-2026-10-03.md` item 2):
+/// two hungry adults a few body lengths from their feast, one behind the other so the rear
+/// one sees its packmate close ahead (its own heuristic then stands with `feed` held, as
+/// it does stalking a body), both walk to the carcass and eat there, and the pack's
+/// feast books what they ate.
+#[test]
+fn a_hungry_pack_walks_to_its_feast_and_eats_it() {
+    let (world, mut flora, mut fauna, adults, _prey) =
+        pack_scene(&[(1.2, 1.6, true), (1.9, 1.6, true)], (9.0, 2.6));
+    let pack = fauna.packs()[0].id;
+    // Centre (3.375, 1.625): 2.2 m and 1.5 m ahead of the two.
+    let feast = Site { x: 13, y: SURFACE_Y, z: 6 };
+    lay_kill(&mut flora, feast, 2.0);
+    fauna.pack_mut(pack).expect("the pack").feast = Some(feast);
+    let before: Vec<f64> = adults.iter().map(|&id| animal(&fauna, id).stomach.total().organic).collect();
+    for _ in 0..400 {
+        fauna.step_with(&world, &mut flora, 1);
+    }
+    for (&id, s0) in adults.iter().zip(before) {
+        let s = animal(&fauna, id).stomach.total().organic;
+        assert!(s > s0 + 1e-9, "adult {id} ate at the feast: stomach {s0} -> {s}");
+    }
+    let eaten = fauna.pack(pack).expect("the pack").feast_eaten;
+    assert!(eaten > 0.0, "the feast books what the pack ate: {eaten}");
+}
+
+/// **A kill on a low step is eaten** (bellwing-finding item 2, seed 3): the carcass lies on
+/// a face one voxel above the face a hungry adult stands on, its centre within the old
+/// 0.25 m stop of the carcass's column. A mouth takes a pool at its own standing face, so
+/// the adult must step onto the carcass's face, not stop short of it.
+#[test]
+fn a_hungry_pack_steps_up_onto_a_feast_one_voxel_higher() {
+    let (mut world, mut flora, mut fauna, adults, _prey) = pack_scene(&[(3.18, 1.625, true)], (9.0, 2.6));
+    world.apply(cubarium_voxel::Command::SetMaterial {
+        x: 13,
+        y: SURFACE_Y + 1,
+        z: 6,
+        material: cubarium_voxel::Material::Rock,
+    });
+    let pack = fauna.packs()[0].id;
+    let feast = Site { x: 13, y: SURFACE_Y + 1, z: 6 };
+    lay_kill(&mut flora, feast, 2.0);
+    fauna.pack_mut(pack).expect("the pack").feast = Some(feast);
+    let id = adults[0];
+    for _ in 0..400 {
+        fauna.step_with(&world, &mut flora, 1);
+    }
+    let s = animal(&fauna, id).stomach.total().organic;
+    assert!(s > 1e-9, "the adult ate at the raised feast (it stands on {:?})", animal(&fauna, id).site);
+}
+
+/// **A spent carcass ends the feast** (bellwing-finding item 2): a bite diminishes with
+/// the stock (`bite_half_stock`), so eating never takes carrion to zero, and a feast held
+/// "while it has carrion" lasted for good — a hungry member nibbling dust at it and the
+/// pack never hunting again (one chase per world, r3 and the branch). A feast whose
+/// carcass record is gone (`carcass_gone_fraction` of the body left) ends as `Emptied`,
+/// and a hungry pack with prey in sight takes a target.
+#[test]
+fn a_spent_carcass_ends_the_feast_and_the_pack_hunts_again() {
+    let (world, mut flora, mut fauna, _adults, _prey) =
+        pack_scene(&[(2.0, 1.5, true), (2.0, 2.3, true)], (3.6, 1.5));
+    let pack = fauna.packs()[0].id;
+    let feast = Site { x: 8, y: SURFACE_Y, z: 6 };
+    // Dust: carrion left, the carcass record already cleared by the plant layer.
+    assert!(flora.deposit(
+        feast,
+        Deposit { kind: DepositKind::Carrion, organic: 1e-4, mineral: 1e-5, energy: 2e-4 }
+    ));
+    fauna.pack_mut(pack).expect("the pack").feast = Some(feast);
+    let set = step_until(&mut fauna, &world, &mut flora, 60, |f| f.ledger.pack_chases > 0);
+    let events = fauna.take_pack_events();
+    assert!(
+        events.iter().any(|e| matches!(e, crate::PackEvent::FeastEnd { why: crate::FeastEnd::Emptied, .. })),
+        "the spent feast ends as Emptied: {events:?}"
+    );
+    assert!(set.is_some(), "the hungry pack hunts again");
 }
 
 /// **The reserve fallback is the old transfer** (repair 3 item 6): a pup whose stomach is
