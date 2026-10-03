@@ -245,11 +245,16 @@ fn ensure_wheel(flora: &mut Flora) {
     }
     let mut wheel = vec![Vec::new(); period as usize];
     for g in &flora.ground {
-        if !g.seeds.is_empty() {
+        if banked(g) {
             wheel[check_phase(g.site, period) as usize].push(g.site);
         }
     }
     flora.bank_wheel = wheel;
+}
+
+/// Whether a site's bank holds anything to check: stand seed or latticevine seed.
+fn banked(g: &Ground) -> bool {
+    !g.seeds.is_empty() || g.vine_seeds.is_some()
 }
 
 /// Put `site` on the wheel: a fixture that banks seeds by hand, or seeds an animal voids
@@ -299,7 +304,7 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
     let mut due: Vec<usize> = Vec::with_capacity(due_sites.len());
     for site in due_sites {
         if let Ok(gi) = ground.binary_search_by_key(&site, |g| g.site)
-            && !ground[gi].seeds.is_empty()
+            && banked(&ground[gi])
         {
             due.push(gi);
         }
@@ -328,9 +333,34 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
             ledger,
         );
     }
+    // Latticevine seed (roster mechanics fix 3), by the stand seeds' rule: at its check a
+    // lot past its dormancy falls to litter, else it comes up where a vine can root.
+    let vine_due: Vec<Site> = due
+        .iter()
+        .filter(|&&gi| ground[gi].vine_seeds.is_some())
+        .map(|&gi| ground[gi].site)
+        .collect();
+    let (vc_age, vc_e) = (config.latticevine.seed_max_age_s, config.latticevine.energy_density);
+    for &site in &vine_due {
+        let Ok(gi) = ground.binary_search_by_key(&site, |g| g.site) else {
+            continue;
+        };
+        let g = &mut ground[gi];
+        let Some(lot) = g.vine_seeds else {
+            continue;
+        };
+        if tick.saturating_sub(lot.landed_tick) as f64 * DT > vc_age {
+            g.vine_seeds = None;
+            add_litter_cap(config.litter_energy_cap, g, lot.organic, lot.mineral, vc_e * lot.organic, ledger);
+        }
+    }
+    for site in vine_due {
+        flora.germinate_vine_seed(world, site);
+    }
+    let Flora { ground, bank_wheel, .. } = flora;
     let bucket = &mut bank_wheel[slot];
     for &gi in &due {
-        if !ground[gi].seeds.is_empty() {
+        if banked(&ground[gi]) {
             bucket.push(ground[gi].site);
         }
     }

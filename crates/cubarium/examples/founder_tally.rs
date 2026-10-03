@@ -211,6 +211,25 @@ fn main() {
                 }
             }
         }
+        if trace.is_some() {
+            // Every tick a body is under water deeper than it drowns in: the drown count.
+            let wv = sim.world().view();
+            for a in sim.fauna().view().animals.iter().filter(|a| a.mobility.submerged_ticks > 0) {
+                println!(
+                    "submerged tick={tick} id={} {} n={} water={:.2} site=({},{},{}) z={:.2} climb={:?} mode={:?}",
+                    a.id,
+                    a.founder.map_or("-", |f| f.name()),
+                    a.mobility.submerged_ticks,
+                    wv.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z),
+                    a.site.x,
+                    a.site.y,
+                    a.site.z,
+                    a.pose.z,
+                    a.mobility.climb,
+                    a.mobility.mode,
+                );
+            }
+        }
         if let Some(every) = trace {
             if tick % (every * u64::from(cubarium_voxel::TICK_HZ)) == 0 {
                 let fv = sim.flora().view();

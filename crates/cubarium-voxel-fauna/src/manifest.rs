@@ -415,6 +415,10 @@ pub const SELF_REFERENCE_RULE: &str = "self_refs_x_body_mass_scale";
 /// same share of the body's need at any mass.
 pub const TASTE_REFERENCE_RULE: &str = "taste_ref_m_emit_x_body_mass_scale";
 
+/// A film eater's taste reference (roster mechanics, the coordinator's item 6): one
+/// site's film capacity, `film_capacity_per_m2 × cell area`, on the world's own cell.
+pub const TASTE_REFERENCE_FILM_RULE: &str = "taste_ref_film_capacity_x_cell_area";
+
 // ---------------------------------------------------------------- static layout
 
 const SELF_CHANNELS: [&str; 8] = [
@@ -1117,6 +1121,9 @@ impl Manifest {
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
             taste_reference: a.taste_ref,
+            // Its taste reads film against one site's film capacity on the world's own
+            // cell (`FounderPhysiology::taste_reference_on`), not `M_EMIT × mass`.
+            taste_reference_rule: TASTE_REFERENCE_FILM_RULE,
             ..Manifest::blind()
         }
     }

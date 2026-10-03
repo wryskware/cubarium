@@ -821,6 +821,14 @@ fn controllers(
         // — turns away from a seen threat within 3 m, or from tremor, and resumes after.
         // Only while a hunter is in the world: a teacher in a world with none behaves as
         // it always did.
+        // A glider's fruit search (roster mechanics fix 4): hungry on the ground with no
+        // fruit at its mouth, its heuristic gives way to a walk to the nearest fruiting
+        // stand in reach. Flight from a threat and the roost come after it and win.
+        if driven && fauna.controllers.flees(id) && fauna.config.founder(founder).glider.is_some() {
+            if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv) {
+                actions = go;
+            }
+        }
         if driven && hunters_here && fauna.controllers.flees(id) {
             if let Some(flee) = flee(fauna, i, view, predation_occupancy.as_ref()) {
                 actions = flee;
@@ -833,6 +841,15 @@ fn controllers(
         if driven && fauna.controllers.flees(id) && fauna.config.founder(founder).glider.is_some() {
             if let Some(roost) = glider::roost_reflex(fauna, i, view, &fv, sky) {
                 actions = roost;
+            }
+        }
+        // The shallows reflex (roster mechanics fix 2): a body in water deeper than it wades
+        // heads for the nearest face it wades, over everything its heuristic asked.
+        if driven && fauna.controllers.flees(id) {
+            if let Some(out) = shallows_reflex(fauna, i, view) {
+                actions = out;
+                lure = 0.0;
+                lift = 0.0;
             }
         }
         // R3: the lanternjaw's carcass yield (its heuristic only), and the chorister's
@@ -3002,6 +3019,60 @@ fn water_over_feet(view: &VoxelView<'_>, a: &Animal) -> f64 {
         Some(c) if c.ascending => depth(c.from) - c.progress_m,
         Some(c) => depth(c.to) - (c.rise_m - c.progress_m),
     }
+}
+
+/// **The shallows reflex** (roster mechanics fix 2): a walker on the ground (not aquatic)
+/// standing in water deeper than it wades — put down in it, the water rose round it, or a
+/// starving body shrank under the water it stood in — walks to the nearest support face
+/// within [`crate::LifeConfig::shallows_search_m`] (horizontally, `x` wrapped) whose water
+/// it wades, at most its step up above its own face. A heuristic world query, not a sense:
+/// read by this reflex only, never an observation. `None` when it is not in too-deep water
+/// or no such face is in reach.
+fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    if phys.aquatic || a.mobility.mode != crate::MobilityMode::Ground || a.attached.is_some() {
+        return None;
+    }
+    let wade = phys.wade_depth_m(&phys.body_at(a.body));
+    let here = view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z);
+    if here <= wade {
+        return None;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let reach = fauna.config.life.shallows_search_m;
+    let k = (reach / v).ceil() as i64;
+    let up = (phys.step_up_m / v).floor().max(0.0) as u32;
+    let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
+    let ring = f64::from(c.width) * v;
+    let top = (a.site.y + up).min(c.height.saturating_sub(1));
+    let mut best: Option<(f64, f64, f64)> = None;
+    for dz in -k..=k {
+        let z = hz + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            let x = (hx + dx).rem_euclid(i64::from(c.width));
+            let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
+                continue;
+            };
+            if view.water_depth_m(x, y, z as u32) > wade {
+                continue;
+            }
+            let tx = (x as f64 + 0.5) * v;
+            let tz = (z as f64 + 0.5) * v;
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if d <= reach && best.is_none_or(|(b, _, _)| d < b) {
+                best = Some((d, ddx, ddz));
+            }
+        }
+    }
+    let (_, dx, dz) = best?;
+    Some(glider::walk_toward(a, dx, dz, 0.0))
 }
 
 /// Step 7: starvation, drowning and old age, and the carrion they leave.

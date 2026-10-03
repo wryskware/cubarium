@@ -67,7 +67,7 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 /// The latticevine face cover (D15 Revision 2): see [`cover`].
 pub use cover::{
     Cover, CoveredFace, Face, FaceDir, FaceDraw, SpurPhase, Vine, VineConfig, VineId, VineSeed,
-    face_eligible, face_light,
+    face_eligible, face_light, vine_seed_package,
 };
 
 pub use layers::{
@@ -554,6 +554,22 @@ pub struct Ground {
     pub film_mineral: f64,
     /// The energy held in the film, respired as heat at the stock's current density.
     pub film_energy: f64,
+    /// **Latticevine seeds** voided here by an animal (roster mechanics fix 3): the vine's
+    /// seed bank on this face, beside the stands' [`Ground::seeds`]. Tested at the site's
+    /// bank check by the lanternberry's rule — one whole seed and a site it can establish
+    /// on — and founds a vine there ([`VineSeedLot`]).
+    pub vine_seeds: Option<VineSeedLot>,
+}
+
+/// Latticevine seed on one face (roster mechanics fix 3): organic matter and the mineral
+/// that came with it, banked by [`Flora::deposit_vine_seeds`]. Its energy is the vine's
+/// `energy_density` times its organic matter. Its age runs from the first landing, a bin
+/// that later landings join without moving it, as a [`SeedCohort`]'s does.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VineSeedLot {
+    pub organic: f64,
+    pub mineral: f64,
+    pub landed_tick: u64,
 }
 
 impl Ground {
@@ -588,7 +604,13 @@ impl Ground {
             film: 0.0,
             film_mineral: 0.0,
             film_energy: 0.0,
+            vine_seeds: None,
         }
+    }
+
+    /// The latticevine seed banked here, organic matter.
+    pub fn vine_seed_organic(&self) -> f64 {
+        self.vine_seeds.map_or(0.0, |l| l.organic)
     }
 
     /// The species whose D5 seed mark this site shows at `tick`, if any ("draw only recent
@@ -3674,6 +3696,7 @@ impl<'a> FloraView<'a> {
                         + g.dead_wood
                         + g.carrion
                         + g.film
+                        + g.vine_seed_organic()
                         + g.seeds.iter().map(|c| c.organic).sum::<f64>()
                 })
                 .sum::<f64>()
@@ -3692,6 +3715,7 @@ impl<'a> FloraView<'a> {
                         + g.dead_wood_mineral
                         + g.carrion_mineral
                         + g.film_mineral
+                        + g.vine_seeds.map_or(0.0, |l| l.mineral)
                         + g.seeds.iter().map(|c| c.mineral).sum::<f64>()
                 })
                 .sum::<f64>()
@@ -3884,6 +3908,7 @@ impl<'a> FloraView<'a> {
                         + g.dead_wood_energy
                         + g.carrion_energy
                         + g.film_energy
+                        + self.config.latticevine.energy_density * g.vine_seed_organic()
                         + g.seeds
                             .iter()
                             .map(|c| self.config.species(c.species).energy_density * c.organic)
@@ -4643,6 +4668,49 @@ impl Flora {
         if fresh {
             seeds::schedule(self, site);
         }
+        true
+    }
+
+    /// **Latticevine seeds voided by an animal** (roster mechanics fix 3): `organic` and
+    /// `mineral` of vine seed land in the vine seed bank of `site`, booked as
+    /// `deposited_*_in` with the energy the seed holds, the vine's `energy_density ·
+    /// organic`; any difference from the `energy` handed over leaves as heat, as
+    /// [`Flora::deposit_seeds`] books it. The site joins the bank's check wheel: at its
+    /// check a whole seed ([`vine_seed_package`]) on a site a vine can root on founds one.
+    /// Refused (`false`, booking nothing) when a number is not finite or negative, or the
+    /// organic matter is zero.
+    pub fn deposit_vine_seeds(&mut self, site: Site, organic: f64, mineral: f64, energy: f64) -> bool {
+        for v in [organic, mineral, energy] {
+            if !v.is_finite() || v < 0.0 {
+                return false;
+            }
+        }
+        if !(organic > 0.0) {
+            return false;
+        }
+        let gi = match self.ground.binary_search_by_key(&site, |g| g.site) {
+            Ok(i) => i,
+            Err(i) => {
+                self.ledger.seeded_mineral_in += self.config.initial_mineral;
+                self.ground
+                    .insert(i, Ground::new(site, self.config.initial_mineral));
+                i
+            }
+        };
+        let held = self.config.latticevine.energy_density * organic;
+        self.ledger.deposited_organic_in += organic;
+        self.ledger.deposited_mineral_in += mineral;
+        self.ledger.deposited_energy_in += energy;
+        self.ledger.heat_out += energy - held;
+        let tick = self.tick;
+        let lot = self.ground[gi].vine_seeds.get_or_insert(VineSeedLot {
+            organic: 0.0,
+            mineral: 0.0,
+            landed_tick: tick,
+        });
+        lot.organic += organic;
+        lot.mineral += mineral;
+        seeds::schedule(self, site);
         true
     }
 

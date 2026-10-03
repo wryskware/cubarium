@@ -209,7 +209,7 @@ fn founder_rows() -> Vec<Row> {
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
-        r("taste_reference", "organic units per site", Range::positive(), "food stock per site that tastes as a cue of 1 before saturation (absent: emit_reference x mass_scale)")
+        r("taste_reference", "organic units per site", Range::positive(), "food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale)")
             .optional().digest().prov("decision"),
         // The carnivore's table (`Hunter`): the lanternjaw's only, optional on the others.
         r("hunter.strike_power", "wound per hit", nonneg, "a hit adds power x (S_pred / S_prey) x (1 - armour)").optional(),
@@ -242,6 +242,7 @@ fn founder_rows() -> Vec<Row> {
         r("glider.glide_cost_factor", "x basal upkeep", nonneg, "a second gliding, upkeep included").optional().prov("decision"),
         r("glider.glide_min_height_m", "m", nonneg, "a glide starts only from this height over the landing surface").optional().prov("decision"),
         r("glider.roost_search_m", "m", nonneg, "at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this").optional(),
+        r("glider.fruit_search_m", "m", nonneg, "a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense)").optional(),
         // Gut seeds (`GutSeeds`, F3): the seedporter's only, optional on the others.
         r("gut_seeds.seeds_per_fruit_organic", "org-units per org-unit of fruit", fraction, "share of a fruit meal that is the source's seeds, carried in the gut").optional(),
         r("gut_seeds.gut_transit_s", "s", nonneg, "a meal's seeds are voided at the body's face this long after it").optional(),
@@ -353,6 +354,7 @@ fn knob_rows() -> Vec<Row> {
         l("lifespan_draw_span", "x median", nonneg, "width of the lifespan draw, in medians").search(0.0, 1.0).grade("C"),
         l("arriving_share_min", "fraction", fraction, "an arriving body keeps a uniform [this, 1) share of a draw").grade("N"),
         l("wall_friction", "fraction", fraction, "share of a walk's along-wall component a wall takes away (0 slides freely, 1 stops)").search(0.0, 1.0),
+        l("shallows_search_m", "m", nonneg, "a heuristic walker in water deeper than it wades heads for the nearest wadeable face within this (a world query, not a sense)"),
     ]);
 
     // `fauna.cue.*`.

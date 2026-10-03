@@ -821,6 +821,10 @@ pub struct VineConfig {
     /// `founder_spacing`, so the count holds. 0 turns it off. 3 m gives the 32 m-wide
     /// desktop terrarium room for about ten.
     pub founder_spread_m: f64,
+    /// **A banked vine seed's dormancy** (roster mechanics fix 3), seconds: latticevine
+    /// seed voided from a gut ([`crate::Flora::deposit_vine_seeds`]) older than this at
+    /// its site's bank check falls to the litter. A stand seed's `seed_max_age_s`; 8 h.
+    pub seed_max_age_s: f64,
 }
 
 impl Default for VineConfig {
@@ -888,6 +892,7 @@ impl Default for VineConfig {
             founder_reserve: 0.1,
             founder_spacing: 8,
             founder_spread_m: 3.0,
+            seed_max_age_s: 28_800.0,
         }
     }
 }
@@ -1747,7 +1752,106 @@ fn root_sister(
 
 // ------------------------------------------------------------------ the public verbs
 
+/// **One latticevine seed** (roster mechanics fix 3): the organic matter a seed needs to
+/// found a vine on one face — a runner and leaf up to `contest_threshold`, what a spread
+/// pays to cover a new face — the vine's counterpart of a stand seed's package
+/// (`alive_min / w_frac`).
+pub fn vine_seed_package(vc: &VineConfig) -> f64 {
+    vc.runner_mass + vc.contest_threshold * vc.leaf_mass
+}
+
 impl Flora {
+    /// **A banked vine seed comes up** (roster mechanics fix 3), at its site's bank check:
+    /// with at least one whole seed ([`vine_seed_package`]) banked on `site`, a soil
+    /// support face that holds no vine root, and a face beside it a vine can root on (a
+    /// wall foot, then a ledge lip: the founders' candidates, the first eligible and
+    /// unowned in a fixed order), the whole lot founds a new vine there — its runner, leaf
+    /// up to leafiness 1 and the rest as reserve. A transfer inside the plant layer, so
+    /// nothing is booked in; the lot's mineral goes to the site's pool (a vine holds
+    /// none). `false` leaves the lot banked.
+    pub(crate) fn germinate_vine_seed(&mut self, world: &World, site: Site) -> bool {
+        let view = world.view();
+        let c = view.config;
+        let Ok(gi) = self.ground.binary_search_by_key(&site, |g| g.site) else {
+            return false;
+        };
+        let Some(lot) = self.ground[gi].vine_seeds else {
+            return false;
+        };
+        let vc = self.config.latticevine.clone();
+        if lot.organic < vine_seed_package(&vc) - 1e-15
+            || site.x >= c.width
+            || !view.is_support(i64::from(site.x), site.y, site.z)
+            || view.material_at(i64::from(site.x), site.y, site.z) != Material::Soil
+        {
+            return false;
+        }
+        self.cover.ensure_built();
+        if self.cover.rt.roots.contains_key(&site) {
+            return false;
+        }
+        let ok = |cover: &Cover, f: Face| face_eligible(&view, f) && !cover.rt.index.contains_key(&f) && root_adjacent(c, site, f);
+        let mut first = None;
+        for d in FaceDir::SIDES {
+            let o = d.offset();
+            if let Some((wx, wy, wz)) = step_voxel(c, site.x, site.y + 1, site.z, (-o.0, -o.1, -o.2)) {
+                let f = Face::new(wx, wy, wz, d);
+                if ok(&self.cover, f) {
+                    first = Some(f);
+                    break;
+                }
+            }
+        }
+        if first.is_none() {
+            first = FaceDir::SIDES
+                .into_iter()
+                .map(|d| Face::new(site.x, site.y, site.z, d))
+                .find(|&f| ok(&self.cover, f));
+        }
+        let Some(first) = first else {
+            return false;
+        };
+        let leafiness = ((lot.organic - vc.runner_mass) / vc.leaf_mass).clamp(0.0, 1.0);
+        let reserve = (lot.organic - vc.runner_mass - leafiness * vc.leaf_mass).max(0.0);
+        let cover = &mut self.cover;
+        let id = cover.next_vine;
+        cover.next_vine += 1;
+        let lineage = cover.next_lineage;
+        cover.next_lineage += 1;
+        cover.add_vine(Vine {
+            id,
+            lineage,
+            root: site,
+            root_face: first,
+            water: 0.0,
+            drank_m3: 0.0,
+            reserve,
+            dormant: false,
+            dry_s: 0.0,
+            wet_s: 0.0,
+            born_tick: self.tick,
+        });
+        cover.add_face(
+            CoveredFace {
+                face: first,
+                owner: id,
+                leafiness,
+                rooted: true,
+                spur: SpurPhase::Bare,
+                spur_timer_s: 0.0,
+                nectar: 0.0,
+                fruit: 0.0,
+            },
+            0,
+            None,
+        );
+        let g = &mut self.ground[gi];
+        g.mineral += lot.mineral;
+        g.vine_seeds = None;
+        self.ledger.vine_births += 1;
+        true
+    }
+
     /// Root a founder vine on `seed.root` covering `seed.first` at leafiness 1, rooted,
     /// with `seed.reserve`; its organic matter booked as `seeded_*_in`. Refused (`None`)
     /// when the root is not a support face or already holds a vine root, or `first` is not

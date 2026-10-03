@@ -357,6 +357,11 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
             // The seed bank goes out with the ground it sat on: a cohort whose support
             // face is gone has nowhere to germinate, and it is booked as removed rather
             // than dropped.
+            if let Some(l) = g.vine_seeds {
+                ledger.removed_organic_out += l.organic;
+                ledger.removed_mineral_out += l.mineral;
+                ledger.removed_energy_out += config.latticevine.energy_density * l.organic;
+            }
             for c in &g.seeds {
                 ledger.removed_organic_out += c.organic;
                 ledger.removed_mineral_out += c.mineral;

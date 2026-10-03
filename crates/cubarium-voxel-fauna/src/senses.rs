@@ -456,11 +456,7 @@ impl DetritusField {
                     };
                     let n = n as usize;
                     // Ground is one entry per site, so a face is a source once.
-                    self.emit[n] = if capacity > 0.0 {
-                        (g.film / capacity).min(1.0) * UPDATE_S
-                    } else {
-                        0.0
-                    };
+                    self.emit[n] = film_strength(g.film, capacity) * UPDATE_S;
                     self.seen[n] = epoch;
                     self.work.push(n as u32);
                 }
@@ -2631,4 +2627,21 @@ mod tests {
             "the other body ahead remains visible"
         );
     }
+}
+
+/// A film face's emission strength, per second of the cue's unit: its film against the
+/// film's capacity per face, `min(film / capacity, 1)`, so a full site emits 1 and a
+/// half-full one 0.5 (e3d2f559; the taste's rule, roster mechanics item 5).
+fn film_strength(film: f64, capacity: f64) -> f64 {
+    if capacity > 0.0 { (film / capacity).min(1.0) } else { 0.0 }
+}
+
+/// What the film on `site` emits into the `Chem(film)` field, per second before the
+/// field's transport ([`film_strength`] on the world's cell area), or `None` when the
+/// site holds no film.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn film_emission(view: &VoxelView<'_>, fv: &FloraView<'_>, site: Site) -> Option<f64> {
+    let g = fv.ground_at(site).filter(|g| g.film > 0.0)?;
+    let v = view.config.voxel_m;
+    Some(film_strength(g.film, fv.config.film_capacity_per_m2 * v * v))
 }

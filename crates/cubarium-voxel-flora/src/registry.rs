@@ -92,6 +92,7 @@ fn groups() -> Vec<Group> {
                 "flora.latticevine.flower_s",
                 "flora.latticevine.fruit_s",
                 "flora.latticevine.spent_s",
+                "flora.latticevine.seed_max_age_s",
             ],
         ),
     ]
@@ -276,6 +277,8 @@ fn vine_rows() -> Vec<Row> {
             .search(2.0, 24.0),
         r("founder_spread_m", "m of floor", nonneg, "floor distance founders keep while the walls allow it; the rest fill at founder_spacing; 0 off")
             .search(0.0, 8.0),
+        r("seed_max_age_s", "s", nonneg, "a banked latticevine seed (voided from a gut) older than this at its check falls to litter")
+            .evolve().log().grade("C"),
     ]
 }
 

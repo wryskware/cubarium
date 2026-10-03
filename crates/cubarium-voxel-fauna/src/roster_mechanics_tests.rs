@@ -171,6 +171,12 @@ fn hold(fauna: &mut Fauna, id: u64, forward: f64, turn: f64, feed: f64) {
     assert!(fauna.set_controller(id, Box::new(Scripted::new(vec![Actions { forward, turn, feed }]))));
 }
 
+/// Drive a body by its lineage's own heuristic (an introduced body has no controller).
+fn heuristic(fauna: &mut Fauna, id: u64, founder: Founder) {
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(founder, teachers)));
+}
+
 fn animal(fauna: &Fauna, id: u64) -> Animal {
     *fauna.view().animal(id).expect("the body is alive")
 }
@@ -216,12 +222,24 @@ fn crown_top(flora: &Flora, site: Site) -> f64 {
 // ------------------------------------------------------------------ 1–2. glides
 
 /// The glide fixture: a rock plateau over `x = 0..=9` topped at `y = 12` (3.25 m), a full
-/// lanternberry on it at `x = 7` (its crown top 4.5 m), and 1.5 m of water on the plain
-/// east of the plateau over `pond`. Returns the world, the plant layer and the stand.
-fn plateau_over_pond(pond: std::ops::RangeInclusive<i64>) -> (World, Flora, Site) {
+/// lanternberry on it at `x = 7` (its crown top 4.5 m), optionally a rock island over
+/// `island` topped at `y = 9` (2.5 m), and 1.5 m of water on the plain east of the
+/// plateau over `pond` wherever the island is not. Returns the world, the plant layer and
+/// the stand.
+fn plateau_over_pond(
+    pond: std::ops::RangeInclusive<i64>,
+    island: Option<std::ops::RangeInclusive<i64>>,
+) -> (World, Flora, Site) {
     let mut world = plain(96, 32, 8);
     rock(&mut world, 0..=9, 3..=12);
-    water(&mut world, pond, 6);
+    if let Some(island) = island.clone() {
+        rock(&mut world, island, 3..=9);
+    }
+    for x in pond {
+        if island.as_ref().is_none_or(|i| !i.contains(&x)) {
+            water(&mut world, x..=x, 6);
+        }
+    }
     let mut flora = Flora::new(FloraConfig::default());
     let site = full_stand(&mut flora, &world, Plant::Lanternberry, 7, 4);
     assert_eq!(site.y, 12, "fixture: the stand is on the plateau");
@@ -233,6 +251,10 @@ fn perched_facing_east(world: &World, flora: &Flora, site: Site) -> (Fauna, u64)
     let mut fauna = Fauna::new(FaunaConfig::default());
     let (x, z) = centre(site.x, site.z);
     let id = aloft(&mut fauna, world, x, z, crown_top(flora, site));
+    hold(&mut fauna, id, 0.0, 0.0, 0.0);
+    // An introduced glider's perch resolves on its first tick.
+    let mut flora = flora.clone();
+    fauna.step(world, &mut flora);
     hold(&mut fauna, id, 1.0, 0.0, 0.0);
     (fauna, id)
 }
@@ -246,7 +268,7 @@ fn perched_facing_east(world: &World, flora: &Flora, site: Site) -> (Fauna, u64)
 #[test]
 fn a_glide_with_only_deep_water_in_range_is_refused_and_a_dry_cell_in_range_is_landed_on() {
     // Only water in range.
-    let (world, mut flora, site) = plateau_over_pond(10..=80);
+    let (world, mut flora, site) = plateau_over_pond(10..=80, None);
     let (mut fauna, id) = perched_facing_east(&world, &flora, site);
     assert_eq!(animal(&fauna, id).mobility.mode, MobilityMode::Perched, "fixture: perched");
     for t in 0..200 {
@@ -257,8 +279,7 @@ fn a_glide_with_only_deep_water_in_range_is_refused_and_a_dry_cell_in_range_is_l
     assert_eq!(animal(&fauna, id).mobility.mode, MobilityMode::Perched, "it stays on its perch");
 
     // A dry island in range.
-    let (mut world, mut flora, site) = plateau_over_pond(10..=80);
-    rock(&mut world, 24..=40, 3..=9);
+    let (world, mut flora, site) = plateau_over_pond(10..=80, Some(24..=40));
     let (mut fauna, id) = perched_facing_east(&world, &flora, site);
     let mut glided = false;
     for _ in 0..400 {
@@ -277,14 +298,14 @@ fn a_glide_with_only_deep_water_in_range_is_refused_and_a_dry_cell_in_range_is_l
 }
 
 /// **Test 2. Only the end cell decides.** From the plateau's ground edge (`x = 9`, facing
-/// east), a glide starts out over 1.5 m of water (`x = 10..=25`) toward dry plain beyond
-/// it: it glides (the water below the take-off does not refuse it) and lands on the dry
+/// east), a glide starts out over 1.5 m of water (`x = 10..=15`; the glide is still above
+/// the water's surface when it clears the far shore) toward dry plain beyond it: it glides (the water below the take-off does not refuse it) and lands on the dry
 /// plain past the pond, where the water is no deeper than it wades.
 #[test]
 fn a_glide_across_a_pond_toward_dry_ground_lands_on_the_dry_ground() {
     let mut world = plain(96, 32, 8);
     rock(&mut world, 0..=9, 3..=12);
-    water(&mut world, 10..=25, 6);
+    water(&mut world, 10..=15, 6);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = on_ground(&mut fauna, &world, SP, 9, 4, EAST, StartingStores::FULL);
@@ -303,7 +324,7 @@ fn a_glide_across_a_pond_toward_dry_ground_lands_on_the_dry_ground() {
     assert!(glided, "it glides out over the pond");
     let a = animal(&fauna, id);
     assert_eq!(a.mobility.mode, MobilityMode::Ground, "it landed");
-    assert!(a.site.x > 25 && a.site.y == 2, "on the dry plain past the pond: {:?}", a.site);
+    assert!(a.site.x > 15 && a.site.y == 2, "on the dry plain past the pond: {:?}", a.site);
     assert!(depth_at(&world, a.site) <= wade(&fauna, id), "dry enough");
 }
 
@@ -355,6 +376,7 @@ fn a_loftstrider_in_deep_water_heads_for_the_shallows() {
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = on_ground(&mut fauna, &world, LS, 32, 12, 0.0, HUNGRY_ADULT);
+    heuristic(&mut fauna, id, LS);
     water(&mut world, 20..=44, 6);
     let wade_m = wade(&fauna, id);
     assert!(depth_at(&world, animal(&fauna, id).site) > wade_m, "fixture: in deep water");
@@ -480,6 +502,7 @@ fn a_hungry_seedporter_finds_a_fruiting_stand_6_m_away() {
         let mut fauna = Fauna::new(FaunaConfig::default());
         // Facing away from the stand.
         let id = on_ground(&mut fauna, &world, SP, cx, cz, a, HUNGRY_ADULT);
+        heuristic(&mut fauna, id, SP);
         let mut ate = false;
         for _ in 0..(120.0 / DT) as usize {
             fauna.step(&world, &mut flora);
