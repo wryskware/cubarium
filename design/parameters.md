@@ -1158,7 +1158,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1104 rows)
+**`fauna.*`** (1113 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1285,6 +1285,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.littershredder.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.littershredder.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.littershredder.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.littershredder.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.littershredder.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1395,6 +1396,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.frondgrazer.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.frondgrazer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.frondgrazer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.frondgrazer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.frondgrazer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1505,6 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.lanternjaw.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.lanternjaw.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.lanternjaw.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.lanternjaw.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.lanternjaw.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1615,6 +1618,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.capgnawer.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.capgnawer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.capgnawer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.capgnawer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.capgnawer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1725,6 +1729,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.loftstrider.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.loftstrider.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.loftstrider.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.loftstrider.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.loftstrider.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1835,6 +1840,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.ripple-snail.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.ripple-snail.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.ripple-snail.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.ripple-snail.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.ripple-snail.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1945,6 +1951,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.bellwing.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.bellwing.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.bellwing.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.bellwing.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.bellwing.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -2055,6 +2062,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.seedporter.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.seedporter.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.seedporter.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.seedporter.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.seedporter.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -2165,6 +2173,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.territory_radius_m` | 10.0 | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.chorister.pack.flank_offset_m` | 1.5 | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
 | `fauna.founders.chorister.pack.chase_give_up_s` | 20.0 | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.chorister.pack.route_reach_fraction` | 0.8 | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.chorister.pack.route_refresh_s` | 60.0 | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.chorister.pack.call_s` | 1.0 | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |

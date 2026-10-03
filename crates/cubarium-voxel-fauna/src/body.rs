@@ -531,6 +531,10 @@ pub struct Pack {
     /// placeholder: the terrain and its water change slowly). 60.
     #[serde(default = "pack_route_refresh_s")]
     pub route_refresh_s: f64,
+    /// A pack takes prey only within this share of what it covers in a chase on foot:
+    /// route distance at most `cruise × chase_give_up_s × route_reach_fraction`. 0.8.
+    #[serde(default = "pack_route_reach_fraction")]
+    pub route_reach_fraction: f64,
     /// ...or when a member's reserve falls under this fraction of its reserve cap. A
     /// placeholder.
     pub chase_reserve_floor: f64,
@@ -553,6 +557,10 @@ fn pack_route_refresh_s() -> f64 {
     Pack::CHORISTER.route_refresh_s
 }
 
+fn pack_route_reach_fraction() -> f64 {
+    Pack::CHORISTER.route_reach_fraction
+}
+
 impl Pack {
     /// The chorister's table (Brief R3).
     pub const CHORISTER: Pack = Pack {
@@ -570,6 +578,7 @@ impl Pack {
         flank_offset_m: 1.5,
         chase_give_up_s: 20.0,
         route_refresh_s: 60.0,
+        route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,
         call_s: 1.0,
         den_search_m: 8.0,

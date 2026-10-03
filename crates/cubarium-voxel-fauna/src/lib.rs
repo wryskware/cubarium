@@ -2847,16 +2847,21 @@ pub struct Fauna {
     /// voids.
     #[serde(skip)]
     pack_events: Vec<PackEvent>,
-    /// Per pack lineage ([`Founder::index`]): its walking route components by face
-    /// ([`encounter::route_component_index`]) and the tick they were built, refreshed
-    /// after [`Pack::route_refresh_s`]. Derived from the terrain, so not saved.
     /// The open air a flyer's egg site must reach ([`flight::OpenAir`]) and the tick it was
     /// built, refreshed after [`Flight::egg_air_refresh_s`]. Derived from the terrain, so
     /// not saved.
     #[serde(skip)]
     open_air: Option<(u64, std::sync::Arc<flight::OpenAir>)>,
+    /// Per pack lineage ([`Founder::index`]): its walking route graph
+    /// ([`encounter::RouteGraph`]) and the tick it was built, refreshed after
+    /// [`Pack::route_refresh_s`]. Derived from the terrain, so not saved.
     #[serde(skip)]
-    pack_routes: FxHashMap<usize, (u64, std::sync::Arc<FxHashMap<Site, usize>>)>,
+    pack_routes: FxHashMap<usize, (u64, std::sync::Arc<encounter::RouteGraph>)>,
+    /// Per pack id: the route field to its target's face (the graph it was walked on,
+    /// that face, the distances from it), recomputed when the graph is rebuilt or the
+    /// target changes face. Not saved.
+    #[serde(skip)]
+    pack_paths: FxHashMap<u64, PackPath>,
     /// The packs standing in the world (roster R3), by id.
     #[serde(default)]
     packs: Vec<PackRecord>,
@@ -2867,6 +2872,14 @@ pub struct Fauna {
 
 /// The most gut-seed void events [`Fauna`] keeps undrained.
 pub const SEED_VOID_LOG_MAX: usize = 65_536;
+
+/// A pack's cached route field to its target ([`Fauna::pack_path`]).
+#[derive(Clone, Debug)]
+pub(crate) struct PackPath {
+    graph: std::sync::Arc<encounter::RouteGraph>,
+    goal: usize,
+    field: std::sync::Arc<FxHashMap<usize, u32>>,
+}
 
 /// One pack hunt or feast event (the minimal gut's repair 3 measure); not world state.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2911,7 +2924,7 @@ impl Fauna {
         &mut self,
         view: &VoxelView<'_>,
         founder: Founder,
-    ) -> std::sync::Arc<FxHashMap<Site, usize>> {
+    ) -> std::sync::Arc<encounter::RouteGraph> {
         let phys = *self.config.founder(founder);
         let every = phys.pack.map_or(0.0, |p| p.route_refresh_s);
         let tick = self.tick;
@@ -2920,9 +2933,30 @@ impl Fauna {
                 return map.clone();
             }
         }
-        let map = std::sync::Arc::new(encounter::route_component_index(view, &phys));
+        let map = std::sync::Arc::new(encounter::RouteGraph::for_founder(view, &phys));
         self.pack_routes.insert(founder.index(), (tick, map.clone()));
         map
+    }
+
+    /// Pack `pack`'s route field to face `goal` on lineage `founder`'s graph, out to
+    /// `max_steps`: cached until the graph is rebuilt or the goal changes.
+    pub(crate) fn pack_path(
+        &mut self,
+        view: &VoxelView<'_>,
+        founder: Founder,
+        pack: u64,
+        goal: usize,
+        max_steps: u32,
+    ) -> (std::sync::Arc<encounter::RouteGraph>, std::sync::Arc<FxHashMap<usize, u32>>) {
+        let graph = self.pack_routes(view, founder);
+        if let Some(p) = self.pack_paths.get(&pack) {
+            if std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal {
+                return (graph, p.field.clone());
+            }
+        }
+        let field = std::sync::Arc::new(graph.distances(goal, max_steps));
+        self.pack_paths.insert(pack, PackPath { graph: graph.clone(), goal, field: field.clone() });
+        (graph, field)
     }
 
     /// The open air under `flight`'s band, rebuilt from `view` when older than its
@@ -2969,6 +3003,7 @@ impl Fauna {
             pack_events: Vec::new(),
             pack_routes: FxHashMap::default(),
             open_air: None,
+            pack_paths: FxHashMap::default(),
             packs: Vec::new(),
             next_pack: 0,
         })

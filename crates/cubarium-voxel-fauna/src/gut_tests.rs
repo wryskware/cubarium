@@ -1236,7 +1236,11 @@ fn attached_and_falling_bodies_stay_awake() {
 /// A pack of `n` adults under their heuristic on the clock-off plain, awake, and a
 /// grazer standing at `prey`; the adults at `at`, each `hungry` or fed.
 fn pack_scene(at: &[(f64, f64, bool)], prey: (f64, f64)) -> (World, Flora, Fauna, Vec<u64>, u64) {
-    let world = clock_off(25);
+    pack_scene_on(clock_off(25), at, prey)
+}
+
+/// [`pack_scene`] on a given world.
+fn pack_scene_on(world: World, at: &[(f64, f64, bool)], prey: (f64, f64)) -> (World, Flora, Fauna, Vec<u64>, u64) {
     let flora = Flora::new(FloraConfig::default());
     let mut c = FaunaConfig::default();
     c.founders[Founder::Chorister.index()].active = Activity::Always;
@@ -1438,6 +1442,60 @@ fn a_pack_never_targets_prey_on_a_ledge_it_cannot_climb() {
             assert!(set.is_some(), "the same grazer on the plain is taken");
         }
     }
+}
+
+/// A cliff the pack walks round: rock up to y = 6 (a 1 m riser, past the chorister's
+/// 0.6 m step) over columns 13..=40 at every `z`, with a stair of 0.25 m steps down at
+/// 41..=43; the hungry pack stands west of the cliff and its grazer on the cliff top 1.6 m
+/// ahead, about 10.5 m away on foot (west round the ring and up the stair).
+fn cliff_with_stair_scene() -> (World, Flora, Fauna, Vec<u64>, u64) {
+    let tall = plain_of_height(DayClock { mode: DayMode::Off, ..DayClock::default() }, 25, 16);
+    let (mut world, flora, mut fauna, adults, prey) =
+        pack_scene_on(tall, &[(2.0, 1.5, true), (2.0, 2.3, true)], (3.6, 1.5));
+    for z in 0..12u32 {
+        for (xs, top) in [(13..=40i64, SURFACE_Y + 4), (41..=41, SURFACE_Y + 3), (42..=42, SURFACE_Y + 2), (43..=43, SURFACE_Y + 1)] {
+            for x in xs {
+                for y in SURFACE_Y + 1..=top {
+                    world.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material: cubarium_voxel::Material::Rock });
+                }
+            }
+        }
+    }
+    let a = animal_mut(&mut fauna, prey);
+    a.site.y = SURFACE_Y + 4;
+    a.pose.y_m = f64::from(SURFACE_Y + 5) * 0.25;
+    (world, flora, fauna, adults, prey)
+}
+
+/// **A chase is within the pack's reach on foot** (bellwing3 item 1): the grazer on the
+/// cliff top is in the pack's walking route component (the stair), but with the reach
+/// cut to 0.1 of `cruise × chase_give_up_s` (about 2.8 m) its 10.5 m route is beyond it:
+/// never targeted.
+#[test]
+fn a_pack_skips_prey_whose_route_is_beyond_its_reach() {
+    let (world, mut flora, mut fauna, _adults, _prey) = cliff_with_stair_scene();
+    let c = Founder::Chorister.index();
+    fauna.config.founders[c].pack.as_mut().expect("a pack").route_reach_fraction = 0.1;
+    let pack = fauna.packs()[0].id;
+    let set = step_until(&mut fauna, &world, &mut flora, 60, |f| f.pack(pack).is_some_and(|p| p.target.is_some()));
+    assert!(set.is_none(), "the grazer 10.5 m away on foot is beyond a 2.8 m reach");
+}
+
+/// **A chase follows the route** (bellwing3 item 1): at the default reach the same grazer
+/// is taken, and the pack walks round and up the stair — not straight into the cliff —
+/// so within 20 s an adult stands on the cliff top (or the grazer is killed).
+#[test]
+fn a_pack_chases_along_the_route_not_into_the_cliff() {
+    let (world, mut flora, mut fauna, adults, _prey) = cliff_with_stair_scene();
+    let pack = fauna.packs()[0].id;
+    let set = step_until(&mut fauna, &world, &mut flora, 60, |f| f.pack(pack).is_some_and(|p| p.target.is_some()));
+    assert!(set.is_some(), "the grazer within reach on foot is taken");
+    let up = step_until(&mut fauna, &world, &mut flora, 400, |f| {
+        f.ledger.pack_chase_kills > 0
+            || adults.iter().any(|&id| f.view().animal(id).is_some_and(|a| a.site.y == SURFACE_Y + 4))
+    });
+    let at: Vec<_> = adults.iter().filter_map(|&id| fauna.view().animal(id).map(|a| (a.site, a.pose.x))).collect();
+    assert!(up.is_some(), "an adult reached the cliff top by the stair: {at:?}");
 }
 
 /// **The reserve fallback is the old transfer** (repair 3 item 6): a pup whose stomach is
