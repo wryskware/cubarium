@@ -123,7 +123,8 @@ fn bloomcrown_is_the_one_species_with_a_nectar_stock() {
 ///   the books close every tick.
 /// - The same stand, filled, then stepped 40 ticks under the midnight twin keeps its
 ///   nectar exactly: unvisited nectar stays, and night adds none.
-/// - A fresh stand at midnight makes none in 80 ticks.
+/// - A fresh stand at midnight makes at most `night_bloom_scale` of the rate in 80 ticks
+///   (night survival 1b), and none at a scale of 0.
 /// - A seedling (a twentieth of `wood_max`, still on its rosette profile) makes none at
 ///   noon: nectar is an adult's.
 #[test]
@@ -161,12 +162,27 @@ fn bloomcrown_nectar_refills_in_daylight_up_to_its_cap_and_not_at_night() {
         closes(&flora, &format!("night tick {t}"));
     }
 
-    let mut flora = Flora::new(config());
+    // Night survival 1b: at night a stand makes nectar at `night_bloom_scale` of the day
+    // rate out of its night budget, never more; at a scale of 0, none (the old rule).
+    let mut none = config();
+    none.bloomcrown.night_bloom_scale = 0.0;
+    let mut flora = Flora::new(none);
     let site = bloomcrown(&mut flora, &night, wood);
     for _ in 0..80 {
         flora.step(&mut night);
     }
-    assert_eq!(nectar(&flora, site), 0.0, "no nectar is made at night");
+    assert_eq!(nectar(&flora, site), 0.0, "no nectar is made at night at scale 0");
+    let mut flora = Flora::new(config());
+    let scale = flora.config().bloomcrown.night_bloom_scale;
+    let site = bloomcrown(&mut flora, &night, wood);
+    for _ in 0..80 {
+        flora.step(&mut night);
+    }
+    let n = nectar(&flora, site);
+    assert!(
+        n <= scale * RATE * 80.0 * cubarium_voxel_flora::DT + 1e-12,
+        "at night at most the night scale of the rate: {n}"
+    );
 
     let mut flora = Flora::new(config());
     let site = bloomcrown(&mut flora, &day, 0.05 * wood);

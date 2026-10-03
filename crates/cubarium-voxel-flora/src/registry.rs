@@ -189,6 +189,12 @@ fn species_rows() -> Vec<Row> {
         r("fruit_cap", "org-units per stand", nonneg, "the most fruit an adult stand holds").grade("N").prov("decision"),
         r("fruit_drop_s", "s", nonneg, "ripe fruit left uneaten this long falls to the litter at the stand's site").grade("N").prov("decision"),
         r("fruit_mineral_fraction", "fraction of organic", fraction, "mineral a unit of fruit carries (small, not zero)").grade("N").prov("decision"),
+        r("night_bloom_scale", "fraction of the day rate", fraction, "nectar and fruit made at night out of the night budget")
+            .search(0.0, 1.0).grade("N").prov("decision"),
+        r("night_floor", "fraction of reserve cap", fraction, "the reserve a stand keeps for dawn; the night budget spends only above it")
+            .search(0.0, 0.8).grade("N").prov("decision"),
+        r("night_min_s", "s", Range::at_least(1.0), "the night budget is spread over at least this long, so it stays bounded near dawn")
+            .search(60.0, 3600.0).log().grade("N").prov("numerics"),
         r("runner_reach", "voxels (not rescaled)", nonneg, "columns sideways a runner daughter may root from its parent")
             .search(1.0, 3.0),
         r("founder_per_m2", "founders per m2 of habitat", nonneg, "founding: stands per square metre of ground the species' own gates pass on")

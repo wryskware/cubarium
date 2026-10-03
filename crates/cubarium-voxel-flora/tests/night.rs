@@ -160,9 +160,10 @@ fn maintenance_goes_on_at_night() {
 }
 
 /// A bloomcrown below `donor_min` (so no propagule draws on its reserve), browsed below
-/// its reflush line, on the day clock `day`: its stocks before and after one tick.
-fn browsed_tick(world: &mut World) -> ((f64, f64), (f64, f64), f64) {
-    let mut flora = Flora::new(FloraConfig::default());
+/// its reflush line, on the day clock `day`, with the plant table `config`: its stocks
+/// before and after one tick.
+fn browsed_tick(world: &mut World, config: FloraConfig) -> ((f64, f64), (f64, f64), f64) {
+    let mut flora = Flora::new(config);
     let sc = flora.config().species(Species::Bloomcrown).clone();
     let wood = 0.5 * sc.donor_min;
     assert!(flora.apply(
@@ -188,15 +189,19 @@ fn browsed_tick(world: &mut World) -> ((f64, f64), (f64, f64), f64) {
     (before, (s.foliage, s.reserve), sc.maintenance * s.wood)
 }
 
-/// Reflushing a browsed stand out of its reserve builds leaves to earn with. At night
-/// they earn nothing and senesce before dawn, and the reserve they cost is the one the
-/// night's maintenance is paid from: a stand browsed low at dusk reflushed its reserve
-/// to nothing and starved before sunrise. At midnight the reserve pays maintenance only.
+/// Reflushing a browsed stand out of its reserve in the dark builds leaves that earn
+/// nothing before dawn, and the reserve they cost is the one the night's maintenance is
+/// paid from. Since the night budget (`design/ecology-timescales-2026-10-02.md` 1b) a
+/// stand may reflush at night only out of what lies above its maintenance to dawn and its
+/// dawn floor: with the floor at the whole cap there is nothing to spend, and at midnight
+/// the reserve pays maintenance only. (Before 1b the rule was "never in the dark".)
 #[test]
-fn a_browsed_stand_does_not_reflush_its_reserve_in_the_dark() {
+fn a_browsed_stand_at_its_dawn_floor_does_not_reflush_its_reserve_in_the_dark() {
     let mut w = world_on(clock(0.0));
     assert_eq!(w.life_daylight(), 0.0);
-    let ((p0, q0), (p1, q1), m) = browsed_tick(&mut w);
+    let mut config = FloraConfig::default();
+    config.species_mut(Species::Bloomcrown).night_floor = 1.0;
+    let ((p0, q0), (p1, q1), m) = browsed_tick(&mut w, config);
     assert!(p1 <= p0, "no leaves built at midnight: foliage {p0} -> {p1}");
     // Maintenance at most (the night is cooler than the mean, so the factor is <= ~1.5).
     let dt = cubarium_voxel_flora::DT;
@@ -212,6 +217,6 @@ fn a_browsed_stand_does_not_reflush_its_reserve_in_the_dark() {
 fn the_same_browsed_stand_reflushes_at_noon() {
     let mut w = world_on(clock(12.0));
     assert_eq!(w.life_daylight(), 1.0);
-    let ((p0, _), (p1, _), _) = browsed_tick(&mut w);
+    let ((p0, _), (p1, _), _) = browsed_tick(&mut w, FloraConfig::default());
     assert!(p1 > p0, "leaves rebuilt at noon: foliage {p0} -> {p1}");
 }

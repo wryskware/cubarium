@@ -44,6 +44,16 @@
 //! rate), strikes and hits, kills by prey lineage, litters and pups born, provisioning
 //! given and received, and lanternjaws displaced from carcasses (the yield).
 //!
+//! **Night survival** (brief `design/handoffs/night-survival-2026-10-02.md`): one `sleep:`
+//! line per lineage and phase (`day` while the world's life daylight is at least 0.5,
+//! `night` below) with the minutes asleep (summed over bodies, the sleep rest only, not a
+//! carnivore's satiated torpor), the sleep onsets and the mean reserve fraction at onset
+//! (`f0`, and its minimum), the wakes by cause (`alert`: a hit's alert running; `hunger`:
+//! at or past the lineage's `wake_hunger`; `other`: the phase turning, a wall, water, a den
+//! walk) and the mean reserve fraction at waking, and the deaths in that phase by cause.
+//! One `night_spend:` line per plant species: the night budget's reserve spent on the
+//! reflush (with its construction respiration), nectar and fruit, organic units.
+//!
 //! At t = 0 it reports the roster R1 check: the glowcap caps standing (count and stock)
 //! and the foliage standing in a loftstrider's mouth band over each stand's support face
 //! (the adult band, `mouth_floor..mouth_ceiling × height`).
@@ -166,9 +176,20 @@ fn main() {
     let mut sp_modes = [0u64; 4];
     let mut sp_asleep = 0u64;
     let mut voids: Vec<(f64, bool)> = Vec::new();
+    // Night survival readouts, per lineage and phase (0 day, 1 night).
+    let mut night = NightTally::default();
+    let mut prev_asleep: std::collections::HashMap<u64, bool> = sim
+        .fauna()
+        .view()
+        .animals
+        .iter()
+        .map(|a| (a.id, is_sleeping(a)))
+        .collect();
+    let mut prev_deaths = sim.fauna().view().ledger.deaths_by_founder_cause;
     let started = std::time::Instant::now();
     for tick in 1..=ticks {
         sim.step();
+        night.observe(&sim, &params, &mut prev_asleep, &mut prev_deaths);
         {
             use cubarium_voxel_fauna::MobilityMode;
             for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(sp)) {
@@ -454,6 +475,7 @@ fn main() {
             deaths.join(" "),
         );
     }
+    night.print(&sim);
     let foods: Vec<String> = Food::ALL
         .iter()
         .map(|f| format!("{}={}", f.name(), l.bites_by_food[f.index()]))
@@ -558,4 +580,115 @@ fn t0_report(sim: &Sim, params: &cubarium_voxel_sim::params::Params) {
         stands_in_band,
         by_species
     );
+}
+
+/// Whether a body is in the sleep rest (not a carnivore's satiated torpor).
+fn is_sleeping(a: &cubarium_voxel_fauna::Animal) -> bool {
+    a.state == cubarium_voxel_fauna::State::Asleep && a.rest == Some(cubarium_voxel_fauna::Rest::Sleep)
+}
+
+/// The night survival readouts, per lineage and per phase (0 day, 1 night).
+#[derive(Default)]
+struct NightTally {
+    sleep_ticks: [[u64; 2]; Founder::COUNT],
+    onsets: [[u64; 2]; Founder::COUNT],
+    f0_sum: [[f64; 2]; Founder::COUNT],
+    f0_min: [[f64; 2]; Founder::COUNT],
+    /// Wakes by cause: alert, hunger, other.
+    wakes: [[[u64; 3]; 2]; Founder::COUNT],
+    wake_sum: [[f64; 2]; Founder::COUNT],
+    deaths: [[[u64; cubarium_voxel_fauna::Departure::COUNT]; 2]; Founder::COUNT],
+}
+
+impl NightTally {
+    fn observe(
+        &mut self,
+        sim: &Sim,
+        params: &cubarium_voxel_sim::params::Params,
+        prev_asleep: &mut std::collections::HashMap<u64, bool>,
+        prev_deaths: &mut [[u64; cubarium_voxel_fauna::Departure::COUNT]; Founder::COUNT],
+    ) {
+        let phase = usize::from(sim.world().life_daylight() < 0.5);
+        let view = sim.fauna().view();
+        let mut seen: std::collections::HashMap<u64, bool> = std::collections::HashMap::with_capacity(view.animals.len());
+        for a in view.animals {
+            let Some(f) = a.founder else { continue };
+            let k = f.index();
+            let phys = params.fauna.founder(f);
+            let cap = phys.core.reserve_of(a.body);
+            let frac = if cap > 0.0 { a.reserve / cap } else { 0.0 };
+            let now = is_sleeping(a);
+            let was = prev_asleep.get(&a.id).copied().unwrap_or(false);
+            if now {
+                self.sleep_ticks[k][phase] += 1;
+            }
+            if now && !was {
+                if self.onsets[k][phase] == 0 {
+                    self.f0_min[k][phase] = f64::INFINITY;
+                }
+                self.onsets[k][phase] += 1;
+                self.f0_sum[k][phase] += frac;
+                self.f0_min[k][phase] = self.f0_min[k][phase].min(frac);
+            }
+            if was && !now {
+                let cause = if a.alert_ticks > 0 {
+                    0
+                } else if 1.0 - frac >= phys.wake_hunger - 1e-9 {
+                    1
+                } else {
+                    2
+                };
+                self.wakes[k][phase][cause] += 1;
+                self.wake_sum[k][phase] += frac;
+            }
+            seen.insert(a.id, now);
+        }
+        *prev_asleep = seen;
+        let deaths = view.ledger.deaths_by_founder_cause;
+        for f in 0..Founder::COUNT {
+            for d in 0..cubarium_voxel_fauna::Departure::COUNT {
+                self.deaths[f][phase][d] += deaths[f][d] - prev_deaths[f][d];
+            }
+        }
+        *prev_deaths = deaths;
+    }
+
+    fn print(&self, sim: &Sim) {
+        let hz = f64::from(cubarium_voxel::TICK_HZ);
+        for f in Founder::ALL {
+            let k = f.index();
+            for (p, name) in [(0, "day"), (1, "night")] {
+                let n = self.onsets[k][p];
+                let w: u64 = self.wakes[k][p].iter().sum();
+                let deaths: Vec<String> = cubarium_voxel_fauna::Departure::ALL
+                    .iter()
+                    .filter_map(|d| {
+                        let c = self.deaths[k][p][d.index()];
+                        (c > 0).then(|| format!("{}={c}", d.name()))
+                    })
+                    .collect();
+                println!(
+                    "sleep: {:15} {:5} sleep_min={:.1} onsets={} f0_mean={:.3} f0_min={:.3} wakes=[alert={} hunger={} other={}] wake_frac_mean={:.3} deaths=[{}]",
+                    f.name(),
+                    name,
+                    self.sleep_ticks[k][p] as f64 / hz / 60.0,
+                    n,
+                    if n > 0 { self.f0_sum[k][p] / n as f64 } else { f64::NAN },
+                    if n > 0 { self.f0_min[k][p] } else { f64::NAN },
+                    self.wakes[k][p][0],
+                    self.wakes[k][p][1],
+                    self.wakes[k][p][2],
+                    if w > 0 { self.wake_sum[k][p] / w as f64 } else { f64::NAN },
+                    deaths.join(" "),
+                );
+            }
+        }
+        let l = &sim.flora().view().ledger;
+        for s in cubarium_voxel_flora::Species::ALL {
+            let [r, n, fr] = l.night_spend[s.index()];
+            if r + n + fr > 0.0 {
+                println!("night_spend: {:13} reflush={r:.6} nectar={n:.6} fruit={fr:.6}", s.name());
+            }
+        }
+    }
 }

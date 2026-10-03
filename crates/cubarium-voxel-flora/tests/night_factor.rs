@@ -62,8 +62,15 @@ fn assert_closed(flora: &Flora) {
 
 /// One stand of `species`, small enough to be no donor and seeded with full foliage (well
 /// above its reflush line), one tick on `w`: (before, after), with the ledgers checked.
+///
+/// No nectar or fruit at night (`night_bloom_scale` 0, night survival 1b), so the
+/// reserve's fall in the dark is the upkeep alone; full foliage takes no reflush.
 fn one_tick(w: &mut World, species: Species) -> (Stand, Stand) {
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut config = FloraConfig::default();
+    for s in Species::ALL {
+        config.species_mut(s).night_bloom_scale = 0.0;
+    }
+    let mut flora = Flora::new(config);
     let sc = flora.config().species(species).clone();
     let wood = (0.5 * sc.donor_min).max(sc.alive_min);
     assert!(flora.apply(

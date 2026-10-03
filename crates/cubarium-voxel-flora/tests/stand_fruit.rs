@@ -152,7 +152,8 @@ fn lanternberry_is_the_one_species_with_a_fruit_stock() {
 ///   fruit is the stand's own matter, not new.
 /// - The same stand, filled, then stepped 40 ticks under the midnight twin keeps its fruit
 ///   exactly: night adds none.
-/// - A fresh stand at midnight makes none in 80 ticks; a seedling (a twentieth of
+/// - A fresh stand at midnight makes at most `night_bloom_scale` of the rate in 80 ticks
+///   (night survival 1b), none at a scale of 0; a seedling (a twentieth of
 ///   `wood_max`) makes none at noon: fruit is an adult's.
 #[test]
 fn lanternberry_fruit_grows_in_daylight_up_to_its_cap_from_its_reserve_and_none_at_night() {
@@ -199,12 +200,27 @@ fn lanternberry_fruit_grows_in_daylight_up_to_its_cap_from_its_reserve_and_none_
         closes(&flora, &format!("night tick {t}"));
     }
 
-    let mut flora = Flora::new(config(RATE, NEVER_S));
+    // Night survival 1b: at night a stand hangs fruit at `night_bloom_scale` of the day
+    // rate out of its night budget, never more; at a scale of 0, none (the old rule).
+    let mut none = config(RATE, NEVER_S);
+    none.lanternberry.night_bloom_scale = 0.0;
+    let mut flora = Flora::new(none);
     let site = lanternberry(&mut flora, &night, wood);
     for _ in 0..80 {
         flora.step(&mut night);
     }
-    assert_eq!(fruit(&flora, site), 0.0, "no fruit is made at night");
+    assert_eq!(fruit(&flora, site), 0.0, "no fruit is made at night at scale 0");
+    let mut flora = Flora::new(config(RATE, NEVER_S));
+    let scale = flora.config().lanternberry.night_bloom_scale;
+    let site = lanternberry(&mut flora, &night, wood);
+    for _ in 0..80 {
+        flora.step(&mut night);
+    }
+    let f = fruit(&flora, site);
+    assert!(
+        f <= scale * RATE * 80.0 * cubarium_voxel_flora::DT + 1e-12,
+        "at night at most the night scale of the rate: {f}"
+    );
 
     let mut flora = Flora::new(config(RATE, NEVER_S));
     let site = lanternberry(&mut flora, &day, 0.05 * wood);
