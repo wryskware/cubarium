@@ -1,15 +1,10 @@
 # The exhibited candidate (design/handoffs/roster-search-groundwork-2026-10-02.md §6):
 # roster.toml with these genes moved, hand-picked to pass every analytic screen (R a readout;
-# plants at x1).
+# plants at x1; sleep and wake hunger the night defaults).
 # Training only; the live defaults are unchanged. Generated; see the commit message.
 
 [base]
 file = "config/desktop/terrarium.toml"
-
-[base.fauna]
-
-[base.fauna.founding]
-arrival_reserve = 1.0
 
 [brains]
 littershredder = "config/training/curiosity-2026-10-02/C1-centre-littershredder.json"
@@ -33,8 +28,7 @@ margin = 1.2
 
 [screen.food]
 min_ratio = 1.0
-vine_faces = 1.0
-night_bloom_scale = 0.0
+vine_faces_founded = 1.0
 balance_share = 0.5
 
 [targets]
@@ -220,58 +214,11 @@ range = [0.5, 5.0]
 value = 2.5
 
 [[gene]]
-name = "sleep@littershredder"
-path = "fauna.founders.littershredder.sleep_upkeep"
+name = "sleep"
+path = "fauna.founders.*.sleep_upkeep"
+tie = "each"
 range = [0.4, 2.0]
-value = 0.6
-
-[[gene]]
-name = "sleep@frondgrazer"
-path = "fauna.founders.frondgrazer.sleep_upkeep"
-range = [0.4, 2.0]
-value = 1.0
-
-[[gene]]
-name = "sleep@lanternjaw"
-path = "fauna.founders.lanternjaw.sleep_upkeep"
-range = [0.4, 2.0]
-value = 0.6
-
-[[gene]]
-name = "sleep@capgnawer"
-path = "fauna.founders.capgnawer.sleep_upkeep"
-range = [0.4, 2.0]
-value = 0.6
-
-[[gene]]
-name = "sleep@loftstrider"
-path = "fauna.founders.loftstrider.sleep_upkeep"
-range = [0.4, 2.0]
-value = 1.0
-
-[[gene]]
-name = "sleep@ripple-snail"
-path = "fauna.founders.ripple-snail.sleep_upkeep"
-range = [0.4, 2.0]
-value = 0.6
-
-[[gene]]
-name = "sleep@bellwing"
-path = "fauna.founders.bellwing.sleep_upkeep"
-range = [0.4, 2.0]
-value = 1.0
-
-[[gene]]
-name = "sleep@seedporter"
-path = "fauna.founders.seedporter.sleep_upkeep"
-range = [0.4, 2.0]
-value = 1.0
-
-[[gene]]
-name = "sleep@chorister"
-path = "fauna.founders.chorister.sleep_upkeep"
-range = [0.4, 2.0]
-value = 1.0
+what = "upkeep asleep (0.5 -> 0.2-1.0; 0.3 -> 0.12-0.6); proposal: 0.5 endotherm-like, 0.3 ectotherm-like"
 
 [[gene]]
 name = "wake_hunger@littershredder"
@@ -450,3 +397,9 @@ name = "rider_detach"
 path = "fauna.parasite_detach_body_fraction"
 range = [0.625, 2.0]
 what = "the size a rider drops off at, x lanternjaw body_max (0.24 -> 0.15-0.48)"
+
+[[gene]]
+name = "night_bloom"
+path = "flora.*.night_bloom_scale"
+range = [0.1, 3.0]
+what = "nectar and fruit made at night, x the day rate (0.3 -> 0.03-0.9)"

@@ -12,14 +12,11 @@
 #   its log-distance); the night envelope stays hard (a design envelope, not impossibility).
 # - F3: food access is soft; only a lineage with no supply path at all is refused.
 # - F2: the lanternjaw is graded above its 2-h pass line (a live rider).
+# - Night (2c7fd076) is in the base defaults; night_bloom_scale stays at its 0.3 default
+#   (the night_bloom gene frozen at x1).
 
 [base]
 file = "config/desktop/terrarium.toml"
-
-[base.fauna]
-
-[base.fauna.founding]
-arrival_reserve = 1.0
 
 [brains]
 littershredder = "config/training/curiosity-2026-10-02/C1-centre-littershredder.json"
@@ -44,7 +41,6 @@ margin = 1.2
 [screen.food]
 min_ratio = 1.0
 vine_faces_founded = 1.0
-night_bloom_scale = 0.0
 balance_share = 0.5
 
 [targets]
@@ -293,7 +289,7 @@ frozen = true
 name = "sleep@littershredder"
 path = "fauna.founders.littershredder.sleep_upkeep"
 range = [0.4, 2.0]
-value = 0.6
+value = 1.0
 
 [[gene]]
 name = "sleep@frondgrazer"
@@ -305,13 +301,13 @@ value = 1.0
 name = "sleep@lanternjaw"
 path = "fauna.founders.lanternjaw.sleep_upkeep"
 range = [0.4, 2.0]
-value = 0.6
+value = 1.0
 
 [[gene]]
 name = "sleep@capgnawer"
 path = "fauna.founders.capgnawer.sleep_upkeep"
 range = [0.4, 2.0]
-value = 0.6
+value = 1.0
 
 [[gene]]
 name = "sleep@loftstrider"
@@ -323,7 +319,7 @@ value = 1.0
 name = "sleep@ripple-snail"
 path = "fauna.founders.ripple-snail.sleep_upkeep"
 range = [0.4, 2.0]
-value = 0.6
+value = 1.0
 
 [[gene]]
 name = "sleep@bellwing"
@@ -545,3 +541,11 @@ path = "fauna.parasite_detach_body_fraction"
 range = [0.625, 2.0]
 what = "the size a rider drops off at, x lanternjaw body_max (0.24 -> 0.15-0.48)"
 value = 1.0
+
+[[gene]]
+name = "night_bloom"
+path = "flora.*.night_bloom_scale"
+range = [0.1, 3.0]
+what = "nectar and fruit made at night, x the day rate (0.3 -> 0.03-0.9)"
+value = 1.0
+frozen = true

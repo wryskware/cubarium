@@ -69,9 +69,6 @@ pub struct FoodSpec {
     /// `roster_tests::vine_faces_founded_on_the_terrarium`). Vines spread afterwards, so a
     /// supply estimated on it may be far below what the vines later give (Astra F3).
     pub vine_faces_founded: f64,
-    /// Nectar and fruit production at night as a share of the day rate (0 until the
-    /// plants' night budget exists).
-    pub night_bloom_scale: f64,
     /// **Predator balance** (a readout, never a refusal; Astra A6): the share of its prey's
     /// production allotted to each predator lineage.
     pub balance_share: f64,
@@ -79,7 +76,7 @@ pub struct FoodSpec {
 
 impl Default for FoodSpec {
     fn default() -> FoodSpec {
-        FoodSpec { min_ratio: 1.0, vine_faces_founded: 1.0, night_bloom_scale: 0.0, balance_share: 0.5 }
+        FoodSpec { min_ratio: 1.0, vine_faces_founded: 1.0, balance_share: 0.5 }
     }
 }
 
@@ -611,7 +608,8 @@ fn band_between(sc: &cubarium_voxel_flora::SpeciesConfig, floor_m: f64, ceiling_
 /// - film: the logistic film's best net production per m², light-hours weighted, over the
 ///   floor; and its reach, a walker's harvest at capacity over its walking need;
 /// - nectar, fruit: each stand's day rate through the light hours and
-///   `night_bloom_scale` of it through the dark, plus `vine_faces_founded` latticevine faces per
+///   each species' `night_bloom_scale` of it through the dark (the night budget's cap;
+///   the budget itself may give less), plus `vine_faces_founded` latticevine faces per
 ///   vine flowering back to back;
 /// - carrion: a hunter's prey list (a scavenger's: every other founded lineage), each prey
 ///   adult's [`carrion_per_adult_s`].
@@ -728,7 +726,7 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
                     Species::ALL
                         .iter()
                         .map(|s| flora.species(*s))
-                        .map(|sc| stands(sc) * stand_product_per_day(sc.nectar_per_s, up_s, down_s, food.night_bloom_scale))
+                        .map(|sc| stands(sc) * stand_product_per_day(sc.nectar_per_s, up_s, down_s, sc.night_bloom_scale))
                         .sum::<f64>()
                         + vine_per_day(vine.nectar)
                 }
@@ -736,7 +734,7 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
                     Species::ALL
                         .iter()
                         .map(|s| flora.species(*s))
-                        .map(|sc| stands(sc) * stand_product_per_day(sc.fruit_per_s, up_s, down_s, food.night_bloom_scale))
+                        .map(|sc| stands(sc) * stand_product_per_day(sc.fruit_per_s, up_s, down_s, sc.night_bloom_scale))
                         .sum::<f64>()
                         + vine_per_day(vine.fruit)
                 }

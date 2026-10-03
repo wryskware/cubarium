@@ -28,13 +28,9 @@
 
 [base]
 file = "config/desktop/terrarium.toml"
-# The night package (branch `night`) is to make founders arrive full and give the plants
-# `night_bloom_scale`; until it lands, founders-full is this existing knob, fixed.
-# HOOK (night merge): drop this line if its code default becomes 1.0, add
-# `night_bloom_scale` as a gene or fixed value, set wake_hunger's value below to the new
-# default, and set [screen.food] night_bloom_scale from the flora knob.
-[base.fauna.founding]
-arrival_reserve = 1.0
+# The night package (2c7fd076) is in the code defaults under it: founders arrive full
+# (arrival_reserve 1.0), wake_hunger 0.9, sleep_upkeep 0.3 / 0.5, the plants' night budget
+# with night_bloom_scale 0.3 (a gene below).
 
 # Brains (ecology only, no brain pairs): the shredders and browsers on the curiosity gate's
 # C1 centres, everyone else on its heuristic. `--centre` overrides.
@@ -73,8 +69,6 @@ min_ratio = 1.0
 # Latticevine faces per founded vine, flowering back to back: the founding roots each vine
 # on one face, and the founded terrarium has exactly that (12 vines, 12 faces, seeds 1-8).
 vine_faces_founded = 1.0
-# Nectar and fruit at night as a share of the day rate: 0 until `night` lands.
-night_bloom_scale = 0.0
 # Predator balance (a READOUT, never a refusal; Astra A6): the share of prey production
 # allotted to each predator lineage.
 balance_share = 0.5
@@ -149,9 +143,9 @@ name = "wake_hunger"
 path = "fauna.founders.*.wake_hunger"
 tie = "each"
 mode = "value"
-value = 0.5
+value = 0.9
 range = [0.3, 0.95]
-what = "hunger that wakes a sleeper (set, not scaled); proposal candidate 0.9. HOOK: value = the base's default"
+what = "hunger that wakes a sleeper (set, not scaled); the night default 0.9"
 
 [[gene]]
 name = "pack_size@chorister"
@@ -273,3 +267,11 @@ name = "rider_detach"
 path = "fauna.parasite_detach_body_fraction"
 range = [0.625, 2.0]
 what = "the size a rider drops off at, x lanternjaw body_max (0.24 -> 0.15-0.48)"
+
+# --- The plants' night budget (night, 2c7fd076). ---
+
+[[gene]]
+name = "night_bloom"
+path = "flora.*.night_bloom_scale"
+range = [0.1, 3.0]
+what = "nectar and fruit made at night, x the day rate (0.3 -> 0.03-0.9)"

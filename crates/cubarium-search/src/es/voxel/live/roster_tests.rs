@@ -99,13 +99,16 @@ fn sleeping_phases_follow_the_clock_and_the_activity_lines() {
     assert!(sleep_bouts_s(&off.day, Activity::Diurnal, &life).is_empty());
 }
 
-/// Today's frondgrazer (c 0.5, m 0.001, s 0.5, h 0.5) outlasts 300 s of its 2,304-s
+/// The pre-night frondgrazer (c 0.5, m 0.001, s 0.5, h 0.5) outlasts 300 s of its 2,304-s
 /// night: refused, by name. Upkeep /5 and wake hunger 0.9 give 3,500 s >= 1.2 x 2,304:
 /// passes.
 #[test]
 fn the_night_screen_refuses_a_short_sleeper_and_passes_a_long_one() {
     let w = world();
     let mut fauna = fauna_with(&[(Founder::Browser, 8)]);
+    // Hand-built: the pre-night frondgrazer (the code default is 0.9 since `night`).
+    fauna.founders[Founder::Browser.index()].wake_hunger = 0.5;
+    fauna.founders[Founder::Browser.index()].sleep_upkeep = 0.5;
     let r = roster(&flora(), &fauna, &w, &spec());
     let night = refusals_naming(&r, "night", "frondgrazer");
     assert_eq!(night.len(), 1, "{:?}", r.refusals());
@@ -451,7 +454,7 @@ fn roster_decodes_over_the_terrarium() {
     let p = e.params().expect("decodes");
     assert!(p.fauna.founder_counts().iter().all(|n| *n > 0), "{:?}", p.fauna.founder_counts());
     assert!(p.flora.seed_film_at_founding);
-    assert_eq!(p.fauna.founding.arrival_reserve, 1.0);
+    assert_eq!(p.fauna.founding.arrival_reserve, 1.0, "founders full (night's default)");
     // A saved genome carries its base: written and read back, it decodes the same.
     let text = e.genome().expect("a genome").to_toml("t");
     let back = EcologyParams::parse(&text).expect("a saved genome loads");
@@ -514,6 +517,9 @@ fn roster_decode_touches_exactly_the_listed_paths() {
             want.insert(format!("flora.{s}.{q}"));
         }
     }
+    for s in Species::ALL {
+        want.insert(format!("flora.{}.night_bloom_scale", s.name()));
+    }
     for q in ["decomposition", "wood_decomposition", "carrion_decomposition"] {
         want.insert(format!("flora.{q}"));
     }
@@ -525,12 +531,13 @@ fn roster_decode_touches_exactly_the_listed_paths() {
 
 /// Fable 2026-10-02: life histories frozen (lifespan, growth, surplus floor, gestation),
 /// motor tied to upkeep; per lineage only upkeep, intake, yield, reserve, sleep and wake
-/// hunger, plus the three parasite genes, pack size and the 15 plant groups: 73.
+/// hunger, plus the three parasite genes, pack size, the 15 plant groups and the night
+/// bloom (night, 2c7fd076): 74.
 #[test]
 fn roster_genes_are_the_agreed_set() {
     let e = roster_file();
     let g = e.genome().expect("a genome");
-    assert_eq!(g.genes.len(), 6 * 9 + 3 + 1 + 15, "{:?}", g.names());
+    assert_eq!(g.genes.len(), 6 * 9 + 3 + 1 + 15 + 1, "{:?}", g.names());
     for frozen in ["lifespan", "maturity", "breed_reserve", "gestation", "motor"] {
         assert!(!g.names().iter().any(|n| n.starts_with(&format!("{frozen}@"))), "{frozen} is frozen");
     }
