@@ -31,6 +31,7 @@ use super::EpisodeDriver;
 pub mod balance;
 pub mod curiosity;
 pub mod ecology;
+pub mod grid;
 pub mod readout;
 pub mod screen;
 pub mod search;
@@ -48,6 +49,8 @@ mod breeding_tests;
 mod curiosity_tests;
 #[cfg(test)]
 mod gut_screen_tests;
+#[cfg(test)]
+mod grid_tests;
 #[cfg(test)]
 mod knob_wiring_tests;
 #[cfg(test)]

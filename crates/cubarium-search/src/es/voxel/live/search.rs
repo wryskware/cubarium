@@ -356,6 +356,9 @@ pub struct EvalSpec {
     /// Each lineage's curiosity in the brains' score (`--curiosity`; weight 0 without).
     /// A training knob, not an ecology gene: the CMA never sees it.
     pub curiosity: Curiosity,
+    /// Found exactly the world `base` names (`Seeds::Asked`), not the first accepted from
+    /// it: the grid keeps one world per seed across its cells.
+    pub asked_seed: bool,
 }
 
 impl EvalSpec {
@@ -375,6 +378,7 @@ impl EvalSpec {
             band: BandSpec::default(),
             score_horizon_ticks: horizon_ticks,
             curiosity: Curiosity::default(),
+            asked_seed: false,
         }
     }
 }
@@ -674,7 +678,12 @@ impl EvalRun {
         spec: &EvalSpec,
     ) -> EvalRun {
         let started = Instant::now();
-        let (mut sim, info) = world::found_world(&spec.world, base, spec.founders, params);
+        let seeds = if spec.asked_seed {
+            cubarium_voxel_sim::found::Seeds::Asked(base)
+        } else {
+            cubarium_voxel_sim::found::Seeds::from(base)
+        };
+        let (mut sim, info) = world::found_world_from(&spec.world, seeds, spec.founders, params);
         super::install_centres(sim.fauna_mut(), drivers);
         sim.world_mut().set_water_every(spec.water_every);
         let founded = founded_lineages(&info.founders, &eggs(&sim));
@@ -732,6 +741,21 @@ impl EvalRun {
     /// What the last window counted per lineage (all zero before the first).
     pub fn last_lineages(&self) -> &[LineageStats; Founder::COUNT] {
         &self.last
+    }
+
+    /// The world as it stands.
+    pub fn sim(&self) -> &cubarium_voxel_sim::Sim {
+        &self.sim
+    }
+
+    /// Ticks run so far.
+    pub fn elapsed(&self) -> u64 {
+        self.elapsed
+    }
+
+    /// What the founding loop kept.
+    pub fn info(&self) -> &world::FoundInfo {
+        &self.info
     }
 
     /// Whether the horizon is run or the world stopped early.

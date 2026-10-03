@@ -75,6 +75,17 @@ pub fn found_world(
     founder_counts: [usize; Founder::COUNT],
     ecology: &EcologyParams,
 ) -> (Sim, FoundInfo) {
+    found_world_from(cfg, found::Seeds::from(base), founder_counts, ecology)
+}
+
+/// [`found_world`] from any [`found::Seeds`]: `Seeds::Asked(seed)` keeps that one world
+/// whatever its verdict (the grid's fixed worlds across cells).
+pub fn found_world_from(
+    cfg: &Config,
+    seeds: found::Seeds,
+    founder_counts: [usize; Founder::COUNT],
+    ecology: &EcologyParams,
+) -> (Sim, FoundInfo) {
     let Founded {
         world,
         flora,
@@ -89,7 +100,7 @@ pub fn found_world(
         cfg,
         &crate::es::voxel::training_world::layers_for(ecology, cfg.voxel_m),
         founder_counts,
-        found::Seeds::from(base),
+        seeds,
         false,
     );
     let sim = Sim::ambient(
