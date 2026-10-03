@@ -437,6 +437,12 @@ pub(crate) fn steer(
     let d_den = distance(&a, dcx, dcz, ring);
 
     let carrion_at = |s: Site| fv.ground_at(s).map_or(0.0, |g| g.carrion);
+    // A feast lasts while its carcass does: carrion there and the plant layer's carcass
+    // record standing (cleared at `carcass_gone_fraction` of the body). "While it has
+    // carrion" never ended — a bite diminishes with the stock (`bite_half_stock`), so
+    // eating leaves dust, and a hungry member nibbled it while the pack never hunted again
+    // (bellwing-finding item 2).
+    let feast_left = |s: Site| fv.ground_at(s).is_some_and(|g| g.carrion > 0.0 && g.carcass.is_some());
     // At the carcass: its mouth is over the feast's carrion, read from the body (as the
     // bite is), not from its heuristic's answer — that also stands with `feed` held while
     // it stalks a body close ahead, a packmate included, and read as eating it held a
@@ -458,7 +464,7 @@ pub(crate) fn steer(
                 let (dx, dz) = crate::pose::wrapped_delta(dcx, dcz, fx, fz, ring);
                 (dx, dz, (dx * dx + dz * dz).sqrt())
             };
-            if from_den <= t.den_radius_m && carrion_at(fs) > 0.0 && a.eating {
+            if from_den <= t.den_radius_m && feast_left(fs) && a.eating {
                 if at_feast(fs) {
                     return Some(eat);
                 }
@@ -568,12 +574,12 @@ pub(crate) fn steer(
         }
     }
 
-    // The pack's carcass first (repair 3 item 5): while it has carrion, a member that wants
+    // The pack's carcass first (repair 3 item 5): while its carcass lasts, a member that wants
     // food eats there, and no new target is taken.
     let joins = a.eating || a.emergency;
     let mut feast_usable = false;
     if let Some(fs) = fauna.pack(own).and_then(|p| p.feast) {
-        if carrion_at(fs) > 0.0 {
+        if feast_left(fs) {
             feast_usable = true;
             if joins {
                 if at_feast(fs) {
