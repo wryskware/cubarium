@@ -965,11 +965,23 @@ fn outcomes(
             continue;
         }
         let mut o = LineageOutcome::new(f, founded[i]);
+        let cfg = fauna.config();
+        let core = &cfg.founder(f).core;
+        let detach = cfg.parasite_detach_body_fraction * core.body_max;
+        let mut growth = 0.0;
         let mine = animals.iter().filter(|a| a.founder == Some(f));
         for a in mine {
             o.alive_end += 1;
             if a.attached.is_some() {
                 o.riders_now += 1;
+                let hours = a.age_ticks as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ) / 3600.0;
+                let grown = (a.body - core.body_min).max(0.0);
+                if hours > 0.0 {
+                    growth += grown / hours;
+                }
+                if detach > core.body_min {
+                    o.rider_progress = o.rider_progress.max(grown / (detach - core.body_min));
+                }
             } else {
                 o.free_living += 1;
             }
@@ -980,6 +992,9 @@ fn outcomes(
                     o.pups_independent += 1;
                 }
             }
+        }
+        if o.riders_now > 0 {
+            o.rider_growth_per_h = growth / o.riders_now as f64;
         }
         o.eggs_end = eggs_end[i];
         o.births = births_all[i];

@@ -7,7 +7,8 @@
 //! - **Birth required** (`birth_required`): an actual birth in the second half. Readiness
 //!   earns at most `birth_credit_max` of the term as a gradient and never meets it.
 //! - **The lanternjaw's ladder** (`progress`): 0.25 hatched from the founding egg bank,
-//!   0.5 a rider attached, 0.75 a juvenile off its host (dropped off or freed) and living
+//!   0.5 a rider attached (up to 0.75 as the furthest rider grows toward its drop-off
+//!   line), 0.75 a juvenile off its host (dropped off or freed) and living
 //!   free, 1 an established hunter feeding (carrion eaten or a hit) or eggs laid by an
 //!   adult. Met at `lanternjaw_progress`. Bank hatches, riders and free-living hunters are
 //!   counted apart.
@@ -160,6 +161,10 @@ pub struct LineageOutcome {
     pub riders_freed: u64,
     /// Bodies living free (not riding) at the end.
     pub free_living: usize,
+    /// The riders now: their mean growth since hatching, body per hour, and the furthest
+    /// one's progress from hatch size to the drop-off line, 0 to 1.
+    pub rider_growth_per_h: f64,
+    pub rider_progress: f64,
     /// Strikes that hit, and carrion its mouths took (gross organic).
     pub hits: u64,
     pub carrion_eaten: f64,
@@ -207,6 +212,8 @@ impl LineageOutcome {
             rider_dropoffs: 0,
             riders_freed: 0,
             free_living: 0,
+            rider_growth_per_h: 0.0,
+            rider_progress: 0.0,
             hits: 0,
             carrion_eaten: 0.0,
             litters: 0,
@@ -251,7 +258,7 @@ fn lanternjaw_score(o: &LineageOutcome) -> f64 {
     } else if o.free_living > 0 && o.rider_dropoffs + o.riders_freed > 0 {
         0.75
     } else if o.riders_attached > 0 {
-        0.5
+        0.5 + 0.25 * o.rider_progress.clamp(0.0, 1.0)
     } else if o.bank_hatches > 0 {
         0.25
     } else {
