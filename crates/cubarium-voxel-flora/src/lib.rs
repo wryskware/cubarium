@@ -363,6 +363,10 @@ pub struct Stand {
     /// species' `fruit_drop_s` the whole hanging crop falls to the litter (F3).
     #[serde(default)]
     pub fruit_age_s: f64,
+    /// Seconds left of the stand's rest after an uneaten crop fell: no fruit is made while
+    /// it is positive ([`SpeciesConfig::fruit_rest_s`]).
+    #[serde(default)]
+    pub fruit_rest_s: f64,
 }
 
 impl Stand {
@@ -1070,6 +1074,13 @@ pub struct SpeciesConfig {
     /// Ripe fruit left uneaten this long, seconds, falls to the litter at the stand's site.
     #[serde(default)]
     pub fruit_drop_s: f64,
+    /// **The mean rest after an uneaten crop falls**, seconds (plants-flowering-vines
+    /// 2026-10-03): the stand hangs no fruit for a random time, exponential with this
+    /// mean, keyed by the stand and the tick, so the bushes of a grove fruit out of step
+    /// and some stand bare. A crop eaten out refills at once, so what a feeder can take is
+    /// unchanged. 0: fruits again at once.
+    #[serde(default)]
+    pub fruit_rest_s: f64,
     /// The **mineral** a unit of fruit carries, a fraction of its organic matter: small
     /// but not zero (energy-rich fruit). Drawn from the stand's own mineral when taken.
     #[serde(default)]
@@ -1463,6 +1474,7 @@ impl SpeciesConfig {
             fruit_per_s: 0.0,
             fruit_cap: 0.0,
             fruit_drop_s: 0.0,
+            fruit_rest_s: 0.0,
             fruit_mineral_fraction: 0.0,
             // 1b: the night budget's knobs, plausible defaults (not tuned).
             night_bloom_scale: default_night_bloom_scale(),
@@ -2264,6 +2276,11 @@ impl SpeciesConfig {
             fruit_per_s: 1e-4,
             fruit_cap: 0.02,
             fruit_drop_s: 1800.0,
+            // Plants-flowering-vines 2026-10-03: after an uneaten crop falls, a rest of 15
+            // minutes on average (exponential), so an unvisited bush hangs fruit about
+            // two thirds of the time (200 s to fill, 1,800 s hanging, 900 s resting) and
+            // a grove's bushes fruit out of step. Eaten out, it refills at once.
+            fruit_rest_s: 900.0,
             fruit_mineral_fraction: 0.01,
             wood_max: 1.0,
             alive_min: 0.02,
@@ -4446,6 +4463,7 @@ impl Flora {
             nectar: 0.0,
             fruit: 0.0,
             fruit_age_s: 0.0,
+            fruit_rest_s: 0.0,
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);

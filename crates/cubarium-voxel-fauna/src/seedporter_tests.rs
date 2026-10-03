@@ -618,14 +618,14 @@ fn vine_wall_in_fruit() -> (World, Flora, Vec<Face>) {
     };
     c.latticevine = VineConfig {
         spur_reserve_min: 0.1,
-        spur_window_s: 3.0,
-        spur_jitter_s: 2.0,
+        // Back to back, no rest; 0.01 a flower and 0.02 a bunch over the 61.5 s cycle.
+        spur_share: 1.0,
         bud_s: 0.5,
         flower_s: 0.5,
         fruit_s: 60.0,
         spent_s: 0.5,
-        nectar: 0.01,
-        fruit: 0.02,
+        nectar_per_face_s: 0.01 / 61.5,
+        fruit_per_face_s: 0.02 / 61.5,
         spread_cost: 1e12,
         sister_cost: 1e12,
         ..c.latticevine

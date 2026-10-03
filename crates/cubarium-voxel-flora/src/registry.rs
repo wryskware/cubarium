@@ -188,6 +188,8 @@ fn species_rows() -> Vec<Row> {
             .grade("N").prov("decision"),
         r("fruit_cap", "org-units per stand", nonneg, "the most fruit an adult stand holds").grade("N").prov("decision"),
         r("fruit_drop_s", "s", nonneg, "ripe fruit left uneaten this long falls to the litter at the stand's site").grade("N").prov("decision"),
+        r("fruit_rest_s", "s", nonneg, "mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none")
+            .search(0.0, 3600.0),
         r("fruit_mineral_fraction", "fraction of organic", fraction, "mineral a unit of fruit carries (small, not zero)").grade("N").prov("decision"),
         r("night_bloom_scale", "fraction of the day rate", fraction, "nectar and fruit made at night out of the night budget")
             .search(0.0, 1.0).grade("N").prov("decision"),
@@ -265,14 +267,16 @@ fn vine_rows() -> Vec<Row> {
             .scale(area).evolve().grade("C"),
         r("spread_hold", "multiples of spur_reserve_min per face", nonneg, "reserve kept back from spreading and sisters for flowering; 0 spends it all")
             .search(0.0, 6.0),
-        r("spur_window_s", "s", nonneg, "after a shower, a cycle may still start this long").evolve().grade("C"),
-        r("spur_jitter_s", "s", nonneg, "spread of the per-face start delay").grade("C"),
+        r("spur_share", "fraction of covered faces", Range::fraction(), "long-run share of faces carrying a flower or fruit at once; each face rests a random (exponential) time between cycles")
+            .search(0.02, 0.5),
         r("bud_s", "s", nonneg, "bud phase").evolve().grade("C"),
         r("flower_s", "s", nonneg, "flower phase").evolve().grade("C"),
         r("fruit_s", "s", nonneg, "fruit phase").evolve().grade("C"),
         r("spent_s", "s", nonneg, "spent phase").evolve().grade("C"),
-        r("nectar", "org-units per reference face", nonneg, "a flower's organic matter").scale(area).evolve().grade("C"),
-        r("fruit", "org-units per reference face", nonneg, "a bead bunch's organic matter").scale(area).evolve().grade("C"),
+        r("nectar_per_face_s", "org-units/s per reference face", nonneg, "long-run nectar a covered face offers: production per unit of vine area (a flower holds this times the mean cycle)")
+            .scale(area).evolve().log().grade("C"),
+        r("fruit_per_face_s", "org-units/s per reference face", nonneg, "long-run bead fruit a covered face sets: production per unit of vine area (a bunch holds this times the mean cycle)")
+            .scale(area).evolve().log().grade("C"),
         r("energy_density", "energy per org-unit", nonneg, "vine tissue energy").grade("D"),
         r("mineral_fraction", "mineral per org-unit", Range::fraction(), "vine tissue mineral: the store it draws from its root, and what its leaf, nectar and fruit carry")
             .prov("decision"),

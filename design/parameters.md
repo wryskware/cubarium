@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (784 rows)
+**`flora.*`** (792 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -423,6 +423,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.bloomcrown.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.bloomcrown.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.bloomcrown.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.bloomcrown.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.bloomcrown.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.bloomcrown.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -502,6 +503,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.umbrellafrond.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.umbrellafrond.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.umbrellafrond.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.umbrellafrond.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.umbrellafrond.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.umbrellafrond.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -581,6 +583,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.springturf.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.springturf.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.springturf.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.springturf.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.springturf.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.springturf.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -660,6 +663,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.stonecushion.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.stonecushion.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.stonecushion.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.stonecushion.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.stonecushion.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.stonecushion.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -739,6 +743,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.velvetpad.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.velvetpad.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.velvetpad.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.velvetpad.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.velvetpad.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.velvetpad.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -818,6 +823,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.glowcap.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.glowcap.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.glowcap.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.glowcap.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.glowcap.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.glowcap.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -897,6 +903,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.vaulttree.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.vaulttree.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.vaulttree.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.vaulttree.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.vaulttree.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.vaulttree.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -976,6 +983,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.fruit_per_s` | 0.0001 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.lanternberry.fruit_cap` | 0.02 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.lanternberry.fruit_drop_s` | 1800.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.lanternberry.fruit_rest_s` | 900.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.lanternberry.fruit_mineral_fraction` | 0.01 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.lanternberry.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.lanternberry.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -1055,6 +1063,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.siphonreed.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.siphonreed.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.siphonreed.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
 | `flora.siphonreed.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.siphonreed.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.siphonreed.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -1101,14 +1110,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.contest_check_s` | 30.0 | s | (0, inf) |  | C | placeholder | the contest wheel's period |
 | `flora.latticevine.spur_reserve_min` | 0.005 | org-units per reference face | [0, inf) | yes | C | placeholder | reserve per face before a flowering cycle |
 | `flora.latticevine.spread_hold` | 2.0 | multiples of spur_reserve_min per face | [0, inf) | 0–6 | - | placeholder | reserve kept back from spreading and sisters for flowering; 0 spends it all |
-| `flora.latticevine.spur_window_s` | 120.0 | s | [0, inf) | yes | C | placeholder | after a shower, a cycle may still start this long |
-| `flora.latticevine.spur_jitter_s` | 60.0 | s | [0, inf) |  | C | placeholder | spread of the per-face start delay |
+| `flora.latticevine.spur_share` | 0.1 | fraction of covered faces | [0, 1] | 0.02–0.5 | - | placeholder | long-run share of faces carrying a flower or fruit at once; each face rests a random (exponential) time between cycles |
 | `flora.latticevine.bud_s` | 60.0 | s | [0, inf) | yes | C | placeholder | bud phase |
 | `flora.latticevine.flower_s` | 120.0 | s | [0, inf) | yes | C | placeholder | flower phase |
 | `flora.latticevine.fruit_s` | 240.0 | s | [0, inf) | yes | C | placeholder | fruit phase |
 | `flora.latticevine.spent_s` | 60.0 | s | [0, inf) | yes | C | placeholder | spent phase |
-| `flora.latticevine.nectar` | 0.002 | org-units per reference face | [0, inf) | yes | C | placeholder | a flower's organic matter |
-| `flora.latticevine.fruit` | 0.005 | org-units per reference face | [0, inf) | yes | C | placeholder | a bead bunch's organic matter |
+| `flora.latticevine.nectar_per_face_s` | 0.0000005555555555555555 | org-units/s per reference face | [0, inf) | yes | C | placeholder | long-run nectar a covered face offers: production per unit of vine area (a flower holds this times the mean cycle) |
+| `flora.latticevine.fruit_per_face_s` | 0.000001388888888888889 | org-units/s per reference face | [0, inf) | yes | C | placeholder | long-run bead fruit a covered face sets: production per unit of vine area (a bunch holds this times the mean cycle) |
 | `flora.latticevine.energy_density` | 1.0 | energy per org-unit | [0, inf) |  | D | placeholder | vine tissue energy |
 | `flora.latticevine.mineral_fraction` | 0.01 | mineral per org-unit | [0, 1] |  | - | decision | vine tissue mineral: the store it draws from its root, and what its leaf, nectar and fruit carry |
 | `flora.latticevine.founders` | 6 | vines | [0, inf) | yes | C | placeholder | founder vines rooted on a fresh world: the floor under the area count |

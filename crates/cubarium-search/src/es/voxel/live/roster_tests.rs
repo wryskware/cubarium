@@ -237,7 +237,7 @@ fn glassfilm_access() {
 fn nectar_access() {
     let rich = scaled(flora(), |s| s.nectar_per_s *= 100.0);
     let mut poor = scaled(flora(), |s| s.nectar_per_s = 0.0);
-    poor.latticevine.nectar = 0.0;
+    poor.latticevine.nectar_per_face_s = 0.0;
     food_case(Founder::Bellwing, "nectar", fauna_with(&[(Founder::Bellwing, 6)]), rich, poor);
 }
 
@@ -245,7 +245,7 @@ fn nectar_access() {
 fn fruit_access() {
     let rich = scaled(flora(), |s| s.fruit_per_s *= 100.0);
     let mut poor = scaled(flora(), |s| s.fruit_per_s = 0.0);
-    poor.latticevine.fruit = 0.0;
+    poor.latticevine.fruit_per_face_s = 0.0;
     food_case(Founder::Seedporter, "fruit", fauna_with(&[(Founder::Seedporter, 4)]), rich, poor);
 }
 
@@ -770,7 +770,7 @@ fn food_short_of_need_is_soft_and_only_zero_supply_refuses() {
     for sp in Species::ALL {
         short.species_mut(sp).fruit_per_s *= 1e-3;
     }
-    short.latticevine.fruit *= 1e-3;
+    short.latticevine.fruit_per_face_s *= 1e-3;
     let r = roster(&short, &fauna, &w, &s);
     let row = r.food.iter().find(|x| x.lineage == "seedporter").expect("row");
     assert!(row.ratio > 0.0 && row.ratio < 1.0, "{row:?}");
@@ -780,7 +780,7 @@ fn food_short_of_need_is_soft_and_only_zero_supply_refuses() {
     for sp in Species::ALL {
         none.species_mut(sp).fruit_per_s = 0.0;
     }
-    none.latticevine.fruit = 0.0;
+    none.latticevine.fruit_per_face_s = 0.0;
     let r = roster(&none, &fauna, &w, &s);
     assert_eq!(refusals_naming(&r, "food", "seedporter").len(), 1);
 }

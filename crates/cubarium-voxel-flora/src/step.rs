@@ -124,6 +124,8 @@ use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand,
 pub(crate) const DOMAIN_DISPERSAL: u64 = 1;
 pub(crate) const DOMAIN_GERMINATION: u64 = 2;
 const DOMAIN_FALL: u64 = 3;
+/// A lanternberry's rest between crops.
+const DOMAIN_FRUIT_REST: u64 = 12;
 pub(crate) const DOMAIN_WIND: u64 = 4;
 pub(crate) const DOMAIN_SPORES: u64 = 5;
 pub(crate) const DOMAIN_WATER: u64 = 6;
@@ -2275,6 +2277,9 @@ pub(crate) struct Climate {
     /// Seconds to the ecological dawn while the sun is down (`World::life_to_dawn_s`),
     /// `None` by day and with the clock off: the plants' night budget runs only on `Some`.
     pub(crate) to_dawn_s: Option<f64>,
+    /// The world's seed mixed with its tick: the key of this tick's keyed draws that have
+    /// no place of their own to key by (a lanternberry's rest between crops).
+    pub(crate) draw_key: u64,
 }
 
 impl Climate {
@@ -2288,6 +2293,7 @@ impl Climate {
             ),
             night: world.plant_night_scale(),
             to_dawn_s: world.life_to_dawn_s(),
+            draw_key: mix(world.config().seed ^ mix(world.tick())),
         }
     }
 }
@@ -2550,6 +2556,7 @@ fn grow_stand(
         upkeep,
         night,
         to_dawn_s,
+        draw_key,
     } = climate;
     let species = stand.species;
     let sc = config.species(species);
@@ -2748,7 +2755,15 @@ fn grow_stand(
     // `fruit_drop_s` the whole uneaten crop falls to this site's litter (with senescence,
     // below), carrying `fruit_mineral_fraction` of itself out of the stand's mineral.
     // At night, as nectar: the night scale, out of what is left of the budget.
-    if sc.fruit_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
+    //
+    // After an uneaten crop falls the stand rests (plants-flowering-vines 2026-10-03): a
+    // random time, exponential with mean `fruit_rest_s`, keyed by the stand and the tick,
+    // so the bushes of a grove fruit out of step. A crop eaten out refills at once.
+    let resting = stand.fruit_rest_s > 0.0;
+    if resting {
+        stand.fruit_rest_s = (stand.fruit_rest_s - DT).max(0.0);
+    }
+    if !resting && sc.fruit_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
         let room = (sc.fruit_cap - stand.fruit).max(0.0);
         let rate = if night_left.is_some() { sc.fruit_per_s * sc.night_bloom_scale } else { sc.fruit_per_s };
         let make = (rate * DT).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
@@ -2770,6 +2785,10 @@ fn grow_stand(
             stand.mineral -= m;
             stand.fruit_age_s = 0.0;
             fell = (o, m);
+            if sc.fruit_rest_s > 0.0 {
+                let u = 1.0 - Rng::keyed(DOMAIN_FRUIT_REST, draw_key, stand.id, 0).unit();
+                stand.fruit_rest_s = -u.ln() * sc.fruit_rest_s;
+            }
         }
     } else {
         stand.fruit_age_s = 0.0;
@@ -4171,6 +4190,7 @@ mod tests {
                 upkeep: 1.0,
                 night: 1.0,
                 to_dawn_s: None,
+                draw_key: 0,
             };
             grow(&mut one, &world, &light, climate, &drink, &substrate, 1);
             grow(&mut split, &world, &light, climate, &drink, &substrate, threads);

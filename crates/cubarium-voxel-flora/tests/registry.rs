@@ -178,14 +178,13 @@ fn the_old_flora_validator_refusals_still_refuse() {
         "sister_cost",
         "contest_threshold",
         "spur_reserve_min",
-        "spur_window_s",
-        "spur_jitter_s",
+        "spur_share",
         "bud_s",
         "flower_s",
         "fruit_s",
         "spent_s",
-        "nectar",
-        "fruit",
+        "nectar_per_face_s",
+        "fruit_per_face_s",
         "energy_density",
         "founder_reserve",
     ] {
@@ -259,8 +258,8 @@ fn hand_rescaled(voxel_m: f64) -> FloraConfig {
         &mut vc.spread_cost,
         &mut vc.sister_cost,
         &mut vc.spur_reserve_min,
-        &mut vc.nectar,
-        &mut vc.fruit,
+        &mut vc.nectar_per_face_s,
+        &mut vc.fruit_per_face_s,
         &mut vc.founder_reserve,
     ] {
         *v *= k;

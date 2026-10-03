@@ -662,7 +662,7 @@ fn with_yield(y: f64, per_day: f64) -> (f64, f64) {
 /// - nectar, fruit: each stand's day rate through the light hours and
 ///   each species' `night_bloom_scale` of it through the dark (the night budget's cap;
 ///   the budget itself may give less), plus `vine_faces_founded` latticevine faces per
-///   vine flowering back to back;
+///   vine at the vine's long-run production per face;
 /// - carrion: a hunter's prey list (a scavenger's: every other founded lineage), each prey
 ///   adult's [`carrion_per_adult_s`].
 pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::Config, spec: &ScreenSpec) -> RosterScreen {
@@ -709,10 +709,8 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
     let (up_s, down_s) = sun_up_down_s(&world.day);
     let vine = &flora.latticevine;
     let vines = f64::from(vine.founders).max((vine.founders_per_m2 * area).round());
-    let vine_cycle = vine.bud_s + vine.flower_s + vine.fruit_s + vine.spent_s;
-    let vine_per_day = |per_face: f64| {
-        if vine_cycle > 0.0 { vines * food.vine_faces_founded * per_face * len_s / vine_cycle } else { 0.0 }
-    };
+    // A face's long-run production is the vine's own knob (per face per second).
+    let vine_per_day = |per_face_s: f64| vines * food.vine_faces_founded * per_face_s * len_s;
     let carrion_of = |eater: Founder| -> f64 {
         let p = fauna.founder(eater);
         founded
@@ -779,7 +777,7 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
                     (d, d * y)
                 }
                 Food::Nectar => {
-                    let (mut raw, mut got) = (vine_per_day(vine.nectar), 0.0);
+                    let (mut raw, mut got) = (vine_per_day(vine.nectar_per_face_s), 0.0);
                     got += raw * y_of(vine.mineral_fraction);
                     for sc in Species::ALL.iter().map(|s| flora.species(*s)) {
                         let d = stands(sc) * stand_product_per_day(sc.nectar_per_s, up_s, down_s, sc.night_bloom_scale);
@@ -789,7 +787,7 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
                     (raw, got)
                 }
                 Food::Fruit => {
-                    let (mut raw, mut got) = (vine_per_day(vine.fruit), 0.0);
+                    let (mut raw, mut got) = (vine_per_day(vine.fruit_per_face_s), 0.0);
                     got += raw * y_of(vine.mineral_fraction);
                     for sc in Species::ALL.iter().map(|s| flora.species(*s)) {
                         let d = stands(sc) * stand_product_per_day(sc.fruit_per_s, up_s, down_s, sc.night_bloom_scale);
