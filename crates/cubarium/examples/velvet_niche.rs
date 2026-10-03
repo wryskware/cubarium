@@ -365,9 +365,18 @@ fn drought(args: &[String]) {
 
 // ---------------------------------------------------------------------------- run
 
-/// Water classes on velvetpad's root box (as `stand_niche_diag`): dry < 0.4, moist
-/// 0.4..1, wet ≥ 1 (above field capacity), soggy (saturated fraction ≥ 0.6).
-const WATER_CLASSES: [&str; 4] = ["dry", "moist", "wet", "soggy"];
+/// Water classes on velvetpad's root box at today's rooting: bins of mean available
+/// water (1 = field capacity), and soggy (saturated fraction ≥ 0.6) ahead of them.
+const WATER_CLASSES: [&str; 8] = ["a<0.4", "a0.4-0.8", "a0.8-1.0", "a1.0-1.2", "a1.2-1.4", "a1.4-1.6", "a>=1.6", "soggy"];
+const CLASSES: usize = WATER_CLASSES.len() * 4;
+
+fn water_class(mean: f64, saturated: f64) -> usize {
+    if saturated >= 0.6 {
+        7
+    } else {
+        [0.4, 0.8, 1.0, 1.2, 1.4, 1.6].iter().filter(|&&b| mean >= b).count()
+    }
+}
 
 struct Census {
     sky: HashMap<Site, f64>,
@@ -412,15 +421,7 @@ fn classify(world: &World, flora: &Flora, census: &mut Census) -> Vec<(Site, usi
                     .or_insert_with(|| view.sky_visibility(x as i64, y, z));
                 let g = establishment_gates_with_sky(&view, site, &probe_sc, sky, 0.0, 0.0);
                 let w = g.mean_water.unwrap_or(0.0);
-                let wc = if g.saturated_fraction >= 0.6 {
-                    3
-                } else if w >= 1.0 {
-                    2
-                } else if w >= 0.4 {
-                    1
-                } else {
-                    0
-                };
+                let wc = water_class(w, g.saturated_fraction);
                 let canopy = canopy_at(&fv, c.width, c.depth, site, f64::from(y) + pad_top);
                 // class = water * 4 + lit(sky ≥ 0.6) * 2 + open(canopy ≥ 0.5)
                 let class = wc * 4 + usize::from(sky >= 0.6) * 2 + usize::from(canopy >= 0.5);
@@ -448,16 +449,15 @@ fn occ_name(i: usize) -> &'static str {
 fn sample(minute: u64, world: &World, flora: &Flora, census: &mut Census) {
     let rows = classify(world, flora, census);
     let n = Species::COUNT + 1;
-    let mut occ = vec![vec![0u64; n]; 16];
-    // Transitions since the last sample, by niche group of the site's class now
-    // (niche = wet or soggy): from × to.
-    let mut tr = vec![vec![vec![0u64; n]; n]; 2];
+    let mut occ = vec![vec![0u64; n]; CLASSES];
+    // Transitions since the last sample, by the water class of the site now: from × to.
+    let mut tr = vec![vec![vec![0u64; n]; n]; WATER_CLASSES.len()];
     for &(site, class, o) in &rows {
         occ[class][o] += 1;
         if let Some(&was) = census.last.get(&site)
             && was != o
         {
-            tr[usize::from(class >= 8)][was][o] += 1;
+            tr[class / 4][was][o] += 1;
         }
         census.last.insert(site, o);
     }
@@ -476,7 +476,7 @@ fn sample(minute: u64, world: &World, flora: &Flora, census: &mut Census) {
         for (a, row) in m.iter().enumerate() {
             for (b, &v) in row.iter().enumerate() {
                 if v > 0 {
-                    println!("tr,{minute},{},{},{},{v}", ["dry-moist", "wet-soggy"][g], occ_name(a), occ_name(b));
+                    println!("tr,{minute},{},{},{},{v}", WATER_CLASSES[g], occ_name(a), occ_name(b));
                 }
             }
         }

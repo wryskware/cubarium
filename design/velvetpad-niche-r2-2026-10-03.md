@@ -14,9 +14,14 @@ Tool: `crates/cubarium/examples/velvet_niche.rs` (`config`, `grid`, `drought`, `
 Written and committed before any paired run started. Plants-only terrarium
 (`config/desktop/terrarium.toml`, `velvet_niche run`, no fauna), seeds 1, 3, 5 and 6, 6 h,
 today's parameters against the candidate, same seed. Classes are read at each sample on
-velvetpad's root box at today's rooting: **niche** = wet (mean available water ≥ 1, i.e.
-above field capacity) or soggy (saturated fraction ≥ 0.6); **non-niche** = dry or moist.
-Shade = terrain sky < 0.6 or canopy transmission at pad height < 0.5.
+velvetpad's root box at today's rooting: **niche** = mean available water ≥ 1.2 or soggy
+(saturated fraction ≥ 0.6); **non-niche** = everything drier. Shade = terrain sky < 0.6 or
+canopy transmission at pad height < 0.5.
+
+*Revised before any candidate run* (the first draft used water ≥ 1.0): the baseline's
+class counts showed drained terrarium ground sits at field capacity. Seed 3 at minute 40:
+5,773 sites at 0.8–1.0, 4,197 at 1.0–1.2, 891 at 1.2–1.6 and 1,900 soggy, of 13,226. A
+boundary at 1.0 would call half the world the niche; at 1.2 the niche is about a fifth.
 
 Non-niche sites change occupants:
 
