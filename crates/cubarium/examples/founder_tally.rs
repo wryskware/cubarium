@@ -190,11 +190,14 @@ fn main() {
     // The minimal gut's readouts: body-ticks per lineage, and the stomach's fill `S / K`
     // summed per lineage over six bins of the clock day (four clock hours each).
     let mut gut = GutTally::default();
+    gut.bellwing_reserve0 = bellwing_reserve(&sim, &params);
+    let mut pack_events: Vec<cubarium_voxel_fauna::PackEvent> = Vec::new();
     let start_hour = params.world.day.start_hour;
     let day_s = params.world.day.day_s();
     for tick in 1..=ticks {
         sim.step();
         gut.observe(&sim, &params, start_hour, day_s, tick);
+        pack_events.extend(sim.fauna_mut().take_pack_events());
         night.observe(&sim, &params, &mut prev_asleep, &mut prev_deaths);
         {
             use cubarium_voxel_fauna::MobilityMode;
@@ -483,6 +486,7 @@ fn main() {
     }
     night.print(&sim);
     gut.print(&sim, &params, &born);
+    print_packs(&pack_events);
     let foods: Vec<String> = Food::ALL
         .iter()
         .map(|f| format!("{}={}", f.name(), l.bites_by_food[f.index()]))
@@ -599,6 +603,8 @@ fn t0_report(sim: &Sim, params: &cubarium_voxel_sim::params::Params) {
 /// deaths by cause. A `riders:` line: attached, dropped off, and the organic riders took.
 #[derive(Default)]
 struct GutTally {
+    /// Mean bellwing reserve fraction at t = 0 (repair 3's measure).
+    bellwing_reserve0: f64,
     body_ticks: [u64; Founder::COUNT],
     eating_ticks: [u64; Founder::COUNT],
     fill: [[f64; 6]; Founder::COUNT],
@@ -677,9 +683,75 @@ impl GutTally {
                 kills,
             );
         }
+        let bw = Founder::Bellwing.index();
+        let dig = l.digested_by_founder[bw];
+        println!(
+            "bellwing_gut: swallowed={:.6} digested={:.6} assimilated={:.6} y_eff={:.3} sip_misses={} reserve_frac={:.3}->{:.3}",
+            l.swallowed_by_founder[bw],
+            dig,
+            l.assimilated_by_founder[bw],
+            if dig > 0.0 { l.assimilated_by_founder[bw] / dig } else { f64::NAN },
+            l.sip_misses_by_founder[bw],
+            self.bellwing_reserve0,
+            bellwing_reserve(sim, params),
+        );
         println!(
             "riders: attached={} dropoffs={} freed={} taken_organic={:.6}",
             l.riders_attached, l.rider_dropoffs, l.riders_freed, l.parasite_taken_organic
+        );
+    }
+}
+
+/// The mean reserve fraction of the living bellwings.
+fn bellwing_reserve(sim: &Sim, params: &cubarium_voxel_sim::params::Params) -> f64 {
+    let p = params.fauna.founder(Founder::Bellwing);
+    let v: Vec<f64> = sim
+        .fauna()
+        .view()
+        .animals
+        .iter()
+        .filter(|a| a.founder == Some(Founder::Bellwing))
+        .map(|a| a.reserve / p.core.reserve_of(a.body).max(1e-300))
+        .collect();
+    if v.is_empty() { f64::NAN } else { v.iter().sum::<f64>() / v.len() as f64 }
+}
+
+/// Per pack (repair 3's measure): chases started with their participant counts, chase
+/// ends by reason, and each feast's carrion eaten and why it ended.
+fn print_packs(events: &[cubarium_voxel_fauna::PackEvent]) {
+    use cubarium_voxel_fauna::PackEvent;
+    let mut packs: Vec<u64> = events
+        .iter()
+        .map(|e| match e {
+            PackEvent::ChaseStart { pack, .. } | PackEvent::ChaseEnd { pack, .. } | PackEvent::FeastEnd { pack, .. } => *pack,
+        })
+        .collect();
+    packs.sort_unstable();
+    packs.dedup();
+    for p in packs {
+        let parts: Vec<String> = events
+            .iter()
+            .filter_map(|e| match e {
+                PackEvent::ChaseStart { pack, participants, .. } if *pack == p => Some(participants.to_string()),
+                _ => None,
+            })
+            .collect();
+        let mut ends = std::collections::BTreeMap::<String, u32>::new();
+        let mut feasts: Vec<String> = Vec::new();
+        for e in events {
+            match e {
+                PackEvent::ChaseEnd { pack, why, .. } if *pack == p => *ends.entry(format!("{why:?}")).or_default() += 1,
+                PackEvent::FeastEnd { pack, eaten, why, .. } if *pack == p => feasts.push(format!("{eaten:.3}:{why:?}")),
+                _ => {}
+            }
+        }
+        let ends: Vec<String> = ends.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        println!(
+            "pack{p}: chases={} participants=[{}] chase_ends=[{}] feasts=[{}]",
+            parts.len(),
+            parts.join(","),
+            ends.join(" "),
+            feasts.join(" ")
         );
     }
 }
