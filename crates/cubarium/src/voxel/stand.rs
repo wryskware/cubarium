@@ -463,7 +463,8 @@ struct ModelInputs {
     /// Each foliage layer's fill, `stock / capacity`.
     foliage: [f64; MAX_FOLIAGE_LAYERS],
     wilt: u8,
-    /// The parcel over one propagule package.
+    /// What the warm accents read: nectar held (1 or 0), the fruit crop over its cap, or
+    /// (any other species) the parcel over one propagule package.
     ripe: f64,
     /// Whether the warm accents are fruit, each kept by its own share of `ripe`.
     fruit: bool,
@@ -949,7 +950,15 @@ impl Stands {
         }
         let wilt = model::wilt_level(stand.moisture);
         let package = sc.propagule_package();
-        let ripe = if package > 0.0 {
+        // The warm accents show what the stand carries (plants-flowering-vines
+        // 2026-10-03): a species that makes nectar is in flower while it holds any (a
+        // bloomcrown, always, once adult); one that hangs fruit shows a berry per share of
+        // its crop (`fruit / fruit_cap`). Any other reads its seed parcel, as before.
+        let ripe = if sc.nectar_cap > 0.0 && sc.nectar_per_s > 0.0 {
+            if stand.nectar > 0.0 { 1.0 } else { 0.0 }
+        } else if sc.fruit_cap > 0.0 && sc.fruit_per_s > 0.0 {
+            (stand.fruit / sc.fruit_cap).clamp(0.0, 1.0)
+        } else if package > 0.0 {
             stand.parcel / package
         } else {
             0.0
