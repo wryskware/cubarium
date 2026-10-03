@@ -389,15 +389,27 @@ fn the_chorister_is_held_to_its_pups() {
     good.pups_alive = 3;
     good.provision_received = 0.2;
     good.carrion_eaten = 0.5;
+    good.intake_run = 0.3;
     judge(&mut good, &s, true);
     assert_eq!(good.rule, Rule::ChoristerProgress);
     assert!(good.met && good.shortfall == 0.0, "{good:?}");
     // Pups provisioned on the founders' endowment, but the pack never ate: not met.
     let mut hungry = good.clone();
     hungry.carrion_eaten = 0.0;
+    hungry.intake_run = 0.0;
     judge(&mut hungry, &s, true);
     assert!(!hungry.met && (hungry.shortfall - 0.25).abs() < 1e-12, "{hungry:?}");
-    // The finalist check asks a pack kill, not carcass feeding alone.
+    // A hit without a meal is not intake (Astra F5).
+    let mut hit_only = hungry.clone();
+    hit_only.hits = 1;
+    judge(&mut hit_only, &s, true);
+    assert!(!hit_only.met, "{hit_only:?}");
+    // Carrion bitten but nothing assimilated is not intake either.
+    let mut bitten = hungry.clone();
+    bitten.carrion_eaten = 0.5;
+    judge(&mut bitten, &s, true);
+    assert!(!bitten.met, "{bitten:?}");
+    // The finalist check asks a pack kill and a meal, not carcass feeding alone.
     let mut f = s;
     f.chorister_kill_required = true;
     let mut scavenged = good.clone();
@@ -766,4 +778,34 @@ fn the_pilot_launch_is_the_agreed_experiment() {
     ] {
         assert!(sh.contains(want), "roster-pilot.sh lacks `{want}`");
     }
+}
+
+
+/// Astra F4: a birth with a negative cycle balance meets the stage, not replenishment,
+/// and so not the combined target; the three verdicts are kept apart.
+#[test]
+fn stage_replenishment_and_combined_verdicts_are_apart() {
+    let mut s = stage();
+    s.birth_required[Founder::Browser.index()] = true;
+    s.replenish[Founder::Browser.index()] = true;
+    let mut o = outcome(Founder::Browser);
+    o.alive_end = 9;
+    o.late_births = 1;
+    o.cycle_complete = true;
+    o.intake_cycle = 1.0;
+    o.biomass_start = 2.0;
+    o.biomass_cycle = 1.75;
+    judge(&mut o, &s, true);
+    assert!(o.stage_met && !o.replenishment_met && !o.met, "{o:?}");
+    o.biomass_cycle = 2.1;
+    judge(&mut o, &s, true);
+    assert!(o.stage_met && o.replenishment_met && o.met, "{o:?}");
+    // An incomplete cycle has not shown replenishment.
+    o.cycle_complete = false;
+    judge(&mut o, &s, true);
+    assert!(!o.replenishment_met && !o.met, "{o:?}");
+    // Not held to replenishment: the stage alone.
+    s.replenish[Founder::Browser.index()] = false;
+    judge(&mut o, &s, true);
+    assert!(o.replenishment_met && o.met, "{o:?}");
 }
