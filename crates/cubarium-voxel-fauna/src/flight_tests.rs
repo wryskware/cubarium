@@ -1268,3 +1268,29 @@ fn a_vine_sip_carries_mineral_and_digests() {
     assert!(a.stomach.pools[Food::Nectar.index()].organic < pool.organic, "the pool digests");
     assert!(a.reserve > r0, "into the reserve");
 }
+
+/// **The hover-sip teacher climbs a step it can clear** (`design/handoffs/
+/// bellwing-finding-2026-10-03.md` item 1): half the ring is a rock step 1.5 m over the
+/// plain — taller than the teacher's search height (0.4 of the 2.5 m band, 1 m) but well
+/// inside the band. A hungry bellwing searching over the plain, with nothing in its fan,
+/// meets the step's wall whichever way it goes round the ring; it must get over it, not
+/// turn away from it for good: within 60 s it flies over the step (its support face is
+/// the step's top). The terrarium's flowers stand on terraces 4 m over the strip the
+/// bellwings were confined to.
+#[test]
+fn the_hover_sip_teacher_climbs_over_a_step_inside_its_band() {
+    let mut world = plain(48, 24, 6);
+    rock(&mut world, 24..=47, 3..=8);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(8, 3);
+    // A full reserve (it can pay its takeoffs) and an empty stomach (its eating latch on).
+    let id = aloft(&mut fauna, &world, x, z, SURFACE + 1.0, EAST, StartingStores::FULL);
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(BW, teachers)));
+    let over = until(&mut fauna, &world, &mut flora, 1200, |f| {
+        f.view().animal(id).is_some_and(|a| a.site.y == 8 && a.mobility.mode == MobilityMode::Fly)
+    });
+    assert!(animal(&fauna, id).eating, "the bellwing is hungry, so it searches");
+    assert!(over < 1200, "the bellwing flew over the 1.5 m step: it is at {:?}", animal(&fauna, id).pose);
+}
