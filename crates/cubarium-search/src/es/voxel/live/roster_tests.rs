@@ -346,6 +346,11 @@ fn the_lanternjaw_is_held_to_progress_not_a_birth() {
     hunter.free_living = 1;
     hunter.alive_end = 1;
     hunter.carrion_eaten = 0.1;
+    // A juvenile off its host scavenging is not yet a hunter (the exhibit run's freed
+    // riders ate carrion); a hit it lands makes it one.
+    judge(&mut hunter, &s, true);
+    assert_eq!(hunter.score, 0.75, "{hunter:?}");
+    hunter.hits = 1;
     judge(&mut hunter, &s, true);
     assert_eq!(hunter.score, 1.0, "{hunter:?}");
 }

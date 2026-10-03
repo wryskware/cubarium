@@ -9,7 +9,7 @@
 //! - **The lanternjaw's ladder** (`progress`): 0.25 hatched from the founding egg bank,
 //!   0.5 a rider attached (up to 0.75 as the furthest rider grows toward its drop-off
 //!   line), 0.75 a juvenile off its host (dropped off or freed) and living
-//!   free, 1 an established hunter feeding (carrion eaten or a hit) or eggs laid by an
+//!   free, 1 an established hunter (a free lanternjaw's hit landed) or eggs laid by an
 //!   adult. Met at `lanternjaw_progress`. Bank hatches, riders and free-living hunters are
 //!   counted apart.
 //! - **The chorister's pups** (`progress`): a litter (in either half: an early one is a
@@ -252,7 +252,7 @@ pub fn replenishment(intake: f64, biomass_start: f64, biomass_end: f64) -> f64 {
 
 /// The lanternjaw's ladder ([`super::targets`] module docs).
 fn lanternjaw_score(o: &LineageOutcome) -> f64 {
-    let established = o.free_living > 0 && (o.carrion_eaten > 0.0 || o.hits > 0);
+    let established = o.free_living > 0 && o.hits > 0;
     if established || o.eggs_laid > 0 {
         1.0
     } else if o.free_living > 0 && o.rider_dropoffs + o.riders_freed > 0 {

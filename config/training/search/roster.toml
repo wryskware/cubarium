@@ -84,8 +84,8 @@ birth_required = ["littershredder", "frondgrazer", "capgnawer", "loftstrider", "
 birth_credit_max = 0.5
 ready_target = 0.5
 # Progress ladders where no birth fits 2 h: the lanternjaw (0.25 hatched from the bank,
-# 0.5 a rider attached, 0.75 a juvenile off its host, 1 an established hunter feeding or
-# laying), met at lanternjaw_progress; the chorister (a litter, pups provisioned, pup
+# 0.5 a rider attached, rising to 0.75 as the furthest rider nears its drop-off line, 0.75 a
+# juvenile off its host, 1 a free lanternjaw's hit landed or an adult laying), met at lanternjaw_progress; the chorister (a litter, pups provisioned, pup
 # survival at least chorister_pup_survival), met at all three.
 progress = ["lanternjaw", "chorister"]
 lanternjaw_progress = 0.5
