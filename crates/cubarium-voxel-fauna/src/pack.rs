@@ -447,6 +447,8 @@ pub(crate) fn steer(
         crate::body::mouth_pool_site(fv, &cols, a.site.y, crate::Food::Carrion).is_some_and(|(s, _)| s == fs)
     };
     let eat = Actions { forward: 0.0, turn: 0.0, feed: 1.0 };
+    // Short of it, it walks on with no stop distance: a mouth takes a pool at its own
+    // standing face, so a carcass on a face a step up is eaten only from that face.
 
     // A pup: at the pack's carcass when it lies by the den, else at the den.
     if m.pup {
@@ -460,7 +462,7 @@ pub(crate) fn steer(
                 if at_feast(fs) {
                     return Some(eat);
                 }
-                return Some(go_to(&a, fx, fz, ring, 0.25, 1.0));
+                return Some(go_to(&a, fx, fz, ring, 0.0, 1.0));
             }
         }
         if d_den > 0.5 * t.den_radius_m {
@@ -578,7 +580,7 @@ pub(crate) fn steer(
                     return Some(clamp(fauna, eat));
                 }
                 let (fx, fz) = centre(fs, v);
-                return Some(clamp(fauna, go_to(&a, fx, fz, ring, 0.25, 1.0)));
+                return Some(clamp(fauna, go_to(&a, fx, fz, ring, 0.0, 1.0)));
             }
         } else {
             let eaten = fauna.pack(own).map_or(0.0, |p| p.feast_eaten);

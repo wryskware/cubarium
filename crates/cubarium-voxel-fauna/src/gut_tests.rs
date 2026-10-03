@@ -1342,6 +1342,34 @@ fn a_hungry_pack_walks_to_its_feast_and_eats_it() {
     assert!(eaten > 0.0, "the feast books what the pack ate: {eaten}");
 }
 
+/// **A kill on a low step is eaten** (bellwing-finding item 2, seed 3): the carcass lies on
+/// a face one voxel above the face a hungry adult stands on, its centre within the old
+/// 0.25 m stop of the carcass's column. A mouth takes a pool at its own standing face, so
+/// the adult must step onto the carcass's face, not stop short of it.
+#[test]
+fn a_hungry_pack_steps_up_onto_a_feast_one_voxel_higher() {
+    let (mut world, mut flora, mut fauna, adults, _prey) = pack_scene(&[(3.18, 1.625, true)], (9.0, 2.6));
+    world.apply(cubarium_voxel::Command::SetMaterial {
+        x: 13,
+        y: SURFACE_Y + 1,
+        z: 6,
+        material: cubarium_voxel::Material::Rock,
+    });
+    let pack = fauna.packs()[0].id;
+    let feast = Site { x: 13, y: SURFACE_Y + 1, z: 6 };
+    assert!(flora.deposit(
+        feast,
+        Deposit { kind: DepositKind::Carrion, organic: 2.0, mineral: 0.1 * 2.0, energy: 4.0 }
+    ));
+    fauna.pack_mut(pack).expect("the pack").feast = Some(feast);
+    let id = adults[0];
+    for _ in 0..400 {
+        fauna.step_with(&world, &mut flora, 1);
+    }
+    let s = animal(&fauna, id).stomach.total().organic;
+    assert!(s > 1e-9, "the adult ate at the raised feast (it stands on {:?})", animal(&fauna, id).site);
+}
+
 /// **The reserve fallback is the old transfer** (repair 3 item 6): a pup whose stomach is
 /// full (its eating latch off) but whose reserve is low still receives reserve from an
 /// adult with an empty stomach and a surplus reserve.
