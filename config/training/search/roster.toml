@@ -1,0 +1,316 @@
+# The full-roster ecology search (design/ecology-timescales-2026-10-02.md Part 3;
+# design/handoffs/roster-search-groundwork-2026-10-02.md). Ecology only: brains held.
+#
+# x1 is the LIVE TERRARIUM: every gene multiplies the value `[base]` gives it, the desktop
+# terrarium preset's own [flora] and [fauna] tables (the curiosity gate's ecology, all nine
+# lineages founded, glassfilm seeded) over the code defaults. So a genome found here is
+# watched exactly with
+#   ./scripts/run-voxel.sh --config config/desktop/terrarium.toml --params <genome.toml>
+# (the app decodes a genome over its config's tables). A saved genome carries the base
+# inline. Run with `--world config/desktop/terrarium.toml`; the founding counts are the
+# base's (all nine), not the code defaults' three.
+#
+# Ties (`derive()`, fauna and flora `ties()`), in force unless freed:
+# - motor_respiration_per_s = motor x maintenance_per_s, and
+#   bite_per_s = intake x maintenance_per_s: the UPKEEP gene also moves bite and motor.
+#   Lowering upkeep x0.12 lowers the bite x0.12 unless `intake` rises to compensate, so
+#   `intake` reaches x10.
+# - wood_decomposition and carrion_decomposition follow `decomposition`.
+# - The mass ties (eight stocks follow mass_scale) are idle: mass is not a gene.
+
+[base]
+file = "config/desktop/terrarium.toml"
+# The night package (branch `night`) is to make founders arrive full and give the plants
+# `night_bloom_scale`; until it lands, founders-full is this existing knob, fixed.
+# HOOK (night merge): drop this line if its code default becomes 1.0, add
+# `night_bloom_scale` as a gene or fixed value, set wake_hunger's value below to the new
+# default, and set [screen.food] night_bloom_scale from the flora knob.
+[base.fauna.founding]
+arrival_reserve = 1.0
+
+# Brains (ecology only, no brain pairs): the shredders and browsers on the curiosity gate's
+# C1 centres, everyone else on its heuristic. `--centre` overrides.
+[brains]
+littershredder = "config/training/curiosity-2026-10-02/C1-centre-littershredder.json"
+frondgrazer = "config/training/curiosity-2026-10-02/C1-centre-frondgrazer.json"
+
+[screen]
+# R/S/F (the browser on foliage), as cotrain.toml.
+r = [0.02, 0.3]
+s = [0.02, 0.2]
+f_min = 10.0
+base = 200.0
+k = 10.0
+run_margin = 2.0
+k_soft = 5.0
+light_moisture = 0.67
+harvest = 0.2
+
+# Night endurance, optimistic adult (proposal 1a; Astra A2): from onset reserve f0,
+# max(0, f0 - (1 - h)) x c / (m x s) >= margin x the lineage's longest sleeping bout on the
+# world's clock (daylight lines 0.3; crepuscular 0.05 / 0.95). Exact, not rounded.
+[screen.night]
+f0 = 0.8
+margin = 1.2
+
+# Food access per food type (proposal Part 3; Astra A5, A11): each founded lineage's basal
+# need over a day (awake plus asleep at sleep_upkeep, assimilated units) against its foods'
+# optimistic supply at founding (stands min(founder_cap, founder_per_m2 x floor area),
+# continuous harvest, no competition, no stock caps). Necessary, not sufficient.
+[screen.food]
+min_ratio = 1.0
+# Latticevine faces per vine, flowering back to back (optimistic).
+vine_faces = 64.0
+# Nectar and fruit at night as a share of the day rate: 0 until `night` lands.
+night_bloom_scale = 0.0
+# Predator balance (a READOUT, never a refusal; Astra A6): the share of prey production
+# allotted to each predator lineage.
+balance_share = 0.5
+
+[targets]
+# Targets v3: per lineage and life stage (proposal Part 3; Astra A10).
+version = 3
+# An actual birth in the second half is required; readiness earns at most
+# birth_credit_max of the term and never meets it.
+birth_required = ["littershredder", "frondgrazer", "capgnawer", "loftstrider", "ripple-snail", "bellwing", "seedporter"]
+birth_credit_max = 0.5
+ready_target = 0.5
+# Progress ladders where no birth fits 2 h: the lanternjaw (0.25 hatched from the bank,
+# 0.5 a rider attached, 0.75 a juvenile off its host, 1 an established hunter feeding or
+# laying), met at lanternjaw_progress; the chorister (a litter, pups provisioned, pup
+# survival at least chorister_pup_survival), met at all three.
+progress = ["lanternjaw", "chorister"]
+lanternjaw_progress = 0.5
+chorister_pup_survival = 0.5
+# Replenishment over one whole day-cycle: assimilated intake over the cycle's measured
+# spending (intake minus the lineage's change in body, reserve and escrow), at least 1.
+replenish = ["littershredder", "frondgrazer", "capgnawer", "loftstrider", "ripple-snail", "bellwing", "seedporter", "chorister"]
+replenish_weight = 5.0
+# Kept: persistence, the band, browsers moving >= 0.30, lanternjaw share 5-15 % scored
+# softly while it cannot establish (its weight x this until a free-living hunter exists).
+lively_weight = 10.0
+share_weight_unestablished = 0.2
+
+# --- Animals: per lineage (tie = "each" over the nine founded lineages). ---
+
+[[gene]]
+name = "upkeep"
+path = "fauna.founders.*.core.maintenance_per_s"
+tie = "each"
+range = [0.05, 4.0]
+what = "basal upkeep (moves bite and motor by the ties); proposal: prey /4-5 for night endurance, lanternjaw to ~7e-5-1e-4, chorister to ~8e-5 (base x0.12-0.19)"
+
+[[gene]]
+name = "motor"
+path = "fauna.founders.*.motor_respiration_per_s"
+tie = "each"
+range = [0.25, 8.0]
+what = "walking cost / upkeep (the motor tie's ratio)"
+
+[[gene]]
+name = "intake"
+path = "fauna.founders.*.core.bite_per_s"
+tie = "each"
+range = [0.1, 10.0]
+what = "max intake / upkeep (the intake tie's ratio); reaches x10 to undo an upkeep cut on the bite"
+
+[[gene]]
+name = "yield"
+path = "fauna.founders.*.yield_by_food.*"
+tie = "each"
+range = [0.25, 1.5]
+what = "assimilation yield, every food (base yields <= 0.6, so <= 0.9)"
+
+[[gene]]
+name = "breed_reserve"
+path = "fauna.founders.*.core.reproduction.surplus_floor"
+tie = "each"
+range = [0.25, 4.0]
+what = "surplus floor: the reserve margin a body breeds above"
+
+[[gene]]
+name = "lifespan"
+path = "fauna.founders.*.core.lifespan_median_s"
+tie = "each"
+range = [0.25, 4.0]
+what = "median lifespan"
+
+[[gene]]
+name = "maturity"
+path = "fauna.founders.*.core.growth_max_per_s"
+tie = "each"
+range = [0.25, 4.0]
+what = "growth to breeding size"
+
+[[gene]]
+name = "reserve"
+path = "fauna.founders.*.core.reserve_cap"
+tie = "each"
+range = [0.5, 5.0]
+what = "reserve per body (0.5 -> 0.25-2.5; 1.0 -> 0.5-5); proposal: the alternative to /4-5 upkeep"
+
+[[gene]]
+name = "sleep"
+path = "fauna.founders.*.sleep_upkeep"
+tie = "each"
+range = [0.4, 2.0]
+what = "upkeep asleep (0.5 -> 0.2-1.0; 0.3 -> 0.12-0.6); proposal: 0.5 endotherm-like, 0.3 ectotherm-like"
+
+[[gene]]
+name = "wake_hunger"
+path = "fauna.founders.*.wake_hunger"
+tie = "each"
+mode = "value"
+value = 0.5
+range = [0.3, 0.95]
+what = "hunger that wakes a sleeper (set, not scaled); proposal candidate 0.9. HOOK: value = the base's default"
+
+# Gestation or incubation, wherever a row is non-zero (the lanternjaw has neither: its eggs
+# lie dormant until a dusk).
+[[gene]]
+name = "gestation@littershredder"
+path = "fauna.founders.littershredder.core.reproduction.incubation_s"
+range = [0.25, 4.0]
+what = "incubation"
+
+[[gene]]
+name = "gestation@frondgrazer"
+path = "fauna.founders.frondgrazer.core.reproduction.gestation_s"
+range = [0.25, 4.0]
+what = "gestation"
+
+[[gene]]
+name = "gestation@capgnawer"
+path = "fauna.founders.capgnawer.core.reproduction.incubation_s"
+range = [0.25, 4.0]
+what = "incubation"
+
+[[gene]]
+name = "gestation@loftstrider"
+path = "fauna.founders.loftstrider.core.reproduction.gestation_s"
+range = [0.25, 4.0]
+what = "gestation"
+
+[[gene]]
+name = "gestation@ripple-snail"
+path = "fauna.founders.ripple-snail.core.reproduction.incubation_s"
+range = [0.25, 4.0]
+what = "incubation"
+
+[[gene]]
+name = "gestation@bellwing"
+path = "fauna.founders.bellwing.core.reproduction.incubation_s"
+range = [0.25, 4.0]
+what = "incubation"
+
+[[gene]]
+name = "gestation@seedporter"
+path = "fauna.founders.seedporter.core.reproduction.gestation_s"
+range = [0.25, 4.0]
+what = "gestation"
+
+[[gene]]
+name = "gestation@chorister"
+path = "fauna.founders.chorister.core.reproduction.gestation_s"
+range = [0.25, 4.0]
+what = "gestation"
+
+# The chorister's founding pack size (4 adults; proposal: 2-3 at upkeep /5).
+[[gene]]
+name = "pack_size@chorister"
+path = "fauna.founders.chorister.pack.pack_size"
+range = [0.5, 1.5]
+what = "adults per founded pack (rounded): 2-6"
+
+# --- Plants: the existing groups (turf, mat, shrub, tree), the grazing defence and
+# decomposition, as cotrain.toml. ---
+
+[[gene]]
+name = "growth@turf"
+path = "flora.@turf.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap"
+
+[[gene]]
+name = "growth@mat"
+path = "flora.@mat.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap"
+
+[[gene]]
+name = "growth@shrub"
+path = "flora.@shrub.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap"
+
+[[gene]]
+name = "growth@tree"
+path = "flora.@tree.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap"
+
+[[gene]]
+name = "leaf_fall@turf"
+path = "flora.@turf.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate"
+
+[[gene]]
+name = "leaf_fall@mat"
+path = "flora.@mat.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate"
+
+[[gene]]
+name = "leaf_fall@shrub"
+path = "flora.@shrub.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate"
+
+[[gene]]
+name = "leaf_fall@tree"
+path = "flora.@tree.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate"
+
+[[gene]]
+name = "alpha@turf"
+path = "flora.@turf.alpha"
+range = [0.25, 2.0]
+what = "foliage per unit wood"
+
+[[gene]]
+name = "alpha@mat"
+path = "flora.@mat.alpha"
+range = [0.25, 2.0]
+what = "foliage per unit wood"
+
+[[gene]]
+name = "alpha@shrub"
+path = "flora.@shrub.alpha"
+range = [0.05, 2.0]
+what = "foliage per unit wood"
+
+[[gene]]
+name = "alpha@tree"
+path = "flora.@tree.alpha"
+range = [0.005, 2.0]
+what = "foliage per unit wood"
+
+[[gene]]
+name = "defence_onset"
+path = "flora.@photo.defence_per_bite"
+range = [0.25, 8.0]
+what = "defence rise per bite"
+
+[[gene]]
+name = "defence_relax"
+path = "flora.@photo.defence_half_life_s"
+range = [0.03, 4.0]
+what = "defence half-life"
+
+[[gene]]
+name = "decomposition"
+path = "flora.decomposition"
+range = [0.1, 4.0]
+what = "litter decay (dead wood and carrion follow)"
