@@ -695,7 +695,7 @@ pub fn seed_pre_rolled(
     }
 
     // The two **sensed founder lineages**, which is what walks this habitat now. Both
-    // arrive grown with half a reserve ([`founder_arrival`]): room to eat, and a body's
+    // arrive grown and full ([`founder_arrival`]): a full reserve, and a body's
     // worth of buffer to find food with at the shipped mass.
     // The seeder installs each lineage's own observation-only heuristic through the
     // fauna layer's ordinary controller boundary, and registers it as that lineage's
@@ -1781,12 +1781,12 @@ pub fn reinstall_heuristics(fauna: &mut Fauna) {
     }
 }
 
-/// How a seeded founder arrives: **grown, with half a reserve** (the mass round,
-/// 2026-09-29). At the shipped x30 mass the old half-grown, empty arrival (the arenas'
-/// `StartingStores::HUNGRY`) starved founders on the terrarium before they settled; a
-/// full reserve would leave no appetite (hunger 0, and asleep at its lineage's night).
-/// Half a reserve is hunger 0.5: awake, eating, with the whole body as buffer. The numbers
-/// are [`cubarium_voxel_fauna::FoundingConfig::arrival_body`] and `arrival_reserve`.
+/// How a seeded founder arrives: **grown and full** (night survival 1a, 2026-10-02; half
+/// a reserve since the mass round of 2026-09-29). At the shipped x30 mass the old
+/// half-grown, empty arrival (the arenas' `StartingStores::HUNGRY`) starved founders on
+/// the terrarium before they settled. A full founder enters its lineage's first sleep at
+/// a full reserve. The numbers are
+/// [`cubarium_voxel_fauna::FoundingConfig::arrival_body`] and `arrival_reserve`.
 pub fn founder_arrival(founding: &cubarium_voxel_fauna::FoundingConfig) -> StartingStores {
     StartingStores {
         body: founding.arrival_body,
@@ -3398,7 +3398,18 @@ mod tests {
             }
         }
 
-        let (world, flora, mut fauna, seeded) = seeded(crate::scene::authored(config()));
+        // Founders past the wake line, so both kinds forage at the layout's hour: since
+        // night survival 1a a founder arrives full and the nocturnal shredder would sleep
+        // through a daytime start (with the old half reserve it sat on the old 0.5 line).
+        let (world, flora, mut fauna, seeded) = {
+            let mut world = crate::scene::authored(config());
+            let mut flora = Flora::new(Default::default());
+            let mut fc = cubarium_voxel_fauna::FaunaConfig::placeholder();
+            fc.founding.arrival_reserve = 0.05;
+            let mut fauna = Fauna::new(fc);
+            let summary = seed(&mut world, &mut flora, &mut fauna);
+            (world, flora, fauna, summary)
+        };
         // One watcher per founder kind, wrapped around the controller the seeder
         // installed, so the heuristic under test is the one the habitat ships.
         let best: [Arc<Mutex<f64>>; Founder::COUNT] = std::array::from_fn(|_| Arc::default());

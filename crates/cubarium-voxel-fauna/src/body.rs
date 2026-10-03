@@ -99,11 +99,16 @@ const MOUTH_REACH_LENGTH_FRACTION: f64 = 0.25;
 const WALL_CLIMB_COST_FACTOR: f64 = 2.0;
 /// [`FounderPhysiology::drown_after_s`], both lineages.
 const DROWN_AFTER_S: f64 = 60.0;
-/// [`FounderPhysiology::sleep_upkeep`], both lineages.
+/// [`FounderPhysiology::sleep_upkeep`] of the endotherm-like lineages (the frondgrazer,
+/// loftstrider, bellwing, seedporter and chorister): 0.5, provisional
+/// (`design/ecology-timescales-2026-10-02.md` 1a).
 const SLEEP_UPKEEP: f64 = 0.5;
-/// [`FounderPhysiology::wake_hunger`], both lineages: awake once the reserve is under half
-/// its cap.
-const WAKE_HUNGER: f64 = 0.5;
+/// [`FounderPhysiology::sleep_upkeep`] of the ectotherm-like lineages (the shredder,
+/// ripple-snail, capgnawer and lanternjaw): 0.3, provisional (1a).
+const SLEEP_UPKEEP_ECTOTHERM: f64 = 0.3;
+/// [`FounderPhysiology::wake_hunger`], every lineage: a sleeper wakes for hunger once its
+/// reserve is under a tenth of its cap (1a, Wrysk 2026-10-02; 0.5 before).
+const WAKE_HUNGER: f64 = 0.9;
 
 /// What a shredder builds out of a unit of litter — and, by the decision, of carrion.
 const LITTER_YIELD: f64 = 0.5;
@@ -348,11 +353,14 @@ pub struct FounderPhysiology {
     /// When this lineage is awake: the browser is diurnal, the shredder nocturnal.
     /// Placeholders, `design/backlog.md` §1.
     pub active: crate::Activity,
-    /// What upkeep costs while it sleeps, **× its basal upkeep** (0.5, Fable's call).
+    /// What upkeep costs while it sleeps, **× its basal upkeep**: 0.5 for endotherm-like
+    /// lineages, 0.3 for the ectotherm-like shredder, ripple-snail, capgnawer and
+    /// lanternjaw (`design/ecology-timescales-2026-10-02.md` 1a; provisional).
     pub sleep_upkeep: f64,
     /// Hunger overrides sleep: a body whose hunger (the reserve's shortfall from its cap,
-    /// 0 full to 1 empty) is at or above this stays awake and forages. 0.5, a placeholder:
-    /// there was no earlier threshold to reuse.
+    /// 0 full to 1 empty) is at or above this stays awake and forages. 0.9 (1a, 2026-10-02;
+    /// 0.5 before): a sleeper wakes with a tenth of its reserve. A carnivore's satiated
+    /// rest has its own [`Hunter::wake_at`].
     pub wake_hunger: f64,
     /// `Some` for a **carnivore** (`design/predation-and-flight-2026-09-28.md` §2.1,
     /// §2.3, §2.8, §2.12): its prey list and size window, the strike, the lure and the
@@ -875,7 +883,7 @@ impl FounderPhysiology {
                 ],
                 organ_structure_fraction: 0.05,
                 active: crate::Activity::Nocturnal,
-                sleep_upkeep: SLEEP_UPKEEP,
+                sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 hunter: None,
                 armour: 0.0,
@@ -1016,7 +1024,7 @@ impl FounderPhysiology {
                 yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
                 active: crate::Activity::Nocturnal,
-                sleep_upkeep: SLEEP_UPKEEP,
+                sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 hunter: Some(Hunter::LANTERNJAW),
                 armour: 0.0,
@@ -1195,6 +1203,8 @@ impl FounderPhysiology {
                     // Taste reads nectar against a bloomcrown's full flower (its
                     // `nectar_cap`, 0.02): a full flower tastes 1 before saturation.
                     taste_reference: Some(0.02),
+                    // An endotherm-like sleeper, not the shredder's 0.3 (1a).
+                    sleep_upkeep: SLEEP_UPKEEP,
                     ..shredder
                 }
             }
@@ -1292,6 +1302,8 @@ impl FounderPhysiology {
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
                     pack: Some(Pack::CHORISTER),
+                    // An endotherm-like sleeper, not the lanternjaw's 0.3 (1a).
+                    sleep_upkeep: SLEEP_UPKEEP,
                     ..lj
                 }
             }

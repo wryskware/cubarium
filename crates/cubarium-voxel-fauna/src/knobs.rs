@@ -451,7 +451,9 @@ impl Default for FoundingConfig {
     fn default() -> FoundingConfig {
         FoundingConfig {
             arrival_body: 1.0,
-            arrival_reserve: 0.5,
+            // Night survival 1a (2026-10-02): founders arrive full, so each enters its
+            // first sleep at f0 = 1 (was 0.5).
+            arrival_reserve: 1.0,
             starter_litter_organic: 0.2,
             starter_litter_mineral_fraction: 0.02,
             starter_litter_energy_density: 2.0,

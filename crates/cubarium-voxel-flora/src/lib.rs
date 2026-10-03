@@ -726,6 +726,21 @@ pub const DEFENCE_PER_BITE: f64 = 3e-3;
 /// "relaxes over tens of minutes".
 pub const DEFENCE_HALF_LIFE_S: f64 = 1200.0;
 
+/// [`SpeciesConfig::night_bloom_scale`]'s default: 0.3 of the day rate (1b's candidate).
+fn default_night_bloom_scale() -> f64 {
+    0.3
+}
+
+/// [`SpeciesConfig::night_floor`]'s default: a fifth of the reserve cap kept for dawn.
+fn default_night_floor() -> f64 {
+    0.2
+}
+
+/// [`SpeciesConfig::night_min_s`]'s default: ten minutes.
+fn default_night_min_s() -> f64 {
+    600.0
+}
+
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
 /// the terrain couplings that replace the old noise fields.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1059,6 +1074,24 @@ pub struct SpeciesConfig {
     /// but not zero (energy-rich fruit). Drawn from the stand's own mineral when taken.
     #[serde(default)]
     pub fruit_mineral_fraction: f64,
+    /// **The night budget** (`design/ecology-timescales-2026-10-02.md` 1b): while the sun
+    /// is down on the ecological clock, a photosynthetic stand's reserve funds the leaf
+    /// reflush (below [`SpeciesConfig::reflush_below`]), then nectar, then fruit, out of
+    /// one spendable budget per second,
+    /// `max(0, reserve − maintenance to dawn − night_floor · reserve cap) / max(time to
+    /// dawn, night_min_s)`. This is nectar and fruit production at night, a fraction of
+    /// the day rate ([`SpeciesConfig::nectar_per_s`], [`SpeciesConfig::fruit_per_s`]).
+    /// 0.3, a tunable candidate.
+    #[serde(default = "default_night_bloom_scale")]
+    pub night_bloom_scale: f64,
+    /// The night budget's **dawn floor**: the reserve a stand keeps for dawn, a fraction of
+    /// its reserve cap (`reserve_cap · W`). Nothing at night is spent from below it.
+    #[serde(default = "default_night_floor")]
+    pub night_floor: f64,
+    /// The night budget's **minimum time to dawn**, seconds: the budget is spread over at
+    /// least this long, so it stays bounded as dawn nears.
+    #[serde(default = "default_night_min_s")]
+    pub night_min_s: f64,
     /// **A runner's reach**: how many columns sideways, in `x` and `z`, a runner or rhizome
     /// daughter may root from the parent (the square ring around the home column); the
     /// support face is then the one at the parent's height or a voxel above or below. A
@@ -1431,6 +1464,10 @@ impl SpeciesConfig {
             fruit_cap: 0.0,
             fruit_drop_s: 0.0,
             fruit_mineral_fraction: 0.0,
+            // 1b: the night budget's knobs, plausible defaults (not tuned).
+            night_bloom_scale: default_night_bloom_scale(),
+            night_floor: default_night_floor(),
+            night_min_s: default_night_min_s(),
             // A runner roots on the next column over (the eight neighbours).
             runner_reach: 1,
             // No founders: every preset that is seeded says so.
@@ -2924,6 +2961,13 @@ pub struct FloraLedger {
     pub propagule_requested: [f64; Species::COUNT],
     pub propagule_funded: [f64; Species::COUNT],
     pub propagule_landed: [f64; Species::COUNT],
+    /// **The night budget's spend** (1b), per species, indexed by [`Species::index`]:
+    /// reserve spent while the sun was down on `[reflush, nectar, fruit]`, organic units,
+    /// the reflush with its construction respiration. A diagnostic flux inside the stand
+    /// (reserve into foliage, nectar and fruit, and the respiration already booked in
+    /// `respired_out`), so in none of the `expected_*` totals.
+    #[serde(default)]
+    pub night_spend: [[f64; 3]; Species::COUNT],
     /// Organic matter the saprotrophs have withdrawn from dead wood and litter, per
     /// species, indexed by [`Species::index`]: a **diagnostic flux and not a boundary flow**, exactly like
     /// the three `propagule_*` arrays, and therefore in none of the three

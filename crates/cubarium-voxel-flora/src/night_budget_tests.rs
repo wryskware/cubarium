@@ -214,10 +214,14 @@ fn below_the_dawn_floor_a_stand_spends_nothing_at_night() {
 fn a_rich_stand_spends_within_the_formula_and_keeps_its_floor_to_dawn() {
     let c = config();
     let sc = c.species(BC).clone();
-    // Plenty, and a tight one just above the floor, where the budget binds every tick.
-    for start in [1.0, sc.night_floor + 0.02] {
+    // Plenty, and a tight one: the floor and the night's maintenance plus 2 % of the cap,
+    // where the budget binds every tick. ("Plenty" means at least the floor and the
+    // maintenance to dawn: below that, maintenance alone takes a stand under its floor,
+    // with nothing spent.)
+    let night_s = 2400.0;
+    let maintenance_frac = sc.maintenance * NIGHT * night_s / sc.reserve_cap;
+    for start in [1.0, sc.night_floor + maintenance_frac + 0.02] {
         let (mut s, mut g) = stand(&c, start, Some(0.1));
-        let night_s = 2400.0;
         let ticks = (night_s / DT).round() as u64;
         let mut total_spent = 0.0;
         for k in 0..ticks {
@@ -232,8 +236,9 @@ fn a_rich_stand_spends_within_the_formula_and_keeps_its_floor_to_dawn() {
             );
             let booked: f64 = book.night.iter().sum();
             assert!(close(booked, total) || (booked - total).abs() < 1e-15, "booked {booked}, spent {total}");
-            assert!(close(book.night[1], nectar) || (book.night[1] - nectar).abs() < 1e-18);
-            assert!(close(book.night[2], fruit) || (book.night[2] - fruit).abs() < 1e-18);
+            // Stock differences round at the stock's magnitude (~1e-2), hence 1e-15.
+            assert!((book.night[1] - nectar).abs() < 1e-15, "nectar booked {}, made {nectar}", book.night[1]);
+            assert!((book.night[2] - fruit).abs() < 1e-15, "fruit booked {}, made {fruit}", book.night[2]);
             assert!(reflush >= -1e-15);
             let floor = sc.night_floor * sc.reserve_cap * s.wood;
             assert!(
@@ -255,7 +260,9 @@ fn a_rich_stand_spends_within_the_formula_and_keeps_its_floor_to_dawn() {
 /// gets the rest, and fruit nothing; with plenty, all three at their rates.
 #[test]
 fn the_reflush_is_paid_before_nectar_and_fruit() {
-    let c = config();
+    // A short night floor, so a reserve within the cap can fund a whole tick's reflush.
+    let mut c = config();
+    c.species_mut(BC).night_min_s = 50.0;
     let sc = c.species(BC).clone();
     let to_dawn = 2.0 * sc.night_min_s;
     let (probe, _) = stand(&c, 1.0, Some(0.1));
@@ -298,8 +305,8 @@ fn the_reflush_is_paid_before_nectar_and_fruit() {
         let book = tick(&c, &mut s, &mut g, night(to_dawn));
         let (_, reflush, nectar, fruit) = spent(&c, &before, &s);
         assert!(close(reflush, expect.0), "{case}: reflush {reflush}, want {}", expect.0);
-        assert!(close(nectar, expect.1) || (nectar - expect.1).abs() < 1e-18, "{case}: nectar {nectar}, want {}", expect.1);
-        assert!(close(fruit, expect.2) || (fruit - expect.2).abs() < 1e-18, "{case}: fruit {fruit}, want {}", expect.2);
+        assert!(close(nectar, expect.1) || (nectar - expect.1).abs() < 1e-15, "{case}: nectar {nectar}, want {}", expect.1);
+        assert!(close(fruit, expect.2) || (fruit - expect.2).abs() < 1e-15, "{case}: fruit {fruit}, want {}", expect.2);
         assert!(close(book.night[0], reflush), "{case}: the reflush booked with its respiration");
     }
 }
