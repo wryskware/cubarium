@@ -603,3 +603,24 @@ fn the_snails_taste_reference_is_the_film_capacity_of_the_worlds_cell() {
         );
     }
 }
+
+/// **A founder is never founded where its disc hangs off the strip** (roster mechanics fix
+/// 2's root cause: the drowned loftstriders were all founded on `z = 0`, their 1.1 m disc
+/// over the strip's end, where the motor could not move them; they starved in place in
+/// 0.75 m of water until the shrinking body was under it). On a plain, `founding_faces`
+/// for the loftstrider offers no face whose centre is nearer either `z` end than its
+/// radius, and still offers the middle.
+#[test]
+fn founding_faces_keep_the_disc_inside_the_strip() {
+    let world = plain(32, 40, 24);
+    let fauna = Fauna::new(FaunaConfig::default());
+    let p = fauna.config().founder(LS);
+    let r = p.adult_body().footprint_radius();
+    let depth_m = 24.0 * V;
+    let faces = crate::founding_faces(&world.view(), p, 0.0);
+    assert!(faces.iter().any(|f| f.z == 12), "the middle is offered");
+    for f in &faces {
+        let z = (f64::from(f.z) + 0.5) * V;
+        assert!(z >= r - 1e-9 && z <= depth_m - r + 1e-9, "face {f:?}: centre {z} m, radius {r} m");
+    }
+}
