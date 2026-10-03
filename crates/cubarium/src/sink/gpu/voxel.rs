@@ -630,6 +630,11 @@ impl VoxelGpuSink {
         self.target.should_quit()
     }
 
+    /// Whether Ctrl+S was pressed in the development window since the last call.
+    pub fn take_save_request(&mut self) -> bool {
+        self.target.take_save_request()
+    }
+
     /// Report what the frames cost and stop.
     pub fn finish(&mut self) -> Result<()> {
         let n = self.frames.max(1) as f64;

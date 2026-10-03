@@ -27,9 +27,14 @@ use wayland_client::protocol::{wl_compositor, wl_keyboard, wl_seat, wl_surface};
 use wayland_client::{Display, EventQueue, GlobalManager, Main};
 use wayland_protocols::xdg_shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
-/// evdev's `KEY_ESC`: the key is the only one the window listens for, so no keymap is
-/// needed to read it.
+/// evdev's `KEY_ESC`. The window listens for Escape and Ctrl+S only, by evdev code, so
+/// no keymap is needed to read them.
 const KEY_ESC: u32 = 1;
+/// evdev's `KEY_S`, for Ctrl+S (save the whole world).
+const KEY_S: u32 = 31;
+/// Control's bit in `wl_keyboard.modifiers`: xkb's standard modifier order puts Control
+/// third (Shift, Lock, Control), and every keymap a desktop sends keeps that order.
+const MOD_CONTROL: u32 = 1 << 2;
 
 /// The app id, which is also the class a compositor rule matches.
 const APP_ID: &str = "cubarium";
@@ -41,6 +46,10 @@ struct Events {
     configured: Option<(u32, u32)>,
     closed: bool,
     escape: bool,
+    /// Control is held, as the last `modifiers` event said.
+    control: bool,
+    /// Ctrl+S was pressed and has not been taken.
+    save: bool,
 }
 
 /// One toplevel on its own connection to the compositor.
@@ -142,6 +151,15 @@ impl WaylandWindow {
                     {
                         events.borrow_mut().escape = true;
                     }
+                    wl_keyboard::Event::Key { key, state, .. }
+                        if key == KEY_S && state == wl_keyboard::KeyState::Pressed =>
+                    {
+                        let mut e = events.borrow_mut();
+                        e.save |= e.control;
+                    }
+                    wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
+                        events.borrow_mut().control = mods_depressed & MOD_CONTROL != 0;
+                    }
                     // The keymap arrives as a descriptor this side owns; it is not needed.
                     wl_keyboard::Event::Keymap { fd, .. } => close(fd),
                     _ => {}
@@ -190,6 +208,11 @@ impl WaylandWindow {
     /// Whether the compositor asked to close it.
     pub fn closed(&self) -> bool {
         self.events.borrow().closed
+    }
+
+    /// Whether Ctrl+S was pressed in it since the last call.
+    pub fn take_save(&self) -> bool {
+        std::mem::take(&mut self.events.borrow_mut().save)
     }
 
     /// Whether Escape has been pressed in it.

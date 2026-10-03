@@ -62,6 +62,23 @@ Loopback viewer without a GPU window:
 ./scripts/run-voxel.sh --sink web --web-port 7393
 ```
 
+### Save the world
+
+Any `cubarium voxel` run saves its whole world — terrain, water, plants and
+animals — on demand, with or without a state directory:
+
+- stdin: `save [DIR]`. Without `DIR` it writes `saves/<YYYYMMDD-HHMMSS>-t<tick>/`
+  under the working directory. `save-terrain PATH` writes the terrain and water
+  alone, as `w` used to.
+- signal, for the user services with no stdin:
+  `systemctl --user kill -s USR1 cubarium` or `kill -USR1 <pid>`. It saves to the
+  default directory.
+- the development window: Ctrl+S.
+
+The save is written off the frame. A request while the last save is still
+writing is refused on stderr; ask again. Resume with
+`cubarium voxel --load saves/<dir>`.
+
 The older cube display: `./scripts/run-cube.sh` builds this checkout and drives
 the physical cube plus the shared viewer on port 7393. It is a development
 launcher, not a frozen release. Old captures and duplicate build trees are
