@@ -266,6 +266,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.territory_radius_m", "m", nonneg, "a pack never paths within this of another pack's den").optional().prov("decision"),
         r("pack.flank_offset_m", "m", nonneg, "flankers go this far either side of the target").optional(),
         r("pack.chase_give_up_s", "s", nonneg, "a chase is dropped after this").optional().prov("decision"),
+        r("pack.route_refresh_s", "s", nonneg, "a pack's walking route components (only prey in its own is taken) are rebuilt at most this often").optional(),
         r("pack.chase_reserve_floor", "fraction of reserve cap", fraction, "a chase is dropped when a member's reserve falls under this").optional(),
         r("pack.call_s", "s", nonneg, "a member calls this long after the target changes or it strikes").optional().prov("decision"),
         r("pack.den_search_m", "m", nonneg, "the breeder looks for a covered den within this of the founding point").optional().prov("decision"),

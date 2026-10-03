@@ -526,6 +526,11 @@ pub struct Pack {
     pub flank_offset_m: f64,
     /// A chase is dropped after this, seconds. 20.
     pub chase_give_up_s: f64,
+    /// A pack takes only prey standing in its own walking route component; the
+    /// lineage's components are rebuilt from the terrain at most this often, seconds (a
+    /// placeholder: the terrain and its water change slowly). 60.
+    #[serde(default = "pack_route_refresh_s")]
+    pub route_refresh_s: f64,
     /// ...or when a member's reserve falls under this fraction of its reserve cap. A
     /// placeholder.
     pub chase_reserve_floor: f64,
@@ -544,6 +549,10 @@ pub struct Pack {
     pub home_give_up_s: f64,
 }
 
+fn pack_route_refresh_s() -> f64 {
+    Pack::CHORISTER.route_refresh_s
+}
+
 impl Pack {
     /// The chorister's table (Brief R3).
     pub const CHORISTER: Pack = Pack {
@@ -560,6 +569,7 @@ impl Pack {
         territory_radius_m: 10.0,
         flank_offset_m: 1.5,
         chase_give_up_s: 20.0,
+        route_refresh_s: 60.0,
         chase_reserve_floor: 0.3,
         call_s: 1.0,
         den_search_m: 8.0,

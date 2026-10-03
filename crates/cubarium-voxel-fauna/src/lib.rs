@@ -58,6 +58,7 @@ mod flight;
 mod slide_tests;
 
 use cubarium_voxel::{VoxelView, World};
+use rustc_hash::FxHashMap;
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
@@ -2846,6 +2847,11 @@ pub struct Fauna {
     /// voids.
     #[serde(skip)]
     pack_events: Vec<PackEvent>,
+    /// Per pack lineage ([`Founder::index`]): its walking route components by face
+    /// ([`encounter::route_component_index`]) and the tick they were built, refreshed
+    /// after [`Pack::route_refresh_s`]. Derived from the terrain, so not saved.
+    #[serde(skip)]
+    pack_routes: FxHashMap<usize, (u64, std::sync::Arc<FxHashMap<Site, usize>>)>,
     /// The packs standing in the world (roster R3), by id.
     #[serde(default)]
     packs: Vec<PackRecord>,
@@ -2894,6 +2900,26 @@ pub enum FeastEnd {
 }
 
 impl Fauna {
+    /// Lineage `founder`'s walking route components by face, rebuilt from `view` when
+    /// older than its pack's `route_refresh_s` (or never built).
+    pub(crate) fn pack_routes(
+        &mut self,
+        view: &VoxelView<'_>,
+        founder: Founder,
+    ) -> std::sync::Arc<FxHashMap<Site, usize>> {
+        let phys = *self.config.founder(founder);
+        let every = phys.pack.map_or(0.0, |p| p.route_refresh_s);
+        let tick = self.tick;
+        if let Some((built, map)) = self.pack_routes.get(&founder.index()) {
+            if tick.saturating_sub(*built) < cubarium_voxel::ticks_at_least_one(every) {
+                return map.clone();
+            }
+        }
+        let map = std::sync::Arc::new(encounter::route_component_index(view, &phys));
+        self.pack_routes.insert(founder.index(), (tick, map.clone()));
+        map
+    }
+
     /// An animal layer on a **valid** config. Panics with the offending field named if
     /// [`FaunaConfig::validate`] refuses it, exactly as
     /// [`cubarium_voxel_flora::Flora::new`] does and for the same reason: a preset that
@@ -2922,6 +2948,7 @@ impl Fauna {
             last_daylight: None,
             seed_voids: Vec::new(),
             pack_events: Vec::new(),
+            pack_routes: FxHashMap::default(),
             packs: Vec::new(),
             next_pack: 0,
         })
