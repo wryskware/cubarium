@@ -3025,7 +3025,8 @@ fn water_over_feet(view: &VoxelView<'_>, a: &Animal) -> f64 {
 /// standing in water deeper than it wades — put down in it, the water rose round it, or a
 /// starving body shrank under the water it stood in — walks to the nearest support face
 /// within [`crate::LifeConfig::shallows_search_m`] (horizontally, `x` wrapped) whose water
-/// it wades, at most its step up above its own face. A heuristic world query, not a sense:
+/// it wades, at most its step up above its own face, where its whole disc stands clear
+/// and its centre is inside the strip's `z` ends. A heuristic world query, not a sense:
 /// read by this reflex only, never an observation. `None` when it is not in too-deep water
 /// or no such face is in reach.
 fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
@@ -3035,13 +3036,17 @@ fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Acti
     if phys.aquatic || a.mobility.mode != crate::MobilityMode::Ground || a.attached.is_some() {
         return None;
     }
-    let wade = phys.wade_depth_m(&phys.body_at(a.body));
+    let geometry = phys.body_at(a.body);
+    let wade = phys.wade_depth_m(&geometry);
     let here = view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z);
     if here <= wade {
         return None;
     }
     let c = view.config;
     let v = c.voxel_m;
+    let r = geometry.footprint_radius();
+    let depth_m = f64::from(c.depth) * v;
+    let limits = phys.step_limits(v);
     let reach = fauna.config.life.shallows_search_m;
     let k = (reach / v).ceil() as i64;
     let up = (phys.step_up_m / v).floor().max(0.0) as u32;
@@ -3064,6 +3069,15 @@ fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Acti
             }
             let tx = (x as f64 + 0.5) * v;
             let tz = (z as f64 + 0.5) * v;
+            // Only where the body itself can stand: its centre inside the strip's `z`
+            // ends, its disc clear over the face.
+            if tz < r || tz > depth_m - r {
+                continue;
+            }
+            let face = Site { x: x as u32, y, z: z as u32 };
+            if !body::disc_clear_on_face(view, &geometry, face, limits) {
+                continue;
+            }
             let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
             let d = (ddx * ddx + ddz * ddz).sqrt();
             if d <= reach && best.is_none_or(|(b, _, _)| d < b) {

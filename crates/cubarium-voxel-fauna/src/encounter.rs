@@ -424,6 +424,12 @@ pub fn founding_faces(
     let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, room, step);
     let faces: Vec<Site> = standable_faces(view, &body, phys.wade_depth_m(&body))
         .into_iter()
+        // Its centre where the motor can hold it: no nearer the strip's `z` ends than its
+        // radius (roster mechanics: a disc founded over the end could not move).
+        .filter(|f| {
+            let z = (f64::from(f.z) + 0.5) * v;
+            z + 1e-9 >= body.footprint_radius() && z <= f64::from(c.depth) * v - body.footprint_radius() + 1e-9
+        })
         .filter(|f| clear((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, f.y))
         .collect();
     let index: FxHashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
