@@ -58,6 +58,8 @@ mod film_tests;
 mod seeds;
 pub mod snapshot;
 mod step;
+#[doc(hidden)]
+pub mod study;
 
 use cubarium_voxel::{Material, VoxelView, World};
 use serde::{Deserialize, Serialize};
@@ -4244,6 +4246,21 @@ impl Flora {
 
     pub fn config(&self) -> &FloraConfig {
         &self.config
+    }
+
+    /// **A study's configuration replacement** on a loaded layer: `config` replaces the
+    /// saved one whole, after [`FloraConfig::validate`], and every stand's tissue is
+    /// re-binned into its (possibly new) profile and the crowns refreshed. For a diagnostic
+    /// that continues a saved world under other parameters; no host calls it.
+    #[doc(hidden)]
+    pub fn replace_config(&mut self, config: FloraConfig) -> Result<(), String> {
+        config.validate()?;
+        self.config = config;
+        for s in &mut self.stands {
+            s.resync_layers(self.config.species(s.species));
+        }
+        self.refresh_crowns(None);
+        Ok(())
     }
 
     pub fn tick(&self) -> u64 {
