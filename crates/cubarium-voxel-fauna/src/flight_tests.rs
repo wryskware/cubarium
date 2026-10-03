@@ -1130,3 +1130,58 @@ fn a_snapshot_round_trip_keeps_a_flying_and_a_perched_bellwing() {
     assert_eq!(back.view().animal(perched).expect("the percher").mobility.perch, animal(&fauna, perched).mobility.perch);
     assert_eq!(back.view().ledger, fauna.view().ledger, "the same ledger");
 }
+
+/// **The bellwing's meal interval** (the minimal gut's repair 2 item 12; the walker
+/// fixture in `step::gut_tests` covers the other eight lineages): a fixed adult bellwing,
+/// breeding and lifespan off, perched on a bloomcrown whose nectar never runs short,
+/// under its own diurnal rhythm, completes at least three meal intervals, and their mean
+/// is within ±30 % of Astra's exact 0.1012 world days. Nectar's mineral (0.01) against
+/// the bellwing's tissue (0.02) gives an effective yield of exactly its 0.5.
+#[test]
+#[ignore = "study: run by name (multi-day cadence)"]
+fn meal_interval_bellwing() {
+    let want = 0.1012;
+    let day_s = 7200.0;
+    let mut world = plain_with(config(16, 20, 8, clock_at(10.0)));
+    let mut fc = nectar_flora();
+    fc.bloomcrown.nectar_per_s = 1e-2;
+    fc.bloomcrown.nectar_cap = 0.05;
+    let mut flora = Flora::new(fc);
+    let site = blooming(&mut flora, &mut world, 8, 4, 60);
+    let top = crown_top(&flora, site);
+    let mut c = FaunaConfig::default();
+    c.founders[BW.index()].core.lifespan_median_s = 0.0;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 1.0, -1.0);
+    let body0 = animal(&fauna, id).body;
+    let max_ticks = ((3.0 * 1.3 + 1.5) * want * day_s / DT) as u64 + (day_s / DT) as u64;
+    let mut starts: Vec<u64> = Vec::new();
+    let mut was = animal(&fauna, id).eating;
+    for t in 1..=max_ticks {
+        world.step();
+        flora.step(&mut world);
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, id);
+        if a.eating && !was {
+            starts.push(t);
+        }
+        was = a.eating;
+        if starts.len() >= 4 {
+            break;
+        }
+    }
+    let a = animal(&fauna, id);
+    assert_eq!(a.mobility.mode, MobilityMode::Perched, "it stayed on the crown");
+    assert!((a.body - body0).abs() <= 1e-9 * body0, "a fixed adult body");
+    assert!(starts.len() >= 4, "{} meal starts", starts.len());
+    let intervals: Vec<f64> = starts.windows(2).map(|w| (w[1] - w[0]) as f64 * DT / day_s).collect();
+    let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
+    eprintln!(
+        "bellwing: intervals {intervals:.4?} days, mean {mean:.4} against {want} ({:+.1} %)",
+        100.0 * (mean / want - 1.0)
+    );
+    assert!((mean / want - 1.0).abs() <= 0.30, "mean interval {mean:.4} days, Astra's {want}");
+}

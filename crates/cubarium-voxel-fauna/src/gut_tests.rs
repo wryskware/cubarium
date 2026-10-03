@@ -326,11 +326,8 @@ fn meal_interval(f: Founder) {
     assert_books(&fauna, "after the cadence run", starts.last().copied().unwrap_or(max_ticks));
 }
 
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_bellwing() {
-    meal_interval(Founder::Bellwing);
-}
+// The bellwing's interval is `flight_tests::meal_interval_bellwing`: its observation is
+// a flyer's, so it cannot stand in for a walker here; it sips a bloomcrown instead.
 #[test]
 #[ignore = "study: run by name (multi-day cadence)"]
 fn meal_interval_seedporter() {
