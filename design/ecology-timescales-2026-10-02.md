@@ -6,9 +6,9 @@ decision_refs: []
 
 # One biological clock: night, metabolism and predator cadence
 
-A proposal by Fable, for Wrysk's decisions. This is **revision 2**, rewritten after Astra's
+A proposal by Fable, for Wrysk's decisions. This is **revision 3**: revision 2 was rewritten after Astra's
 review (`design/7_Research/astra-ecology-timescales-review-2026-10-02.md`, verdict "revise",
-12 findings). Findings are cited as [A1]…[A12]. Numbers come from
+12 findings), and revision 3 applies its repair-1 check ("accept with changes"). Findings are cited as [A1]…[A12] and [N1]. Numbers come from
 `design/7_Research/timescales-inventory-2026-10-02.md` ("the inventory") unless marked
 otherwise. Nothing here is canon until Wrysk decides; every part below can be decided
 separately.
@@ -19,10 +19,11 @@ separately.
 
 Animal metabolism runs about 1,700–2,600× faster than nature, while the day runs only 12×
 faster.
-- **The metabolism figure:** the audit's browser has 1,000 s of upkeep in reserve against
-  20–30 days at field metabolic rate. This compares metabolism only; plants, gestation and
-  lifespans have other factors.
-- **Consequence:** a 40-min night is, to an animal, about 50–80 days without food.
+- **The metabolism figure:** the audit's browser has a 1,000-s body-turnover time (`1/m`)
+  against 20–30 days at field metabolic rate. This is the browser and reference case only;
+  plants, gestation and lifespans have other factors.
+- **Consequence:** a 40-min night is, to such an animal, about 50–70 days without food.
+  Its full reserve lasts 500 s.
   - Seven lineages hold 0.5 body of reserve at 0.001/s upkeep, which is 8.3 min awake.
   - Hunger wakes a sleeper at 0.5, so it sleeps at most 8.3 min from full.
 - **Nocturnal lineages** sleep through the light hours, about 80 min. That is twice the
@@ -67,12 +68,14 @@ are needed [A11].
 
 **`wake_hunger` is a candidate, not a fix [A3].**
 - Raising it from 0.5 toward 0.9 lengthens sleep.
-- But an animal then wakes with 10 % of its reserve, which is 50 s awake at today's upkeep.
+- But an animal then wakes with 10 % of its reserve. For the seven lineages with reserve
+  0.5 body and upkeep 0.001/s, that is 50 s awake.
 - Sleeping prey can't dodge, so longer sleep gives predators more undefended first strikes.
   A hit does wake the prey and alert it.
 - The hunter's satiated rest has its own `wake_at` (0.5), which this does not change.
-- **Required tests:** a nocturnal sleeper over its 80-min daylight sleep, emergency waking,
-  first-hit exposure, and post-wake food access.
+- **Required tests:** emergency waking, first-hit exposure, and post-wake food access.
+- **A bounded study, not a unit test:** a nocturnal sleeper over its 80-min daylight
+  sleep.
 
 **Screens, in two levels [A2].**
 - **Optimistic adult screen (cheap, labelled as optimistic):** uninterrupted sleep from onset
@@ -85,14 +88,20 @@ are needed [A11].
   - `h` is wake hunger.
 
   It must be ≥ 1.2 × the lineage's measured sleeping-phase length, at `f0` = 0.8.
-  - **Measured phase lengths:** take each lineage's sleep windows from the clock's 0.3
-    thresholds (`Activity::awake`, `fauna/src/lib.rs:567-577`). Crepuscular lineages have
-    two bouts.
+  - **Measured phase lengths:** take each lineage's sleep windows from its own activity
+    thresholds (`Activity::awake`, `fauna/src/lib.rs:567-577`): 0.3 for diurnal and
+    nocturnal lineages, 0.05/0.95 for crepuscular ones, which sleep in two bouts.
+  - **Acceptance is computed exactly, not rounded.**
+  - **Check `f0` is reached:** verify that animals actually enter each sleep at
+    `f0` ≥ 0.8, cycle after cycle. Balancing total daily intake is not enough.
   - **Size of the change at today's upkeep:**
-    - `h` = 0.9 alone gives 15 min at `s` = 0.5, or 25 min at `s` = 0.3.
-    - With `f0` 0.8, `h` 0.9 and the 1.2 margin, passing needs upkeep about 4× lower
-      (diurnal, 40 min, `s` 0.5) to about 5× lower (nocturnal, 80 min, `s` 0.3), or an
-      equivalent rise in reserve per body.
+    - From a full reserve (`f0` = 1), `h` = 0.9 alone gives 15 min at `s` = 0.5, or 25 min at
+      `s` = 0.3.
+    - At `f0` 0.8, usable reserve is 0.35 body: 700 s of sleep at `s` 0.5 and 1,167 s at
+      `s` 0.3.
+    - With the 1.2 margin, passing needs upkeep 4.11× lower (diurnal, 40 min, `s` 0.5) to
+      4.94× lower (nocturnal, 80 min, `s` 0.3), or an equivalent rise in reserve per
+      body.
 - **Whole-cycle check:** over one day, the waking phase's feasible intake must cover the
   day's costs, adding to basal:
   - motor;
@@ -111,13 +120,16 @@ says nothing about sustainability [A1].
 ### 1b. Plants: spend the store at night, with no unbooked input [A4]
 
 - **Mechanism:** one spendable night budget per stand:
-  `(reserve − maintenance to dawn − a dawn safety floor) / time to dawn`.
+  `max(0, reserve − maintenance to dawn − a dawn safety floor) / max(time to dawn, a floor)`.
   - Leaf reflush, nectar and fruit share it, in that priority order.
-  - Construction respiration and material accounting stay as they are; the reflush already
-    pays through `budget.build_from`.
+  - Each keeps its existing rate and stock caps.
+  - Construction respiration is charged against the same budget.
+  - Material accounting is unchanged; the reflush already pays through
+    `budget.build_from`.
 - **The reflush threshold stays** (`reflush_below` 0.25 of foliage capacity). So this does
-  **not** promise to replace the ordinary 10–13 % night leaf loss; it prevents deep losses
-  from becoming a famine.
+  **not** promise to replace the ordinary 10–13 % night leaf loss. It lowers famine risk
+  after deep losses; it cannot guarantee against famine when stores or reachable foliage
+  run short.
 - **Nectar and fruit at night:** `night_bloom_scale` starts at 0.3, as a tunable candidate,
   and is debited from the night budget.
   - Standing stocks remain edible at night.
@@ -125,8 +137,11 @@ says nothing about sustainability [A1].
 - **Conservation, stated precisely:** no new unbooked input. Daily fixation is **not**
   invariant, because foliage and storage room change tomorrow's capture. The initial planted
   stocks are endowments.
-- **Clock modes:** time to dawn is defined for `cycle`; under `off` there is no night; under
-  `local`, the date's sunrise.
+- **Clock modes:** "dawn" is always the **ecological** dawn.
+  - Under `cycle`, the cycle's dawn.
+  - Under `off`, there is no night.
+  - Under today's coupled `local` mode, the date's sunrise.
+  - Under RT-A (Part 2), the 120-min ecological clock's dawn, never the wall clock's.
 - **No photosynthetic moonlight** (Astra agrees [A5]). The moon stays picture-only.
 - **Glowcap** remains the light-free producer.
 
@@ -138,12 +153,17 @@ says nothing about sustainability [A1].
 - the dusk draw;
 - **a host within 0.75 m with a free rider slot** [A8].
 
-The rider then drains its host until it drops off at 0.24 of adult body. No readout covers
-this today.
+The rider then drains its host until it drops off at 0.24 of adult body, or until the host
+dies and frees it. Lower prey upkeep also lowers a rider's income, so rider growth must be
+checked whenever prey upkeep moves.
 
-**First step (a measurement, not a search):** add readouts for hosts encountered at dusk,
-slots occupied, rider growth and drop-off, host deaths with riders, and adults established.
-Then rerun the 8-world gate on the new defaults to find where lanternjaws fail.
+**Readouts that exist:** `voxel_census` already exports `riders_now`, `riders_attached`,
+`rider_dropoffs` and `riders_freed` (`crates/cubarium/examples/voxel_census.rs:986,1184-1187`)
+[N1]. The gap is attributing the bottleneck.
+
+**First step (a measurement, not a search):**
+- Add readouts for hosts within reach at dusk, rider growth, and adults established.
+- Rerun the 8-world gate on the new defaults to find where lanternjaws fail.
 
 **Targets, defined as realized intake (not kill counts):**
 - **Lanternjaw (nocturnal ambusher):** a meal of about one grazer-equivalent every 2+ days.
@@ -157,24 +177,39 @@ Then rerun the 8-world gate on the new defaults to find where lanternjaws fail.
   - Pups add 1.1–2.1 ou per litter at birth, plus 2 h of growth and upkeep, delivered only at
     the den above 60 % giver reserve.
   - The first litter is not delayed by the 6 h interval.
-  - **Arithmetic:** 2–3 adults at upkeep ÷5 cost 2.6–4.0 ou a day awake, which is
-    0.67–1.0 loftstriders a day before pups. Meeting "one kill per 2 days" needs satiated
-    torpor or other savings too.
+  - **Arithmetic:** 2–3 adults at upkeep ÷5 cost:
+    - **today's rhythm** (diurnal, sleep 0.5 at night): 2.64–3.96 ou a day, which is
+      0.67–1.0 loftstriders a day;
+    - **awake all day:** 3.16–4.74 ou a day, which is 0.80–1.20 loftstriders a day.
 
-**Balance as a necessary-condition ceiling only [A6].** Allocate predator demand across prey
-species by energy, not by counted births. On the gate's prey births, the optimistic ceiling
-is:
+    Both are before pups, provisioning at 0.7 efficiency, and the nearby-carcass feeding
+    exception. Meeting "one kill per 2 days" needs satiated torpor or other savings too.
+  - The founding pack size doesn't cap later adults.
+  - **Rhythm:** the chorister stays diurnal. A crepuscular chorister is not proposed now; if
+    tried, evaluate it across a whole litter cycle first.
 
-| ecology | lanternjaws supported at 0.56 ou a day (meal every 2 days) |
+**Balance: an illustration, not a screen [A6].** Allocate predator demand across prey
+species by energy, not by counted births. On the 2026-10-02 gate arms' prey births per
+world-day, the conditional ceiling is:
+
+`N = 0.5 × (1.125 × grazer births + 0.28125 × shredder births) / 0.5625`
+
+The assumptions behind it:
+- half of the prey energy goes to lanternjaws;
+- every newborn prey is counted as an eventual full adult;
+- each lanternjaw takes half a grazer-equivalent a day.
+
+| gate arm | lanternjaws supported |
 |---|---|
-| C1 | about 11 |
-| X21 | about 7.6 |
-| defaults | about 1.25 |
+| C1 (C1's ecology and brains) | 11.0 |
+| X21 (C2's ecology, C1's brains) | 7.6 |
+| defaults | 1.25 |
 
 - These ceilings are optimistic: newborns are smaller, other deaths take recruitment, and
   choristers compete for the same prey.
-- **Use:** a generous pre-screen that refuses only the clearly impossible. Measure realized
-  births, kills and consumption.
+- **Use:** an illustration only. Historical birth rates and the 50 % share are not a
+  hard rejection for a new full-roster candidate. Measure realized births, kills,
+  non-predatory deaths, maturation, and competing predator and rider demand.
 - The claim that this "is why the target was unreachable" is withdrawn [A6].
 
 ### 1d. Unchanged
@@ -193,10 +228,11 @@ options:
 | **RT-A: sky only** | **two clocks**: the picture follows the wall clock; photosynthesis, sleep, hatching and climate read the 120-min ecological clock | a real-time sky over a world with its own short days: night hunters can be out under a daytime picture | a clock-split package; today's `local` mode doesn't do this |
 | **RT-B: slow world** | divide every biological rate by 12 and multiply every biological duration by 12 (lifespan, gestation, egg viability, pack intervals); speeds stay real | lives of **2–6 real days**, a few births and hunts a day | searchable headless (cost scales with ticks, not wall days), but much more expensive per candidate. Real speeds change encounters and transport, so retune |
 | **RT-C: moonlight + torpor** | plants earn 5–10 % of daylight at night; animals torpor | everything sleeps at night, so the nocturnal niche disappears | 5–10 % is about 19,000–38,000× real moonlight. Torpor at 5–10 % still leaves small lineages only 1.4–2.8 h at today's upkeep. **Not recommended.** |
-| **RT-D: accelerated nights** | run the night faster on the wall clock | either the sky also races (so it isn't real time), or only the ecology races, which breaks sky sync | doesn't reduce metabolic cost per night. **Not recommended.** |
+| **RT-D: accelerated nights** | three different things: (1) the biology and its sky race together at night; (2) only the ecological sky advances faster while biology runs normally; (3) the biology races under an unchanged real-time night | (1) is real time only by day; (2) the ecological night is short but out of sync with the real sky; (3) the real night stays | (1) keeps the cost per ecological night; (2) **reduces** it, at the price of sky sync, which makes it effectively RT-A; (3) **increases** it. Only (2) helps, so it folds into RT-A |
 
 **Fable's recommendation:**
 - Keep `cycle` as the default.
+- Every night-budget calculation uses the ecological clock.
 - If a wall-clock sky is wanted, RT-A, built as an explicit clock split.
 - RT-B only as a soak experiment.
 
@@ -214,14 +250,19 @@ and motor, so an intake gene must be able to compensate.
 
 **R/S/F per food type.** It reads frondgrazer and foliage only today. Each consumer needs an
 access check against its own food:
-- **Nectar and fruit:** same units on both sides [A5]. A sleeping seedporter needs about
-  4.3 ou of fruit a day, while a stand yields about 0.55 ou a day under day plus 0.3 night
-  production. That is **about 8 continuously harvested stands per seedporter**, not 4, and
-  more than that awake.
+- **Nectar and fruit:** same units on both sides [A5].
+  - A sleeping seedporter needs about 4.28 ou of fruit a day, while a stand yields about
+    0.554 ou a day under day plus 0.3 night production.
+  - That is **about 7.7 continuously harvested stands per seedporter**, or 9.3 if it never
+    sleeps.
+  - These are optimistic lower bounds: default adult basal costs, continuous harvest,
+    enough plant reserve.
+  - The candidate check must use actual yield, reach, caps, fruit drops, motion and
+    reproduction.
 - **Caps, film, litter, canopy and carnivory:** likewise.
 
-**Targets per lineage, not one rule [A10].** Two hours can't contain a replacement
-generation for:
+**Targets per lineage and life stage, not one rule [A10].** Two hours can't contain a
+replacement generation for:
 - the lanternjaw (first breeding about 176 min, then a later dusk);
 - chorister pups (2 h to independence).
 
@@ -231,13 +272,16 @@ Use instead:
 - feeding or kill success;
 - viable offspring, or eggs and pups in escrow;
 
-and:
-- count egg-bank hatching separately from adult breeding;
-- count riders separately from established hunters;
-- for the chorister, require pup survival and provisioning, not a second-half litter, which
+How to apply them:
+- **Require actual births where a birth fits in the horizon.** Elsewhere, use explicit
+  progress criteria.
+- **Readiness never substitutes for a required birth.**
+- **Replenishment must cover a whole cycle's measured spending.** A rise after one meal can
+  hide a negative day.
+- Count egg-bank hatching separately from adult breeding.
+- Count riders separately from established hunters.
+- For the chorister, require pup survival and provisioning, not a second-half litter, which
   would penalise an early success.
-
-Keep the scorer's readiness fallback from passing a lineage with no birth.
 
 **Horizon and finalists.** Keep 8 worlds × 2 h with early stopping for candidates. Validate
 **finalists** from saved worlds across the next dusk, pup independence and a litter
