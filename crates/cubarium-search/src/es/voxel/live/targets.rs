@@ -6,7 +6,10 @@
 //! what fits:
 //! - **Birth required** (`birth_required`): an actual birth in the second half. Readiness
 //!   earns at most `birth_credit_max` of the term as a gradient and never meets it.
-//! - **The lanternjaw's ladder** (`progress`): 0.25 hatched from the founding egg bank,
+//! - **Readout-only** (`readout_only`): judged and reported, never scored (the pilot's
+//!   broken feeders, Astra F1).
+//! - **The lanternjaw's graded objective** (`progress`; [`lanternjaw_score`] is current,
+//!   the list below its first version): 0.25 hatched from the founding egg bank,
 //!   0.5 a rider attached (up to 0.75 as the furthest rider grows toward its drop-off
 //!   line), 0.75 a juvenile off its host (dropped off or freed) and living
 //!   free, 1 an established hunter (a free lanternjaw's hit landed) or eggs laid by an
@@ -31,6 +34,10 @@ pub struct StageSpec {
     /// The lanternjaw and the chorister: their ladders instead of a birth.
     pub progress: [bool; Founder::COUNT],
     pub replenish: [bool; Founder::COUNT],
+    /// **Readout-only** (`readout_only`, the pilot's broken feeders; Astra F1): judged and
+    /// reported, but no stage, replenishment or loss penalty, no early stop on their loss,
+    /// and out of the population band.
+    pub readout_only: [bool; Founder::COUNT],
     /// The most of a birth term readiness can earn back (never all of it).
     pub birth_credit_max: f64,
     /// Readiness at which that credit is full.
@@ -55,6 +62,7 @@ impl Default for StageSpec {
             birth_required: [false; Founder::COUNT],
             progress: [false; Founder::COUNT],
             replenish: [false; Founder::COUNT],
+            readout_only: [false; Founder::COUNT],
             birth_credit_max: 0.5,
             ready_target: 0.5,
             lanternjaw_progress: 0.5,
@@ -117,6 +125,7 @@ impl StageSpec {
                 "birth_required" => s.birth_required = lineages(v, k)?,
                 "progress" => s.progress = lineages(v, k)?,
                 "replenish" => s.replenish = lineages(v, k)?,
+                "readout_only" => s.readout_only = lineages(v, k)?,
                 "birth_credit_max" => s.birth_credit_max = number(v, k)?.min(0.99),
                 "ready_target" => s.ready_target = number(v, k)?.max(1e-9),
                 "lanternjaw_progress" => s.lanternjaw_progress = number(v, k)?,
@@ -166,10 +175,14 @@ pub struct LineageOutcome {
     pub riders_freed: u64,
     /// Bodies living free (not riding) at the end.
     pub free_living: usize,
-    /// The riders now: their mean growth since hatching, body per hour, and the furthest
-    /// one's progress from hatch size to the drop-off line, 0 to 1.
+    /// The riders now: their mean growth since hatching, body per hour, and their mean
+    /// progress from hatch size to the drop-off line by actual size gain, 0 to 1.
     pub rider_growth_per_h: f64,
     pub rider_progress: f64,
+    /// Free-living lanternjaws at adult size (`birth_body`) or more, and the furthest free
+    /// juvenile's progress from hatch size to it, 0 to 1.
+    pub free_adults: usize,
+    pub free_progress: f64,
     /// Strikes that hit, and carrion its mouths took (gross organic).
     pub hits: u64,
     pub carrion_eaten: f64,
@@ -189,6 +202,8 @@ pub struct LineageOutcome {
     pub biomass_cycle: f64,
     pub cycle_complete: bool,
     pub replenishment: f64,
+    /// Readout-only: judged, never scored.
+    pub readout: bool,
     /// The verdict.
     pub rule: Rule,
     /// The ladder's score (progress rules), 0 to 1.
@@ -221,6 +236,8 @@ impl LineageOutcome {
             free_living: 0,
             rider_growth_per_h: 0.0,
             rider_progress: 0.0,
+            free_adults: 0,
+            free_progress: 0.0,
             hits: 0,
             carrion_eaten: 0.0,
             pack_kills: 0,
@@ -234,6 +251,7 @@ impl LineageOutcome {
             biomass_cycle: 0.0,
             cycle_complete: false,
             replenishment: 0.0,
+            readout: false,
             rule: Rule::Persist,
             score: 0.0,
             shortfall: 0.0,
@@ -258,16 +276,23 @@ pub fn replenishment(intake: f64, biomass_start: f64, biomass_end: f64) -> f64 {
     if spent <= intake / 10.0 { 10.0 } else { intake / spent }
 }
 
-/// The lanternjaw's ladder ([`super::targets`] module docs).
+/// **The lanternjaw's graded objective** (Astra F2), 0 to 1, of **living** bodies only:
+/// - 1: a free adult (at `birth_body`), a free lanternjaw's hit landed, or eggs laid;
+/// - 0.75 + 0.2 x the free juvenile's progress to adult size: a healthy drop-off living
+///   free (a host-death release earns no juvenile credit);
+/// - 0.5 + 0.25 x rider survival (live riders over attached) x their mean progress to the
+///   drop-off line by actual size gain: a live rider (attach-and-die earns nothing);
+/// - 0.25: any other living lanternjaw (a hatchling, a released rider);
+/// - 0: none living, whatever eggs remain.
 fn lanternjaw_score(o: &LineageOutcome) -> f64 {
-    let established = o.free_living > 0 && o.hits > 0;
-    if established || o.eggs_laid > 0 {
+    if o.free_adults > 0 || (o.free_living > 0 && o.hits > 0) || o.eggs_laid > 0 {
         1.0
-    } else if o.free_living > 0 && o.rider_dropoffs + o.riders_freed > 0 {
-        0.75
-    } else if o.riders_attached > 0 {
-        0.5 + 0.25 * o.rider_progress.clamp(0.0, 1.0)
-    } else if o.bank_hatches > 0 {
+    } else if o.free_living > 0 && o.rider_dropoffs > 0 {
+        0.75 + 0.2 * o.free_progress.clamp(0.0, 1.0)
+    } else if o.riders_now > 0 {
+        let survival = (o.riders_now as f64 / o.riders_attached.max(1) as f64).min(1.0);
+        0.5 + 0.25 * survival * o.rider_progress.clamp(0.0, 1.0)
+    } else if o.alive_end > 0 {
         0.25
     } else {
         0.0
@@ -311,9 +336,9 @@ pub fn judge(o: &mut LineageOutcome, spec: &StageSpec, reached_second_half: bool
             }
         }
         Rule::LanternjawProgress => {
-            let s = if lost { 0.0 } else { lanternjaw_score(o) };
-            let target = spec.lanternjaw_progress.max(1e-9);
-            (s, ((target - s) / target).clamp(0.0, 1.0), s >= target)
+            // Graded above the pass line: the term is 1 − score, met at the line.
+            let s = lanternjaw_score(o);
+            (s, 1.0 - s, s >= spec.lanternjaw_progress)
         }
         Rule::ChoristerProgress => {
             let s = if lost { 0.0 } else { chorister_score(o, spec.chorister_pup_survival, spec.chorister_kill_required) };
@@ -325,6 +350,7 @@ pub fn judge(o: &mut LineageOutcome, spec: &StageSpec, reached_second_half: bool
     o.shortfall = shortfall;
     o.met = met;
     o.replenishment = replenishment(o.intake_cycle, o.biomass_start, o.biomass_cycle);
+    o.readout = spec.readout_only[i];
     o.replenish_shortfall = if !spec.replenish[i] || o.founded == 0 {
         0.0
     } else if !o.cycle_complete {
@@ -332,4 +358,8 @@ pub fn judge(o: &mut LineageOutcome, spec: &StageSpec, reached_second_half: bool
     } else {
         (1.0 - o.replenishment).clamp(0.0, 1.0)
     };
+    if o.readout {
+        o.shortfall = 0.0;
+        o.replenish_shortfall = 0.0;
+    }
 }

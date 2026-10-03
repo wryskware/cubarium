@@ -15,6 +15,7 @@
 //! # inverse = [...]        # paths divided by the multiplier instead (a duration under a clock)
 //! # mode = "value"         # set the value instead of multiplying it
 //! # value = 1.3            # a genome file carries each gene's value; x1 when absent
+//! # frozen = true          # decoded at its value but not searched (a pilot's fixed gene)
 //! ```
 //!
 //! - **A path** is a registry path. `*` is any one segment, `@group` as a segment any member
@@ -58,6 +59,9 @@ pub struct Gene {
     pub value: f64,
     /// One line on what it is.
     pub what: String,
+    /// **Frozen**: decoded at its value, never searched — outside the search coordinates
+    /// ([`Genome::to_search`], [`Genome::from_search`], [`Genome::search_bounds`]).
+    pub frozen: bool,
 }
 
 /// A search file, expanded over the configs it decodes: one entry per searched number.
@@ -81,6 +85,7 @@ struct Spec {
     range: Option<(f64, f64)>,
     value: Option<f64>,
     what: String,
+    frozen: bool,
 }
 
 /// A search file, parsed.
@@ -160,6 +165,7 @@ impl Spec {
             range: None,
             value: None,
             what: String::new(),
+            frozen: false,
         };
         for (k, x) in t {
             match k.as_str() {
@@ -192,6 +198,7 @@ impl Spec {
                 }
                 "value" => s.value = Some(number(x).ok_or("a gene's value is a number")?),
                 "what" => s.what = x.as_str().unwrap_or_default().to_string(),
+                "frozen" => s.frozen = x.as_bool().ok_or("frozen is true or false")?,
                 other => return Err(format!("unknown key `{other}` in a [[gene]]")),
             }
         }
@@ -383,6 +390,7 @@ impl Genome {
                     range,
                     value,
                     what: spec.what.clone(),
+                    frozen: spec.frozen,
                 });
             }
         }
@@ -613,6 +621,7 @@ impl Genome {
     pub fn search_bounds(&self) -> Vec<(f64, f64)> {
         self.genes
             .iter()
+            .filter(|g| !g.frozen)
             .map(|g| match g.mode {
                 Mode::Scale => (g.range.0.ln(), g.range.1.ln()),
                 Mode::Value => g.range,
@@ -624,6 +633,7 @@ impl Genome {
     pub fn to_search(&self) -> Vec<f64> {
         self.genes
             .iter()
+            .filter(|g| !g.frozen)
             .map(|g| match g.mode {
                 Mode::Scale => g.value.ln(),
                 Mode::Value => g.value,
@@ -631,17 +641,23 @@ impl Genome {
             .collect()
     }
 
-    /// This genome with the genes at search coordinates `x`, each clamped into its box.
+    /// This genome with the searched genes at search coordinates `x`, each clamped into
+    /// its box; frozen genes keep their values.
     pub fn from_search(&self, x: &[f64]) -> Genome {
-        assert_eq!(x.len(), self.genes.len(), "one coordinate per gene");
+        assert_eq!(x.len(), self.searched(), "one coordinate per searched gene");
         let mut g = self.clone();
-        for (gene, &v) in g.genes.iter_mut().zip(x) {
+        for (gene, &v) in g.genes.iter_mut().filter(|g| !g.frozen).zip(x) {
             gene.value = match gene.mode {
                 Mode::Scale => v.exp().clamp(gene.range.0, gene.range.1),
                 Mode::Value => v.clamp(gene.range.0, gene.range.1),
             };
         }
         g
+    }
+
+    /// The search's dimension: the genes not frozen.
+    pub fn searched(&self) -> usize {
+        self.genes.iter().filter(|g| !g.frozen).count()
     }
 
     /// Every gene at x1 (a value gene keeps its value).
@@ -706,6 +722,9 @@ impl Genome {
                 t.insert("value".into(), Value::Float(g.value));
                 if !g.what.is_empty() {
                     t.insert("what".into(), Value::String(g.what.clone()));
+                }
+                if g.frozen {
+                    t.insert("frozen".into(), Value::Boolean(true));
                 }
                 Value::Table(t)
             })

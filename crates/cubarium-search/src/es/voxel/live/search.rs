@@ -106,7 +106,7 @@ impl BandSpec {
             match k.as_str() {
                 "version" | "birth_required" | "progress" | "replenish" | "birth_credit_max"
                 | "lanternjaw_progress" | "chorister_pup_survival" | "replenish_weight"
-                | "share_weight_unestablished"
+                | "share_weight_unestablished" | "balance_share" | "readout_only"
                     if self.stage.is_some() => {}
                 "persist_only" => {
                     let names = v.as_array().ok_or("persist_only is a list of lineages")?;
@@ -445,6 +445,9 @@ pub struct Evaluation {
     /// **Predator balance**, measured (a readout; Astra A6): per founded hunter.
     #[serde(default)]
     pub balance: Vec<BalanceReadout>,
+    /// The readout-only lineages it was scored without (Astra F1).
+    #[serde(default)]
+    pub readout_only: Vec<bool>,
     pub ticks: u64,
     pub wall_s: f64,
     #[serde(skip)]
@@ -523,6 +526,20 @@ fn eggs(sim: &cubarium_voxel_sim::Sim) -> Vec<usize> {
 /// founded as an egg bank, and its seeding counts no bodies).
 pub fn founded_lineages(founders: &[usize], eggs: &[usize]) -> Vec<usize> {
     founders.iter().zip(eggs).map(|(b, e)| b + e).collect()
+}
+
+/// [`lost_lineages`] without the readout-only ones (Astra F1): what the search scores
+/// and stops on.
+pub fn scored_lost(founded: &[usize], bodies: &[usize], eggs: &[usize], readout: &[bool; Founder::COUNT]) -> usize {
+    (0..Founder::COUNT)
+        .filter(|&i| !readout[i] && founded[i] > 0 && bodies[i] + eggs[i] == 0)
+        .count()
+}
+
+/// The animals the population band counts: every lineage's bodies but the readout-only
+/// ones' (their endowments neither help nor hurt the band; Astra F1).
+pub fn scored_animals(pop: &[usize; Founder::COUNT], readout: &[bool; Founder::COUNT]) -> usize {
+    (0..Founder::COUNT).filter(|&i| !readout[i]).map(|i| pop[i]).sum()
 }
 
 /// The lineages a world founded (bodies or clutches) that hold neither now.
@@ -637,7 +654,9 @@ impl EvalRun {
         sim.world_mut().set_water_every(spec.water_every);
         let founded = founded_lineages(&info.founders, &eggs(&sim));
         let lj = Founder::Lanternjaw.index();
-        let animals0: usize = (0..Founder::COUNT).filter(|&i| i != lj).map(|i| founded[i]).sum();
+        let readout = spec.band.stage.map_or([false; Founder::COUNT], |s| s.readout_only);
+        let animals0: usize =
+            (0..Founder::COUNT).filter(|&i| i != lj && !readout[i]).map(|i| founded[i]).sum();
         let band = Band::for_founding(animals0, founded[lj] > 0, &spec.band);
         let species_start = Scan::of(&sim).stands.to_vec();
         let max_id = sim.fauna().view().animals.iter().map(|a| a.id).max().unwrap_or(0);
@@ -726,8 +745,10 @@ impl EvalRun {
             if self.elapsed.is_multiple_of(TICKS_PER_MIN) {
                 let pop = window::population(&self.sim);
                 let total = self.sim.fauna().view().animals.len();
+                let readout = spec.band.stage.map_or([false; Founder::COUNT], |s| s.readout_only);
                 self.trace.minutes.push((self.elapsed / TICKS_PER_MIN) as f64);
-                self.trace.animals.push(total);
+                // The band's count: readout-only lineages out (all of them without v3).
+                self.trace.animals.push(total - (pop.iter().sum::<usize>() - scored_animals(&pop, &readout)));
                 self.trace.lanternjaws.push(pop[lj]);
                 if self.elapsed > half_ticks {
                     let fauna = self.sim.fauna();
@@ -763,7 +784,7 @@ impl EvalRun {
                         self.elapsed / TICKS_PER_MIN
                     ));
                 } else if spec.stop_on_loss
-                    && lost_lineages(&self.founded, &pop, &eggs(&self.sim)) > 0
+                    && scored_lost(&self.founded, &pop, &eggs(&self.sim), &readout) > 0
                 {
                     halt = Some("a lineage died out".to_string());
                 }
@@ -837,7 +858,8 @@ impl EvalRun {
         let pop = window::population(&sim);
         let eggs_end = eggs(&sim);
         let species_end = Scan::of(&sim).stands.to_vec();
-        trace.missing = lost_lineages(&founded, &pop, &eggs_end)
+        let readout = spec.band.stage.map_or([false; Founder::COUNT], |s| s.readout_only);
+        trace.missing = scored_lost(&founded, &pop, &eggs_end, &readout)
             + species_start
                 .iter()
                 .zip(&species_end)
@@ -878,9 +900,10 @@ impl EvalRun {
             trace.stage = lineages.iter().map(|o| o.shortfall).sum();
             trace.replenish =
                 stage.replenish_weight * lineages.iter().map(|o| o.replenish_shortfall).sum::<f64>();
-            let lj_free = lineages
-                .iter()
-                .any(|o| o.founder == Founder::Lanternjaw && o.free_living > 0);
+            // Established means a free adult or a hunter, not a free juvenile (Astra F2).
+            let lj_free = lineages.iter().any(|o| {
+                o.founder == Founder::Lanternjaw && (o.free_adults > 0 || (o.free_living > 0 && o.hits > 0))
+            });
             trace.share_discount =
                 if lj_free { 0.0 } else { 1.0 - stage.share_weight_unestablished.clamp(0.0, 1.0) };
         }
@@ -935,6 +958,7 @@ impl EvalRun {
             readiness,
             lineages,
             balance,
+            readout_only: readout.to_vec(),
             ticks: elapsed,
             wall_s: started.elapsed().as_secs_f64(),
             body_scores,
@@ -971,6 +995,7 @@ fn outcomes(
         let core = &cfg.founder(f).core;
         let detach = cfg.parasite_detach_body_fraction * core.body_max;
         let mut growth = 0.0;
+        let mut progress = 0.0;
         let mine = animals.iter().filter(|a| a.founder == Some(f));
         for a in mine {
             o.alive_end += 1;
@@ -982,10 +1007,16 @@ fn outcomes(
                     growth += grown / hours;
                 }
                 if detach > core.body_min {
-                    o.rider_progress = o.rider_progress.max(grown / (detach - core.body_min));
+                    progress += (grown / (detach - core.body_min)).min(1.0);
                 }
             } else {
                 o.free_living += 1;
+                if a.body >= core.birth_body {
+                    o.free_adults += 1;
+                } else if core.birth_body > core.body_min {
+                    let p = (a.body - core.body_min).max(0.0) / (core.birth_body - core.body_min);
+                    o.free_progress = o.free_progress.max(p.min(1.0));
+                }
             }
             if let Some(m) = a.pack {
                 if m.pup {
@@ -997,6 +1028,7 @@ fn outcomes(
         }
         if o.riders_now > 0 {
             o.rider_growth_per_h = growth / o.riders_now as f64;
+            o.rider_progress = progress / o.riders_now as f64;
         }
         o.eggs_end = eggs_end[i];
         o.births = births_all[i];
@@ -1510,7 +1542,11 @@ pub fn species_lost(start: usize, end: usize, default_end: usize) -> bool {
 /// (and `e`'s own world started with it), since some worlds lose a species whatever the
 /// genome (siphonreed, 2026-09-25). Lineages lost always count.
 pub fn rescore(e: &mut Evaluation, reference: &Evaluation) {
-    let lineages = lost_lineages(&e.founded, &e.lineages_end, &e.eggs_end);
+    let mut readout = [false; Founder::COUNT];
+    for (i, r) in e.readout_only.iter().enumerate().take(Founder::COUNT) {
+        readout[i] = *r;
+    }
+    let lineages = scored_lost(&e.founded, &e.lineages_end, &e.eggs_end, &readout);
     let species = e
         .species_start
         .iter()
@@ -1626,11 +1662,11 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
     let mut brain_step = 0u32;
     if let Some(dir) = &spec.resume {
         let cp = Checkpoint::load(dir)?;
-        if cp.cma.mean().len() != start.genes.len() {
+        if cp.cma.mean().len() != start.searched() {
             return Err(format!(
                 "the checkpoint searches {} genes, the search file {}",
                 cp.cma.mean().len(),
-                start.genes.len()
+                start.searched()
             ));
         }
         cma = cp.cma;
@@ -1767,7 +1803,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                         .map(|(_, e)| e.penalty.total)
                         .collect();
                     pens.iter().sum::<f64>() / pens.len().max(1) as f64
-                        + spec.screen.soft(&screens[k])
+                        + spec.screen.soft_with(&screens[k], &rosters[k])
                 })
             })
             .collect();
@@ -1795,7 +1831,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 refusals: rosters[k].refusals(),
                 roster: rosters[k].clone(),
                 screen: verdicts[k],
-                soft: if run[k] { spec.screen.soft(&screens[k]) } else { 0.0 },
+                soft: if run[k] { spec.screen.soft_with(&screens[k], &rosters[k]) } else { 0.0 },
                 screened_out,
                 evaluations: mine,
             });
@@ -2204,8 +2240,9 @@ pub fn finalist(
             let late: u64 = rows.iter().map(|o| o.late_births).sum();
             let repl: Vec<String> = rows.iter().map(|o| format!("{:.2}", o.replenishment)).collect();
             println!(
-                "  {:<14} met {met}/{}  alive {alive:>4}  births {births:>4} (late {late:>3})  score {score:.2}  replenish [{}]",
+                "  {:<14}{} met {met}/{}  alive {alive:>4}  births {births:>4} (late {late:>3})  score {score:.2}  replenish [{}]",
                 f.name(),
+                if rows.iter().any(|o| o.readout) { " (readout)" } else { "" },
                 rows.len(),
                 repl.join(" ")
             );

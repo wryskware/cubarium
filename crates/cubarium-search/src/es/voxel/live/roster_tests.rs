@@ -561,7 +561,7 @@ fn roster_ranges_reach_the_targets() {
 }
 
 /// **Study** (Fable 2026-10-02): latticevine faces per vine on the founded terrarium,
-/// seeds 1–8, under roster.toml's base; the median sets `[screen.food] vine_faces`.
+/// seeds 1–8, under roster.toml's base; the median sets `[screen.food] vine_faces_founded`.
 /// `CUBARIUM_THREADS=1 cargo test -p cubarium-search --release vine_faces_founded -- --ignored --nocapture`
 #[test]
 #[ignore = "study: run by name"]
@@ -661,7 +661,9 @@ fn a_readout_only_feeder_is_scored_by_nobody() {
     assert_eq!(super::search::scored_lost(&founded, &bodies, &eggs, &s.readout_only), 0);
     bodies[Founder::Browser.index()] = 0;
     assert_eq!(super::search::scored_lost(&founded, &bodies, &eggs, &s.readout_only), 1);
-    // The band counts scored lineages only.
+    // The band counts scored lineages only: the pilot's three feeders out.
+    s.readout_only[Founder::Bellwing.index()] = true;
+    s.readout_only[Founder::Chorister.index()] = true;
     let pop = [10usize; Founder::COUNT];
     assert_eq!(super::search::scored_animals(&pop, &s.readout_only), 60);
 }

@@ -32,9 +32,10 @@ use cubarium_voxel_fauna::{
 use cubarium_voxel_flora::{FloraConfig, Species, Trophic};
 use serde::{Deserialize, Serialize};
 
-/// **Night endurance** (proposal 1a, Astra A2; the search file's `[screen.night]`): an
+/// **The night envelope** (proposal 1a, Astra A2; the search file's `[screen.night]`): an
 /// optimistic adult that goes to sleep at reserve fraction `f0` must outlast `margin` x its
-/// longest sleeping bout.
+/// longest sleeping bout. A chosen **design envelope** (uninterrupted sleep from 80 %), not
+/// biological impossibility: an animal that wakes to feed could live outside it (Astra F7).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct NightSpec {
@@ -50,20 +51,24 @@ impl Default for NightSpec {
     }
 }
 
-/// **Food access per food type** (proposal Part 3, Astra A5, A11; `[screen.food]`): each
-/// founded lineage's basal need against its foods' optimistic supply at founding, in the
-/// same (assimilated) units. A necessary condition, never a sufficient one.
+/// **Food access per food type** (proposal Part 3, Astra A5, A11, F3; `[screen.food]`):
+/// each founded lineage's basal need against its foods' supply estimated at founding, in
+/// the same (assimilated) units. **Soft**: these are estimates, not proven upper bounds
+/// (plants and vines grow, stocks bridge, twilight produces), so a short supply runs and
+/// pays `k_soft` x its log-distance; only a lineage with **no** supply path at all is
+/// refused.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FoodSpec {
-    /// Supply over need (and a ground grazer's reach over its walking need) at least this.
+    /// Supply over need (and a ground grazer's reach over its walking need) below this pays
+    /// the soft term.
     pub min_ratio: f64,
-    /// Latticevine faces per founded vine, every face flowering back to back (optimistic).
+    /// **A founding measurement**, not a bound: latticevine faces per vine at founding.
     /// The founding roots each vine on one face (`Cover::seed_vine_founders`), and the
     /// founded terrarium measures exactly that (12 vines, 12 faces, seeds 1–8:
-    /// `roster_tests::vine_faces_founded_on_the_terrarium`), so 1: founding access counts
-    /// the faces a world founds, not the cover the vines grow later.
-    pub vine_faces: f64,
+    /// `roster_tests::vine_faces_founded_on_the_terrarium`). Vines spread afterwards, so a
+    /// supply estimated on it may be far below what the vines later give (Astra F3).
+    pub vine_faces_founded: f64,
     /// Nectar and fruit production at night as a share of the day rate (0 until the
     /// plants' night budget exists).
     pub night_bloom_scale: f64,
@@ -74,7 +79,7 @@ pub struct FoodSpec {
 
 impl Default for FoodSpec {
     fn default() -> FoodSpec {
-        FoodSpec { min_ratio: 1.0, vine_faces: 1.0, night_bloom_scale: 0.0, balance_share: 0.5 }
+        FoodSpec { min_ratio: 1.0, vine_faces_founded: 1.0, night_bloom_scale: 0.0, balance_share: 0.5 }
     }
 }
 
@@ -161,6 +166,11 @@ impl ScreenSpec {
     /// refusal refuses ([`RosterScreen::refusals`]).
     pub fn verdict_with(&self, rsf: &Rsf, roster: &RosterScreen) -> Verdict {
         if roster.refusals().is_empty() { self.verdict(rsf) } else { Verdict::Refused }
+    }
+
+    /// The soft terms a candidate that runs pays: R/S/F's and the food rows'.
+    pub fn soft_with(&self, rsf: &Rsf, roster: &RosterScreen) -> f64 {
+        self.soft(rsf) + roster.soft(self.k_soft)
     }
 
     /// A refused candidate's fitness with the roster screens: [`ScreenSpec::graded`] plus
@@ -451,7 +461,16 @@ pub struct FoodRow {
     pub supply_per_day: f64,
     pub ratio: f64,
     pub reach: Option<f64>,
+    /// The `min_ratio` it was judged at.
+    pub min_ratio: f64,
     pub passes: bool,
+}
+
+impl FoodRow {
+    /// No supply path at all (or no reach): the one hard food refusal.
+    pub fn absent(&self) -> bool {
+        !(self.supply_per_day > 0.0) || self.reach.is_some_and(|r| !(r > 0.0))
+    }
 }
 
 /// **Predator balance** (a readout; Astra A6): `balance_share` of the prey list's
@@ -474,16 +493,18 @@ pub struct RosterScreen {
 }
 
 impl RosterScreen {
-    /// Each refusal, named: `night: …` or `food: …`. The balance never refuses.
+    /// Each refusal, named: `night: …` (the design envelope) or `food: …` (a lineage with
+    /// no supply path at all). Short food is soft ([`RosterScreen::soft`]); the balance
+    /// never refuses.
     pub fn refusals(&self) -> Vec<String> {
         let mut out = Vec::new();
         for n in self.night.iter().filter(|n| !n.passes) {
             out.push(format!(
-                "night: {} sleeps {:.0} s and endures {:.0} s ({:.2}x the margin's need)",
+                "night: {} sleeps {:.0} s and endures {:.0} s ({:.2}x the design envelope's need)",
                 n.lineage, n.sleep_s, n.endurance_s, n.ratio
             ));
         }
-        for f in self.food.iter().filter(|f| !f.passes) {
+        for f in self.food.iter().filter(|f| f.absent()) {
             let foods: Vec<&str> = f.foods.iter().map(|x| x.food).collect();
             let reach = f.reach.map(|r| format!(", reach {r:.2}x")).unwrap_or_default();
             out.push(format!(
@@ -504,10 +525,24 @@ impl RosterScreen {
         for n in self.night.iter().filter(|n| !n.passes) {
             d += -ln(n.ratio);
         }
-        for f in self.food.iter().filter(|f| !f.passes) {
+        for f in self.food.iter().filter(|f| f.absent()) {
             d += (-ln(f.ratio)).max(0.0) + f.reach.map_or(0.0, |r| (-ln(r)).max(0.0));
         }
         d
+    }
+
+    /// **The soft food term** of a candidate that runs: `k` x the log-distance of every
+    /// food row short of `min_ratio` (supply, and a grazer's reach) but not absent.
+    pub fn soft(&self, k: f64) -> f64 {
+        let ln = |x: f64| x.max(1e-12).ln();
+        self.food
+            .iter()
+            .filter(|f| !f.passes && !f.absent())
+            .map(|f| {
+                k * ((ln(f.min_ratio) - ln(f.ratio)).max(0.0)
+                    + f.reach.map_or(0.0, |r| (ln(f.min_ratio) - ln(r)).max(0.0)))
+            })
+            .sum()
     }
 }
 
@@ -558,14 +593,16 @@ fn band_between(sc: &cubarium_voxel_flora::SpeciesConfig, floor_m: f64, ceiling_
 }
 
 /// **The roster screens** of `flora` (at the world's cell size) and `fauna` on `world`:
-/// night endurance per founded lineage, food access per lineage over its diet, and the
-/// predator balance readout. Founded means `founding_count` above zero.
+/// the night envelope per founded lineage, food access per lineage over its diet (soft
+/// unless absent), and the predator balance readout. Founded means `founding_count` above
+/// zero.
 ///
-/// Food supply is **optimistic**: stands at founding are `min(founder_cap, founder_per_m2
+/// Food supply is **estimated at founding**, generously but not as a proven upper bound
+/// (Astra F3): stands at founding are `min(founder_cap, founder_per_m2
 /// × floor area)` (the whole floor counted as habitat), harvested continuously, with no
 /// competition between lineages, no stock caps, no fruit drop, no plant reserve limit;
-/// need is basal only (no motion, growth or breeding). A lineage refused here cannot be
-/// fed; one passed may still starve.
+/// need is basal only (no motion, growth or breeding). Short supply is a soft term; only
+/// a lineage with no supply path is refused. One passed may still starve.
 /// - foliage: each photosynthetic species' regrowth (R's rule) where its adult crown meets
 ///   the lineage's mouth band;
 /// - cap tissue: a saprotroph's cap regrowth cap where it meets the band;
@@ -574,7 +611,7 @@ fn band_between(sc: &cubarium_voxel_flora::SpeciesConfig, floor_m: f64, ceiling_
 /// - film: the logistic film's best net production per m², light-hours weighted, over the
 ///   floor; and its reach, a walker's harvest at capacity over its walking need;
 /// - nectar, fruit: each stand's day rate through the light hours and
-///   `night_bloom_scale` of it through the dark, plus `vine_faces` latticevine faces per
+///   `night_bloom_scale` of it through the dark, plus `vine_faces_founded` latticevine faces per
 ///   vine flowering back to back;
 /// - carrion: a hunter's prey list (a scavenger's: every other founded lineage), each prey
 ///   adult's [`carrion_per_adult_s`].
@@ -623,7 +660,7 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
     let vines = f64::from(vine.founders).max((vine.founders_per_m2 * area).round());
     let vine_cycle = vine.bud_s + vine.flower_s + vine.fruit_s + vine.spent_s;
     let vine_per_day = |per_face: f64| {
-        if vine_cycle > 0.0 { vines * food.vine_faces * per_face * len_s / vine_cycle } else { 0.0 }
+        if vine_cycle > 0.0 { vines * food.vine_faces_founded * per_face * len_s / vine_cycle } else { 0.0 }
     };
     let carrion_of = |eater: Founder| -> f64 {
         let p = fauna.founder(eater);
@@ -714,7 +751,17 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
             .sum();
         let ratio = if need > 0.0 { supply / need } else { f64::INFINITY };
         let passes = ratio >= food.min_ratio && reach.is_none_or(|r| r >= food.min_ratio);
-        out.food.push(FoodRow { lineage: f.name(), bodies, foods, need_per_day: need, supply_per_day: supply, ratio, reach, passes });
+        out.food.push(FoodRow {
+            lineage: f.name(),
+            bodies,
+            foods,
+            need_per_day: need,
+            supply_per_day: supply,
+            ratio,
+            reach,
+            min_ratio: food.min_ratio,
+            passes,
+        });
         if p.hunter.is_some() {
             let y = p.yield_by_food[Food::Carrion.index()];
             let one = p.core.maintenance_per_s * p.core.body_max * (awake_s + p.sleep_upkeep * asleep_s);
