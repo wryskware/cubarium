@@ -2073,3 +2073,135 @@ pub fn check(
     });
     results.into_iter().collect()
 }
+
+/// **The finalist horizon**, hours: `from` plus the longest of the next night after it
+/// (from `from` through the following dawn), the pack's pup independence and its litter
+/// interval (a founded pack's; none without one). About 8 h on the terrarium.
+pub fn finalist_hours(world: &cubarium_voxel::Config, fauna: &cubarium_voxel_fauna::FaunaConfig, from: f64) -> f64 {
+    let day = &world.day;
+    let mut wait_s: f64 = 0.0;
+    if day.mode == cubarium_voxel::weather::DayMode::Cycle {
+        let len = day.length_min * 60.0;
+        let (rise, set) = day.cycle_rise_set();
+        let tick = (from * 3600.0 * f64::from(cubarium_voxel_fauna::TICK_HZ)).round() as u64;
+        let p = day.cycle_phase(tick);
+        let to_dusk = (set - p).rem_euclid(1.0);
+        let night = (rise - set).rem_euclid(1.0);
+        wait_s = (to_dusk + night) * len;
+    }
+    for f in Founder::ALL {
+        let p = fauna.founder(f);
+        if let (Some(k), true) = (p.pack, p.founding_count > 0) {
+            wait_s = wait_s.max(k.independence_age_s).max(k.litter_interval_s);
+        }
+    }
+    from + wait_s / 3600.0
+}
+
+/// **Finalist validation** (proposal Part 3; Astra A10): each arm × seed founded as the
+/// search founds it and run to [`finalist_hours`], judged by the search's own evaluation
+/// under the arm's `[targets]` (v3, else the readout rules) with the lanternjaw held to an
+/// established hunter (`lanternjaw_progress` 1). Worlds are refounded on their seeds, not
+/// restored from a save. Writes `<arm>__seed<s>.json` (the [`Evaluation`]) under `out` and
+/// prints each lineage's targets met per arm.
+///
+/// With `hours` given (`voxel-ecology-check --targets`), every world runs that long
+/// instead and is judged under the arm's own `[targets]` unchanged: the search's
+/// evaluation of one candidate, as the exhibit run uses it.
+#[allow(clippy::too_many_arguments)]
+pub fn finalist(
+    world_cfg: &cubarium_voxel::Config,
+    arms: &[(String, EcologyParams)],
+    seeds: &[u64],
+    hours: Option<f64>,
+    from_hours: f64,
+    window_min: f64,
+    water_every: u32,
+    centres: &[(Founder, PathBuf)],
+    founders: [usize; Founder::COUNT],
+    threads: usize,
+    out: &std::path::Path,
+) -> Result<(), String> {
+    std::fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
+    let drivers: Vec<(Founder, EpisodeDriver)> = centres
+        .iter()
+        .map(|(f, p)| Ok((*f, brain_driver(*f, &p.display().to_string())?)))
+        .collect::<Result<_, String>>()?;
+    let hz = f64::from(cubarium_voxel_fauna::TICK_HZ);
+    let mut specs = Vec::new();
+    for (name, params) in arms {
+        check_mass(&drivers, params)?;
+        let hours = hours.unwrap_or_else(|| finalist_hours(world_cfg, &params.fauna(), from_hours));
+        let validating = hours > from_hours;
+        let horizon = (hours * 3600.0 * hz).round() as u64;
+        let mut eval = EvalSpec::new(world_cfg.clone(), horizon, (window_min * 60.0 * hz).round() as u64);
+        eval.founders = founders;
+        eval.water_every = water_every;
+        let rest = params.genome().map(|g| g.rest.clone()).unwrap_or_default();
+        eval.band = BandSpec::default().with_targets(&rest)?;
+        let mut stage = eval.band.stage.unwrap_or_else(StageSpec::readout_default);
+        if validating {
+            stage.lanternjaw_progress = 1.0;
+        }
+        eval.band.stage = Some(stage);
+        println!("# {name}: {hours:.2} h per world");
+        specs.push(eval);
+    }
+    let jobs: Vec<(usize, u64)> = (0..arms.len())
+        .flat_map(|a| seeds.iter().map(move |&s| (a, s)))
+        .collect();
+    let tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
+    let evals: Vec<Evaluation> = parallel(jobs.clone(), threads, |(a, seed)| {
+        evaluate(&arms[a].1, seed, &drivers, &tables, &specs[a])
+    });
+    for ((a, seed), e) in jobs.iter().zip(&evals) {
+        let path = out.join(format!("{}__seed{seed}.json", arms[*a].0));
+        let json = serde_json::to_string(e).map_err(|e| e.to_string())?;
+        std::fs::write(&path, json).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    }
+    for (a, (name, _)) in arms.iter().enumerate() {
+        println!("{name}: lineage  met/worlds  alive_end  births  (score)");
+        for f in Founder::ALL {
+            let rows: Vec<&LineageOutcome> = jobs
+                .iter()
+                .zip(&evals)
+                .filter(|((k, _), _)| *k == a)
+                .filter_map(|(_, e)| e.lineages.iter().find(|o| o.founder == f))
+                .collect();
+            if rows.is_empty() {
+                continue;
+            }
+            let met = rows.iter().filter(|o| o.met).count();
+            let alive: usize = rows.iter().map(|o| o.alive_end).sum();
+            let births: u64 = rows.iter().map(|o| o.births).sum();
+            let score = rows.iter().map(|o| o.score).sum::<f64>() / rows.len() as f64;
+            let late: u64 = rows.iter().map(|o| o.late_births).sum();
+            let repl: Vec<String> = rows.iter().map(|o| format!("{:.2}", o.replenishment)).collect();
+            println!(
+                "  {:<14} met {met}/{}  alive {alive:>4}  births {births:>4} (late {late:>3})  score {score:.2}  replenish [{}]",
+                f.name(),
+                rows.len(),
+                repl.join(" ")
+            );
+        }
+        for ((k, seed), e) in jobs.iter().zip(&evals) {
+            if *k != a {
+                continue;
+            }
+            println!(
+                "  seed {seed}: penalty {:.3} (bound {:.3} lively {:.3} share {:.3} persist {:.3} stage {:.3} replenish {:.3}) animals_end {} stopped {:?} wall {:.0}s",
+                e.penalty.total,
+                e.penalty.bound,
+                e.penalty.lively,
+                e.penalty.share,
+                e.penalty.persist,
+                e.penalty.stage,
+                e.penalty.replenish,
+                e.trace.animals.last().copied().unwrap_or(0),
+                e.stopped,
+                e.wall_s
+            );
+        }
+    }
+    Ok(())
+}

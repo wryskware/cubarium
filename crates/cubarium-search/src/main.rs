@@ -888,6 +888,20 @@ enum Command {
         /// (`config/training/curiosity.toml`); the defaults without. A measurement only.
         #[arg(long)]
         curiosity: Option<PathBuf>,
+        /// **Finalist validation** (proposal Part 3; Astra A10): run each arm's worlds past
+        /// the search horizon (`--finalist-from`, hours) by the longest of the next night
+        /// (through the following dawn), pup independence and one litter interval (about 8 h
+        /// on the terrarium), scored by the search's own evaluation with the lanternjaw
+        /// held to an established hunter. Writes one JSON per world and a per-lineage table;
+        /// `--hours` is ignored.
+        #[arg(long, default_value_t = false)]
+        finalist: bool,
+        #[arg(long, default_value_t = 2.0)]
+        finalist_from: f64,
+        /// Score each world `--hours` long by the search's own evaluation (the arm's
+        /// `[targets]`: per-lineage outcomes, penalty) instead of writing window CSVs.
+        #[arg(long, default_value_t = false)]
+        targets: bool,
     },
     /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
     /// every body of every lineage given a centre runs its own antithetic variant inside
@@ -1154,6 +1168,27 @@ enum Command {
 }
 
 /// `<lineage>=<centre.json>` arguments.
+/// `--centre` when given, else the search file's `[brains]` table (`<lineage> = <file>`).
+fn centres_or_brains(
+    centres: &[String],
+    rest: &toml::Table,
+) -> Result<Vec<(cubarium_voxel_fauna::Founder, PathBuf)>, String> {
+    if !centres.is_empty() {
+        return parse_centres(centres);
+    }
+    let Some(brains) = rest.get("brains") else {
+        return Ok(Vec::new());
+    };
+    let brains = brains.as_table().ok_or("[brains] is a table")?;
+    brains
+        .iter()
+        .map(|(name, v)| {
+            let path = v.as_str().ok_or_else(|| format!("[brains] {name} is a file"))?;
+            Ok((es::voxel::parse_founder(name)?, PathBuf::from(path)))
+        })
+        .collect()
+}
+
 fn parse_centres(
     centres: &[String],
 ) -> Result<Vec<(cubarium_voxel_fauna::Founder, PathBuf)>, String> {
@@ -1174,8 +1209,17 @@ fn parse_centres(
 fn parse_founders(
     s: Option<&str>,
 ) -> Result<[usize; cubarium_voxel_fauna::Founder::COUNT], String> {
+    parse_founders_over(s, cubarium_voxel_fauna::FaunaConfig::default().founder_counts())
+}
+
+/// [`parse_founders`] over `base`: a search file's own founding (its `[base]`'s), the
+/// named lineages set over it.
+fn parse_founders_over(
+    s: Option<&str>,
+    base: [usize; cubarium_voxel_fauna::Founder::COUNT],
+) -> Result<[usize; cubarium_voxel_fauna::Founder::COUNT], String> {
     use cubarium_voxel_fauna::Founder;
-    let mut out = cubarium_voxel_fauna::FaunaConfig::default().founder_counts();
+    let mut out = base;
     let Some(s) = s else {
         return Ok(out);
     };
@@ -1610,7 +1654,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (hours * 3600.0 * hz).round() as u64,
                 (window_min * 60.0 * hz).round() as u64,
             );
-            eval.founders = parse_founders(founders.as_deref())?;
+            // The search file's own founding (a `[base]`'s: the terrarium founds all nine).
+            let base_counts = es::voxel::live::ecology::EcologyParams::Genome(genome.clone())
+                .fauna()
+                .founder_counts();
+            eval.founders = parse_founders_over(founders.as_deref(), base_counts)?;
             eval.curiosity =
                 es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?;
             eval.water_every = water_every;
@@ -1650,7 +1698,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None => None,
             };
             let spec = es::voxel::live::search::SearchSpec {
-                centres: parse_centres(&centres)?,
+                centres: centres_or_brains(&centres, &genome.rest)?,
                 genome,
                 start,
                 screen,
@@ -1685,7 +1733,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     _ => es::voxel::live::screen::ScreenSpec::default(),
                 },
-                None => es::voxel::live::screen::ScreenSpec::default(),
+                // A genome arm carries its search file's `[screen]`.
+                None => match e.genome() {
+                    Some(g) => es::voxel::live::screen::ScreenSpec::from_rest(&g.rest)?,
+                    None => es::voxel::live::screen::ScreenSpec::default(),
+                },
             };
             let world_cfg = es::voxel::live::search::check_world_config(world.as_deref())?;
             let r = es::voxel::live::search::screen_of(&e, &world_cfg, &screen);
@@ -1707,6 +1759,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     s.species, s.stands_in_reach, s.edible, s.regrowth_per_s, s.r, s.s, s.f
                 );
             }
+            let roster = es::voxel::live::search::roster_of(&e, &world_cfg, &screen);
+            for n in &roster.night {
+                println!(
+                    "night {:<14} sleeps {:>6.0} s  endures {:>8.0} s  x{:<6.3} {}",
+                    n.lineage,
+                    n.sleep_s,
+                    n.endurance_s,
+                    n.ratio,
+                    if n.passes { "ok" } else { "REFUSED" }
+                );
+            }
+            for f in &roster.food {
+                let foods: Vec<String> =
+                    f.foods.iter().map(|x| format!("{}={:.3}", x.food, x.per_day)).collect();
+                println!(
+                    "food  {:<14} bodies {:<4} need {:>8.3}/day  supply {:>9.3}/day  x{:<7.3}{} {}  [{}]",
+                    f.lineage,
+                    f.bodies,
+                    f.need_per_day,
+                    f.supply_per_day,
+                    f.ratio,
+                    f.reach.map(|r| format!(" reach x{r:.2}")).unwrap_or_default(),
+                    if f.passes { "ok" } else { "REFUSED" },
+                    foods.join(" ")
+                );
+            }
+            for b in &roster.balance {
+                println!(
+                    "balance {:<12} (readout) founds {} supports {:.2} on {:.3}/day of prey",
+                    b.predator, b.predators, b.supported, b.prey_per_day
+                );
+            }
+            let refusals = roster.refusals();
+            println!(
+                "{}",
+                if refusals.is_empty() && r.passes(&screen) {
+                    "every screen passes".to_string()
+                } else {
+                    format!("refused: {}", refusals.join("; "))
+                }
+            );
             Ok(())
         }
         Command::VoxelEcologyCheck {
@@ -1721,6 +1814,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             out,
             world,
             curiosity,
+            finalist,
+            finalist_from,
+            targets,
         } => {
             let world_cfg =
                 es::voxel::live::search::check_world_config(world.as_deref())?;
@@ -1740,6 +1836,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .split(',')
                 .map(|s| s.trim().parse::<u64>().map_err(|e| format!("seed {s}: {e}")))
                 .collect::<Result<_, _>>()?;
+            // The first arm's own founding and brains when none are given (a `[base]`
+            // search genome founds all nine; its `[brains]` name the held centres).
+            let first = parsed.first().map(|(_, p)| p.clone()).unwrap_or_default();
+            let base_counts = first.fauna().founder_counts();
+            let rest = first.genome().map(|g| g.rest.clone()).unwrap_or_default();
+            let centres = centres_or_brains(&centres, &rest)?;
+            let founders = parse_founders_over(founders.as_deref(), base_counts)?;
+            if finalist || targets {
+                es::voxel::live::search::finalist(
+                    &world_cfg,
+                    &parsed,
+                    &seeds,
+                    (!finalist).then_some(hours),
+                    finalist_from,
+                    window_min,
+                    water_every,
+                    &centres,
+                    founders,
+                    threads,
+                    &out,
+                )?;
+                return Ok(());
+            }
             es::voxel::live::search::check(
                 &world_cfg,
                 &parsed,
@@ -1747,8 +1866,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 hours,
                 window_min,
                 water_every,
-                &parse_centres(&centres)?,
-                parse_founders(founders.as_deref())?,
+                &centres,
+                founders,
                 threads,
                 &es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?,
                 &out,
