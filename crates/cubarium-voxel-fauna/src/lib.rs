@@ -46,6 +46,8 @@ mod hot_path_tests;
 #[cfg(test)]
 mod roster_tests;
 #[cfg(test)]
+mod roster_mechanics_tests;
+#[cfg(test)]
 mod snail_tests;
 #[cfg(test)]
 mod flight_tests;
