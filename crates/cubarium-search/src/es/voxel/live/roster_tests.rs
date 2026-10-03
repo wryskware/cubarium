@@ -275,6 +275,23 @@ fn predator_balance_is_a_readout_not_a_refusal() {
     assert!(r.refusals().is_empty(), "{:?}", r.refusals());
 }
 
+/// With `r_readout` (roster.toml, Fable 2026-10-02) R is reported and never refuses or
+/// pays; S and F stay hard.
+#[test]
+fn r_is_a_readout_when_the_file_says_so() {
+    let mut spec = ScreenSpec { r_readout: true, ..ScreenSpec::default() };
+    let mut s = super::screen::rsf(&flora(), &FaunaConfig::default(), VOXEL_M, &spec);
+    (s.r, s.s, s.f) = (5.0, 0.1, 20.0);
+    assert!(s.passes(&spec), "{:?}", s.failures(&spec));
+    assert_eq!(spec.verdict(&s), super::screen::Verdict::Inside);
+    assert_eq!(s.distance(&spec), 0.0);
+    (s.r, s.s, s.f) = (5.0, 5.0, 20.0);
+    assert!(!s.passes(&spec) && s.failures(&spec).iter().all(|x| x.starts_with('S')));
+    spec.r_readout = false;
+    (s.r, s.s, s.f) = (5.0, 0.1, 20.0);
+    assert!(!s.passes(&spec));
+}
+
 /// Screens off (cotrain.toml has neither table): no rows, no refusals.
 #[test]
 fn without_the_tables_the_roster_screens_are_off() {
@@ -367,14 +384,30 @@ fn the_chorister_is_held_to_its_pups() {
     good.pups_born = 4;
     good.pups_alive = 3;
     good.provision_received = 0.2;
+    good.carrion_eaten = 0.5;
     judge(&mut good, &s, true);
     assert_eq!(good.rule, Rule::ChoristerProgress);
     assert!(good.met && good.shortfall == 0.0, "{good:?}");
+    // Pups provisioned on the founders' endowment, but the pack never ate: not met.
+    let mut hungry = good.clone();
+    hungry.carrion_eaten = 0.0;
+    judge(&mut hungry, &s, true);
+    assert!(!hungry.met && (hungry.shortfall - 0.25).abs() < 1e-12, "{hungry:?}");
+    // The finalist check asks a pack kill, not carcass feeding alone.
+    let mut f = s;
+    f.chorister_kill_required = true;
+    let mut scavenged = good.clone();
+    judge(&mut scavenged, &f, true);
+    assert!(!scavenged.met, "{scavenged:?}");
+    scavenged.pack_kills = 1;
+    judge(&mut scavenged, &f, true);
+    assert!(scavenged.met, "{scavenged:?}");
     let mut unfed = good.clone();
     unfed.provision_received = 0.0;
     unfed.pups_alive = 1;
     judge(&mut unfed, &s, true);
-    assert!(!unfed.met && unfed.shortfall > 0.5, "{unfed:?}");
+    // Two of the four quarters missed (provisioning, survival).
+    assert!(!unfed.met && (unfed.shortfall - 0.5).abs() < 1e-12, "{unfed:?}");
 }
 
 /// Replenishment is intake over a whole cycle's spending (intake minus the change in
@@ -457,9 +490,6 @@ fn roster_decode_touches_exactly_the_listed_paths() {
             "core.maintenance_per_s",
             "motor_respiration_per_s",
             "core.bite_per_s",
-            "core.reproduction.surplus_floor",
-            "core.lifespan_median_s",
-            "core.growth_max_per_s",
             "core.reserve_cap",
             "sleep_upkeep",
             "wake_hunger",
@@ -469,20 +499,13 @@ fn roster_decode_touches_exactly_the_listed_paths() {
         for food in cubarium_voxel_fauna::Food::ALL {
             want.insert(format!("{at}.yield_by_food.{}", food.name()));
         }
-        if core.reproduction.gestation_s > 0.0 {
-            want.insert(format!("{at}.core.reproduction.gestation_s"));
-        }
-        if core.reproduction.incubation_s > 0.0 {
-            want.insert(format!("{at}.core.reproduction.incubation_s"));
-        }
+        let _ = core;
     }
     want.insert("fauna.founders.chorister.pack.pack_size".into());
     // The parasite hatchling's knobs (lanternjaw recruitment, 2026-10-02).
     for q in ["parasite_drain_of_host_basal", "parasite_attach_radius_m", "parasite_detach_body_fraction"] {
         want.insert(format!("fauna.{q}"));
     }
-    // The placeholder species follows the browser's lifespan (a tie).
-    want.insert("fauna.frondgrazer.lifespan_median_s".into());
     let group = |names: &[Species]| names.iter().map(|s| s.name()).collect::<Vec<_>>();
     use Species::*;
     for s in group(&[Springturf, Siphonreed, Velvetpad, Stonecushion, Bloomcrown, Umbrellafrond, Lanternberry, Vaulttree]) {
@@ -497,6 +520,19 @@ fn roster_decode_touches_exactly_the_listed_paths() {
     let missing: Vec<&String> = want.difference(&touched).collect();
     assert!(extra.is_empty(), "outside the list: {extra:?}");
     assert!(missing.is_empty(), "listed but untouched: {missing:?}");
+}
+
+/// Fable 2026-10-02: life histories frozen (lifespan, growth, surplus floor, gestation),
+/// motor tied to upkeep; per lineage only upkeep, intake, yield, reserve, sleep and wake
+/// hunger, plus the three parasite genes, pack size and the 15 plant groups: 73.
+#[test]
+fn roster_genes_are_the_agreed_set() {
+    let e = roster_file();
+    let g = e.genome().expect("a genome");
+    assert_eq!(g.genes.len(), 6 * 9 + 3 + 1 + 15, "{:?}", g.names());
+    for frozen in ["lifespan", "maturity", "breed_reserve", "gestation", "motor"] {
+        assert!(!g.names().iter().any(|n| n.starts_with(&format!("{frozen}@"))), "{frozen} is frozen");
+    }
 }
 
 /// The search ranges reach the proposal's targets: upkeep to /5 for every prey lineage,
@@ -521,4 +557,29 @@ fn roster_ranges_reach_the_targets() {
     assert!(range("upkeep@lanternjaw").0 * lj <= 7e-5, "lanternjaw upkeep reaches 7e-5");
     let ch = base.fauna.founder(Founder::Chorister).core.maintenance_per_s;
     assert!(range("upkeep@chorister").0 * ch <= 8e-5, "chorister upkeep reaches 8e-5");
+}
+
+/// **Study** (Fable 2026-10-02): latticevine faces per vine on the founded terrarium,
+/// seeds 1–8, under roster.toml's base; the median sets `[screen.food] vine_faces`.
+/// `CUBARIUM_THREADS=1 cargo test -p cubarium-search --release vine_faces_founded -- --ignored --nocapture`
+#[test]
+#[ignore = "study: run by name"]
+fn vine_faces_founded_on_the_terrarium() {
+    let world = cubarium_voxel::world_config_from_file(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/desktop/terrarium.toml"),
+    )
+    .expect("the terrarium");
+    let e = roster_file();
+    let counts = e.fauna().founder_counts();
+    let mut per_vine = Vec::new();
+    for seed in 1..=8u64 {
+        let (sim, info) = super::world::found_world(&world, seed, counts, &e);
+        let cover = sim.flora().view().cover;
+        let (vines, faces) = (cover.vines().len(), cover.faces().len());
+        let x = faces as f64 / vines.max(1) as f64;
+        println!("seed {seed} (world {}): {vines} vines, {faces} faces, {x:.2} per vine", info.seed);
+        per_vine.push(x);
+    }
+    per_vine.sort_by(f64::total_cmp);
+    println!("median faces per vine: {:.2}", 0.5 * (per_vine[3] + per_vine[4]));
 }

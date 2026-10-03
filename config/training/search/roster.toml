@@ -11,8 +11,8 @@
 # base's (all nine), not the code defaults' three.
 #
 # Ties (`derive()`, fauna and flora `ties()`), in force unless freed:
-# - motor_respiration_per_s = motor x maintenance_per_s, and
-#   bite_per_s = intake x maintenance_per_s: the UPKEEP gene also moves bite and motor.
+# - motor_respiration_per_s and bite_per_s follow maintenance_per_s by ratio: the UPKEEP
+#   gene also moves walking cost (no motor gene: frozen ratio) and the bite.
 #   Lowering upkeep x0.12 lowers the bite x0.12 unless `intake` rises to compensate, so
 #   `intake` reaches x10.
 # - wood_decomposition and carrion_decomposition follow `decomposition`.
@@ -53,6 +53,9 @@ run_margin = 2.0
 k_soft = 5.0
 light_moisture = 0.67
 harvest = 0.2
+# R is a readout here, not a refusal (Fable 2026-10-02): its band was set for the old clock,
+# and the movement target and the curiosity brains handle parking. S and F stay hard.
+r_readout = true
 
 # Night endurance, optimistic adult (proposal 1a; Astra A2): from onset reserve f0,
 # max(0, f0 - (1 - h)) x c / (m x s) >= margin x the lineage's longest sleeping bout on the
@@ -67,8 +70,9 @@ margin = 1.2
 # continuous harvest, no competition, no stock caps). Necessary, not sufficient.
 [screen.food]
 min_ratio = 1.0
-# Latticevine faces per vine, flowering back to back (optimistic).
-vine_faces = 64.0
+# Latticevine faces per founded vine, flowering back to back: the founding roots each vine
+# on one face, and the founded terrarium has exactly that (12 vines, 12 faces, seeds 1-8).
+vine_faces = 1.0
 # Nectar and fruit at night as a share of the day rate: 0 until `night` lands.
 night_bloom_scale = 0.0
 # Predator balance (a READOUT, never a refusal; Astra A6): the share of prey production
@@ -85,8 +89,10 @@ birth_credit_max = 0.5
 ready_target = 0.5
 # Progress ladders where no birth fits 2 h: the lanternjaw (0.25 hatched from the bank,
 # 0.5 a rider attached, rising to 0.75 as the furthest rider nears its drop-off line, 0.75 a
-# juvenile off its host, 1 a free lanternjaw's hit landed or an adult laying), met at lanternjaw_progress; the chorister (a litter, pups provisioned, pup
-# survival at least chorister_pup_survival), met at all three.
+# juvenile off its host, 1 a free lanternjaw's hit landed or an adult laying), met at
+# lanternjaw_progress; the chorister (a litter, pups provisioned, pup
+# survival at least chorister_pup_survival, and the pack's own intake: a kill or carcass
+# feeding; a pack kill in finalist validation), met at all four.
 progress = ["lanternjaw", "chorister"]
 lanternjaw_progress = 0.5
 chorister_pup_survival = 0.5
@@ -99,7 +105,9 @@ replenish_weight = 5.0
 lively_weight = 10.0
 share_weight_unestablished = 0.2
 
-# --- Animals: per lineage (tie = "each" over the nine founded lineages). ---
+# --- Animals: per lineage (tie = "each" over the nine founded lineages). Frozen at x1 by
+# Fable 2026-10-02 (life histories stay fast; Wrysk): lifespan, growth, surplus floor,
+# gestation and incubation; walking stays tied to upkeep (no motor gene). ---
 
 [[gene]]
 name = "upkeep"
@@ -107,13 +115,6 @@ path = "fauna.founders.*.core.maintenance_per_s"
 tie = "each"
 range = [0.05, 4.0]
 what = "basal upkeep (moves bite and motor by the ties); proposal: prey /4-5 for night endurance, lanternjaw to ~7e-5-1e-4, chorister to ~8e-5 (base x0.12-0.19)"
-
-[[gene]]
-name = "motor"
-path = "fauna.founders.*.motor_respiration_per_s"
-tie = "each"
-range = [0.25, 8.0]
-what = "walking cost / upkeep (the motor tie's ratio)"
 
 [[gene]]
 name = "intake"
@@ -128,27 +129,6 @@ path = "fauna.founders.*.yield_by_food.*"
 tie = "each"
 range = [0.25, 1.5]
 what = "assimilation yield, every food (base yields <= 0.6, so <= 0.9)"
-
-[[gene]]
-name = "breed_reserve"
-path = "fauna.founders.*.core.reproduction.surplus_floor"
-tie = "each"
-range = [0.25, 4.0]
-what = "surplus floor: the reserve margin a body breeds above"
-
-[[gene]]
-name = "lifespan"
-path = "fauna.founders.*.core.lifespan_median_s"
-tie = "each"
-range = [0.25, 4.0]
-what = "median lifespan"
-
-[[gene]]
-name = "maturity"
-path = "fauna.founders.*.core.growth_max_per_s"
-tie = "each"
-range = [0.25, 4.0]
-what = "growth to breeding size"
 
 [[gene]]
 name = "reserve"
@@ -173,57 +153,6 @@ value = 0.5
 range = [0.3, 0.95]
 what = "hunger that wakes a sleeper (set, not scaled); proposal candidate 0.9. HOOK: value = the base's default"
 
-# Gestation or incubation, wherever a row is non-zero (the lanternjaw has neither: its eggs
-# lie dormant until a dusk).
-[[gene]]
-name = "gestation@littershredder"
-path = "fauna.founders.littershredder.core.reproduction.incubation_s"
-range = [0.25, 4.0]
-what = "incubation"
-
-[[gene]]
-name = "gestation@frondgrazer"
-path = "fauna.founders.frondgrazer.core.reproduction.gestation_s"
-range = [0.25, 4.0]
-what = "gestation"
-
-[[gene]]
-name = "gestation@capgnawer"
-path = "fauna.founders.capgnawer.core.reproduction.incubation_s"
-range = [0.25, 4.0]
-what = "incubation"
-
-[[gene]]
-name = "gestation@loftstrider"
-path = "fauna.founders.loftstrider.core.reproduction.gestation_s"
-range = [0.25, 4.0]
-what = "gestation"
-
-[[gene]]
-name = "gestation@ripple-snail"
-path = "fauna.founders.ripple-snail.core.reproduction.incubation_s"
-range = [0.25, 4.0]
-what = "incubation"
-
-[[gene]]
-name = "gestation@bellwing"
-path = "fauna.founders.bellwing.core.reproduction.incubation_s"
-range = [0.25, 4.0]
-what = "incubation"
-
-[[gene]]
-name = "gestation@seedporter"
-path = "fauna.founders.seedporter.core.reproduction.gestation_s"
-range = [0.25, 4.0]
-what = "gestation"
-
-[[gene]]
-name = "gestation@chorister"
-path = "fauna.founders.chorister.core.reproduction.gestation_s"
-range = [0.25, 4.0]
-what = "gestation"
-
-# The chorister's founding pack size (4 adults; proposal: 2-3 at upkeep /5).
 [[gene]]
 name = "pack_size@chorister"
 path = "fauna.founders.chorister.pack.pack_size"
@@ -325,7 +254,7 @@ what = "litter decay (dead wood and carrion follow)"
 
 # --- The lanternjaw's recruitment (Fable, 2026-10-02 readouts: riders grow 0.05-0.14
 # body/h on frondgrazers toward a 0.25 drop-off line; small hosts cannot feed one).
-# Its growth is `maturity@lanternjaw` above. No host-size rule (a mechanics decision). ---
+# No host-size rule (with Wrysk). ---
 
 [[gene]]
 name = "rider_drain"
