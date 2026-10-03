@@ -3194,3 +3194,6 @@ mod parasite_tests;
 #[cfg(test)]
 #[path = "chorister_tests.rs"]
 mod chorister_tests;
+#[cfg(test)]
+#[path = "night_survival_tests.rs"]
+mod night_survival_tests;

@@ -2272,6 +2272,9 @@ pub(crate) struct Climate {
     /// The plant night rule: maintenance and leaf loss at `plant_night_factor` of their
     /// daytime rate while it is dark (`World::plant_night_scale`).
     pub(crate) night: f64,
+    /// Seconds to the ecological dawn while the sun is down (`World::life_to_dawn_s`),
+    /// `None` by day and with the clock off: the plants' night budget runs only on `Some`.
+    pub(crate) to_dawn_s: Option<f64>,
 }
 
 impl Climate {
@@ -2284,6 +2287,7 @@ impl Climate {
                 upkeep_q10,
             ),
             night: world.plant_night_scale(),
+            to_dawn_s: world.life_to_dawn_s(),
         }
     }
 }
@@ -2398,8 +2402,12 @@ fn grow(
             run(w);
         }
     }
-    for b in &books {
+    for (b, s) in books.iter().zip(stands.iter()) {
         b.apply(ledger);
+        let line = &mut ledger.night_spend[s.species.index()];
+        for k in 0..3 {
+            line[k] += b.night[k];
+        }
     }
     let dead: Vec<usize> = (0..n).filter(|&si| dying[si]).collect();
 
@@ -2423,6 +2431,9 @@ struct Booked {
     respired_n: u8,
     heat: [f64; 3],
     heat_n: u8,
+    /// The night budget's spend on `[reflush, nectar, fruit]` (1b), the reflush with its
+    /// construction respiration: `FloraLedger::night_spend`'s line for this stand.
+    night: [f64; 3],
 }
 
 impl Booked {
@@ -2538,6 +2549,7 @@ fn grow_stand(
         daylight,
         upkeep,
         night,
+        to_dawn_s,
     } = climate;
     let species = stand.species;
     let sc = config.species(species);
@@ -2649,20 +2661,40 @@ fn grow_stand(
     stand.reserve += dq_s;
 
     let dp_a = budget.build(d_p, sc.build);
-    // A photosynthetic stand reflushes from its reserve only as far as the day lets the
-    // new leaves earn: in the dark they would senesce before dawn, and the reserve they
-    // cost is what pays the night's maintenance. The reflush is reserve turned into
-    // foliage, so its mineral is already in the stand.
-    let flush_light = match sc.trophic {
-        Trophic::Photo => daylight,
-        Trophic::Saprotroph => 1.0,
+    // **The night budget** (`design/ecology-timescales-2026-10-02.md` 1b): while the sun is
+    // down on the ecological clock, a photosynthetic stand spends its reserve on the
+    // reflush, then nectar, then fruit, out of one allowance this tick,
+    // `max(0, Q − maintenance to dawn − floor) / max(to dawn, night_min_s) · DT`, `Q` the
+    // reserve after this tick's maintenance. The maintenance to dawn is this tick's rate
+    // carried to dawn, so a stand spending its allowance every tick meets dawn at its
+    // floor. By day, and always with the clock off, `None`: today's rules.
+    let mut night_left = match (sc.trophic, to_dawn_s) {
+        (Trophic::Photo, Some(t)) => {
+            let hold = m / DT * t + sc.night_floor * q_max;
+            Some((stand.reserve - hold).max(0.0) / t.max(sc.night_min_s) * DT)
+        }
+        _ => None,
+    };
+    // By day a photosynthetic stand reflushes from its reserve only as far as the light
+    // lets the new leaves earn. At night the light gate gives way to the night budget,
+    // which pays the reflush first, construction respiration included. The reflush is
+    // reserve turned into foliage, so its mineral is already in the stand.
+    let flush_light = match (sc.trophic, night_left) {
+        (Trophic::Photo, None) => daylight,
+        _ => 1.0,
     };
     let dp_q = if p0 < sc.reflush_below * p_cap {
-        budget.build_from(
-            &mut stand.reserve,
-            ((d_p - dp_a) * flush_light).min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0)),
-            sc.build,
-        )
+        let mut want = ((d_p - dp_a) * flush_light).min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0));
+        if let Some(left) = night_left {
+            want = want.min(left / (1.0 + sc.build));
+        }
+        let x = budget.build_from(&mut stand.reserve, want, sc.build);
+        if let Some(left) = night_left.as_mut() {
+            let cost = (1.0 + sc.build) * x;
+            *left = (*left - cost).max(0.0);
+            book.night[0] += cost;
+        }
+        x
     } else {
         0.0
     };
@@ -2694,12 +2726,20 @@ fn grow_stand(
     // makes it moves `nectar_per_s` of its reserve into its flowers in daylight, up to
     // `nectar_cap`. A move inside the stand's material: no ledger line, and the mineral
     // stays in `stand.mineral` until a consumer takes the nectar.
-    if sc.nectar_per_s > 0.0 && daylight > 0.0 && stand.profile_stage >= 1 {
+    //
+    // At night (1b) it is made at `night_bloom_scale` of the rate out of what the reflush
+    // left of the night budget.
+    if sc.nectar_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
         let room = (sc.nectar_cap - stand.nectar).max(0.0);
-        let make = (sc.nectar_per_s * DT).min(room).min(stand.reserve.max(0.0));
+        let rate = if night_left.is_some() { sc.nectar_per_s * sc.night_bloom_scale } else { sc.nectar_per_s };
+        let make = (rate * DT).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
         if make > 0.0 {
             stand.reserve -= make;
             stand.nectar += make;
+            if let Some(left) = night_left.as_mut() {
+                *left = (*left - make).max(0.0);
+                book.night[1] += make;
+            }
         }
     }
 
@@ -2707,12 +2747,18 @@ fn grow_stand(
     // hangs fruit, up to `fruit_cap`. The crop's clock runs while any fruit hangs; at
     // `fruit_drop_s` the whole uneaten crop falls to this site's litter (with senescence,
     // below), carrying `fruit_mineral_fraction` of itself out of the stand's mineral.
-    if sc.fruit_per_s > 0.0 && daylight > 0.0 && stand.profile_stage >= 1 {
+    // At night, as nectar: the night scale, out of what is left of the budget.
+    if sc.fruit_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
         let room = (sc.fruit_cap - stand.fruit).max(0.0);
-        let make = (sc.fruit_per_s * DT).min(room).min(stand.reserve.max(0.0));
+        let rate = if night_left.is_some() { sc.fruit_per_s * sc.night_bloom_scale } else { sc.fruit_per_s };
+        let make = (rate * DT).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
         if make > 0.0 {
             stand.reserve -= make;
             stand.fruit += make;
+            if let Some(left) = night_left.as_mut() {
+                *left = (*left - make).max(0.0);
+                book.night[2] += make;
+            }
         }
     }
     let mut fell = (0.0, 0.0);
@@ -3356,6 +3402,10 @@ pub(crate) fn standing_water_beside(view: &VoxelView<'_>, site: Site) -> f64 {
     }
     best
 }
+
+#[cfg(test)]
+#[path = "night_budget_tests.rs"]
+mod night_budget_tests;
 
 #[cfg(test)]
 mod tests {
@@ -4120,6 +4170,7 @@ mod tests {
                 daylight: 1.0,
                 upkeep: 1.0,
                 night: 1.0,
+                to_dawn_s: None,
             };
             grow(&mut one, &world, &light, climate, &drink, &substrate, 1);
             grow(&mut split, &world, &light, climate, &drink, &substrate, threads);

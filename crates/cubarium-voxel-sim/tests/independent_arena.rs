@@ -89,7 +89,15 @@ fn litter_pools(flora: &cubarium_voxel_flora::Flora) -> (f64, f64, f64, f64) {
 /// out of a stock, which would make every arena result unfalsifiable.
 #[test]
 fn an_arena_bite_closes_the_three_currencies_across_stock_animal_and_respiration() {
-    let mut arena = build(Founder::Blind, 1);
+    // Awake at every hour: since night survival 1a (`wake_hunger` 0.9) a hungry body in
+    // its sleeping phase eats only to the wake line and lies down again, and this case
+    // counts one bite per interval. The layout's clock hour is drawn from its seed.
+    let mut arena = {
+        let grid = ArenaGrid::Standard;
+        let mut layers = LayerConfig::new(&Params::defaults(), grid.voxel_m());
+        layers.fauna.founders[Founder::Blind.index()].active = cubarium_voxel_fauna::Activity::Always;
+        Arena::build(Founder::Blind, 1, grid, layers)
+    };
     // The founder alone: the ledger below is the layer's, so the bystanders go.
     arena.bystanders.clear();
     arena.refound(cubarium_voxel_sim::FOUNDER_START);

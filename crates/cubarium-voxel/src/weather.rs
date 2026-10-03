@@ -1610,6 +1610,21 @@ impl World {
         d + (1.0 - d) * self.config.day.plant_night_factor
     }
 
+    /// Seconds to the **ecological dawn** while the sun is down, `None` while it is up and
+    /// always with the clock off (there is no night). The dawn is the simulation's own
+    /// sunrise: the cycle's under `cycle`, the date's under today's coupled `local` mode
+    /// (`design/ecology-timescales-2026-10-02.md` 1b). What the plants' night budget is
+    /// spread over.
+    pub fn life_to_dawn_s(&self) -> Option<f64> {
+        if self.config.day.mode == DayMode::Off {
+            return None;
+        }
+        let sun = self.weather.sun;
+        let day = (sun.set - sun.rise).rem_euclid(1.0);
+        let since_rise = (sun.phase - sun.rise).rem_euclid(1.0);
+        (since_rise > day).then(|| (1.0 - since_rise) * self.config.day.day_s())
+    }
+
     /// The temperature plants and animals live by, °C. The climate's mean with the day
     /// clock off, whatever the picture shows.
     pub fn life_temperature_c(&self) -> f64 {

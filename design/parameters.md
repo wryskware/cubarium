@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (756 rows)
+**`flora.*`** (783 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -424,6 +424,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.bloomcrown.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.bloomcrown.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.bloomcrown.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.bloomcrown.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.bloomcrown.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.bloomcrown.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.bloomcrown.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.bloomcrown.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -500,6 +503,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.umbrellafrond.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.umbrellafrond.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.umbrellafrond.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.umbrellafrond.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.umbrellafrond.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.umbrellafrond.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.umbrellafrond.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.umbrellafrond.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -576,6 +582,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.springturf.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.springturf.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.springturf.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.springturf.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.springturf.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.springturf.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.springturf.founder_per_m2` | 0.6 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.springturf.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -652,6 +661,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.stonecushion.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.stonecushion.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.stonecushion.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.stonecushion.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.stonecushion.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.stonecushion.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.stonecushion.founder_per_m2` | 0.2 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.stonecushion.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -728,6 +740,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.velvetpad.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.velvetpad.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.velvetpad.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.velvetpad.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.velvetpad.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.velvetpad.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.velvetpad.founder_per_m2` | 0.4 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.velvetpad.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -804,6 +819,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.glowcap.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.glowcap.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.glowcap.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.glowcap.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.glowcap.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.glowcap.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.glowcap.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.glowcap.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -880,6 +898,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.vaulttree.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.vaulttree.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.vaulttree.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.vaulttree.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.vaulttree.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.vaulttree.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.vaulttree.founder_per_m2` | 0.1 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.vaulttree.founder_colony` | 1 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -956,6 +977,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.fruit_cap` | 0.02 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.lanternberry.fruit_drop_s` | 1800.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.lanternberry.fruit_mineral_fraction` | 0.01 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.lanternberry.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.lanternberry.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.lanternberry.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.lanternberry.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.lanternberry.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.lanternberry.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -1032,6 +1056,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.siphonreed.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
 | `flora.siphonreed.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.siphonreed.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
+| `flora.siphonreed.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
+| `flora.siphonreed.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.siphonreed.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.siphonreed.founder_per_m2` | 4.0 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.siphonreed.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -1195,8 +1222,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.littershredder.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
-| `fauna.founders.littershredder.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.littershredder.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.littershredder.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
+| `fauna.founders.littershredder.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1300,7 +1327,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.frondgrazer.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.frondgrazer.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.frondgrazer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1403,8 +1430,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
-| `fauna.founders.lanternjaw.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.lanternjaw.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.lanternjaw.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
+| `fauna.founders.lanternjaw.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1507,8 +1534,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.capgnawer.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
-| `fauna.founders.capgnawer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.capgnawer.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.capgnawer.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
+| `fauna.founders.capgnawer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1612,7 +1639,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.loftstrider.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.loftstrider.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.loftstrider.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.loftstrider.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1715,8 +1742,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.ripple-snail.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
-| `fauna.founders.ripple-snail.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.ripple-snail.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.ripple-snail.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
+| `fauna.founders.ripple-snail.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1820,7 +1847,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.bellwing.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.bellwing.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.bellwing.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.bellwing.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -1924,7 +1951,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.seedporter.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.seedporter.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.seedporter.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.seedporter.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -2028,7 +2055,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.chorister.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.2–1 | - | decision | upkeep while asleep |
-| `fauna.founders.chorister.wake_hunger` | 0.5 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
+| `fauna.founders.chorister.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | hunger at or above which it stays awake |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
@@ -2168,7 +2195,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.seedporter_full_at` | 0.9 | fraction of adult reserve | [0, 1] | 0.5–1 | - | placeholder | the seedporter's heuristic stops eating at this reserve |
 | `fauna.teachers.bellwing_roost_ceiling` | 0.4 | fraction of band | [0, 1] | 0.1–0.8 | - | placeholder | going to rest, cover closer than this overhead is an underside to rise into |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
-| `fauna.founding.arrival_reserve` | 0.5 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
+| `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
 | `fauna.founding.starter_litter_organic` | 0.2 | organic units | [0, inf) | 0.05–1 | - | placeholder | leaf litter laid under each seeded littershredder |
 | `fauna.founding.starter_litter_mineral_fraction` | 0.02 | fraction of organic | [0, 1] | 0.005–0.1 | - | placeholder | mineral share of the starter litter |
 | `fauna.founding.starter_litter_energy_density` | 2.0 | energy per organic unit | [0, inf) | 0.5–4 | - | placeholder | retained energy density of the starter litter |

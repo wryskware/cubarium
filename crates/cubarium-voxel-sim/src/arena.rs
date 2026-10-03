@@ -1736,11 +1736,12 @@ mod tests {
                         x: i64::from(stand_site.x),
                         z,
                         founder: Founder::Browser,
-                        // Hungrier than the wake line, so neither body sleeps whatever
-                        // hour the layout's clock starts at (audit round step 5).
+                        // Hungrier than the wake line (0.9 since night survival 1a), so
+                        // neither body sleeps whatever hour the layout's clock starts at
+                        // (audit round step 5).
                         stores: cubarium_voxel_fauna::StartingStores {
                             body: 0.8,
-                            reserve: 0.4,
+                            reserve: 0.05,
                         },
                         heading_rad: 0.0,
                     },
@@ -2038,10 +2039,11 @@ mod tests {
                     x: i64::from(site.x),
                     z: site.z,
                     founder: Founder::Blind,
-                    // Past the wake line, so it samples at any hour of the layout's day.
+                    // Past the wake line (0.9 since night survival 1a), so it samples
+                    // at any hour of the layout's day.
                     stores: cubarium_voxel_fauna::StartingStores {
                         body: 1.0,
-                        reserve: 0.4,
+                        reserve: 0.05,
                     },
                     heading_rad: 0.0,
                 },

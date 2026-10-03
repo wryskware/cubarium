@@ -695,7 +695,7 @@ pub fn seed_pre_rolled(
     }
 
     // The two **sensed founder lineages**, which is what walks this habitat now. Both
-    // arrive grown with half a reserve ([`founder_arrival`]): room to eat, and a body's
+    // arrive grown and full ([`founder_arrival`]): a full reserve, and a body's
     // worth of buffer to find food with at the shipped mass.
     // The seeder installs each lineage's own observation-only heuristic through the
     // fauna layer's ordinary controller boundary, and registers it as that lineage's
@@ -1781,12 +1781,12 @@ pub fn reinstall_heuristics(fauna: &mut Fauna) {
     }
 }
 
-/// How a seeded founder arrives: **grown, with half a reserve** (the mass round,
-/// 2026-09-29). At the shipped x30 mass the old half-grown, empty arrival (the arenas'
-/// `StartingStores::HUNGRY`) starved founders on the terrarium before they settled; a
-/// full reserve would leave no appetite (hunger 0, and asleep at its lineage's night).
-/// Half a reserve is hunger 0.5: awake, eating, with the whole body as buffer. The numbers
-/// are [`cubarium_voxel_fauna::FoundingConfig::arrival_body`] and `arrival_reserve`.
+/// How a seeded founder arrives: **grown and full** (night survival 1a, 2026-10-02; half
+/// a reserve since the mass round of 2026-09-29). At the shipped x30 mass the old
+/// half-grown, empty arrival (the arenas' `StartingStores::HUNGRY`) starved founders on
+/// the terrarium before they settled. A full founder enters its lineage's first sleep at
+/// a full reserve. The numbers are
+/// [`cubarium_voxel_fauna::FoundingConfig::arrival_body`] and `arrival_reserve`.
 pub fn founder_arrival(founding: &cubarium_voxel_fauna::FoundingConfig) -> StartingStores {
     StartingStores {
         body: founding.arrival_body,
@@ -3398,7 +3398,18 @@ mod tests {
             }
         }
 
-        let (world, flora, mut fauna, seeded) = seeded(crate::scene::authored(config()));
+        // Founders past the wake line, so both kinds forage at the layout's hour: since
+        // night survival 1a a founder arrives full and the nocturnal shredder would sleep
+        // through a daytime start (with the old half reserve it sat on the old 0.5 line).
+        let (world, flora, mut fauna, seeded) = {
+            let mut world = crate::scene::authored(config());
+            let mut flora = Flora::new(Default::default());
+            let mut fc = cubarium_voxel_fauna::FaunaConfig::placeholder();
+            fc.founding.arrival_reserve = 0.05;
+            let mut fauna = Fauna::new(fc);
+            let summary = seed(&mut world, &mut flora, &mut fauna);
+            (world, flora, fauna, summary)
+        };
         // One watcher per founder kind, wrapped around the controller the seeder
         // installed, so the heuristic under test is the one the habitat ships.
         let best: [Arc<Mutex<f64>>; Founder::COUNT] = std::array::from_fn(|_| Arc::default());
@@ -3682,13 +3693,16 @@ mod tests {
         );
     }
 
-    /// Founders arrive grown with half a reserve ([`founder_arrival`]): at the shipped
-    /// mass a half-grown, empty founder starved on the terrarium before it had settled
-    /// (x30, 60 min: 5-7 of 8 browsers dead by minute 30), and a full one would have no
-    /// appetite. Half a reserve is hunger 0.5, awake by day or night.
+    /// Founders arrive grown and **full** ([`founder_arrival`]; night survival, brief test
+    /// 8): every founder's reserve is its cap × `founding.arrival_reserve`, and the knob's
+    /// default is 1. (It was half until 2026-10-02: a full founder slept at its lineage's
+    /// night with no appetite; Part 1a of `design/ecology-timescales-2026-10-02.md` wants
+    /// it to enter that sleep full.)
     #[test]
-    fn a_seeded_founder_arrives_grown_with_half_a_reserve() {
+    fn a_seeded_founder_arrives_grown_and_full() {
         let world = plain(24, 6);
+        let knob = cubarium_voxel_fauna::FoundingConfig::default().arrival_reserve;
+        assert_eq!(knob, 1.0, "the knob's default");
         for founder in Founder::ALL {
             let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());
             install_heuristics(&mut fauna);
@@ -3697,12 +3711,13 @@ mod tests {
             let sc = fauna.config().founder(founder).core;
             assert!((a.body - sc.body_max).abs() < 1e-12, "{founder:?}: grown");
             assert!(
-                (a.reserve - 0.5 * sc.reserve_of(sc.body_max)).abs() < 1e-12,
-                "{founder:?}: half a reserve"
+                (a.reserve - knob * sc.reserve_of(sc.body_max)).abs() < 1e-12,
+                "{founder:?}: reserve {} is the cap × the knob",
+                a.reserve
             );
         }
         let arrival = founder_arrival(&cubarium_voxel_fauna::FoundingConfig::default());
         assert_eq!(arrival.body, 1.0);
-        assert_eq!(arrival.reserve, 0.5);
+        assert_eq!(arrival.reserve, knob);
     }
 }

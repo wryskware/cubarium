@@ -22,7 +22,9 @@ use crate::Flora;
 // 18: glassfilm drying — `FloraConfig::{film_wet_min_depth_m, film_gone_fraction}`.
 // 19: roster mechanics — `Ground::vine_seeds` (the latticevine seed bank),
 //     `VineConfig::seed_max_age_s`.
-pub const SCHEMA: u32 = 19;
+// 20: night survival 1b — `SpeciesConfig::{night_bloom_scale, night_floor, night_min_s}`,
+//     `FloraLedger::night_spend`; a stand spends its reserve at night.
+pub const SCHEMA: u32 = 20;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
