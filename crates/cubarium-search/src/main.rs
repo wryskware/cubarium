@@ -903,6 +903,45 @@ enum Command {
         #[arg(long, default_value_t = false)]
         targets: bool,
     },
+    /// **The big-lever grid** (`design/handoffs/lever-grid-tool-2026-10-03.md`): master
+    /// scales (animal metabolism `m` x plant productivity `p`, plus any `--axis`) x distinct
+    /// worlds, resumable; writes `cells.jsonl`, `summary.tsv` and `summary.md` to `--out`.
+    VoxelEcologyGrid {
+        /// Multipliers of every lineage's daily need (motor follows); `none` drops the axis.
+        #[arg(long, default_value = es::voxel::live::grid::DEFAULT_LEVELS)]
+        m: String,
+        /// Multipliers of plant production; `none` drops the axis.
+        #[arg(long, default_value = es::voxel::live::grid::DEFAULT_LEVELS)]
+        p: String,
+        /// A further axis, `NAME:LEVEL|LEVEL|…`; a level is `PATH=V` (set) or `PATH=xV`
+        /// (multiply) overrides joined by `;`, or a number for a named scale.
+        #[arg(long = "axis")]
+        axes: Vec<String>,
+        /// Distinct worlds the founding accepts as themselves, tried from `--first-seed`.
+        #[arg(long, default_value_t = 8)]
+        seeds: usize,
+        #[arg(long, default_value_t = 1)]
+        first_seed: u64,
+        #[arg(long, default_value_t = 2.0)]
+        hours: f64,
+        /// A host config file (its `[world]`, and its `[flora]`/`[fauna]` as every cell's
+        /// x1) or a preset's name (the code-default ecology).
+        #[arg(long, default_value = "config/desktop/terrarium.toml")]
+        world: String,
+        /// Worlds run at once, one simulation thread each.
+        #[arg(long, default_value_t = 8)]
+        threads: usize,
+        #[arg(long, default_value_t = 1)]
+        water_every: u32,
+        /// Stop a world holding more animals than this.
+        #[arg(long, default_value_t = 600)]
+        abort_animals: usize,
+        /// `<lineage>=<brain>`; a lineage given none runs its heuristic.
+        #[arg(long = "centre")]
+        centres: Vec<String>,
+        #[arg(long, default_value = "runs/ecology-grid")]
+        out: PathBuf,
+    },
     /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
     /// every body of every lineage given a centre runs its own antithetic variant inside
     /// persistent live worlds (the `small` preset, still water), one ES update per lineage
@@ -1873,6 +1912,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?,
                 &out,
             )?;
+            Ok(())
+        }
+        Command::VoxelEcologyGrid {
+            m,
+            p,
+            axes,
+            seeds,
+            first_seed,
+            hours,
+            world,
+            threads,
+            water_every,
+            abort_animals,
+            centres,
+            out,
+        } => {
+            use es::voxel::live::grid;
+            let mut parsed = Vec::new();
+            for (name, levels) in [("m", &m), ("p", &p)] {
+                if levels.trim() != "none" {
+                    parsed.push(grid::Axis::named(name, &grid::parse_values(levels)?)?);
+                }
+            }
+            for a in &axes {
+                parsed.push(grid::Axis::parse(a)?);
+            }
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let file = [PathBuf::from(&world), root.join(&world)].into_iter().find(|p| p.is_file());
+            let (world_cfg, base) = match file {
+                Some(f) => (cubarium_voxel::world_config_from_file(&f)?, Some(f)),
+                None => {
+                    let preset = cubarium_voxel::Preset::find(&world)
+                        .ok_or_else(|| format!("--world {world}: neither a file nor a preset"))?;
+                    (preset.config(), None)
+                }
+            };
+            let centres = centres_or_brains(&centres, &toml::Table::new())?;
+            grid::grid(&grid::GridSpec {
+                world: world_cfg,
+                world_name: world,
+                base,
+                axes: parsed,
+                seeds,
+                first_seed,
+                hours,
+                threads,
+                water_every,
+                abort_animals,
+                centres,
+                out,
+            })?;
             Ok(())
         }
         Command::VoxelLiveTrain {
