@@ -1254,17 +1254,24 @@ fn print_pack_trace(sim: &Sim, tick: u64) {
         // The route from each member to the target (bellwing3): steps on the lineage's
         // route graph (out to 400) and whether the straight line is walkable.
         let graph = target.map(|_| {
-            cubarium_voxel_fauna::RouteGraph::for_founder(&sim.world().view(), f.config().founder(Founder::Chorister))
+            cubarium_voxel_fauna::RouteGraph::for_founder(
+                &sim.world().view(),
+                f.config().founder(Founder::Chorister),
+                f.config().founding.clearance_margin_m,
+            )
         });
-        let field = target.zip(graph.as_ref()).and_then(|(o, g)| g.face(o.site).map(|j| g.distances(j, 400)));
+        let field = target
+            .zip(graph.as_ref())
+            .and_then(|(o, g)| g.node_near(o.site, (o.pose.x, o.pose.z), 8).map(|j| g.distances(j, 400)));
         for a in f.view().animals.iter().filter(|a| a.pack.is_some_and(|m| m.pack == p.id)) {
             if let (Some(o), Some(g)) = (target, graph.as_ref()) {
-                let steps = g.face(a.site).and_then(|i| field.as_ref().and_then(|fl| fl.get(&i).copied()));
+                let node = g.node_near(a.site, (a.pose.x, a.pose.z), 2);
+                let steps = node.and_then(|i| field.as_ref().and_then(|fl| fl.get(&i).copied()));
                 print!(
                     "  route id={} steps={:?} straight={} ",
                     a.id,
                     steps,
-                    g.walk_line(a.site, (a.pose.x, a.pose.z), (o.pose.x, o.pose.z))
+                    node.is_some_and(|i| g.walk_line(i, (a.pose.x, a.pose.z), (o.pose.x, o.pose.z)))
                 );
             }
             let pup = a.pack.is_some_and(|m| m.pup);

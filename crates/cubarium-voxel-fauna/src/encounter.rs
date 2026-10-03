@@ -394,20 +394,24 @@ pub fn route_components(
     cubarium_voxel::walk::components_linked(&cells, c.width, rule.step.mutual(), &links)
 }
 
-/// A founder lineage's **walking route graph** (bellwing3 item 1): [`RouteMap::for_founder`]'s
-/// faces and components (its adult body, wade depth, step and walls) without the mouth
-/// columns, with the step rule's edges kept so a route can be walked: route distances
-/// ([`RouteGraph::distances`]), the next face toward a goal ([`RouteGraph::next_toward`])
-/// and whether a straight line is walkable ([`RouteGraph::walk_line`]).
+/// A founder lineage's **walking route graph** (bellwing3 item 1; on the disc rule since
+/// bellwing4): the graph [`founding_faces`] builds for its adult body — a face is a node
+/// when the disc (its footprint plus `margin_m`) stands clear at the face's centre, and two
+/// neighbouring nodes within the mutual step are joined when the disc is also clear at the
+/// midpoint, standing on either layer; a climber's walls join as in [`route_components`] —
+/// with its edges kept so a route can be walked: route distances
+/// ([`RouteGraph::distances`]), the next node toward a goal ([`RouteGraph::next_toward`])
+/// and whether a straight line is walkable ([`RouteGraph::walk_line`]). The column rule
+/// let a 1.4 m chorister's route run up stairs and gaps its body does not fit.
 #[derive(Debug)]
 pub struct RouteGraph {
-    /// The standable faces, in [`standable_faces`] order.
+    /// The nodes: faces the disc stands clear on.
     pub faces: Vec<Site>,
-    /// The walkable component of each face.
+    /// The walkable component of each node.
     pub components: Vec<usize>,
     index: FxHashMap<Site, usize>,
-    /// A climber's wall edges, both ways.
-    links: FxHashMap<usize, Vec<usize>>,
+    /// Each node's neighbours (the step edges the disc passes, and a climber's walls).
+    adj: Vec<Vec<usize>>,
     climb: u32,
     width: u32,
     depth: u32,
@@ -415,24 +419,50 @@ pub struct RouteGraph {
 }
 
 impl RouteGraph {
-    /// The route graph of a founder lineage's adult body.
-    pub fn for_founder(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> RouteGraph {
+    /// The route graph of a founder lineage's adult body, its disc grown by `margin_m`
+    /// ([`crate::FoundingConfig::clearance_margin_m`], as the founding's).
+    pub fn for_founder(view: &VoxelView<'_>, phys: &crate::FounderPhysiology, margin_m: f64) -> RouteGraph {
         let c = view.config;
+        let v = c.voxel_m;
         let body = phys.adult_body();
-        let faces = standable_faces(view, &body, phys.wade_depth_m(&body));
-        let rule = RouteRule {
-            step: phys.step_limits(c.voxel_m),
-            climbs_walls: phys.climbs_walls,
-        };
-        let headroom = body.headroom_voxels(c.voxel_m);
-        let components = route_components(view, &faces, rule, headroom);
+        let step = phys.step_limits(v);
+        let room = body.headroom_voxels(v);
+        let r = body.footprint_radius() + margin_m.max(0.0);
+        let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, room, step);
+        let faces: Vec<Site> = standable_faces(view, &body, phys.wade_depth_m(&body))
+            .into_iter()
+            .filter(|f| {
+                let z = (f64::from(f.z) + 0.5) * v;
+                z + 1e-9 >= body.footprint_radius() && z <= f64::from(c.depth) * v - body.footprint_radius() + 1e-9
+            })
+            .filter(|f| clear((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, f.y))
+            .collect();
         let index: FxHashMap<Site, usize> = faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
-        let mut links: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
-        if rule.climbs_walls {
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); faces.len()];
+        let climb = step.mutual();
+        for (i, f) in faces.iter().enumerate() {
+            for (dx, dz) in [(1i64, 0i64), (0, 1)] {
+                let nz = i64::from(f.z) + dz;
+                if nz >= i64::from(c.depth) {
+                    continue;
+                }
+                let nx = (i64::from(f.x) + dx).rem_euclid(i64::from(c.width)) as u32;
+                let (mx, mz) = ((f64::from(f.x) + 0.5 + dx as f64 / 2.0) * v, (f64::from(f.z) + 0.5 + dz as f64 / 2.0) * v);
+                for ny in f.y.saturating_sub(climb)..=f.y + climb {
+                    let Some(&j) = index.get(&Site { x: nx, y: ny, z: nz as u32 }) else {
+                        continue;
+                    };
+                    if clear(mx, mz, f.y) && clear(mx, mz, ny) {
+                        adj[i].push(j);
+                        adj[j].push(i);
+                    }
+                }
+            }
+        }
+        if phys.climbs_walls {
             for (i, f) in faces.iter().enumerate() {
                 for dir in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
-                    let crate::Face::Climb(top) =
-                        crate::wall_ascent(view, i64::from(f.x), f.y, f.z, dir, headroom, rule.step.up)
+                    let crate::Face::Climb(top) = crate::wall_ascent(view, i64::from(f.x), f.y, f.z, dir, room, step.up)
                     else {
                         continue;
                     };
@@ -442,87 +472,93 @@ impl RouteGraph {
                         z: (i64::from(f.z) + dir.1) as u32,
                     };
                     if let Some(&j) = index.get(&to) {
-                        links.entry(i).or_default().push(j);
-                        links.entry(j).or_default().push(i);
+                        adj[i].push(j);
+                        adj[j].push(i);
                     }
                 }
             }
         }
-        RouteGraph {
-            faces,
-            components,
-            index,
-            links,
-            climb: rule.step.mutual(),
-            width: c.width,
-            depth: c.depth,
-            voxel_m: c.voxel_m,
+        // Components over the edges.
+        let mut components: Vec<usize> = vec![usize::MAX; faces.len()];
+        for s0 in 0..faces.len() {
+            if components[s0] != usize::MAX {
+                continue;
+            }
+            components[s0] = s0;
+            let mut stack = vec![s0];
+            while let Some(i) = stack.pop() {
+                for &j in &adj[i] {
+                    if components[j] == usize::MAX {
+                        components[j] = s0;
+                        stack.push(j);
+                    }
+                }
+            }
         }
+        RouteGraph { faces, components, index, adj, climb, width: c.width, depth: c.depth, voxel_m: v }
     }
 
-    /// The index of `site` among the faces, if the body can stand there.
+    /// The node on `site`, if the disc stands clear there.
     pub fn face(&self, site: Site) -> Option<usize> {
         self.index.get(&site).copied()
     }
 
-    /// The walkable component a body standing on `site` is in.
+    /// The walkable component of the node on `site`.
     pub fn component_of(&self, site: Site) -> Option<usize> {
         self.face(site).map(|i| self.components[i])
     }
 
-    /// The face on column `(x, z)` within the step of layer `y`, the nearest layer first.
-    fn face_near(&self, x: u32, y: u32, z: u32) -> Option<usize> {
-        let climb = i64::from(self.climb);
-        (0..=climb).flat_map(|d| if d == 0 { vec![0] } else { vec![-d, d] }).find_map(|dy| {
-            let yy = i64::from(y) + dy;
-            if yy < 0 {
-                return None;
-            }
-            self.face(Site { x, y: yy as u32, z })
-        })
-    }
-
-    /// Face `i`'s neighbours under the step rule (and its wall edges).
-    fn neighbours(&self, i: usize, out: &mut Vec<usize>) {
-        out.clear();
-        let f = self.faces[i];
-        let climb = i64::from(self.climb);
-        for (dx, dz) in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
-            let nz = i64::from(f.z) + dz;
+    /// The node nearest `(x, z)` within `radius` columns of `site`'s column, within the
+    /// step of its layer: where a body standing (or a prey caught) at `site` is on the
+    /// graph when the disc does not stand clear on its own face.
+    pub fn node_near(&self, site: Site, (x, z): (f64, f64), radius: u32) -> Option<usize> {
+        if let Some(i) = self.face(site) {
+            return Some(i);
+        }
+        let v = self.voxel_m;
+        let ring = f64::from(self.width) * v;
+        let (r, climb) = (i64::from(radius), i64::from(self.climb));
+        let mut best: Option<(f64, usize)> = None;
+        for dz in -r..=r {
+            let nz = i64::from(site.z) + dz;
             if nz < 0 || nz >= i64::from(self.depth) {
                 continue;
             }
-            let nx = (i64::from(f.x) + dx).rem_euclid(i64::from(self.width)) as u32;
-            for dy in -climb..=climb {
-                let ny = i64::from(f.y) + dy;
-                if ny < 0 {
-                    continue;
-                }
-                if let Some(j) = self.face(Site { x: nx, y: ny as u32, z: nz as u32 }) {
-                    out.push(j);
+            for dx in -r..=r {
+                let nx = (i64::from(site.x) + dx).rem_euclid(i64::from(self.width)) as u32;
+                for dy in -climb..=climb {
+                    let ny = i64::from(site.y) + dy;
+                    if ny < 0 {
+                        continue;
+                    }
+                    let Some(j) = self.face(Site { x: nx, y: ny as u32, z: nz as u32 }) else {
+                        continue;
+                    };
+                    let (cx, cz) = self.centre(j);
+                    let (ddx, ddz) = crate::pose::wrapped_delta(x, z, cx, cz, ring);
+                    let d = ddx * ddx + ddz * ddz;
+                    if best.is_none_or(|(b, bj)| d < b || (d == b && j < bj)) {
+                        best = Some((d, j));
+                    }
                 }
             }
         }
-        if let Some(l) = self.links.get(&i) {
-            out.extend(l.iter().copied());
-        }
+        best.map(|(_, j)| j)
     }
 
-    /// Route distances in face steps from face `from`, out to `max_steps`: a step is one
-    /// face to a neighbouring column (one voxel across).
+    /// Route distances in steps from node `from`, out to `max_steps`: a step is one node
+    /// to a neighbouring column (one voxel across).
     pub fn distances(&self, from: usize, max_steps: u32) -> FxHashMap<usize, u32> {
         let mut dist: FxHashMap<usize, u32> = FxHashMap::default();
         let mut queue = std::collections::VecDeque::new();
         dist.insert(from, 0);
         queue.push_back(from);
-        let mut nb = Vec::new();
         while let Some(i) = queue.pop_front() {
             let d = dist[&i];
             if d >= max_steps {
                 continue;
             }
-            self.neighbours(i, &mut nb);
-            for &j in &nb {
+            for &j in &self.adj[i] {
                 if let std::collections::hash_map::Entry::Vacant(e) = dist.entry(j) {
                     e.insert(d + 1);
                     queue.push_back(j);
@@ -532,36 +568,35 @@ impl RouteGraph {
         dist
     }
 
-    /// The neighbour of face `i` one step nearer the goal of `field` (a
+    /// The neighbour of node `i` one step nearer the goal of `field` (a
     /// [`RouteGraph::distances`] from the goal), the lowest index among equals; `None` at
     /// the goal or off the field.
     pub fn next_toward(&self, field: &FxHashMap<usize, u32>, i: usize) -> Option<usize> {
         let d = *field.get(&i)?;
-        let mut nb = Vec::new();
-        self.neighbours(i, &mut nb);
-        nb.into_iter()
-            .filter_map(|j| field.get(&j).map(|&dj| (dj, j)))
+        self.adj[i]
+            .iter()
+            .filter_map(|&j| field.get(&j).map(|&dj| (dj, j)))
             .filter(|&(dj, _)| dj < d)
             .min()
             .map(|(_, j)| j)
     }
 
-    /// The centre of face `i`, metres `(x, z)`.
+    /// The centre of node `i`, metres `(x, z)`.
     pub fn centre(&self, i: usize) -> (f64, f64) {
         let f = self.faces[i];
         ((f64::from(f.x) + 0.5) * self.voxel_m, (f64::from(f.z) + 0.5) * self.voxel_m)
     }
 
-    /// Whether the straight line from `(x0, z0)` (a body standing on `from`) to `(x1, z1)`
-    /// is walkable on the route graph: every column it crosses, sampled each half voxel,
-    /// holds a standable face within the step of the last one.
-    pub fn walk_line(&self, from: Site, (x0, z0): (f64, f64), (x1, z1): (f64, f64)) -> bool {
+    /// Whether the straight line from node `from` at `(x0, z0)` to `(x1, z1)` is walkable on
+    /// the graph: sampled each half voxel, every column it enters holds a node joined to the
+    /// last one by an edge (a diagonal crossing by two).
+    pub fn walk_line(&self, from: usize, (x0, z0): (f64, f64), (x1, z1): (f64, f64)) -> bool {
         let v = self.voxel_m;
         let ring = f64::from(self.width) * v;
         let (dx, dz) = crate::pose::wrapped_delta(x0, z0, x1, z1, ring);
         let len = (dx * dx + dz * dz).sqrt();
         let n = ((len / (0.5 * v)).ceil() as usize).max(1);
-        let mut y = from.y;
+        let mut cur = from;
         for k in 1..=n {
             let t = k as f64 / n as f64;
             let (x, z) = (x0 + dx * t, z0 + dz * t);
@@ -570,8 +605,21 @@ impl RouteGraph {
                 return false;
             }
             let cx = ((x / v).floor() as i64).rem_euclid(i64::from(self.width)) as u32;
-            match self.face_near(cx, y, cz as u32) {
-                Some(j) => y = self.faces[j].y,
+            let f = self.faces[cur];
+            if f.x == cx && f.z == cz as u32 {
+                continue;
+            }
+            let next = self.adj[cur]
+                .iter()
+                .copied()
+                .find(|&j| self.faces[j].x == cx && self.faces[j].z == cz as u32)
+                .or_else(|| {
+                    self.adj[cur].iter().find_map(|&k| {
+                        self.adj[k].iter().copied().find(|&j| self.faces[j].x == cx && self.faces[j].z == cz as u32)
+                    })
+                });
+            match next {
+                Some(j) => cur = j,
                 None => return false,
             }
         }
