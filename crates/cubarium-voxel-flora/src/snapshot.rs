@@ -25,7 +25,11 @@ use crate::Flora;
 // 20: night survival 1b — `SpeciesConfig::{night_bloom_scale, night_floor, night_min_s}`,
 //     `FloraLedger::night_spend`; a stand spends its reserve at night.
 // 21: the minimal gut's repair 3 — `Vine::mineral`, `VineConfig::mineral_fraction`.
-pub const SCHEMA: u32 = 21;
+// 22: sparse, staggered flowering — `VineConfig::{spur_share, nectar_per_face_s,
+//     fruit_per_face_s}` replace `{spur_window_s, spur_jitter_s, nectar, fruit}`, a bare
+//     spur's timer is its random rest, `Cover`'s shower tick goes; `Stand::fruit_rest_s`,
+//     `SpeciesConfig::fruit_rest_s`; founders rank walls by lit open area.
+pub const SCHEMA: u32 = 22;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -147,7 +147,7 @@ fn the_food_screen_judges_supply_against_the_daily_need() {
     for sp in Species::ALL {
         short.species_mut(sp).fruit_per_s *= 1e-3;
     }
-    short.latticevine.fruit *= 1e-3;
+    short.latticevine.fruit_per_face_s *= 1e-3;
     let r = roster(&short, &fauna, &w, &food_spec());
     let row = r.food.iter().find(|x| x.lineage == "seedporter").expect("a row");
     assert!(!row.passes && row.ratio > 0.0 && row.ratio < 1.0, "{row:?}");
@@ -157,8 +157,10 @@ fn the_food_screen_judges_supply_against_the_daily_need() {
 /// Vine products carry the vine's mineral (repair 3 item 2), and what a product's mineral
 /// cannot fund passes undigested (item 1). The seedporter (yield 0.6, n_tissue 0.05) on
 /// latticevine fruit alone: at the vine's 0.01 mineral the fruit funds a yield of 0.2 (a
-/// third of its 0.6), enough for one seedporter (four would be short); mineral-free, it
-/// feeds nothing and the seedporter is refused.
+/// third of its 0.6); mineral-free, it feeds nothing and the seedporter is refused. (The
+/// founding faces alone fed one seedporter while the screen counted every face fruiting
+/// back to back; at the vine's production knob, plants-flowering-vines 2026-10-03, they
+/// give a quarter of its need: short, not refused.)
 #[test]
 fn vine_fruit_feeds_at_the_yield_its_mineral_funds() {
     assert!((mineral_limited_yield(0.6, 0.01, 0.05) - 0.2).abs() < 1e-15);
@@ -176,7 +178,8 @@ fn vine_fruit_feeds_at_the_yield_its_mineral_funds() {
     let fruit = &row.foods[0];
     assert!(fruit.per_day > 0.0, "{row:?}");
     assert!((fruit.assimilable_per_day - 0.2 * fruit.per_day).abs() < 1e-12 * fruit.per_day, "{row:?}");
-    assert!(row.passes, "{row:?}");
+    assert!(row.ratio > 0.0, "{row:?}");
+    assert!(!r.refusals().iter().any(|x| x.starts_with("food") && x.contains("seedporter")), "{:?}", r.refusals());
     let mut bare = vine_only.clone();
     bare.latticevine.mineral_fraction = 0.0;
     let r = roster(&bare, &fauna, &w, &food_spec());

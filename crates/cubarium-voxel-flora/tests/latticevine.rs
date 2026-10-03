@@ -165,14 +165,15 @@ fn fast() -> FloraConfig {
         contest_threshold: 0.3,
         contest_check_s: DT,
         spur_reserve_min: 0.1,
-        spur_window_s: 3.0,
-        spur_jitter_s: 2.0,
+        // Every face cycles back to back (no rest), a flower opening with 0.01 and a
+        // bunch setting with 0.02 over the 2 s cycle.
+        spur_share: 1.0,
         bud_s: 0.5,
         flower_s: 0.5,
         fruit_s: 0.5,
         spent_s: 0.5,
-        nectar: 0.01,
-        fruit: 0.02,
+        nectar_per_face_s: 0.01 / 2.0,
+        fruit_per_face_s: 0.02 / 2.0,
         energy_density: 1.0,
         ..VineConfig::default()
     };
@@ -883,52 +884,46 @@ fn spur_starts(
     starts
 }
 
-/// Spurs cycle only with reserve and after rain, on scattered ticks, and never while
-/// dormant. Four arms on the same eight-face vine.
+/// Spurs cycle with reserve, rain or no rain, each face on its own clock (scattered
+/// ticks), and never while dormant. Three arms on the same eight-face vine, with a rest
+/// between cycles (`spur_share` 0.1 on the 2 s cycle: a 10 s mean cycle). Plants-flowering
+/// -vines 2026-10-03 replaced the shower start.
 #[test]
-fn t09_spurs_cycle_only_after_rain_with_reserve_scattered_and_never_dormant() {
+fn t09_spurs_cycle_on_their_own_clocks_with_reserve_scattered_and_never_dormant() {
     let plan = Plan::wall(12, 16, 1, 12);
+    let resting = |mut c: FloraConfig| {
+        c.latticevine.spur_share = 0.1;
+        c
+    };
     let build = |config: FloraConfig, avail: f64| {
-        let (sky, rain) = (plan.world(avail, false), plan.world(avail, true));
+        let sky = plan.world(avail, false);
         let mut flora = Flora::new(config);
         let id = seed(&mut flora, &sky, foot(0), wf(3, 0), 100.0);
         cover_column(&mut flora, &sky, id, 0, 4..=10);
-        (flora, id, sky, rain)
+        (flora, id, sky)
     };
 
-    // No rain: nothing starts.
-    let (mut flora, id, mut sky, _) = build(fixed_cover(), 1.0);
-    let starts = spur_starts(&mut flora, &mut sky, id, 160);
-    assert!(starts.is_empty(), "no shower, no cycle: {starts:?}");
-
-    // A shower ends with reserve in hand: every spur starts, and not on one tick.
-    let (mut flora, id, mut sky, mut rain) = build(fixed_cover(), 1.0);
-    flora.step(&mut rain);
-    let starts = spur_starts(&mut flora, &mut sky, id, 160);
-    assert_eq!(
-        starts.len(),
-        8,
-        "every face's spur cycles after a shower: {starts:?}"
-    );
+    // No rain, reserve in hand: every spur starts within a minute, and not on one tick.
+    let (mut flora, id, mut sky) = build(resting(fixed_cover()), 1.0);
+    let starts = spur_starts(&mut flora, &mut sky, id, ticks(60.0));
+    assert_eq!(starts.len(), 8, "every face's spur cycles, no shower needed: {starts:?}");
     let distinct: BTreeSet<usize> = starts.values().copied().collect();
     assert!(
-        distinct.len() >= 2,
-        "starts are jittered, not all on one tick: {starts:?}"
+        distinct.len() >= 6,
+        "each face starts on its own clock, not together: {starts:?}"
     );
 
-    // The same shower without the reserve: nothing starts.
-    let mut poor = fixed_cover();
+    // Without the reserve: nothing starts.
+    let mut poor = resting(fixed_cover());
     poor.latticevine.spur_reserve_min = 1e12;
-    let (mut flora, id, mut sky, mut rain) = build(poor, 1.0);
-    flora.step(&mut rain);
-    let starts = spur_starts(&mut flora, &mut sky, id, 160);
+    let (mut flora, id, mut sky) = build(poor, 1.0);
+    let starts = spur_starts(&mut flora, &mut sky, id, ticks(60.0));
     assert!(starts.is_empty(), "no reserve, no cycle: {starts:?}");
 
-    // Dormant: a shower on a dormant vine starts nothing.
-    let (mut flora, id, mut sky, mut rain) = build(fixed_cover(), 0.0);
+    // Dormant: nothing starts.
+    let (mut flora, id, mut sky) = build(resting(fixed_cover()), 0.0);
     run_into_dormancy(&mut flora, &mut sky, id);
-    flora.step(&mut rain);
-    let starts = spur_starts(&mut flora, &mut sky, id, 160);
+    let starts = spur_starts(&mut flora, &mut sky, id, ticks(60.0));
     assert!(
         starts.is_empty(),
         "a dormant vine's spurs do not cycle: {starts:?}"
@@ -1950,4 +1945,42 @@ fn t_mineral_vine_products_carry_mineral_from_the_vines_store() {
     cover_column(&mut flora2, &sky, id2, 0, 4..=10);
     let leaf = flora2.crop(wf(5, 0), 1e-3).expect("a crop");
     assert_eq!(leaf.mineral, 0.0, "a vine with nothing in its store gives mineral-free leaf");
+}
+
+// ------------------------------------------------------------------ sisters before spreading
+
+/// **A vine with faces still to take roots a sister first** (plants-flowering-vines
+/// 2026-10-03, Part B 1). A wall six slabs long; one vine covering its bottom row
+/// (`y = 3`, slabs 0..=5), so slab 5 is five faces from the root along the cover and its
+/// foot is free soil; open faces above every one. The economy stopped (no income or
+/// upkeep), no flowering hold, a purse that pays one sister (0.5) or several faces (0.23
+/// each), never both. One spread check: the sister roots, at a foot along the wall. (The
+/// old order spent the purse on four faces and looked for a sister with the 0.08 left,
+/// so a vine on a wall it had not finished never rooted one.)
+#[test]
+fn t23_a_vine_with_faces_still_to_take_roots_a_sister_first() {
+    let plan = Plan::wall(12, 14, 6, 10);
+    let mut world = plan.world(1.0, false);
+    let mut config = frozen();
+    config.latticevine.spread_cost = 0.2;
+    config.latticevine.sister_cost = 0.5;
+    config.latticevine.spread_hold = 0.0;
+    let mut flora = Flora::new(config);
+    let id = seed(&mut flora, &world, foot(0), wf(3, 0), 1.0);
+    for z in 1..=5 {
+        assert!(flora.cover_face(&world, id, wf(3, z), 1.0), "fixture: cover {:?}", wf(3, z));
+    }
+    let mut t = 0;
+    while flora.view().cover.vines().len() == 1 && vine(&flora, id).reserve >= 0.5 {
+        flora.step(&mut world);
+        t += 1;
+        assert!(t < 200, "fixture: a spread check comes within 10 s");
+    }
+    let vines = flora.view().cover.vines().to_vec();
+    assert_eq!(vines.len(), 2, "a sister rooted before the purse went on faces: {vines:?}");
+    let sister = vines.iter().find(|v| v.id != id).expect("the sister");
+    assert_eq!((sister.root.x, sister.root.y), (5, 2), "at a foot along the wall: {sister:?}");
+    assert!(sister.root.z >= 4, "at least four faces along the cover from the root: {sister:?}");
+    assert_eq!(flora.view().cover.faces().len(), 6, "and no face was bought this check");
+    assert_residuals(&flora, "after the sister");
 }

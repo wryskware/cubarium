@@ -776,14 +776,14 @@ fn flowering_vines() -> FloraConfig {
     };
     c.latticevine = VineConfig {
         spur_reserve_min: 0.1,
-        spur_window_s: 3.0,
-        spur_jitter_s: 2.0,
+        // Back to back, no rest; 0.01 a flower and 0.02 a bunch over the 31.5 s cycle.
+        spur_share: 1.0,
         bud_s: 0.5,
         flower_s: 30.0,
         fruit_s: 0.5,
         spent_s: 0.5,
-        nectar: 0.01,
-        fruit: 0.02,
+        nectar_per_face_s: 0.01 / 31.5,
+        fruit_per_face_s: 0.02 / 31.5,
         spread_cost: 1e12,
         sister_cost: 1e12,
         ..c.latticevine

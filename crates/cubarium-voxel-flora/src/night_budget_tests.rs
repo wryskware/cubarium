@@ -105,6 +105,7 @@ fn night(to_dawn: f64) -> Climate {
         upkeep: 1.0,
         night: NIGHT,
         to_dawn_s: Some(to_dawn),
+        draw_key: 0,
     }
 }
 

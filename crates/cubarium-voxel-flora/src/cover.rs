@@ -241,6 +241,49 @@ pub fn face_light(config: &VineConfig, dir: FaceDir, sky: f64) -> f64 {
     }
 }
 
+/// **An open wall's lit area**: the eligible faces joined to `start` in its own plane
+/// (the same direction; up, down and sideways along a wall, [`FaceDir::plane_steps`]),
+/// and the sum of their [`face_light`], read as the step reads it (the sky of the front
+/// voxel's floor, through `sky`, a site-sorted cache). The founders' rank. Light is read
+/// on at most 64 faces spread through the wall and scaled up to its size.
+pub(crate) fn wall_lit_area(
+    view: &VoxelView<'_>,
+    vc: &VineConfig,
+    start: Face,
+    sky: &mut Vec<(Site, f64)>,
+) -> (Vec<Face>, f64) {
+    let c = view.config;
+    let mut faces = vec![start];
+    let mut seen: FxHashSet<Face> = FxHashSet::default();
+    seen.insert(start);
+    let mut i = 0;
+    while i < faces.len() {
+        let f = faces[i];
+        i += 1;
+        for s in f.dir.plane_steps() {
+            if let Some((x, y, z)) = step_voxel(c, f.x, f.y, f.z, s) {
+                let n = Face::new(x, y, z, f.dir);
+                if !seen.contains(&n) && face_eligible(view, n) {
+                    seen.insert(n);
+                    faces.push(n);
+                }
+            }
+        }
+    }
+    const SAMPLES: usize = 64;
+    let stride = faces.len().div_ceil(SAMPLES).max(1);
+    let (mut sum, mut n) = (0.0, 0usize);
+    for f in faces.iter().step_by(stride) {
+        let sv = front_in(c, *f)
+            .and_then(|(x, y, z)| (y >= 1).then_some(Site { x, y: y - 1, z }))
+            .map_or(0.0, |k| step::sky_at(sky, view, k));
+        sum += face_light(vc, f.dir, sv);
+        n += 1;
+    }
+    let area = if n > 0 { sum / n as f64 * faces.len() as f64 } else { 0.0 };
+    (faces, area)
+}
+
 /// The side face one step up a staircase from `f`, the same direction: the riser whose
 /// front voxel sits on top of `f`'s own voxel, across a one-voxel tread. `None` for an
 /// underside or off the world. Not screened.
@@ -363,7 +406,8 @@ pub struct CoveredFace {
     /// Whether the owner's root arch is on this face (the face next to its root).
     pub rooted: bool,
     pub spur: SpurPhase,
-    /// Seconds left in the current spur phase (or of the jittered delay before a start).
+    /// Seconds left in the current spur phase, or, bare, of its random rest before the next
+    /// start (0 until one is drawn).
     pub spur_timer_s: f64,
     /// Organic matter in the flower. Positive only in [`SpurPhase::Flower`].
     pub nectar: f64,
@@ -482,8 +526,6 @@ pub struct Cover {
     faces: Vec<CoveredFace>,
     next_vine: VineId,
     next_lineage: u64,
-    /// The tick the last shower ended on: spurs may start within `spur_window_s` of it.
-    shower_end_tick: Option<u64>,
     /// Faces to contest at the next step: crossed below the threshold between ticks.
     contest_queue: Vec<Face>,
     #[serde(skip)]
@@ -496,7 +538,6 @@ impl PartialEq for Cover {
             && self.faces() == other.faces()
             && self.next_vine == other.next_vine
             && self.next_lineage == other.next_lineage
-            && self.shower_end_tick == other.shower_end_tick
     }
 }
 
@@ -791,22 +832,31 @@ pub struct VineConfig {
     pub spur_reserve_min: f64,
     /// The flowering share of the reserve: spreading and sisters spend only what is above
     /// `spread_hold · spur_reserve_min` per covered face, so a growing vine still has the
-    /// reserve to flower after a shower. Leaf regrowth is not held back. 0 spends it all
+    /// reserve to keep flowering. Leaf regrowth is not held back. 0 spends it all
     /// on spreading (the vine never flowers while it grows). At 2 the hold is about a
     /// minute of a lit face's income at the 3× pace, so the spread barely slows.
     pub spread_hold: f64,
-    /// How long after a shower ends a cycle may still start, seconds.
-    pub spur_window_s: f64,
-    /// Spread of the per-face start delay, seconds.
-    pub spur_jitter_s: f64,
+    /// **The share of covered faces carrying a flower or a bead bunch at once**, over the
+    /// long run (plants-flowering-vines 2026-10-03). Each face cycles on its own: a rest
+    /// drawn at random (exponential, keyed by the face and the tick), then bud, flower,
+    /// fruit and spent. The rest's mean is what makes this share:
+    /// `(flower_s + fruit_s) / spur_share` is a face's mean cycle ([`VineConfig::spur_cycle_s`]),
+    /// never shorter than the four phases back to back (1 or more: no rest at all). 0
+    /// never flowers.
+    pub spur_share: f64,
     /// Phase lengths, seconds.
     pub bud_s: f64,
     pub flower_s: f64,
     pub fruit_s: f64,
     pub spent_s: f64,
-    /// Organic matter a flower holds when it opens, and a bead bunch when it sets.
-    pub nectar: f64,
-    pub fruit: f64,
+    /// **Nectar a covered face offers per second over the long run**, organic units per
+    /// reference face: production per unit of vine area. A flower opens holding this rate
+    /// times the mean cycle, so the long-run supply of a colony of `N` faces is
+    /// `N · nectar_per_face_s` whatever [`VineConfig::spur_share`] is.
+    pub nectar_per_face_s: f64,
+    /// **Bead fruit a covered face sets per second over the long run**, organic units per
+    /// reference face, the same way: a bunch sets holding this rate times the mean cycle.
+    pub fruit_per_face_s: f64,
     /// Energy per unit of organic matter in the vine's tissue.
     pub energy_density: f64,
     /// **Mineral per unit of the vine's tissue** (the minimal gut's repair 3 item 2): the
@@ -892,14 +942,20 @@ impl Default for VineConfig {
             contest_check_s: 30.0,
             spur_reserve_min: 0.005,
             spread_hold: 2.0,
-            spur_window_s: 120.0,
-            spur_jitter_s: 60.0,
+            // A tenth of a colony's faces in flower or fruit at once (a third of them in
+            // flower): with the phases below a face's mean cycle is an hour, so a face
+            // flowers about twice a world day (7,200 s), each time at a random moment.
+            spur_share: 0.1,
             bud_s: 60.0,
             flower_s: 120.0,
             fruit_s: 240.0,
             spent_s: 60.0,
-            nectar: 0.002,
-            fruit: 0.005,
+            // Per reference face per second; over the hour's cycle a flower opens with
+            // 0.002 and a bunch sets with 0.005, the per-spur amounts the shower-timed
+            // cycle had. Per world day (7,200 s) a reference face offers 0.004 nectar and
+            // 0.01 fruit; a 0.125 m face a quarter of that.
+            nectar_per_face_s: 0.002 / 3600.0,
+            fruit_per_face_s: 0.005 / 3600.0,
             energy_density: 1.0,
             mineral_fraction: 0.01,
             founders: 6,
@@ -913,6 +969,37 @@ impl Default for VineConfig {
 }
 
 impl VineConfig {
+    /// **A face's mean spur cycle**, seconds: `(flower_s + fruit_s) / spur_share`, never
+    /// shorter than the four phases back to back. Infinite when `spur_share` is not
+    /// positive (no face ever flowers).
+    pub fn spur_cycle_s(&self) -> f64 {
+        let phases = self.bud_s + self.flower_s + self.fruit_s + self.spent_s;
+        if !(self.spur_share > 0.0) {
+            return f64::INFINITY;
+        }
+        ((self.flower_s + self.fruit_s) / self.spur_share).max(phases)
+    }
+
+    /// The mean rest between one face's cycles, seconds: the mean cycle less its phases.
+    pub fn spur_rest_s(&self) -> f64 {
+        let phases = self.bud_s + self.flower_s + self.fruit_s + self.spent_s;
+        (self.spur_cycle_s() - phases).max(0.0)
+    }
+
+    /// The nectar a flower opens with: [`VineConfig::nectar_per_face_s`] times the mean
+    /// cycle (0 when no face flowers).
+    pub fn nectar_per_flower(&self) -> f64 {
+        let t = self.spur_cycle_s();
+        if t.is_finite() { (self.nectar_per_face_s * t).max(0.0) } else { 0.0 }
+    }
+
+    /// The fruit a bead bunch sets with: [`VineConfig::fruit_per_face_s`] times the mean
+    /// cycle (0 when no face flowers).
+    pub fn fruit_per_bunch(&self) -> f64 {
+        let t = self.spur_cycle_s();
+        if t.is_finite() { (self.fruit_per_face_s * t).max(0.0) } else { 0.0 }
+    }
+
     /// How many founders a world of `area_m2` of floor gets:
     /// `max(founders, round(founders_per_m2 · area_m2))`.
     pub fn founder_count(&self, area_m2: f64) -> usize {
@@ -1216,8 +1303,6 @@ pub(crate) fn drink_done(flora: &mut Flora) {
 pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
     let tick = flora.tick;
     let view = world.view();
-    let raining = view.is_raining();
-    let shower_end = flora.was_raining && !raining;
     let Flora {
         config,
         cover,
@@ -1226,9 +1311,6 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
         ..
     } = flora;
     cover.ensure_built();
-    if shower_end {
-        cover.shower_end_tick = Some(tick);
-    }
     if cover.vines.is_empty() {
         cover.contest_queue.clear();
         return;
@@ -1322,10 +1404,12 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
     }
 
     // ---- 2. one pass over the faces
-    let window = cubarium_voxel::ticks_at_least_one(vc.spur_window_s);
-    let in_window = cover
-        .shower_end_tick
-        .is_some_and(|t| tick.saturating_sub(t) <= window);
+    // The spur clock (plants-flowering-vines 2026-10-03): every face on its own, a random
+    // rest between cycles whose mean sets the share in flower or fruit, and the amounts
+    // that make the long-run production per face the knob's.
+    let rest_mean = vc.spur_rest_s();
+    let flowering = vc.spur_cycle_s().is_finite();
+    let (nectar_amount, fruit_amount) = (vc.nectar_per_flower(), vc.fruit_per_bunch());
     let wheel = cubarium_voxel::ticks_at_least_one(vc.contest_check_s);
     let wheel_slot = tick % wheel;
     let fall = DT / vc.leaf_fall_s;
@@ -1393,19 +1477,28 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
             // Spurs.
             match f.spur {
                 SpurPhase::Bare => {
-                    if v.dormant {
+                    // A bare spur's timer is its rest; 0 means none drawn yet. Dormancy
+                    // clears it, so a vine waking draws fresh rests face by face.
+                    if v.dormant || !flowering {
                         f.spur_timer_s = 0.0;
-                    } else if shower_end {
+                    } else if f.spur_timer_s <= 0.0 {
+                        // Exponential, keyed by the face and the tick: memoryless, so the
+                        // starts of a colony are scattered in time and place from the
+                        // first, and no event lines them up.
                         let (ka, kb, kc) = f.face.key();
                         let mut rng =
                             Rng::keyed(DOMAIN_SPUR, ka ^ world_seed.rotate_left(17), kb ^ tick, kc);
-                        f.spur_timer_s = DT + rng.unit() * vc.spur_jitter_s;
-                    } else if f.spur_timer_s > 0.0 {
+                        let u = 1.0 - rng.unit();
+                        f.spur_timer_s = DT + (-u.ln() * rest_mean).max(0.0);
+                    } else {
                         f.spur_timer_s -= DT;
                         if f.spur_timer_s <= EPS {
                             f.spur_timer_s = 0.0;
+                            // Without the reserve this start is skipped and a new rest is
+                            // drawn next tick: a short vine never queues its spurs up to
+                            // open together once it can pay.
                             let per_face = v.reserve / f64::from(a.faces.max(1));
-                            if in_window && per_face >= vc.spur_reserve_min {
+                            if per_face >= vc.spur_reserve_min {
                                 f.spur = SpurPhase::Bud;
                                 f.spur_timer_s = vc.bud_s;
                             }
@@ -1419,7 +1512,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
                     } else {
                         f.spur_timer_s -= DT;
                         if f.spur_timer_s <= EPS {
-                            let n = vc.nectar.min(v.reserve).max(0.0);
+                            let n = nectar_amount.min(v.reserve).max(0.0);
                             v.reserve -= n;
                             f.nectar = n;
                             f.spur = SpurPhase::Flower;
@@ -1439,7 +1532,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
                             // What the visitors left is taken back; the beads are paid.
                             v.reserve += f.nectar;
                             f.nectar = 0.0;
-                            let b = vc.fruit.min(v.reserve).max(0.0);
+                            let b = fruit_amount.min(v.reserve).max(0.0);
                             v.reserve -= b;
                             f.fruit = b;
                             f.spur = SpurPhase::Fruit;
@@ -1674,6 +1767,37 @@ fn spread(
         return;
     }
 
+    // A sister first, where the cover reaches free soil far enough from the root
+    // (plants-flowering-vines 2026-10-03): before, the spread spent the spare reserve
+    // first and a sister was looked for with what was left, so a vine with faces still
+    // to take — a big wall, never fully covered — never rooted one and the whole wall
+    // drank and starved through one root box. A sister takes this check; the spread
+    // goes on at the next.
+    if can_sister {
+        let own_root = cover.vines[vi].root;
+        let mut found: Option<(Site, usize)> = None;
+        'members: for &(s, d, _) in &walk {
+            if d < vc.sister_min_dist {
+                continue;
+            }
+            let f = cover.faces[s as usize].face;
+            for site in root_sites(c, f).into_iter().flatten() {
+                if site != own_root
+                    && !cover.rt.roots.contains_key(&site)
+                    && view.material_at(site.x as i64, site.y, site.z) == Material::Soil
+                    && view.is_support(site.x as i64, site.y, site.z)
+                {
+                    found = Some((site, s as usize));
+                    break 'members;
+                }
+            }
+        }
+        if let Some((site, root_slot)) = found {
+            root_sister(cover, c, vi, site, root_slot, vc, tick, ledger);
+            return;
+        }
+    }
+
     if can_spread {
         let mut nbuf = std::mem::take(&mut cover.rt.nbuf);
         let mut seen: FxHashSet<Face> = FxHashSet::default();
@@ -1712,33 +1836,6 @@ fn spread(
             ledger.vine_faces_spread += 1;
         }
     }
-
-    // A sister, where the cover reaches free soil far enough from the root.
-    if spare(cover) < vc.sister_cost {
-        return;
-    }
-    let own_root = cover.vines[vi].root;
-    let mut found: Option<(Site, usize)> = None;
-    'members: for &(s, d, _) in &walk {
-        if d < vc.sister_min_dist {
-            continue;
-        }
-        let f = cover.faces[s as usize].face;
-        for site in root_sites(c, f).into_iter().flatten() {
-            if site != own_root
-                && !cover.rt.roots.contains_key(&site)
-                && view.material_at(site.x as i64, site.y, site.z) == Material::Soil
-                && view.is_support(site.x as i64, site.y, site.z)
-            {
-                found = Some((site, s as usize));
-                break 'members;
-            }
-        }
-    }
-    let Some((site, root_slot)) = found else {
-        return;
-    };
-    root_sister(cover, c, vi, site, root_slot, vc, tick, ledger);
 }
 
 /// Root a sister of vine `vi` on `site`, its root arch on the face in `root_slot`. It takes
@@ -2125,9 +2222,13 @@ impl Flora {
     /// [`VineConfig::founder_reserve`]: on soil support faces at the **foot** of a wall at
     /// least three faces tall, or on the **lip** of a soil ledge with at least two faces of
     /// drop below it (a stepped slope's risers count, joined by [`stair_up`]). The
-    /// **tallest walls first**: each candidate carries its wall's height in eligible faces
-    /// — counted up from a foot (straight up or up a stair), down from a lip (straight down
-    /// or down a stair) — and the world seed's shuffle only breaks ties; kept
+    /// **biggest lit open walls first** (plants-flowering-vines 2026-10-03): each
+    /// candidate carries the lit area of the open wall its first face is part of — the
+    /// eligible faces joined to it in its own plane, each weighted by its [`face_light`]
+    /// ([`wall_lit_area`]) — and the world seed's shuffle only breaks ties. (Before, the
+    /// rank was a wall's height counted up stair risers too, so a long stepped slope beat
+    /// every sheer face: on the desktop terrarium no founder took any of the big open
+    /// walls.) Kept
     /// [`VineConfig::founder_spacing`] voxels apart, and [`VineConfig::founder_spread_m`]
     /// of floor apart while the walls allow it (a second pass fills the rest at the
     /// spacing alone). Returns how many rooted.
@@ -2147,30 +2248,7 @@ impl Flora {
                 .filter(|&n| ok(n))
                 .or_else(|| stair_up(c, f).filter(|&n| ok(n)))
         };
-        // The next eligible face down from `f`, straight down or down a stair.
-        let down = |f: Face| {
-            (f.y >= 1)
-                .then(|| Face::new(f.x, f.y - 1, f.z, f.dir))
-                .filter(|&n| ok(n))
-                .or_else(|| stair_down(c, f).filter(|&n| ok(n)))
-        };
-        // A wall's height in eligible faces from `f` along `next`, `f` included, bounded by
-        // the world's height so a pathological chain cannot loop.
-        let height = |f: Face, next: &dyn Fn(Face) -> Option<Face>| {
-            let mut n = 1u32;
-            let mut at = f;
-            while n < c.height {
-                match next(at) {
-                    Some(g) => {
-                        n += 1;
-                        at = g;
-                    }
-                    None => break,
-                }
-            }
-            n
-        };
-        let mut candidates: Vec<(Site, Face, u32)> = Vec::new();
+        let mut candidates: Vec<(Site, Face, f64)> = Vec::new();
         for z in 0..c.depth {
             for x in 0..c.width {
                 for y in view.supports_in_column(x as i64, z) {
@@ -2187,7 +2265,7 @@ impl Flora {
                             && up(Face::new(wx, wy, wz, d)).and_then(up).is_some()
                         {
                             let f = Face::new(wx, wy, wz, d);
-                            candidates.push((s, f, height(f, &up)));
+                            candidates.push((s, f, 0.0));
                         }
                         // Lip: the ledge's own side, with a drop below it, straight or
                         // down a stair.
@@ -2197,7 +2275,7 @@ impl Flora {
                             && (ok(Face::new(x, y - 1, z, d))
                                 || stair_down(c, lip).is_some_and(|n| ok(n)))
                         {
-                            candidates.push((s, lip, height(lip, &down)));
+                            candidates.push((s, lip, 0.0));
                         }
                     }
                 }
@@ -2206,14 +2284,36 @@ impl Flora {
         if candidates.is_empty() {
             return 0;
         }
-        // A keyed shuffle, then tallest first — the sort is stable, so the shuffle breaks
-        // the ties — then the first that keep their distance.
+        // Each candidate's wall: its lit open area, one walk per wall.
+        {
+            let vc = &self.config.latticevine;
+            let mut sky: Vec<(Site, f64)> = Vec::new();
+            let mut wall_of: FxHashMap<Face, usize> = FxHashMap::default();
+            let mut areas: Vec<f64> = Vec::new();
+            for cand in &mut candidates {
+                let w = match wall_of.get(&cand.1) {
+                    Some(&w) => w,
+                    None => {
+                        let (faces, area) = wall_lit_area(&view, vc, cand.1, &mut sky);
+                        let w = areas.len();
+                        areas.push(area);
+                        for f in faces {
+                            wall_of.insert(f, w);
+                        }
+                        w
+                    }
+                };
+                cand.2 = areas[w];
+            }
+        }
+        // A keyed shuffle, then the biggest lit wall first — the sort is stable, so the
+        // shuffle breaks the ties — then the first that keep their distance.
         let mut rng = Rng::keyed(DOMAIN_VINE_FOUNDERS, c.seed, candidates.len() as u64, 0);
         for i in (1..candidates.len()).rev() {
             let j = rng.below(i + 1);
             candidates.swap(i, j);
         }
-        candidates.sort_by_key(|&(_, _, h)| std::cmp::Reverse(h));
+        candidates.sort_by(|a, b| b.2.total_cmp(&a.2));
         let width = c.width as i64;
         let spacing = i64::from(self.config.latticevine.founder_spacing);
         let apart = |a: Site, b: Site| {
