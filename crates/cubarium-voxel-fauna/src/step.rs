@@ -196,6 +196,17 @@ fn tick_inner(
             // Strike outcomes are events: the act only reads other bodies, and the hits
             // are applied here, serially, in the order the strikers acted.
             let mut hits: Vec<Hit> = Vec::new();
+            // The balance measures: a free founder awake with its eating latch on wants
+            // food this tick (a counter only).
+            for a in fauna.animals.iter() {
+                if let Some(f) = a.founder
+                    && a.eating
+                    && a.state != State::Asleep
+                    && a.attached.is_none()
+                {
+                    fauna.ledger.wanting_ticks_by_founder[f.index()] += 1;
+                }
+            }
             act(fauna, &view, flora, seed, tick, &sky, &mut hits);
             for hit in hits {
                 apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
@@ -258,8 +269,17 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
     // The mineral that organic matter held is shed to the gut, so a body's mineral stays
     // in proportion to its tissue instead of banking for life; the energy leaves as heat.
     a.gut.mineral += out.mineral;
+    let founder = a.founder;
     book_respired(fauna, paid, kind);
     fauna.ledger.heat_out += out.energy;
+    // The balance measures' spend by lineage (counters only).
+    if let Some(f) = founder {
+        match kind {
+            Respiration::Maintenance => fauna.ledger.upkeep_by_founder[f.index()] += paid,
+            Respiration::Motor | Respiration::Hunt => fauna.ledger.motor_by_founder[f.index()] += paid,
+            _ => {}
+        }
+    }
     (paid, from_body)
 }
 
@@ -347,6 +367,9 @@ fn drain_riders(fauna: &mut Fauna) {
             host.founder_state.feedback.structural_loss += from_body;
         }
         fauna.ledger.parasite_taken_organic += taken.organic;
+        if let Some(f) = fauna.animals[h].founder {
+            fauna.ledger.rider_take_lost_by_founder[f.index()] += taken.organic;
+        }
         let rider = &mut fauna.animals[r];
         rider.reserve += taken.organic;
         rider.mineral += taken.mineral;
@@ -614,6 +637,8 @@ pub(crate) fn swallow(fauna: &mut Fauna, i: usize, food: Food, t: Taken) {
     l.swallowed.energy += t.energy;
     if let Some(f) = fauna.animals[i].founder {
         l.swallowed_by_founder[f.index()] += t.organic;
+        // A bite covers its controller interval: the balance measures' eating ticks.
+        l.eating_ticks_by_founder[f.index()] += fauna.config.manifest(f).cadence_ticks();
     }
     settle_full(fauna, i);
 }
@@ -827,6 +852,7 @@ fn grow(fauna: &mut Fauna) {
         );
         // The measured maturation: the tick it grows through its breeding size.
         if let Some(f) = a.founder {
+            fauna.ledger.growth_by_founder[f.index()] += a.body - before;
             if before < sc.birth_body && a.body >= sc.birth_body {
                 fauna.ledger.matured_by_founder[f.index()] += 1;
                 fauna.ledger.maturation_ticks_by_founder[f.index()] += a.age_ticks;
@@ -2642,6 +2668,10 @@ fn gestate(
         }
         let a = &mut fauna.animals[i];
         let paid = take_from_reserve(a, want);
+        if let Some(f) = a.founder {
+            fauna.ledger.reproduction_by_founder[f.index()] += paid.organic;
+        }
+        let a = &mut fauna.animals[i];
         let e = a.reproduction.escrow.as_mut().expect("an open escrow");
         e.organic += paid.organic;
         e.mineral += paid.mineral;
@@ -2954,6 +2984,7 @@ fn lay(
     }
     fauna.ledger.clutches_laid += 1;
     fauna.ledger.eggs_laid_by_founder[lineage.index()] += u64::from(rule.clutch_size);
+    fauna.ledger.reproduction_by_founder[lineage.index()] += cost;
 }
 
 /// A clutch whose face the terrain took away, or that standing water has covered deeper

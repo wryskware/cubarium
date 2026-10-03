@@ -46,6 +46,18 @@ replenish = ["littershredder", "frondgrazer", "capgnawer", "loftstrider", "rippl
 replenish_weight = 5.0
 lively_weight = 10.0
 share_weight_unestablished = 0.2
+# Continuous balance (the search rebase's addendum, Wrysk 2026-10-03): with the gut a full
+# adult lasts 3-25 world days, so alive counts after 2 h no longer show starvation.
+# - Each lineage in `balance` pays balance_weight x its soft shortfall on B >= 1 and
+#   R-hat >= 1 (live/balance.rs); persistence stays hard.
+# - counts_readout: the population band, its peak and the lanternjaw share are readouts.
+# - The chorister, lanternjaw and loftstrider are readout-only: a founders-only world has
+#   not established their food (too few prey; no vaulttree groves). Staged arrival is a
+#   separate proposal.
+readout_only = ["chorister", "lanternjaw", "loftstrider"]
+balance = ["littershredder", "frondgrazer", "capgnawer", "ripple-snail", "bellwing", "seedporter"]
+balance_weight = 5.0
+counts_readout = true
 
 [[gene]]
 name = "upkeep@littershredder"

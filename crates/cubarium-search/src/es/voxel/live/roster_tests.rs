@@ -824,13 +824,19 @@ fn the_pilot_launch_is_the_agreed_experiment() {
     let ch = |q: &cubarium_voxel_fauna::FaunaConfig| q.founder(Founder::Chorister).core.maintenance_per_s;
     assert!((ch(&p.fauna) / ch(&base.fauna) - 1.0).abs() < 1e-12);
     assert_eq!(p.fauna.founder(Founder::Chorister).pack.expect("pack").pack_size, 3);
-    // Targets: the three feeders readout-only.
+    // Targets: the three feeders readout-only, and since the balance addendum the
+    // lanternjaw and loftstrider too; the other four scored on balance, counts readouts.
     let band = super::search::BandSpec::default().with_targets(&g.rest).expect("targets");
     let st = band.stage.expect("v3");
     for f in Founder::ALL {
-        let feeder = matches!(f, Founder::Bellwing | Founder::Seedporter | Founder::Chorister);
-        assert_eq!(st.readout_only[f.index()], feeder, "{}", f.name());
+        let readout = matches!(
+            f,
+            Founder::Bellwing | Founder::Seedporter | Founder::Chorister | Founder::Lanternjaw | Founder::Loftstrider
+        );
+        assert_eq!(st.readout_only[f.index()], readout, "{}", f.name());
+        assert_eq!(st.balance[f.index()], !readout, "{}", f.name());
     }
+    assert!(st.counts_readout && st.balance_weight > 0.0);
     // Screens: R a readout, S/F soft (every miss runs), the night envelope hard.
     let sc = ScreenSpec::from_rest(&g.rest).expect("[screen]");
     assert!(sc.r_readout && sc.night.is_some() && sc.food.is_some());

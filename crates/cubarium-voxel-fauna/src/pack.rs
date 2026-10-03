@@ -244,6 +244,9 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
             l.regurgitated.organic += moved.organic;
             l.regurgitated.mineral += moved.mineral;
             l.regurgitated.energy += moved.energy;
+            if let Some(f) = fauna.animals[g].founder {
+                l.provision_by_founder[f.index()] += moved.organic;
+            }
             if let Some(b) = fauna.animals[g].bout.as_mut() {
                 b.kind = b.kind.max(crate::BoutKind::Provisioning);
             }
@@ -285,6 +288,9 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
         fauna.animals[g].gut.mineral += lost_mineral;
         crate::step::book_provision_loss(fauna, lost_organic, lost_energy);
         fauna.ledger.provision_given_organic += taken.organic;
+        if let Some(f) = fauna.animals[g].founder {
+            fauna.ledger.provision_by_founder[f.index()] += taken.organic;
+        }
         fauna.ledger.provision_received_organic += taken.organic - lost_organic;
     }
 }

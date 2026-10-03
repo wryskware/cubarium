@@ -28,6 +28,7 @@ use cubarium_voxel_fauna::{Controller, Fauna, Founder};
 
 use super::EpisodeDriver;
 
+pub mod balance;
 pub mod curiosity;
 pub mod ecology;
 pub mod readout;
@@ -39,6 +40,8 @@ pub mod variants;
 pub mod window;
 pub mod world;
 
+#[cfg(test)]
+mod balance_tests;
 #[cfg(test)]
 mod breeding_tests;
 #[cfg(test)]

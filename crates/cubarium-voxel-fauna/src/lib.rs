@@ -2469,6 +2469,33 @@ pub struct FaunaLedger {
     /// reach, by lineage (repair 3's measure: a flyer's reach failures).
     #[serde(default)]
     pub sip_misses_by_founder: [u64; Founder::COUNT],
+    /// **Spend by lineage** (the search rebase's balance measures; counters only, no
+    /// rule reads them), organic. Upkeep paid, the sleep factor applied.
+    #[serde(default)]
+    pub upkeep_by_founder: [f64; Founder::COUNT],
+    /// Motor paid: walking, flying, climbing, and a hunter's lure and strike costs.
+    #[serde(default)]
+    pub motor_by_founder: [f64; Founder::COUNT],
+    /// Structure built out of the reserve (growth).
+    #[serde(default)]
+    pub growth_by_founder: [f64; Founder::COUNT],
+    /// Reproduction invested: gestation instalments into an escrow, and clutches laid.
+    #[serde(default)]
+    pub reproduction_by_founder: [f64; Founder::COUNT],
+    /// Provisioning given by the giver's lineage: reserve transferred to young, and raw
+    /// food regurgitated into their stomachs (raw organic).
+    #[serde(default)]
+    pub provision_by_founder: [f64; Founder::COUNT],
+    /// What riders took out of hosts of this lineage (the host's loss).
+    #[serde(default)]
+    pub rider_take_lost_by_founder: [f64; Founder::COUNT],
+    /// Ticks a free founder body was awake with its eating latch on ("wanting"), and the
+    /// ticks it spent eating: each bite swallowed credits its controller interval's
+    /// ticks (a bite covers one interval).
+    #[serde(default)]
+    pub wanting_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub eating_ticks_by_founder: [u64; Founder::COUNT],
 }
 
 impl FaunaLedger {

@@ -289,6 +289,8 @@ pub struct Window {
     /// the ledger's, not the meters' sum (the minimal gut digests before the controller
     /// stage, [`credit_unseen_intake`]).
     assimilated_start: [f64; Founder::COUNT],
+    /// The ledger at the window's start: the balance measures' books.
+    ledger_start: Box<cubarium_voxel_fauna::FaunaLedger>,
     tracked: Vec<Tracked>,
     index: FxHashMap<u64, usize>,
     counts: Vec<Vec<u32>>,
@@ -348,6 +350,7 @@ impl Window {
                 .collect(),
             deaths_start: sim.fauna().view().ledger.deaths_by_founder_cause,
             assimilated_start: sim.fauna().view().ledger.assimilated_by_founder,
+            ledger_start: Box::new(*sim.fauna().view().ledger),
             tracked: Vec::new(),
             index: FxHashMap::default(),
             counts: pairs.iter().map(|&p| vec![0u32; 2 * p]).collect(),
@@ -463,6 +466,9 @@ impl Window {
                 b.seen = stamp;
                 let d = b.meter.observe(a);
                 seen[f.index()] += d.intake;
+                if super::balance::is_adult(a, fv.config) {
+                    self.stats[f.index()].adult_ticks += 1;
+                }
                 b.energy.observe(a);
                 let len = self.phys[f.index()].body_at(a.body).length_m;
                 if len > 0.0 {
@@ -591,9 +597,24 @@ impl Window {
             }
         }
         let assimilated_end = sim.fauna().view().ledger.assimilated_by_founder;
+        let fv = sim.fauna().view();
+        let days = super::balance::days(
+            self.elapsed as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ),
+            fv.config,
+        );
         for f in Founder::ALL {
             let fi = f.index();
             self.stats[fi].intake = assimilated_end[fi] - self.assimilated_start[fi];
+            // The window's balance measures (the search rebase's addendum).
+            let books = super::balance::Books::of(fv.ledger, f)
+                .since(&super::balance::Books::of(&self.ledger_start, f));
+            let adult_days = super::balance::days(
+                self.stats[fi].adult_ticks as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ),
+                fv.config,
+            );
+            let ctx = super::balance::context(fv.animals, fv.config, f, adult_days, days);
+            self.stats[fi].books = books;
+            self.stats[fi].balance = super::balance::measures(&books, &ctx);
         }
         for b in &self.tracked {
             let s = &mut self.stats[b.founder.index()];

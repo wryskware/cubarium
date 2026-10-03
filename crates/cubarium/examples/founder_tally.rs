@@ -54,6 +54,10 @@
 //! One `night_spend:` line per plant species: the night budget's reserve spent on the
 //! reflush (with its construction respiration), nectar and fruit, organic units.
 //!
+//! **Balance** (the search rebase's addendum): one `balance:` line per lineage over the
+//! run — `B`, days to empty, surplus per adult per world day, `R̂` (optimistic), access,
+//! the books behind them, and a hunter's kills per adult-day against its prey's births.
+//!
 //! At t = 0 it reports the roster R1 check: the glowcap caps standing (count and stock)
 //! and the foliage standing in a loftstrider's mouth band over each stand's support face
 //! (the adult band, `mouth_floor..mouth_ceiling × height`).
@@ -609,6 +613,8 @@ struct GutTally {
     eating_ticks: [u64; Founder::COUNT],
     fill: [[f64; 6]; Founder::COUNT],
     fill_n: [[u64; 6]; Founder::COUNT],
+    /// Adult body-ticks (free, at `birth_body` or more): the balance line's adult-days.
+    adult_ticks: [u64; Founder::COUNT],
 }
 
 impl GutTally {
@@ -620,6 +626,9 @@ impl GutTally {
             let Some(f) = a.founder else { continue };
             let i = f.index();
             self.body_ticks[i] += 1;
+            if cubarium_search::es::voxel::live::balance::is_adult(a, &params.fauna) {
+                self.adult_ticks[i] += 1;
+            }
             if a.eating {
                 self.eating_ticks[i] += 1;
             }
@@ -682,6 +691,57 @@ impl GutTally {
                 born[i],
                 kills,
             );
+        }
+        // The continuous balance measures over the run (the search rebase's addendum):
+        // B, days to empty (at B < 1), surplus per adult per world day, R-hat (optimistic:
+        // every juvenile survives), access; a hunter's kills per adult-day against its
+        // prey's births per world day.
+        {
+            use cubarium_search::es::voxel::live::balance;
+            let v = sim.fauna().view();
+            let run_s = sim.fauna().view().tick as f64 / hz;
+            let days = balance::days(run_s, v.config);
+            for f in Founder::ALL {
+                let i = f.index();
+                if self.body_ticks[i] == 0 && born[i] == 0 {
+                    continue;
+                }
+                let books = balance::Books::of(l, f);
+                let adult_days = balance::days(self.adult_ticks[i] as f64 / hz, v.config);
+                let ctx = balance::context(v.animals, v.config, f, adult_days, days);
+                let m = balance::measures(&books, &ctx);
+                let predator = v.config.founder(f).hunter.map(|h| {
+                    let kills: u64 = Founder::ALL
+                        .iter()
+                        .map(|&p| l.departed_founder(p, Departure::Killed { by: f }))
+                        .sum();
+                    let prey: u64 = Founder::ALL.iter().filter(|q| h.prey[q.index()]).map(|q| born[q.index()]).sum();
+                    format!(
+                        " kills_per_adult_day={:.3} prey_births_per_day={:.3}",
+                        if adult_days > 0.0 { kills as f64 / adult_days } else { f64::NAN },
+                        if days > 0.0 { prey as f64 / days } else { f64::NAN },
+                    )
+                });
+                println!(
+                    "balance: {:15} B={:.3} days_to_empty={} surplus_per_adult_day={:.5} r_hat={:.3} access={:.3} assimilated={:.6} upkeep={:.6} motor={:.6} rider_take_lost={:.6} growth={:.6} reproduction={:.6} provision={:.6} stores={:.6} adult_days={:.3}{}",
+                    f.name(),
+                    m.energy_balance,
+                    m.days_to_empty.map_or("-".to_string(), |d| format!("{d:.2}")),
+                    m.surplus_per_adult_day,
+                    m.r_hat,
+                    m.access,
+                    books.assimilated,
+                    books.upkeep,
+                    books.motor,
+                    books.rider_take_lost,
+                    books.growth,
+                    books.reproduction,
+                    books.provision,
+                    ctx.stores,
+                    adult_days,
+                    predator.unwrap_or_default(),
+                );
+            }
         }
         let bw = Founder::Bellwing.index();
         let dig = l.digested_by_founder[bw];
