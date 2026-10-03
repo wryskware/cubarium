@@ -500,8 +500,12 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &
     let mut since = std::time::Instant::now();
     let mut weather = WeatherLog::new(sim, timing.weather_log.as_deref());
     let mut deaths = DeathLog::new(sim);
+    let mut lj = LjChain::new(sim);
     while tick < total_ticks {
+        lj.before(sim);
+        let attached_before = sim.fauna().view().ledger.riders_attached;
         sim.step();
+        lj.after(sim, attached_before);
         tick += 1;
         weather.poll(sim);
         deaths.poll(sim, tick);
@@ -532,6 +536,7 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &
         }
     }
     weather.summary(sim);
+    lj.summary(sim);
 }
 
 /// `--weather-log`: the finished events, and the run's weather totals.
@@ -1297,5 +1302,350 @@ impl DeathLog {
             }
         }
         self.last = next;
+    }
+}
+
+/// **Lanternjaw recruitment readouts** (`design/handoffs/lanternjaw-recruitment-2026-10-02.md`):
+/// observation only, nothing here changes the run. Three kinds of stderr line:
+///
+/// - `lj_dusk:` at each dusk the fauna layer sees — the dormant eggs' hatch gate, link by
+///   link, in the order viable → footfall ≥ threshold → no adult in reach → a host with
+///   a free slot in reach → the per-dusk draw → hatched. Each count is of the eggs that
+///   passed every link before it; the gates are re-evaluated here from the eggs as they
+///   stood before the dusk tick and the bodies as they stand after it (the layer
+///   evaluates them in its births phase, between the two), and `hatched` is the ledger's
+///   own `riders_attached` over that tick.
+/// - `lj_body:` once per lanternjaw when it leaves the world or the run ends: its rider
+///   phase (attach tick, the host's lineage, growth per hour on the host, how it let go
+///   and at what age), its free phase (strikes begun, the lowest and last reserve as a
+///   share of body, the largest body, whether it reached `birth_body`), and its death
+///   cause and age.
+/// - `lj_chain:` one summary per run: the summed dusk links, riders, free juveniles,
+///   adults established, the lineage's strikes, hits, kills, intake and eggs laid over
+///   the run, and the first link with zero throughput.
+struct LjChain {
+    line: f64,
+    clock_on: bool,
+    last_daylight: Option<f64>,
+    dusk_now: bool,
+    pre_eggs: Vec<cubarium_voxel_fauna::Clutch>,
+    pre_riders: std::collections::HashMap<u64, u32>,
+    links: [u64; 6],
+    dusks: u64,
+    off_dusk_hatches: u64,
+    bodies: std::collections::BTreeMap<u64, LjBody>,
+    done: Vec<LjBody>,
+    start: cubarium_voxel_fauna::FaunaLedger,
+    last_deaths: [u64; Departure::COUNT],
+}
+
+#[derive(Clone, Copy, Default)]
+struct LjBody {
+    id: u64,
+    born_tick: u64,
+    rider: bool,
+    host_lineage: Option<Founder>,
+    attach_body: f64,
+    detach: Option<(&'static str, u64, f64)>,
+    strikes: u64,
+    striking: bool,
+    min_reserve_share: f64,
+    last_reserve_share: f64,
+    max_body: f64,
+    adult: bool,
+    death: Option<(&'static str, u64)>,
+    last_age: u64,
+    last_body: f64,
+}
+
+const LJ_LINKS: [&str; 6] = ["viable", "footfall", "unblocked", "host", "drawn", "hatched"];
+
+impl LjChain {
+    fn new(sim: &Sim) -> LjChain {
+        let fa = sim.fauna().view();
+        let cfg = sim.world().view().config;
+        let mut lj = LjChain {
+            line: fa.config.life.day_line,
+            clock_on: cfg.day.mode != cubarium_voxel::weather::DayMode::Off,
+            last_daylight: None,
+            dusk_now: false,
+            pre_eggs: Vec::new(),
+            pre_riders: Default::default(),
+            links: [0; 6],
+            dusks: 0,
+            off_dusk_hatches: 0,
+            bodies: Default::default(),
+            done: Vec::new(),
+            start: fa.ledger.clone(),
+            last_deaths: fa.ledger.deaths_by_founder_cause[Founder::Lanternjaw.index()],
+        };
+        lj.track(sim);
+        lj
+    }
+
+    /// Before a step: the daylight the fauna layer will read this tick (the clock advances
+    /// after the fauna leg), so whether this tick is its dusk, and at a dusk the eggs and
+    /// the hosts' rider counts as they stand before it.
+    fn before(&mut self, sim: &Sim) {
+        let daylight = sim.world().life_daylight();
+        self.dusk_now = self.clock_on
+            && self.last_daylight.is_some_and(|b| b >= self.line)
+            && daylight < self.line;
+        self.last_daylight = Some(daylight);
+        if !self.dusk_now {
+            return;
+        }
+        let fa = sim.fauna().view();
+        self.pre_eggs = fa.clutches.iter().filter(|c| c.dormancy.is_some()).copied().collect();
+        self.pre_riders.clear();
+        for a in fa.animals {
+            if let Some(h) = a.attached {
+                *self.pre_riders.entry(h.host).or_default() += 1;
+            }
+        }
+    }
+
+    fn after(&mut self, sim: &Sim, attached_before: u64) {
+        let fa = sim.fauna().view();
+        let hatched = fa.ledger.riders_attached - attached_before;
+        if self.dusk_now {
+            self.dusk(sim, hatched);
+        } else if hatched > 0 {
+            self.off_dusk_hatches += hatched;
+        }
+        self.track(sim);
+    }
+
+    fn dusk(&mut self, sim: &Sim, hatched: u64) {
+        let fa = sim.fauna().view();
+        let wv = sim.world().view();
+        let v = wv.config.voxel_m;
+        let ring = f64::from(wv.config.width) * v;
+        let day_ticks = cubarium_voxel::ticks_at_least_one(wv.config.day.length_min * 60.0);
+        let pc = fa.config.predation;
+        let tick = fa.tick;
+        let mut n = [0u64; 6];
+        n[5] = hatched;
+        let wrap = |ex: f64, ez: f64, a: &cubarium_voxel_fauna::Animal| {
+            let mut dx = (a.pose.x - ex).rem_euclid(ring);
+            if dx > 0.5 * ring {
+                dx -= ring;
+            }
+            let dz = a.pose.z - ez;
+            (dx * dx + dz * dz).sqrt()
+        };
+        for c in &self.pre_eggs {
+            let Some(mut d) = c.dormancy else { continue };
+            let phys = fa.config.founder(c.lineage);
+            if tick >= d.viable_until_tick || c.organic < phys.core.body_min {
+                continue;
+            }
+            n[0] += 1;
+            let (ex, ez) = ((f64::from(c.site.x) + 0.5) * v, (f64::from(c.site.z) + 0.5) * v);
+            let mut nearest_adult: Option<f64> = None;
+            for a in fa.animals {
+                let Some(f) = a.founder else { continue };
+                let dist = wrap(ex, ez, a);
+                if f == c.lineage && a.body >= phys.core.birth_body {
+                    nearest_adult = Some(nearest_adult.map_or(dist, |m: f64| m.min(dist)));
+                }
+                if phys.hunter.is_some_and(|h| h.hunts(f))
+                    && dist <= pc.footfall_radius_m
+                    && cubarium_voxel_fauna::tremor_of(a, dist, pc.tremor_near_m)
+                        >= pc.footfall_tremor_min
+                {
+                    d.hear(a.id, tick);
+                }
+            }
+            let heard = d.footfall(tick, day_ticks);
+            if heard < d.threshold {
+                continue;
+            }
+            n[1] += 1;
+            if !cubarium_voxel_fauna::egg_hatches(&pc, d.threshold, heard, true, nearest_adult) {
+                continue;
+            }
+            n[2] += 1;
+            let host = fa.animals.iter().any(|a| {
+                a.founder != Some(c.lineage)
+                    && a.attached.is_none()
+                    && wrap(ex, ez, a) <= fa.config.parasite_attach_radius_m
+                    && self.pre_riders.get(&a.id).copied().unwrap_or(0) < fa.config.parasite_max_per_host
+            });
+            if !host {
+                continue;
+            }
+            n[3] += 1;
+            if cubarium_voxel_fauna::hatch_draw(fa.config.hatch_chance_per_dusk, wv.config.seed, d.serial, tick) {
+                n[4] += 1;
+            }
+        }
+        self.dusks += 1;
+        for k in 0..6 {
+            self.links[k] += n[k];
+        }
+        eprintln!(
+            "lj_dusk: tick={tick} min={:.1} eggs={} viable={} footfall={} unblocked={} host={} drawn={} hatched={}",
+            tick as f64 / TICKS_PER_MIN as f64,
+            self.pre_eggs.len(),
+            n[0], n[1], n[2], n[3], n[4], n[5]
+        );
+    }
+
+    /// Every tick: each lanternjaw's phase, strikes, reserve and departure.
+    fn track(&mut self, sim: &Sim) {
+        let fa = sim.fauna().view();
+        let lj = Founder::Lanternjaw;
+        let birth_body = fa.config.founder(lj).core.birth_body;
+        let mut seen = 0usize;
+        for a in fa.animals.iter().filter(|a| a.founder == Some(lj)) {
+            seen += 1;
+            let b = self.bodies.entry(a.id).or_insert_with(|| {
+                let host = a.attached.and_then(|h| fa.animal(h.host));
+                LjBody {
+                    id: a.id,
+                    born_tick: fa.tick.saturating_sub(a.age_ticks),
+                    rider: a.attached.is_some(),
+                    host_lineage: host.and_then(|h| h.founder),
+                    attach_body: a.body,
+                    min_reserve_share: f64::INFINITY,
+                    ..LjBody::default()
+                }
+            });
+            if b.rider && b.detach.is_none() && a.attached.is_none() {
+                let line = fa.config.parasite_detach_body_fraction
+                    * cubarium_voxel_fauna::effective_config(fa.config, a).body_max;
+                let cause = if a.body >= line { "dropoff" } else { "freed" };
+                b.detach = Some((cause, a.age_ticks, a.body));
+            }
+            if a.attached.is_none() {
+                let share = a.reserve / a.body.max(1e-12);
+                b.min_reserve_share = b.min_reserve_share.min(share);
+                b.last_reserve_share = share;
+                if a.strike.is_some() && !b.striking {
+                    b.strikes += 1;
+                }
+            }
+            b.striking = a.strike.is_some();
+            b.max_body = b.max_body.max(a.body);
+            b.adult |= a.body >= birth_body;
+            b.last_age = a.age_ticks;
+            b.last_body = a.body;
+        }
+        if seen == self.bodies.len() {
+            return;
+        }
+        // Departures this tick: their causes from the lineage's ledger row.
+        let row = fa.ledger.deaths_by_founder_cause[lj.index()];
+        let mut causes: Vec<&'static str> = Vec::new();
+        for (k, cause) in Departure::ALL.iter().enumerate() {
+            for _ in self.last_deaths[k]..row[k] {
+                causes.push(cause.name());
+            }
+        }
+        self.last_deaths = row;
+        let gone: Vec<u64> =
+            self.bodies.keys().copied().filter(|id| fa.animal(*id).is_none()).collect();
+        for (i, id) in gone.into_iter().enumerate() {
+            let mut b = self.bodies.remove(&id).expect("tracked");
+            let cause = if causes.len() == 1 || i < causes.len() {
+                causes[i.min(causes.len() - 1)]
+            } else {
+                "unbooked"
+            };
+            if b.rider && b.detach.is_none() {
+                b.detach = Some(("died_riding", b.last_age, b.last_body));
+            }
+            b.death = Some((cause, b.last_age));
+            Self::print(&b, fa.tick);
+            self.done.push(b);
+        }
+    }
+
+    fn print(b: &LjBody, tick: u64) {
+        let h = |t: u64| t as f64 / (3600.0 * f64::from(TICK_HZ));
+        let (rider, growth) = match (b.rider, b.detach) {
+            (false, _) => ("never".to_string(), "-".to_string()),
+            (true, Some((cause, age, body))) => (
+                format!("{cause}@{:.2}h", h(age)),
+                format!("{:.5}", (body - b.attach_body) / h(age).max(1e-9)),
+            ),
+            (true, None) => (
+                format!("riding@{:.2}h", h(b.last_age)),
+                format!("{:.5}", (b.last_body - b.attach_body) / h(b.last_age).max(1e-9)),
+            ),
+        };
+        let death = b.death.map_or("alive".to_string(), |(c, age)| format!("{c}@{:.2}h", h(age)));
+        let min_r = if b.min_reserve_share.is_finite() {
+            format!("{:.3}", b.min_reserve_share)
+        } else {
+            "-".to_string()
+        };
+        eprintln!(
+            "lj_body: id={} born_min={:.1} host={} rider={} growth_per_h={} attach_body={:.5} \
+             strikes={} min_reserve_share={} last_reserve_share={:.3} max_body={:.5} adult={} death={} tick={}",
+            b.id,
+            b.born_tick as f64 / TICKS_PER_MIN as f64,
+            b.host_lineage.map_or("-", |f| f.name()),
+            rider,
+            growth,
+            b.attach_body,
+            b.strikes,
+            min_r,
+            b.last_reserve_share,
+            b.max_body,
+            b.adult,
+            death,
+            tick,
+        );
+    }
+
+    fn summary(&mut self, sim: &Sim) {
+        let fa = sim.fauna().view();
+        for b in self.bodies.values() {
+            Self::print(b, fa.tick);
+        }
+        let all: Vec<LjBody> = self.done.iter().chain(self.bodies.values()).copied().collect();
+        let k = Founder::Lanternjaw.index();
+        let (l, s) = (fa.ledger, &self.start);
+        let kills: u64 = (0..cubarium_voxel_fauna::Founder::COUNT)
+            .map(|f| {
+                let i = Departure::Killed { by: Founder::Lanternjaw }.index();
+                l.deaths_by_founder_cause[f][i] - s.deaths_by_founder_cause[f][i]
+            })
+            .sum();
+        let riders = all.iter().filter(|b| b.rider).count();
+        let detached = all.iter().filter(|b| b.rider && matches!(b.detach, Some((c, ..)) if c != "died_riding")).count();
+        let free_juv = all
+            .iter()
+            .filter(|b| !b.rider || matches!(b.detach, Some((c, ..)) if c != "died_riding"))
+            .count();
+        let adults = all.iter().filter(|b| b.adult).count();
+        let eggs_laid = l.eggs_laid_by_founder[k] - s.eggs_laid_by_founder[k];
+        let mut chain: Vec<(&str, u64)> = LJ_LINKS.iter().zip(self.links).map(|(n, c)| (*n, c)).collect();
+        chain.push(("detached", detached as u64));
+        chain.push(("adult", adults as u64));
+        chain.push(("bred", eggs_laid));
+        let first = chain.iter().find(|(_, c)| *c == 0).map_or("none", |(n, _)| n);
+        eprintln!(
+            "lj_chain: dusks={} viable={} footfall={} unblocked={} host={} drawn={} hatched={} \
+             off_dusk_hatches={} riders={} detached={} free_bodies={} adults={} strikes={} hits={} \
+             kills={} intake={:.5} carrion={:.5} eggs_laid={} eggs_died={} first_zero={}",
+            self.dusks,
+            self.links[0], self.links[1], self.links[2], self.links[3], self.links[4], self.links[5],
+            self.off_dusk_hatches,
+            riders,
+            detached,
+            free_juv,
+            adults,
+            l.strikes_by_founder[k] - s.strikes_by_founder[k],
+            l.hits_by_founder[k] - s.hits_by_founder[k],
+            kills,
+            l.assimilated_by_founder[k] - s.assimilated_by_founder[k],
+            l.eaten_carrion_by_founder[k] - s.eaten_carrion_by_founder[k],
+            eggs_laid,
+            l.eggs_died - s.eggs_died,
+            first,
+        );
     }
 }
