@@ -29,6 +29,8 @@ pub struct Books {
     /// Awake ticks with the eating latch on, and of those the ticks spent eating.
     pub wanting_ticks: u64,
     pub eating_ticks: u64,
+    /// Awake ticks, latch on or off.
+    pub awake_ticks: u64,
 }
 
 impl Books {
@@ -45,6 +47,7 @@ impl Books {
             provision: l.provision_by_founder[i],
             wanting_ticks: l.wanting_ticks_by_founder[i],
             eating_ticks: l.eating_ticks_by_founder[i],
+            awake_ticks: l.awake_ticks_by_founder[i],
         }
     }
 
@@ -60,6 +63,7 @@ impl Books {
             provision: self.provision - start.provision,
             wanting_ticks: self.wanting_ticks.saturating_sub(start.wanting_ticks),
             eating_ticks: self.eating_ticks.saturating_sub(start.eating_ticks),
+            awake_ticks: self.awake_ticks.saturating_sub(start.awake_ticks),
         }
     }
 
@@ -106,6 +110,11 @@ pub struct Measures {
     pub r_hat: f64,
     /// **Access**: eating ticks over wanting ticks, at most 1.
     pub access: f64,
+    /// **Sated share**: awake ticks with the eating latch off over awake ticks. It reads
+    /// `R̂`, which is realised (what food actually funded, not unrealised capacity): a low
+    /// `R̂` with a **high** sated share means the breeding rule is the limit (fed, but not
+    /// investing); a low `R̂` with a **low** sated share means food is.
+    pub sated_share: f64,
 }
 
 impl Default for Measures {
@@ -116,6 +125,7 @@ impl Default for Measures {
             surplus_per_adult_day: f64::NAN,
             r_hat: f64::NAN,
             access: f64::NAN,
+            sated_share: f64::NAN,
         }
     }
 }
@@ -154,7 +164,12 @@ pub fn measures(b: &Books, c: &Context) -> Measures {
     } else {
         f64::NAN
     };
-    Measures { energy_balance, days_to_empty, surplus_per_adult_day, r_hat, access }
+    let sated_share = if b.awake_ticks > 0 {
+        (b.awake_ticks.saturating_sub(b.wanting_ticks) as f64 / b.awake_ticks as f64).clamp(0.0, 1.0)
+    } else {
+        f64::NAN
+    };
+    Measures { energy_balance, days_to_empty, surplus_per_adult_day, r_hat, access, sated_share }
 }
 
 /// **The soft shortfall** a lineage scored on balance pays: `(1 − min(1, B)) + (1 −

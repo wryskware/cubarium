@@ -792,9 +792,9 @@ fn pilot_file() -> EcologyParams {
 }
 
 /// F1, F7, F10 / F11(c): the pilot file reaches the intended score and serialization
-/// path: 80 searched genes since the minimal gut (six searched lineages x upkeep, yield,
-/// reserve, sleep, wake hunger, stomach, bite, s0 and refill gap, their 8 tau genes, and
-/// 18 plant and rider genes; the three feeders and pack size frozen at the exhibit's values), the
+/// path: 60 searched genes since the minimal gut (four searched lineages x upkeep, yield,
+/// reserve, sleep, wake hunger, stomach, bite, s0 and refill gap, their 6 tau genes, and
+/// 18 plant and rider genes; the five readout-only lineages' genes and pack size frozen), the
 /// feeders readout-only, R a readout, S and F soft, the night envelope hard, food soft;
 /// it round-trips through a saved genome; and the launch script runs it with the agreed
 /// settings.
@@ -802,10 +802,10 @@ fn pilot_file() -> EcologyParams {
 fn the_pilot_launch_is_the_agreed_experiment() {
     let e = pilot_file();
     let g = e.genome().expect("a genome");
-    assert_eq!(g.search_bounds().len(), 80, "searched: {}", g.genes.iter().filter(|x| !x.frozen).count());
-    assert_eq!(g.to_search().len(), 80);
+    assert_eq!(g.search_bounds().len(), 60, "searched: {}", g.genes.iter().filter(|x| !x.frozen).count());
+    assert_eq!(g.to_search().len(), 60);
     let base = e.base_params().expect("base");
-    for f in [Founder::Bellwing, Founder::Seedporter, Founder::Chorister] {
+    for f in [Founder::Bellwing, Founder::Seedporter, Founder::Chorister, Founder::Lanternjaw, Founder::Loftstrider] {
         let mut kinds: Vec<String> = ["upkeep", "yield", "reserve", "sleep", "wake_hunger", "stomach", "bite", "s0", "refill_gap"]
             .iter()
             .map(|k| k.to_string())
@@ -846,7 +846,7 @@ fn the_pilot_launch_is_the_agreed_experiment() {
     assert!(sc.soft(&rsf) > 0.0);
     // A saved nominee keeps its frozen genes frozen and decodes the same.
     let back = EcologyParams::parse(&g.to_toml("t")).expect("a saved genome");
-    assert_eq!(back.genome().expect("g").search_bounds().len(), 80);
+    assert_eq!(back.genome().expect("g").search_bounds().len(), 60);
     assert_eq!(back.fauna(), e.fauna());
     // The launch script.
     let sh = std::fs::read_to_string(
@@ -856,9 +856,12 @@ fn the_pilot_launch_is_the_agreed_experiment() {
     for want in [
         "--search config/training/search/roster-pilot.toml",
         "--world config/desktop/terrarium.toml",
-        "--lambda 8",
-        "--seeds-per-generation 3",
-        "--hours 2",
+        "LAMBDA:-8",
+        "SEEDS:-3",
+        "HOURS:-2",
+        "--lambda \"$LAMBDA\"",
+        "--seeds-per-generation \"$SEEDS\"",
+        "--hours \"$HOURS\"",
         "--sigma0 0.08",
         "--water-every 1",
         "CUBARIUM_THREADS=1",

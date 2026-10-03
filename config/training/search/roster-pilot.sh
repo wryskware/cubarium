@@ -10,6 +10,9 @@
 #             9 candidates (8 draws + the reference) x 3 seeds = 27 worlds of ~26 min each.
 # <wall-seconds> the run stops before a generation that would pass this.
 #
+# Optional environment overrides (a smoke): LAMBDA (default 8), SEEDS per generation
+# (default 3), HOURS per world (default 2), e.g. LAMBDA=2 SEEDS=2 HOURS=1.
+#
 # The nominee is <out>/best.toml, chosen by raw fitness over DIFFERENT seed sets: compare it
 # with the incumbent (the pilot file itself, the exhibit's values) on common held-out seeds
 # before promoting anything:
@@ -22,6 +25,9 @@ set -euo pipefail
 CHECKOUT=${1:?usage: roster-pilot.sh <checkout> <workers> <wall-seconds> [out-dir]}
 WORKERS=${2:?workers}
 WALL=${3:?wall seconds}
+LAMBDA=${LAMBDA:-8}
+SEEDS=${SEEDS:-3}
+HOURS=${HOURS:-2}
 cd "$CHECKOUT"
 OUT=${4:-runs/roster-pilot-$(date +%Y%m%d-%H%M)}
 nice -n 10 cargo build --release -j "$WORKERS" -p cubarium-search --bin cubarium-search
@@ -32,6 +38,6 @@ export CUBARIUM_THREADS=1 RAYON_NUM_THREADS=1
 nice -n 10 ./target/release/cubarium-search voxel-ecology-search \
   --search config/training/search/roster-pilot.toml \
   --world config/desktop/terrarium.toml \
-  --lambda 8 --seeds-per-generation 3 --hours 2 --sigma0 0.08 --water-every 1 \
+  --lambda "$LAMBDA" --seeds-per-generation "$SEEDS" --hours "$HOURS" --sigma0 0.08 --water-every 1 \
   --generations 1000 --threads "$WORKERS" --wall-seconds "$WALL" \
   --out "$OUT" 2>&1 | tee "$OUT/search.log"

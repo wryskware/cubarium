@@ -18,7 +18,7 @@ use super::targets::{LineageOutcome, StageSpec, judge};
 /// - the deficit is 0.3 over 2 days, 0.15 a day, so the stores last 4 days;
 /// - surplus per adult-day `(0.3 − 0.4 − 0.1) / 4 adult-days = −0.05`, so `R̂` is
 ///   −0.05 x 8 days / 0.3 per young < 0;
-/// - access: 300 of 400 wanting ticks spent eating, 0.75.
+/// - access: 300 of 400 wanting ticks spent eating, 0.75; sated share 600 of 1,000 awake.
 #[test]
 fn a_hand_built_ledger_gives_the_measures() {
     let f = Founder::Browser;
@@ -30,6 +30,7 @@ fn a_hand_built_ledger_gives_the_measures() {
     l.rider_take_lost_by_founder[i] = 0.1;
     l.wanting_ticks_by_founder[i] = 400;
     l.eating_ticks_by_founder[i] = 300;
+    l.awake_ticks_by_founder[i] = 1000;
     let b = Books::of(&l, f).since(&Books::default());
     let c = Context { stores: 0.6, adult_days: 4.0, days: 2.0, lifespan_days: 8.0, offspring_cost: 0.3 };
     let m = measures(&b, &c);
@@ -38,6 +39,8 @@ fn a_hand_built_ledger_gives_the_measures() {
     assert!((m.surplus_per_adult_day + 0.05).abs() < 1e-12, "{m:?}");
     assert!((m.r_hat - (-0.05 * 8.0 / 0.3)).abs() < 1e-12, "{m:?}");
     assert!((m.access - 0.75).abs() < 1e-12, "{m:?}");
+    // 600 of 1,000 awake ticks with the latch off.
+    assert!((m.sated_share - 0.6).abs() < 1e-12, "{m:?}");
 
     // A fed lineage: assimilated 0.9 against the same spend. B 1.5, no days to empty;
     // surplus (0.9 − 0.5) / 4 = 0.1 a day, R̂ = 0.1 x 8 / 0.3 = 2.67.
@@ -160,6 +163,7 @@ fn a_fed_body_has_b_at_least_one() {
     assert!(m.energy_balance >= 1.0, "{m:?} {books:?}");
     assert!(m.days_to_empty.is_none());
     assert!(m.access > 0.0 && m.access <= 1.0, "{m:?}");
+    assert!(books.awake_ticks >= books.wanting_ticks && m.sated_share >= 0.0 && m.sated_share < 1.0, "{m:?}");
 }
 
 /// With `counts_readout` the population band, its peak and the lanternjaw share are

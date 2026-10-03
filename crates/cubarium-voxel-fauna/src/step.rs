@@ -200,11 +200,13 @@ fn tick_inner(
             // food this tick (a counter only).
             for a in fauna.animals.iter() {
                 if let Some(f) = a.founder
-                    && a.eating
                     && a.state != State::Asleep
                     && a.attached.is_none()
                 {
-                    fauna.ledger.wanting_ticks_by_founder[f.index()] += 1;
+                    fauna.ledger.awake_ticks_by_founder[f.index()] += 1;
+                    if a.eating {
+                        fauna.ledger.wanting_ticks_by_founder[f.index()] += 1;
+                    }
                 }
             }
             act(fauna, &view, flora, seed, tick, &sky, &mut hits);

@@ -223,6 +223,7 @@ pub const LINEAGE_FACTORS: &[LineageFactor] = &[
     ("surplus_per_adult_day", Pool::Mean, |c, f| c.lineages[f.index()].balance.surplus_per_adult_day),
     ("r_hat", Pool::Mean, |c, f| c.lineages[f.index()].balance.r_hat),
     ("access", Pool::Mean, |c, f| c.lineages[f.index()].balance.access),
+    ("sated_share", Pool::Mean, |c, f| c.lineages[f.index()].balance.sated_share),
     ("population", Pool::Sum, |c, f| {
         lineage_bodies(c, f).len() as f64
     }),

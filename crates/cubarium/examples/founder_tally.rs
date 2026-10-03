@@ -56,6 +56,7 @@
 //!
 //! **Balance** (the search rebase's addendum): one `balance:` line per lineage over the
 //! run — `B`, days to empty, surplus per adult per world day, `R̂` (optimistic), access,
+//! the sated share (awake with the eating latch off),
 //! the books behind them, and a hunter's kills per adult-day against its prey's births.
 //!
 //! At t = 0 it reports the roster R1 check: the glowcap caps standing (count and stock)
@@ -723,13 +724,14 @@ impl GutTally {
                     )
                 });
                 println!(
-                    "balance: {:15} B={:.3} days_to_empty={} surplus_per_adult_day={:.5} r_hat={:.3} access={:.3} assimilated={:.6} upkeep={:.6} motor={:.6} rider_take_lost={:.6} growth={:.6} reproduction={:.6} provision={:.6} stores={:.6} adult_days={:.3}{}",
+                    "balance: {:15} B={:.3} days_to_empty={} surplus_per_adult_day={:.5} r_hat={:.3} access={:.3} sated_share={:.3} assimilated={:.6} upkeep={:.6} motor={:.6} rider_take_lost={:.6} growth={:.6} reproduction={:.6} provision={:.6} stores={:.6} adult_days={:.3}{}",
                     f.name(),
                     m.energy_balance,
                     m.days_to_empty.map_or("-".to_string(), |d| format!("{d:.2}")),
                     m.surplus_per_adult_day,
                     m.r_hat,
                     m.access,
+                    m.sated_share,
                     books.assimilated,
                     books.upkeep,
                     books.motor,

@@ -2496,6 +2496,10 @@ pub struct FaunaLedger {
     pub wanting_ticks_by_founder: [u64; Founder::COUNT],
     #[serde(default)]
     pub eating_ticks_by_founder: [u64; Founder::COUNT],
+    /// Ticks a free founder body was awake, latch on or off (the sated share's
+    /// denominator).
+    #[serde(default)]
+    pub awake_ticks_by_founder: [u64; Founder::COUNT],
 }
 
 impl FaunaLedger {

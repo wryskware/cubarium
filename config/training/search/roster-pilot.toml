@@ -13,7 +13,8 @@
 #   `intake` (on the unread bite_per_s) is replaced by the gut's own genes per lineage:
 #   stomach k, bite b, appetite floor s0, refill gap (repair 3) and tau per food class
 #   eaten; the rider's take is `rider_take` (parasite_take_per_day). Gut genes start at
-#   x1. 80 searched.
+#   x1. The lanternjaw's and loftstrider's genes are frozen too: readout-only lineages give
+#   the search no signal (Fable 2026-10-03). 60 searched.
 # - F7: R is a readout; S and F are soft (run_margin 1e6: every miss runs and pays k_soft x
 #   its log-distance); the night envelope stays hard (a design envelope, not impossibility).
 # - F3: food access is soft; only a lineage with no supply path at all is refused.
@@ -92,6 +93,7 @@ name = "upkeep@lanternjaw"
 path = "fauna.founders.lanternjaw.core.maintenance_per_s"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "upkeep@capgnawer"
@@ -104,6 +106,7 @@ name = "upkeep@loftstrider"
 path = "fauna.founders.loftstrider.core.maintenance_per_s"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "upkeep@ripple-snail"
@@ -149,6 +152,7 @@ name = "yield@lanternjaw"
 path = "fauna.founders.lanternjaw.yield_by_food.*"
 range = [0.25, 1.5]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "yield@capgnawer"
@@ -161,6 +165,7 @@ name = "yield@loftstrider"
 path = "fauna.founders.loftstrider.yield_by_food.*"
 range = [0.25, 1.5]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "yield@ripple-snail"
@@ -206,6 +211,7 @@ name = "reserve@lanternjaw"
 path = "fauna.founders.lanternjaw.core.reserve_cap"
 range = [0.5, 5.0]
 value = 2.5
+frozen = true
 
 [[gene]]
 name = "reserve@capgnawer"
@@ -218,6 +224,7 @@ name = "reserve@loftstrider"
 path = "fauna.founders.loftstrider.core.reserve_cap"
 range = [0.5, 5.0]
 value = 2.5
+frozen = true
 
 [[gene]]
 name = "reserve@ripple-snail"
@@ -263,6 +270,7 @@ name = "sleep@lanternjaw"
 path = "fauna.founders.lanternjaw.sleep_upkeep"
 range = [0.4, 2.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "sleep@capgnawer"
@@ -275,6 +283,7 @@ name = "sleep@loftstrider"
 path = "fauna.founders.loftstrider.sleep_upkeep"
 range = [0.4, 2.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "sleep@ripple-snail"
@@ -323,6 +332,7 @@ path = "fauna.founders.lanternjaw.wake_hunger"
 mode = "value"
 range = [0.3, 0.95]
 value = 0.9
+frozen = true
 
 [[gene]]
 name = "wake_hunger@capgnawer"
@@ -337,6 +347,7 @@ path = "fauna.founders.loftstrider.wake_hunger"
 mode = "value"
 range = [0.3, 0.95]
 value = 0.9
+frozen = true
 
 [[gene]]
 name = "wake_hunger@ripple-snail"
@@ -440,30 +451,35 @@ name = "stomach@lanternjaw"
 path = "fauna.founders.lanternjaw.gut.stomach_k"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "bite@lanternjaw"
 path = "fauna.founders.lanternjaw.gut.bite_per_body_s"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "s0@lanternjaw"
 path = "fauna.founders.lanternjaw.gut.s0"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "refill_gap@lanternjaw"
 path = "fauna.founders.lanternjaw.gut.refill_gap"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "tau_carrion@lanternjaw"
 path = "fauna.founders.lanternjaw.gut.digestion_s.carrion"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "stomach@capgnawer"
@@ -506,30 +522,35 @@ name = "stomach@loftstrider"
 path = "fauna.founders.loftstrider.gut.stomach_k"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "bite@loftstrider"
 path = "fauna.founders.loftstrider.gut.bite_per_body_s"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "s0@loftstrider"
 path = "fauna.founders.loftstrider.gut.s0"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "refill_gap@loftstrider"
 path = "fauna.founders.loftstrider.gut.refill_gap"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "tau_foliage@loftstrider"
 path = "fauna.founders.loftstrider.gut.digestion_s.foliage"
 range = [0.25, 4.0]
 value = 1.0
+frozen = true
 
 [[gene]]
 name = "stomach@ripple-snail"
