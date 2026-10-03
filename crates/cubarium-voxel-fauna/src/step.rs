@@ -2412,8 +2412,10 @@ fn assimilate(
     // Egested: the share the yield never absorbs goes to the gut, not to heat. Only the
     // absorbed matter the bite's mineral cannot fund (and the reserve backstop) is
     // respired.
-    let egested = ((1.0 - yield_fraction) * t.organic).clamp(0.0, t.organic - assimilated);
-    let unfunded = (t.organic - assimilated - egested).max(0.0);
+    // The absorbed share its mineral cannot fund, exactly zero when the mineral pays for
+    // the whole yield; the egested share is the remainder, so the three add up.
+    let unfunded = (yield_fraction * t.organic - assimilated).clamp(0.0, t.organic - assimilated);
+    let egested = (t.organic - assimilated - unfunded).max(0.0);
 
     // The organism budget: the income stored into the reserve, up to `reserve_cap · body`.
     // Structure is built out of the reserve at the growth rate ([`grow`]), never straight

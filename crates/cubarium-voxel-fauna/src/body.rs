@@ -4066,7 +4066,11 @@ mod tests {
     fn the_first_sample_reports_no_prior_interval_from_a_depleted_start() {
         for founder in [Founder::Blind, Founder::Browser] {
             let world = flat_world();
-            let mut fauna = Fauna::new(crate::FaunaConfig::placeholder());
+            // The minimal gut: an empty founding stomach (`s0` 0), so nothing digests
+            // into the empty reserve and upkeep really comes out of structure.
+            let mut config = crate::FaunaConfig::placeholder();
+            config.founders[founder.index()].gut.s0 = 0.0;
+            let mut fauna = Fauna::new(config);
             assert!(fauna.apply(
                 &world,
                 crate::Command::IntroduceFounder {

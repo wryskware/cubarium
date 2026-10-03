@@ -3384,8 +3384,8 @@ impl Fauna {
         };
         let mut animal = animal;
         // A founder arrives with its eating latch off and a stomach at `s0 · K` of its own
-        // first food (repair 2 item 3), at a composition its yield is not mineral-limited
-        // by and its lineage's energy density, booked introduced with the rest of it.
+        // first food (repair 2 item 3), at its own tissue's mineral and energy densities
+        // (so no yield up to 1 is mineral-limited), booked introduced with the rest of it.
         if let Some(f) = founder {
             let p = self.config.founder(f);
             if let Some(food) = p.diet.foods().next() {
@@ -3393,7 +3393,7 @@ impl Fauna {
                 if organic > 0.0 {
                     animal.stomach.pools[food.index()] = Taken {
                         organic,
-                        mineral: p.yield_for(food) * sc.n_tissue * organic,
+                        mineral: sc.n_tissue * organic,
                         energy: sc.energy_density * organic,
                     };
                 }

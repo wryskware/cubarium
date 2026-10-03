@@ -408,10 +408,9 @@ fn the_f3_seedporter_table_is_the_briefs() {
     let r = (0.5 * 0.25 * 0.2) / (grazer.adult_length_m * grazer.adult_width_m * grazer.adult_height_m);
     assert!(close(x1.core.body_max, grazer.core.body_max * r), "the browser's by volume");
     assert!((x1.core.body_max - 0.012).abs() <= 0.0006, "body_max ≈ 0.012: {}", x1.core.body_max);
-    assert!(
-        close(x1.core.maintenance_per_s, grazer.core.maintenance_per_s),
-        "upkeep is per unit of body"
-    );
+    // The minimal gut: its own daily need, f 0.08 over the 7,200-s day.
+    assert!(close(x1.core.maintenance_per_s * 7200.0, 0.08), "upkeep is its own daily need");
+    let _ = &grazer;
     assert!(close(sp.cruise_body_lengths_per_s, 1.0), "walk 1 BL/s");
     assert!(close(sp.climb_speed_fraction, 0.5), "climb at half its walking pace");
     assert!(close(sp.wall_climb_cost_factor, shredder.wall_climb_cost_factor), "the shredder's climb cost");

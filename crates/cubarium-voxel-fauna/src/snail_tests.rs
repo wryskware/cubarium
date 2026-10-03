@@ -262,9 +262,9 @@ fn the_r2b_physiology_table_is_the_briefs() {
         ("bite_per_s", snail.core.bite_per_s, shredder.core.bite_per_s * r),
         ("growth_max_per_s", snail.core.growth_max_per_s, shredder.core.growth_max_per_s * r),
         ("egg_organic", snail.core.reproduction.egg_organic, shredder.core.reproduction.egg_organic * r),
-        // Per unit of body: the specific rates are the shredder's.
-        ("maintenance_per_s", snail.core.maintenance_per_s, shredder.core.maintenance_per_s),
-        ("motor_respiration_per_s", snail.motor_respiration_per_s, shredder.motor_respiration_per_s),
+        // The minimal gut: its own daily need (f 0.02 over 7,200 s), motor at its ratio.
+        ("maintenance_per_s", snail.core.maintenance_per_s * 7200.0, 0.02),
+        ("motor_respiration_per_s", snail.motor_respiration_per_s, snail.core.maintenance_per_s),
         ("reserve_cap", snail.core.reserve_cap, shredder.core.reserve_cap),
     ] {
         assert!(close(got, want), "{what}: {got} against {want}");

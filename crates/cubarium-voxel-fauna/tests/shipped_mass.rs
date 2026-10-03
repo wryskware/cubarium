@@ -17,7 +17,9 @@ fn both_lineages_ship_thirty_times_heavier() {
     let b = c.founder(Founder::Browser).core;
     assert!((b.body_max - 30.0 * 0.05).abs() < 1e-12);
     assert!((b.bite_per_s - 30.0 * 0.002).abs() < 1e-12);
-    assert_eq!(b.maintenance_per_s, 0.001, "per-unit rates stay");
+    // Per-unit rates stay: the minimal gut's daily need f = 0.06 over the 7,200-s day.
+    assert_eq!(b.maintenance_per_s, FounderPhysiology::placeholder(Founder::Browser).core.maintenance_per_s, "per-unit rates stay");
+    assert!((b.maintenance_per_s * 7200.0 - 0.06).abs() < 1e-15);
     let s = c.founder(Founder::Blind).core;
     assert!((s.body_max - 30.0 * 0.0125).abs() < 1e-12);
     assert!((s.reproduction.egg_organic - 30.0 * 0.004).abs() < 1e-12);

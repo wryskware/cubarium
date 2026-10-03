@@ -111,18 +111,16 @@ fn one_period(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
 
 // ------------------------------------------------------------------ 1. satiety
 
-/// Test 1: a full animal — body at `body_max`, reserve at its cap — takes nothing, and
-/// the plant keeps its foliage.
+/// Test 1, **changed by the minimal gut**: a full animal takes nothing, and the plant
+/// keeps its foliage. "Full" is now the stomach's full event (the eating latch off), not
+/// the reserve: a founder arrives at `s0 K` and eats to the full event; after that, a
+/// whole period at the turf with `feed` held takes nothing.
 #[test]
 fn a_full_animal_takes_nothing_and_the_plant_keeps_its_foliage() {
     let world = flat_world();
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 2, 2);
     turf(&mut flora, &world, 2, 3);
-    let before = (
-        foliage_at(&flora, site(2, 2)),
-        foliage_at(&flora, site(2, 3)),
-    );
 
     let config = still_browser(|_| {});
     let sc = config.founder(Founder::Browser).core;
@@ -138,11 +136,25 @@ fn a_full_animal_takes_nothing_and_the_plant_keeps_its_foliage() {
         .is_some(),
         "the fixture puts food at the mouth"
     );
+    let mut full = false;
+    for _ in 0..(20 * 60 * 10) {
+        fauna.step(&world, &mut flora);
+        if fauna.view().ledger.bites > 0 && !fauna.view().animal(id).unwrap().eating {
+            full = true;
+            break;
+        }
+    }
+    assert!(full, "it eats to the full event");
+    let before = (
+        foliage_at(&flora, site(2, 2)),
+        foliage_at(&flora, site(2, 3)),
+    );
+    let bites = fauna.view().ledger.bites;
+    one_period(&mut fauna, &world, &mut flora);
     one_period(&mut fauna, &world, &mut flora);
 
     let ledger = &fauna.view().ledger;
-    assert_eq!(ledger.bites, 0, "a full animal does not bite");
-    assert_eq!(ledger.eaten_organic_in, 0.0);
+    assert_eq!(ledger.bites, bites, "a full animal does not bite");
     assert_eq!(
         (
             foliage_at(&flora, site(2, 2)),
@@ -153,16 +165,16 @@ fn a_full_animal_takes_nothing_and_the_plant_keeps_its_foliage() {
     );
     let a = fauna.view().animal(id).expect("alive");
     assert_eq!(a.body, sc.body_max);
-    assert_eq!(a.reserve, sc.reserve_of(sc.body_max));
+    assert!(a.reserve <= sc.reserve_of(sc.body_max) * (1.0 + 1e-12));
 }
 
-/// Test 2: a hungry animal's bite is capped by the room it has left after yield, and
+/// Test 2, **changed by the minimal gut**: a bite is capped by the stomach's room, and
 /// none of it is respired as surplus.
 ///
-/// This case's mouth is five hundred times the shipped one — `bite_per_s` 1.0 — so that
-/// the room and not the mouth is what binds inside one bite. The body is at `body_max`
-/// (no growth to move the reserve) with its reserve half full: the room is half a
-/// reserve, and the bite may take no more than `room / yield`.
+/// This case's mouth is huge (`bite_per_body_s` 1,000) so that the room and not the mouth
+/// binds inside one bite. The founder arrives with its stomach at `s0 K`: the one bite
+/// fills it to exactly `K`, raw (nothing assimilated, egested or respired by the bite
+/// itself), and the full event ends the meal.
 #[test]
 fn a_hungry_bite_is_capped_by_its_room_and_none_of_it_is_respired_as_surplus() {
     let world = flat_world();
@@ -170,9 +182,9 @@ fn a_hungry_bite_is_capped_by_its_room_and_none_of_it_is_respired_as_surplus() {
     turf(&mut flora, &world, 2, 2);
     turf(&mut flora, &world, 2, 3);
 
-    let config = still_browser(|core| core.bite_per_s = 1.0);
+    let mut config = still_browser(|_| {});
+    config.founders[Founder::Browser.index()].gut.bite_per_body_s = 1000.0;
     let phys = *config.founder(Founder::Browser);
-    let sc = phys.core;
     let mut fauna = Fauna::new(config);
     let id = feeding_browser(
         &mut fauna,
@@ -182,52 +194,30 @@ fn a_hungry_bite_is_capped_by_its_room_and_none_of_it_is_respired_as_surplus() {
             reserve: 0.5,
         },
     );
-    let reserve_before = fauna.view().animal(id).unwrap().reserve;
-    let cap = sc.reserve_of(sc.body_max);
-    let room = cap - reserve_before;
-    let yield_fraction = phys.yield_for(Food::Foliage);
+    let k = phys.gut.capacity(phys.core.body_max);
+    let s0 = fauna.view().animal(id).unwrap().stomach.organic();
+    assert!((s0 - phys.gut.s0 * k).abs() < 1e-15, "a founder's stomach at s0 K");
     one_period(&mut fauna, &world, &mut flora);
 
     let ledger = *fauna.view().ledger;
     assert_eq!(ledger.bites, 1, "one bite");
     let eaten = ledger.eaten_organic_in;
-    let limit = room / yield_fraction;
+    // The tick of the bite digested nothing yet of it: digestion runs before the act.
+    let digested_before_bite = ledger.digested.organic;
+    let room = k - (s0 - digested_before_bite);
     assert!(
-        eaten <= limit * (1.0 + 1e-12) && eaten >= limit * (1.0 - 1e-9),
-        "the bite is the room after yield, {limit}, not {eaten}"
+        (eaten - room).abs() <= 1e-9 * room,
+        "the bite is the stomach's room, {room}, not {eaten}"
     );
-    // What the bite built, by the assimilation rule: the yield, or what its mineral pays
-    // for. All of it is placed; the rest of the bite is the undigested share (egested)
-    // and the absorbed share its mineral cannot fund (respired), and nothing more.
-    let assimilated = (yield_fraction * eaten).min(ledger.eaten_mineral_in / sc.n_tissue);
     let a = fauna.view().animal(id).expect("alive");
-    assert!(
-        (a.reserve - (reserve_before + assimilated)).abs() < 1e-15,
-        "every assimilated unit was placed: {} vs {}",
-        a.reserve,
-        reserve_before + assimilated
-    );
-    assert!(
-        a.reserve <= cap * (1.0 + 1e-12),
-        "the reserve is within its cap"
-    );
-    // The share the yield never absorbs is egested to the gut; only the absorbed share
-    // the bite's mineral cannot fund is respired. Nothing is respired as surplus.
-    let egested = ((1.0 - yield_fraction) * eaten).clamp(0.0, eaten - assimilated);
-    assert!(
-        (a.gut.organic - egested).abs() < 1e-15,
-        "the gut holds the undigested share {egested}, not {}",
-        a.gut.organic
-    );
-    let unfunded = eaten - assimilated - egested;
-    assert!(
-        (ledger.respired_digestion_out - unfunded).abs() < 1e-15,
-        "digestion respired {} of a bite whose unfunded absorbed share is {unfunded}: no surplus",
-        ledger.respired_digestion_out,
-    );
+    assert!((a.stomach.organic() - k).abs() <= 1e-9 * k, "the stomach is full");
+    assert!(!a.eating, "the full event ended the meal");
+    assert_eq!(ledger.meals_by_founder_kind[Founder::Browser.index()].iter().sum::<u64>(), 1);
+    // Only digestion respires, and only its unfunded share: the founding stomach's food
+    // is funded at the tissue's own density, and the springturf bite has not been
+    // digested on this tick.
+    assert!(ledger.respired_digestion_out <= 1e-9 * eaten, "no surplus respired");
 }
-
-// ---------------------------------------------------------- 2. diminishing bites
 
 /// The edible foliage a fresh hungry browser's mouth reaches at the fixture, `E`.
 fn edible_at_the_mouth(world: &World, flora: &Flora) -> f64 {
@@ -253,9 +243,9 @@ fn edible_at_the_mouth(world: &World, flora: &Flora) -> f64 {
 
 /// Test 3: the bite is `want · E / (E + K)`, and at `E = K` it is half of `want`.
 ///
-/// `want` is the shipped mouth over one controller period at full effort and full
-/// hunger (an empty reserve): `bite_per_s · 0.25 s`. `K` is set to the `E` this mouth
-/// actually reads, and then to a third of it.
+/// `want` is the minimal gut's mouth over one controller period at full effort:
+/// `bite_per_body_s · body · 0.25 s` (no hunger scaling since the gut). `K` is set to
+/// the `E` this mouth actually reads, and then to a third of it.
 #[test]
 fn the_bite_is_want_times_e_over_e_plus_k_and_half_of_want_at_k() {
     let world = flat_world();
@@ -267,8 +257,8 @@ fn the_bite_is_want_times_e_over_e_plus_k_and_half_of_want_at_k() {
     for (k, factor) in [(e, 0.5), (e / 3.0, 0.75)] {
         let mut flora = seed.clone();
         let config = still_browser(|core| core.bite_half_stock = k);
-        let sc = config.founder(Founder::Browser).core;
-        let want = sc.bite_per_s * 0.25;
+        let p = config.founder(Founder::Browser);
+        let want = p.gut.bite_per_body_s * p.core.body_max * 0.25;
         let mut fauna = Fauna::new(config);
         feeding_browser(
             &mut fauna,
@@ -344,10 +334,14 @@ fn a_newborn_fed_at_the_most_it_can_eat_grows_no_faster_than_the_cap() {
     }
     let base = FaunaConfig::placeholder().founder(Founder::Browser).core;
     let g = (base.birth_body - base.body_min) / (100.0 * DT);
-    let config = still_browser(|core| {
+    let mut config = still_browser(|core| {
         core.growth_max_per_s = g;
-        core.bite_per_s = 0.05;
     });
+    // The minimal gut: a mouth and a digestion fast enough that neither binds.
+    let gut = &mut config.founders[Founder::Browser.index()].gut;
+    gut.bite_per_body_s = 50.0;
+    gut.stomach_k = 10.0;
+    gut.digestion_s = [0.05; Food::COUNT];
     let sc = config.founder(Founder::Browser).core;
     let mut fauna = Fauna::new(config);
     fauna.set_births_enabled(false);

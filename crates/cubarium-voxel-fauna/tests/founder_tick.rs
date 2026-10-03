@@ -253,10 +253,12 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
         fauna.step(&world, &mut flora);
     }
 
-    let want = 0.0005 * 0.25; // the frozen bite rate over one controller period
+    // The minimal gut's bite: `b · body · period`, the body as it was at the bite.
+    let gut = fauna.config().founder(Founder::Blind).gut;
+    let want = gut.bite_per_body_s * before_body * 0.25;
     let after_stock = litter_of(&flora);
     assert!(
-        ((before_stock - after_stock) - want).abs() < 1e-12,
+        ((before_stock - after_stock) - want).abs() < 1e-6 * want,
         "one bite of {} was taken, stock moved {}",
         want,
         before_stock - after_stock
@@ -264,11 +266,11 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
     let ledger = &fauna.view().ledger;
     assert_eq!(ledger.bites, 1, "exactly one attempt per interval");
     assert!(
-        (ledger.eaten_organic_in - want).abs() < 1e-12,
+        (ledger.eaten_organic_in - (before_stock - after_stock)).abs() < 1e-9 * want,
         "the fauna ledger booked the same transfer"
     );
     assert!(
-        (ledger.eaten_mineral_in - want * 0.02).abs() < 1e-15,
+        (ledger.eaten_mineral_in - ledger.eaten_organic_in * 0.02).abs() < 1e-15,
         "the real Taken composition: mineral pro rata at the litter's fraction"
     );
     let a = fauna.view().animal(id).expect("alive");
@@ -277,10 +279,12 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
         a.reserve > 0.0,
         "the funded share of the bite was stored, for growth to build from"
     );
+    // The minimal gut: the bite went raw into the stomach; what the reserve took is
+    // digestion's, at the yield, and it is the interval's intake.
+    assert!(a.stomach.organic() > 0.0, "the bite is in the stomach");
     assert!(
-        (a.founder_state.feedback.intake - 0.5 * want).abs() < 1e-12,
-        "the placed share is the yield fraction, {}",
-        a.founder_state.feedback.intake
+        fauna.view().ledger.digested.organic > 0.0,
+        "digestion runs into the reserve's room"
     );
 
     // A second interval: the second attempt, and only that.
@@ -288,13 +292,12 @@ fn a_litter_bite_debits_the_real_stock_exactly_once_per_interval() {
         fauna.step(&world, &mut flora);
     }
     assert_eq!(fauna.view().ledger.bites, 2);
-    // The second bite is a hungry one too, but less hungry than the first: package G's
-    // satiety scales it by the reserve's shortfall, so it is smaller than a whole bite,
-    // and the stock fell by exactly what the ledger booked.
+    // The minimal gut: the second bite is a whole one too (no hunger scaling; the latch
+    // is on until the stomach is full), and the stock fell by exactly what was booked.
     let eaten = fauna.view().ledger.eaten_organic_in;
     assert!(
-        eaten > want && eaten < 2.0 * want,
-        "a whole bite and a smaller one: {eaten}"
+        (eaten - 2.0 * want).abs() < 1e-3 * want,
+        "two whole bites: {eaten}"
     );
     assert!((litter_of(&flora) - (before_stock - eaten)).abs() < 1e-12);
 }
@@ -398,17 +401,19 @@ fn a_browser_bite_crops_the_stand_it_touches() {
         fauna.step(&world, &mut flora);
     }
 
-    let want = 0.002 * 0.25; // the frondgrazer bite rate over one controller period
+    // The minimal gut's bite: `b · body · period` (the body 0.8 of its adult's).
+    let p = fauna.config().founder(Founder::Browser);
+    let want = p.gut.bite_per_body_s * 0.8 * p.core.body_max * 0.25;
     let ledger = &fauna.view().ledger;
     assert_eq!(ledger.bites, 1);
     assert!(
-        ((before_stock - foliage_of(&flora)) - want).abs() < 1e-12,
+        ((before_stock - foliage_of(&flora)) - want).abs() < 1e-6 * want,
         "foliage debited by {}",
         before_stock - foliage_of(&flora)
     );
     let turf = Plant::Springturf.index();
     assert_eq!(ledger.bites_by_plant[turf], 1);
-    assert!((ledger.eaten_by_plant[turf] - want).abs() < 1e-12);
+    assert!((ledger.eaten_by_plant[turf] - want).abs() < 1e-6 * want);
     let a = fauna.view().animal(id).expect("alive");
     assert!(a.reserve > 0.0, "the funded share was stored");
 }
@@ -464,7 +469,9 @@ fn the_self_feedback_is_the_prior_interval_and_reset_once() {
         (log[1][7] - 1.0).abs() < 1e-9,
         "free movement delivers what it requests"
     );
-    assert_eq!(log[1][4], 0.0, "no intake without a feed action");
+    // The minimal gut: a founder's stomach starts at s0 K, so digestion may place a little
+    // with no feed action; no bite was taken.
+    assert_eq!(fauna.view().ledger.bites, 0, "no bite without a feed action");
 
     // Third sampling: reset once — the prior interval again, not the running total.
     assert!(
@@ -516,7 +523,8 @@ fn full_cruise_motor_respiration_equals_the_basal_rate() {
     }
     let paid = fauna.view().ledger.respired_out - before;
     let body = 0.0125;
-    let basal_per_tick = 0.001 * body * (1.0 / 20.0);
+    let basal_per_tick =
+        fauna.config().founder(Founder::Blind).core.maintenance_per_s * body * (1.0 / 20.0);
     // Ten steps: basal upkeep on all ten for both; the cruiser's held action is
     // resolved on its due ticks (5 and 10) and the four ticks after each sampling —
     // six motion ticks — while the rester's held set is zero.
@@ -602,7 +610,8 @@ fn a_blocked_attempt_still_pays_the_motor_budget() {
         fauna.step(&world, &mut flora);
     }
     let paid = fauna.view().ledger.respired_out - before;
-    let basal_per_tick = 0.001 * 0.0125 * (1.0 / 20.0);
+    let basal_per_tick =
+        fauna.config().founder(Founder::Blind).core.maintenance_per_s * 0.0125 * (1.0 / 20.0);
     // Both founders pay basal upkeep on all 35 ticks and full-cruise motor on the 30
     // ticks their actions were held — the blocked attempt is attempted in full.
     let expected = 2.0 * 35.0 * basal_per_tick + 2.0 * 31.0 * basal_per_tick;
@@ -976,10 +985,13 @@ fn the_motor_respiration_counter_and_the_ledger_split_track_one_interval() {
     assert!(ledger.respired_motor_out > 0.0, "the ledger's motor split");
     assert!(ledger.respired_maintenance_out > 0.0, "ten ticks of upkeep");
     assert_eq!(ledger.respired_digestion_out, 0.0, "nothing was eaten");
-    assert_eq!(
-        ledger.respired_maintenance_out + ledger.respired_motor_out + ledger.respired_digestion_out,
-        ledger.respired_out,
-        "the split sums to the total to the bit"
+    // To the last place: the interleaved total and the per-split sums round apart by an
+    // ulp at the gut's per-day upkeep (the old 0.001/s happened to round alike).
+    let splits = ledger.respired_maintenance_out + ledger.respired_motor_out + ledger.respired_digestion_out;
+    assert!(
+        (splits - ledger.respired_out).abs() <= 4.0 * f64::EPSILON * ledger.respired_out,
+        "the split sums to the total: {splits} against {}",
+        ledger.respired_out
     );
 }
 

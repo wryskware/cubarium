@@ -599,17 +599,14 @@ fn a_bite_debits_the_stock_once_per_interval_and_conserves_the_three_currencies(
         ledger.bites
     );
     let manifest = Manifest::blind();
-    let want = cubarium_voxel_fauna::FounderPhysiology::frozen(Founder::Blind)
-        .core
-        .bite_per_s
-        * manifest.controller_period_s;
+    // The minimal gut's bite: `b · body · period`, whole while the eating latch is on (no
+    // hunger scaling). A bite a tick would have been ten of them.
+    let gut = cubarium_voxel_fauna::FounderPhysiology::frozen(Founder::Blind).gut;
+    let want = gut.bite_per_body_s * before_animal.body * manifest.controller_period_s;
     let debited = before_ground.0 - after_ground.0;
-    // The first bite of an empty reserve is a whole one; the second is scaled by what
-    // the first left short of the cap (package G's satiety), so it is smaller. A bite a
-    // tick would have been ten of them.
     assert!(
-        debited > want && debited < 2.0 * want,
-        "two bites debited {debited} of litter: one whole bite of {want} and a smaller one"
+        close(debited, 2.0 * want, 1e-3),
+        "two bites debited {debited} of litter: two whole bites of {want}"
     );
 
     // The debit is the same number on both sides of the boundary.
@@ -762,9 +759,10 @@ fn a_feed_effort_with_no_mouth_contact_transfers_nothing() {
         "only {} samples in 40 ticks",
         samples.len()
     );
-    for (k, o) in samples.iter().enumerate() {
-        assert_eq!(o[intake], 0.0, "sample {k} reported intake {}", o[intake]);
-    }
+    // The minimal gut: a founder's own stomach (`s0 K`) digests into its reserve, so the
+    // intake channel may read that; nothing from outside reached the stomach.
+    let _ = intake;
+    assert_eq!(fauna.view().ledger.swallowed.organic, 0.0, "nothing was swallowed");
 
     // Browser: a stand three columns off, the mouth in air. Taste is invalid without
     // contact, which is the direct evidence that there was no mouth contact to feed from.
@@ -900,7 +898,9 @@ fn self_feedback_reports_the_previous_interval_only_and_starts_at_zero() {
         "an unobstructed interval delivered {}",
         samples[1][delivery]
     );
-    assert_eq!(samples[1][intake], 0.0, "intake appeared without food");
+    // The minimal gut: its founding stomach digests, so intake may read without food;
+    // no bite was taken.
+    assert_eq!(fauna.view().ledger.bites, 0, "a bite without food");
 
     // Third sample: the rest interval, not the motion before it.
     assert_eq!(
@@ -916,11 +916,14 @@ fn self_feedback_reports_the_previous_interval_only_and_starts_at_zero() {
     );
 }
 
-/// The same rule for the one channel that needs food: `Self.assimilated_intake` is the
-/// previous interval's intake and nothing else. One feeding interval, then rest.
+/// The same rule for the one channel that needs food, **as the minimal gut changed it**:
+/// `Self.assimilated_intake` is the previous interval's assimilation and nothing else. A
+/// meal now digests over minutes, so the channel reads digestion interval by interval:
+/// each sample is proportional to what was assimilated in its own interval, not a
+/// running total. One feeding interval, then rest.
 ///
-/// A failure means a policy sees its meal for longer than it lasted — a reward signal
-/// leaking into the observation.
+/// A failure means a policy sees a running total, or an interval's intake leaking into
+/// the next.
 #[test]
 fn intake_feedback_is_the_previous_interval_only() {
     let world = flat(8, 3);
@@ -937,21 +940,26 @@ fn intake_feedback_is_the_previous_interval_only() {
     ]);
     assert!(fauna.set_controller(id, Box::new(recorder)));
     let mut senses = Senses::new();
-    run(&mut fauna, &world, &mut flora, &mut senses, 16);
-
+    let assimilated = |f: &Fauna| f.view().ledger.assimilated_by_founder[Founder::Blind.index()];
+    // Samples at ages 5, 10 and 15; a sample at age t reads ticks t - 4 ..= t.
+    let mut at = vec![assimilated(&fauna)];
+    for _ in 0..3 {
+        run(&mut fauna, &world, &mut flora, &mut senses, 5);
+        at.push(assimilated(&fauna));
+    }
+    let _ = id;
     let intake = slot(&Manifest::blind(), "Self", "assimilated_intake");
     let samples = log.lock().expect("log").clone();
     assert_eq!(samples.len(), 3);
-    assert_eq!(samples[0][intake], 0.0, "intake before the first bite");
+    assert_eq!(samples[0][intake], 0.0, "the first sample reads zero");
+    let (d1, d2) = (at[2] - at[1], at[3] - at[2]);
+    assert!(d1 > 0.0 && d2 > 0.0, "digestion ran in both intervals");
+    assert!(samples[1][intake] > 0.0 && samples[2][intake] > 0.0);
     assert!(
-        samples[1][intake] > 0.0,
-        "the interval that bit reported intake {}",
+        close(samples[2][intake] / samples[1][intake], d2 / d1, 1e-9),
+        "each sample is its own interval's assimilation: {} / {} against {d2} / {d1}",
+        samples[2][intake],
         samples[1][intake]
-    );
-    assert_eq!(
-        samples[2][intake], 0.0,
-        "the bite's intake was still on the wire an interval later: {}",
-        samples[2][intake]
     );
     assert_eq!(
         fauna.view().ledger.bites,

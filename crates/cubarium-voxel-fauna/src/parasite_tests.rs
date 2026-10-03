@@ -572,9 +572,10 @@ fn a_rider_drains_its_hosts_basal_share_and_the_books_close() {
     let (h1, t1) = (animal(&s.fauna, host), animal(&s.fauna, twin));
     let extra =
         (h0.stored_organic() - h1.stored_organic()) - (t0.stored_organic() - t1.stored_organic());
+    // The minimal gut: the take is `parasite_take_per_day` of the host's body per
+    // ecological day, whatever its upkeep.
     let c = s.fauna.config;
-    let basal = c.founder(Founder::Browser).core.maintenance_per_s * h0.body * DT;
-    let want = c.parasite_drain_of_host_basal * basal;
+    let want = c.parasite_take_per_day / c.life.ecological_day_s * h0.body * DT;
     assert!(want > 0.0);
     assert!(
         (extra - want).abs() <= 1e-6 * want,
@@ -589,7 +590,7 @@ fn a_rider_drains_its_hosts_basal_share_and_the_books_close() {
 #[test]
 fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
     let (mut s, _host, rider) = ride(FaunaConfig {
-        parasite_drain_of_host_basal: 0.0,
+        parasite_take_per_day: 0.0,
         ..config()
     });
     let a0 = animal(&s.fauna, rider);
@@ -606,7 +607,7 @@ fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
     s.assert_closes("undrained");
 
     let (mut s, _host, rider) = ride(FaunaConfig {
-        parasite_drain_of_host_basal: 1.0,
+        parasite_take_per_day: 7.2,
         ..config()
     });
     let cap = s
@@ -637,7 +638,7 @@ fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
 #[test]
 fn a_drained_host_starves_as_usual() {
     let (mut s, host, rider) = ride(FaunaConfig {
-        parasite_drain_of_host_basal: 1.0,
+        parasite_take_per_day: 7.2,
         ..config()
     });
     let min = s.fauna.config.founder(Founder::Browser).core.body_min;
@@ -671,7 +672,7 @@ fn a_drained_host_starves_as_usual() {
 #[test]
 fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
     let (mut s, host, rider) = ride(FaunaConfig {
-        parasite_drain_of_host_basal: 0.0,
+        parasite_take_per_day: 0.0,
         ..config()
     });
     let c = s.fauna.config;

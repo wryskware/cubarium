@@ -134,7 +134,12 @@ fn a_sleeper_at_the_wake_line_wakes_and_feeds() {
             wood,
         }
     ));
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    // The minimal gut: the pre-gut upkeep (0.001/s) so the line is reached inside the
+    // case's 2,000 ticks, and an empty founding stomach so nothing digests into it.
+    let mut config = FaunaConfig::default();
+    config.founders[Founder::Browser.index()].core.maintenance_per_s = 0.001;
+    config.founders[Founder::Browser.index()].gut.s0 = 0.0;
+    let mut fauna = Fauna::new(config);
     let h = fauna.config.founder(Founder::Browser).wake_hunger;
     let id = introduce(
         &mut fauna,
@@ -165,6 +170,8 @@ fn a_sleeper_at_the_wake_line_wakes_and_feeds() {
         f.ledger.bites_by_founder[Founder::Browser.index()] > bites
     })
     .expect("awake, with food at its mouth, it bites");
+    // The minimal gut: the bite is digested from the next tick.
+    fauna.step_with(&world, &mut flora, 1);
     assert!(fauna.ledger.assimilated_by_founder[Founder::Browser.index()] > assimilated);
     feed.store(false, Ordering::Relaxed);
     assert_closes(&fauna, "after the emergency meal");
