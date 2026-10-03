@@ -33,7 +33,9 @@
 //! nectar-holding flower heads a bellwing can fly to through air under its band ceiling
 //! (and with no ceiling): a point body, so an upper bound. `packtrace=S` prints, every S
 //! seconds, each pack's target and feast (carrion left, carcass record) and each member's
-//! state, latch and distances.
+//! state, latch and distances. `bwlife` tracks every bellwing from founding or hatching to
+//! death and prints one `bwdeath:` line per death (founder or hatchling, cause, age, size,
+//! endowment and the cruise seconds it pays, sips, aloft share) and a `bwlife:` summary.
 //!
 //! An optional `seedporters=N` (F3's measure) does the same for the seedporter (its count
 //! on the asked seed). The run then prints a `seedporter:` census line — body-hours, the
@@ -96,6 +98,8 @@ fn main() {
     let mut trace: Option<u64> = None;
     // `packtrace=S`: every S seconds, one line per pack and per member (a diagnostic).
     let mut packtrace: Option<u64> = None;
+    // `bwlife`: one line per bellwing death (age, size, endowment, sips), and a summary.
+    let mut bwlife_on = false;
     // `reach`: at t = 0 and every 15 minutes, which bloom heads a bellwing can fly to.
     let mut reach = false;
     for a in args.iter().skip(4) {
@@ -107,6 +111,8 @@ fn main() {
             seedporters = Some(n.parse().expect("seedporters=N"));
         } else if let Some(n) = a.strip_prefix("bellwings=") {
             bellwings = Some(n.parse().expect("bellwings=N"));
+        } else if a == "bwlife" {
+            bwlife_on = true;
         } else if a == "reach" {
             reach = true;
         } else if let Some(n) = a.strip_prefix("packtrace=") {
@@ -216,12 +222,16 @@ fn main() {
     let mut gut = GutTally::default();
     gut.bellwing_reserve0 = bellwing_reserve(&sim, &params);
     let mut pack_events: Vec<cubarium_voxel_fauna::PackEvent> = Vec::new();
+    let mut bwlife = BwLife::new(&sim);
     let start_hour = params.world.day.start_hour;
     let day_s = params.world.day.day_s();
     for tick in 1..=ticks {
         sim.step();
         gut.observe(&sim, &params, start_hour, day_s, tick);
         pack_events.extend(sim.fauna_mut().take_pack_events());
+        if bwlife_on {
+            bwlife.observe(&sim, &params, tick);
+        }
         night.observe(&sim, &params, &mut prev_asleep, &mut prev_deaths);
         {
             use cubarium_voxel_fauna::MobilityMode;
@@ -548,6 +558,9 @@ fn main() {
     night.print(&sim);
     gut.print(&sim, &params, &born);
     print_packs(&sim, &pack_events);
+    if bwlife_on {
+        bwlife.summary(&sim, &params);
+    }
     let foods: Vec<String> = Food::ALL
         .iter()
         .map(|f| format!("{}={}", f.name(), l.bites_by_food[f.index()]))
@@ -1042,6 +1055,154 @@ fn print_reach(sim: &Sim, params: &cubarium_voxel_sim::params::Params, minute: u
             reachable_any,
             per_bird.join(" ")
         );
+    }
+}
+
+/// One bellwing's life so far (`bwlife`).
+struct BwRecord {
+    born_tick: u64,
+    founder: bool,
+    body0: f64,
+    reserve0: f64,
+    nectar_last: f64,
+    sips: u64,
+    first_sip_tick: Option<u64>,
+    aloft: u64,
+    ticks: u64,
+    last: cubarium_voxel_fauna::Animal,
+}
+
+/// `bwlife`: every bellwing tracked from birth (or founding) to death.
+struct BwLife {
+    live: std::collections::HashMap<u64, BwRecord>,
+    prev_deaths: [u64; 8],
+    dead: Vec<(BwRecord, u64, String)>,
+}
+
+impl BwLife {
+    fn new(sim: &Sim) -> BwLife {
+        let mut live = std::collections::HashMap::new();
+        for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(Founder::Bellwing)) {
+            live.insert(a.id, BwLife::record(a, 0, true));
+        }
+        let mut prev = [0u64; 8];
+        let d = sim.fauna().view().ledger.deaths_by_founder_cause[Founder::Bellwing.index()];
+        for (k, v) in d.iter().enumerate().take(8) {
+            prev[k] = *v;
+        }
+        BwLife { live, prev_deaths: prev, dead: Vec::new() }
+    }
+
+    fn record(a: &cubarium_voxel_fauna::Animal, tick: u64, founder: bool) -> BwRecord {
+        BwRecord {
+            born_tick: tick,
+            founder,
+            body0: a.body,
+            reserve0: a.reserve,
+            nectar_last: a.stomach.pools[Food::Nectar.index()].organic,
+            sips: 0,
+            first_sip_tick: None,
+            aloft: 0,
+            ticks: 0,
+            last: *a,
+        }
+    }
+
+    fn observe(&mut self, sim: &Sim, _params: &cubarium_voxel_sim::params::Params, tick: u64) {
+        let view = sim.fauna().view();
+        let mut seen: HashSet<u64> = HashSet::new();
+        for a in view.animals.iter().filter(|a| a.founder == Some(Founder::Bellwing)) {
+            seen.insert(a.id);
+            let r = self.live.entry(a.id).or_insert_with(|| BwLife::record(a, tick, false));
+            let n = a.stomach.pools[Food::Nectar.index()].organic;
+            if n > r.nectar_last + 1e-15 {
+                r.sips += 1;
+                r.first_sip_tick.get_or_insert(tick);
+            }
+            r.nectar_last = n;
+            r.ticks += 1;
+            if a.mobility.mode == cubarium_voxel_fauna::MobilityMode::Fly {
+                r.aloft += 1;
+            }
+            r.last = *a;
+        }
+        let gone: Vec<u64> = self.live.keys().copied().filter(|id| !seen.contains(id)).collect();
+        if gone.is_empty() {
+            return;
+        }
+        let d = view.ledger.deaths_by_founder_cause[Founder::Bellwing.index()];
+        let mut causes: Vec<String> = Vec::new();
+        for (k, v) in d.iter().enumerate().take(8) {
+            for _ in self.prev_deaths[k]..*v {
+                causes.push(format!("{:?}", Departure::ALL.get(k).copied()));
+            }
+            self.prev_deaths[k] = *v;
+        }
+        let cause = if causes.len() == gone.len() && causes.windows(2).all(|w| w[0] == w[1]) {
+            causes.first().cloned().unwrap_or_else(|| "?".into())
+        } else {
+            format!("{causes:?}")
+        };
+        for id in gone {
+            let r = self.live.remove(&id).expect("tracked");
+            self.dead.push((r, tick, cause.clone()));
+        }
+    }
+
+    fn summary(&self, sim: &Sim, params: &cubarium_voxel_sim::params::Params) {
+        let p = params.fauna.founder(Founder::Bellwing);
+        let flight = p.flight.expect("a flyer");
+        let hz = f64::from(cubarium_voxel::TICK_HZ);
+        // Seconds of cruise its reserve pays at its body (flight_factor x basal).
+        let cruise_s = |reserve: f64, body: f64| reserve / (flight.flight_factor * p.core.maintenance_per_s * body);
+        println!(
+            "bwlife_table: body_min={:.6} body_max={:.6} birth_body={:.6} birth_cost={:.6} egg_organic={:.6} clutch={} reserve_cap={:.3} cruise_s_of_hatchling_reserve={:.0}",
+            p.core.body_min,
+            p.core.body_max,
+            p.core.birth_body,
+            p.core.birth_cost,
+            p.core.reproduction.egg_organic,
+            p.core.reproduction.clutch_size,
+            p.core.reserve_cap,
+            cruise_s(p.core.reproduction.egg_organic - p.core.body_min, p.core.body_min)
+        );
+        for (r, tick, cause) in &self.dead {
+            let a = &r.last;
+            println!(
+                "bwdeath: {} cause={} born_min={:.1} age_s={:.0} body={:.6} body/max={:.3} body0={:.6} reserve0={:.6} reserve0_cruise_s={:.0} reserve_end={:.6} sips={} first_sip_age_s={} aloft={:.2} site=({},{},{}) mode={:?}",
+                if r.founder { "founder" } else { "hatchling" },
+                cause,
+                r.born_tick as f64 / hz / 60.0,
+                (tick - r.born_tick) as f64 / hz,
+                a.body,
+                a.body / p.core.body_max,
+                r.body0,
+                r.reserve0,
+                cruise_s(r.reserve0, r.body0),
+                a.reserve,
+                r.sips,
+                r.first_sip_tick.map_or("-".into(), |t| format!("{:.0}", (t - r.born_tick) as f64 / hz)),
+                r.aloft as f64 / r.ticks.max(1) as f64,
+                a.site.x,
+                a.site.y,
+                a.site.z,
+                a.mobility.mode,
+            );
+        }
+        let live = |founder: bool| self.live.values().filter(move |r| r.founder == founder);
+        let dead = |founder: bool| self.dead.iter().filter(move |d| d.0.founder == founder);
+        for (label, f) in [("founder", true), ("hatchling", false)] {
+            println!(
+                "bwlife: {label} n={} alive={} dead={} ever_sipped_alive={} ever_sipped_dead={} mean_body/max_alive={:.3}",
+                live(f).count() + dead(f).count(),
+                live(f).count(),
+                dead(f).count(),
+                live(f).filter(|r| r.sips > 0).count(),
+                dead(f).filter(|d| d.0.sips > 0).count(),
+                live(f).map(|r| r.last.body / p.core.body_max).sum::<f64>() / live(f).count().max(1) as f64,
+            );
+        }
+        let _ = sim;
     }
 }
 

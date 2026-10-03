@@ -1401,6 +1401,45 @@ fn a_spent_carcass_ends_the_feast_and_the_pack_hunts_again() {
     assert!(set.is_some(), "the hungry pack hunts again");
 }
 
+/// **A pack takes only prey it can reach** (`design/handoffs/bellwing-finding-2026-10-03.md`
+/// item 3, the coordinator's reachability call): the grazer in front of a hungry pack
+/// stands on a rock ledge 1 m over the plain, past the chorister's 0.6 m step up, so it is
+/// in no walking route component of the pack's: never targeted. With no ledge the same
+/// grazer is taken (seed 1 ran 74 timed-out chases at grazers on a cliff top 3 m up).
+#[test]
+fn a_pack_never_targets_prey_on_a_ledge_it_cannot_climb() {
+    for ledge in [true, false] {
+        let (mut world, mut flora, mut fauna, _adults, prey) =
+            pack_scene(&[(2.0, 1.5, true), (2.0, 2.3, true)], (3.6, 1.5));
+        if ledge {
+            // Columns 13..=16 (3.25 to 4.25 m), rock up to y = 6: a 1 m riser.
+            for z in 0..12u32 {
+                for x in 13..=16i64 {
+                    for y in SURFACE_Y + 1..=SURFACE_Y + 4 {
+                        world.apply(cubarium_voxel::Command::SetMaterial {
+                            x,
+                            y,
+                            z,
+                            material: cubarium_voxel::Material::Rock,
+                        });
+                    }
+                }
+            }
+            let a = animal_mut(&mut fauna, prey);
+            a.site.y = SURFACE_Y + 4;
+            a.pose.y_m = f64::from(SURFACE_Y + 5) * 0.25;
+        }
+        let pack = fauna.packs()[0].id;
+        let set = step_until(&mut fauna, &world, &mut flora, 60, |f| f.pack(pack).is_some_and(|p| p.target.is_some()));
+        if ledge {
+            assert!(set.is_none(), "the grazer on the ledge is never the pack's target");
+            assert_eq!(fauna.ledger.pack_chases, 0);
+        } else {
+            assert!(set.is_some(), "the same grazer on the plain is taken");
+        }
+    }
+}
+
 /// **The reserve fallback is the old transfer** (repair 3 item 6): a pup whose stomach is
 /// full (its eating latch off) but whose reserve is low still receives reserve from an
 /// adult with an empty stomach and a surplus reserve.

@@ -1070,9 +1070,18 @@ impl Controller for HoverSip {
         if self.since < HOVER_SIP_REPLAN && !sip_now && self.since > 0 && self.last != Actions::REST {
             return Response::Bounded(self.last);
         }
+        // Under cover close overhead it holds the middle of the gap between the floor and
+        // the cover instead (as far down as its search height): it never climbs into the
+        // cover, and never scrapes along the floor, where a one-voxel lip blocks it —
+        // a hatchling hatched on its face under an overhang hung there, turning in place,
+        // until it starved (bellwing-finding follow-up 2).
         let hold = |alt: f64| {
             let lift = (cfg.bellwing_altitude_gain * (cfg.bellwing_cruise_altitude - alt)).clamp(-1.0, 1.0);
-            if overhead < cfg.bellwing_roost_ceiling { lift.min(0.0) } else { lift }
+            if overhead < cfg.bellwing_roost_ceiling {
+                lift.min((cfg.bellwing_altitude_gain * 0.5 * (overhead - alt)).clamp(-1.0, 1.0))
+            } else {
+                lift
+            }
         };
 
         // A bloom at the mouth: sip.

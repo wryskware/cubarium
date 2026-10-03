@@ -625,6 +625,11 @@ pub(crate) fn steer(
         let mates = near.len();
         let participating = near.iter().filter(|b| participates(b, own)).count();
         if mates > 0 {
+            // Only prey it can reach: standing in the taker's own walking route
+            // component (bellwing-finding item 3: grazers on a cliff top 3 m over the pack
+            // drew 74 timed-out chases in seed 1).
+            let routes = fauna.pack_routes(view, founder);
+            let own_component = routes.get(&a.site).copied();
             let window = window_body(fauna, i, ring);
             let sight = manifest.cone_range_m;
             let (fx, fz) = a.pose.forward();
@@ -639,6 +644,9 @@ pub(crate) fn steer(
                     || best.is_some_and(|(b, _, _)| d >= b)
                     || fauna.pack(own).and_then(|p| p.abandoned) == Some(o.id)
                 {
+                    continue;
+                }
+                if own_component.is_none() || routes.get(&o.site).copied() != own_component {
                     continue;
                 }
                 if !crate::predation::is_prey_in_window(&fauna.config, &a, o, window)

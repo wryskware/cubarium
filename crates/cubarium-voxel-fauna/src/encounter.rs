@@ -394,6 +394,20 @@ pub fn route_components(
     cubarium_voxel::walk::components_linked(&cells, c.width, rule.step.mutual(), &links)
 }
 
+/// A founder lineage's **walking route components**, by face: [`RouteMap::for_founder`]'s
+/// faces and components (its adult body, wade depth, step and walls) without the mouth
+/// columns, for a question asked per tick ("is that body in my component?").
+pub fn route_component_index(view: &VoxelView<'_>, phys: &crate::FounderPhysiology) -> FxHashMap<Site, usize> {
+    let body = phys.adult_body();
+    let faces = standable_faces(view, &body, phys.wade_depth_m(&body));
+    let rule = RouteRule {
+        step: phys.step_limits(view.config.voxel_m),
+        climbs_walls: phys.climbs_walls,
+    };
+    let components = route_components(view, &faces, rule, body.headroom_voxels(view.config.voxel_m));
+    faces.into_iter().zip(components).collect()
+}
+
 /// The faces a lineage's founders may be placed on (fix 2,
 /// `design/handoffs/browser-stuck-in-crags-2026-10-01.md`): standable for its adult body,
 /// in the **largest** component of the graph below. A founder with its disc in a wall can
