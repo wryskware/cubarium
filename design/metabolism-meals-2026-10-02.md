@@ -227,9 +227,11 @@ implements this section, and Astra reviews the implementation, not another draft
 5. **Juveniles and lifespans [M4, M11].**
    - Maturation is measured, not promised. The plan expects about 1.5 world days at the
      grazer's maximum digestion throughput (1.8 current bodies a day).
-   - Lifespans rise so that maturation is at most a quarter of the median life:
-     - small lineages (shredder, snail, capgnawer, bellwing, seedporter): 6 world days;
-     - frondgrazer, loftstrider: 8 world days;
+   - Lifespans rise so that maturation is at most a quarter of the median life. These are
+     Wrysk's values, 2026-10-03, by size:
+     - loftstrider: 16 world days;
+     - seedporter, frondgrazer: 8 world days;
+     - shredder, snail, capgnawer, bellwing: 6 world days;
      - lanternjaw, chorister: 12 world days.
    - The live medians are 1.22 world days (small) and 2.02 (lanternjaw).
 6. **Provisioning [M6].**
