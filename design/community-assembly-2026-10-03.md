@@ -120,3 +120,155 @@ search's food screens, so one module serves all three.
    tests whether it can hold.
 5. What would make a staged-arrival world fail to reach a full community at all, and how
    should that be scored?
+
+---
+
+## Revision 2 (after Astra's review, `design/7_Research/astra-community-assembly-review-2026-10-03.md`)
+
+Astra said revise, with three blocking findings: a shared food budget, predator units, and
+"never arriving" as an escape. This revision overrides Parts 1–2 above where they differ.
+
+### R1. Two evaluation settings, scored separately [A5]
+
+- **The established setting:** the ecology grid, the ecology search and brain comparisons.
+  - Every candidate starts from the **same shared, paired ensemble** of starting states, not
+    from candidate-specific ones.
+  - Here all nine lineages are present and **all are scored**, including the chorister,
+    lanternjaw and loftstrider. Their readout-only flags apply only to today's
+    founders-only diagnostic.
+- **The assembly setting:** a smaller staged-arrival arm from a bare world, run on
+  finalists only.
+- **Finalists must pass both.** The two results are reported separately and never averaged.
+- **Today's founding** remains a disclosed early-community diagnostic. It doesn't rank the
+  full community.
+
+### R2. The starting ensemble [A4, A8]
+
+Three levels, the same states for every candidate:
+1. **E0, today's founding.** The diagnostic.
+2. **E1, constructed rich.** Built by explicit construction, not predicted from a candidate's
+   parameters:
+   - mature vaulttree groves and latticevine colonies on walls, at fixed densities;
+   - roughly 3× today's consumer founders;
+   - one chorister pack sized to the prey present.
+
+   All injected organic matter, mineral and energy is booked: wood, soil and film, reserves,
+   stomachs, eggs. Ages, sizes and reproductive states are drawn as consistent sets: a
+   juvenile is small and not gravid.
+3. **E2, grown.** A staged-arrival run (R4) carried past the last arrival plus one world day,
+   then saved. Hard seeds are kept; a seed where something never arrives stays in the panel,
+   with its failure on record.
+
+**Episode contract:** every evaluation loads a start through one initializer, which:
+- matches the layer files, tick and phase, resolved parameters, and build and policy
+  identities;
+- applies the candidate's parameters over the loaded state;
+- resets controller memory, followed by a fixed burn-in that is the same for every
+  candidate;
+- reads scores from checkpoint-relative ledger baselines.
+
+Starts are disposable. They are regenerated when relevant code or config changes.
+
+**Relaxation is judged by trends, not a fixed hour:** stores, producer stocks and recruitment
+over phase-aligned windows. The startup interval is reported on its own.
+
+Candidate-specific constructed starts may come later as a second treatment, never as the
+only comparison.
+
+### R3. One shared food budget [A1, A2]
+
+Readiness and construction both use one local resource budget:
+- Each source (stand, vine face, litter cell, glowcap, film, prey cohort) is allocated **once**
+  across resident and prospective consumers.
+- **Supply is realised:** a rolling, spatially indexed estimate of edible production, taken
+  from source-level production, withdrawal and loss counters. Counters are added where the
+  state lacks them. A standing-stock buffer is reported beside it.
+  - The configured-rate estimates in the search screens stay as optimistic bounds, labelled
+    as such.
+- **Demand is assimilated:** the allocation converts at the eater's effective,
+  mineral-limited yield, against rhythm-aware basal demand plus explicit allowances for
+  activity and family (growth, reproduction, provisioning, riders).
+- `K_L` is a provisional food-budget bound under that allocation. It is not carrying
+  capacity.
+- **Total bodies and placement attempts are capped,** so a low-upkeep candidate can't flood
+  the world through the initializer.
+
+### R4. Staged arrival [A1, A6, A7]
+
+**The required roster** is all nine lineages. Each has an explicit state:
+- pending;
+- ready but unplaceable;
+- arrived;
+- established (recruiting from new food, not from an endowment);
+- extinct;
+- deadline missed.
+
+**Rules:**
+- **Readiness:** realised allocated supply ≥ `margin_on × demand` turns it on, and below
+  `margin_off` turns it off (`margin_off < margin_on`). It must hold for `sustain_s`.
+- **Deadline:** a lineage not arrived at `max_wait_s` is an **assembly failure**, with its
+  reason: production, contested supply, missing habitat, den or host, placement, or failure
+  after arrival. No forced immigration erases it.
+- **A late arrival** starts its own post-arrival observation window.
+- **A fresh egg bank** is not an established predator.
+
+**Arrival units** follow each founding mode:
+- bodies, via a new general staged-arrival wrapper;
+- packs, via `introduce_packs`, which needs a dry den in a prey component;
+- clutches, via `bury_founding_clutches`, which counts eggs.
+
+Actual counts and failed attempts are recorded.
+
+**Placement:**
+1. Pick a viable local component that has the allocated budget.
+2. Pick a valid arrival face inside it (route, headroom, water, a usable food patch at the
+   site).
+3. Reserve resources only for arrivals actually placed.
+
+"Nearest edge" is presentation only. Wrapped seams are not outside edges.
+
+**Scheduler state persists with the save:** the pending roster, readiness history, deadlines
+and immigration state.
+
+### R5. Predators [A3]
+
+The harvest budget for a predator lineage is `β × P × y × e ≥ D`, where:
+
+| term | meaning |
+|---|---|
+| `P` | renewable, eligible prey production, in raw organic units per day |
+| `y` | effective carrion yield |
+| `e` | the fraction captured and eaten before loss (scavengers, decay) |
+| `β` | the allocated harvest share: a tuning knob, starting at 0.1–0.3, not a known bound |
+| `D` | predator demand, assimilated |
+
+- **P** is the structural biomass of births plus later structural growth. Reserve transfers
+  into offspring are not counted twice. Deaths, and the share available to predators, are
+  reported separately.
+- **At y = 0.5 and e = 1,** `β` 0.1–0.3 means `P/D ≥ 6.7–20`.
+- **Predators also need** a non-depleting prey cohort and enough **standing eligible prey**
+  in the prey windows, judged against the participating pack's strength and its reachable
+  components.
+- **One harvest allocation** is shared across predator lineages.
+- **The lanternjaw** also needs a host check: hosts within the hatchlings' reach, and a host
+  budget for rider growth.
+- **Before any of this, the control defects get fixed** (the empty feasts readout, the
+  timeout-heavy chase world). That is package `bellwing`, running now.
+
+### R6. Measures [A9]
+
+- B, R̂, access and sated share stay as diagnostics. They sit next to:
+  - cohort size, actual births and maturation;
+  - cause-specific deaths;
+  - stores and producer stocks over time.
+- **Undefined (NaN) is never success.**
+- **R̂ is not used for predator admission.** That uses R5's harvestable production.
+- **A funded first birth is kept apart from recruitment** sustained by new food.
+
+### Build order
+
+1. **The episode initializer and E0/E1 starts.** The grid needs these first; until they
+   exist, it runs on E0, disclosed as such.
+2. **Source-level production and withdrawal counters,** and the shared budget (R3).
+3. **The staged-arrival scheduler** with the required roster (R4), which also makes E2.
+4. **Predator harvest budgets** (R5), after `bellwing` lands.
