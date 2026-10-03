@@ -989,6 +989,12 @@ fn print_header() {
     // Parasite hatchlings: riders on a host now, then cumulative riders attached,
     // drop-offs at the detach size and riders freed by their host's departure.
     header.push_str(",riders_now,riders_attached,rider_dropoffs,riders_freed");
+    // Flowering and fruiting (plants-flowering-vines 2026-10-03): the latticevine's
+    // covered faces (on walls, on undersides) and its spurs by phase, the organic matter
+    // in its flowers and beads; bloomcrowns holding nectar and lanternberries hanging
+    // fruit, and the organic matter in each.
+    header.push_str(",vines,vine_faces,vine_wall_faces,vine_under_faces,vine_buds,vine_flowers,vine_fruits");
+    header.push_str(",vine_nectar,vine_fruit,bloom_in_nectar,bloom_nectar,lantern_in_fruit,lantern_fruit");
     println!("{header}");
 }
 
@@ -1191,6 +1197,26 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
     row.push(l.riders_attached.to_string());
     row.push(l.rider_dropoffs.to_string());
     row.push(l.riders_freed.to_string());
+    {
+        use cubarium_voxel_flora::SpurPhase;
+        let faces = f.cover.faces();
+        let phase = |p: SpurPhase| faces.iter().filter(|c| c.spur == p).count();
+        let under = faces.iter().filter(|c| c.face.dir.is_underside()).count();
+        row.push(f.cover.vines().len().to_string());
+        row.push(faces.len().to_string());
+        row.push((faces.len() - under).to_string());
+        row.push(under.to_string());
+        row.push(phase(SpurPhase::Bud).to_string());
+        row.push(phase(SpurPhase::Flower).to_string());
+        row.push(phase(SpurPhase::Fruit).to_string());
+        row.push(format!("{:.6}", faces.iter().map(|c| c.nectar).sum::<f64>()));
+        row.push(format!("{:.6}", faces.iter().map(|c| c.fruit).sum::<f64>()));
+        let of = |sp: Plant| f.stands.iter().filter(move |s| s.species == sp);
+        row.push(of(Plant::Bloomcrown).filter(|s| s.nectar > 0.0).count().to_string());
+        row.push(format!("{:.6}", of(Plant::Bloomcrown).map(|s| s.nectar).sum::<f64>()));
+        row.push(of(Plant::Lanternberry).filter(|s| s.fruit > 0.0).count().to_string());
+        row.push(format!("{:.6}", of(Plant::Lanternberry).map(|s| s.fruit).sum::<f64>()));
+    }
     println!("{}", row.join(","));
 }
 
