@@ -197,6 +197,15 @@ impl GpuTarget {
         }
     }
 
+    /// Whether Ctrl+S was pressed in the development window since the last call.
+    pub fn take_save_request(&mut self) -> bool {
+        match self {
+            GpuTarget::Window(t) => std::mem::take(&mut t.save),
+            GpuTarget::WindowThread(t) => std::mem::take(&mut t.save),
+            _ => false,
+        }
+    }
+
     pub fn finish(&mut self, _gpu: &Gpu) -> Result<()> {
         Ok(())
     }
@@ -226,6 +235,8 @@ pub struct SwapchainWindow {
     host: Option<Host>,
     presenter: WindowPresenter,
     pub open: bool,
+    /// Ctrl+S was pressed since the run loop last asked.
+    pub save: bool,
     /// The event pump, which is the one thing about the window left on the loop: calls,
     /// and total and worst nanoseconds. It reads the socket the presenting thread's WSI
     /// also reads, so it is measured rather than assumed to be free.
@@ -258,6 +269,14 @@ impl Host {
                 let (w, h) = w.get_size();
                 (w as u32, h as u32)
             }
+        }
+    }
+
+    /// Whether Ctrl+S was pressed since the last call. Read after [`Host::pump`].
+    fn take_save(&mut self) -> bool {
+        match self {
+            Host::Wayland(w) => w.take_save(),
+            Host::Xlib(w) => ctrl_s(w),
         }
     }
 
@@ -343,6 +362,7 @@ impl SwapchainWindow {
             host: Some(host),
             presenter,
             open: true,
+            save: false,
             pumps: 0,
             pump_ns: 0,
             pump_max_ns: 0,
@@ -356,6 +376,7 @@ impl SwapchainWindow {
             .expect("the window is only let go of at destroy");
         let at = Instant::now();
         let open = host.pump()?;
+        self.save |= host.take_save();
         let ns = at.elapsed().as_nanos() as u64;
         self.pumps += 1;
         self.pump_ns += ns;
@@ -428,6 +449,14 @@ pub struct WindowTarget {
     zoom: usize,
     size: (usize, usize),
     pub open: bool,
+    /// Ctrl+S was pressed since the run loop last asked.
+    pub save: bool,
+}
+
+/// Ctrl+S pressed in a `minifb` window since the last update (a held S does not repeat).
+fn ctrl_s(w: &minifb::Window) -> bool {
+    w.is_key_pressed(minifb::Key::S, minifb::KeyRepeat::No)
+        && (w.is_key_down(minifb::Key::LeftCtrl) || w.is_key_down(minifb::Key::RightCtrl))
 }
 
 impl WindowTarget {
@@ -453,6 +482,7 @@ impl WindowTarget {
         };
         Ok(WindowTarget {
             window,
+            save: false,
             headless: Headless::new(gpu, src)?,
             buffer: vec![0; size.0 * size.1],
             zoom,
@@ -469,6 +499,7 @@ impl WindowTarget {
             self.open = false;
             return Ok(ms);
         }
+        self.save |= ctrl_s(&self.window);
         self.window
             .update_with_buffer(&self.buffer, self.size.0, self.size.1)
             .context("updating the --gpu-target window")?;

@@ -7,7 +7,12 @@
 //! running (pause, single-step, speed, rain, set a cell's material, save, load, inspect,
 //! outlet, quit).
 //!
-//! **`w` and `l` are terrain only** (Astra R9.6). `World::save`/`World::load` carry the
+//! **`save [DIR]` saves the whole world** — the world, the plants and the animals, in the
+//! layered snapshot `--load DIR` resumes — on demand, whether or not the run has a state
+//! directory; `SIGUSR1` and Ctrl+S in the development window do the same into
+//! `saves/<time>-t<tick>/` ([`save`]).
+//!
+//! **`save-terrain` and `l` are terrain only** (Astra R9.6). `World::save`/`World::load` carry the
 //! voxels, the water and the world's own tick, and **nothing** of the plant or animal
 //! layers: there is no atomic world/flora/fauna envelope yet, and the plant layer does not
 //! serialize at all. So `l` is refused in place whenever this run holds ecology state — any
@@ -47,6 +52,7 @@ pub mod model;
 pub mod placement;
 pub mod present;
 pub mod project;
+pub mod save;
 pub mod sleep;
 pub mod stand;
 pub mod textures;
@@ -101,7 +107,8 @@ const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 cha
                         e [N] bury N lanternjaw egg clutches where prey live, \
                         j [N] introduce N adult lanternjaws where prey live, \
                         k [N] found N chorister packs on covered dens near prey, \
-                        w PATH save the terrain only, \
+                        save [DIR] save the whole world (default saves/<time>-t<tick>/), \
+                        save-terrain PATH save the terrain only, \
                         l PATH load a terrain only (refused once anything is alive), \
                         i X Y Z inspect, o outlet, q quit";
 
@@ -850,6 +857,28 @@ fn save_voxel_snapshot(dir: &Path, world: &World, layers: Option<(&Flora, &Fauna
     }
 }
 
+/// The whole world, plants and animals into `dir`, made if missing, in the layout
+/// `--load DIR` resumes. Says on stderr where it went, or why it did not.
+fn save_whole_world(dir: &Path, world: &World, flora: &Flora, fauna: &Fauna) {
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        eprintln!("cubarium voxel: save to {}: {e}", dir.display());
+        return;
+    }
+    save_voxel_snapshot(dir, world, Some((flora, fauna)));
+    let tick = world.tick();
+    let (flora_file, fauna_file) = layer_files(dir, tick);
+    let world_file = dir.join(format!("world-{tick}.voxel"));
+    if world_file.is_file() && flora_file.is_file() && fauna_file.is_file() {
+        eprintln!(
+            "cubarium voxel: saved the whole world to {}/ — resume with `--load {}`",
+            dir.display(),
+            dir.display()
+        );
+    } else {
+        eprintln!("cubarium voxel: save to {} failed", dir.display());
+    }
+}
+
 /// The plant and animal layers saved with `world-N.voxel`, if both are there and load.
 /// `None` (said on stderr when the files exist) means the caller seeds afresh.
 fn load_layers(dir: &Path, tick: u64) -> Option<(Flora, Fauna)> {
@@ -909,6 +938,36 @@ impl SnapshotWriter {
         let (world, flora, fauna) = (world.clone(), flora.clone(), fauna.clone());
         let dir = self.dir.clone();
         self.spawn(move || save_voxel_snapshot(&dir, &world, Some((&flora, &fauna))))
+    }
+
+    /// Whether a write is still in flight.
+    fn busy(&self) -> bool {
+        self.in_flight.as_ref().is_some_and(|h| !h.is_finished())
+    }
+
+    /// The on-demand save: the whole world into `dir` (made if missing), off the loop.
+    /// A request while the last one is still writing is refused and said so, not queued.
+    fn save_whole_to(
+        &mut self,
+        dir: PathBuf,
+        world: &World,
+        flora: &Flora,
+        fauna: &Fauna,
+    ) -> bool {
+        if self.busy() {
+            eprintln!(
+                "cubarium voxel: the last save is still writing; not saving to {} — ask again",
+                dir.display()
+            );
+            return false;
+        }
+        eprintln!(
+            "cubarium voxel: saving the whole world at tick {} to {}/",
+            world.tick(),
+            dir.display()
+        );
+        let (world, flora, fauna) = (world.clone(), flora.clone(), fauna.clone());
+        self.spawn(move || save_whole_world(&dir, &world, &flora, &fauna))
     }
 
     /// Run `job` as the one write in flight. The seam the tests hold a write open with.
@@ -1159,6 +1218,8 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         None => VoxelConfig::default(),
     };
     args.validate()?;
+    // Before the founding: until it is installed, SIGUSR1's default action ends the run.
+    save::install_save_signal();
     if args.sink == VoxelSinkArg::Png && args.seconds <= 0.0 {
         bail!("`--sink png` needs `--seconds N`, or it would capture until interrupted");
     }
@@ -1623,8 +1684,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         None
     };
     if let Some(s) = snapshots.as_mut() {
-        s.placement = placed;
+        s.placement = placed.clone();
     }
+    // `save [DIR]`, SIGUSR1 and Ctrl+S: the whole world on demand, with or without a
+    // state directory. Its own writer, so a running snapshot never refuses it.
+    let mut on_demand = SnapshotWriter::new(PathBuf::from(save::SAVES_DIR));
+    on_demand.placement = placed;
     // The resolved parameter set, beside what this run writes: its state directory, or
     // the PNG captures. A run that writes nothing has nowhere to put it.
     let params_dir = snapshots
@@ -1687,6 +1752,15 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
         if ctl.quit {
             break;
+        }
+        let asked = ctl.save_to.take().or_else(|| {
+            let now = std::time::SystemTime::now();
+            (save::take_save_signal() || out.take_save_request())
+                .then(|| save::default_save_dir(now, sim.world().tick()))
+        });
+        if let Some(dir) = asked {
+            let (world, flora, fauna) = sim.layers();
+            on_demand.save_whole_to(dir, world, flora, fauna);
         }
 
         match clock.next_step(now) {
@@ -1752,6 +1826,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     }
 
     out.finish()?;
+    on_demand.wait();
     if let Some(s) = snapshots.as_mut() {
         let (world, flora, fauna) = sim.layers();
         s.save_now(world, flora, fauna);
@@ -2340,6 +2415,14 @@ impl Out {
         }
     }
 
+    /// Whether Ctrl+S was pressed in the development window since the last call.
+    fn take_save_request(&mut self) -> bool {
+        match self {
+            Out::Cpu { .. } => false,
+            Out::Gpu(gpu) => gpu.take_save_request(),
+        }
+    }
+
     fn finish(&mut self) -> Result<()> {
         match self {
             Out::Cpu { sink, .. } => sink.finish(),
@@ -2746,6 +2829,8 @@ struct Control {
     outlet: bool,
     quit: bool,
     proj: Projection,
+    /// A whole-world save `save [DIR]` asked for, for the loop to start off the frame.
+    save_to: Option<PathBuf>,
 }
 
 impl Control {
@@ -2757,6 +2842,7 @@ impl Control {
             outlet: false,
             quit: false,
             proj,
+            save_to: None,
         }
     }
 
@@ -2858,7 +2944,14 @@ impl Control {
                     if self.outlet { "open" } else { "closed" }
                 );
             }
-            "w" | "save" => match rest.first() {
+            "w" | "save" => {
+                let dir = rest.first().map_or_else(
+                    || save::default_save_dir(std::time::SystemTime::now(), world.tick()),
+                    PathBuf::from,
+                );
+                self.save_to = Some(dir);
+            }
+            "save-terrain" => match rest.first() {
                 // Terrain only, and the message says so: `World::save` holds the voxels,
                 // the water and the world's tick, and neither layer of the ecology.
                 Some(path) => match std::fs::write(path, world.save()) {
@@ -2868,7 +2961,7 @@ impl Control {
                     ),
                     Err(e) => eprintln!("cubarium voxel: saving {path}: {e}"),
                 },
-                None => eprintln!("cubarium voxel: `w PATH` needs a path (terrain only)"),
+                None => eprintln!("cubarium voxel: `save-terrain PATH` needs a path"),
             },
             "l" | "load" => match rest.first() {
                 Some(path) => {
@@ -4062,7 +4155,7 @@ width = 64
         assert_eq!(world.view().aquifer_m3, 0.0);
         ctl.handle(&mut world, &mut flora, &mut fauna, "i 0 999 0");
         ctl.handle(&mut world, &mut flora, &mut fauna, "i only-one");
-        ctl.handle(&mut world, &mut flora, &mut fauna, "w");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "save-terrain");
         assert_eq!((ctl.speed, ctl.pending_steps, ctl.outlet), (2.0, 1, true));
         assert!(!ctl.quit);
         ctl.handle(&mut world, &mut flora, &mut fauna, "i 0 0 0");
@@ -4405,7 +4498,7 @@ width = 64
             "a fresh run holds no ecology"
         );
 
-        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("w {at}"));
+        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("save-terrain {at}"));
         assert!(path.exists(), "the terrain was saved");
 
         // A cell edited after the save, so a load that happened would be visible.
@@ -4642,6 +4735,91 @@ width = 64
         assert!(COMMANDS.contains("c X Z"));
     }
 
+    /// **`save DIR` writes the whole world**: a soil strip with a stand and a grazer,
+    /// saved through the console and the on-demand writer, loads back from `DIR` with the
+    /// same tick and the same plants and animals. `save` alone names a default directory
+    /// with the tick, and `save-terrain` still writes the terrain alone.
+    #[test]
+    fn the_console_save_writes_the_whole_world_and_it_loads_back() {
+        let c = cubarium_voxel::Config {
+            width: 16,
+            height: 8,
+            depth: 2,
+            ..Default::default()
+        };
+        let mut world = World::empty(c.clone());
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                for y in 0..=2 {
+                    world.apply(VoxelCommand::SetMaterial {
+                        x,
+                        y,
+                        z,
+                        material: Material::Soil,
+                    });
+                }
+            }
+        }
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
+        let mut ctl = Control::new(1.0, Projection::new(30.0, 4, 0, &c).unwrap());
+        ctl.handle(&mut world, &mut flora, &mut fauna, "f 3 1 bloomcrown");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "f 9 1 umbrellafrond");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "g 6 1");
+        for _ in 0..3 {
+            world.step();
+        }
+        let (stands, animals) = (flora.view().stands.len(), fauna.view().animals.len());
+        assert!(stands == 2 && animals == 1, "{stands} stands, {animals} animals");
+
+        // `save` alone: the default directory, named with the tick.
+        ctl.handle(&mut world, &mut flora, &mut fauna, "save");
+        let default = ctl.save_to.take().expect("a save was asked for");
+        assert!(default.starts_with(save::SAVES_DIR));
+        assert!(
+            default.to_string_lossy().ends_with(&format!("-t{}", world.tick())),
+            "{}",
+            default.display()
+        );
+
+        let dir = StateDir::new("save-on-demand");
+        let target = dir.0.join("nested");
+        let line = format!("save {}", target.display());
+        ctl.handle(&mut world, &mut flora, &mut fauna, &line);
+        let asked = ctl.save_to.take().expect("a save was asked for");
+        assert_eq!(asked, target);
+        let mut writer = SnapshotWriter::new(PathBuf::from(save::SAVES_DIR));
+        assert!(writer.save_whole_to(asked, &world, &flora, &fauna));
+        writer.wait();
+
+        let world_file = target.join(format!("world-{}.voxel", world.tick()));
+        let loaded = World::load(&std::fs::read(&world_file).unwrap()).unwrap();
+        assert_eq!(loaded.tick(), world.tick());
+        let (f, a) = load_layers(&target, loaded.tick()).expect("the layers load back");
+        assert_eq!(f.view().stands.len(), stands);
+        assert_eq!(a.view().animals.len(), animals);
+
+        // `save-terrain PATH` is one terrain file, no layers beside it.
+        let terrain = dir.0.join("terrain.bin");
+        ctl.handle(
+            &mut world,
+            &mut flora,
+            &mut fauna,
+            &format!("save-terrain {}", terrain.display()),
+        );
+        World::load(&std::fs::read(&terrain).unwrap()).unwrap();
+        assert!(ctl.save_to.is_none(), "save-terrain is not a whole-world save");
+        let layers = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                n.starts_with("flora-") || n.starts_with("fauna-")
+            })
+            .count();
+        assert_eq!(layers, 0, "terrain only");
+    }
+
     /// `w` then `l` round-trips the world through the snapshot the core writes, and a
     /// world of a different shape is refused rather than drawn into the wrong raster.
     #[test]
@@ -4666,7 +4844,7 @@ width = 64
             &mut world,
             &mut flora,
             &mut fauna,
-            &format!("w {}", path.display()),
+            &format!("save-terrain {}", path.display()),
         );
         assert!(path.exists());
 
