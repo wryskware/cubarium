@@ -322,3 +322,25 @@ name = "decomposition"
 path = "flora.decomposition"
 range = [0.1, 4.0]
 what = "litter decay (dead wood and carrion follow)"
+
+# --- The lanternjaw's recruitment (Fable, 2026-10-02 readouts: riders grow 0.05-0.14
+# body/h on frondgrazers toward a 0.25 drop-off line; small hosts cannot feed one).
+# Its growth is `maturity@lanternjaw` above. No host-size rule (a mechanics decision). ---
+
+[[gene]]
+name = "rider_drain"
+path = "fauna.parasite_drain_of_host_basal"
+range = [0.2, 10.0]
+what = "a rider's take, x host basal upkeep (0.05 -> 0.01-0.5, the row's interval)"
+
+[[gene]]
+name = "rider_attach_radius"
+path = "fauna.parasite_attach_radius_m"
+range = [0.33, 2.67]
+what = "host search radius from a hatching egg (0.75 m -> 0.25-2.0 m)"
+
+[[gene]]
+name = "rider_detach"
+path = "fauna.parasite_detach_body_fraction"
+range = [0.625, 2.0]
+what = "the size a rider drops off at, x lanternjaw body_max (0.24 -> 0.15-0.48)"

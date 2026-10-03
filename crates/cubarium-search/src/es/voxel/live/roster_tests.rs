@@ -334,6 +334,12 @@ fn the_lanternjaw_is_held_to_progress_not_a_birth() {
     rider.alive_end = 1;
     judge(&mut rider, &s, true);
     assert!(rider.met && rider.score == 0.5 && rider.shortfall == 0.0, "{rider:?}");
+    // Rider growth is progress inside 2 h (riders take 1-3 h to reach the drop-off line,
+    // Fable 2026-10-02): a rider halfway there scores between attached and detached.
+    let mut growing = rider.clone();
+    growing.rider_progress = 0.5;
+    judge(&mut growing, &s, true);
+    assert!((growing.score - 0.625).abs() < 1e-12, "{growing:?}");
     let mut hunter = outcome(Founder::Lanternjaw);
     hunter.riders_attached = 1;
     hunter.rider_dropoffs = 1;
@@ -466,6 +472,10 @@ fn roster_decode_touches_exactly_the_listed_paths() {
         }
     }
     want.insert("fauna.founders.chorister.pack.pack_size".into());
+    // The parasite hatchling's knobs (lanternjaw recruitment, 2026-10-02).
+    for q in ["parasite_drain_of_host_basal", "parasite_attach_radius_m", "parasite_detach_body_fraction"] {
+        want.insert(format!("fauna.{q}"));
+    }
     // The placeholder species follows the browser's lifespan (a tie).
     want.insert("fauna.frondgrazer.lifespan_median_s".into());
     let group = |names: &[Species]| names.iter().map(|s| s.name()).collect::<Vec<_>>();
