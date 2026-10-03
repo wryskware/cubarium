@@ -86,3 +86,42 @@ Package 2 of the gut line: repair 2 item 11 of `design/metabolism-meals-2026-10-
 - the fields deleted;
 - the smoke results;
 - open questions.
+
+## Addendum, 2026-10-03: continuous balance measures (Wrysk: "probably")
+
+With the gut, a full adult lasts 3–25 world days, so alive counts in a 2 h run (one world day)
+no longer show starvation. Add these measures and make them the search's per-lineage
+viability signal.
+
+1. **Fauna ledger counters, per lineage** (in `crates/cubarium-voxel-fauna`; the gut's
+   mechanics stay untouched):
+   - upkeep spent, with the sleep factor applied;
+   - motor spent;
+   - growth built;
+   - reproduction invested (escrow, eggs, gestation);
+   - provisioning given;
+   - rider take lost by hosts.
+
+   Then add awake ticks with the eating latch on, and of those, ticks spent eating.
+2. **Readouts** in `founder_tally` and the search's window record, per lineage, over the run:
+   - **Energy balance** `B = assimilated / (upkeep + motor + rider take lost)`.
+   - **Days to empty**, when `B < 1`: stores / (spend − intake) per world day. Stores are
+     reserve plus digestible stomach (stomach × yield).
+   - **Surplus** per adult per world day: assimilated − upkeep − motor.
+   - **Replacement estimate** `R̂`: surplus per adult per day × median lifespan in days /
+     the cost of one offspring. This is optimistic: it assumes every juvenile survives.
+     Say so in the field's doc.
+   - **Access**: eating ticks / wanting ticks.
+   - **Predators**: kills per adult per world day, against prey births per world day.
+3. **Targets:**
+   - Every lineage must still persist. That stays hard.
+   - Each lineage scores softly on `B ≥ 1` and `R̂ ≥ 1`. Alive counts at 2 h become
+     readouts.
+   - **Choristers, lanternjaws and loftstriders are readouts only, not scored.** In a
+     founders-only world their food base isn't established: there aren't enough prey for
+     the predators, and no vaulttree groves for the loftstrider. Wrysk raised this on
+     2026-10-03. Staged arrival (succession) is a separate proposal, pending his go.
+4. **Tests:**
+   - a hand-built ledger gives the right `B`, days to empty, surplus and `R̂`;
+   - a starving fixture shows `B < 1` with finite days to empty;
+   - a fed fixture shows `B ≥ 1`.
