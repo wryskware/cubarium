@@ -384,6 +384,8 @@ struct Census {
     /// Each soil support face's occupant at the last sample: species index, or COUNT for
     /// vacant.
     last: HashMap<Site, usize>,
+    /// Each face's water class and occupant at the first sample: the fate rows' origin.
+    first: HashMap<Site, (usize, usize)>,
     /// Live stands at the last minute: id → (species, site).
     alive: HashMap<u64, (Species, Site)>,
     deaths_drown: [u64; Species::COUNT],
@@ -446,8 +448,30 @@ fn occ_name(i: usize) -> &'static str {
     if i == Species::COUNT { "vacant" } else { Species::ALL[i].name() }
 }
 
-fn sample(minute: u64, world: &World, flora: &Flora, census: &mut Census) {
+fn sample(minute: u64, world: &World, flora: &Flora, census: &mut Census, last: bool) {
     let rows = classify(world, flora, census);
+    if census.first.is_empty() {
+        census.first = rows.iter().map(|&(site, class, o)| (site, (class / 4, o))).collect();
+    }
+    if last {
+        // Fate since the first sample: the water class then, the occupant then and now.
+        let n = Species::COUNT + 1;
+        let mut fate = vec![vec![vec![0u64; n]; n]; WATER_CLASSES.len()];
+        for &(site, _, o) in &rows {
+            if let Some(&(wc, was)) = census.first.get(&site) {
+                fate[wc][was][o] += 1;
+            }
+        }
+        for (g, m) in fate.iter().enumerate() {
+            for (a, row) in m.iter().enumerate() {
+                for (b, &v) in row.iter().enumerate() {
+                    if v > 0 {
+                        println!("fate,{minute},{},{},{},{v}", WATER_CLASSES[g], occ_name(a), occ_name(b));
+                    }
+                }
+            }
+        }
+    }
     let n = Species::COUNT + 1;
     let mut occ = vec![vec![0u64; n]; CLASSES];
     // Transitions since the last sample, by the water class of the site now: from × to.
@@ -597,6 +621,7 @@ fn run(args: &[String]) {
         sky: HashMap::new(),
         sky_version: u64::MAX,
         last: HashMap::new(),
+        first: HashMap::new(),
         alive: sim.flora().view().stands.iter().map(|s| (s.id, (s.species, s.site))).collect(),
         deaths_drown: [0; Species::COUNT],
         deaths_starve: [0; Species::COUNT],
@@ -604,11 +629,12 @@ fn run(args: &[String]) {
     };
     println!("# occ,minute,class,{}", (0..=Species::COUNT).map(occ_name).collect::<Vec<_>>().join(","));
     println!("# tr,minute,group,from,to,count");
+    println!("# fate,minute,water_class_at_first_sample,occupant_then,occupant_now,count");
     println!(
         "# sp,minute,species,stands,donors,germinated,clonal,overtopped,drowned,starved,seeds_landed,funded,median_site_mineral,litter_total"
     );
     let (world, flora, _) = sim.layers();
-    sample(minute0, world, flora, &mut census);
+    sample(minute0, world, flora, &mut census, false);
     let end = minute0 + (hours * 60.0).round() as u64;
     let t0 = std::time::Instant::now();
     for minute in minute0 + 1..=end {
@@ -619,7 +645,7 @@ fn run(args: &[String]) {
         let (world, flora, _) = sim.layers();
         deaths(world, flora, &mut census, &over);
         if minute % every == 0 || minute == end {
-            sample(minute, world, flora, &mut census);
+            sample(minute, world, flora, &mut census, minute == end);
             eprintln!("minute {minute} ({:.0} s wall)", t0.elapsed().as_secs_f64());
         }
         if let Some(dir) = save
