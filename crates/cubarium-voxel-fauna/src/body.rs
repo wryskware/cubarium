@@ -110,6 +110,39 @@ const SLEEP_UPKEEP_ECTOTHERM: f64 = 0.3;
 /// reserve is under a tenth of its cap (1a, Wrysk 2026-10-02; 0.5 before).
 const WAKE_HUNGER: f64 = 0.9;
 
+/// [`FounderPhysiology::emergency_clear_hunger`], every lineage: the emergency latch
+/// clears below this hunger (repair 2 item 7).
+const EMERGENCY_CLEAR_HUNGER: f64 = 0.6;
+/// [`Gut::s0`], every lineage: a fed body wants food at a nearly empty stomach.
+const APPETITE_FLOOR: f64 = 0.15;
+/// [`Gut::full_tolerance`], every lineage: the full event (repair 2 item 3).
+const FULL_TOLERANCE: f64 = 0.98;
+/// The ecological day the daily needs and lifespans below are written in, seconds
+/// ([`crate::LifeConfig::ecological_day_s`]'s default): a unit for stating defaults.
+const DAY_S: f64 = 7200.0;
+
+/// **Daily need `f`**: the share of its adult body a lineage burns per world day awake
+/// and at rest (`design/metabolism-meals-2026-10-02.md` §1; `maintenance_per_s = f /
+/// 7,200 s`). Plausible art/game defaults, not calibrated biology (Astra M1).
+const DAILY_BELLWING: f64 = 0.15;
+const DAILY_SEEDPORTER: f64 = 0.08;
+const DAILY_FRONDGRAZER: f64 = 0.06;
+const DAILY_LOFTSTRIDER: f64 = 0.04;
+const DAILY_CHORISTER: f64 = 0.08;
+const DAILY_LANTERNJAW: f64 = 0.04;
+const DAILY_SHREDDER: f64 = 0.03;
+const DAILY_CAPGNAWER: f64 = 0.03;
+const DAILY_RIPPLE_SNAIL: f64 = 0.02;
+
+/// **Median lifespans** (repair 2 item 5, with Wrysk's 2026-10-03 change), world days:
+/// maturation at most a quarter of the median life. The small lineages (shredder,
+/// ripple-snail, capgnawer, bellwing) 6; the frondgrazer and the similar-sized seedporter
+/// 8; the predators 12; the loftstrider, largest and longest-lived, 16.
+const LIFE_SMALL_DAYS: f64 = 6.0;
+const LIFE_GRAZER_DAYS: f64 = 8.0;
+const LIFE_PREDATOR_DAYS: f64 = 12.0;
+const LIFE_LOFTSTRIDER_DAYS: f64 = 16.0;
+
 /// What a shredder builds out of a unit of litter — and, by the decision, of carrion.
 const LITTER_YIELD: f64 = 0.5;
 /// What a grazer builds out of a unit of foliage — and, by the decision, what a
@@ -359,12 +392,19 @@ pub struct FounderPhysiology {
     pub sleep_upkeep: f64,
     /// Hunger overrides sleep: a body whose hunger (the reserve's shortfall from its cap,
     /// 0 full to 1 empty) is at or above this stays awake and forages. 0.9 (1a, 2026-10-02;
-    /// 0.5 before): a sleeper wakes with a tenth of its reserve. A carnivore's satiated
-    /// rest has its own [`Hunter::wake_at`].
+    /// 0.5 before): a sleeper wakes with a tenth of its reserve, on the emergency latch
+    /// ([`Animal::emergency`](crate::Animal::emergency)).
     pub wake_hunger: f64,
+    /// **The emergency latch's clear line** (repair 2 item 7): a body whose emergency
+    /// latch went on at `wake_hunger` keeps it until its hunger is below this. 0.6.
+    pub emergency_clear_hunger: f64,
+    /// **The minimal gut** ([`Gut`]): the stomach, its digestion, the bite and the
+    /// appetite.
+    pub gut: Gut,
     /// `Some` for a **carnivore** (`design/predation-and-flight-2026-09-28.md` §2.1,
-    /// §2.3, §2.8, §2.12): its prey list and size window, the strike, the lure and the
-    /// satiated rest. `None` for every lineage that eats no animal.
+    /// §2.3, §2.12): its prey list and size window, the strike and the lure. `None` for
+    /// every lineage that eats no animal. Its satiated rest went with the minimal gut: a
+    /// fed hunter is one whose eating latch is off.
     pub hunter: Option<Hunter>,
     /// The damage multiplier a hit is reduced by, `1 − armour` (§2.7): the grazer's saddle
     /// shield 0.25, the shredder 0.
@@ -726,17 +766,12 @@ pub struct Hunter {
     pub strike_cost_s: f64,
     /// A lit lure's cost, × its awake upkeep (§2.12: "doubles its burn").
     pub lure_power: f64,
-    /// The satiated rest (§2.8): down at `rest_at` of its reserve cap, at `torpor_upkeep`
-    /// × its basal upkeep, up again below `wake_at` of the cap.
-    pub rest_at: f64,
-    pub torpor_upkeep: f64,
-    pub wake_at: f64,
 }
 
 impl Hunter {
     /// The lanternjaw's table (§2.12): power 0.7, window 1.5, reach 0.6 L over the jaw
     /// band 0.6 H, windup 0.15 s, lunge 0.25 s, recovery 3 s, a strike at 100 s of awake
-    /// upkeep, the lure at its awake upkeep, and the satiated rest at 0.9 / 0.25 / 0.5.
+    /// upkeep, and the lure at its awake upkeep.
     pub const LANTERNJAW: Hunter = Hunter {
         // Shredder, grazer and (roster R1) the capgnawer; the size window decides. The
         // loftstrider (4) is on no list until the chorister.
@@ -755,9 +790,6 @@ impl Hunter {
         recovery_s: 3.0,
         strike_cost_s: 100.0,
         lure_power: 1.0,
-        rest_at: 0.9,
-        torpor_upkeep: 0.25,
-        wake_at: 0.5,
     };
 
     /// Whether `prey`'s lineage is on its list.
@@ -768,6 +800,55 @@ impl Hunter {
     /// Whole ticks for a phase, never below one.
     pub fn ticks(seconds: f64) -> u32 {
         u32::try_from(cubarium_voxel::ticks_at_least_one(seconds)).unwrap_or(u32::MAX)
+    }
+}
+
+/// **The minimal gut** (`design/metabolism-meals-2026-10-02.md`, repair 2): a stomach of
+/// raw food sized to the current body, digested into the reserve's room only, filled by a
+/// body-scaled bite, and an appetite that starts a meal near an empty stomach — sooner the
+/// emptier the reserve.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Gut {
+    /// `k`: the stomach's capacity, raw organic matter per unit of **current** body
+    /// (`K = k · body`), so a juvenile has a juvenile's stomach.
+    pub stomach_k: f64,
+    /// `b`: raw food a bite takes, per unit of current body per second at full effort;
+    /// one bite per controller interval. Default `2k / τ` of the lineage's own food, so a
+    /// meal fills in about `0.69 τ` with digestion running (repair 2 item 4). Independent
+    /// of upkeep.
+    pub bite_per_body_s: f64,
+    /// `τ` per [`crate::Food`] class, seconds: a class's pool empties at `S / τ` while the
+    /// reserve has room for what it yields.
+    pub digestion_s: [f64; crate::Food::COUNT],
+    /// `s0`, the appetite floor: a fed body (reserve hunger at most 0.5) wants food at
+    /// `S ≤ s0 · K`; `s_start` rises linearly to 1 as hunger goes from 0.5 to 1.
+    pub s0: f64,
+    /// The full event: the eating latch goes off at `S ≥ full_tolerance · K`.
+    pub full_tolerance: f64,
+}
+
+impl Gut {
+    /// The design's gut for a lineage of stomach `k` eating food it digests in `τ`
+    /// seconds: `b = 2k / τ`, `τ` for every class, `s0` 0.15, full at 0.98.
+    pub fn of(stomach_k: f64, tau_s: f64) -> Gut {
+        Gut {
+            stomach_k,
+            bite_per_body_s: 2.0 * stomach_k / tau_s,
+            digestion_s: [tau_s; crate::Food::COUNT],
+            s0: APPETITE_FLOOR,
+            full_tolerance: FULL_TOLERANCE,
+        }
+    }
+
+    /// `K`, raw organic matter, for a body of `body`.
+    pub fn capacity(&self, body: f64) -> f64 {
+        self.stomach_k * body
+    }
+
+    /// `s_start` at reserve hunger `hunger`: `s0 + (1 − s0) · max(0, (h − 0.5) / 0.5)`.
+    pub fn s_start(&self, hunger: f64) -> f64 {
+        let over = ((hunger - 0.5) / 0.5).clamp(0.0, 1.0);
+        self.s0 + (1.0 - self.s0) * over
     }
 }
 
@@ -817,7 +898,7 @@ impl FounderPhysiology {
         match founder {
             Founder::Blind => FounderPhysiology {
                 core: SpeciesConfig {
-                    maintenance_per_s: 0.001,
+                    maintenance_per_s: DAILY_SHREDDER / DAY_S,
                     bite_per_s: 0.0005,
                     // The browser's K scaled by body (0.0125 / 0.05): a fortieth of the
                     // litter cue's reference stock `emit_reference`, so a litter film gives crumbs
@@ -839,9 +920,10 @@ impl FounderPhysiology {
                     energy_density: 2.0,
                     // The littershredder lays a clutch on the litter it lives in.
                     reproduction: Reproduction::EGGS_PLACEHOLDER,
-                    lifespan_median_s: crate::LIFESPAN_MEDIAN_S,
+                    lifespan_median_s: LIFE_SMALL_DAYS * DAY_S,
                 },
-                motor_respiration_per_s: 0.001,
+                // Full cruise at its basal rate (the motor's tie to upkeep).
+                motor_respiration_per_s: DAILY_SHREDDER / DAY_S,
                 cruise_body_lengths_per_s: 1.0,
                 yaw_cap_rad_per_s: 2.0,
                 // Two thirds of its length both ways; everything taller is a wall.
@@ -885,6 +967,9 @@ impl FounderPhysiology {
                 active: crate::Activity::Nocturnal,
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
+                emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
+                // Litter: k 0.02, τ 120 s.
+                gut: Gut::of(0.02, 120.0),
                 hunter: None,
                 armour: 0.0,
                 agility: 0.3,
@@ -910,10 +995,14 @@ impl FounderPhysiology {
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
                 // stand, including their deliberately mineral-hungry tissue against
                 // foliage. Only the cost settings are new.
-                core: SpeciesConfig::frondgrazer(),
+                core: SpeciesConfig {
+                    maintenance_per_s: DAILY_FRONDGRAZER / DAY_S,
+                    lifespan_median_s: LIFE_GRAZER_DAYS * DAY_S,
+                    ..SpeciesConfig::frondgrazer()
+                },
                 // The frondgrazer gives live birth out of a gestation escrow, which is
                 // in `SpeciesConfig::frondgrazer`'s own table.
-                motor_respiration_per_s: 0.001,
+                motor_respiration_per_s: DAILY_FRONDGRAZER / DAY_S,
                 cruise_body_lengths_per_s: 1.0,
                 yaw_cap_rad_per_s: 2.0,
                 // Its own height both ways; a longer drop waits for the retrain (see the
@@ -944,6 +1033,9 @@ impl FounderPhysiology {
                 active: crate::Activity::Diurnal,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
+                emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
+                // Foliage: k 0.06, τ 120 s.
+                gut: Gut::of(0.06, 120.0),
                 hunter: None,
                 // The saddle shield (§2.7).
                 armour: 0.25,
@@ -964,11 +1056,11 @@ impl FounderPhysiology {
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
-            // scorpid ambusher, 1.0 × 0.25 × 0.45 m, a fifth of the grazer's upkeep.
+            // scorpid ambusher, 1.0 × 0.25 × 0.45 m, its daily need two thirds of the grazer's (the minimal gut).
             // Numbers the note pins are its own; the others are stated where they sit.
             Founder::Lanternjaw => FounderPhysiology {
                 core: SpeciesConfig {
-                    maintenance_per_s: 0.0002,
+                    maintenance_per_s: DAILY_LANTERNJAW / DAY_S,
                     // The other two lineages' mouth, 0.04 body per second, at its body: a
                     // grazer carcass fills it in a few minutes of feeding (§2.6, "handling
                     // time is how long filling its reserve takes").
@@ -994,11 +1086,11 @@ impl FounderPhysiology {
                     drown_depth_m: 0.2,
                     energy_density: 2.0,
                     reproduction: Reproduction::DORMANT_EGGS_PLACEHOLDER,
-                    // §2.12: three times the grazers' if lifespan lands (it has).
-                    lifespan_median_s: 3.0 * crate::LIFESPAN_MEDIAN_S,
+                    // Repair 2 item 5: the predators' twelve world days.
+                    lifespan_median_s: LIFE_PREDATOR_DAYS * DAY_S,
                 },
                 // Full cruise at its basal rate, both other lineages' rule.
-                motor_respiration_per_s: 0.0002,
+                motor_respiration_per_s: DAILY_LANTERNJAW / DAY_S,
                 cruise_body_lengths_per_s: 0.6,
                 yaw_cap_rad_per_s: 2.0,
                 // Its own height both ways, the browser's rule.
@@ -1026,6 +1118,9 @@ impl FounderPhysiology {
                 active: crate::Activity::Nocturnal,
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
+                emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
+                // Meat: k 0.15, τ 300 s (an ambusher's rare large meal).
+                gut: Gut::of(0.15, 300.0),
                 hunter: Some(Hunter::LANTERNJAW),
                 armour: 0.0,
                 agility: 0.0,
@@ -1065,6 +1160,7 @@ impl FounderPhysiology {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let mut core = shredder.core;
                 core.scale_mass(CAPGNAWER_VOLUME_RATIO);
+                core.maintenance_per_s = DAILY_CAPGNAWER / DAY_S;
                 FounderPhysiology {
                     core,
                     // A gripping six-legged walker on bark: it keeps the shredder's legs
@@ -1085,11 +1181,14 @@ impl FounderPhysiology {
                         FOLIAGE_YIELD,
                     ],
                     diet: crate::Diet::of(&[crate::Food::CapTissue, crate::Food::Litter]),
+                    // Caps: k 0.02, τ 120 s; the shredder's daily need (its own row).
+                    gut: Gut::of(0.02, 120.0),
                     // Near glowcap stands: a face from which its mouth reaches a stocked cap
                     // (the diet-driven food filter).
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
+                    motor_respiration_per_s: DAILY_CAPGNAWER / DAY_S,
                     ..shredder
                 }
             }
@@ -1110,7 +1209,8 @@ impl FounderPhysiology {
                 let mut core = grazer.core;
                 core.scale_mass(LOFTSTRIDER_VOLUME_RATIO);
                 core.reproduction.gestation_s *= 3.0;
-                core.lifespan_median_s *= 3.0;
+                core.lifespan_median_s = LIFE_LOFTSTRIDER_DAYS * DAY_S;
+                core.maintenance_per_s = DAILY_LOFTSTRIDER / DAY_S;
                 FounderPhysiology {
                     core,
                     // Long legs: a step of a third of its 3.4 m height both ways (Wrysk
@@ -1147,6 +1247,9 @@ impl FounderPhysiology {
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
+                    motor_respiration_per_s: DAILY_LOFTSTRIDER / DAY_S,
+                    // Foliage: k 0.05, τ 120 s (one or two long browses a day).
+                    gut: Gut::of(0.05, 120.0),
                     ..grazer
                 }
             }
@@ -1169,6 +1272,7 @@ impl FounderPhysiology {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let mut core = shredder.core;
                 core.scale_mass(BELLWING_MASS_RATIO);
+                core.maintenance_per_s = DAILY_BELLWING / DAY_S;
                 // Nectar's half-stock: a tenth of a bloomcrown's nectar cap (0.02), so a
                 // full flower gives about nine tenths of a sip and a nearly drained one
                 // crumbs. Not a mass (the food's stock does not scale with the eater).
@@ -1205,6 +1309,9 @@ impl FounderPhysiology {
                     taste_reference: Some(0.02),
                     // An endotherm-like sleeper, not the shredder's 0.3 (1a).
                     sleep_upkeep: SLEEP_UPKEEP,
+                    motor_respiration_per_s: DAILY_BELLWING / DAY_S,
+                    // Nectar: k 0.03, τ 30 s (many small sips).
+                    gut: Gut::of(0.03, 30.0),
                     ..shredder
                 }
             }
@@ -1221,6 +1328,8 @@ impl FounderPhysiology {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let mut core = grazer.core;
                 core.scale_mass(SEEDPORTER_VOLUME_RATIO);
+                core.maintenance_per_s = DAILY_SEEDPORTER / DAY_S;
+                core.lifespan_median_s = LIFE_GRAZER_DAYS * DAY_S;
                 FounderPhysiology {
                     core,
                     adult_length_m: 0.5,
@@ -1251,6 +1360,9 @@ impl FounderPhysiology {
                     taste_reference: Some(0.02),
                     glider: Some(Glider::SEEDPORTER),
                     gut_seeds: Some(GutSeeds::SEEDPORTER),
+                    motor_respiration_per_s: DAILY_SEEDPORTER / DAY_S,
+                    // Fruit: k 0.05, τ 60 s (a few meals a day).
+                    gut: Gut::of(0.05, 60.0),
                     ..grazer
                 }
             }
@@ -1277,7 +1389,7 @@ impl FounderPhysiology {
                 core.reproduction.surplus_floor *= lj.core.body_max / 0.05;
                 core.birth_cost = 2.0 * core.body_min;
                 core.scale_mass(CHORISTER_VOLUME_RATIO);
-                core.maintenance_per_s = 2.0 * lj.core.maintenance_per_s;
+                core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
                 FounderPhysiology {
                     core,
                     motor_respiration_per_s: core.maintenance_per_s,
@@ -1304,6 +1416,8 @@ impl FounderPhysiology {
                     pack: Some(Pack::CHORISTER),
                     // An endotherm-like sleeper, not the lanternjaw's 0.3 (1a).
                     sleep_upkeep: SLEEP_UPKEEP,
+                    // Meat: k 0.20, τ 300 s (Wrysk: one big meal every one or two days).
+                    gut: Gut::of(0.20, 300.0),
                     ..lj
                 }
             }
@@ -1312,6 +1426,7 @@ impl FounderPhysiology {
                 let grazer = FounderPhysiology::placeholder(Founder::Browser);
                 let mut core = shredder.core;
                 core.scale_mass(RIPPLE_SNAIL_VOLUME_RATIO);
+                core.maintenance_per_s = DAILY_RIPPLE_SNAIL / DAY_S;
                 // Film is fresh tissue: the browser's foliage yield. The other foods are
                 // not its diet and carry the same number so none is a silent zero.
                 let film_yield = grazer.yield_by_food[crate::Food::Foliage.index()];
@@ -1337,6 +1452,9 @@ impl FounderPhysiology {
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
+                    motor_respiration_per_s: DAILY_RIPPLE_SNAIL / DAY_S,
+                    // Film: k 0.012, τ 120 s.
+                    gut: Gut::of(0.012, 120.0),
                     ..shredder
                 }
             }

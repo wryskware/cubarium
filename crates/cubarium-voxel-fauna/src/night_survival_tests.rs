@@ -28,8 +28,10 @@ fn the_sleep_defaults_are_the_briefs() {
         assert_eq!(p.sleep_upkeep, want, "{}: sleep_upkeep", f.name());
         assert_eq!(p.wake_hunger, 0.9, "{}: wake_hunger", f.name());
     }
-    let h = c.founder(Founder::Lanternjaw).hunter.expect("a hunter");
-    assert_eq!(h.wake_at, 0.5, "the satiated rest's own wake line is separate");
+    // The minimal gut: the satiated rest is gone; the emergency latch clears at 0.6.
+    for f in Founder::ALL {
+        assert_eq!(c.founder(f).emergency_clear_hunger, 0.6, "{}", f.name());
+    }
 }
 
 /// The longest run of a day a lineage of `active` sleeps through on `day`, seconds, from

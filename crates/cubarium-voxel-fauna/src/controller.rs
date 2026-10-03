@@ -865,9 +865,10 @@ impl Controller for BrowserForager {
 /// tall stem climbs it to the crown, forward effort on a perch glides off (or climbs down
 /// when the drop is short), and a glide is steered by `turn`. So the forager only:
 ///
-/// 1. **eats** (stops, `feed`) while fruit is in the mouth's reach (`Taste`) and its
-///    reserve is short of [`TeacherConfig::seedporter_full_at`] — until the source is empty
-///    or it is full;
+/// 1. **eats** (stops, `feed`) while fruit is in the mouth's reach (`Taste`) — until the
+///    source is empty. Whether it wants food is the body's eating latch, which no sense
+///    reads: since the minimal gut a fed body's reserve sits at its cap, so the old
+///    reserve line ([`TeacherConfig::seedporter_full_at`]) is no longer read;
 /// 2. else **turns toward** the cone sector with the most fruit in view and goes forward
 ///    — walking to a stem and up it, or off a crown in a glide aimed at it;
 /// 3. else **wanders** forward (on a perch, that glides it off or takes it down), backing
@@ -904,8 +905,8 @@ impl FruitForager {
 impl Controller for FruitForager {
     fn drive(&mut self, o: &[f64]) -> Response {
         let cfg = self.cfg;
-        let reserve = o[self.selfm.offset + 1];
-        let full = reserve >= cfg.seedporter_full_at;
+        // The body's latch decides whether a bite is taken (the minimal gut).
+        let full = false;
         let taste = o[self.taste.offset];
         let tasted = o[self.taste.offset + 2] > 0.5 && taste > cfg.feed_gate;
         if tasted && !full {
@@ -965,10 +966,12 @@ impl Controller for FruitForager {
 
 /// The bellwing's **hover-sip teacher** (F1, Brief F1 item 8), observation-only:
 ///
-/// - a bloom in the mouth's reach (`Taste`) and not full: hover (or stay perched) and sip;
-/// - full (`Self.reserve` at [`TeacherConfig::bellwing_full_at`]): go to rest — rise into
-///   cover close overhead (an underside), else come down onto what is below — and rest
-///   perched until hungry ([`TeacherConfig::bellwing_hungry_at`]), when it takes off;
+/// - a bloom in the mouth's reach (`Taste`): hover (or stay perched) and sip — the body's
+///   eating latch decides whether the sip is taken (the minimal gut);
+/// - the rest when full (rise into cover close overhead, else come down, and rest perched
+///   until hungry) is kept but **no longer triggered**: since the minimal gut a fed body's
+///   reserve sits at its cap, so [`TeacherConfig::bellwing_full_at`] and
+///   [`TeacherConfig::bellwing_hungry_at`] are no longer read;
 /// - a bloom in the fan: turn toward the sector with the most, fly at it, and come down
 ///   when it is near;
 /// - nothing in sight: a correlated wander at its search height within the band;
@@ -1035,11 +1038,9 @@ impl Controller for HoverSip {
         let f = self.fan.offset;
         let bloom = [o[f + 2], o[f + 10], o[f + 18]];
         let bloom_prox = [o[f + 3], o[f + 11], o[f + 19]];
-        if reserve >= cfg.bellwing_full_at {
-            self.resting = true;
-        } else if reserve < cfg.bellwing_hungry_at {
-            self.resting = false;
-        }
+        // The minimal gut: satiety is the body's eating latch, not the reserve.
+        let _ = reserve;
+        self.resting = false;
         // Hold the search height, never climbing into cover close overhead (it would hang
         // there): it goes around.
         // Between decisions it holds the last one, unless a bloom is at its mouth.
@@ -1143,8 +1144,8 @@ enum Ambush {
 /// to a body it sees and creep toward it slower than 0.1 BL/s, so it stays a still shape;
 /// hold `feed` while a body is close ahead, which the body turns into a strike when a
 /// prey is in the capsule and into a mouthful of carrion when one is under the mouth; eat
-/// the carcass its kill left; stand down when full (the tick's satiated rest takes over
-/// at 0.9 of its cap). A fruitless wait of a minute sends it on to another crown.
+/// the carcass its kill left. A fed body's mouth, lure and strike are shut by its eating
+/// latch, not by the teacher. A fruitless wait of a minute sends it on to another crown.
 #[derive(Clone, Debug)]
 pub struct LanternjawAmbush {
     mode: Ambush,
@@ -1158,10 +1159,6 @@ pub struct LanternjawAmbush {
     eating: bool,
     /// Whether it lights a lure at all (the chorister's does not).
     lit: bool,
-    /// `Self.reserve` at which it stops eating and hunting: the physiology's own
-    /// `rest_at`, where the tick's satiated rest takes it (an adult's `Self.reserve` is
-    /// its fraction of its cap).
-    sated: f64,
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     cone: crate::manifest::Module,
@@ -1197,7 +1194,6 @@ impl LanternjawAmbush {
             lure: 0.0,
             eating: false,
             lit: hunter.is_some_and(|h| h.lure_power > 0.0),
-            sated: hunter.map_or(1.0, |h| h.rest_at),
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
             cone: module_slot(&manifest, "Cone(3, foliage/body)"),
@@ -1225,7 +1221,6 @@ impl Default for LanternjawAmbush {
 impl Controller for LanternjawAmbush {
     fn drive(&mut self, o: &[f64]) -> Response {
         let cfg = self.cfg;
-        let reserve = o[1];
         let front = o[self.contact.offset];
         let (taste_cue, taste_valid) = (o[self.taste.offset], o[self.taste.offset + 2]);
         let base = self.cone.offset;
@@ -1234,12 +1229,11 @@ impl Controller for LanternjawAmbush {
         let foliage = [o[base + 2], o[base + 8], o[base + 14]];
         let foliage_near = o[base + 9];
 
-        // Carrion at the mouth: eat it until full.
-        if taste_valid > 0.5 && taste_cue > 0.0 && reserve < self.sated {
+        // Carrion at the mouth: eat it. Whether it is wanted is the body's: since the
+        // minimal gut a fed body's mouth and strike are shut by its eating latch, which no
+        // sense reads, so the teacher asks and the body decides.
+        if taste_valid > 0.5 && taste_cue > 0.0 {
             return self.act(Ambush::Idle, 0.0, 0.0, 1.0);
-        }
-        if reserve >= self.sated {
-            return self.act(Ambush::Idle, 0.0, 0.0, 0.0);
         }
         // A body in sight: face it, and creep up on one ahead with feed held.
         if body.iter().any(|&b| b > 0.0) {
@@ -1310,10 +1304,8 @@ impl Controller for LanternjawAmbush {
 
     fn reset(&mut self) {
         let lit = self.lit;
-        let sated = self.sated;
         *self = LanternjawAmbush::with_config(self.cfg);
         self.lit = lit;
-        self.sated = sated;
     }
 
     fn lure(&self) -> f64 {

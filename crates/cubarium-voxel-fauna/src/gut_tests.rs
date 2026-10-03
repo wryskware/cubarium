@@ -79,7 +79,7 @@ fn clear_carrion(world: &World, flora: &mut Flora) {
     let c = world.view().config;
     for z in 0..c.depth {
         for x in 0..c.width {
-            let _ = flora.take_carrion(Site { x, y: SURFACE_Y, z }, f64::INFINITY);
+            let _ = flora.take_carrion(Site { x, y: SURFACE_Y, z }, 1e12);
         }
     }
 }
@@ -188,19 +188,43 @@ fn meals(fauna: &Fauna, f: Founder) -> u64 {
     fauna.ledger.meals_by_founder_kind[f.index()].iter().sum()
 }
 
+/// The books closed after a run of `ticks`: [`assert_closes`]'s residual, with a float
+/// allowance that grows with the run. Steady small increments into a large accumulator
+/// round the same way each tick (measured: about 4e-18 of mineral a tick on a 0.08 stock,
+/// a famine recovery), so a 50,000-tick run drifts a few parts in 1e12 with nothing lost.
+/// The scale is the larger of the stock and the flows through it, so a layer emptied by a
+/// death is judged against what passed through it, not against zero.
+fn assert_books(fauna: &Fauna, when: &str, ticks: u64) {
+    let v = fauna.view();
+    let l = v.ledger;
+    for (held, expected, through, what) in [
+        (v.organic(), l.expected_organic(), l.introduced_organic_in + l.eaten_organic_in, "organic"),
+        (v.mineral(), l.expected_mineral(), l.introduced_mineral_in + l.eaten_mineral_in, "mineral"),
+        (v.energy(), l.expected_energy(), l.introduced_energy_in + l.eaten_energy_in, "energy"),
+    ] {
+        let scale = held.abs().max(through.abs()).max(1e-6);
+        let allow = (1e-12 + 1e-16 * ticks as f64) * scale;
+        assert!(
+            (held - expected).abs() <= allow,
+            "{when}: fauna {what} holds {held}, the ledger expects {expected} (allowance {allow:e})"
+        );
+    }
+}
+
 // ------------------------------------------------------------------ the defaults
 
 /// The design's tables: `f` (as `maintenance_per_s · 7200`), `k`, `τ` of the lineage's
 /// own food, `b = 2k/τ`, `s0` 0.15, `full_tolerance` 0.98, `emergency_clear_hunger` 0.6,
-/// motor at its basal ratio, the repair-2 lifespans, and the rider's take 0.09.
+/// motor at its basal ratio, the repair-2 lifespans as Wrysk changed them on 2026-10-03
+/// (loftstrider 16 days, seedporter 8), and the rider's take 0.09.
 #[test]
 fn the_gut_defaults_are_the_designs() {
     let c = FaunaConfig::default();
     let table = [
         (Founder::Bellwing, 0.15, 0.03, 30.0, 6.0),
-        (Founder::Seedporter, 0.08, 0.05, 60.0, 6.0),
+        (Founder::Seedporter, 0.08, 0.05, 60.0, 8.0),
         (Founder::Browser, 0.06, 0.06, 120.0, 8.0),
-        (Founder::Loftstrider, 0.04, 0.05, 120.0, 8.0),
+        (Founder::Loftstrider, 0.04, 0.05, 120.0, 16.0),
         (Founder::Blind, 0.03, 0.02, 120.0, 6.0),
         (Founder::Capgnawer, 0.03, 0.02, 120.0, 6.0),
         (Founder::RippleSnail, 0.02, 0.012, 120.0, 6.0),
@@ -299,7 +323,7 @@ fn meal_interval(f: Founder) {
         "{}: mean interval {mean:.4} days, Astra's {want} (±30 %)",
         f.name()
     );
-    assert_closes(&fauna, "after the cadence run");
+    assert_books(&fauna, "after the cadence run", starts.last().copied().unwrap_or(max_ticks));
 }
 
 #[test]
@@ -370,7 +394,7 @@ fn a_full_stomach_on_food_takes_no_bite() {
         assert!(!animal(&fauna, id).eating, "the latch stays off on a full stomach");
     }
     assert_eq!(bites(&fauna, f), 0, "no bite on a full stomach");
-    assert_closes(&fauna, "full stomach");
+    assert_books(&fauna, "full stomach", 400);
 
     // The same body with an empty stomach does eat (the case is not vacuous).
     let mut fauna = Fauna::new(carrion_config(f));
@@ -420,7 +444,7 @@ fn interrupted_access_keeps_the_latch_on() {
     let a = animal(&fauna, id);
     assert!(a.stomach.organic() >= 0.98 * capacity(&fauna, id) * (1.0 - 1e-9));
     assert_eq!(meals(&fauna, f), 1, "one meal, completed");
-    assert_closes(&fauna, "interrupted meal");
+    assert_books(&fauna, "interrupted meal", 30_000);
 }
 
 /// Famine recovery: a starved adult on ample food keeps `0 ≤ S ≤ K` every tick, refills
@@ -457,7 +481,7 @@ fn famine_recovery_keeps_the_stomach_bounded_and_the_books_closed() {
     let e = BoutKind::Emergency.index();
     assert!(l.meals_by_founder_kind[f.index()][e] >= 1, "an emergency bout is recorded");
     assert!(l.meal_ticks_by_founder_kind[f.index()][e] > 0, "with its duration");
-    assert_closes(&fauna, "famine recovery");
+    assert_books(&fauna, "famine recovery", ticks);
 }
 
 // ------------------------------------------------------------------ sleep
@@ -496,9 +520,14 @@ fn a_starving_sleeper_wakes_refills_and_flips_at_most_twice_an_hour() {
     fauna.set_births_enabled(false);
     let id = introduce(&mut fauna, &world, f, StartingStores::FULL);
     place(&mut fauna, id, 6.0, 1.5, EAST);
-    set_reserve(&mut fauna, id, 0.05);
     fill_stomach(&mut fauna, id, 0.0);
     fauna.controllers.set(id, stand_and_feed());
+    // Fed, it falls asleep at midnight; then it is starved in its sleep.
+    set_reserve(&mut fauna, id, 1.0);
+    fauna.step_with(&world, &mut flora, 1);
+    assert_eq!(animal(&fauna, id).state, State::Asleep, "asleep first");
+    set_reserve(&mut fauna, id, 0.05);
+    let flips0 = fauna.ledger.sleep_flips_by_founder[f.index()];
     let r0 = animal(&fauna, id).reserve;
     let mut flips = 0u32;
     let mut was = animal(&fauna, id).state == State::Asleep;
@@ -514,8 +543,8 @@ fn a_starving_sleeper_wakes_refills_and_flips_at_most_twice_an_hour() {
     assert!(bites(&fauna, f) > 0, "and ate");
     assert!(animal(&fauna, id).reserve > r0, "its reserve refilled");
     assert!(flips <= 2, "{flips} sleep flips in the hour");
-    assert_eq!(fauna.ledger.sleep_flips_by_founder[f.index()], u64::from(flips));
-    assert_closes(&fauna, "emergency refill");
+    assert_eq!(fauna.ledger.sleep_flips_by_founder[f.index()] - flips0, u64::from(flips));
+    assert_books(&fauna, "emergency refill", 72_001);
 }
 
 // ------------------------------------------------------------------ hunters
@@ -616,7 +645,8 @@ fn a_pack_hunts_when_half_want_food_or_one_is_in_emergency() {
             }
         }
         let prey = introduce(&mut fauna, &world, Founder::Browser, StartingStores { body: 0.5, reserve: 1.0 });
-        place(&mut fauna, prey, 4.0, 1.5, EAST);
+        // Inside every adult's 2 m cone ahead.
+        place(&mut fauna, prey, 3.5, 1.5, EAST);
         let _off = drive(&mut fauna, prey, 0.0, false);
         for _ in 0..40 {
             fauna.step_with(&world, &mut flora, 1);
@@ -684,7 +714,7 @@ fn regurgitation_conserves_and_keeps_composition() {
     // Digestion moves stomach food on, so compare with what was digested out.
     let after = a.stomach.total().organic + got.organic + fauna.ledger.digested.organic;
     assert!((after - before).abs() <= 1e-9 * before, "conserved: {before} → {after}");
-    assert_closes(&fauna, "regurgitation");
+    assert_books(&fauna, "regurgitation", 20);
 }
 
 // ------------------------------------------------------------------ riders
@@ -868,7 +898,7 @@ fn the_books_close_over_a_world_day() {
         let rhs = dig + out + held;
         assert!((lhs - rhs).abs() <= 1e-9 * lhs.abs().max(1e-9), "{what}: stomach in {lhs} ≠ out {rhs}");
     }
-    assert_closes(&fauna, "after a world day");
+    assert_books(&fauna, "after a world day", (DAY_S / DT) as u64);
 }
 
 /// A body dying with a full stomach hands its contents to the carrion with the rest of
@@ -889,16 +919,18 @@ fn a_dead_bodys_stomach_goes_to_its_carrion() {
     assert!(held > s.organic && s.organic > 0.0, "the stored total counts the stomach");
     fauna.step_with(&world, &mut flora, 1);
     assert!(fauna.view().animal(id).is_none(), "it died");
+    // What the last tick's digestion took is in `digested`; the rest left with it.
     assert!(
-        fauna.ledger.stomach_out.organic >= s.organic * (1.0 - 1e-6),
+        fauna.ledger.stomach_out.organic + fauna.ledger.digested.organic >= s.organic * (1.0 - 1e-12),
         "its stomach left with it"
     );
     assert!(
         fauna.ledger.deposited_organic_out - deposited0 >= held * (1.0 - 1e-3),
         "into the carrion, with the rest of it"
     );
-    assert_closes(&fauna, "a death with a full stomach");
+    assert_books(&fauna, "a death with a full stomach", 1);
 }
 
 #[allow(dead_code)]
 fn _clock_modes(_: DayMode) {}
+

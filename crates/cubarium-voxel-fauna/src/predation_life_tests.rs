@@ -10,7 +10,7 @@ use super::predation_fixture::*;
 use crate::controller::{Actions, Controller, Response};
 use crate::senses::{Fine, cone_occupancy, ray_first_hit};
 use crate::{
-    Command, DT, Fauna, apply_hit, FaunaConfig, Founder, Rest, SCHEMA,
+    Command, DT, Fauna, FaunaConfig, Founder, Rest, SCHEMA,
     StartingStores, State, StrikePhase, egg_hatches,
 };
 use cubarium_voxel::weather::DayClock;
@@ -70,99 +70,69 @@ impl Controller for Counting {
 
 // ------------------------------------------------------------------ case 10
 
-/// Case 10: a full lanternjaw rests (satiated, in any phase: here with the clock off) at
-/// the torpor factor 0.25 × its basal upkeep, is not consulted while it rests, stays down
-/// above half its cap and wakes below it; an awake one does not lie down below 0.9.
+/// Case 10, **changed by the minimal gut** (repair 2 item 7: the hunters' satiated rest
+/// goes): a full lanternjaw with the clock off does not lie down. It rests awake at its
+/// full basal upkeep, consulted as any awake body is, its eating latch off on a full
+/// stomach; a hit leaves it awake.
 #[test]
-fn a_full_lanternjaw_rests_at_the_torpor_factor_and_wakes_at_half_its_cap() {
+fn a_full_lanternjaw_rests_awake_at_its_basal_upkeep() {
     let world = clock_off(10);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
+    fauna.set_births_enabled(false);
     let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     let calls = Arc::new(AtomicUsize::new(0));
     fauna.controllers.set(lj, Box::new(Counting(calls.clone())));
     let phys = *fauna.config.founder(Founder::Lanternjaw);
+    // A full stomach: its eating latch stays off.
+    {
+        let k = phys.gut.capacity(animal(&fauna, lj).body);
+        let a = animal_mut(&mut fauna, lj);
+        let food = &mut a.stomach.pools[crate::Food::Carrion.index()];
+        let extra = k - food.organic;
+        food.organic += extra;
+        food.mineral += 0.05 * extra;
+        food.energy += 2.0 * extra;
+        fauna.ledger.introduced_organic_in += extra;
+        fauna.ledger.introduced_mineral_in += 0.05 * extra;
+        fauna.ledger.introduced_energy_in += 2.0 * extra;
+    }
     fauna.step_with(&world, &mut flora, 1);
     let a = animal(&fauna, lj);
-    assert_eq!(a.state, State::Asleep);
-    assert_eq!(a.rest, Some(Rest::Satiated));
-    assert_eq!(crate::PredationConfig::default().awareness(a.state), 0.0, "a resting animal is prey too");
+    assert_ne!(a.state, State::Asleep, "no satiated rest");
+    assert_eq!(a.rest, None);
+    assert!(!a.eating, "a full stomach does not want food");
 
-    let before = fauna.ledger.respired_out;
+    let before = fauna.ledger.respired_maintenance_out;
     fauna.step_with(&world, &mut flora, 1);
-    let paid = fauna.ledger.respired_out - before;
+    let paid = fauna.ledger.respired_maintenance_out - before;
     let basal = phys.core.maintenance_per_s * animal(&fauna, lj).body * DT;
-    assert!(
-        (paid - 0.25 * basal).abs() <= 1e-15,
-        "resting paid {paid}, the torpor factor gives {}",
-        0.25 * basal
-    );
+    assert!((paid - basal).abs() <= 1e-15, "awake upkeep {paid}, basal {basal}");
     let period = Founder::Lanternjaw.manifest().cadence_ticks();
     for _ in 0..(3 * period) {
         fauna.step_with(&world, &mut flora, 1);
     }
-    assert_eq!(calls.load(Ordering::Relaxed), 0, "consulted while resting");
-    assert_closes(&fauna, "resting");
-
-    // Hysteresis on the reserve fraction of its cap (`reserve_cap · body`).
-    let set = |fauna: &mut Fauna, id: u64, fraction: f64| {
-        let cap = phys.core.reserve_of(animal(fauna, id).body);
-        animal_mut(fauna, id).reserve = fraction * cap;
-    };
-    set(&mut fauna, lj, 0.7);
-    fauna.step_with(&world, &mut flora, 1);
-    assert_eq!(animal(&fauna, lj).rest, Some(Rest::Satiated), "0.7 of cap: still down");
-    set(&mut fauna, lj, 0.52);
-    fauna.step_with(&world, &mut flora, 1);
-    assert_eq!(animal(&fauna, lj).state, State::Asleep, "0.52 of cap: still down");
-    set(&mut fauna, lj, 0.48);
-    fauna.step_with(&world, &mut flora, 1);
-    let a = animal(&fauna, lj);
-    assert_ne!(a.state, State::Asleep, "below half its cap it wakes");
-    assert_eq!(a.rest, None);
-
-    // A satiated lanternjaw that is struck leaves its rest.
-    let struck = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
-    fauna.step_with(&world, &mut flora, 1);
-    assert_eq!(animal(&fauna, struck).rest, Some(Rest::Satiated));
-    apply_hit(&mut fauna, &mut flora, struck, 0.1, Founder::Lanternjaw);
-    let a = animal(&fauna, struck);
-    assert_ne!(a.state, State::Asleep, "a hit ends a satiated rest");
-    assert_eq!(a.rest, None);
-
-    // An awake lanternjaw at 0.7 of its cap does not lie down.
-    let awake = introduce(
-        &mut fauna,
-        &world,
-        Founder::Lanternjaw,
-        StartingStores {
-            body: 1.0,
-            reserve: 0.7,
-        },
-    );
-    for _ in 0..5 {
-        fauna.step_with(&world, &mut flora, 1);
-    }
-    assert_ne!(animal(&fauna, awake).state, State::Asleep);
+    assert!(calls.load(Ordering::Relaxed) > 0, "an awake body is consulted");
+    assert_closes(&fauna, "resting awake");
 }
 
-/// Under its own heuristic, a lanternjaw beside a carcass eats until the satiated rest
-/// takes it: the teacher eats up to `rest_at`, not short of it. Started just under the
-/// line (0.885 of its cap) so the hunger-scaled bite reaches 0.9 inside the test's ticks.
+/// Under its own heuristic, a hungry lanternjaw (an empty stomach) beside a carcass eats
+/// to the full event and stops: one meal, its latch off.
 #[test]
-fn the_ambush_heuristic_eats_a_carcass_into_the_satiated_rest() {
+fn the_ambush_heuristic_eats_a_carcass_to_the_full_event() {
     let world = clock_off(10);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
-    let lj = introduce(
-        &mut fauna,
-        &world,
-        Founder::Lanternjaw,
-        StartingStores {
-            body: 1.0,
-            reserve: 0.885,
-        },
-    );
+    fauna.set_births_enabled(false);
+    let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
+    {
+        let a = animal_mut(&mut fauna, lj);
+        let s = a.stomach.total();
+        a.stomach = crate::Stomach::default();
+        fauna.ledger.introduced_organic_in -= s.organic;
+        fauna.ledger.introduced_mineral_in -= s.mineral;
+        fauna.ledger.introduced_energy_in -= s.energy;
+    }
     let site = animal(&fauna, lj).site;
     assert!(flora.deposit(
         site,
@@ -177,12 +147,13 @@ fn the_ambush_heuristic_eats_a_carcass_into_the_satiated_rest() {
     fauna
         .controllers
         .set(lj, Box::new(crate::LanternjawAmbush::new()));
-    let rested = step_until(&mut fauna, &world, &mut flora, 200, |f| {
-        f.view().animal(lj).is_some_and(|a| a.rest == Some(Rest::Satiated))
+    let full = step_until(&mut fauna, &world, &mut flora, 20 * 60 * 20, |f| {
+        f.ledger.meals_by_founder_kind[Founder::Lanternjaw.index()].iter().sum::<u64>() > 0
     });
-    assert!(rested.is_some(), "it never ate its way into the satiated rest");
+    assert!(full.is_some(), "it never ate to the full event");
+    assert!(!animal(&fauna, lj).eating);
     assert!(fauna.ledger.eaten_carrion_by_founder[Founder::Lanternjaw.index()] > 0.0);
-    assert_closes(&fauna, "fed and resting");
+    assert_closes(&fauna, "fed");
 }
 
 /// the sleep is the other reason on the same state: a diurnal grazer asleep at
@@ -553,7 +524,9 @@ fn a_snapshot_keeps_wounds_rest_strikes_and_eggs() {
     let get = |id| *loaded.view().animal(id).unwrap();
     assert!(get(grazer).wound > 0.0);
     assert_eq!(get(striker).strike.map(|s| s.phase), Some(StrikePhase::Recovery));
-    assert_eq!(get(full).rest, Some(Rest::Satiated));
+    // The minimal gut: no satiated rest; the stomach rides in the snapshot.
+    assert_eq!(get(full).stomach, fauna.view().animal(full).unwrap().stomach);
+    assert!(get(full).stomach.organic() > 0.0);
     assert_eq!(eggs(&loaded).len(), 3);
     assert!(eggs(&loaded).iter().all(|c| c.dormancy.is_some()));
 }

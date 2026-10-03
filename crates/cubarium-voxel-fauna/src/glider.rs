@@ -991,9 +991,9 @@ fn perched_tick(
     fauna.animals[i].state = if fed { State::Cropping } else { State::Resting };
 }
 
-/// **A fruit bite** (F3, §3.7): the sated bite from [`glider_fruit_in_reach`], booked
-/// eaten whole, its seed share into the gut seed lots and the rest assimilated at fruit's
-/// yield.
+/// **A fruit bite** (F3, §3.7): the gut's bite from [`glider_fruit_in_reach`], booked
+/// eaten whole, its seed share into the gut seed lots and the rest into the stomach's
+/// fruit pool. Only while the eating latch is on.
 fn glider_feed(
     fauna: &mut Fauna,
     i: usize,
@@ -1003,17 +1003,14 @@ fn glider_feed(
     phys: &crate::FounderPhysiology,
     effort: f64,
 ) -> bool {
-    let sc = phys.core;
-    let want = sc.bite_per_s * manifest.controller_period_s * effort * hunger(&fauna.animals[i], &sc);
-    if !(want > 0.0) {
+    if !fauna.animals[i].eating {
         return false;
     }
     let founder = fauna.animals[i].founder.expect("a founder body");
     let Some((source, stock)) = glider_fruit_in_reach(view, &flora.view(), &fauna.animals[i], phys) else {
         return false;
     };
-    let yield_fraction = phys.yield_for(Food::Fruit);
-    let bite = sated_bite(want, stock, &sc, &fauna.animals[i], yield_fraction);
+    let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
     }
@@ -1065,12 +1062,10 @@ fn glider_feed(
         }
         _ => taken,
     };
-    let placed = assimilate(fauna, i, &sc, rest, yield_fraction);
     let l = &mut fauna.ledger;
     l.bites_by_founder[founder.index()] += 1;
     l.bites_by_founder_food[founder.index()][Food::Fruit.index()] += 1;
-    l.assimilated_by_founder[founder.index()] += placed;
-    fauna.animals[i].founder_state.feedback.intake += placed;
+    swallow(fauna, i, Food::Fruit, rest);
     true
 }
 
@@ -1203,8 +1198,7 @@ pub(super) fn roost_reflex(
     let founder = a.founder?;
     let phys = fauna.config.founder(founder);
     let glider = phys.glider?;
-    let sleepy = !phys.active.awake(sky.clock_on, sky.daylight, &fauna.config.life)
-        && hunger(a, &phys.core) < phys.wake_hunger;
+    let sleepy = !phys.active.awake(sky.clock_on, sky.daylight, &fauna.config.life) && !a.emergency;
     if !(sleepy || sky.downpour) {
         return None;
     }
@@ -1257,8 +1251,8 @@ pub(super) fn walk_toward(a: &Animal, dx: f64, dz: f64, feed: f64) -> Actions {
 }
 
 /// **The fruit search** (roster mechanics fix 4; Fable's call, 2026-10-02): a glider
-/// driven by its own heuristic, on the ground, short of full (`Self.reserve` under
-/// [`crate::TeacherConfig::seedporter_full_at`] of its cap) and with no fruit at its
+/// driven by its own heuristic, on the ground, wanting food (its eating latch on; the
+/// reserve line [`crate::TeacherConfig::seedporter_full_at`] is no longer read) and with no fruit at its
 /// mouth, walks to the stem of the nearest stand it can climb that hangs fruit within
 /// [`Glider::fruit_search_m`] — the roost reflex's world query over the plant layer, not a
 /// sense — and walking into it climbs it. `None` leaves its heuristic's actions. No
@@ -1272,8 +1266,9 @@ pub(super) fn fruit_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &F
     if a.mobility.mode != MobilityMode::Ground || a.state == State::Asleep {
         return None;
     }
-    let cap = phys.core.reserve_of(a.body);
-    if !(cap > 0.0) || a.reserve >= fauna.config.teachers.seedporter_full_at * cap {
+    // It searches while it wants food (the eating latch; since the minimal gut a fed
+    // body's reserve stays near full, so the old reserve line no longer tells).
+    if !a.eating {
         return None;
     }
     if glider_fruit_in_reach(view, fv, a, phys).is_some() {

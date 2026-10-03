@@ -85,7 +85,6 @@ fn the_lanternjaw_and_its_prey_carry_the_notes_numbers() {
     assert_eq!(h.jaw_band_height_fraction, 0.6);
     assert_eq!((h.windup_s, h.lunge_s, h.recovery_s), (0.15, 0.25, 3.0));
     assert_eq!(h.strike_cost_s, 100.0);
-    assert_eq!((h.rest_at, h.torpor_upkeep, h.wake_at), (0.9, 0.25, 0.5));
     assert!(h.hunts(Founder::Browser) && h.hunts(Founder::Blind));
     assert!(!h.hunts(Founder::Lanternjaw), "not in its own prey list");
 

@@ -171,6 +171,17 @@ pub struct LifeConfig {
     /// horizontal distance whose water it wades. A heuristic world query, not a sense.
     #[serde(default = "default_shallows_search_m")]
     pub shallows_search_m: f64,
+    /// **The ecological day**, seconds (the minimal gut, 2026-10-03): the day per-day
+    /// physiology is written in — `maintenance_per_s` is a lineage's daily need `f` over
+    /// it, and a rider's [`crate::FaunaConfig::parasite_take_per_day`] is spread over it.
+    /// 7,200, the default cycle's two hours. Fixed, so the picture clock (a `local` day, a
+    /// changed cycle) never changes physiology.
+    #[serde(default = "default_ecological_day_s")]
+    pub ecological_day_s: f64,
+}
+
+fn default_ecological_day_s() -> f64 {
+    LifeConfig::default().ecological_day_s
 }
 
 fn default_shallows_search_m() -> f64 {
@@ -193,6 +204,7 @@ impl Default for LifeConfig {
             arriving_share_min: 0.5,
             wall_friction: 0.0,
             shallows_search_m: 8.0,
+            ecological_day_s: 7200.0,
         }
     }
 }

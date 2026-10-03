@@ -33,7 +33,11 @@ use crate::Fauna;
 // `FoundingConfig::clearance_margin_m` in the saved config.
 // 35: roster mechanics — `LifeConfig::shallows_search_m`, `Glider::fruit_search_m` in
 //     the saved config.
-pub const SCHEMA: u32 = 35;
+// 36: the minimal gut — `Animal::{stomach, eating, emergency, bout}`, the gut ledger
+//     lines, `FounderPhysiology::{gut, emergency_clear_hunger}`, `Hunter` without its
+//     satiated rest, `Rest` without `Satiated`, `FaunaConfig::parasite_take_per_day`,
+//     `LifeConfig::ecological_day_s`; per-day upkeep and the new lifespans.
+pub const SCHEMA: u32 = 36;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -358,6 +362,10 @@ mod tests {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            stomach: crate::Stomach::default(),
+            eating: false,
+            emergency: false,
+            bout: None,
         }
     }
 

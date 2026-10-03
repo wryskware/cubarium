@@ -20,7 +20,8 @@ pub fn registry() -> &'static Registry {
             rows(),
             vec![
                 Alias { pattern: "fauna.founders".into(), names: founders.clone() },
-                Alias { pattern: "fauna.founders.*.yield_by_food".into(), names: foods },
+                Alias { pattern: "fauna.founders.*.yield_by_food".into(), names: foods.clone() },
+                Alias { pattern: "fauna.founders.*.gut.digestion_s".into(), names: foods },
                 Alias { pattern: "fauna.founders.*.hunter.prey".into(), names: founders },
             ],
             Vec::new(),
@@ -119,10 +120,10 @@ fn r(path: &str, unit: &'static str, range: Range, what: &'static str) -> Row {
 fn species_rows() -> Vec<Row> {
     let nonneg = Range::nonneg();
     vec![
-        r("maintenance_per_s", "org-units/s per unit body", nonneg, "basal upkeep, paid from reserve then body")
-            .search(2e-5, 4e-3).log().grade("B"),
-        r("bite_per_s", "org-units/s", nonneg, "the hungry mouth's intake rate")
-            .search(2e-4, 4e-3).log().grade("C"),
+        r("maintenance_per_s", "org-units/s per unit body", nonneg, "basal upkeep, paid from reserve then body: daily need f / 7200 s")
+            .search(2e-6, 4e-3).log().grade("B"),
+        r("bite_per_s", "org-units/s", nonneg, "UNREAD since the minimal gut (gut.bite_per_body_s); kept for the search rebase")
+            .search(2e-4, 4e-3).log().grade("N"),
         r("bite_half_stock", "org-units at the mouth", nonneg, "K: a bite is want * E / (E + K)")
             .search(1e-4, 5e-2).log().grade("C").prov("tuned"),
         r("n_tissue", "mineral per org-unit", nonneg, "tissue stoichiometry: a bite builds at most mineral / n_tissue")
@@ -139,7 +140,7 @@ fn species_rows() -> Vec<Row> {
         r("drown_depth_m", "m", nonneg, "standing water that kills the heuristic body and a clutch").grade("D"),
         r("energy_density", "energy per org-unit", nonneg, "energy an introduced animal arrives with").grade("N"),
         r("lifespan_median_s", "s", nonneg, "median lifespan (0: none)")
-            .search(3600.0, 57600.0).log().grade("B").prov("derived"),
+            .search(3600.0, 172800.0).log().grade("B").prov("derived"),
         r("reproduction.surplus_floor", "org-units above the package", nonneg, "reserve margin above the package that counts as surplus")
             .evolve().grade("C"),
         r("reproduction.surplus_hold_s", "s", nonneg, "the window a surplus is judged over")
@@ -204,7 +205,20 @@ fn founder_rows() -> Vec<Row> {
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
         r("sleep_upkeep", "x basal upkeep", fraction, "upkeep while asleep").search(0.1, 1.0).prov("decision"),
-        r("wake_hunger", "hunger 0..1", fraction, "hunger at or above which it stays awake").search(0.1, 1.0),
+        r("wake_hunger", "hunger 0..1", fraction, "the emergency latch goes on (awake in any phase) at this reserve hunger").search(0.1, 1.0),
+        r("emergency_clear_hunger", "hunger 0..1", fraction, "the emergency latch goes off below this reserve hunger")
+            .search(0.0, 0.9).prov("decision"),
+        // The minimal gut (`Gut`, design/metabolism-meals-2026-10-02.md repair 2).
+        r("gut.stomach_k", "raw org-units per unit current body", nonneg, "k: stomach capacity K = k x body")
+            .search(0.005, 0.5).log().prov("decision"),
+        r("gut.bite_per_body_s", "raw org-units/s per unit current body", nonneg, "b: a bite's rate at full effort (default 2k / tau)")
+            .search(1e-5, 1e-2).log().prov("derived"),
+        r("gut.digestion_s.*", "s", Range::positive(), "tau: a food class's pool empties at S / tau into the reserve's room")
+            .search(10.0, 1200.0).log().prov("decision"),
+        r("gut.s0", "fraction of K", fraction, "appetite floor: a fed body wants food at S <= s0 K")
+            .search(0.0, 0.8).prov("decision"),
+        r("gut.full_tolerance", "fraction of K", Range::closed(0.0, 1.0).open_lo(), "the eating latch goes off at S >= this x K")
+            .prov("decision"),
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
@@ -222,9 +236,6 @@ fn founder_rows() -> Vec<Row> {
         r("hunter.recovery_s", "s", nonneg, "the recovery, at half speed and unable to strike").optional(),
         r("hunter.strike_cost_s", "s of awake upkeep", nonneg, "a strike's cost, hit or miss").optional(),
         r("hunter.lure_power", "x awake upkeep", nonneg, "a lit lure's cost").optional(),
-        r("hunter.rest_at", "fraction of reserve cap", fraction, "satiated: rests at this reserve").optional(),
-        r("hunter.torpor_upkeep", "x basal upkeep", nonneg, "upkeep in the satiated rest").optional(),
-        r("hunter.wake_at", "fraction of reserve cap", fraction, "wakes from the rest below this").optional(),
         // The flyer's table (`Flight`, F1): the bellwing's only, optional on the others.
         r("flight.span_m", "m", Range::positive(), "wingspan: the collision sphere's diameter").optional().prov("decision"),
         r("flight.band_max_m", "m", nonneg, "the ceiling: the base's most height over the support face below").optional().prov("decision"),
@@ -285,8 +296,10 @@ fn rows() -> Vec<Row> {
         r("fauna.parasite_attach_radius_m", "m", Range::nonneg(), "host search radius from a hatching egg").search(0.25, 2.0).grade("N"),
         r("fauna.parasite_max_per_host", "count", Range::nonneg(), "riders one host carries (0: dormant eggs never hatch)")
             .search(0.0, 4.0).grade("N"),
-        r("fauna.parasite_drain_of_host_basal", "x host basal upkeep", Range::nonneg(), "a rider's take from its host")
+        r("fauna.parasite_drain_of_host_basal", "x host basal upkeep", Range::nonneg(), "UNREAD since the minimal gut (parasite_take_per_day); kept for the search rebase")
             .search(0.01, 0.5).log().grade("N"),
+        r("fauna.parasite_take_per_day", "host body per ecological day", Range::nonneg(), "a rider's take from its host, into its reserve")
+            .search(0.01, 0.5).log().grade("N").prov("derived"),
         r("fauna.parasite_detach_body_fraction", "fraction of lineage body_max", Range::closed(0.0, 1.0).open_lo(), "a rider drops off at this size")
             .search(0.15, 0.5).grade("N"),
     ]);
@@ -355,6 +368,8 @@ fn knob_rows() -> Vec<Row> {
         l("arriving_share_min", "fraction", fraction, "an arriving body keeps a uniform [this, 1) share of a draw").grade("N"),
         l("wall_friction", "fraction", fraction, "share of a walk's along-wall component a wall takes away (0 slides freely, 1 stops)").search(0.0, 1.0),
         l("shallows_search_m", "m", nonneg, "a heuristic walker in water deeper than it wades heads for the nearest wadeable face within this (a world query, not a sense)"),
+        l("ecological_day_s", "s", pos, "the day per-day physiology is written in (daily need, a rider's take); fixed, not the picture clock")
+            .prov("decision"),
     ]);
 
     // `fauna.cue.*`.
@@ -407,15 +422,15 @@ fn knob_rows() -> Vec<Row> {
         t("ambush_gaze_turn", "effort", fraction, "the ambush's turn toward foliage while seeking a crown").search(0.2, 1.0),
         t("ambush_wander_turn", "effort", fraction, "the ambush's no-signal wander turn").search(0.1, 1.0),
         t("ambush_wander_flip", "samples", count, "samples the ambush's wander holds a side before flipping").search(2.0, 24.0),
-        t("bellwing_full_at", "fraction of adult reserve", fraction, "the hover-sip teacher stops sipping and rests at this reserve").search(0.5, 1.0),
-        t("bellwing_hungry_at", "fraction of adult reserve", fraction, "a resting bellwing takes off to forage below this reserve").search(0.1, 0.9),
+        t("bellwing_full_at", "fraction of adult reserve", fraction, "UNREAD since the minimal gut (the eating latch decides); the hover-sip teacher rested at this reserve").search(0.5, 1.0),
+        t("bellwing_hungry_at", "fraction of adult reserve", fraction, "UNREAD since the minimal gut; a resting bellwing took off below this reserve").search(0.1, 0.9),
         t("bellwing_cruise_altitude", "fraction of band", fraction, "the height the bellwing searches at").search(0.1, 0.9),
         t("bellwing_altitude_gain", "effort per band fraction", nonneg, "lift effort per unit of altitude error").search(1.0, 10.0),
         t("bellwing_bloom_gate", "fraction of rays", fraction, "a fan sector sees blooms above this fraction of its rays").search(0.005, 0.2).log(),
         t("bellwing_bloom_near", "1 - d/range", fraction, "a bloom this near: slow and come down to it").search(0.3, 0.9),
         t("bellwing_gaze_turn", "effort", fraction, "turn effort toward the sector with the most bloom").search(0.2, 1.0),
         t("bellwing_wander_forward", "effort", fraction, "forward effort of the bellwing's no-signal wander").search(0.2, 1.0),
-        t("seedporter_full_at", "fraction of adult reserve", fraction, "the seedporter's heuristic stops eating at this reserve").search(0.5, 1.0),
+        t("seedporter_full_at", "fraction of adult reserve", fraction, "UNREAD since the minimal gut (the eating latch decides); the seedporter's heuristic stopped eating at this reserve").search(0.5, 1.0),
         t("bellwing_roost_ceiling", "fraction of band", fraction, "going to rest, cover closer than this overhead is an underside to rise into").search(0.1, 0.8),
     ]);
 

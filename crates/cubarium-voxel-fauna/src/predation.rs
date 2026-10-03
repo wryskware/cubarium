@@ -43,14 +43,13 @@ pub struct Strike {
 }
 
 /// Why a body is at rest ([`crate::Animal::rest`], `Some` exactly while its state is
-/// [`State::Asleep`]): the rest state with a reason (§2.8).
+/// [`State::Asleep`]): the rest state with a reason (§2.8). One reason since the minimal
+/// gut removed the carnivores' satiated rest: a fed hunter rests awake, its eating latch
+/// off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Rest {
-    /// Out of its activity phase and not hungry, at `sleep_upkeep`.
+    /// Out of its activity phase and not in an emergency, at `sleep_upkeep`.
     Sleep,
-    /// A carnivore at `rest_at` of its reserve cap, in any phase, at `torpor_upkeep`,
-    /// until it falls below `wake_at`.
-    Satiated,
 }
 
 /// What one body is to another, per observer (§2.2).
