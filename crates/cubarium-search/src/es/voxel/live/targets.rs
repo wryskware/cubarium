@@ -186,8 +186,11 @@ pub struct LineageOutcome {
     /// Strikes that hit, and carrion its mouths took (gross organic).
     pub hits: u64,
     pub carrion_eaten: f64,
-    /// Pack chases that ended in a kill (a pack lineage).
+    /// Pack chases that ended in a kill (a pack lineage). Not strict attribution: the
+    /// fauna counts a target gone with carrion at its site (Astra F5).
     pub pack_kills: u64,
+    /// Assimilated intake over the whole run (the ledger's), organic.
+    pub intake_run: f64,
     /// A pack's litters, pups born, pups alive (still pups) and grown past independence at
     /// the end, and what pups received from provisioning (organic).
     pub litters: u64,
@@ -208,8 +211,12 @@ pub struct LineageOutcome {
     pub rule: Rule,
     /// The ladder's score (progress rules), 0 to 1.
     pub score: f64,
-    /// The stage term, 0 (met) to 1, and whether the target is met.
+    /// The stage term, 0 (met) to 1.
     pub shortfall: f64,
+    /// **Three verdicts** (Astra F4): the stage target met; replenishment met (a lineage
+    /// held to it: a complete cycle at 1 or more; otherwise true); and both.
+    pub stage_met: bool,
+    pub replenishment_met: bool,
     pub met: bool,
     /// The replenishment term, 0 to 1 (0 for a lineage not held to it).
     pub replenish_shortfall: f64,
@@ -241,6 +248,7 @@ impl LineageOutcome {
             hits: 0,
             carrion_eaten: 0.0,
             pack_kills: 0,
+            intake_run: 0.0,
             litters: 0,
             pups_born: 0,
             pups_alive: 0,
@@ -255,6 +263,8 @@ impl LineageOutcome {
             rule: Rule::Persist,
             score: 0.0,
             shortfall: 0.0,
+            stage_met: true,
+            replenishment_met: true,
             met: true,
             replenish_shortfall: 0.0,
         }
@@ -306,7 +316,9 @@ fn chorister_score(o: &LineageOutcome, survival_min: f64, kill_required: bool) -
     let fed = o.provision_received > 0.0;
     let pups_now = (o.pups_alive + o.pups_independent) as f64;
     let survived = o.pups_born > 0 && pups_now / o.pups_born as f64 >= survival_min;
-    let ate = o.pack_kills > 0 || (!kill_required && (o.carrion_eaten > 0.0 || o.hits > 0));
+    // Real assimilated intake, never a hit or a bite alone (Astra F5); at finalist stage a
+    // pack kill as well.
+    let ate = o.intake_run > 0.0 && (!kill_required || o.pack_kills > 0);
     [litter, fed, survived, ate].iter().filter(|x| **x).count() as f64 / 4.0
 }
 
@@ -348,7 +360,7 @@ pub fn judge(o: &mut LineageOutcome, spec: &StageSpec, reached_second_half: bool
     };
     o.score = score;
     o.shortfall = shortfall;
-    o.met = met;
+    o.stage_met = met;
     o.replenishment = replenishment(o.intake_cycle, o.biomass_start, o.biomass_cycle);
     o.readout = spec.readout_only[i];
     o.replenish_shortfall = if !spec.replenish[i] || o.founded == 0 {
@@ -358,6 +370,9 @@ pub fn judge(o: &mut LineageOutcome, spec: &StageSpec, reached_second_half: bool
     } else {
         (1.0 - o.replenishment).clamp(0.0, 1.0)
     };
+    o.replenishment_met =
+        !spec.replenish[i] || o.founded == 0 || (o.cycle_complete && o.replenishment >= 1.0);
+    o.met = o.stage_met && o.replenishment_met;
     if o.readout {
         o.shortfall = 0.0;
         o.replenish_shortfall = 0.0;

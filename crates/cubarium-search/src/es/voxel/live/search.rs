@@ -1040,6 +1040,7 @@ fn outcomes(
         }
         o.eggs_laid = now.laid[i] - start.laid[i];
         o.hits = now.hits[i] - start.hits[i];
+        o.intake_run = now.assimilated[i] - start.assimilated[i];
         o.carrion_eaten = now.carrion[i] - start.carrion[i];
         if f == Founder::Lanternjaw {
             o.riders_attached = now.riders_attached - start.riders_attached;
@@ -2234,13 +2235,15 @@ pub fn finalist(
                 continue;
             }
             let met = rows.iter().filter(|o| o.met).count();
+            let stage_met = rows.iter().filter(|o| o.stage_met).count();
+            let repl_met = rows.iter().filter(|o| o.replenishment_met).count();
             let alive: usize = rows.iter().map(|o| o.alive_end).sum();
             let births: u64 = rows.iter().map(|o| o.births).sum();
             let score = rows.iter().map(|o| o.score).sum::<f64>() / rows.len() as f64;
             let late: u64 = rows.iter().map(|o| o.late_births).sum();
             let repl: Vec<String> = rows.iter().map(|o| format!("{:.2}", o.replenishment)).collect();
             println!(
-                "  {:<14}{} met {met}/{}  alive {alive:>4}  births {births:>4} (late {late:>3})  score {score:.2}  replenish [{}]",
+                "  {:<14}{} met {met}/{} (stage {stage_met}, replenishment {repl_met})  alive {alive:>4}  births {births:>4} (late {late:>3})  score {score:.2}  replenish [{}]",
                 f.name(),
                 if rows.iter().any(|o| o.readout) { " (readout)" } else { "" },
                 rows.len(),
