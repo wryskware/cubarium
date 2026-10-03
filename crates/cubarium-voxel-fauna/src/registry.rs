@@ -120,7 +120,7 @@ fn species_rows() -> Vec<Row> {
     let nonneg = Range::nonneg();
     vec![
         r("maintenance_per_s", "org-units/s per unit body", nonneg, "basal upkeep, paid from reserve then body")
-            .search(2.5e-4, 4e-3).log().grade("B"),
+            .search(2e-5, 4e-3).log().grade("B"),
         r("bite_per_s", "org-units/s", nonneg, "the hungry mouth's intake rate")
             .search(2e-4, 4e-3).log().grade("C"),
         r("bite_half_stock", "org-units at the mouth", nonneg, "K: a bite is want * E / (E + K)")
@@ -135,7 +135,7 @@ fn species_rows() -> Vec<Row> {
         r("birth_cost", "org-units", nonneg, "a gestation's package: the newborn's body_min plus its reserve")
             .evolve().grade("B"),
         r("reserve_cap", "fraction of body", nonneg, "ceiling on new intake into the reserve")
-            .search(0.2, 1.5).grade("A"),
+            .search(0.2, 5.0).grade("A"),
         r("drown_depth_m", "m", nonneg, "standing water that kills the heuristic body and a clutch").grade("D"),
         r("energy_density", "energy per org-unit", nonneg, "energy an introduced animal arrives with").grade("N"),
         r("lifespan_median_s", "s", nonneg, "median lifespan (0: none)")
@@ -167,7 +167,7 @@ fn founder_rows() -> Vec<Row> {
     let fraction = Range::fraction();
     vec![
         r("motor_respiration_per_s", "org-units/s per unit body at full cruise", nonneg, "paid motion")
-            .search(2.5e-4, 1e-2).log().grade("B"),
+            .search(2e-5, 1e-2).log().grade("B"),
         r("step_up_m", "m", nonneg, "tallest riser stepped (rounded down to voxels)")
             .search(0.1, 1.5).digest().grade("B").prov("measured"),
         r("step_down_m", "m", nonneg, "deepest drop stepped").evolve().digest().grade("C").prov("measured"),
@@ -203,7 +203,7 @@ fn founder_rows() -> Vec<Row> {
         r("yield_by_food.*", "fraction", fraction, "assimilation yield of one food class").search(0.05, 0.9),
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
-        r("sleep_upkeep", "x basal upkeep", fraction, "upkeep while asleep").search(0.2, 1.0).prov("decision"),
+        r("sleep_upkeep", "x basal upkeep", fraction, "upkeep while asleep").search(0.1, 1.0).prov("decision"),
         r("wake_hunger", "hunger 0..1", fraction, "hunger at or above which it stays awake").search(0.1, 1.0),
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
         r("agility", "fraction", fraction, "the dodge's species factor"),

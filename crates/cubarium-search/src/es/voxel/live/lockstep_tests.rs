@@ -39,6 +39,14 @@ fn spec(out: PathBuf, generations: u32, resume: bool) -> SearchSpec {
         depth: 8,
         voxel_m: 0.25,
         landform: cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::DEFAULT),
+        // The clock off: this is the lock step's mechanics, not the rhythm. Since the
+        // night package (2c7fd076: founders full, wake_hunger 0.9) a nocturnal shredder
+        // founded at 08:00 sleeps through both windows, every twin scores alike and its
+        // centre rightly takes no step.
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..cubarium_voxel::weather::DayClock::default()
+        },
         ..cubarium_voxel::Config::default()
     });
     let genome = EcologyParams::cotrain()

@@ -26,6 +26,7 @@ fn trace(n: usize, lj: usize) -> Trace {
         browser_moving: 0.4,
         missing: 0,
         silent_lineages: 0.0,
+        ..Trace::default()
     }
 }
 

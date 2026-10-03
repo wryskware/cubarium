@@ -47,16 +47,23 @@ use serde::{Deserialize, Serialize};
 /// the diagnostics need. The frozen driver keeps one per acting body, the live window one
 /// per body of the world.
 ///
-/// The accumulator is zeroed at a controller sampling, which the fauna makes on exactly
-/// the ticks where `age_ticks` is a multiple of the lineage's cadence, **before** that
-/// tick's motion and bite are added. So after such a tick it holds that tick alone, and
-/// otherwise it holds the previous reading plus this tick.
+/// The accumulator is zeroed at a controller sampling, which the fauna makes on the ticks
+/// where `age_ticks` is a multiple of the lineage's cadence **and the body is due** — not
+/// asleep and not riding a host — **before** that tick's motion and bite are added. So
+/// after a sampled tick it holds that tick alone, and otherwise it holds the previous
+/// reading plus this tick. A sleeper is never sampled, so its accumulator runs on across
+/// cadence ticks (counting it whole there counted the interval again each time: 12x the
+/// ledger at `wake_hunger` 0.9, the night package's finding). Due-ness is read from the
+/// body as the previous observation left it, the state the sampling saw.
 #[derive(Clone, Debug)]
 pub struct BodyMeter {
     cadence: u64,
     /// The accumulator after the previous tick: intake, motor, attempted, delivered,
     /// forward.
     prev: [f64; 5],
+    /// Whether the body could be sampled at the next cadence tick: awake and not riding,
+    /// as the previous observation left it.
+    due: bool,
     /// Settled assimilated intake, organic.
     pub intake: f64,
     /// Paid motor respiration, organic.
@@ -82,11 +89,16 @@ impl BodyMeter {
         BodyMeter {
             cadence: founder.manifest().cadence_ticks().max(1),
             prev: Self::reading(a),
+            due: Self::can_sample(a),
             intake: 0.0,
             motor: 0.0,
             walked_m: 0.0,
             blocked_motor: 0.0,
         }
+    }
+
+    fn can_sample(a: &Animal) -> bool {
+        a.state != cubarium_voxel_fauna::State::Asleep && a.attached.is_none()
     }
 
     fn reading(a: &Animal) -> [f64; 5] {
@@ -103,7 +115,8 @@ impl BodyMeter {
     /// Fold in one post-step reading of the living body; returns this tick's share.
     pub fn observe(&mut self, a: &Animal) -> MeterTick {
         let now = Self::reading(a);
-        let sampled = a.age_ticks.is_multiple_of(self.cadence);
+        let sampled = self.due && a.age_ticks.is_multiple_of(self.cadence);
+        self.due = Self::can_sample(a);
         let d: [f64; 5] = std::array::from_fn(|i| {
             if sampled {
                 now[i]

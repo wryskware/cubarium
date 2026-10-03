@@ -33,6 +33,7 @@ pub mod ecology;
 pub mod readout;
 pub mod screen;
 pub mod search;
+pub mod targets;
 pub mod trainer;
 pub mod variants;
 pub mod window;
@@ -56,6 +57,8 @@ mod motor_tests;
 mod movement_tests;
 #[cfg(test)]
 mod reward_tests;
+#[cfg(test)]
+mod roster_tests;
 #[cfg(test)]
 mod screen_tests;
 #[cfg(test)]

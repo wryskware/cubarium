@@ -1,0 +1,405 @@
+# The exhibited candidate (design/handoffs/roster-search-groundwork-2026-10-02.md §6):
+# roster.toml with these genes moved, hand-picked to pass every analytic screen (R a readout;
+# plants at x1; sleep and wake hunger the night defaults).
+# Training only; the live defaults are unchanged. Generated; see the commit message.
+
+[base]
+file = "config/desktop/terrarium.toml"
+
+[brains]
+littershredder = "config/training/curiosity-2026-10-02/C1-centre-littershredder.json"
+frondgrazer = "config/training/curiosity-2026-10-02/C1-centre-frondgrazer.json"
+
+[screen]
+r = [0.02, 0.3]
+s = [0.02, 0.2]
+f_min = 10.0
+base = 200.0
+k = 10.0
+run_margin = 2.0
+k_soft = 5.0
+light_moisture = 0.67
+harvest = 0.2
+r_readout = true
+
+[screen.night]
+f0 = 0.8
+margin = 1.2
+
+[screen.food]
+min_ratio = 1.0
+vine_faces_founded = 1.0
+balance_share = 0.5
+
+[targets]
+version = 3
+birth_required = ["littershredder", "frondgrazer", "capgnawer", "loftstrider", "ripple-snail", "bellwing", "seedporter"]
+birth_credit_max = 0.5
+ready_target = 0.5
+progress = ["lanternjaw", "chorister"]
+lanternjaw_progress = 0.5
+chorister_pup_survival = 0.5
+replenish = ["littershredder", "frondgrazer", "capgnawer", "loftstrider", "ripple-snail", "bellwing", "seedporter", "chorister"]
+replenish_weight = 5.0
+lively_weight = 10.0
+share_weight_unestablished = 0.2
+
+[[gene]]
+name = "upkeep@littershredder"
+path = "fauna.founders.littershredder.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.25
+
+[[gene]]
+name = "upkeep@frondgrazer"
+path = "fauna.founders.frondgrazer.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.25
+
+[[gene]]
+name = "upkeep@lanternjaw"
+path = "fauna.founders.lanternjaw.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.4
+
+[[gene]]
+name = "upkeep@capgnawer"
+path = "fauna.founders.capgnawer.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.22
+
+[[gene]]
+name = "upkeep@loftstrider"
+path = "fauna.founders.loftstrider.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.25
+
+[[gene]]
+name = "upkeep@ripple-snail"
+path = "fauna.founders.ripple-snail.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.22
+
+[[gene]]
+name = "upkeep@bellwing"
+path = "fauna.founders.bellwing.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.25
+
+[[gene]]
+name = "upkeep@seedporter"
+path = "fauna.founders.seedporter.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.25
+
+[[gene]]
+name = "upkeep@chorister"
+path = "fauna.founders.chorister.core.maintenance_per_s"
+range = [0.05, 4.0]
+value = 0.2
+
+[[gene]]
+name = "intake@littershredder"
+path = "fauna.founders.littershredder.core.bite_per_s"
+range = [0.1, 10.0]
+value = 4.0
+
+[[gene]]
+name = "intake@frondgrazer"
+path = "fauna.founders.frondgrazer.core.bite_per_s"
+range = [0.1, 10.0]
+value = 4.0
+
+[[gene]]
+name = "intake@lanternjaw"
+path = "fauna.founders.lanternjaw.core.bite_per_s"
+range = [0.1, 10.0]
+value = 2.5
+
+[[gene]]
+name = "intake@capgnawer"
+path = "fauna.founders.capgnawer.core.bite_per_s"
+range = [0.1, 10.0]
+value = 4.5
+
+[[gene]]
+name = "intake@loftstrider"
+path = "fauna.founders.loftstrider.core.bite_per_s"
+range = [0.1, 10.0]
+value = 4.0
+
+[[gene]]
+name = "intake@ripple-snail"
+path = "fauna.founders.ripple-snail.core.bite_per_s"
+range = [0.1, 10.0]
+value = 4.5
+
+[[gene]]
+name = "intake@bellwing"
+path = "fauna.founders.bellwing.core.bite_per_s"
+range = [0.1, 10.0]
+value = 4.0
+
+[[gene]]
+name = "intake@seedporter"
+path = "fauna.founders.seedporter.core.bite_per_s"
+range = [0.1, 10.0]
+value = 4.0
+
+[[gene]]
+name = "intake@chorister"
+path = "fauna.founders.chorister.core.bite_per_s"
+range = [0.1, 10.0]
+value = 5.0
+
+[[gene]]
+name = "yield"
+path = "fauna.founders.*.yield_by_food.*"
+tie = "each"
+range = [0.25, 1.5]
+what = "assimilation yield, every food (base yields <= 0.6, so <= 0.9)"
+
+[[gene]]
+name = "reserve@littershredder"
+path = "fauna.founders.littershredder.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "reserve@frondgrazer"
+path = "fauna.founders.frondgrazer.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "reserve@lanternjaw"
+path = "fauna.founders.lanternjaw.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "reserve@capgnawer"
+path = "fauna.founders.capgnawer.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "reserve@loftstrider"
+path = "fauna.founders.loftstrider.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "reserve@ripple-snail"
+path = "fauna.founders.ripple-snail.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "reserve@bellwing"
+path = "fauna.founders.bellwing.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "reserve@seedporter"
+path = "fauna.founders.seedporter.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "reserve@chorister"
+path = "fauna.founders.chorister.core.reserve_cap"
+range = [0.5, 5.0]
+value = 2.5
+
+[[gene]]
+name = "sleep"
+path = "fauna.founders.*.sleep_upkeep"
+tie = "each"
+range = [0.4, 2.0]
+what = "upkeep asleep (0.5 -> 0.2-1.0; 0.3 -> 0.12-0.6); proposal: 0.5 endotherm-like, 0.3 ectotherm-like"
+
+[[gene]]
+name = "wake_hunger@littershredder"
+path = "fauna.founders.littershredder.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "wake_hunger@frondgrazer"
+path = "fauna.founders.frondgrazer.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "wake_hunger@lanternjaw"
+path = "fauna.founders.lanternjaw.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "wake_hunger@capgnawer"
+path = "fauna.founders.capgnawer.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "wake_hunger@loftstrider"
+path = "fauna.founders.loftstrider.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "wake_hunger@ripple-snail"
+path = "fauna.founders.ripple-snail.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "wake_hunger@bellwing"
+path = "fauna.founders.bellwing.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "wake_hunger@seedporter"
+path = "fauna.founders.seedporter.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "wake_hunger@chorister"
+path = "fauna.founders.chorister.wake_hunger"
+mode = "value"
+range = [0.3, 0.95]
+value = 0.9
+
+[[gene]]
+name = "pack_size@chorister"
+path = "fauna.founders.chorister.pack.pack_size"
+range = [0.5, 1.5]
+what = "adults per founded pack (rounded): 2-6"
+value = 0.75
+
+[[gene]]
+name = "growth@turf"
+path = "flora.@turf.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap"
+
+[[gene]]
+name = "growth@mat"
+path = "flora.@mat.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap"
+
+[[gene]]
+name = "growth@shrub"
+path = "flora.@shrub.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap"
+
+[[gene]]
+name = "growth@tree"
+path = "flora.@tree.foliage_rate"
+range = [0.1, 4.0]
+what = "foliage regrowth cap"
+
+[[gene]]
+name = "leaf_fall@turf"
+path = "flora.@turf.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate"
+
+[[gene]]
+name = "leaf_fall@mat"
+path = "flora.@mat.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate"
+
+[[gene]]
+name = "leaf_fall@shrub"
+path = "flora.@shrub.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate"
+
+[[gene]]
+name = "leaf_fall@tree"
+path = "flora.@tree.senescence"
+range = [0.05, 4.0]
+what = "leaf fall rate"
+
+[[gene]]
+name = "alpha@turf"
+path = "flora.@turf.alpha"
+range = [0.25, 2.0]
+what = "foliage per unit wood"
+
+[[gene]]
+name = "alpha@mat"
+path = "flora.@mat.alpha"
+range = [0.25, 2.0]
+what = "foliage per unit wood"
+
+[[gene]]
+name = "alpha@shrub"
+path = "flora.@shrub.alpha"
+range = [0.05, 2.0]
+what = "foliage per unit wood"
+
+[[gene]]
+name = "alpha@tree"
+path = "flora.@tree.alpha"
+range = [0.005, 2.0]
+what = "foliage per unit wood"
+
+[[gene]]
+name = "defence_onset"
+path = "flora.@photo.defence_per_bite"
+range = [0.25, 8.0]
+what = "defence rise per bite"
+
+[[gene]]
+name = "defence_relax"
+path = "flora.@photo.defence_half_life_s"
+range = [0.03, 4.0]
+what = "defence half-life"
+
+[[gene]]
+name = "decomposition"
+path = "flora.decomposition"
+range = [0.1, 4.0]
+what = "litter decay (dead wood and carrion follow)"
+
+[[gene]]
+name = "rider_drain"
+path = "fauna.parasite_drain_of_host_basal"
+range = [0.2, 10.0]
+what = "a rider's take, x host basal upkeep (0.05 -> 0.01-0.5, the row's interval)"
+
+[[gene]]
+name = "rider_attach_radius"
+path = "fauna.parasite_attach_radius_m"
+range = [0.33, 2.67]
+what = "host search radius from a hatching egg (0.75 m -> 0.25-2.0 m)"
+
+[[gene]]
+name = "rider_detach"
+path = "fauna.parasite_detach_body_fraction"
+range = [0.625, 2.0]
+what = "the size a rider drops off at, x lanternjaw body_max (0.24 -> 0.15-0.48)"
+
+[[gene]]
+name = "night_bloom"
+path = "flora.*.night_bloom_scale"
+range = [0.1, 3.0]
+what = "nectar and fruit made at night, x the day rate (0.3 -> 0.03-0.9)"
