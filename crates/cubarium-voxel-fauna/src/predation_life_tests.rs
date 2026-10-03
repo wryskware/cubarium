@@ -122,7 +122,12 @@ fn a_full_lanternjaw_rests_awake_at_its_basal_upkeep() {
 fn the_ambush_heuristic_eats_a_carcass_to_the_full_event() {
     let world = clock_off(10);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    // A fast gut (τ 5 s, b = 2k/τ), so the meal fills inside a couple of hundred ticks.
+    let mut config = FaunaConfig::default();
+    let g = &mut config.founders[Founder::Lanternjaw.index()].gut;
+    g.digestion_s = [5.0; crate::Food::COUNT];
+    g.bite_per_body_s = 2.0 * g.stomach_k / 5.0;
+    let mut fauna = Fauna::new(config);
     fauna.set_births_enabled(false);
     let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     {
@@ -147,7 +152,7 @@ fn the_ambush_heuristic_eats_a_carcass_to_the_full_event() {
     fauna
         .controllers
         .set(lj, Box::new(crate::LanternjawAmbush::new()));
-    let full = step_until(&mut fauna, &world, &mut flora, 20 * 60 * 20, |f| {
+    let full = step_until(&mut fauna, &world, &mut flora, 300, |f| {
         f.ledger.meals_by_founder_kind[Founder::Lanternjaw.index()].iter().sum::<u64>() > 0
     });
     assert!(full.is_some(), "it never ate to the full event");

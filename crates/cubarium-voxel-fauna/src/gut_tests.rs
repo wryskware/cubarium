@@ -109,6 +109,13 @@ fn carrion_config(f: Founder) -> FaunaConfig {
     c
 }
 
+/// A fast gut on `f` for short tests: every class at `τ` seconds and `b = 2k / τ`.
+fn fast_gut(config: &mut FaunaConfig, f: Founder, tau: f64) {
+    let g = &mut config.founders[f.index()].gut;
+    g.digestion_s = [tau; Food::COUNT];
+    g.bite_per_body_s = 2.0 * g.stomach_k / tau;
+}
+
 /// A controller that stands and holds `feed`.
 fn stand_and_feed() -> Box<dyn Controller> {
     Box::new(Scripted::new(vec![Actions {
@@ -281,9 +288,13 @@ fn meal_interval(f: Founder) {
 
     let max_ticks = ((3.0 * 1.3 + 1.5) * want * DAY_S / DT) as u64 + (DAY_S / DT) as u64;
     let mut starts: Vec<u64> = Vec::new();
+    // Meals completed, and normal ones, at each start (Astra's finding 10: each counted
+    // interval spans one completed normal bout, and no start is emergency chatter).
+    let mut at_start: Vec<(u64, u64)> = Vec::new();
     let mut was = animal(&fauna, id).eating;
     if was {
         starts.push(0);
+        at_start.push((0, 0));
     }
     for t in 1..=max_ticks {
         world.step();
@@ -291,11 +302,18 @@ fn meal_interval(f: Founder) {
         let a = animal(&fauna, id);
         if a.eating && !was {
             starts.push(t);
+            let k = &fauna.ledger.meals_by_founder_kind[f.index()];
+            at_start.push((k.iter().sum(), k[BoutKind::Normal.index()]));
+            assert!(!a.emergency, "{}: a meal started in an emergency at tick {t}", f.name());
         }
         was = a.eating;
         if starts.len() >= 4 {
             break;
         }
+    }
+    for w in at_start.windows(2) {
+        assert_eq!(w[1].0 - w[0].0, 1, "{}: one completed bout between starts: {at_start:?}", f.name());
+        assert_eq!(w[1].1 - w[0].1, 1, "{}: and it was a normal one: {at_start:?}", f.name());
     }
     let a = animal(&fauna, id);
     assert!(
@@ -416,50 +434,68 @@ fn interrupted_access_keeps_the_latch_on() {
     let world = clock_off(2);
     let mut flora = Flora::new(FloraConfig::default());
     carrion_everywhere(&world, &mut flora, 1.0);
-    let mut fauna = Fauna::new(carrion_config(f));
+    // A fast gut (τ 6 s, b = 2k/τ), so the meal fills in about 80 ticks.
+    let mut config = carrion_config(f);
+    fast_gut(&mut config, f, 6.0);
+    let mut fauna = Fauna::new(config);
     fauna.set_births_enabled(false);
     let id = introduce(&mut fauna, &world, f, StartingStores::FULL);
     place(&mut fauna, id, 6.0, 1.5, EAST);
     fill_stomach(&mut fauna, id, 0.0);
     fauna.controllers.set(id, stand_and_feed());
-    for _ in 0..60 {
+    for _ in 0..20 {
         fauna.step_with(&world, &mut flora, 1);
     }
     let a = animal(&fauna, id);
     assert!(a.eating, "it is eating");
     assert!(a.stomach.organic() > 0.0 && a.stomach.organic() < 0.9 * capacity(&fauna, id));
     clear_carrion(&world, &mut flora);
-    for _ in 0..2000 {
+    for _ in 0..200 {
         fauna.step_with(&world, &mut flora, 1);
         assert!(animal(&fauna, id).eating, "losing access does not clear the latch");
     }
     carrion_everywhere(&world, &mut flora, 1.0);
-    let full = step_until(&mut fauna, &world, &mut flora, 20 * 60 * 20, |fa| {
+    let full = step_until(&mut fauna, &world, &mut flora, 400, |fa| {
         !animal(fa, id).eating
     });
     assert!(full.is_some(), "food back: it eats to the full event and stops");
     let a = animal(&fauna, id);
     assert!(a.stomach.organic() >= 0.98 * capacity(&fauna, id) * (1.0 - 1e-9));
     assert_eq!(meals(&fauna, f), 1, "one meal, completed");
-    assert_books(&fauna, "interrupted meal", 30_000);
+    assert_books(&fauna, "interrupted meal", 700);
 }
 
 /// Famine recovery: a starved adult on ample food keeps `0 ≤ S ≤ K` every tick, refills
 /// its reserve out of the emergency, records its bouts with their durations, and the books
 /// close.
 #[test]
+#[ignore = "study: run by name (long run; repair 3 item 9)"]
 fn famine_recovery_keeps_the_stomach_bounded_and_the_books_closed() {
+    famine_case(None, (40.0 * 60.0 / DT) as u64);
+}
+
+/// [`famine_recovery_keeps_the_stomach_bounded_and_the_books_closed`] on a fast gut (τ 1 s)
+/// for 600 ticks: the same claims, short.
+#[test]
+fn famine_recovery_on_a_fast_gut() {
+    famine_case(Some(1.0), 600);
+}
+
+fn famine_case(tau: Option<f64>, ticks: u64) {
     let f = Founder::Browser;
     let world = clock_off(3);
     let mut flora = Flora::new(FloraConfig::default());
     carrion_everywhere(&world, &mut flora, 1.0);
-    let mut fauna = Fauna::new(carrion_config(f));
+    let mut config = carrion_config(f);
+    if let Some(t) = tau {
+        fast_gut(&mut config, f, t);
+    }
+    let mut fauna = Fauna::new(config);
     fauna.set_births_enabled(false);
     let id = introduce(&mut fauna, &world, f, StartingStores { body: 1.0, reserve: 0.0 });
     place(&mut fauna, id, 6.0, 1.5, EAST);
     fill_stomach(&mut fauna, id, 0.0);
     fauna.controllers.set(id, stand_and_feed());
-    let ticks = (40.0 * 60.0 / DT) as u64;
     for _ in 0..ticks {
         fauna.step_with(&world, &mut flora, 1);
         let a = animal(&fauna, id);
@@ -486,6 +522,7 @@ fn famine_recovery_keeps_the_stomach_bounded_and_the_books_closed() {
 /// A fed sleeper sleeps through its phase: a fed frondgrazer held at midnight and a fed
 /// littershredder held at noon sleep for the whole sleeping window without one wake.
 #[test]
+#[ignore = "study: run by name (long run; repair 3 item 9)"]
 fn a_fed_sleeper_sleeps_through_its_phase() {
     for (f, hour) in [(Founder::Browser, 0.0), (Founder::Blind, 12.0)] {
         let world = at_hour(hour, 4);
@@ -508,6 +545,7 @@ fn a_fed_sleeper_sleeps_through_its_phase() {
 /// with an empty stomach, held at midnight on ample carrion, wakes on the emergency
 /// latch, eats, and over the hour makes at most two sleep flips.
 #[test]
+#[ignore = "study: run by name (long run; repair 3 item 9)"]
 fn a_starving_sleeper_wakes_refills_and_flips_at_most_twice_an_hour() {
     let f = Founder::Browser;
     let world = at_hour(0.0, 5);
@@ -719,6 +757,7 @@ fn regurgitation_conserves_and_keeps_composition() {
 /// A rider on a fixed 1.5-ou adult grazer, all awake, reaches drop-off in about 1.19
 /// world days (Astra's integration), ±30 %, at `parasite_take_per_day` 0.09.
 #[test]
+#[ignore = "study: run by name (long run; repair 3 item 9)"]
 fn a_rider_on_a_fixed_host_reaches_dropoff_in_about_1_19_days() {
     let world = clock_off(10);
     let mut flora = Flora::new(FloraConfig::default());
@@ -815,7 +854,19 @@ fn a_juvenile_reaches_breeding_size_and_its_time_is_measured() {
 /// is what was digested, what left in stomachs and what is in them now, in every
 /// currency, and the layer's residual is closed.
 #[test]
+#[ignore = "study: run by name (a whole world day; repair 3 item 9)"]
 fn the_books_close_over_a_world_day() {
+    books_case((DAY_S / DT) as u64);
+}
+
+/// [`the_books_close_over_a_world_day`]'s scene for 300 ticks: eating, digestion,
+/// regurgitation and a rider's take all run from the first ticks.
+#[test]
+fn the_books_close_with_every_gut_flow_running() {
+    books_case(300);
+}
+
+fn books_case(ticks: u64) {
     let world = clock_off(12);
     let mut flora = Flora::new(FloraConfig::default());
     carrion_everywhere(&world, &mut flora, 5.0);
@@ -870,7 +921,7 @@ fn the_books_close_over_a_world_day() {
         }
     });
     let l0 = fauna.ledger;
-    for _ in 0..(DAY_S / DT) as u64 {
+    for _ in 0..ticks {
         fauna.step_with(&world, &mut flora, 1);
     }
     let l = fauna.ledger;
@@ -895,7 +946,7 @@ fn the_books_close_over_a_world_day() {
         let rhs = dig + out + held;
         assert!((lhs - rhs).abs() <= 1e-9 * lhs.abs().max(1e-9), "{what}: stomach in {lhs} ≠ out {rhs}");
     }
-    assert_books(&fauna, "after a world day", (DAY_S / DT) as u64);
+    assert_books(&fauna, "after the run", ticks);
 }
 
 /// A body dying with a full stomach hands its contents to the carrion with the rest of
@@ -931,3 +982,447 @@ fn a_dead_bodys_stomach_goes_to_its_carrion() {
 #[allow(dead_code)]
 fn _clock_modes(_: DayMode) {}
 
+
+// ================================================================== repair 3
+
+/// Short sleep transitions (repair 3 item 9; the long phase runs are studies): a fed
+/// frondgrazer at midnight and a fed littershredder at noon stay asleep for 300 ticks.
+#[test]
+fn a_fed_sleeper_stays_asleep() {
+    for (f, hour) in [(Founder::Browser, 0.0), (Founder::Blind, 12.0)] {
+        let world = at_hour(hour, 4);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(carrion_config(f));
+        fauna.set_births_enabled(false);
+        let id = introduce(&mut fauna, &world, f, StartingStores::FULL);
+        fauna.controllers.set(id, stand_and_feed());
+        for t in 0..300 {
+            fauna.step_with(&world, &mut flora, 1);
+            assert_eq!(animal(&fauna, id).state, State::Asleep, "{}: awake at tick {t}", f.name());
+        }
+        assert_eq!(fauna.ledger.emergency_wakes_by_founder[f.index()], 0);
+    }
+}
+
+/// The emergency latch's transitions (short): a fed frondgrazer asleep at midnight wakes
+/// on the tick its hunger reaches 0.9, stays awake while its hunger is between 0.6 and 0.9,
+/// and sleeps again below 0.6 — two flips, one emergency wake.
+#[test]
+fn the_emergency_latch_wakes_holds_and_releases() {
+    let f = Founder::Browser;
+    let world = at_hour(0.0, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(carrion_config(f));
+    fauna.set_births_enabled(false);
+    let id = introduce(&mut fauna, &world, f, StartingStores::FULL);
+    fauna.controllers.set(id, stand_and_feed());
+    fauna.step_with(&world, &mut flora, 1);
+    assert_eq!(animal(&fauna, id).state, State::Asleep);
+    let flips0 = fauna.ledger.sleep_flips_by_founder[f.index()];
+    set_reserve(&mut fauna, id, 0.05);
+    fauna.step_with(&world, &mut flora, 1);
+    let a = animal(&fauna, id);
+    assert!(a.emergency && a.state != State::Asleep, "woken on the emergency");
+    assert_eq!(fauna.ledger.emergency_wakes_by_founder[f.index()], 1);
+    set_reserve(&mut fauna, id, 0.3);
+    for _ in 0..20 {
+        fauna.step_with(&world, &mut flora, 1);
+        assert_ne!(animal(&fauna, id).state, State::Asleep, "the latch holds at hunger 0.7");
+    }
+    set_reserve(&mut fauna, id, 0.45);
+    fauna.step_with(&world, &mut flora, 1);
+    let a = animal(&fauna, id);
+    assert!(!a.emergency && a.state == State::Asleep, "below 0.6 it sleeps again");
+    assert_eq!(fauna.ledger.sleep_flips_by_founder[f.index()] - flips0, 2);
+}
+
+/// **Passage** (repair 3 item 1): raw food whose effective yield is zero (no mineral)
+/// passes at `S·dt/τ` — no reserve gain, the undigested share to egesta, the unfunded
+/// share respired — whether or not the reserve has room. In a mixed stomach with no room
+/// the funded pool holds and the mineral-free one still passes; after a few τ the
+/// capacity is free again. All three currencies close.
+#[test]
+fn mineral_free_food_passes_and_frees_the_stomach() {
+    let f = Founder::Browser;
+    let world = clock_off(20);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut config = carrion_config(f);
+    let p = &mut config.founders[f.index()];
+    p.core.maintenance_per_s = 0.0;
+    p.motor_respiration_per_s = 0.0;
+    p.gut.digestion_s[Food::Nectar.index()] = 2.0;
+    let tau = 2.0;
+    let mut fauna = Fauna::new(config);
+    fauna.set_births_enabled(false);
+    for (reserve, mixed) in [(1.0, false), (0.5, false), (1.0, true)] {
+        let id = introduce(&mut fauna, &world, f, StartingStores { body: 1.0, reserve });
+        fill_stomach(&mut fauna, id, 0.0);
+        let k = capacity(&fauna, id);
+        {
+            let a = animal_mut(&mut fauna, id);
+            a.stomach.pools[Food::Nectar.index()] = Taken {
+                organic: 0.5 * k,
+                mineral: 0.0,
+                energy: 2.0 * 0.5 * k,
+            };
+            if mixed {
+                a.stomach.pools[Food::Carrion.index()] = Taken {
+                    organic: 0.3 * k,
+                    mineral: CARRION_MINERAL * 0.3 * k,
+                    energy: CARRION_ENERGY * 0.3 * k,
+                };
+            }
+        }
+        let fed = animal(&fauna, id).stomach.total();
+        fauna.ledger.introduced_organic_in += fed.organic;
+        fauna.ledger.introduced_mineral_in += fed.mineral;
+        fauna.ledger.introduced_energy_in += fed.energy;
+        let a0 = animal(&fauna, id);
+        let (dig0, resp0) = (fauna.ledger.digested.organic, fauna.ledger.respired_digestion_out);
+        fauna.step_with(&world, &mut flora, 1);
+        let a1 = animal(&fauna, id);
+        let d = 0.5 * k * DT / tau;
+        let nectar = a1.stomach.pools[Food::Nectar.index()].organic;
+        assert!((nectar - (0.5 * k - d)).abs() <= 1e-12 * k, "it passes at S dt / τ: {nectar}");
+        assert!((a1.reserve - a0.reserve).abs() <= 1e-15, "no reserve gain");
+        assert!((a1.gut.organic - a0.gut.organic - 0.5 * d).abs() <= 1e-12 * d, "half to egesta");
+        assert!(
+            (fauna.ledger.respired_digestion_out - resp0 - 0.5 * d).abs() <= 1e-12 * d,
+            "the unfunded yield share respired"
+        );
+        if mixed {
+            assert_eq!(
+                a1.stomach.pools[Food::Carrion.index()].organic,
+                0.3 * k,
+                "the funded pool holds with no room"
+            );
+            assert!((fauna.ledger.digested.organic - dig0 - d).abs() <= 1e-12 * d);
+        }
+        for _ in 0..(10.0 * tau / DT) as u64 {
+            fauna.step_with(&world, &mut flora, 1);
+        }
+        let s = animal(&fauna, id).stomach.pools[Food::Nectar.index()].organic;
+        assert!(s < 1e-3 * k, "after ten τ the mineral-free pool is all but gone: {s}");
+        assert_books(&fauna, "passage", 400);
+        let _ = fauna.apply(&world, Command::Remove { x: 8, z: 6 });
+    }
+}
+
+/// **A two-pool digestion, by the numbers** (Astra's finding 8): carrion (mineral-rich,
+/// `y_eff` 0.5, τ 60 s) and foliage (mineral-poor, `y_eff` 0.2, τ 120 s) in one stomach,
+/// with reserve room for only 0.3 of what their yields would place this tick. One tick
+/// moves exactly the scaled raw shares out of the pools, places exactly the room, egests
+/// the undigested halves, respires only the foliage's unfunded share (no surplus), keeps
+/// the tissue's mineral and egests the rest, and splits the energy in proportion.
+#[test]
+fn a_two_pool_digestion_by_the_numbers() {
+    let f = Founder::Browser;
+    let world = clock_off(21);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut config = carrion_config(f);
+    let p = &mut config.founders[f.index()];
+    p.core.maintenance_per_s = 0.0;
+    p.motor_respiration_per_s = 0.0;
+    p.yield_by_food[Food::Foliage.index()] = 0.5;
+    p.gut.digestion_s[Food::Carrion.index()] = 60.0;
+    p.gut.digestion_s[Food::Foliage.index()] = 120.0;
+    let n = p.core.n_tissue;
+    assert_eq!(n, 0.05);
+    let mut fauna = Fauna::new(config);
+    fauna.set_births_enabled(false);
+    let id = introduce(&mut fauna, &world, f, StartingStores::FULL);
+    fill_stomach(&mut fauna, id, 0.0);
+    let (oc, of) = (0.04, 0.03);
+    let (mc, mf) = (0.1 * oc, 0.01 * of);
+    let (ec, ef) = (2.0 * oc, 1.5 * of);
+    let dc = oc * DT / 60.0;
+    let df = of * DT / 120.0;
+    let yields = 0.5 * dc + 0.2 * df;
+    let room = 0.3 * yields;
+    {
+        let a = animal_mut(&mut fauna, id);
+        a.stomach.pools[Food::Carrion.index()] = Taken { organic: oc, mineral: mc, energy: ec };
+        a.stomach.pools[Food::Foliage.index()] = Taken { organic: of, mineral: mf, energy: ef };
+    }
+    fauna.ledger.introduced_organic_in += oc + of;
+    fauna.ledger.introduced_mineral_in += mc + mf;
+    fauna.ledger.introduced_energy_in += ec + ef;
+    let cap = fauna.config.founder(f).core.reserve_of(animal(&fauna, id).body);
+    set_reserve(&mut fauna, id, (cap - room) / cap);
+    let a0 = animal(&fauna, id);
+    let l0 = fauna.ledger;
+    fauna.step_with(&world, &mut flora, 1);
+    let a1 = animal(&fauna, id);
+    let l1 = fauna.ledger;
+    let (tc, tf) = (0.3 * dc, 0.3 * df);
+    let close = |got: f64, want: f64, what: &str| {
+        assert!((got - want).abs() <= 1e-9 * want.abs().max(1e-18), "{what}: {got} against {want}");
+    };
+    close(oc - a1.stomach.pools[Food::Carrion.index()].organic, tc, "carrion out");
+    close(of - a1.stomach.pools[Food::Foliage.index()].organic, tf, "foliage out");
+    close(l1.digested.organic - l0.digested.organic, tc + tf, "digested");
+    close(a1.reserve - a0.reserve, room, "the reserve took exactly its room");
+    close(a1.gut.organic - a0.gut.organic, 0.5 * (tc + tf), "the undigested halves egested");
+    close(
+        l1.respired_digestion_out - l0.respired_digestion_out,
+        0.3 * tf,
+        "only foliage's unfunded share respired; no surplus",
+    );
+    let kept_mineral = n * room;
+    close(a1.mineral - a0.mineral, kept_mineral, "tissue mineral kept");
+    close(
+        a1.gut.mineral - a0.gut.mineral,
+        (mc / oc) * tc + (mf / of) * tf - kept_mineral,
+        "the rest of the mineral egested",
+    );
+    let placed_c = 0.5 * tc;
+    let placed_f = room - placed_c;
+    close(a1.energy - a0.energy, 2.0 * placed_c + 1.5 * placed_f, "energy kept at food density");
+    close(l1.heat_out - l0.heat_out, 1.5 * 0.3 * tf, "the unfunded share's energy as heat");
+    assert_books(&fauna, "two pools", 1);
+}
+
+/// **The refill gap** (repair 3 item 3): `s_start` is capped at `full_tolerance −
+/// refill_gap` (0.98 − 0.1), so a starving body just declared full (S ≈ 0.95 K) does not
+/// want food again until its stomach falls to 0.88 K.
+#[test]
+fn a_starving_body_just_full_waits_for_the_refill_gap() {
+    let f = Founder::Browser;
+    let c = FaunaConfig::default();
+    let gut = c.founder(f).gut;
+    assert_eq!(gut.refill_gap, 0.1);
+    assert!((gut.s_start(1.0) - 0.88).abs() < 1e-12, "{}", gut.s_start(1.0));
+    assert!((gut.s_start(0.95) - 0.88).abs() < 1e-12);
+    assert!((gut.s_start(0.5) - gut.s0).abs() < 1e-12);
+    let world = clock_off(22);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(carrion_config(f));
+    fauna.set_births_enabled(false);
+    let id = introduce(&mut fauna, &world, f, StartingStores { body: 1.0, reserve: 0.0 });
+    fill_stomach(&mut fauna, id, 0.95);
+    fauna.step_with(&world, &mut flora, 1);
+    assert!(!animal(&fauna, id).eating, "at 0.95 K a starving body does not restart");
+    fill_stomach(&mut fauna, id, 0.85);
+    fauna.step_with(&world, &mut flora, 1);
+    assert!(animal(&fauna, id).eating, "at 0.85 K it does");
+}
+
+/// **Safety** (repair 3 item 4): an attached rider and a falling body are awake in
+/// their off phase.
+#[test]
+fn attached_and_falling_bodies_stay_awake() {
+    // A nocturnal lanternjaw riding a grazer at noon.
+    let world = at_hour(12.0, 23);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    fauna.set_births_enabled(false);
+    let host = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
+    let rider = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores { body: 0.2, reserve: 1.0 });
+    animal_mut(&mut fauna, rider).attached = Some(Attachment { host });
+    for _ in 0..10 {
+        fauna.step_with(&world, &mut flora, 1);
+        assert_ne!(animal(&fauna, rider).state, State::Asleep, "a rider is awake");
+    }
+    // A diurnal grazer falling at midnight.
+    let world = at_hour(0.0, 24);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    fauna.set_births_enabled(false);
+    let g = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
+    animal_mut(&mut fauna, g).mobility.falling = true;
+    fauna.step_with(&world, &mut flora, 1);
+    assert_ne!(animal(&fauna, g).state, State::Asleep, "a falling body is awake");
+}
+
+/// A pack of `n` adults under their heuristic on the clock-off plain, awake, and a
+/// grazer standing at `prey`; the adults at `at`, each `hungry` or fed.
+fn pack_scene(at: &[(f64, f64, bool)], prey: (f64, f64)) -> (World, Flora, Fauna, Vec<u64>, u64) {
+    let world = clock_off(25);
+    let flora = Flora::new(FloraConfig::default());
+    let mut c = FaunaConfig::default();
+    c.founders[Founder::Chorister.index()].active = Activity::Always;
+    let mut pk = c.founders[Founder::Chorister.index()].pack.expect("a pack");
+    pk.pack_size = at.len();
+    c.founders[Founder::Chorister.index()].pack = Some(pk);
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    assert!(fauna.apply(
+        &world,
+        Command::FoundPack {
+            den: Site { x: 8, y: SURFACE_Y, z: 6 },
+            founder: Founder::Chorister,
+            stores: StartingStores::FULL,
+            heading_rad: EAST,
+        }
+    ));
+    let adults: Vec<u64> = fauna.animals.iter().filter(|a| a.pack.is_some()).map(|a| a.id).collect();
+    for (&id, &(x, z, hungry)) in adults.iter().zip(at) {
+        place(&mut fauna, id, x, z, EAST);
+        let teacher = crate::controller::heuristic(Founder::Chorister, fauna.config.teachers);
+        fauna.controllers.set(id, teacher);
+        fill_stomach(&mut fauna, id, if hungry { 0.0 } else { 0.99 });
+    }
+    let pid = introduce(&mut fauna, &world, Founder::Browser, StartingStores { body: 0.5, reserve: 1.0 });
+    place(&mut fauna, pid, prey.0, prey.1, EAST);
+    let _off = drive(&mut fauna, pid, 0.0, false);
+    (world, flora, fauna, adults, pid)
+}
+
+/// **One participant set** (repair 3 item 5): the nearest adult to the prey is fed; the
+/// two that want food are the participants. The driver is the nearest participant, which
+/// heads straight at the prey, and the body window counts the participants only.
+#[test]
+fn only_participants_drive_flank_and_count_in_the_window() {
+    // Fed adult nearest the prey; hungry A on the prey's line behind it; hungry B beside A.
+    let (world, mut flora, mut fauna, adults, _prey) =
+        pack_scene(&[(2.0, 1.5, true), (2.9, 1.5, false), (2.0, 2.3, true)], (3.6, 1.5));
+    let (a, fed, b) = (adults[0], adults[1], adults[2]);
+    let pack = fauna.packs()[0].id;
+    let set = step_until(&mut fauna, &world, &mut flora, 40, |f| f.pack(pack).is_some_and(|p| p.target.is_some()));
+    assert!(set.is_some(), "the pack takes the grazer as its target");
+    // The next sampling of A: it drives (straight at the prey, no turn), not a flank.
+    for _ in 0..5 {
+        fauna.step_with(&world, &mut flora, 1);
+    }
+    let held = animal(&fauna, a).founder_state.held;
+    assert!(held.turn.abs() < 0.2 && held.forward > 0.5, "A drives straight at the prey: {held:?}");
+    let ring = f64::from(world.view().config.width) * world.view().config.voxel_m;
+    let i = fauna.animals.iter().position(|x| x.id == a).expect("A");
+    let window = crate::pack::window_body(&fauna, i, ring);
+    let want = animal(&fauna, a).body + animal(&fauna, b).body;
+    assert!((window - want).abs() < 1e-9, "the window is the participants' {want}, not {window}");
+    let _ = fed;
+}
+
+/// **A usable feast first** (repair 3 item 5): a hungry pack at its carcass, with live
+/// prey in sight, starts no new chase while the carcass has carrion.
+#[test]
+fn a_hungry_pack_at_its_feast_starts_no_new_chase() {
+    let (world, mut flora, mut fauna, adults, _prey) =
+        pack_scene(&[(2.0, 1.5, true), (2.0, 2.3, true)], (3.6, 1.5));
+    let pack = fauna.packs()[0].id;
+    let feast = Site { x: 8, y: SURFACE_Y, z: 6 };
+    assert!(flora.deposit(
+        feast,
+        Deposit { kind: DepositKind::Carrion, organic: 2.0, mineral: 0.1 * 2.0, energy: 4.0 }
+    ));
+    fauna.pack_mut(pack).expect("the pack").feast = Some(feast);
+    for _ in 0..60 {
+        fauna.step_with(&world, &mut flora, 1);
+    }
+    assert_eq!(fauna.ledger.pack_chases, 0, "no new chase while the feast lasts");
+    let _ = adults;
+}
+
+/// **The reserve fallback is the old transfer** (repair 3 item 6): a pup whose stomach is
+/// full (its eating latch off) but whose reserve is low still receives reserve from an
+/// adult with an empty stomach and a surplus reserve.
+#[test]
+fn the_reserve_fallback_does_not_need_the_pups_latch() {
+    let world = clock_off(26);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = FaunaConfig::default();
+    c.founders[Founder::Chorister.index()].active = Activity::Always;
+    let mut pk = c.founders[Founder::Chorister.index()].pack.expect("a pack");
+    pk.pack_size = 1;
+    c.founders[Founder::Chorister.index()].pack = Some(pk);
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    assert!(fauna.apply(
+        &world,
+        Command::FoundPack {
+            den: Site { x: 8, y: SURFACE_Y, z: 6 },
+            founder: Founder::Chorister,
+            stores: StartingStores { body: 1.0, reserve: 0.9 },
+            heading_rad: EAST,
+        }
+    ));
+    let pack = fauna.packs()[0].id;
+    let adult = fauna.animals[0].id;
+    place(&mut fauna, adult, 2.125, 1.625, EAST);
+    fill_stomach(&mut fauna, adult, 0.0);
+    let pup = introduce(&mut fauna, &world, Founder::Chorister, StartingStores { body: 0.3, reserve: 0.0 });
+    animal_mut(&mut fauna, pup).pack = Some(PackMember { pack, pup: true, calling_ticks: 0 });
+    place(&mut fauna, pup, 2.125, 2.125, EAST);
+    fill_stomach(&mut fauna, pup, 0.99);
+    assert!(!animal(&fauna, pup).eating);
+    fauna.step_with(&world, &mut flora, 1);
+    assert!(fauna.ledger.provision_given_organic > 0.0, "the fallback fed the full-stomached pup");
+    assert_eq!(fauna.ledger.regurgitated.organic, 0.0);
+    assert_books(&fauna, "fallback", 1);
+}
+
+/// **Removal is export** (repair 3 item 7): a removed body leaves whole, stomach included,
+/// booked `removed_*`; nothing is deposited.
+#[test]
+fn a_removed_body_exports_its_stomach() {
+    let world = clock_off(27);
+    let mut fauna = Fauna::new(carrion_config(Founder::Browser));
+    let id = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
+    fill_stomach(&mut fauna, id, 0.7);
+    let a = animal(&fauna, id);
+    let (removed0, deposited0) = (fauna.ledger.removed_organic_out, fauna.ledger.deposited_organic_out);
+    assert!(fauna.apply(&world, Command::Remove { x: i64::from(a.site.x), z: a.site.z }));
+    assert!(fauna.view().animal(id).is_none());
+    assert!((fauna.ledger.removed_organic_out - removed0 - a.stored_organic()).abs() <= 1e-12);
+    assert_eq!(fauna.ledger.deposited_organic_out, deposited0, "nothing deposited");
+    assert!((fauna.ledger.stomach_out.organic - a.stomach.organic()).abs() <= 1e-15);
+    assert_closes(&fauna, "removal");
+}
+
+/// **Fed perching** (repair 3 item 8): a bellwing under its own heuristic, aloft over a
+/// bare plain with a full stomach (its eating latch off), comes down and rests perched.
+#[test]
+fn a_fed_bellwing_perches_and_rests() {
+    let world = clock_off(28);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    fauna.set_births_enabled(false);
+    assert!(fauna.apply(
+        &world,
+        Command::IntroduceAloft {
+            pose: crate::Pose { x: 3.0, z: 1.5, heading_rad: EAST, y_m: SURFACE_M + 1.0 },
+            founder: Founder::Bellwing,
+            stores: StartingStores::FULL,
+        }
+    ));
+    let id = fauna.animals.last().expect("aloft").id;
+    fill_stomach(&mut fauna, id, 0.99);
+    let teacher = crate::controller::heuristic(Founder::Bellwing, fauna.config.teachers);
+    fauna.controllers.set(id, teacher);
+    let perched = step_until(&mut fauna, &world, &mut flora, 300, |f| {
+        animal(f, id).mobility.mode == crate::MobilityMode::Perched
+    });
+    assert!(perched.is_some(), "a fed bellwing comes down to perch");
+    for _ in 0..60 {
+        fauna.step_with(&world, &mut flora, 1);
+        let a = animal(&fauna, id);
+        assert_eq!(a.mobility.mode, crate::MobilityMode::Perched, "and stays perched while fed");
+    }
+}
+
+/// **A non-empty snapshot round trip, and validation on load** (Astra's finding 9): mixed
+/// stomach pools, both latches set and an open growth bout come back exactly; a stomach
+/// pool that is not a finite nonnegative stock is refused.
+#[test]
+fn a_snapshot_keeps_a_mixed_stomach_and_refuses_a_bad_one() {
+    let world = clock_off(29);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
+    {
+        let a = animal_mut(&mut fauna, id);
+        a.stomach.pools[Food::Foliage.index()] = Taken { organic: 0.01, mineral: 2e-4, energy: 0.02 };
+        a.stomach.pools[Food::Carrion.index()] = Taken { organic: 0.02, mineral: 1e-3, energy: 0.05 };
+        a.eating = true;
+        a.emergency = true;
+        a.bout = Some(crate::Bout { start_tick: 7, kind: BoutKind::Growth });
+    }
+    let loaded = Fauna::load(&fauna.save()).expect("round trip");
+    assert_eq!(loaded.animals, fauna.animals);
+    let b = loaded.view().animal(id).copied().expect("back");
+    assert!(b.eating && b.emergency && b.bout.is_some_and(|x| x.kind == BoutKind::Growth));
+    for bad in [f64::NAN, -1e-3, f64::INFINITY] {
+        let mut broken = fauna.clone();
+        animal_mut(&mut broken, id).stomach.pools[Food::Carrion.index()].mineral = bad;
+        assert!(Fauna::load(&broken.save()).is_err(), "a stomach mineral of {bad} is refused");
+    }
+}
