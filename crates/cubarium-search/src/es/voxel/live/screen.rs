@@ -58,7 +58,11 @@ impl Default for NightSpec {
 pub struct FoodSpec {
     /// Supply over need (and a ground grazer's reach over its walking need) at least this.
     pub min_ratio: f64,
-    /// Latticevine faces per vine, every face flowering back to back (optimistic).
+    /// Latticevine faces per founded vine, every face flowering back to back (optimistic).
+    /// The founding roots each vine on one face (`Cover::seed_vine_founders`), and the
+    /// founded terrarium measures exactly that (12 vines, 12 faces, seeds 1–8:
+    /// `roster_tests::vine_faces_founded_on_the_terrarium`), so 1: founding access counts
+    /// the faces a world founds, not the cover the vines grow later.
     pub vine_faces: f64,
     /// Nectar and fruit production at night as a share of the day rate (0 until the
     /// plants' night budget exists).
@@ -70,7 +74,7 @@ pub struct FoodSpec {
 
 impl Default for FoodSpec {
     fn default() -> FoodSpec {
-        FoodSpec { min_ratio: 1.0, vine_faces: 64.0, night_bloom_scale: 0.0, balance_share: 0.5 }
+        FoodSpec { min_ratio: 1.0, vine_faces: 1.0, night_bloom_scale: 0.0, balance_share: 0.5 }
     }
 }
 
@@ -100,6 +104,9 @@ pub struct ScreenSpec {
     pub light_moisture: f64,
     /// The share of a field's edible foliage a walker takes in passing (0.2).
     pub harvest: f64,
+    /// **R as a readout** (`r_readout = true`, roster.toml; Fable 2026-10-02): R is
+    /// reported but neither refuses nor pays. S and F stay hard.
+    pub r_readout: bool,
     /// The night-endurance screen (`[screen.night]`; off without the table).
     pub night: Option<NightSpec>,
     /// The food-access screens (`[screen.food]`; off without the table).
@@ -118,6 +125,7 @@ impl Default for ScreenSpec {
             k_soft: 5.0,
             light_moisture: 0.67,
             harvest: 0.2,
+            r_readout: false,
             night: None,
             food: None,
         }
@@ -143,7 +151,7 @@ impl ScreenSpec {
             return Verdict::Inside;
         }
         let m = self.run_margin.max(1.0);
-        let within = (self.r[0] / m..=self.r[1] * m).contains(&rsf.r)
+        let within = (self.r_readout || (self.r[0] / m..=self.r[1] * m).contains(&rsf.r))
             && (self.s[0] / m..=self.s[1] * m).contains(&rsf.s)
             && rsf.f >= self.f_min / m;
         if within { Verdict::Margin } else { Verdict::Refused }
@@ -211,7 +219,7 @@ impl Rsf {
     /// What lies outside the bands, one line each (`R …`, `S …`, `F …`).
     pub fn failures(&self, spec: &ScreenSpec) -> Vec<String> {
         let mut out = Vec::new();
-        if !(spec.r[0]..=spec.r[1]).contains(&self.r) {
+        if !spec.r_readout && !(spec.r[0]..=spec.r[1]).contains(&self.r) {
             out.push(format!(
                 "R {:.3} outside [{}, {}]",
                 self.r, spec.r[0], spec.r[1]
@@ -233,8 +241,8 @@ impl Rsf {
     pub fn distance(&self, spec: &ScreenSpec) -> f64 {
         let ln = |x: f64| x.max(1e-12).ln();
         let band = |x: f64, lo: f64, hi: f64| (ln(lo) - ln(x)).max(0.0) + (ln(x) - ln(hi)).max(0.0);
-        band(self.r, spec.r[0], spec.r[1])
-            + band(self.s, spec.s[0], spec.s[1])
+        let r = if spec.r_readout { 0.0 } else { band(self.r, spec.r[0], spec.r[1]) };
+        r + band(self.s, spec.s[0], spec.s[1])
             + (ln(spec.f_min) - ln(self.f)).max(0.0)
     }
 

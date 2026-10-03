@@ -477,6 +477,7 @@ struct Snap {
     litters: u64,
     pups_born: u64,
     provision_received: f64,
+    pack_kills: u64,
     /// Body, reserve and open escrow over each lineage's living bodies.
     biomass: [f64; Founder::COUNT],
 }
@@ -503,6 +504,7 @@ impl Snap {
             litters: l.litters,
             pups_born: l.pups_born,
             provision_received: l.provision_received_organic,
+            pack_kills: l.pack_chase_kills,
             biomass,
         }
     }
@@ -1016,6 +1018,7 @@ fn outcomes(
             o.litters = now.litters - start.litters;
             o.pups_born = now.pups_born - start.pups_born;
             o.provision_received = now.provision_received - start.provision_received;
+            o.pack_kills = now.pack_kills - start.pack_kills;
         }
         o.biomass_start = start.biomass[i];
         if let Some(c) = cycle {
@@ -2164,6 +2167,7 @@ pub fn finalist(
         let mut stage = eval.band.stage.unwrap_or_else(StageSpec::readout_default);
         if validating {
             stage.lanternjaw_progress = 1.0;
+            stage.chorister_kill_required = true;
         }
         eval.band.stage = Some(stage);
         println!("# {name}: {hours:.2} h per world");

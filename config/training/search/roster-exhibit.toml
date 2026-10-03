@@ -1,5 +1,6 @@
 # The exhibited candidate (design/handoffs/roster-search-groundwork-2026-10-02.md §6):
-# roster.toml with these genes moved, hand-picked to pass every analytic screen.
+# roster.toml with these genes moved, hand-picked to pass every analytic screen (R a readout;
+# plants at x1).
 # Training only; the live defaults are unchanged. Generated; see the commit message.
 
 [base]
@@ -24,6 +25,7 @@ run_margin = 2.0
 k_soft = 5.0
 light_moisture = 0.67
 harvest = 0.2
+r_readout = true
 
 [screen.night]
 f0 = 0.8
@@ -31,7 +33,7 @@ margin = 1.2
 
 [screen.food]
 min_ratio = 1.0
-vine_faces = 64.0
+vine_faces = 1.0
 night_bloom_scale = 0.0
 balance_share = 0.5
 
@@ -103,13 +105,6 @@ range = [0.05, 4.0]
 value = 0.2
 
 [[gene]]
-name = "motor"
-path = "fauna.founders.*.motor_respiration_per_s"
-tie = "each"
-range = [0.25, 8.0]
-what = "walking cost / upkeep (the motor tie's ratio)"
-
-[[gene]]
 name = "intake@littershredder"
 path = "fauna.founders.littershredder.core.bite_per_s"
 range = [0.1, 10.0]
@@ -169,27 +164,6 @@ path = "fauna.founders.*.yield_by_food.*"
 tie = "each"
 range = [0.25, 1.5]
 what = "assimilation yield, every food (base yields <= 0.6, so <= 0.9)"
-
-[[gene]]
-name = "breed_reserve"
-path = "fauna.founders.*.core.reproduction.surplus_floor"
-tie = "each"
-range = [0.25, 4.0]
-what = "surplus floor: the reserve margin a body breeds above"
-
-[[gene]]
-name = "lifespan"
-path = "fauna.founders.*.core.lifespan_median_s"
-tie = "each"
-range = [0.25, 4.0]
-what = "median lifespan"
-
-[[gene]]
-name = "maturity"
-path = "fauna.founders.*.core.growth_max_per_s"
-tie = "each"
-range = [0.25, 4.0]
-what = "growth to breeding size"
 
 [[gene]]
 name = "reserve@littershredder"
@@ -363,54 +337,6 @@ range = [0.3, 0.95]
 value = 0.9
 
 [[gene]]
-name = "gestation@littershredder"
-path = "fauna.founders.littershredder.core.reproduction.incubation_s"
-range = [0.25, 4.0]
-what = "incubation"
-
-[[gene]]
-name = "gestation@frondgrazer"
-path = "fauna.founders.frondgrazer.core.reproduction.gestation_s"
-range = [0.25, 4.0]
-what = "gestation"
-
-[[gene]]
-name = "gestation@capgnawer"
-path = "fauna.founders.capgnawer.core.reproduction.incubation_s"
-range = [0.25, 4.0]
-what = "incubation"
-
-[[gene]]
-name = "gestation@loftstrider"
-path = "fauna.founders.loftstrider.core.reproduction.gestation_s"
-range = [0.25, 4.0]
-what = "gestation"
-
-[[gene]]
-name = "gestation@ripple-snail"
-path = "fauna.founders.ripple-snail.core.reproduction.incubation_s"
-range = [0.25, 4.0]
-what = "incubation"
-
-[[gene]]
-name = "gestation@bellwing"
-path = "fauna.founders.bellwing.core.reproduction.incubation_s"
-range = [0.25, 4.0]
-what = "incubation"
-
-[[gene]]
-name = "gestation@seedporter"
-path = "fauna.founders.seedporter.core.reproduction.gestation_s"
-range = [0.25, 4.0]
-what = "gestation"
-
-[[gene]]
-name = "gestation@chorister"
-path = "fauna.founders.chorister.core.reproduction.gestation_s"
-range = [0.25, 4.0]
-what = "gestation"
-
-[[gene]]
 name = "pack_size@chorister"
 path = "fauna.founders.chorister.pack.pack_size"
 range = [0.5, 1.5]
@@ -422,56 +348,48 @@ name = "growth@turf"
 path = "flora.@turf.foliage_rate"
 range = [0.1, 4.0]
 what = "foliage regrowth cap"
-value = 0.3
 
 [[gene]]
 name = "growth@mat"
 path = "flora.@mat.foliage_rate"
 range = [0.1, 4.0]
 what = "foliage regrowth cap"
-value = 0.3
 
 [[gene]]
 name = "growth@shrub"
 path = "flora.@shrub.foliage_rate"
 range = [0.1, 4.0]
 what = "foliage regrowth cap"
-value = 0.3
 
 [[gene]]
 name = "growth@tree"
 path = "flora.@tree.foliage_rate"
 range = [0.1, 4.0]
 what = "foliage regrowth cap"
-value = 0.3
 
 [[gene]]
 name = "leaf_fall@turf"
 path = "flora.@turf.senescence"
 range = [0.05, 4.0]
 what = "leaf fall rate"
-value = 0.3
 
 [[gene]]
 name = "leaf_fall@mat"
 path = "flora.@mat.senescence"
 range = [0.05, 4.0]
 what = "leaf fall rate"
-value = 0.3
 
 [[gene]]
 name = "leaf_fall@shrub"
 path = "flora.@shrub.senescence"
 range = [0.05, 4.0]
 what = "leaf fall rate"
-value = 0.3
 
 [[gene]]
 name = "leaf_fall@tree"
 path = "flora.@tree.senescence"
 range = [0.05, 4.0]
 what = "leaf fall rate"
-value = 0.3
 
 [[gene]]
 name = "alpha@turf"

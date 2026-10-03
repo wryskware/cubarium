@@ -13,8 +13,9 @@
 //!   adult. Met at `lanternjaw_progress`. Bank hatches, riders and free-living hunters are
 //!   counted apart.
 //! - **The chorister's pups** (`progress`): a litter (in either half: an early one is a
-//!   success, the next is six hours off), pups provisioned, and pup survival at least
-//!   `chorister_pup_survival`. A third each; met at all three.
+//!   success, the next is six hours off), pups provisioned, pup survival at least
+//!   `chorister_pup_survival`, and the pack's own intake (a kill or carcass feeding; a
+//!   pack kill in finalist validation). A quarter each; met at all four.
 //! - **Replenishment** (`replenish`): over one whole day-cycle, assimilated intake over the
 //!   cycle's measured spending, `intake / (intake − Δbiomass)` with biomass every living
 //!   body's structure, reserve and open escrow. At least 1; a rise after one meal cannot
@@ -40,6 +41,9 @@ pub struct StageSpec {
     pub replenish_weight: f64,
     /// The lanternjaw share term's weight while no lanternjaw lives free.
     pub share_weight_unestablished: f64,
+    /// Finalist validation: the chorister's intake criterion asks a pack kill, not carcass
+    /// feeding alone.
+    pub chorister_kill_required: bool,
     /// The measured predator balance's share of prey births per hunter lineage (a
     /// readout, Astra A6's 50 %).
     pub balance_share: f64,
@@ -58,6 +62,7 @@ impl Default for StageSpec {
             replenish_weight: 5.0,
             share_weight_unestablished: 1.0,
             balance_share: 0.5,
+            chorister_kill_required: false,
         }
     }
 }
@@ -168,6 +173,8 @@ pub struct LineageOutcome {
     /// Strikes that hit, and carrion its mouths took (gross organic).
     pub hits: u64,
     pub carrion_eaten: f64,
+    /// Pack chases that ended in a kill (a pack lineage).
+    pub pack_kills: u64,
     /// A pack's litters, pups born, pups alive (still pups) and grown past independence at
     /// the end, and what pups received from provisioning (organic).
     pub litters: u64,
@@ -216,6 +223,7 @@ impl LineageOutcome {
             rider_progress: 0.0,
             hits: 0,
             carrion_eaten: 0.0,
+            pack_kills: 0,
             litters: 0,
             pups_born: 0,
             pups_alive: 0,
@@ -266,13 +274,15 @@ fn lanternjaw_score(o: &LineageOutcome) -> f64 {
     }
 }
 
-/// The chorister's three thirds.
-fn chorister_score(o: &LineageOutcome, survival_min: f64) -> f64 {
+/// The chorister's four quarters: a litter, pups provisioned, pup survival, and the
+/// pack's own intake (a kill or carcass feeding; a pack kill when `kill_required`).
+fn chorister_score(o: &LineageOutcome, survival_min: f64, kill_required: bool) -> f64 {
     let litter = o.litters > 0;
     let fed = o.provision_received > 0.0;
     let pups_now = (o.pups_alive + o.pups_independent) as f64;
     let survived = o.pups_born > 0 && pups_now / o.pups_born as f64 >= survival_min;
-    [litter, fed, survived].iter().filter(|x| **x).count() as f64 / 3.0
+    let ate = o.pack_kills > 0 || (!kill_required && (o.carrion_eaten > 0.0 || o.hits > 0));
+    [litter, fed, survived, ate].iter().filter(|x| **x).count() as f64 / 4.0
 }
 
 /// **Judge one lineage** under `spec`: its rule, score, stage shortfall, whether met, and
@@ -306,7 +316,7 @@ pub fn judge(o: &mut LineageOutcome, spec: &StageSpec, reached_second_half: bool
             (s, ((target - s) / target).clamp(0.0, 1.0), s >= target)
         }
         Rule::ChoristerProgress => {
-            let s = if lost { 0.0 } else { chorister_score(o, spec.chorister_pup_survival) };
+            let s = if lost { 0.0 } else { chorister_score(o, spec.chorister_pup_survival, spec.chorister_kill_required) };
             (s, 1.0 - s, s >= 1.0 - 1e-12)
         }
         Rule::Persist => (if lost { 0.0 } else { 1.0 }, 0.0, !lost),

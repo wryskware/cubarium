@@ -1742,8 +1742,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let world_cfg = es::voxel::live::search::check_world_config(world.as_deref())?;
             let r = es::voxel::live::search::screen_of(&e, &world_cfg, &screen);
             println!(
-                "R {:.4}  S {:.4}  F {:.2}  need {:.3e}/s  {}",
+                "R {:.4}{}  S {:.4}  F {:.2}  need {:.3e}/s  {}",
                 r.r,
+                if screen.r_readout { " (a readout)" } else { "" },
                 r.s,
                 r.f,
                 r.need_per_s,
