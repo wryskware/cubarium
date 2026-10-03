@@ -272,3 +272,65 @@ The harvest budget for a predator lineage is `β × P × y × e ≥ D`, where:
 2. **Source-level production and withdrawal counters,** and the shared budget (R3).
 3. **The staged-arrival scheduler** with the required roster (R4), which also makes E2.
 4. **Predator harvest budgets** (R5), after `bellwing` lands.
+
+---
+
+## Revision 3 (after Astra's revision-2 check: accept with changes)
+
+Astra marked A1–A5, A7 and A9 resolved, A6 and A8 partial, and added N1–N3. This revision
+closes the partial items and the new findings, overriding the text above where they differ.
+
+### A6. Establishment has a deadline too
+
+- **After arrival,** a lineage has a bounded window `establish_s` to show recruitment from new
+  food.
+  - The default is 2 world days for consumers and 3 for predators and the loftstrider. These
+    are knobs.
+  - If it ends extinct, or with only eggs or riders and no required recruitment, the lineage
+    **fails establishment**, with its reason.
+- **The whole assembly episode stops at `assembly_horizon_s`.**
+- **A required arrival or establishment failure counts toward assembly fitness,** even when
+  the lineage's ordinary statistics are absent.
+
+### A8 and N1. The parameter and state contract
+
+- **The first grid's override set is rate-only:** the `m` paths (upkeep, with motor tied) and
+  the `p` paths (fixation, growth rates, and nectar, fruit and propagule rates). These are
+  applied over the loaded state, which keeps its absolute stocks, ages and states.
+- **State-coupled traits stay at the start's values** in established-setting runs until their
+  semantics are specified: stomach `k`, body scale, reserve capacity, tissue composition,
+  plant capacities, lifespan and reproductive state.
+  - A search gene on one of these is frozen in established runs. It is evaluated only from
+    E0's fresh founding.
+- **Incompatible states are rejected,** never fixed by deleting or creating matter.
+- **The initializer runs derived-parameter resolution** and installs the result into every
+  layer. It records the start's own parameters separately from the candidate's.
+- **The 1–3 day spin-up estimate is withdrawn.** The spin-up is unknown until readiness is
+  measured. A fixed burn-in doesn't prove the startup bias has gone.
+
+### N2. Build order
+
+1. **The episode initializer:**
+   - the compatibility rules above;
+   - **fixed E0 and E1 recipes**, with E1 a prescribed fixture booked conservatively (not
+     sized to each candidate, and not needing R3);
+   - paired scoring.
+2. **The source-level counters and the shared budget** (R3).
+3. **The scheduler** and **admission for non-predators** (R4).
+4. **Predator harvest and host admission** (R5), after the control fixes are verified in
+   behaviour.
+
+Only then are full E2 starts generated and full assembly acceptance enabled. Before step 4,
+a run without predators is labelled as such, never "complete assembly". The E0/E1 grid
+doesn't wait for E2.
+
+### N3. Failed seeds and scoring windows
+
+- **A growth run that fails** stays in the assembly and provenance panel with its failure on
+  record. It isn't used as an established start, and no other seed is silently swapped in.
+- **The assembly arm** may give candidates a bounded chance to complete such a seed. That
+  result is reported separately from E1 and successful-E2 persistence.
+- **Scoring windows are fixed in advance and aligned to phase,** with a maximum startup
+  allowance that is the same for every candidate.
+- **A failure during burn-in, or a start that doesn't settle, is recorded, never excluded.**
+  Ledger baselines are kept at every window boundary.
