@@ -17,6 +17,14 @@
 #   `intake` reaches x10.
 # - wood_decomposition and carrion_decomposition follow `decomposition`.
 # - The mass ties (eight stocks follow mass_scale) are idle: mass is not a gene.
+#
+# Launch (the overnight is Fable's, after Astra reviews the screens and targets):
+#   CUBARIUM_THREADS=1 cubarium-search voxel-ecology-search \
+#     --search config/training/search/roster.toml --start config/training/search/roster-exhibit.toml \
+#     --world config/desktop/terrarium.toml --hours 2 --seeds-per-generation 8 --threads N
+# CUBARIUM_THREADS=1 keeps each world on one thread (the world's own pool otherwise takes
+# every core but one per world). Finalists:
+#   voxel-ecology-check --finalist --arm best=<run>/best.toml --world config/desktop/terrarium.toml
 
 [base]
 file = "config/desktop/terrarium.toml"

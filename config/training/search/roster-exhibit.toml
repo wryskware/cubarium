@@ -195,55 +195,55 @@ what = "growth to breeding size"
 name = "reserve@littershredder"
 path = "fauna.founders.littershredder.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "reserve@frondgrazer"
 path = "fauna.founders.frondgrazer.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "reserve@lanternjaw"
 path = "fauna.founders.lanternjaw.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "reserve@capgnawer"
 path = "fauna.founders.capgnawer.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "reserve@loftstrider"
 path = "fauna.founders.loftstrider.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "reserve@ripple-snail"
 path = "fauna.founders.ripple-snail.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "reserve@bellwing"
 path = "fauna.founders.bellwing.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "reserve@seedporter"
 path = "fauna.founders.seedporter.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "reserve@chorister"
 path = "fauna.founders.chorister.core.reserve_cap"
 range = [0.5, 5.0]
-value = 2.0
+value = 2.5
 
 [[gene]]
 name = "sleep@littershredder"

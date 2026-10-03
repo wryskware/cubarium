@@ -331,6 +331,9 @@ pub struct EvalSpec {
     pub water_every: u32,
     /// Stop a world that holds more animals than this.
     pub abort_animals: usize,
+    /// Stop a world once a founded lineage is lost (the search's early stop; the exhibit
+    /// and finalist runs keep going to show every lineage's whole horizon).
+    pub stop_on_loss: bool,
     pub band: BandSpec,
     /// The horizon the band is scored on, ticks. Past what was run (`horizon_ticks`, or
     /// an early stop) the animal count is projected on its last hour's trend
@@ -354,6 +357,7 @@ impl EvalSpec {
             window_ticks,
             water_every: 1,
             abort_animals: 240,
+            stop_on_loss: true,
             band: BandSpec::default(),
             score_horizon_ticks: horizon_ticks,
             curiosity: Curiosity::default(),
@@ -756,7 +760,9 @@ impl EvalRun {
                         "{total} animals at minute {}",
                         self.elapsed / TICKS_PER_MIN
                     ));
-                } else if lost_lineages(&self.founded, &pop, &eggs(&self.sim)) > 0 {
+                } else if spec.stop_on_loss
+                    && lost_lineages(&self.founded, &pop, &eggs(&self.sim)) > 0
+                {
                     halt = Some("a lineage died out".to_string());
                 }
                 if halt.is_some() {
@@ -2137,6 +2143,7 @@ pub fn finalist(
         let mut eval = EvalSpec::new(world_cfg.clone(), horizon, (window_min * 60.0 * hz).round() as u64);
         eval.founders = founders;
         eval.water_every = water_every;
+        eval.stop_on_loss = false;
         let rest = params.genome().map(|g| g.rest.clone()).unwrap_or_default();
         eval.band = BandSpec::default().with_targets(&rest)?;
         let mut stage = eval.band.stage.unwrap_or_else(StageSpec::readout_default);
