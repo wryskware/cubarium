@@ -1313,6 +1313,35 @@ fn a_hungry_pack_at_its_feast_starts_no_new_chase() {
     let _ = adults;
 }
 
+/// **The pack eats its kill** (`design/handoffs/bellwing-finding-2026-10-03.md` item 2):
+/// two hungry adults a few body lengths from their feast, one behind the other so the rear
+/// one sees its packmate close ahead (its own heuristic then stands with `feed` held, as
+/// it does stalking a body), both walk to the carcass and eat there, and the pack's
+/// feast books what they ate.
+#[test]
+fn a_hungry_pack_walks_to_its_feast_and_eats_it() {
+    let (world, mut flora, mut fauna, adults, _prey) =
+        pack_scene(&[(1.2, 1.6, true), (1.9, 1.6, true)], (9.0, 2.6));
+    let pack = fauna.packs()[0].id;
+    // Centre (3.375, 1.625): 2.2 m and 1.5 m ahead of the two.
+    let feast = Site { x: 13, y: SURFACE_Y, z: 6 };
+    assert!(flora.deposit(
+        feast,
+        Deposit { kind: DepositKind::Carrion, organic: 2.0, mineral: 0.1 * 2.0, energy: 4.0 }
+    ));
+    fauna.pack_mut(pack).expect("the pack").feast = Some(feast);
+    let before: Vec<f64> = adults.iter().map(|&id| animal(&fauna, id).stomach.total().organic).collect();
+    for _ in 0..400 {
+        fauna.step_with(&world, &mut flora, 1);
+    }
+    for (&id, s0) in adults.iter().zip(before) {
+        let s = animal(&fauna, id).stomach.total().organic;
+        assert!(s > s0 + 1e-9, "adult {id} ate at the feast: stomach {s0} -> {s}");
+    }
+    let eaten = fauna.pack(pack).expect("the pack").feast_eaten;
+    assert!(eaten > 0.0, "the feast books what the pack ate: {eaten}");
+}
+
 /// **The reserve fallback is the old transfer** (repair 3 item 6): a pup whose stomach is
 /// full (its eating latch off) but whose reserve is low still receives reserve from an
 /// adult with an empty stomach and a surplus reserve.

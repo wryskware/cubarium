@@ -437,7 +437,16 @@ pub(crate) fn steer(
     let d_den = distance(&a, dcx, dcz, ring);
 
     let carrion_at = |s: Site| fv.ground_at(s).map_or(0.0, |g| g.carrion);
-    let eating = held.forward == 0.0 && held.feed > 0.0;
+    // At the carcass: its mouth is over the feast's carrion, read from the body (as the
+    // bite is), not from its heuristic's answer — that also stands with `feed` held while
+    // it stalks a body close ahead, a packmate included, and read as eating it held a
+    // member short of its feast for good (bellwing-finding item 2).
+    let geometry = phys.body_at(a.body);
+    let at_feast = |fs: Site| {
+        let cols = crate::body::mouth_columns(view, &a.pose, &geometry);
+        crate::body::mouth_pool_site(fv, &cols, a.site.y, crate::Food::Carrion).is_some_and(|(s, _)| s == fs)
+    };
+    let eat = Actions { forward: 0.0, turn: 0.0, feed: 1.0 };
 
     // A pup: at the pack's carcass when it lies by the den, else at the den.
     if m.pup {
@@ -448,8 +457,8 @@ pub(crate) fn steer(
                 (dx, dz, (dx * dx + dz * dz).sqrt())
             };
             if from_den <= t.den_radius_m && carrion_at(fs) > 0.0 && a.eating {
-                if eating {
-                    return Some(held);
+                if at_feast(fs) {
+                    return Some(eat);
                 }
                 return Some(go_to(&a, fx, fz, ring, 0.25, 1.0));
             }
@@ -465,7 +474,6 @@ pub(crate) fn steer(
     }
 
     let manifest = fauna.config.manifest(founder);
-    let geometry = phys.body_at(a.body);
     let guard = manifest.cruise_m_per_s * manifest.controller_period_s
         + (h.strike_reach_length_fraction + h.jaw_forward_length_fraction) * geometry.length_m;
     let own = m.pack;
@@ -566,8 +574,8 @@ pub(crate) fn steer(
         if carrion_at(fs) > 0.0 {
             feast_usable = true;
             if joins {
-                if eating {
-                    return Some(clamp(fauna, held));
+                if at_feast(fs) {
+                    return Some(clamp(fauna, eat));
                 }
                 let (fx, fz) = centre(fs, v);
                 return Some(clamp(fauna, go_to(&a, fx, fz, ring, 0.25, 1.0)));
