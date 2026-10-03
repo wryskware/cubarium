@@ -15,7 +15,7 @@
 //! - an **old `[ecology]` vector** (`config/training/ecology-tuned-*.toml`), read through
 //!   `legacy.toml`'s gene names.
 
-use cubarium_voxel::genome::Genome;
+use cubarium_voxel::genome::{Genome, SearchFile};
 use cubarium_voxel_fauna::FaunaConfig;
 use cubarium_voxel_flora::FloraConfig;
 use cubarium_voxel_sim::LayerConfig;
@@ -27,6 +27,92 @@ pub const LEGACY: &str = include_str!("../../../../../../config/training/search/
 pub const COTRAIN: &str = include_str!("../../../../../../config/training/search/cotrain.toml");
 /// Where the search files live, from the repository root.
 pub const SEARCH_DIR: &str = "config/training/search";
+
+/// A search file's **`[base]`**, made self-contained: `file = "<config.toml>"` (from the
+/// working directory, else the repository root) contributes that config's `[flora]` and
+/// `[fauna]` tables, and the base's own `[base.flora]` / `[base.fauna]` tables override
+/// them key by key. The result carries the merged tables and `inlined = true` (the file
+/// is read once; a saved genome keeps them, so it decodes the same after the file moves
+/// on). Without `file`, the base's own tables alone.
+pub fn with_base(base: &toml::Table) -> Result<toml::Table, String> {
+    if base.get("inlined").and_then(|v| v.as_bool()) == Some(true) {
+        return Ok(base.clone());
+    }
+    let mut merged = toml::Table::new();
+    if let Some(file) = base.get("file") {
+        let file = file.as_str().ok_or("[base] file is a path")?;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let path = [std::path::PathBuf::from(file), root.join(file)]
+            .into_iter()
+            .find(|p| p.exists())
+            .ok_or_else(|| format!("[base] file {file}: not found"))?;
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let doc: toml::Table =
+            text.parse().map_err(|e| format!("{}: not TOML: {e}", path.display()))?;
+        for key in ["flora", "fauna"] {
+            if let Some(v) = doc.get(key) {
+                merged.insert(key.into(), v.clone());
+            }
+        }
+        merged.insert("file".into(), toml::Value::String(file.to_string()));
+    }
+    for key in ["flora", "fauna"] {
+        if let Some(v) = base.get(key) {
+            let over = v.as_table().ok_or_else(|| format!("[base.{key}] is a table"))?;
+            let into = merged
+                .entry(key)
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                .as_table_mut()
+                .expect("a table");
+            deep_merge(into, over);
+        }
+    }
+    for (k, v) in base {
+        if !matches!(k.as_str(), "file" | "flora" | "fauna" | "inlined") {
+            return Err(format!("unknown key `{k}` in [base]"));
+        }
+        let _ = v;
+    }
+    merged.insert("inlined".into(), toml::Value::Boolean(true));
+    Ok(merged)
+}
+
+/// `over` into `into`, table by table: a key of `over` replaces the same key of `into`
+/// unless both are tables, which merge.
+fn deep_merge(into: &mut toml::Table, over: &toml::Table) {
+    for (k, v) in over {
+        match (into.get_mut(k), v) {
+            (Some(toml::Value::Table(a)), toml::Value::Table(b)) => deep_merge(a, b),
+            _ => {
+                into.insert(k.clone(), v.clone());
+            }
+        }
+    }
+}
+
+/// The code defaults under a merged base's tables ([`with_base`]).
+fn base_of_table(base: &toml::Table) -> Result<Params, String> {
+    let mut doc = toml::Table::new();
+    for key in ["flora", "fauna"] {
+        if let Some(v) = base.get(key) {
+            doc.insert(key.into(), v.clone());
+        }
+    }
+    Params::resolve(&cubarium_voxel_sim::params::Layers {
+        file: Some(doc),
+        ..Default::default()
+    })
+    .map_err(|e| format!("[base]: {e}"))
+}
+
+/// A genome's base from its other tables: the code defaults without a `[base]`.
+fn base_of(rest: &toml::Table) -> Result<Params, String> {
+    match rest.get("base").and_then(|b| b.as_table()) {
+        None => Ok(Params::defaults()),
+        Some(b) => base_of_table(&with_base(b)?),
+    }
+}
 
 /// One training world's ecology.
 #[derive(Clone, Debug, PartialEq)]
@@ -84,13 +170,23 @@ impl EcologyParams {
         }
     }
 
+    /// What a genome's genes multiply: the code defaults, or with a `[base]` the code
+    /// defaults under the base's `[flora]` and `[fauna]` tables ([`with_base`]). A resolved
+    /// file is its own base.
+    pub fn base_params(&self) -> Result<Params, String> {
+        match self {
+            EcologyParams::Genome(g) => base_of(&g.rest),
+            EcologyParams::Resolved { .. } => self.params(),
+        }
+    }
+
     /// The plants (as authored) and animals this ecology runs; the world is the default.
     /// Refuses a genome that does not decode (unreachable for one [`load`] or a search
     /// expanded).
     pub fn params(&self) -> Result<Params, String> {
         match self {
             EcologyParams::Genome(g) => {
-                let mut p = Params::defaults();
+                let mut p = base_of(&g.rest)?;
                 p.apply_genome(g)?;
                 Ok(p)
             }
@@ -145,7 +241,14 @@ impl EcologyParams {
     pub fn parse(text: &str) -> Result<EcologyParams, String> {
         let doc: toml::Table = text.parse().map_err(|e| format!("not TOML: {e}"))?;
         if doc.contains_key("gene") {
-            return Ok(EcologyParams::Genome(load_genome(text)?));
+            let Some(base) = doc.get("base") else {
+                return Ok(EcologyParams::Genome(load_genome(text)?));
+            };
+            let base = with_base(base.as_table().ok_or("[base] is a table")?)?;
+            let p = base_of_table(&base)?;
+            let mut g = p.expand_genome(SearchFile::parse(text)?)?;
+            g.rest.insert("base".into(), toml::Value::Table(base));
+            return Ok(EcologyParams::Genome(g));
         }
         if let Some(table) = doc.get("ecology").and_then(|t| t.as_table()) {
             return EcologyParams::from_old(table);

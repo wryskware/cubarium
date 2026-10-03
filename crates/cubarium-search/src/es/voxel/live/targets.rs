@@ -1,0 +1,318 @@
+//! **Targets v3: per lineage and life stage** (`design/ecology-timescales-2026-10-02.md`
+//! Part 3; Astra A10; `design/handoffs/roster-search-groundwork-2026-10-02.md` §3). A search
+//! file opts in with `[targets] version = 3`; without it the v2 breeding term stands.
+//!
+//! Two hours cannot hold a replacement generation for every lineage, so each is held to
+//! what fits:
+//! - **Birth required** (`birth_required`): an actual birth in the second half. Readiness
+//!   earns at most `birth_credit_max` of the term as a gradient and never meets it.
+//! - **The lanternjaw's ladder** (`progress`): 0.25 hatched from the founding egg bank,
+//!   0.5 a rider attached, 0.75 a juvenile off its host (dropped off or freed) and living
+//!   free, 1 an established hunter feeding (carrion eaten or a hit) or eggs laid by an
+//!   adult. Met at `lanternjaw_progress`. Bank hatches, riders and free-living hunters are
+//!   counted apart.
+//! - **The chorister's pups** (`progress`): a litter (in either half: an early one is a
+//!   success, the next is six hours off), pups provisioned, and pup survival at least
+//!   `chorister_pup_survival`. A third each; met at all three.
+//! - **Replenishment** (`replenish`): over one whole day-cycle, assimilated intake over the
+//!   cycle's measured spending, `intake / (intake − Δbiomass)` with biomass every living
+//!   body's structure, reserve and open escrow. At least 1; a rise after one meal cannot
+//!   hide a negative day.
+
+use cubarium_voxel_fauna::Founder;
+use serde::Serialize;
+
+/// The v3 targets as a search file's `[targets]` sets them.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct StageSpec {
+    pub birth_required: [bool; Founder::COUNT],
+    /// The lanternjaw and the chorister: their ladders instead of a birth.
+    pub progress: [bool; Founder::COUNT],
+    pub replenish: [bool; Founder::COUNT],
+    /// The most of a birth term readiness can earn back (never all of it).
+    pub birth_credit_max: f64,
+    /// Readiness at which that credit is full.
+    pub ready_target: f64,
+    pub lanternjaw_progress: f64,
+    pub chorister_pup_survival: f64,
+    /// The replenishment term's weight per unit of shortfall.
+    pub replenish_weight: f64,
+    /// The lanternjaw share term's weight while no lanternjaw lives free.
+    pub share_weight_unestablished: f64,
+    /// The measured predator balance's share of prey births per hunter lineage (a
+    /// readout, Astra A6's 50 %).
+    pub balance_share: f64,
+}
+
+impl Default for StageSpec {
+    fn default() -> StageSpec {
+        StageSpec {
+            birth_required: [false; Founder::COUNT],
+            progress: [false; Founder::COUNT],
+            replenish: [false; Founder::COUNT],
+            birth_credit_max: 0.5,
+            ready_target: 0.5,
+            lanternjaw_progress: 0.5,
+            chorister_pup_survival: 0.5,
+            replenish_weight: 5.0,
+            share_weight_unestablished: 1.0,
+            balance_share: 0.5,
+        }
+    }
+}
+
+fn lineages(v: &toml::Value, key: &str) -> Result<[bool; Founder::COUNT], String> {
+    let names = v.as_array().ok_or_else(|| format!("{key} is a list of lineages"))?;
+    let mut out = [false; Founder::COUNT];
+    for n in names {
+        let n = n.as_str().ok_or_else(|| format!("{key} names lineages"))?;
+        let f = Founder::ALL
+            .into_iter()
+            .find(|f| f.name() == n)
+            .ok_or_else(|| format!("[targets] {key}: no lineage {n:?}"))?;
+        out[f.index()] = true;
+    }
+    Ok(out)
+}
+
+fn number(v: &toml::Value, key: &str) -> Result<f64, String> {
+    v.as_float()
+        .or_else(|| v.as_integer().map(|i| i as f64))
+        .filter(|x| x.is_finite() && *x >= 0.0)
+        .ok_or_else(|| format!("[targets] {key} is a number >= 0"))
+}
+
+impl StageSpec {
+    /// The rules a v2 search's readout judges by (no penalty reads them): a birth for every
+    /// lineage but the lanternjaw and the chorister, which climb their ladders, and
+    /// replenishment for every lineage but the lanternjaw.
+    pub fn readout_default() -> StageSpec {
+        let mut s = StageSpec::default();
+        for f in Founder::ALL {
+            let ladder = matches!(f, Founder::Lanternjaw | Founder::Chorister);
+            s.birth_required[f.index()] = !ladder;
+            s.progress[f.index()] = ladder;
+            s.replenish[f.index()] = f != Founder::Lanternjaw;
+        }
+        s
+    }
+
+    /// The v3 keys of a `[targets]` table: `Some` when it says `version = 3`. Keys of v2
+    /// (and the band's) are left to their reader.
+    pub fn from_targets(t: &toml::Table) -> Result<Option<StageSpec>, String> {
+        match t.get("version").and_then(|v| v.as_integer()) {
+            Some(3) => {}
+            Some(v) if v != 2 => return Err(format!("[targets] version {v}: 2 or 3")),
+            _ => return Ok(None),
+        }
+        let mut s = StageSpec::default();
+        for (k, v) in t {
+            match k.as_str() {
+                "birth_required" => s.birth_required = lineages(v, k)?,
+                "progress" => s.progress = lineages(v, k)?,
+                "replenish" => s.replenish = lineages(v, k)?,
+                "birth_credit_max" => s.birth_credit_max = number(v, k)?.min(0.99),
+                "ready_target" => s.ready_target = number(v, k)?.max(1e-9),
+                "lanternjaw_progress" => s.lanternjaw_progress = number(v, k)?,
+                "chorister_pup_survival" => s.chorister_pup_survival = number(v, k)?,
+                "replenish_weight" => s.replenish_weight = number(v, k)?,
+                "share_weight_unestablished" => s.share_weight_unestablished = number(v, k)?,
+                "balance_share" => s.balance_share = number(v, k)?,
+                _ => {}
+            }
+        }
+        Ok(Some(s))
+    }
+}
+
+/// Which rule a lineage is held to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum Rule {
+    Birth,
+    LanternjawProgress,
+    ChoristerProgress,
+    /// Persistence alone (and replenishment, if listed).
+    Persist,
+}
+
+/// **One lineage's outcome** in one world: what it did, and the verdict ([`judge`]).
+#[derive(Clone, Debug, Serialize)]
+pub struct LineageOutcome {
+    pub lineage: &'static str,
+    pub founder: Founder,
+    /// Founders (bodies, or clutches for an egg bank).
+    pub founded: usize,
+    /// Living bodies at the end (riders included) and eggs.
+    pub alive_end: usize,
+    pub eggs_end: usize,
+    /// Bodies born in the second half, and in the whole run (by id, minute by minute).
+    pub late_births: u64,
+    pub births: u64,
+    /// Second-half mean breeding readiness.
+    pub readiness: f64,
+    /// Hatches out of the founding egg bank (an egg-bank lineage), and eggs adults laid.
+    pub bank_hatches: u64,
+    pub eggs_laid: u64,
+    /// Riders now, and attached, dropped off and freed over the run.
+    pub riders_now: usize,
+    pub riders_attached: u64,
+    pub rider_dropoffs: u64,
+    pub riders_freed: u64,
+    /// Bodies living free (not riding) at the end.
+    pub free_living: usize,
+    /// Strikes that hit, and carrion its mouths took (gross organic).
+    pub hits: u64,
+    pub carrion_eaten: f64,
+    /// A pack's litters, pups born, pups alive (still pups) and grown past independence at
+    /// the end, and what pups received from provisioning (organic).
+    pub litters: u64,
+    pub pups_born: u64,
+    pub pups_alive: usize,
+    pub pups_independent: usize,
+    pub provision_received: f64,
+    /// One whole day-cycle from founding: assimilated intake, and the lineage's biomass at
+    /// its start and its end. `cycle_complete` false when the world stopped first.
+    pub intake_cycle: f64,
+    pub biomass_start: f64,
+    pub biomass_cycle: f64,
+    pub cycle_complete: bool,
+    pub replenishment: f64,
+    /// The verdict.
+    pub rule: Rule,
+    /// The ladder's score (progress rules), 0 to 1.
+    pub score: f64,
+    /// The stage term, 0 (met) to 1, and whether the target is met.
+    pub shortfall: f64,
+    pub met: bool,
+    /// The replenishment term, 0 to 1 (0 for a lineage not held to it).
+    pub replenish_shortfall: f64,
+}
+
+impl LineageOutcome {
+    /// A lineage founded with `founded`, nothing yet observed.
+    pub fn new(founder: Founder, founded: usize) -> LineageOutcome {
+        LineageOutcome {
+            lineage: founder.name(),
+            founder,
+            founded,
+            alive_end: 0,
+            eggs_end: 0,
+            late_births: 0,
+            births: 0,
+            readiness: 0.0,
+            bank_hatches: 0,
+            eggs_laid: 0,
+            riders_now: 0,
+            riders_attached: 0,
+            rider_dropoffs: 0,
+            riders_freed: 0,
+            free_living: 0,
+            hits: 0,
+            carrion_eaten: 0.0,
+            litters: 0,
+            pups_born: 0,
+            pups_alive: 0,
+            pups_independent: 0,
+            provision_received: 0.0,
+            intake_cycle: 0.0,
+            biomass_start: 0.0,
+            biomass_cycle: 0.0,
+            cycle_complete: false,
+            replenishment: 0.0,
+            rule: Rule::Persist,
+            score: 0.0,
+            shortfall: 0.0,
+            met: true,
+            replenish_shortfall: 0.0,
+        }
+    }
+
+    /// Neither a body nor an egg left.
+    pub fn lost(&self) -> bool {
+        self.founded > 0 && self.alive_end + self.eggs_end == 0
+    }
+}
+
+/// **Replenishment**: intake over spending, `intake / (intake − (end − start))`; 0 with no
+/// intake, capped at 10 when the lineage gained more than it spent.
+pub fn replenishment(intake: f64, biomass_start: f64, biomass_end: f64) -> f64 {
+    if !(intake > 0.0) {
+        return 0.0;
+    }
+    let spent = intake - (biomass_end - biomass_start);
+    if spent <= intake / 10.0 { 10.0 } else { intake / spent }
+}
+
+/// The lanternjaw's ladder ([`super::targets`] module docs).
+fn lanternjaw_score(o: &LineageOutcome) -> f64 {
+    let established = o.free_living > 0 && (o.carrion_eaten > 0.0 || o.hits > 0);
+    if established || o.eggs_laid > 0 {
+        1.0
+    } else if o.free_living > 0 && o.rider_dropoffs + o.riders_freed > 0 {
+        0.75
+    } else if o.riders_attached > 0 {
+        0.5
+    } else if o.bank_hatches > 0 {
+        0.25
+    } else {
+        0.0
+    }
+}
+
+/// The chorister's three thirds.
+fn chorister_score(o: &LineageOutcome, survival_min: f64) -> f64 {
+    let litter = o.litters > 0;
+    let fed = o.provision_received > 0.0;
+    let pups_now = (o.pups_alive + o.pups_independent) as f64;
+    let survived = o.pups_born > 0 && pups_now / o.pups_born as f64 >= survival_min;
+    [litter, fed, survived].iter().filter(|x| **x).count() as f64 / 3.0
+}
+
+/// **Judge one lineage** under `spec`: its rule, score, stage shortfall, whether met, and
+/// its replenishment. `reached_second_half` false (the world stopped first) fails a birth.
+pub fn judge(o: &mut LineageOutcome, spec: &StageSpec, reached_second_half: bool) {
+    let i = o.founder.index();
+    let lost = o.lost();
+    o.rule = if spec.progress[i] && o.founder == Founder::Lanternjaw {
+        Rule::LanternjawProgress
+    } else if spec.progress[i] && o.founder == Founder::Chorister {
+        Rule::ChoristerProgress
+    } else if spec.birth_required[i] {
+        Rule::Birth
+    } else {
+        Rule::Persist
+    };
+    let (score, shortfall, met) = match o.rule {
+        Rule::Birth => {
+            if lost || !reached_second_half {
+                (0.0, 1.0, false)
+            } else if o.late_births > 0 {
+                (1.0, 0.0, true)
+            } else {
+                let credit = spec.birth_credit_max * (o.readiness / spec.ready_target).min(1.0);
+                (0.0, 1.0 - credit, false)
+            }
+        }
+        Rule::LanternjawProgress => {
+            let s = if lost { 0.0 } else { lanternjaw_score(o) };
+            let target = spec.lanternjaw_progress.max(1e-9);
+            (s, ((target - s) / target).clamp(0.0, 1.0), s >= target)
+        }
+        Rule::ChoristerProgress => {
+            let s = if lost { 0.0 } else { chorister_score(o, spec.chorister_pup_survival) };
+            (s, 1.0 - s, s >= 1.0 - 1e-12)
+        }
+        Rule::Persist => (if lost { 0.0 } else { 1.0 }, 0.0, !lost),
+    };
+    o.score = score;
+    o.shortfall = shortfall;
+    o.met = met;
+    o.replenishment = replenishment(o.intake_cycle, o.biomass_start, o.biomass_cycle);
+    o.replenish_shortfall = if !spec.replenish[i] || o.founded == 0 {
+        0.0
+    } else if !o.cycle_complete {
+        1.0
+    } else {
+        (1.0 - o.replenishment).clamp(0.0, 1.0)
+    };
+}

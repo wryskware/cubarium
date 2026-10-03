@@ -320,6 +320,7 @@ fn trace_at(n: usize, moving: f64) -> Trace {
         browser_moving: moving,
         missing: 0,
         silent_lineages: 0.0,
+        ..Trace::default()
     }
 }
 
@@ -398,6 +399,7 @@ fn a_short_trace_is_projected_on_its_last_hours_trend() {
         browser_moving: 0.3,
         missing: 0,
         silent_lineages: 0.0,
+        ..Trace::default()
     };
     let end = *growing.animals.last().unwrap();
     super::search::project(&mut growing, 360.0);
