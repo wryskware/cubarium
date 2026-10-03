@@ -95,11 +95,12 @@ impl Controller for Counting {
 
 #[test]
 fn the_founders_have_their_activity_and_the_rest_state_costs_half() {
+    // Night survival 1a: the shredder, an ectotherm-like lineage, sleeps at 0.3.
     let c = FaunaConfig::default();
     assert_eq!(c.founder(Founder::Browser).active, Activity::Diurnal);
     assert_eq!(c.founder(Founder::Blind).active, Activity::Nocturnal);
     assert_eq!(c.founder(Founder::Browser).sleep_upkeep, 0.5);
-    assert_eq!(c.founder(Founder::Blind).sleep_upkeep, 0.5);
+    assert_eq!(c.founder(Founder::Blind).sleep_upkeep, 0.3);
 }
 
 #[test]

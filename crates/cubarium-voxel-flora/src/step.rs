@@ -3358,6 +3358,10 @@ pub(crate) fn standing_water_beside(view: &VoxelView<'_>, site: Site) -> f64 {
 }
 
 #[cfg(test)]
+#[path = "night_budget_tests.rs"]
+mod night_budget_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::Species;

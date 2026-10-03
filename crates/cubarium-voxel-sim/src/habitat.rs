@@ -3682,13 +3682,16 @@ mod tests {
         );
     }
 
-    /// Founders arrive grown with half a reserve ([`founder_arrival`]): at the shipped
-    /// mass a half-grown, empty founder starved on the terrarium before it had settled
-    /// (x30, 60 min: 5-7 of 8 browsers dead by minute 30), and a full one would have no
-    /// appetite. Half a reserve is hunger 0.5, awake by day or night.
+    /// Founders arrive grown and **full** ([`founder_arrival`]; night survival, brief test
+    /// 8): every founder's reserve is its cap × `founding.arrival_reserve`, and the knob's
+    /// default is 1. (It was half until 2026-10-02: a full founder slept at its lineage's
+    /// night with no appetite; Part 1a of `design/ecology-timescales-2026-10-02.md` wants
+    /// it to enter that sleep full.)
     #[test]
-    fn a_seeded_founder_arrives_grown_with_half_a_reserve() {
+    fn a_seeded_founder_arrives_grown_and_full() {
         let world = plain(24, 6);
+        let knob = cubarium_voxel_fauna::FoundingConfig::default().arrival_reserve;
+        assert_eq!(knob, 1.0, "the knob's default");
         for founder in Founder::ALL {
             let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());
             install_heuristics(&mut fauna);
@@ -3697,12 +3700,13 @@ mod tests {
             let sc = fauna.config().founder(founder).core;
             assert!((a.body - sc.body_max).abs() < 1e-12, "{founder:?}: grown");
             assert!(
-                (a.reserve - 0.5 * sc.reserve_of(sc.body_max)).abs() < 1e-12,
-                "{founder:?}: half a reserve"
+                (a.reserve - knob * sc.reserve_of(sc.body_max)).abs() < 1e-12,
+                "{founder:?}: reserve {} is the cap × the knob",
+                a.reserve
             );
         }
         let arrival = founder_arrival(&cubarium_voxel_fauna::FoundingConfig::default());
         assert_eq!(arrival.body, 1.0);
-        assert_eq!(arrival.reserve, 0.5);
+        assert_eq!(arrival.reserve, knob);
     }
 }
