@@ -19,7 +19,8 @@ use crate::Flora;
 // fruit_drop_s, fruit_mineral_fraction}`.
 // 16: F3 — lanternberry fruit is made, falls and is taken; `Stand::fruit_age_s`.
 // 17: merge with main's glowcap dark habitat (main's schema 11).
-pub const SCHEMA: u32 = 17;
+// 18: glassfilm drying — `FloraConfig::{film_wet_min_depth_m, film_gone_fraction}`.
+pub const SCHEMA: u32 = 18;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
