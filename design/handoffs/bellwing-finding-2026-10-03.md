@@ -57,7 +57,9 @@ For each defect fixed, write a fixture that fails before the fix and passes afte
   - for bellwings, the gut line;
   - for packs, the feasts and chase ends.
 - Use `nice -n 10`, one thread per run, at most 8 at once on the desktop.
-- Eidolon is busy overnight; don't use it.
+- Eidolon (`ssh eidolon.local`) is available with up to 8 threads. An overnight soak uses 8
+  more, and the plants worker may use 8. Eidolon's shell is fish, so run a bash script file
+  and give your binary a new name.
 
 ## Constraints
 

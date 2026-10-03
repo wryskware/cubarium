@@ -90,7 +90,12 @@ that no vine has taken.
   - flowers and fruits standing over time.
 - Plus one headless capture per seed at the end.
 - Long runs are fine tonight (Wrysk: "feel free to run things locally"). Use `nice -n 10` and
-  at most 8 threads in total.
+  at most 8 threads on the desktop.
+- Eidolon (`ssh eidolon.local`) has 8 more threads for you; the bellwing worker has 8 and a
+  soak uses 8. Eidolon's shell is fish, so run a bash script file and give your binary a new
+  name.
+- Wrysk's live world is stopped and kept no snapshot, so reproduce the issues on generated
+  terrarium worlds.
 
 ## Constraints
 
