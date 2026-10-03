@@ -1946,3 +1946,41 @@ fn t_mineral_vine_products_carry_mineral_from_the_vines_store() {
     let leaf = flora2.crop(wf(5, 0), 1e-3).expect("a crop");
     assert_eq!(leaf.mineral, 0.0, "a vine with nothing in its store gives mineral-free leaf");
 }
+
+// ------------------------------------------------------------------ sisters before spreading
+
+/// **A vine with faces still to take roots a sister first** (plants-flowering-vines
+/// 2026-10-03, Part B 1). A wall six slabs long; one vine covering its bottom row
+/// (`y = 3`, slabs 0..=5), so slab 5 is five faces from the root along the cover and its
+/// foot is free soil; open faces above every one. The economy stopped (no income or
+/// upkeep), no flowering hold, a purse that pays one sister (0.5) or several faces (0.23
+/// each), never both. One spread check: the sister roots, at a foot along the wall. (The
+/// old order spent the purse on four faces and looked for a sister with the 0.08 left,
+/// so a vine on a wall it had not finished never rooted one.)
+#[test]
+fn t23_a_vine_with_faces_still_to_take_roots_a_sister_first() {
+    let plan = Plan::wall(12, 14, 6, 10);
+    let mut world = plan.world(1.0, false);
+    let mut config = frozen();
+    config.latticevine.spread_cost = 0.2;
+    config.latticevine.sister_cost = 0.5;
+    config.latticevine.spread_hold = 0.0;
+    let mut flora = Flora::new(config);
+    let id = seed(&mut flora, &world, foot(0), wf(3, 0), 1.0);
+    for z in 1..=5 {
+        assert!(flora.cover_face(&world, id, wf(3, z), 1.0), "fixture: cover {:?}", wf(3, z));
+    }
+    let mut t = 0;
+    while flora.view().cover.vines().len() == 1 && vine(&flora, id).reserve >= 0.5 {
+        flora.step(&mut world);
+        t += 1;
+        assert!(t < 200, "fixture: a spread check comes within 10 s");
+    }
+    let vines = flora.view().cover.vines().to_vec();
+    assert_eq!(vines.len(), 2, "a sister rooted before the purse went on faces: {vines:?}");
+    let sister = vines.iter().find(|v| v.id != id).expect("the sister");
+    assert_eq!((sister.root.x, sister.root.y), (5, 2), "at a foot along the wall: {sister:?}");
+    assert!(sister.root.z >= 4, "at least four faces along the cover from the root: {sister:?}");
+    assert_eq!(flora.view().cover.faces().len(), 6, "and no face was bought this check");
+    assert_residuals(&flora, "after the sister");
+}

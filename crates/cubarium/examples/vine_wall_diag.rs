@@ -149,11 +149,28 @@ fn main() {
         );
     }
     // The vines: root, its material, first face, faces owned, water, dormancy.
-    eprintln!("vines: {}", fv.cover.vines().len());
+    eprintln!(
+        "vines: {} (dormancies so far {}, deaths {}, sisters {})",
+        fv.cover.vines().len(),
+        fv.ledger.vine_dormancies,
+        fv.ledger.vine_deaths,
+        fv.ledger.vine_sisters
+    );
     for v in fv.cover.vines() {
-        let n = fv.cover.faces_of(v.id).len();
+        let faces = fv.cover.faces_of(v.id);
+        let n = faces.len();
+        let leaf: f64 = faces.iter().map(|f| f.leafiness).sum();
+        // Mean face light over (up to 200 of) its faces, and the share below the light
+        // at which a full face's income, half the day dark, pays its upkeep.
+        let pay = 2.0 * (vc.leaf_upkeep + vc.wood_upkeep) / vc.assimilation;
+        let stride = n.div_ceil(200).max(1);
+        let ls: Vec<f64> = faces.iter().step_by(stride).map(|f| face_light(vc, f.face.dir, sky(f.face))).collect();
+        let light = ls.iter().sum::<f64>() / ls.len().max(1) as f64;
+        let dark = ls.iter().filter(|&&l| l < pay).count() as f64 / ls.len().max(1) as f64;
+        // The drink's ask at full moisture against what the root got last tick.
+        let ask = vc.transpiration_m3_per_s * leaf * cubarium_voxel::DT;
         eprintln!(
-            "vine {} lineage {} root ({},{},{}) {:?} root_face {:?} faces {} water {:.3} reserve {:.4} dormant {}",
+            "vine {} lineage {} root ({},{},{}) {:?} root_face {:?} faces {} light {:.2} below_pay {:.2} leaf {:.1} drank/ask {:.3} water {:.3} reserve {:.4} dormant {}",
             v.id,
             v.lineage,
             v.root.x,
@@ -162,6 +179,10 @@ fn main() {
             view.material_at(v.root.x as i64, v.root.y, v.root.z),
             v.root_face.dir,
             n,
+            light,
+            dark,
+            leaf,
+            if ask > 0.0 { v.drank_m3 / ask } else { f64::NAN },
             v.water,
             v.reserve,
             v.dormant

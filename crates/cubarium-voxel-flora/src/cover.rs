@@ -1767,6 +1767,37 @@ fn spread(
         return;
     }
 
+    // A sister first, where the cover reaches free soil far enough from the root
+    // (plants-flowering-vines 2026-10-03): before, the spread spent the spare reserve
+    // first and a sister was looked for with what was left, so a vine with faces still
+    // to take — a big wall, never fully covered — never rooted one and the whole wall
+    // drank and starved through one root box. A sister takes this check; the spread
+    // goes on at the next.
+    if can_sister {
+        let own_root = cover.vines[vi].root;
+        let mut found: Option<(Site, usize)> = None;
+        'members: for &(s, d, _) in &walk {
+            if d < vc.sister_min_dist {
+                continue;
+            }
+            let f = cover.faces[s as usize].face;
+            for site in root_sites(c, f).into_iter().flatten() {
+                if site != own_root
+                    && !cover.rt.roots.contains_key(&site)
+                    && view.material_at(site.x as i64, site.y, site.z) == Material::Soil
+                    && view.is_support(site.x as i64, site.y, site.z)
+                {
+                    found = Some((site, s as usize));
+                    break 'members;
+                }
+            }
+        }
+        if let Some((site, root_slot)) = found {
+            root_sister(cover, c, vi, site, root_slot, vc, tick, ledger);
+            return;
+        }
+    }
+
     if can_spread {
         let mut nbuf = std::mem::take(&mut cover.rt.nbuf);
         let mut seen: FxHashSet<Face> = FxHashSet::default();
@@ -1805,33 +1836,6 @@ fn spread(
             ledger.vine_faces_spread += 1;
         }
     }
-
-    // A sister, where the cover reaches free soil far enough from the root.
-    if spare(cover) < vc.sister_cost {
-        return;
-    }
-    let own_root = cover.vines[vi].root;
-    let mut found: Option<(Site, usize)> = None;
-    'members: for &(s, d, _) in &walk {
-        if d < vc.sister_min_dist {
-            continue;
-        }
-        let f = cover.faces[s as usize].face;
-        for site in root_sites(c, f).into_iter().flatten() {
-            if site != own_root
-                && !cover.rt.roots.contains_key(&site)
-                && view.material_at(site.x as i64, site.y, site.z) == Material::Soil
-                && view.is_support(site.x as i64, site.y, site.z)
-            {
-                found = Some((site, s as usize));
-                break 'members;
-            }
-        }
-    }
-    let Some((site, root_slot)) = found else {
-        return;
-    };
-    root_sister(cover, c, vi, site, root_slot, vc, tick, ledger);
 }
 
 /// Root a sister of vine `vi` on `site`, its root arch on the face in `root_slot`. It takes
