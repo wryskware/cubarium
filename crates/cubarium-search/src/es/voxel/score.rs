@@ -72,6 +72,10 @@ pub struct BodyMeter {
     pub walked_m: f64,
     /// The share of `motor` paid for motion that was attempted and not delivered.
     pub blocked_motor: f64,
+    /// Whether the last observed tick was a sampling ([`credit_unseen_intake`]).
+    sampled: bool,
+    /// The last unsampled tick's intake: the weight [`credit_unseen_intake`] shares by.
+    rate: f64,
 }
 
 /// One tick's increments, as [`BodyMeter::observe`] read them.
@@ -94,6 +98,8 @@ impl BodyMeter {
             motor: 0.0,
             walked_m: 0.0,
             blocked_motor: 0.0,
+            sampled: false,
+            rate: 0.0,
         }
     }
 
@@ -125,6 +131,10 @@ impl BodyMeter {
             }
         });
         self.prev = now;
+        self.sampled = sampled;
+        if !sampled {
+            self.rate = d[0];
+        }
         self.intake += d[0];
         self.motor += d[1];
         self.walked_m += d[4];
@@ -136,6 +146,30 @@ impl BodyMeter {
             motor: d[1],
             forward_m: d[4],
         }
+    }
+}
+
+/// **Intake the meters cannot see** (the minimal gut). Digestion, the only intake, runs
+/// before the controller stage, so on the tick a body is sampled its digestion goes into the
+/// interval the sampling closes and is zeroed before any post-step reading. The lineage
+/// ledger still has it. `residual` is the ledger's assimilation for the lineage this tick
+/// minus what its meters saw; it is credited to the meters sampled this tick, in proportion
+/// to each one's last unsampled per-tick intake (equal shares when none has any). Exact per
+/// lineage; exact per body when one body of the lineage is sampled at a time. No meter
+/// sampled: nothing is credited (the residual is rounding).
+pub fn credit_unseen_intake<'a>(meters: impl IntoIterator<Item = &'a mut BodyMeter>, residual: f64) {
+    if residual == 0.0 || !residual.is_finite() {
+        return;
+    }
+    let mut sampled: Vec<&mut BodyMeter> = meters.into_iter().filter(|m| m.sampled).collect();
+    if sampled.is_empty() {
+        return;
+    }
+    let total: f64 = sampled.iter().map(|m| m.rate.max(0.0)).sum();
+    let n = sampled.len() as f64;
+    for m in sampled.iter_mut() {
+        let share = if total > 0.0 { m.rate.max(0.0) / total } else { 1.0 / n };
+        m.intake += residual * share;
     }
 }
 

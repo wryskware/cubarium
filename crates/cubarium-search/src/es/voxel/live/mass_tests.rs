@@ -127,7 +127,13 @@ fn mass_scale_multiplies_the_eight_absolute_quantities_and_nothing_else() {
 fn resting_reserve_fraction(e: &EcologyParams, founder: Founder, ticks: u32) -> f64 {
     let world = flat_world();
     let mut flora = Flora::new(e.flora(0.25));
-    let mut fauna = Fauna::new(e.fauna());
+    // The minimal gut: an empty founding stomach (`s0` 0). A full reserve with `s0 K`
+    // in the stomach refills from digestion, so the reserve would not fall at all.
+    let mut config = e.fauna();
+    for p in config.founders.iter_mut() {
+        p.gut.s0 = 0.0;
+    }
+    let mut fauna = Fauna::new(config);
     assert!(fauna.apply(
         &world,
         FaunaCommand::IntroduceFounder {

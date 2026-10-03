@@ -171,7 +171,10 @@ fn a_gestating_body_counts_one() {
 #[test]
 fn readiness_is_monotonic_in_reserve() {
     let mut last = -1.0;
-    for reserve in [0.0, 0.2, 0.4, 0.6, 0.8] {
+    // The browser's surplus line is 0.6 of its reserve cap. Under the minimal gut's
+    // upkeep (f / 7,200 s) a body placed at 0.6 no longer drops under the line in two
+    // ticks, so the ladder steps from below the line (0.5) to above it (0.8).
+    for reserve in [0.0, 0.2, 0.4, 0.5, 0.8] {
         let stores = StartingStores { body: 1.0, reserve };
         let (r, _) = readiness_after(FaunaConfig::default(), stores, 2);
         assert!(r > last, "reserve {reserve}: {r} after {last}");
@@ -179,3 +182,4 @@ fn readiness_is_monotonic_in_reserve() {
         last = r;
     }
 }
+

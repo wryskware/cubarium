@@ -21,7 +21,7 @@ use super::ecology::EcologyParams;
 use super::readout::{self, Ctx, LineageStats, Pool, Scan};
 use super::variants::VariantTable;
 use super::world::FoundInfo;
-use crate::es::voxel::score::BodyMeter;
+use crate::es::voxel::score::{BodyMeter, credit_unseen_intake};
 
 /// The window both training CLIs default to, simulated minutes.
 pub const DEFAULT_WINDOW_MIN: f64 = 10.0;
@@ -285,6 +285,10 @@ pub struct Window {
     cell_area: f64,
     phys: Vec<cubarium_voxel_fauna::FounderPhysiology>,
     deaths_start: [[u64; cubarium_voxel_fauna::Departure::COUNT]; Founder::COUNT],
+    /// The ledger's assimilation per lineage at the window's start: a lineage's intake is
+    /// the ledger's, not the meters' sum (the minimal gut digests before the controller
+    /// stage, [`credit_unseen_intake`]).
+    assimilated_start: [f64; Founder::COUNT],
     tracked: Vec<Tracked>,
     index: FxHashMap<u64, usize>,
     counts: Vec<Vec<u32>>,
@@ -343,6 +347,7 @@ impl Window {
                 .map(|f| *sim.fauna().config().founder(*f))
                 .collect(),
             deaths_start: sim.fauna().view().ledger.deaths_by_founder_cause,
+            assimilated_start: sim.fauna().view().ledger.assimilated_by_founder,
             tracked: Vec::new(),
             index: FxHashMap::default(),
             counts: pairs.iter().map(|&p| vec![0u32; 2 * p]).collect(),
@@ -433,6 +438,8 @@ impl Window {
     /// Step `sim` one tick and follow every body; a newcomer gets its variant the tick it
     /// appears.
     pub fn step(&mut self, sim: &mut Sim) {
+        let assimilated_before = sim.fauna().view().ledger.assimilated_by_founder;
+        let mut seen = [0.0f64; Founder::COUNT];
         sim.step();
         self.elapsed += 1;
         self.memory.advance();
@@ -455,6 +462,7 @@ impl Window {
                 let b = &mut self.tracked[k];
                 b.seen = stamp;
                 let d = b.meter.observe(a);
+                seen[f.index()] += d.intake;
                 b.energy.observe(a);
                 let len = self.phys[f.index()].body_at(a.body).length_m;
                 if len > 0.0 {
@@ -474,6 +482,21 @@ impl Window {
                     b.visited
                         .insert(cx.rem_euclid(i64::from(self.width)) as u32 * self.depth + cz);
                 }
+            }
+        }
+        // The sampled bodies' digestion the meters missed, per lineage, from the ledger.
+        {
+            let after = sim.fauna().view().ledger.assimilated_by_founder;
+            for f in Founder::ALL {
+                let fi = f.index();
+                let residual = after[fi] - assimilated_before[fi] - seen[fi];
+                credit_unseen_intake(
+                    self.tracked
+                        .iter_mut()
+                        .filter(|b| b.founder == f && b.seen == stamp)
+                        .map(|b| &mut b.meter),
+                    residual,
+                );
             }
         }
         for (id, &k) in &self.index {
@@ -567,11 +590,15 @@ impl Window {
                 self.stats[fi].deaths[d] = end - start;
             }
         }
+        let assimilated_end = sim.fauna().view().ledger.assimilated_by_founder;
+        for f in Founder::ALL {
+            let fi = f.index();
+            self.stats[fi].intake = assimilated_end[fi] - self.assimilated_start[fi];
+        }
         for b in &self.tracked {
             let s = &mut self.stats[b.founder.index()];
             s.body_ticks += b.alive_ticks;
             s.unique_m2 += b.visited.len() as f64 * self.cell_area;
-            s.intake += b.meter.intake;
             s.walked_bl += b.minute_bl;
             let fi = b.founder.index();
             let novelty = self.geometry[fi].novelty(b.earned, self.ticks);
