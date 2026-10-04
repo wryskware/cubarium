@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (792 rows)
+**`flora.*`** (801 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -411,7 +411,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.bloomcrown.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.bloomcrown.seed_mass` | 2 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.bloomcrown.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.bloomcrown.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.bloomcrown.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.bloomcrown.crown_height_m.*` | 0.375, 1.0 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.bloomcrown.crown_radius_m.*` | 0.125, 0.3125 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.bloomcrown.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
@@ -491,7 +492,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.clonal_share` | 0.5 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.umbrellafrond.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.umbrellafrond.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.umbrellafrond.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.umbrellafrond.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.umbrellafrond.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.umbrellafrond.crown_height_m.*` | 1.0, 2.0 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.umbrellafrond.crown_radius_m.*` | 0.375, 0.75 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.umbrellafrond.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
@@ -571,7 +573,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.clonal_share` | 0.3 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.springturf.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.springturf.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.springturf.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.springturf.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.springturf.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.springturf.crown_height_m.*` | 0.125, 0.1875 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.springturf.crown_radius_m.*` | 0.125, 0.25 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.springturf.graze_refuge` | 0.3 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
@@ -651,7 +654,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.stonecushion.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.stonecushion.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.stonecushion.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.stonecushion.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.stonecushion.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.stonecushion.crown_height_m.*` | 0.125, 0.1875 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.stonecushion.crown_radius_m.*` | 0.125, 0.15625 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.stonecushion.graze_refuge` | 0.4 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
@@ -731,7 +735,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.clonal_share` | 0.3 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.velvetpad.spore_tries` | 2 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.velvetpad.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.velvetpad.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.velvetpad.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.velvetpad.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.velvetpad.crown_height_m.*` | 0.125, 0.125 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.velvetpad.crown_radius_m.*` | 0.1875, 0.375 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.velvetpad.graze_refuge` | 0.3 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
@@ -811,7 +816,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.glowcap.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.glowcap.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.glowcap.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.glowcap.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.glowcap.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.glowcap.crown_height_m.*` | 0.125, 0.25 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.glowcap.crown_radius_m.*` | 0.0625, 0.0625 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.glowcap.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
@@ -891,7 +897,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.vaulttree.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.vaulttree.seed_mass` | 4 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.vaulttree.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.vaulttree.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.vaulttree.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.vaulttree.crown_height_m.*` | 2.25, 3.5 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.vaulttree.crown_radius_m.*` | 0.625, 1.0 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.vaulttree.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
@@ -971,7 +978,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.clonal_share` | 0.0 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.lanternberry.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.lanternberry.seed_mass` | 3 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.lanternberry.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.lanternberry.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.lanternberry.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.lanternberry.crown_height_m.*` | 0.625, 1.125 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.lanternberry.crown_radius_m.*` | 0.25, 0.4375 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.lanternberry.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
@@ -1051,7 +1059,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.clonal_share` | 0.7 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.siphonreed.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.siphonreed.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.siphonreed.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a woody seedling comes up through a ground cover |
+| `flora.siphonreed.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.siphonreed.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.siphonreed.crown_height_m.*` | 0.75, 1.5 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.siphonreed.crown_radius_m.*` | 0.0625, 0.125 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.siphonreed.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |

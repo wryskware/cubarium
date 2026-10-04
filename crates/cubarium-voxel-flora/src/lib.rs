@@ -1792,8 +1792,8 @@ impl SpeciesConfig {
             // touched before anything else could seed in), so a turf still closes its own
             // patch while most of its seed goes looking. The longest bank, 12 h, the top
             // of the brief's 6–12 h: a pioneer's seed bank is the persistent one, waiting
-            // under whatever replaced it for the next bare ground. A ground cover: a woody
-            // seedling can come up through it.
+            // under whatever replaced it for the next bare ground. A ground cover: a seedling
+            // with a positive overtop (the woody species) can come up through it.
             hop: 3,
             clonal_share: 0.3,
             ground_cover: true,
@@ -2785,7 +2785,7 @@ impl FloraConfig {
     }
 
     /// Every species' seed back to **one minimum package** at the rate that paid for one
-    /// (`propagule_rate` divided by `seed_mass`), and no woody seedling coming up through
+    /// (`propagule_rate` divided by `seed_mass`), and no seedling coming up through
     /// ground cover.
     ///
     /// For a **fixture whose subject is a package's arithmetic or the lottery's**: one seed
@@ -3068,7 +3068,7 @@ pub struct FloraLedger {
     /// Organic matter the vines sent to litter: leaf fall, spent fruit, dropped runners
     /// and dead vines' reserves. A diagnostic; the litter itself is in the ground totals.
     pub vine_litter: f64,
-    /// Ground covers killed by a woody seedling coming up through them, per
+    /// Ground covers killed by a seedling coming up through them, per
     /// **cover** species: a death, counted in `deaths` too, with its tissue booked to
     /// dead wood and litter like any other.
     pub overtopped: [u64; Species::COUNT],

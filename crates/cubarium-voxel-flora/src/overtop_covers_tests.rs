@@ -175,7 +175,8 @@ fn springturf_does_not_come_up_through_a_cover_its_list_leaves_out() {
         assert!(banked(&flora, TURF), "{cover:?}: the seed waits");
         let l = flora.view().ledger;
         assert_eq!(l.overtopped, [0; Species::COUNT], "{cover:?}");
-        assert_eq!(l.seeds_germinated[TURF.index()], 0, "{cover:?}");
+        // (A springturf cover's own seed may germinate on the bare columns beside it.)
+        assert_eq!(l.overtop_pairs, [[0; Species::COUNT]; Species::COUNT], "{cover:?}");
     }
 }
 
