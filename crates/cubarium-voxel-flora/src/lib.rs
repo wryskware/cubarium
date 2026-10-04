@@ -1772,21 +1772,40 @@ impl SpeciesConfig {
     /// - **Shape.** `hop` 3 is the wide hop of a pioneer; the crown is `[0.125, 0.1875]` m
     ///   tall and `[0.125, 0.25]` m in radius: a mat on the ground
     ///   with no stem at all.
+    ///
+    /// **Succession redesign (2026-10-03, Wrysk: "a wild grass ... rolling hills of
+    /// california ... drought resistant").** The numbers above are the earlier turf's
+    /// where these replace them; the crown, profile and colours are unchanged (the look is
+    /// Wrysk's). The presets carry the same relative changes (`alpha` 1.285 → 4,
+    /// `foliage_rate` × 3, `senescence` 0.00156 → 0.0026, the bank × 2).
+    /// - **Productive.** `alpha` 6.2 (× 3.1) and `wood_max` 0.3 (× 5): a site's foliage
+    ///   capacity is `α · W`, about 15 times the earlier turf's and above velvetpad's.
+    ///   `foliage_rate` 0.06 (× 3) and `graze_refuge` 0.4 (basal buds) regrow a cropped
+    ///   sward fast. `senescence` 0.00167 (× 1.67 the base): heavy thatch.
+    /// - **Drought-tolerant.** `wilt_water` 0 and `full_water` 0.3, `rooting_depth` 2: it
+    ///   earns on any water its deeper box holds (the probe: an adult and a newborn live
+    ///   through 55,000 s at available water 0.2, longer than the bank, and regrow).
+    /// - **Not a bog plant.** `establish_saturated_max` 0.05: a saturated share of the
+    ///   (deeper) box over a twentieth stresses it, and a half-saturated box takes its net
+    ///   below zero (the viability grid), so soggy ground goes back to velvetpad.
+    /// - **Seeds.** The bank lives 24 h (`seed_max_age_s` 86,400); a large adult funds
+    ///   many packages. It comes up through velvetpad when `overtop_per_check` is
+    ///   positive (`overtop_covers` velvetpad; the rate itself is 0 here).
     pub fn springturf() -> SpeciesConfig {
         SpeciesConfig {
             founder_per_m2: 0.6,
             founder_colony: 6,
             founder_cap: 160,
             light_half: 1.0,
-            rooting_depth: 1,
+            rooting_depth: 2,
             rooting_radius: 1,
-            wilt_water: 0.1,
-            full_water: 0.5,
+            wilt_water: 0.0,
+            full_water: 0.3,
             establish_water_min: 0.3,
             establish_light_min: 0.75,
             stress_rate_per_s: 0.2,
             relax_rate_per_s: 0.05,
-            establish_saturated_max: 0.3,
+            establish_saturated_max: 0.05,
             drown_depth_m: 0.03,
             // Seeds: dropped within the pioneer's wide `hop` 3, and **runners**
             // for 0.3 of the packages (package SU: 0.5 let the turf close every patch it
@@ -1798,20 +1817,23 @@ impl SpeciesConfig {
             hop: 3,
             clonal_share: 0.3,
             ground_cover: true,
-            seed_max_age_s: 43_200.0,
-            seed_attrition_per_s: 1.0 / 43_200.0,
-            wood_max: 0.06,
+            overtop_covers: vec![Species::Velvetpad],
+            seed_max_age_s: 86_400.0,
+            seed_attrition_per_s: 1.0 / 86_400.0,
+            wood_max: 0.3,
             alive_min: 0.006,
             donor_min: 0.03,
             maintenance: 0.002,
-            foliage_rate: 0.02,
+            alpha: 6.2,
+            senescence: 0.00167,
+            foliage_rate: 0.06,
             wood_rate: 0.01,
             propagule_rate: 0.002,
             assimilation: 0.008,
             crown_height_m: [0.125, 0.1875],
             crown_radius_m: [0.125, 0.25],
-            // Grazing refuge: basal buds under a grazer's mouth (`graze_refuge`'s doc).
-            graze_refuge: 0.3,
+            // Grazing refuge: a grass's basal buds and crowns (`graze_refuge`'s doc).
+            graze_refuge: 0.4,
             // Anatomy document §3: a mat, no trunk at any size, entirely inside a
             // grazer's reach; cropping it is the mat thinning.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::mat_layer(
@@ -1952,6 +1974,13 @@ impl SpeciesConfig {
     /// - **Shape.** `hop` 1; the crown is 0.125 m tall at every size and `[0.1875, 0.375]` m
     ///   in radius — low and broad, a mat on the floor rather than a
     ///   stem, and the widest ground cover relative to its height.
+    ///
+    /// **Succession redesign (2026-10-03, Wrysk: "a mossy undergrowth / early
+    /// colonizer").** `alpha` 1.0, half the base (the presets: 4 → 2): a thin moss, half
+    /// the foliage and so half the litter per unit wood; still positive down to L 0.05 on
+    /// damp ground and through a half-saturated box (the viability grid). Its spores and
+    /// runners are unchanged — it still colonises bare ground first — and springturf now
+    /// comes up through it on open drained ground.
     pub fn velvetpad() -> SpeciesConfig {
         SpeciesConfig {
             founder_per_m2: 0.4,
@@ -1987,6 +2016,7 @@ impl SpeciesConfig {
             wood_max: 0.2,
             alive_min: 0.015,
             donor_min: 0.1,
+            alpha: 1.0,
             senescence: 0.0005,
             foliage_rate: 0.004,
             wood_rate: 0.002,

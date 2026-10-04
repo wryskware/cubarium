@@ -531,12 +531,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.springturf.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
-| `flora.springturf.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
-| `flora.springturf.wood_max` | 0.06 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
+| `flora.springturf.alpha` | 6.2 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.springturf.wood_max` | 0.3 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.springturf.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.springturf.maintenance` | 0.002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.springturf.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
-| `flora.springturf.foliage_rate` | 0.02 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.springturf.senescence` | 0.00167 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.springturf.foliage_rate` | 0.06 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.springturf.wood_rate` | 0.01 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.springturf.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
 | `flora.springturf.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
@@ -546,8 +546,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.propagule_rate` | 0.002 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
 | `flora.springturf.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.springturf.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
-| `flora.springturf.seed_attrition_per_s` | 0.000023148148148148147 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
-| `flora.springturf.seed_max_age_s` | 43200.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
+| `flora.springturf.seed_attrition_per_s` | 0.000011574074074074073 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
+| `flora.springturf.seed_max_age_s` | 86400.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
 | `flora.springturf.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
 | `flora.springturf.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.springturf.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
@@ -556,17 +556,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.springturf.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.springturf.light_half` | 1.0 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
-| `flora.springturf.rooting_depth` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
+| `flora.springturf.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.springturf.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
-| `flora.springturf.wilt_water` | 0.1 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
-| `flora.springturf.full_water` | 0.5 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
+| `flora.springturf.wilt_water` | 0.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
+| `flora.springturf.full_water` | 0.3 | available water | (-inf, inf) | yes | B | measured | mu = 1 at and above |
 | `flora.springturf.transpiration_m3_per_s` | 0.000001 | m3/s per unit foliage at mu = 1 | [0, inf) |  | D | measured | water drawn from the root box |
 | `flora.springturf.establish_water_min` | 0.3 | available water | (-inf, inf) | yes | B | placeholder | germination moisture gate |
 | `flora.springturf.establish_light_min` | 0.75 | sky visibility | (-inf, inf) | yes | C | placeholder | germination light gate |
 | `flora.springturf.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
 | `flora.springturf.stress_rate_per_s` | 0.2 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
 | `flora.springturf.relax_rate_per_s` | 0.05 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
-| `flora.springturf.establish_saturated_max` | 0.3 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.springturf.establish_saturated_max` | 0.05 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
 | `flora.springturf.drown_depth_m` | 0.03 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
 | `flora.springturf.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
 | `flora.springturf.hop` | 3 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
@@ -577,7 +577,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.springturf.crown_height_m.*` | 0.125, 0.1875 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.springturf.crown_radius_m.*` | 0.125, 0.25 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
-| `flora.springturf.graze_refuge` | 0.3 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
+| `flora.springturf.graze_refuge` | 0.4 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.springturf.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.springturf.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
 | `flora.springturf.nectar_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into nectar per second, in daylight |
@@ -693,7 +693,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.velvetpad.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.velvetpad.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
-| `flora.velvetpad.alpha` | 2.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.velvetpad.alpha` | 1.0 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
 | `flora.velvetpad.wood_max` | 0.2 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.velvetpad.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.velvetpad.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |

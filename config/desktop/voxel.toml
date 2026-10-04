@@ -198,16 +198,16 @@ senescence = 0.0015582388047764115
 wood_rate = 0.0016396050372662204
 
 [flora.springturf]
-alpha = 1.2852762203479797
+alpha = 4.0
 assimilation = 0.013116840298129763
 defence_half_life_s = 439.18820662503924
 defence_per_bite = 0.002975200559889063
-foliage_rate = 0.0067854723610511385
+foliage_rate = 0.0204
 maintenance = 0.003279210074532441
 propagule_rate = 0.003279210074532441
-seed_attrition_per_s = 0.00003795382030708844
-seed_max_age_s = 26347.80878206443
-senescence = 0.0015582388047764115
+seed_attrition_per_s = 0.000018977
+seed_max_age_s = 52696.0
+senescence = 0.0026
 wood_rate = 0.016396050372662202
 
 [flora.stonecushion]
@@ -250,7 +250,7 @@ senescence = 0.0009469072535054164
 wood_rate = 0.000491881511179866
 
 [flora.velvetpad]
-alpha = 4.0
+alpha = 2.0
 assimilation = 0.006558420149064882
 defence_half_life_s = 439.18820662503924
 defence_per_bite = 0.002975200559889063

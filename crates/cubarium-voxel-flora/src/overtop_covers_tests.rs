@@ -293,15 +293,19 @@ fn overtop_covers_is_a_list_of_species_names() {
     let text = toml::to_string(&config().springturf).expect("writes");
     assert!(text.contains("overtop_covers = [\"velvetpad\"]"), "{text}");
     let mut f = FloraConfig::default();
-    assert!(f.springturf.overtop_covers.is_empty());
+    assert_eq!(f.springturf.overtop_covers, vec![PAD], "the grass's default list");
+    assert_eq!(f.springturf.overtop_per_check, 0.0, "and its rate stays 0 by default");
     crate::registry()
         .set(
             &mut f,
             "flora.springturf.overtop_covers",
-            toml::Value::Array(vec![toml::Value::String("velvetpad".into())]),
+            toml::Value::Array(vec![
+                toml::Value::String("velvetpad".into()),
+                toml::Value::String("stonecushion".into()),
+            ]),
         )
         .expect("set by path");
-    assert_eq!(f.springturf.overtop_covers, vec![PAD]);
+    assert_eq!(f.springturf.overtop_covers, vec![PAD, STONE]);
 }
 
 /// The study's attempt trace and the replacement's food readouts: a traced springturf

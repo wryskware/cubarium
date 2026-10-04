@@ -510,6 +510,9 @@ fn a_springturf_package_under_a_shut_sky_never_germinates_and_goes_to_litter() {
     // the run, and no decomposition (placeholder 0.001 /s) so what reaches it stays.
     config.springturf.seed_max_age_s = 0.1;
     config.decomposition = 0.0;
+    // The fixture's well is two soil rows deep: the one-row box it was built around (the
+    // 2026-10-03 grass roots two deep).
+    config.springturf.rooting_depth = 1;
     let package = config.springturf.alive_min / config.springturf.propagule_split[0];
 
     let mut world = well(0.6);
