@@ -146,6 +146,29 @@ fn resume_skips_finished_cells() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// The longest runs go first: highest plant scale, then lowest metabolism, seeds in order.
+#[test]
+fn the_longest_runs_go_first() {
+    let axes = [Axis::named("m", &[1.0, 6.0]).unwrap(), Axis::named("p", &[0.5, 4.0]).unwrap()];
+    let all = cells(&axes);
+    let mut jobs = pending(&all, &[3, 5], 2.0, &[]);
+    longest_first(&all, &mut jobs);
+    let order: Vec<(&str, u64)> = jobs.iter().map(|&(c, s)| (all[c].label.as_str(), s)).collect();
+    assert_eq!(
+        order,
+        vec![
+            ("m=1 p=4", 3),
+            ("m=1 p=4", 5),
+            ("m=6 p=4", 3),
+            ("m=6 p=4", 5),
+            ("m=1 p=0.5", 3),
+            ("m=1 p=0.5", 5),
+            ("m=6 p=0.5", 3),
+            ("m=6 p=0.5", 5),
+        ]
+    );
+}
+
 /// The summary of hand-built records: medians and ranges over seeds, missing values left
 /// out, and the matrix shows them.
 #[test]

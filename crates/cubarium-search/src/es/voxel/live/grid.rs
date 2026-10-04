@@ -460,6 +460,22 @@ pub fn pending(cells: &[Cell], seeds: &[u64], hours: f64, done: &[CellRecord]) -
         .collect()
 }
 
+/// **The longest runs first**, so the short ones fill the cores at the end instead of a few
+/// long ones holding a near-empty machine (the tail): the plant scale `p` highest first, then
+/// the metabolism scale `m` lowest first (more plants and more animals step slower: on a
+/// c7g, 2 h at p 0.5/1/2 took 1.1/1.5/2.8 h, and m 6 ran ~20 % faster than m 1). A grid
+/// without those axes keeps its order; the sort is stable, so seeds stay in order.
+pub fn longest_first(cells: &[Cell], jobs: &mut [(usize, u64)]) {
+    let level = |c: usize, axis: &str| {
+        cells[c].levels.iter().find(|(a, _)| a == axis).and_then(|(_, l)| l.parse::<f64>().ok())
+    };
+    jobs.sort_by(|a, b| {
+        let p = |c| level(c, "p").unwrap_or(1.0);
+        let m = |c| level(c, "m").unwrap_or(1.0);
+        p(b.0).total_cmp(&p(a.0)).then(m(a.0).total_cmp(&m(b.0)))
+    });
+}
+
 /// The median and range of the present values; `None` without any.
 pub fn median_range(mut v: Vec<f64>) -> Option<(usize, f64, f64, f64)> {
     v.retain(|x| x.is_finite());
@@ -790,7 +806,8 @@ pub fn grid(spec: &GridSpec) -> Result<(), String> {
     }
     let cells_path = out.join("cells.jsonl");
     let done = read_records(&cells_path);
-    let jobs = pending(&all, &list.seeds, spec.hours, &done);
+    let mut jobs = pending(&all, &list.seeds, spec.hours, &done);
+    longest_first(&all, &mut jobs);
     println!(
         "grid: {} cells x {} worlds ({:?}), {} to run, {} already booked",
         all.len(),
