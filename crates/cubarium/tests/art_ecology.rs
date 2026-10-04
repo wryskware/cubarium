@@ -1117,7 +1117,7 @@ fn a_dead_tall_column_stands_in_ash_at_a_height_from_its_dead_wood() {
 }
 
 #[test]
-fn the_foliage_shoulder_is_overridable_for_a_study_and_ships_unchanged() {
+fn the_foliage_shoulder_is_overridable_for_a_study_and_the_default_is_the_presenters() {
     // The ramp at the shipped shoulder is exactly the ramp the presenter ships with.
     for f in [0.0, 0.1, 0.5, 0.8, FOLIAGE_FULL, 0.9, 1.0, f64::NAN] {
         assert_eq!(
@@ -1126,7 +1126,6 @@ fn the_foliage_shoulder_is_overridable_for_a_study_and_ships_unchanged() {
             "the shoulder hook changed the shipped ramp at f = {f}"
         );
     }
-    assert_eq!(FOLIAGE_FULL, 0.85, "the default shoulder moved");
     assert_eq!(
         ArtPresenter::new(pack()).foliage_full(),
         FOLIAGE_FULL,

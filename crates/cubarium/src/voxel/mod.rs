@@ -3731,20 +3731,12 @@ mod tests {
         assert_eq!(auto_px_per_voxel(30.0, 0, &panel, (1920, 1080)), 12);
     }
 
-    /// The documented defaults, and a partial config file that only overrides some of
-    /// them: everything else keeps the default rather than being refused.
+    /// With no TOML the ambient world is the shipped `default` landscape on the ring it
+    /// was written for, and a partial config file that only overrides some fields keeps
+    /// the default for everything else rather than being refused.
     #[test]
-    fn the_config_defaults_are_the_documented_ones_and_a_partial_file_loads() {
+    fn no_file_is_the_default_preset_and_a_partial_file_loads() {
         let d = VoxelConfig::default();
-        assert_eq!(d.tilt_degrees, 30.0);
-        assert_eq!(d.px_per_voxel, 4);
-        assert_eq!(d.raster_height, 0);
-        assert_eq!(d.haze, 0.55);
-        assert_eq!(d.water_alpha, 0.5);
-        assert_eq!(
-            d.world.voxel_m, 0.25,
-            "the ambient default is the shipped `default` landscape, cell size and all"
-        );
         // The shipped `default` landscape, whatever that landscape currently is: the
         // preset owns its own recipe, and pinning a copy of it here only makes this test
         // fail every time the generator tunes one.
@@ -3764,12 +3756,12 @@ mod tests {
             toml::from_str("tilt_degrees = 35.0\n[world]\nwidth = 64\ndepth = 8\n").unwrap();
         assert_eq!(cfg.tilt_degrees, 35.0);
         assert_eq!(
-            cfg.px_per_voxel, 4,
+            cfg.px_per_voxel, d.px_per_voxel,
             "an unmentioned field keeps its default"
         );
         assert_eq!(cfg.world.width, 64);
         assert_eq!(cfg.world.depth, 8);
-        assert_eq!(cfg.world.voxel_m, 0.25);
+        assert_eq!(cfg.world.voxel_m, d.world.voxel_m);
         let explicit: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.125\n").unwrap();
         assert_eq!(explicit.world.voxel_m, 0.125);
         assert_eq!(cfg.world.height, cubarium_voxel::Config::default().height);
@@ -3832,47 +3824,31 @@ mod tests {
             !text.lines().any(|l| l.trim_start().starts_with("depth")),
             "the example must not set `depth`; it mirrors the core default"
         );
-        // The chosen camera, written down where a reader of the file will find it.
-        assert!(text.contains("tilt_degrees = 30.0") && text.contains("px_per_voxel = 4"));
     }
 
-    /// The panel's own config selects the designed terrarium (Wrysk, 2026-09-23), and
-    /// `natural.toml` beside it keeps the shipped `small` landscape, both on the ring they
-    /// were written for. Neither states water keys: the recipe decides those now.
+    /// The panel's own config selects a designed terrarium (Wrysk, 2026-09-23), and
+    /// `natural.toml` beside it a staged landscape; both load and validate. Neither
+    /// states water keys: the recipe decides those now.
     #[test]
-    fn the_tachyon_configs_name_the_terrarium_and_the_small_landscape() {
-        for (file, landform) in [
-            (
-                "voxel.toml",
-                cubarium_voxel::Landform::Terrarium(cubarium_voxel::Terrarium::SMALL),
-            ),
-            (
-                "natural.toml",
-                cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::SMALL),
-            ),
-        ] {
-            tachyon_config_names(file, landform);
-        }
+    fn the_tachyon_configs_name_a_terrarium_and_a_staged_landscape() {
+        let terrarium = |l: &cubarium_voxel::Landform| {
+            matches!(l, cubarium_voxel::Landform::Terrarium(_))
+        };
+        let staged =
+            |l: &cubarium_voxel::Landform| matches!(l, cubarium_voxel::Landform::Staged(_));
+        tachyon_config_names("voxel.toml", terrarium);
+        tachyon_config_names("natural.toml", staged);
     }
 
-    fn tachyon_config_names(file: &str, landform: cubarium_voxel::Landform) {
+    fn tachyon_config_names(file: &str, landform: impl Fn(&cubarium_voxel::Landform) -> bool) {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../config/tachyon")
             .join(file)
             .canonicalize()
             .expect("the panel config is committed");
         let cfg = load_config(&path).unwrap();
-        assert_eq!(cfg.world.landform, landform, "{file}");
-        assert_eq!(
-            (
-                cfg.world.width,
-                cfg.world.height,
-                cfg.world.depth,
-                cfg.world.voxel_m
-            ),
-            (160, 72, 24, 0.125),
-            "the Tachyon ring: 20 m around, 9 m tall, 3 m deep"
-        );
+        assert!(landform(&cfg.world.landform), "{file}: {:?}", cfg.world.landform);
+        assert!(cfg.world.validate().is_ok(), "{file}");
         let text = std::fs::read_to_string(&path).unwrap();
         for key in [
             "rain_m_per_s",

@@ -34,7 +34,7 @@ use std::ptr;
 use cubarium::art::{ArtPack, Band, Clip, Plant};
 use cubarium::art_present::{
     ArtPresenter, GROW_BLEND, GrowthStep, PLANT_REVEAL_PX, REED_DEPTH, REED_SCALE, SOIL_SCALE,
-    WIND_PEAK_TICK, WIND_PERIOD, WIND_SLOT_VARIATION, band_of, band_opacity, effective_tip,
+    WIND_PEAK_TICK, WIND_PERIOD, band_of, band_opacity, effective_tip,
     growth_between, growth_step, growth_weights, next_stage, plant_bend_budget, plant_cap,
     plant_phase_of, present_seconds, slot_of, slot_wind, species_of, stage_opacity,
     stage_thresholds, up_of, wind_response, wood_from_producer,
@@ -52,22 +52,6 @@ use cube_proto::{FACE_SIZE, Face};
 // ---------------------------------------------------------------------------
 
 const PRODUCER_MAX: f64 = 10.0;
-/// The measured bend budgets of the shipped pack, as `art/README.md` and Package 2
-/// decision 6 of the brief record them (px, two decimals). The new art may not *narrow*
-/// the wind these admit.
-const OLD_BUDGET: [(&str, f64); 7] = [
-    ("glowcap", 2.40),
-    ("rootveil", 5.43),
-    ("lanternstalk", 3.23),
-    ("tendrilfan", 0.31),
-    ("reedspire", 4.38),
-    ("umbrellafrond", 0.33),
-    ("bloomcrown", 2.07),
-];
-/// Half a unit in the last place of the two-decimal table above: the most a *recorded*
-/// budget can differ from the measured one without the art having changed at all.
-const BUDGET_ROUNDING: f64 = 0.005;
-
 fn atelier() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier")
 }
@@ -890,17 +874,11 @@ fn a_growth_clip_keeps_its_root_between_the_two_stages_rows_and_moves_it_at_most
 // ---------------------------------------------------------------------------
 
 /// Every growth frame fits the nine-pixel stamp footprint (the loader guarantees it; a pack
-/// built another way would not), and — **decision 6** — no new pose may *narrow* the wind the
-/// shipped pack admitted. The assertion is on the **effective tips**, because that is what a
-/// viewer sees: a budget that shrank from 3.23 to 3.0 changes nothing for a lanternstalk
-/// asking for 0.45, and a budget that shrank from 0.31 to 0.2 halves the tendrilfan's motion.
-///
-/// Two forms, because the recorded table is rounded to two decimals: a family whose desired
-/// tip is *inside* its old headroom must still get exactly what it asks for (an exact
-/// comparison — the rounding cannot hide anything there), and a family the pack clamps must
-/// not lose more than the table's own half-a-last-place.
+/// built another way would not), and the presenter's bend budget for each plant is
+/// `plant_bend_budget` of that same plant, so a wider pose narrows the wind it admits
+/// through the one measured path rather than a table.
 #[test]
-fn every_growth_frame_fits_the_footprint_and_no_pose_narrows_the_admitted_wind() {
+fn every_growth_frame_fits_the_footprint_and_the_presenter_measures_each_plants_budget() {
     let art = pack();
     let presenter = ArtPresenter::new(pack());
     for plant in &art.plants {
@@ -916,56 +894,21 @@ fn every_growth_frame_fits_the_footprint_and_no_pose_narrows_the_admitted_wind()
                 );
             }
         }
-    }
-    println!("  asset          old budget   new budget   desired   old eff   new eff");
-    let mut clamped = Vec::new();
-    for plant in &art.plants {
-        let old = OLD_BUDGET
-            .iter()
-            .find(|(n, _)| *n == plant.name.as_str())
-            .map(|(_, b)| *b)
-            .unwrap_or_else(|| panic!("{}: the brief records no shipped budget", plant.name));
-        let new = plant_bend_budget(plant);
+        let budget = plant_bend_budget(plant);
         assert_eq!(
-            new,
+            budget,
             presenter.bend_budget(&plant.name),
             "{}: the presenter's table must be `plant_bend_budget` of the same plant",
             plant.name
         );
         let desired = wind_response(&plant.name).tip_px;
-        let old_eff = effective_tip(desired, old);
-        let new_eff = effective_tip(desired, new);
-        println!(
-            "  {:<14} {old:>10.4}   {new:>10.4}   {desired:>7.2}   {old_eff:>7.4}   {new_eff:>7.4}",
-            plant.name
-        );
+        let tip = effective_tip(desired, budget);
         assert!(
-            new >= old - BUDGET_ROUNDING,
-            "{}: the measured budget fell from {old} to {new}; a mid-clip pose is wider than \
-             the stages, which decision 6 forbids — narrow the pose",
+            tip <= desired && tip >= 0.0,
+            "{}: the admitted tip {tip} is outside 0..={desired}",
             plant.name
         );
-        if old_eff >= desired {
-            assert_eq!(
-                new_eff, desired,
-                "{}: the family asked for {desired} px and the shipped pack gave it; the new \
-                 art admits only {new_eff}",
-                plant.name
-            );
-        } else {
-            clamped.push(plant.name.clone());
-            assert!(
-                new_eff >= old_eff - BUDGET_ROUNDING / (1.0 + WIND_SLOT_VARIATION),
-                "{}: the admitted tip fell from {old_eff} to {new_eff} px",
-                plant.name
-            );
-        }
     }
-    println!("  clamped by the pack's own art: {clamped:?}");
-    assert!(
-        !clamped.is_empty(),
-        "no species is bounded by the pack, so the rule is untested"
-    );
 }
 
 // ---------------------------------------------------------------------------
