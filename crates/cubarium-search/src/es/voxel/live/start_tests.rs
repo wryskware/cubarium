@@ -62,7 +62,7 @@ fn library(name: &str) -> PathBuf {
 fn ecology(m: f64, p: f64, gut: bool) -> EcologyParams {
     let mut axes = vec![Axis::named("m", &[m]).unwrap(), Axis::named("p", &[p]).unwrap()];
     if gut {
-        axes.push(Axis::parse("k:fauna.founders.*.gut.k=x2").unwrap());
+        axes.push(Axis::parse("k:fauna.founders.*.gut.stomach_k=x2").unwrap());
     }
     cell_ecology(&cells(&axes)[0], None).expect("decodes")
 }
@@ -126,7 +126,7 @@ fn an_incompatible_start_is_rejected() {
     // A state-coupled parameter differs from the start's: the run's base is not the start's.
     let e = Expect::new(&cfg, &ecology(1.0, 1.0, true), heuristic_policy());
     match load_start(&dir, &e) {
-        Err(Reject::Params { path, .. }) => assert!(glob("fauna.founders.*.gut.k", &path), "{path}"),
+        Err(Reject::Params { path, .. }) => assert!(glob("fauna.founders.*.gut.stomach_k", &path), "{path}"),
         other => panic!("a state-coupled mismatch is refused, got {:?}", other.err()),
     }
 
@@ -159,18 +159,16 @@ fn rate_only_overrides_change_the_rates_and_leave_every_stock_untouched() {
     let candidate = ecology(2.0, 0.5, true).layers(cfg.voxel_m);
     let o = rate_override(&start, &candidate).expect("overrides");
 
+    let (cand, st): (std::collections::HashMap<_, _>, std::collections::HashMap<_, _>) =
+        (leaves(&candidate).into_iter().collect(), leaves(&start).into_iter().collect());
     for (path, v) in leaves(&o.installed) {
-        let want = if is_rate_path(&path) {
-            leaves(&candidate).into_iter().find(|(p, _)| *p == path).unwrap().1
-        } else {
-            leaves(&start).into_iter().find(|(p, _)| *p == path).unwrap().1
-        };
+        let want = if is_rate_path(&path) { cand[&path] } else { st[&path] };
         assert_eq!(v, want, "{path}");
     }
     let upkeep = "fauna.founders.*.core.maintenance_per_s";
     assert!(leaf(&o.installed, upkeep).iter().zip(leaf(&start, upkeep)).any(|(a, b)| *a == 2.0 * b && b > 0.0));
-    assert_eq!(leaf(&o.installed, "fauna.founders.*.gut.k"), leaf(&start, "fauna.founders.*.gut.k"));
-    assert!(o.frozen.iter().any(|c| glob("fauna.founders.*.gut.k", &c.path)), "the gut gene is frozen");
+    assert_eq!(leaf(&o.installed, "fauna.founders.*.gut.stomach_k"), leaf(&start, "fauna.founders.*.gut.stomach_k"));
+    assert!(o.frozen.iter().any(|c| glob("fauna.founders.*.gut.stomach_k", &c.path)), "the gut gene is frozen");
     assert!(o.frozen.iter().all(|c| !is_rate_path(&c.path)));
     assert!(o.changed.iter().all(|c| is_rate_path(&c.path)) && !o.changed.is_empty());
 
