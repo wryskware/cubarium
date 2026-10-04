@@ -412,9 +412,28 @@ germination replaces the mark with the newborn plant.
 
 ## D6 · Springturf (*Caespes primus*, "springturf")
 
-*Niche.* The pioneer turf of open, moist, drained soil: shallow roots, needs open sky,
-fast and cheap, burns out in 250 s without income, spreads with the widest hop (3). It
-is the grazer's main food and the thing that visibly gets cropped.
+*Niche (revised 2026-10-03, Wrysk: "springturf should really be a wild grass. think,
+rolling hills of california along with the wildflowers. maybe even drought resistant
+too").* The **wild grass of open hills**: it holds open, lit, drained ground in sweeping
+stands, the way grass and wildflowers cover rolling hills.
+- **Drought-resistant:** deeper roots and a low wilting point, so it rides out dry spells
+  and regrows when the rain returns.
+- **The world's main grazing crop:** a large standing crop that regrows fast from its
+  basal buds after cropping. It's the grazer's staple and the thing that visibly gets
+  cropped.
+- **Heavy thatch:** it sheds plenty of litter, which feeds the decomposers.
+- **Seeds:** abundant, with a long-lived bank.
+- **Succession:** it comes up through velvetpad's moss on open ground and replaces it
+  (moss first, then grass, then the woody plants). Woody seedlings come up through it in
+  turn.
+
+Its crop, foliage and litter are a different class from velvetpad's: tall, abundant and
+fast-renewing, against the moss's thin, slow carpet. The numbers come from the
+succession study (`design/plant-succession-2026-10-03.md`).
+
+*Look, open for Wrysk:* the art below predates the wild-grass role. Two questions are open:
+- whether the clump should read taller, more like a meadow;
+- whether a dry-season state (golden or tawny in a drought) belongs in the states list.
 
 *Size under the ladder.* Crown 1–1.5 voxels tall, radius 1–2: a clump **2–4 voxels
 wide, 6–9 px tall**, about three times as wide as it is tall, low to the ground.
@@ -460,8 +479,15 @@ most 24 × 9 px.
 
 ## D7 · Velvetpad (*Stratum umbrae*, "velvetpad")
 
-*Niche.* The shelter carpet: thin damp soil, under ledges and crowns, low light, poor
-competitive height; it only offers sites under a standing crown. Very low turnover.
+*Niche (revised 2026-10-03, Wrysk: "its really more of a mossy undergrowth / early
+colonizer").* **Mossy undergrowth and the early colonizer.**
+- **Bare ground:** its spores reach new ground first, lit or shaded, and carpet it fast.
+- **Open, drained ground:** the wild grass (springturf) comes up through the moss and
+  replaces it.
+- **Where it stays:** in shade and damp, under ledges and crowns, where the grass can't
+  follow.
+- **Low and thin:** a small crop and little litter. It's a minor food beside the
+  grass, more cover than pasture.
 
 *Size.* Crown 1 voxel tall, radius 1.5–3: **3–6 voxels wide, 6 px tall**.
 
