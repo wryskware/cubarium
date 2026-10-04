@@ -2123,6 +2123,7 @@ mod tests {
                 inventory_m: 0.3,
                 aquifer_head_m: 0.3,
                 closed_cycle: true,
+                ring_stream_floor_m: 0.25,
                 ..Water::DRY
             },
         );

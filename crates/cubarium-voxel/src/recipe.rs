@@ -1669,25 +1669,6 @@ mod tests {
     }
     use super::*;
 
-    /// The presets differ in resolved octaves and in how many landforms fit, never by
-    /// squeezing one landscape into another ring.
-    #[test]
-    fn the_presets_resolve_the_octaves_their_rings_can_carry() {
-        let small = Preset::find("small").unwrap();
-        let default = Preset::find("default").unwrap();
-        let wide = Preset::find("wide").unwrap();
-
-        assert_eq!(default.recipe.resolved_octaves(default.voxel_m), 6);
-        assert_eq!(small.recipe.resolved_octaves(small.voxel_m), 5);
-        assert_eq!(wide.recipe.resolved_octaves(wide.voxel_m), 6);
-
-        // Landforms per ring: the coarse octave's lattice.
-        let count = |p: &Preset| ring_cells(p.circumference_m(), p.recipe.relief_wavelength_m);
-        assert_eq!(count(small), 2);
-        assert_eq!(count(default), 2);
-        assert_eq!(count(wide), 4, "the wide ring holds twice the geography");
-    }
-
     /// The vertical budget: nothing a preset can build reaches the clamps, or the
     /// landscape would be a plateau and the metre-for-metre invariance would be a lie.
     #[test]

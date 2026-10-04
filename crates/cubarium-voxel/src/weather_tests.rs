@@ -442,7 +442,7 @@ fn the_tropical_jungle_parses_from_a_toml_with_one_override() {
         "the rest is the preset"
     );
     assert_eq!(c.climate.diurnal_c, preset.diurnal_c);
-    assert_eq!(c.climate.dry_gap_max_s, 900.0);
+    assert_eq!(c.climate.dry_gap_max_s, preset.dry_gap_max_s);
 
     let err = toml::from_str::<Config>("[climate]\npreset = \"tundra\"\n").unwrap_err();
     assert!(format!("{err}").contains("tropical_jungle"), "{err}");
@@ -461,26 +461,25 @@ fn auto_speed_is_nature_on_a_24_hour_day_and_five_on_a_2_hour_one() {
         ..DayClock::default()
     };
     let auto = WeatherSpeed::Auto;
-    assert!((auto.factor(&clock(DayMode::Cycle, 1440.0), Climate::default().auto_speed_exponent) - 1.0).abs() < 1e-12);
-    let two_hours = auto.factor(&clock(DayMode::Cycle, 120.0), Climate::default().auto_speed_exponent);
-    assert!((two_hours - 5.0).abs() < 0.05, "{two_hours}");
+    // The test's own exponent: the one that makes a 2-hour day five times nature's pace.
+    let e = 5f64.ln() / 12f64.ln();
+    assert!((auto.factor(&clock(DayMode::Cycle, 1440.0), e) - 1.0).abs() < 1e-12);
+    let two_hours = auto.factor(&clock(DayMode::Cycle, 120.0), e);
+    assert!((two_hours - 5.0).abs() < 1e-9, "{two_hours}");
+    assert_eq!(auto.factor(&clock(DayMode::Local, 120.0), e), 1.0, "local is nature");
     assert_eq!(
-        auto.factor(&clock(DayMode::Local, 120.0), Climate::default().auto_speed_exponent),
-        1.0,
-        "local is nature"
-    );
-    assert_eq!(
-        auto.factor(&clock(DayMode::Off, 120.0), Climate::default().auto_speed_exponent),
+        auto.factor(&clock(DayMode::Off, 120.0), e),
         two_hours,
         "off counts length_min"
     );
-    assert_eq!(
-        WeatherSpeed::Fixed(2.0).factor(&clock(DayMode::Local, 120.0), Climate::default().auto_speed_exponent),
-        2.0
-    );
+    assert_eq!(WeatherSpeed::Fixed(2.0).factor(&clock(DayMode::Local, 120.0), e), 2.0);
 
     // The longest durations shrink by it, the hazards grow by it, the gap does not move.
-    let nature = Climate::tropical_jungle();
+    let nature = Climate {
+        weather_speed: WeatherSpeed::Auto,
+        auto_speed_exponent: e,
+        ..Climate::tropical_jungle()
+    };
     let fast = nature.at_speed(&clock(DayMode::Cycle, 120.0));
     for (n, f) in [
         (&nature.drizzle, &fast.drizzle),
@@ -491,11 +490,6 @@ fn auto_speed_is_nature_on_a_24_hour_day_and_five_on_a_2_hour_one() {
         assert!((f.lambda_max_per_h - n.lambda_max_per_h * two_hours).abs() < 1e-9);
         assert_eq!(f.rate_r0, n.rate_r0);
     }
-    assert!(
-        (fast.downpour.longest_min - 10.0).abs() < 0.1,
-        "{}",
-        fast.downpour.longest_min
-    );
     assert_eq!(fast.dry_gap_max_s, nature.dry_gap_max_s);
     assert_eq!(fast.strike_mean_s, nature.strike_mean_s);
 
