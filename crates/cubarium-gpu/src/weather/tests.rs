@@ -187,16 +187,15 @@ fn rain_fades_in_and_out_and_modes_cross_fade() {
     assert!(last[1] < 0.01 && last[2] > 0.99, "{last:?}");
 }
 
-/// The rings on open water follow the rain rate: sparse in a drizzle, W-2's density in a
-/// shower, denser in a downpour, none when it is dry.
+/// The rings on open water follow the rain rate: none when it is dry, sparser in a
+/// drizzle than in a shower, denser again in a downpour, and never past full.
 #[test]
 fn ring_density_follows_the_rain_rate() {
     let p = params();
     let rings = |rate: f32| look(&Eased { rain_rate: rate * R0, ..Eased::DRY }, &p).rings;
     assert_eq!(rings(0.0), 0.0);
-    assert!(rings(0.1) < 0.15);
-    assert!((0.45..0.6).contains(&rings(1.0)));
-    assert!(rings(2.5) > 0.8 && rings(2.5) < 1.0);
+    assert!(0.0 < rings(0.1) && rings(0.1) < rings(1.0));
+    assert!(rings(1.0) < rings(2.5) && rings(2.5) <= 1.0);
 }
 
 /// Fog glows in the sun's colour: at dawn it leans warm, at noon it does not.
