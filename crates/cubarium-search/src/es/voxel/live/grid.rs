@@ -263,6 +263,10 @@ pub struct LineageRecord {
     pub r_hat: Option<f64>,
     pub access: Option<f64>,
     pub sated_share: Option<f64>,
+    /// Departures since the baseline by cause (`starved`, `drowned`, `aged`,
+    /// `killed_by_<lineage>`, `removed`), the nonzero ones.
+    #[serde(default)]
+    pub deaths: Vec<(String, u64)>,
 }
 
 /// One plant species in one world.
@@ -289,6 +293,22 @@ pub struct CellRecord {
     pub wall_s: f64,
     pub lineages: Vec<LineageRecord>,
     pub species: Vec<SpeciesRecord>,
+    /// The start set it ran on ([`super::start::StartSet::label`]; empty is `e0`).
+    #[serde(default)]
+    pub start: String,
+    /// How it started: burn-in, frozen genes, ledger residuals.
+    #[serde(default)]
+    pub start_record: Option<super::start::StartRecord>,
+    /// The ledger baselines: the burn-in's end and every window boundary.
+    #[serde(default)]
+    pub windows: Vec<super::start::Baseline>,
+}
+
+impl CellRecord {
+    /// The start set it ran on, `e0` for a record from before starts.
+    pub fn start_label(&self) -> &str {
+        if self.start.is_empty() { "e0" } else { &self.start }
+    }
 }
 
 fn finite(x: f64) -> Option<f64> {
@@ -371,6 +391,8 @@ pub fn run_cell(
         }
         (n, f)
     };
+    let departed = |r: &EvalRun| r.sim().fauna().view().ledger.deaths_by_founder_cause;
+    let departed0 = departed(&run);
     let starved0 = starved(&run);
     let (stands0, foliage0) = plants(&run);
     let accepted = run.info().accepted;
@@ -385,6 +407,7 @@ pub fn run_cell(
         }
     }
     let starved1 = starved(&run);
+    let departed1 = departed(&run);
     let (stands1, foliage1) = plants(&run);
     let minutes_run = run.elapsed() as f64 / TICKS_PER_MIN as f64;
     let e = run.finish();
@@ -408,6 +431,11 @@ pub fn run_cell(
                 r_hat: finite(m.r_hat),
                 access: finite(m.access),
                 sated_share: finite(m.sated_share),
+                deaths: Departure::ALL
+                    .iter()
+                    .map(|d| (d.name().to_string(), departed1[i][d.index()] - departed0[i][d.index()]))
+                    .filter(|(_, n)| *n > 0)
+                    .collect(),
             }
         })
         .collect();
@@ -436,6 +464,9 @@ pub fn run_cell(
         wall_s: e.wall_s,
         lineages,
         species,
+        start: e.start.set.clone(),
+        start_record: Some(e.start),
+        windows: e.baselines,
     }
 }
 
@@ -489,15 +520,17 @@ pub fn median_range(mut v: Vec<f64>) -> Option<(usize, f64, f64, f64)> {
 }
 
 /// The lineage metrics the summary carries, by name.
-pub const LINEAGE_METRICS: [&str; 11] = [
-    "alive_60", "alive_120", "alive_end", "births", "starved", "B", "days_to_empty", "surplus", "r_hat", "access",
-    "sated_share",
+pub const LINEAGE_METRICS: [&str; 13] = [
+    "founded", "alive_60", "alive_120", "alive_end", "births", "starved", "deaths", "B", "days_to_empty", "surplus",
+    "r_hat", "access", "sated_share",
 ];
 /// The plant metrics.
 pub const SPECIES_METRICS: [&str; 4] = ["stands_start", "stands_end", "foliage_start", "foliage_end"];
 
 fn lineage_metric(l: &LineageRecord, m: &str) -> Option<f64> {
     match m {
+        "founded" => Some(l.founded as f64),
+        "deaths" => Some(l.deaths.iter().filter(|(c, _)| c != "removed").map(|(_, n)| *n as f64).sum()),
         "alive_60" => l.alive_60.map(|x| x as f64),
         "alive_120" => l.alive_120.map(|x| x as f64),
         "alive_end" => Some(l.alive_end as f64),
@@ -758,6 +791,12 @@ pub struct GridSpec {
     pub abort_animals: usize,
     pub centres: Vec<(Founder, PathBuf)>,
     pub out: PathBuf,
+    /// Where every cell starts ([`super::start`]): E0 (today's founding) or a library.
+    pub start: super::start::StartSet,
+    pub burn_in: super::start::BurnIn,
+    /// These worlds exactly (each founded as asked), instead of picking `seeds` from
+    /// `first_seed`. A library's own seeds are used with a library.
+    pub seed_list: Option<Vec<u64>>,
 }
 
 /// Run the grid: pick (or reread) the worlds, run every pending cell × seed (one simulation
@@ -780,32 +819,46 @@ pub fn grid(spec: &GridSpec) -> Result<(), String> {
     for e in &ecologies {
         check_mass(&drivers, e)?;
     }
-    // The worlds: reread when this run asked for the same ones.
+    // The worlds: a library's own seeds, a list asked for, or picked (reread when this run
+    // asked for the same ones).
     let seeds_path = out.join("seeds.json");
     let reread: Option<SeedList> = std::fs::read_to_string(&seeds_path)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .filter(|l: &SeedList| l.world == spec.world_name && l.first == spec.first_seed && l.seeds.len() >= spec.seeds);
-    let list = match reread {
-        Some(mut l) => {
+    let given: Option<Vec<u64>> = match (&spec.start, &spec.seed_list) {
+        (super::start::StartSet::Library(lib), Some(list)) => {
+            if let Some(s) = list.iter().find(|s| !lib.seeds.contains(s)) {
+                return Err(format!("seed {s} is not in the start library {}", lib.dir.display()));
+            }
+            Some(list.clone())
+        }
+        (super::start::StartSet::Library(lib), None) => Some(lib.seeds.iter().copied().take(spec.seeds).collect()),
+        (super::start::StartSet::E0, Some(list)) => Some(list.clone()),
+        (super::start::StartSet::E0, None) => None,
+    };
+    let list = match (given, reread) {
+        (Some(seeds), _) => SeedList { world: spec.world_name.clone(), first: 0, seeds, skipped: Vec::new() },
+        (None, Some(mut l)) => {
             l.seeds.truncate(spec.seeds);
             l
         }
-        None => {
+        (None, None) => {
             let l = pick_seeds(&spec.world, &neutral, founders, spec.seeds, spec.first_seed, spec.threads, &spec.world_name);
             let text = serde_json::to_string_pretty(&l).map_err(|e| e.to_string())?;
             std::fs::write(&seeds_path, text).map_err(|e| format!("cannot write {}: {e}", seeds_path.display()))?;
             l
         }
     };
-    if list.seeds.len() < spec.seeds {
+    if list.seeds.len() < spec.seeds && spec.seed_list.is_none() {
         eprintln!("grid: only {} distinct accepted worlds found", list.seeds.len());
     }
     for (s, why) in &list.skipped {
         println!("grid: seed {s} skipped: {why}");
     }
     let cells_path = out.join("cells.jsonl");
-    let done = read_records(&cells_path);
+    let label = spec.start.label();
+    let done: Vec<CellRecord> = read_records(&cells_path).into_iter().filter(|r| r.start_label() == label).collect();
     let mut jobs = pending(&all, &list.seeds, spec.hours, &done);
     longest_first(&all, &mut jobs);
     println!(
@@ -823,6 +876,8 @@ pub fn grid(spec: &GridSpec) -> Result<(), String> {
     eval.abort_animals = spec.abort_animals;
     eval.stop_on_loss = false;
     eval.asked_seed = true;
+    eval.start = spec.start.clone();
+    eval.burn_in = spec.burn_in;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -849,15 +904,46 @@ pub fn write_summaries(spec: &GridSpec, all: &[Cell], list: &SeedList) -> Result
     let out = &spec.out;
     let records: Vec<CellRecord> = read_records(&out.join("cells.jsonl"))
         .into_iter()
-        .filter(|r| r.hours == spec.hours && list.seeds.contains(&r.world_seed))
+        .filter(|r| r.hours == spec.hours && list.seeds.contains(&r.world_seed) && r.start_label() == spec.start.label())
         .collect();
     let rows = summarise(all, &records);
     let tsv = out.join("summary.tsv");
     std::fs::write(&tsv, summary_tsv(&spec.axes, &rows)).map_err(|e| format!("cannot write {}: {e}", tsv.display()))?;
     let unaccepted = records.iter().filter(|r| !r.accepted).count();
     let stopped = records.iter().filter(|r| r.stopped.is_some()).count();
+    let frozen: std::collections::BTreeSet<String> = records
+        .iter()
+        .filter_map(|r| r.start_record.as_ref())
+        .flat_map(|s| s.frozen.iter().map(|c| c.path.clone()))
+        .collect();
+    let start = match &spec.start {
+        super::start::StartSet::E0 => "**Start: E0**, today's founding under each cell's own ecology (the disclosed \
+             early-community diagnostic; chorister, lanternjaw and loftstrider are readouts here)"
+            .to_string(),
+        super::start::StartSet::Library(lib) => format!(
+            "**Start: {}**, every cell on the same loaded starts, rate-only (the established setting: \
+             every lineage scored){}",
+            lib.label(),
+            if frozen.is_empty() {
+                String::new()
+            } else {
+                format!("; frozen at the start's values: {}", frozen.into_iter().collect::<Vec<_>>().join(", "))
+            }
+        ),
+    };
+    let burn = records.iter().filter_map(|r| r.start_record.as_ref()).map(|s| s.burn_in_ticks).collect::<Vec<_>>();
+    let burn_note = match (burn.iter().min(), burn.iter().max()) {
+        (Some(lo), Some(hi)) if *hi > 0 => format!(
+            " Burn-in {:.0}–{:.0} min (at least {:.0}, ending on the {:.0}-min window grid of the day clock); scores from its end.",
+            *lo as f64 / TICKS_PER_MIN as f64,
+            *hi as f64 / TICKS_PER_MIN as f64,
+            spec.burn_in.min_ticks as f64 / TICKS_PER_MIN as f64,
+            spec.burn_in.align_ticks as f64 / TICKS_PER_MIN as f64,
+        ),
+        _ => " No burn-in: scores from the start.".to_string(),
+    };
     let header = format!(
-        "World `{}`, {} h, worlds {:?} (skipped: {}). {} cell x world runs; {} of them on a world \
+        "{start}.{burn_note}\n\nWorld `{}`, {} h, worlds {:?} (skipped: {}). {} cell x world runs; {} of them on a world \
          the cell's ecology would refuse; {} stopped early. Medians over worlds; `–` nothing \
          to measure, `·` not run.",
         spec.world_name,

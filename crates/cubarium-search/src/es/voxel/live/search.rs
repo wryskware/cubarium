@@ -1933,6 +1933,22 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         })
         .collect();
     let start = spec.genome.clone();
+    if let super::start::StartSet::Library(lib) = &spec.eval.start {
+        // Established starts take rate-only genes; a gene on any other path is frozen at
+        // the start's value there (recorded per evaluation as `start.frozen`).
+        let frozen: Vec<&str> = start
+            .genes
+            .iter()
+            .filter(|g| !g.frozen && g.paths.iter().chain(&g.inverse).any(|p| !super::start::is_rate_path(p)))
+            .map(|g| g.name.as_str())
+            .collect();
+        println!(
+            "# starts: {} — every candidate on seeds {:?}; genes frozen at the start's values there: {}",
+            lib.label(),
+            lib.seeds,
+            if frozen.is_empty() { "none".to_string() } else { frozen.join(", ") }
+        );
+    }
     let bounds = start.search_bounds();
     let mean0 = match &spec.start {
         Some(s) => start_from(&start, s)?.to_search(),
@@ -1997,8 +2013,12 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         let started = Instant::now();
         let seeds: Vec<u64> = (0..spec.seeds_per_generation)
             .map(|s| {
-                spec.seed_base
-                    + (u64::from(generation) * spec.seeds_per_generation as u64 + s as u64) * 1000
+                let k = u64::from(generation) * spec.seeds_per_generation as u64 + s as u64;
+                match &spec.eval.start {
+                    // A library's starts in turn: every candidate on the same ones.
+                    super::start::StartSet::Library(lib) => lib.seeds[(k % lib.seeds.len() as u64) as usize],
+                    super::start::StartSet::E0 => spec.seed_base + k * 1000,
+                }
             })
             .collect();
         let (mean_start, sigma_start) = (cma.mean().to_vec(), cma.sigma());
