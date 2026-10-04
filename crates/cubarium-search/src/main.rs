@@ -786,6 +786,11 @@ enum Command {
         sigma0: f64,
         #[arg(long, default_value_t = 16)]
         threads: usize,
+        /// Cores the last worlds share once none is left queued (each about cores / running,
+        /// re-read every simulated minute); `0` is every core the OS reports, `1` keeps
+        /// every world on one thread throughout.
+        #[arg(long, default_value_t = 0)]
+        tail_cores: usize,
         #[arg(long, default_value_t = 50_001)]
         seed_base: u64,
         #[arg(long, default_value_t = 20260924)]
@@ -878,6 +883,11 @@ enum Command {
         water_every: u32,
         #[arg(long, default_value_t = 8)]
         threads: usize,
+        /// Cores the last worlds share once none is left queued (each about cores / running,
+        /// re-read every simulated minute); `0` is every core the OS reports, `1` keeps
+        /// every world on one thread throughout.
+        #[arg(long, default_value_t = 0)]
+        tail_cores: usize,
         #[arg(long, default_value = "runs/ecology-check")]
         out: PathBuf,
         /// Found from this config file's `[world]` (a host's, e.g.
@@ -928,9 +938,14 @@ enum Command {
         /// x1) or a preset's name (the code-default ecology).
         #[arg(long, default_value = "config/desktop/terrarium.toml")]
         world: String,
-        /// Worlds run at once, one simulation thread each.
+        /// Worlds run at once, one simulation thread each while jobs are queued.
         #[arg(long, default_value_t = 8)]
         threads: usize,
+        /// Cores the last worlds share once the queue is empty (each about cores / running,
+        /// re-read every simulated minute); `0` is every core the OS reports, `1` keeps
+        /// every world on one thread throughout.
+        #[arg(long, default_value_t = 0)]
+        tail_cores: usize,
         #[arg(long, default_value_t = 1)]
         water_every: u32,
         /// Stop a world holding more animals than this.
@@ -1208,6 +1223,15 @@ enum Command {
 
 /// `<lineage>=<centre.json>` arguments.
 /// `--centre` when given, else the search file's `[brains]` table (`<lineage> = <file>`).
+/// `--tail-cores`: `0` is every core the OS reports.
+fn machine_cores(tail_cores: usize) -> usize {
+    if tail_cores == 0 {
+        std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+    } else {
+        tail_cores
+    }
+}
+
 fn centres_or_brains(
     centres: &[String],
     rest: &toml::Table,
@@ -1652,6 +1676,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             wall_seconds,
             sigma0,
             threads,
+            tail_cores,
             seed_base,
             cma_seed,
             hours,
@@ -1747,6 +1772,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 wall_seconds,
                 sigma0,
                 threads,
+                tail_cores: machine_cores(tail_cores),
                 seed_base,
                 cma_seed,
                 eval,
@@ -1851,6 +1877,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             window_min,
             water_every,
             threads,
+            tail_cores,
             out,
             world,
             curiosity,
@@ -1895,6 +1922,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &centres,
                     founders,
                     threads,
+                    machine_cores(tail_cores),
                     &out,
                 )?;
                 return Ok(());
@@ -1923,6 +1951,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             hours,
             world,
             threads,
+            tail_cores,
             water_every,
             abort_animals,
             centres,
@@ -1958,6 +1987,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 first_seed,
                 hours,
                 threads,
+                tail_cores: machine_cores(tail_cores),
                 water_every,
                 abort_animals,
                 centres,

@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ecology::EcologyParams;
 use super::search::{EvalRun, EvalSpec, brain_driver, check_mass};
+use super::threads::{ThreadBudget, parallel_shared};
 use super::trainer::parallel;
 use super::window::TICKS_PER_MIN;
 use super::world;
@@ -352,8 +353,12 @@ pub fn run_cell(
     hours: f64,
     drivers: &[(Founder, EpisodeDriver)],
     spec: &EvalSpec,
+    budget: Option<&std::sync::Arc<ThreadBudget>>,
 ) -> CellRecord {
     let mut run = EvalRun::begin(eco, seed, drivers, spec);
+    if let Some(b) = budget {
+        run.share_threads(b.clone());
+    }
     let starved = |r: &EvalRun| -> [u64; Founder::COUNT] {
         let l = r.sim().fauna().view().ledger;
         std::array::from_fn(|i| l.deaths_by_founder_cause[i][Departure::Starved.index()])
@@ -730,6 +735,9 @@ pub struct GridSpec {
     pub first_seed: u64,
     pub hours: f64,
     pub threads: usize,
+    /// Cores the worlds share once the queue is empty ([`super::threads`]); `1` keeps every
+    /// world on one thread throughout.
+    pub tail_cores: usize,
     pub water_every: u32,
     pub abort_animals: usize,
     pub centres: Vec<(Founder, PathBuf)>,
@@ -737,7 +745,8 @@ pub struct GridSpec {
 }
 
 /// Run the grid: pick (or reread) the worlds, run every pending cell × seed (one simulation
-/// thread per world, `threads` worlds at once), then write the summaries.
+/// thread per world while jobs are queued, `threads` worlds at once; once the queue is
+/// empty the worlds still running share `tail_cores`), then write the summaries.
 pub fn grid(spec: &GridSpec) -> Result<(), String> {
     let out = &spec.out;
     std::fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
@@ -803,8 +812,9 @@ pub fn grid(spec: &GridSpec) -> Result<(), String> {
         .open(&cells_path)
         .map_err(|e| format!("cannot open {}: {e}", cells_path.display()))?;
     let file = Mutex::new(file);
-    let results: Vec<Result<(), String>> = parallel(jobs, spec.threads, |(c, seed)| {
-        let r = run_cell(&all[c], &ecologies[c], seed, spec.hours, &drivers, &eval);
+    let budget = ThreadBudget::new(spec.tail_cores);
+    let results: Vec<Result<(), String>> = parallel_shared(jobs, spec.threads, &budget, |(c, seed), b| {
+        let r = run_cell(&all[c], &ecologies[c], seed, spec.hours, &drivers, &eval, Some(b));
         let line = serde_json::to_string(&r).map_err(|e| e.to_string())?;
         let mut f = file.lock().expect("cells.jsonl");
         writeln!(f, "{line}").map_err(|e| e.to_string())?;

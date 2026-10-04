@@ -313,6 +313,34 @@ fn the_thread_count_does_not_move_the_soil() {
     }
 }
 
+/// **A thread count changed mid-run** (`design/handoffs/tail-threads-2026-10-03.md`): a
+/// chained sim built at one thread, as the search builds its worlds, then stepped at 4, 16
+/// with its water on a wider pool, 2 and back to 1 between ticks still closes every
+/// residual, and agrees with the run that stayed at one thread to rounding.
+#[test]
+fn a_thread_count_changed_mid_run_still_conserves() {
+    cubarium_voxel_sim::prepare_compute_pool(16);
+    let one = schedule(200, 1, false);
+    conserves("1 thread throughout", &one);
+    let (world, flora, fauna) = conditioned();
+    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 1, overlap: false }, None);
+    for (k, (threads, pool)) in [(1, None), (4, None), (16, Some(16)), (2, Some(16)), (1, None)]
+        .into_iter()
+        .enumerate()
+    {
+        sim.set_water_pool(pool);
+        sim.set_threads(threads);
+        assert_eq!(sim.config().threads, threads);
+        for _ in 0..40 {
+            sim.step();
+        }
+        let (w, f, a) = sim.layers();
+        conserves(&format!("leg {k}: {threads} threads"), &read(w, f, a));
+    }
+    let (world, flora, fauna) = sim.layers();
+    agree("changed mid-run against 1 thread", &one, &read(world, flora, fauna), 1e-6);
+}
+
 /// The tick counter moves exactly once per scheduled tick, and the `Advance` phase is
 /// what moves it: a world stepped by the schedule reads the same tick a world stepped by
 /// hand does.

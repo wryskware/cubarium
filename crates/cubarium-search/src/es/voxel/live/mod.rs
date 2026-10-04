@@ -36,6 +36,7 @@ pub mod readout;
 pub mod screen;
 pub mod search;
 pub mod targets;
+pub mod threads;
 pub mod trainer;
 pub mod variants;
 pub mod window;

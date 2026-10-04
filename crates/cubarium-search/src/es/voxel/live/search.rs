@@ -45,6 +45,7 @@ use super::ecology::EcologyParams;
 use super::readout::{LineageStats, Scan};
 use super::screen::{RosterScreen, Rsf, ScreenSpec, Verdict, roster, rsf};
 use super::targets::{LineageOutcome, StageSpec, judge};
+use super::threads::{ThreadBudget, parallel_shared};
 use super::trainer::{ascend, parallel, pooled_scores};
 use super::variants::VariantTable;
 use super::window::{self, BodyScore, TICKS_PER_MIN, Window};
@@ -666,6 +667,8 @@ pub struct EvalRun {
     body_minutes: [u64; Founder::COUNT],
     /// Adult body-ticks per lineage over the run (the balance measures' adult-days).
     adult_ticks: [u64; Founder::COUNT],
+    /// The shared thread budget this world re-reads every simulated minute, if any.
+    budget: Option<std::sync::Arc<super::threads::ThreadBudget>>,
 }
 
 impl EvalRun {
@@ -735,6 +738,7 @@ impl EvalRun {
             births_late: [0; Founder::COUNT],
             body_minutes: [0; Founder::COUNT],
             adult_ticks: [0; Founder::COUNT],
+            budget: None,
         }
     }
 
@@ -746,6 +750,25 @@ impl EvalRun {
     /// The world as it stands.
     pub fn sim(&self) -> &cubarium_voxel_sim::Sim {
         &self.sim
+    }
+
+    /// Step this world on `threads` workers from the next tick on, and keep it there
+    /// (no shared budget). Execution only.
+    pub fn set_threads(&mut self, threads: usize) {
+        self.budget = None;
+        self.sim.set_water_pool(None);
+        self.sim.set_threads(threads);
+    }
+
+    /// Take this world's thread count from `budget` now and again every simulated minute
+    /// ([`super::threads`]): one thread while jobs are queued, the machine shared among
+    /// the worlds still running once the queue is empty. Its water, once it is parallel,
+    /// runs on the one pool of all the budget's cores the other worlds share, so worlds at
+    /// the same count do not crowd one small pool. Execution only.
+    pub fn share_threads(&mut self, budget: std::sync::Arc<super::threads::ThreadBudget>) {
+        self.sim.set_water_pool(Some(budget.cores()));
+        self.sim.set_threads(budget.current());
+        self.budget = Some(budget);
     }
 
     /// Ticks run so far.
@@ -793,6 +816,9 @@ impl EvalRun {
             w.step(&mut self.sim);
             self.elapsed += 1;
             if self.elapsed.is_multiple_of(TICKS_PER_MIN) {
+                if let Some(b) = &self.budget {
+                    self.sim.set_threads(b.current());
+                }
                 let pop = window::population(&self.sim);
                 let total = self.sim.fauna().view().animals.len();
                 let readout = spec.band.stage.map_or([false; Founder::COUNT], |s| s.readout_only);
@@ -1208,7 +1234,23 @@ pub fn evaluate(
     tables: &[Option<VariantTable>],
     spec: &EvalSpec,
 ) -> Evaluation {
+    evaluate_shared(params, base, drivers, tables, spec, None)
+}
+
+/// [`evaluate`] with the world's thread count taken from a runner's shared `budget`
+/// ([`super::threads`]) every simulated minute; one thread throughout without.
+pub fn evaluate_shared(
+    params: &EcologyParams,
+    base: u64,
+    drivers: &[(Founder, EpisodeDriver)],
+    tables: &[Option<VariantTable>],
+    spec: &EvalSpec,
+    budget: Option<&std::sync::Arc<ThreadBudget>>,
+) -> Evaluation {
     let mut run = EvalRun::begin(params, base, drivers, spec);
+    if let Some(b) = budget {
+        run.share_threads(b.clone());
+    }
     let zeros = vec![0usize; Founder::COUNT];
     while !run.done() {
         run.window(tables, &zeros, 0);
@@ -1234,6 +1276,10 @@ pub struct SearchSpec {
     pub wall_seconds: f64,
     pub sigma0: f64,
     pub threads: usize,
+    /// Cores a generation's worlds share once none is left queued ([`super::threads`]): a
+    /// generation waits for its slowest world, so its last worlds spread onto the cores the
+    /// finished ones freed. `1` keeps every world on one thread throughout.
+    pub tail_cores: usize,
     /// Generation `g`'s seeds are `seed_base + (g·seeds_per_generation + s)·1000`.
     pub seed_base: u64,
     pub cma_seed: u64,
@@ -1437,6 +1483,7 @@ fn lockstep(
         EvalRun::begin(&params[k], seed, drivers, &spec.eval)
     });
     let candidates = 2 * spec.brain_pairs;
+    let budget = ThreadBudget::new(spec.tail_cores);
     let mut window = 0u32;
     while runs.iter().any(|r| !r.done()) {
         let started = Instant::now();
@@ -1472,7 +1519,8 @@ fn lockstep(
             .collect();
         let tables_ref = &tables;
         let results: Vec<(Vec<BodyScore>, [LineageStats; Founder::COUNT])> =
-            parallel(live, spec.threads, |(r, first)| {
+            parallel_shared(live, spec.threads, &budget, |(r, first), b| {
+                r.share_threads(b.clone());
                 let scores = r.window(tables_ref, &first, key);
                 (scores, r.last_lineages().clone())
             });
@@ -1857,8 +1905,9 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             )?
         } else {
             let tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
-            parallel(jobs.clone(), spec.threads, |(k, seed)| {
-                evaluate(&params[k], seed, &drivers, &tables, &spec.eval)
+            let budget = ThreadBudget::new(spec.tail_cores);
+            parallel_shared(jobs.clone(), spec.threads, &budget, |(k, seed), b| {
+                evaluate_shared(&params[k], seed, &drivers, &tables, &spec.eval, Some(b))
             })
         };
         let references: Vec<Evaluation> = jobs
@@ -2263,6 +2312,7 @@ pub fn finalist(
     centres: &[(Founder, PathBuf)],
     founders: [usize; Founder::COUNT],
     threads: usize,
+    tail_cores: usize,
     out: &std::path::Path,
 ) -> Result<(), String> {
     std::fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
@@ -2296,8 +2346,9 @@ pub fn finalist(
         .flat_map(|a| seeds.iter().map(move |&s| (a, s)))
         .collect();
     let tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
-    let evals: Vec<Evaluation> = parallel(jobs.clone(), threads, |(a, seed)| {
-        evaluate(&arms[a].1, seed, &drivers, &tables, &specs[a])
+    let budget = ThreadBudget::new(tail_cores);
+    let evals: Vec<Evaluation> = parallel_shared(jobs.clone(), threads, &budget, |(a, seed), b| {
+        evaluate_shared(&arms[a].1, seed, &drivers, &tables, &specs[a], Some(b))
     });
     for ((a, seed), e) in jobs.iter().zip(&evals) {
         let path = out.join(format!("{}__seed{seed}.json", arms[*a].0));
