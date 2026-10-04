@@ -51,7 +51,10 @@ screen for me to watch", closer to prototyping a game than to systems
 engineering. Iteration speed is priority one. Clean code, fast and dirty process.
 
 - **Tests check that a function works**: build the smallest thing, run a few
-  frames at most. No pinned hashes of worlds or configs, no provenance /
+  frames at most. **Never bake tuned numbers into a test.** That means no assert on a
+  default value, a current ratio, population or score, or a pass/fail verdict on
+  today's defaults. Check the mechanism on hand-built inputs, against whatever the
+  config says, so retuning never breaks a test. No pinned hashes of worlds or configs, no provenance /
   adoption / migration / regression suites, no test that steps a world past a
   few hundred ticks. A long run someone wants is an `#[ignore = "study: run by
   name"]`. `cargo nextest run --workspace --exclude cubarium-gpu` is the check

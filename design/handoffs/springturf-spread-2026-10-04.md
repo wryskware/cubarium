@@ -106,14 +106,14 @@ All matter moved is booked, and every ledger is conserved.
    - report kills, carcass production, bites and assimilation for the Veilhound (code
      `chorister`) alongside B (finding 9).
 
-9. **The co-training screen.** Since the merge, main fails
-   `screen_tests::the_shipped_start_passes_the_screen_where_the_defaults_fail` with
-   `S 0.485 outside [0.02, 0.2]`: the G turf changed the supply ratio.
-   - After step 7, re-check it.
-   - Either update `config/training/search/cotrain-start.toml` or the screen's S band. Say which,
-     and why. Don't just delete the test.
-
 ## Tests (write them first, check that each fails on main)
+
+**Tests never pin tuned numbers** (Wrysk's standing rule):
+- no asserts on default values, current ratios or populations, or a verdict on today's
+  defaults;
+- a test checks a mechanism against whatever the config says, on hand-built inputs;
+- the production targets above are study readouts, never tests.
+
 
 - Runners root on velvetpad only when the target list allows it and turf's gates pass. A pad
   under a forbidden cover is never displaced. The displaced pad is booked.
