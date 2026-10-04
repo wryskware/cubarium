@@ -5,7 +5,14 @@
 //! succession_study found  seed=N save=DIR [minutes=120] [threads=T] [config=FILE] [set=P=V ...]
 //! succession_study plants load=DIR/mM arm=NAME hours=H [every=30] [save=DIR save_min=M,..] [set=...]
 //! succession_study fauna  load=DIR/mM arm=NAME hours=H [set=...]
+//! succession_study fate   from=DIR/mM to=DIR2/mN
 //! ```
+//!
+//! - `fate`: the too-damp sites, read on the `from` save with its own config: each soil
+//!   face where springturf's aeration or standing-water gate fails (`wet`), and the
+//!   subset whose velvetpad box is soggy (saturated fraction ≥ 0.6). For each, the
+//!   occupant at `from` against the occupant at `to`; and the same classes read on the
+//!   `to` save's water (still with `from`'s config), occupied by what.
 //!
 //! Every subcommand resolves the layers as `velvet_niche` does: code defaults, the file's
 //! `[flora]`/`[fauna]` (default `config/desktop/terrarium.toml`), then `set=` lines and a
@@ -98,6 +105,7 @@ fn main() {
         Some("found") => found(&args),
         Some("plants") => plants(&args),
         Some("fauna") => fauna(&args),
+        Some("fate") => fate(&args),
         _ => panic!("usage: succession_study found|plants|fauna [...]"),
     }
 }
@@ -864,6 +872,80 @@ fn fauna(args: &[String]) {
             sum(&a.foliage_taken, &b.foliage_taken),
             b.litter_taken - a.litter_taken,
             b.overtop_pairs[PAD.index()][TURF.index()] - a.overtop_pairs[PAD.index()][TURF.index()],
+        );
+    }
+}
+
+// --------------------------------------------------------------------------- fate
+
+fn read_save(dir: &Path) -> (World, Flora) {
+    let read = |n: &str| std::fs::read(dir.join(n)).unwrap_or_else(|e| panic!("{}/{n}: {e}", dir.display()));
+    let world = World::load(&read("world.bin")).expect("world");
+    let flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin")).expect("flora");
+    (world, flora)
+}
+
+/// Each soil face's wetness on `world` by `reference`'s springturf and velvetpad boxes:
+/// (site, turf's aeration or depth gate fails, velvetpad's box saturated >= 0.6), on the
+/// faces under no more standing water than drowns a velvetpad.
+fn wetness(world: &World, reference: &FloraConfig) -> Vec<(Site, bool, bool)> {
+    let view = world.view();
+    let turf = reference.species(TURF);
+    let pad = reference.species(PAD);
+    soil_faces(world)
+        .into_iter()
+        .map(|site| {
+            let sky = view.sky_visibility(site.x as i64, site.y, site.z);
+            let t = establishment_gates_with_sky(&view, site, turf, sky, 0.0, 0.0);
+            let p = establishment_gates_with_sky(&view, site, pad, sky, 0.0, 0.0);
+            (site, !(t.aeration_ok && t.depth_ok), p.saturated_fraction >= 0.6, p.water_depth_m <= pad.drown_depth_m)
+        })
+        // Damp, not flooded: a face under more water than drowns a velvetpad is the lake.
+        .filter(|w| w.3)
+        .map(|(s, a, b, _)| (s, a, b))
+        .collect()
+}
+
+fn fate(args: &[String]) {
+    let from = Path::new(arg(args, "from=").expect("from=DIR"));
+    let to = Path::new(arg(args, "to=").expect("to=DIR"));
+    let (w0, f0) = read_save(from);
+    let (w1, f1) = read_save(to);
+    let reference = f0.config().clone();
+    let occ = |f: &Flora, site: Site| occ_index(f.view().stand_at(site).map(|s| s.species));
+    let tag = format!("{}->{}", from.display(), to.display());
+    for (name, pick) in [("wet", 0usize), ("soggy", 1)] {
+        let mut m: HashMap<(usize, usize), u64> = HashMap::new();
+        for (site, wet, soggy) in wetness(&w0, &reference) {
+            if [wet, soggy][pick] {
+                *m.entry((occ(&f0, site), occ(&f1, site))).or_default() += 1;
+            }
+        }
+        for from_occ in [TURF.index(), PAD.index()] {
+            let total: u64 = m.iter().filter(|((a, _), _)| *a == from_occ).map(|(_, v)| v).sum();
+            let mut parts: Vec<(usize, u64)> = m.iter().filter(|((a, _), _)| *a == from_occ).map(|((_, b), v)| (*b, *v)).collect();
+            parts.sort();
+            println!(
+                "fate,{tag},{name},from={},n={total},{}",
+                occ_name(from_occ),
+                parts.iter().map(|(b, v)| format!("{}={v}", occ_name(*b))).collect::<Vec<_>>().join(",")
+            );
+        }
+        // The same class on the `to` save's own water.
+        let mut v = vec![0u64; Species::COUNT + 1];
+        let mut n = 0;
+        for (site, wet, soggy) in wetness(&w1, &reference) {
+            if [wet, soggy][pick] {
+                n += 1;
+                v[occ(&f1, site)] += 1;
+            }
+        }
+        println!(
+            "wetnow,{tag},{name},n={n},springturf={},velvetpad={},vacant={},other={}",
+            v[TURF.index()],
+            v[PAD.index()],
+            v[Species::COUNT],
+            n as u64 - v[TURF.index()] - v[PAD.index()] - v[Species::COUNT]
         );
     }
 }
