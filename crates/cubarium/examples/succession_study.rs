@@ -112,13 +112,16 @@ fn save(dir: &Path, sim: &Sim, minute: u64) {
     eprintln!("saved {} at minute {minute}", dir.display());
 }
 
-/// A save, its plant config replaced by `want`.
-fn load(dir: &Path, want: &FloraConfig) -> (World, Flora, Fauna, u64) {
+/// A save, its plant config replaced by `want`; the save's own config is returned too
+/// (the cohorts are read on it, so an arm that changes springturf's gates reads the same
+/// sites as the baseline).
+fn load(dir: &Path, want: &FloraConfig) -> (World, Flora, Fauna, u64, FloraConfig) {
     let read = |n: &str| std::fs::read(dir.join(n)).unwrap_or_else(|e| panic!("{}/{n}: {e}", dir.display()));
     let world = World::load(&read("world.bin")).expect("world");
     let mut flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin")).expect("flora");
     let fauna = Fauna::load(&read("fauna.bin")).expect("fauna");
     let minute: u64 = String::from_utf8(read("minute")).unwrap().trim().parse().unwrap();
+    let saved = flora.config().clone();
     flora.replace_config(want.clone()).expect("the resolved config validates");
     assert!(flora.config() == want, "the configuration replacement took");
     let t = flora.config().species(TURF);
@@ -129,7 +132,7 @@ fn load(dir: &Path, want: &FloraConfig) -> (World, Flora, Fauna, u64) {
         t.overtop_covers,
         WOODY.map(|w| flora.config().species(w).overtop_per_check)
     );
-    (world, flora, fauna, minute)
+    (world, flora, fauna, minute, saved)
 }
 
 // -------------------------------------------------------------------------- found
@@ -205,11 +208,12 @@ fn soil_faces(world: &World) -> Vec<Site> {
     out
 }
 
-fn cohorts(world: &World, flora: &Flora, l_min: f64) -> Cohorts {
+fn cohorts(world: &World, flora: &Flora, reference: &FloraConfig, l_min: f64) -> Cohorts {
     let view = world.view();
     let c = view.config;
     let fv = flora.view();
-    let sc = fv.config.species(TURF);
+    // The save's own springturf: its gates, crown and donor size define the cohorts.
+    let sc = reference.species(TURF);
     let top = sc.crown_height(sc.wood_max, c.voxel_m);
     let mut out = Cohorts {
         pad: Vec::new(),
@@ -308,9 +312,9 @@ fn plants(args: &[String]) {
     let params = resolve(args);
     let want = params.flora_for_world();
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
-    let (world, mut flora, fauna, minute0) = load(dir, &want);
-    // The cohorts, from the save alone, before any step.
-    let co = cohorts(&world, &flora, l_min);
+    let (world, mut flora, fauna, minute0, saved) = load(dir, &want);
+    // The cohorts, from the save alone (its own config), before any step.
+    let co = cohorts(&world, &flora, &saved, l_min);
     let count = |k: Class| co.pad.iter().filter(|(_, c)| *c == k).count();
     let pads = co.pad.len();
     println!(
@@ -711,7 +715,7 @@ fn fauna(args: &[String]) {
     let params = resolve(args);
     let want = params.flora_for_world();
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
-    let (mut world, mut flora, mut fauna, minute0) = load(dir, &want);
+    let (mut world, mut flora, mut fauna, minute0, _) = load(dir, &want);
     // The introduction: the seeder's own fauna placement on the world as it stands, with
     // no plant founders (every producer, glowcap, vine and film founding zeroed).
     let mut founding = want.clone();
