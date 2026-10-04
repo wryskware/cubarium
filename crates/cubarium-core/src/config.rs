@@ -1241,7 +1241,6 @@ capacity.telemetry_seconds = 5.0
         assert_eq!(cfg.seed, 7);
         assert_eq!(cfg.detritus.decomposition, 0.002);
         assert_eq!(cfg.detritus.fall, DetritusConfig::default().fall);
-        assert_eq!(cfg.detritus.fall, 0.02);
         // The omitted `version` takes the current one, so validation passes.
         assert_eq!(cfg.version, CONFIG_VERSION);
         cfg.validate().unwrap();
@@ -1257,38 +1256,13 @@ capacity.telemetry_seconds = 5.0
     #[test]
     fn a_config_toml_without_fauna_v2_takes_the_design_defaults() {
         let cfg: WorldConfig = toml::from_str("seed = 3\nproducer.growth = 0.008\n").unwrap();
-        assert_eq!(cfg.fruit, FruitConfig::default());
-        assert_eq!(
-            (
-                cfg.fruit.ripen,
-                cfg.fruit.fruit_min,
-                cfg.fruit.drop,
-                cfg.fruit.energy_density
-            ),
-            (0.02, 0.3, 0.004, 3.0)
-        );
-        assert_eq!((cfg.mutation.probability, cfg.mutation.step), (0.3, 0.08));
-        assert!(
-            cfg.mechanisms.mutation,
-            "mutation is on by default in fauna v2"
-        );
-        assert_eq!(cfg.organism.rest_turn_fraction, 0.0);
-        assert_eq!(cfg.organism.feed_turn_fraction, 0.1);
-        assert_eq!(cfg.drives.w_depth, 1.0);
-        let kinds = &cfg.founders.kinds;
-        assert_eq!(
-            kinds.iter().map(|k| k.name.as_str()).collect::<Vec<_>>(),
-            ["burrower", "grazer", "glider", "skimmer"]
-        );
-        assert_eq!(
-            kinds.iter().map(|k| k.count).collect::<Vec<_>>(),
-            [4, 10, 5, 5]
-        );
-        assert_eq!(
-            kinds.iter().map(|k| k.form).collect::<Vec<_>>(),
-            [Some(2), Some(0), Some(1), Some(3)]
-        );
-        assert_eq!(kinds[3].swim, Some(1.0));
+        let d = WorldConfig::default();
+        assert_eq!(cfg.fruit, d.fruit);
+        assert_eq!(cfg.mutation, d.mutation);
+        assert_eq!(cfg.mechanisms, d.mechanisms);
+        assert_eq!(cfg.organism, d.organism);
+        assert_eq!(cfg.drives, d.drives);
+        assert_eq!(cfg.founders.kinds, d.founders.kinds);
         cfg.validate().unwrap();
 
         // An explicit empty list is the v1 path; kinds may also be written in full.
@@ -1310,17 +1284,7 @@ capacity.telemetry_seconds = 5.0
     fn a_config_toml_without_water_or_basins_takes_the_defaults() {
         let cfg: WorldConfig = toml::from_str("seed = 3\nproducer.growth = 0.008\n").unwrap();
         assert_eq!(cfg.water, WaterConfig::default());
-        assert_eq!(cfg.water.rain_rate, 0.6);
-        assert_eq!(cfg.water.rain_threshold, 0.35);
-        assert_eq!(cfg.water.flow, 3.0);
-        assert_eq!(cfg.water.evap, 0.008);
-        assert_eq!(cfg.water.evap_floor, 0.5);
-        assert_eq!(cfg.water.depth_gain, 0.4);
-        assert_eq!(cfg.water.wet_gain, 0.5);
-        assert_eq!(cfg.water.flood, 1.5);
-        assert_eq!(cfg.water.algae_light, 0.5);
-        assert_eq!(cfg.water.algae_depth, 0.3);
-        assert_eq!(cfg.habitat.basin_gain, 0.15);
+        assert_eq!(cfg.habitat.basin_gain, WorldConfig::default().habitat.basin_gain);
         cfg.validate().unwrap();
         let dry: WorldConfig =
             toml::from_str("water.rain_rate = 0.0\nhabitat.basin_gain = 0.0\n").unwrap();

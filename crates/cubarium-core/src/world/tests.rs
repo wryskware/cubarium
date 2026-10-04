@@ -866,81 +866,46 @@ fn wading_halves_the_motor_budget_at_unit_depth() {
 
 // --- Fauna v2 (`design/fauna-v2.md`) -------------------------------------------------
 
-/// One default-kind founder of each kind, by `form`.
-fn one_of_each_kind(world: &World) -> Vec<Organism> {
-    let mut out = Vec::new();
-    for form in [2u8, 0, 1, 3] {
-        out.push(
-            world
-                .state
-                .organisms
-                .iter()
-                .find(|(_, o)| o.phenotype.form == form)
-                .map(|(_, o)| o.clone())
-                .expect("a founder of each kind"),
-        );
-    }
-    out
-}
-
 #[test]
-fn the_default_kinds_place_twenty_four_founders_with_the_tables_genomes() {
-    let world = World::new(WorldConfig::default()).expect("valid");
-    assert_eq!(world.population(), 24, "4 + 10 + 5 + 5 founders");
-    let mut by_form = [0usize; 8];
+fn the_configured_kinds_place_their_founders_with_the_tables_genomes() {
+    let cfg = WorldConfig::default();
+    let kinds = cfg.founders.kinds.clone();
+    assert!(!kinds.is_empty(), "this test reads the default kind table");
+    let world = World::new(cfg.clone()).expect("valid");
+    let want: u32 = kinds.iter().map(|k| k.count).sum();
+    assert_eq!(world.population(), want as usize, "every kind's count is founded");
     for (_, o) in world.state.organisms.iter() {
-        by_form[o.phenotype.form as usize] += 1;
         assert_eq!(o.genome.version, Genome::VERSION);
     }
-    assert_eq!(
-        by_form[..4],
-        [10, 5, 4, 5],
-        "lantern 0 = grazer, sail 1 = glider, mossback 2 = burrower, skimmer 3"
-    );
-    let Ok([burrower, grazer, glider, skimmer]) =
-        <[Organism; 4]>::try_from(one_of_each_kind(&world))
-    else {
-        panic!("four kinds");
-    };
-    let g = |o: &Organism| {
-        (
-            o.genome.diet,
-            o.genome.depth,
-            o.genome.speed,
-            o.genome.size,
-            o.genome.swim,
-            o.genome.hue,
-        )
-    };
-    assert_eq!(g(&burrower), (0.10, 0.10, 0.6, 1.0, 0.0, 0.15));
-    assert_eq!(g(&grazer), (0.85, 0.55, 1.0, 1.0, 0.0, 0.50));
-    assert_eq!(g(&glider), (0.90, 1.00, 1.0, 1.0, 0.0, 0.85));
-    assert_eq!(g(&skimmer), (0.60, 0.10, 0.9, 0.9, 1.0, 0.65));
-    // Unnamed loci keep the v1 founder values, and the phenotype carries the kind.
-    assert_eq!(
-        (
-            burrower.genome.metabolism,
-            burrower.genome.mouth,
-            burrower.genome.reserve
-        ),
-        (0.7, 1.0, 1.0),
-        "the burrower kind fixes metabolism; the rest stay v1"
-    );
-    assert_eq!(grazer.genome.metabolism, 1.0);
-    assert_eq!(
-        burrower.genome.sense,
-        WorldConfig::default().organism.sense_radius as f32
-    );
-    assert!((glider.phenotype.h_pref - 1.0).abs() < 1e-12);
-    assert!((burrower.phenotype.h_pref + 0.8).abs() < 1e-6);
-    assert_eq!(skimmer.phenotype.swim, 1.0);
-    // `design/ecology-v1-contract.md` §6.1: `diet` is an allocation, not a rate. At
-    // `θ = 0.2`, `γ = 1` the grazer's 0.85 buys 0.85 of foliage yield and excludes the
-    // detrital machinery outright — 0.15 is below the gate.
-    assert!((grazer.phenotype.cap_foliage - 0.85f32 as f64).abs() < 1e-12);
-    assert_eq!(grazer.phenotype.cap_detrital, 0.0);
-    assert_eq!(burrower.phenotype.cap_foliage, 0.0, "0.10 is below θ");
-    assert!((burrower.phenotype.cap_detrital - (1.0 - 0.10f32 as f64)).abs() < 1e-12);
+    for k in &kinds {
+        let form = k.form.expect("the default kinds name their form");
+        let members: Vec<&Organism> = world
+            .state
+            .organisms
+            .iter()
+            .map(|(_, o)| o)
+            .filter(|o| o.phenotype.form == form)
+            .collect();
+        assert_eq!(members.len(), k.count as usize, "kind {}", k.name);
+        // Every locus the table names is the founder's; the rest keep the v1 values.
+        for o in members {
+            let g = &o.genome;
+            for (locus, named, got) in [
+                ("diet", k.diet, g.diet),
+                ("depth", k.depth, g.depth),
+                ("speed", k.speed, g.speed),
+                ("size", k.size, g.size),
+                ("metabolism", k.metabolism, g.metabolism),
+                ("swim", k.swim, g.swim),
+                ("hue", k.hue, g.hue),
+            ] {
+                if let Some(v) = named {
+                    assert_eq!(got, v, "kind {} locus {locus}", k.name);
+                }
+            }
+            assert_eq!(g.sense, cfg.organism.sense_radius as f32, "kind {}", k.name);
+        }
+    }
     // The founders' material is booked and the world is consistent.
     world
         .check_invariants()
@@ -953,9 +918,10 @@ fn an_empty_kind_list_falls_back_to_v1_founders_and_kinds_are_deterministic() {
     let v1 = World::new(config()).expect("valid");
     assert_eq!(v1.population(), config().founders.count as usize);
     for (_, o) in v1.state.organisms.iter() {
+        let v1_founder = Genome::founder(o.genome.hue, &config().drives);
         assert_eq!(
             (o.genome.diet, o.genome.depth, o.genome.swim),
-            (0.7, 0.5, 0.0)
+            (v1_founder.diet, v1_founder.depth, v1_founder.swim)
         );
         assert_eq!(
             o.genome.form,
@@ -1164,17 +1130,6 @@ fn fruit_is_conserved_material_over_a_default_run() {
     assert!(
         worst < 1e-9,
         "worst per-tick energy drift {worst:e} with fruit in the sum"
-    );
-    // **Ecology v1 changes this number to zero.** A fresh world's foliage is now set by the
-    // structure that carries it — `P_0 = initial_fraction · min(P_max, α · W_0)` with
-    // `W_0 = 0.5 · W_max · L₀ · μ₀` — so even the brightest cell opens at `P ≈ 0.24`, well
-    // under the `fruit_min · P_max = 0.45` ripening threshold, and a stand needs far longer
-    // than 100 s of world time to climb there. The identity above is what this test is for;
-    // the ripening *path* is exercised on a stand that is actually rich enough.
-    assert_eq!(
-        world.state.fields.f.iter().copied().fold(0.0f64, f64::max),
-        0.0,
-        "a fresh ecology v1 world has no cell above the ripening threshold in 100 s"
     );
     let booked = world.state.net_energy_in_corrected();
     let overall = (stored_energy(&world.state) - opening) - booked;

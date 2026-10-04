@@ -689,13 +689,16 @@ fn charging_can_fund_a_fully_paid_escrow_when_the_stocks_allow() {
             .id;
         let o = world.state.organisms.get(id).expect("alive");
         let (r_max, e_max) = (o.phenotype.reserve_max, o.phenotype.energy_max);
-        // Full reserve, and a battery a little *below* the unchanged 0.75 gate but inside the
+        // Full reserve, and a battery a little *below* the battery gate but inside the
         // candidate band: exactly the state the proposal says charging should be able to close.
+        let threshold = world.config().organism.oxidation_threshold;
+        let top = gate_energy.min(CHARGE80_OXIDATION_THRESHOLD);
+        assert!(threshold < top, "this config leaves a band to charge in");
+        let start = 0.5 * (threshold + top);
         set_reserve(&mut world, id, r_max);
-        set_energy_fraction(&mut world, id, 0.72);
-        assert!(0.72 > world.config().organism.oxidation_threshold && 0.72 < 0.80);
+        set_energy_fraction(&mut world, id, start);
         assert!(
-            0.72 < gate_energy,
+            start < gate_energy,
             "the battery gate is genuinely shut at the start"
         );
         assert!(

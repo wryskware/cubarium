@@ -2234,85 +2234,51 @@ fn a_crafted_hunter_extension_is_refused_one_property_at_a_time() {
 
 // ---------------------------------------------------------------- observation is not change
 
-/// Two fixed profile-3 hunter worlds, hashed after a run that captures, digests, funds an
-/// escrow and commits a birth. The numbers are recorded from the build **before** the
-/// reproduction-evidence work began (core `9eacb7e`, the commit root's twelve-seed screen runs
-/// on): adding observations must not move a single bit of the world they observe.
+/// Two fixed profile-3 hunter worlds, one that captures and digests and one that funds an
+/// escrow and commits a birth, each run twice: once drained of every event it records and
+/// once left alone. Observing must not move a single bit of the world it observes.
 #[test]
 fn observations_do_not_move_a_profile_three_hunter_world() {
+    let run = |observe: bool, world: &mut World, ticks: usize| {
+        for _ in 0..ticks {
+            world.step();
+            if observe {
+                world.drain_hunter_events();
+                world.drain_events();
+                let _ = world.render_view();
+                let _ = world.telemetry();
+            }
+        }
+    };
+
     // A: a hunt that captures and digests.
     let profile = certain(trial(&empty_world()));
-    let (mut world, _hunter, _prey) = staged_in(quiet_world(), profile);
-    for _ in 0..400 {
-        world.step();
-        world.drain_hunter_events();
-        world.drain_events();
-    }
-    let hunt_hash = schema_twelve_hash(&world.state);
+    let hunt = |observe: bool| {
+        let (mut world, _hunter, _prey) = staged_in(quiet_world(), profile.clone());
+        run(observe, &mut world, 400);
+        schema_twelve_hash(&world.state)
+    };
+    assert_eq!(hunt(true), hunt(false), "observing moved a hunt-and-digest world");
 
     // B: a funded escrow that becomes a child.
-    let mut world = quiet_world();
-    let breeding = breeder(&world);
-    let parent = world
-        .start_hunter_trial(
-            breeding,
-            target_of(SurfacePoint::new(Face::Top, 22.0, 34.0)),
-        )
-        .expect("started")
-        .id;
-    feed_to_full(&mut world, parent);
-    for _ in 0..200 {
-        world.step();
-        world.drain_hunter_events();
-        world.drain_events();
-    }
-    let birth_hash = schema_twelve_hash(&world.state);
-    assert_eq!(
-        world.hunters().hunter_births_total,
-        1,
-        "scenario B must actually give birth"
-    );
-
-    // Re-recorded at R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) and again
-    // at R0b (`design/handoffs/r0b-opus-2026-09-14.md`). The numbers R0a replaced were recorded
-    // from `9eacb7e`, before any reproduction-evidence code existed; every change between then
-    // and R0a left them standing, which is the point of the test. R0a did not: a lanternjaw
-    // reaches 14.8 px from root to claw tip, and rotating that body became paid physical work
-    // sharing one budget with translation. R0b does not either: it removed the independent
-    // rotation allowance from that budget, so every body that turns now trades travel for the
-    // turn and both of these worlds legitimately move again. The claim — that *observing* a
-    // world never moves it — is unchanged, and is anchored to this build's own numbers, still
-    // read off the schema 12 projection (`snapshot::v12`).
-    // R0d re-recorded both: the pace calibration changed `WorldConfig::default()`, which is
-    // the config these staged worlds are built from, and it corrected the pursuit hold
-    // predicate in `world/step.rs`. The claim — that *observing* a world never moves it — is
-    // unchanged and is anchored to this build's own numbers.
-    // Re-recorded at ecology v1 (`design/ecology-v1-contract.md`): the schema 12 projection
-    // covers `config` and `fields`, and both moved — the config gained `plant` and lost
-    // `producer.energy_density`, and a fresh world's foliage is now set by the wood that
-    // carries it. The claim — that *observing* a world never moves it — is unchanged and is
-    // anchored to this build's own numbers.
-    // Re-recorded at ecology v1 (`design/ecology-v1-contract.md`), and again in its repair
-    // cycle 1: the schema 12 projection covers `config` and `fields`, and both moved — the
-    // config gained the `plant` block (and, in the repair, `reserve_share` and
-    // `reflush_below`), and a fresh world's foliage is set by the wood that carries it. The
-    // claim — that *observing* a world never moves it — is unchanged and is anchored to this
-    // build's own numbers.
-    // Re-recorded for the ring world (`design/flat-world-plan-2026-09-16.md` §4). The schema
-    // 12 projection carries `config`, and `WorldConfig` gained `topology` and `world_scale`
-    // and went to version 9, so **no** hash that covers the config can be equal across this
-    // change — which is exactly why §4 replaces hash comparison with `CubeProjection`. That
-    // the two worlds themselves did not move is shown by
-    // `tests/cube_projection.rs::a_cube_world_is_unchanged_by_the_ring_work`, which compares a
-    // 6,000-tick cube run against a snapshot written by a build with no topology in it and
-    // finds no differing field. The claim here — that *observing* a world never moves it — is
-    // unchanged and is anchored to this build's own numbers.
-    assert_eq!(
-        hunt_hash, 7_424_989_416_957_462_349,
-        "a hunt-and-digest world moved"
-    );
-    assert_eq!(
-        birth_hash, 14_793_747_053_647_923_190,
-        "a funded-birth world moved"
-    );
+    let birth = |observe: bool| {
+        let mut world = quiet_world();
+        let breeding = breeder(&world);
+        let parent = world
+            .start_hunter_trial(
+                breeding,
+                target_of(SurfacePoint::new(Face::Top, 22.0, 34.0)),
+            )
+            .expect("started")
+            .id;
+        feed_to_full(&mut world, parent);
+        run(observe, &mut world, 200);
+        assert_eq!(
+            world.hunters().hunter_births_total,
+            1,
+            "scenario B must actually give birth"
+        );
+        schema_twelve_hash(&world.state)
+    };
+    assert_eq!(birth(true), birth(false), "observing moved a funded-birth world");
 }
