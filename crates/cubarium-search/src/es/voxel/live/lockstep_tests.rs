@@ -72,6 +72,7 @@ fn spec(out: PathBuf, generations: u32, resume: bool) -> SearchSpec {
         wall_seconds: 1e9,
         sigma0: 0.3,
         threads: 3,
+        tail_cores: 1,
         seed_base: 7,
         cma_seed: 11,
         eval: EvalSpec::new(world, 100, 50),

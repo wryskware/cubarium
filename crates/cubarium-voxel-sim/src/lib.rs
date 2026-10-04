@@ -706,6 +706,45 @@ impl Sim {
         *self.ecs.resource::<SimConfig>()
     }
 
+    /// **This world's** in-phase worker count from the next tick on
+    /// (`design/handoffs/tail-threads-2026-10-03.md`): several sims in one process can each
+    /// take a different count, and change it between ticks, with no process-global.
+    /// Execution only, like [`SimConfig::threads`]. A count above one makes sure the water's
+    /// rayon pool of that size exists; the compute pool is process-global and sized by its
+    /// first user, so a host that will raise counts later builds it at full size first
+    /// ([`prepare_compute_pool`]). The overlapped tick keeps the executor it was built with:
+    /// a sim built at one thread runs that schedule's two legs one after the other.
+    pub fn set_threads(&mut self, threads: usize) {
+        let threads = threads.max(1);
+        let mut config = self.ecs.resource_mut::<SimConfig>();
+        if config.threads == threads {
+            return;
+        }
+        config.threads = threads;
+        let water = config.overlap_split().0;
+        if threads > 1 {
+            prepare_compute_pool(threads);
+            water::prepare_pool(threads);
+            water::prepare_pool(water);
+        }
+    }
+
+    /// Run this sim's chained-tick water phases on the process's pool of `workers` (when
+    /// wider than [`SimConfig::threads`] and the sim is not serial), `None` to go back to
+    /// [`SimConfig::threads`]'s pool. See [`WaterPool`]; the overlapped tick's water leg
+    /// keeps [`SimConfig::overlap_split`].
+    pub fn set_water_pool(&mut self, workers: Option<usize>) {
+        match workers {
+            Some(n) if n > 1 => {
+                water::prepare_pool(n);
+                self.ecs.insert_resource(WaterPool(n));
+            }
+            _ => {
+                self.ecs.remove_resource::<WaterPool>();
+            }
+        }
+    }
+
     pub fn world(&self) -> &cubarium_voxel::World {
         &self.ecs.resource::<VoxelWorld>().0
     }
@@ -806,26 +845,45 @@ fn sys_substeps(ecs: &mut World) {
     }
 }
 
-fn sys_infiltrate(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
+/// **A sim's water on a wider pool** than its own thread count
+/// ([`Sim::set_water_pool`]): absent, the chained tick's water phases run on the process's
+/// pool of [`SimConfig::threads`] workers, which every sim at that count shares. A runner
+/// that splits the machine among several worlds gives each world's water the one
+/// full-size pool instead, so worlds at the same count do not crowd one small pool while
+/// the rest of the machine idles. Execution only.
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct WaterPool(pub usize);
+
+/// The chained tick's water worker count: one when the sim runs serially, else its
+/// [`WaterPool`] when that is wider than [`SimConfig::threads`].
+fn water_threads(config: &SimConfig, pool: Option<&WaterPool>) -> usize {
+    match (config.threads, pool) {
+        (0 | 1, _) => 1,
+        (n, Some(p)) => n.max(p.0),
+        (n, None) => n,
+    }
+}
+
+fn sys_infiltrate(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>, pool: Option<Res<WaterPool>>) {
     let substeps = w.0.config().water_substeps.max(1);
     let sub_dt = cubarium_voxel::DT / substeps as f64;
-    water::infiltrate(&mut w.0, sub_dt, config.threads);
+    water::infiltrate(&mut w.0, sub_dt, water_threads(&config, pool.as_deref()));
 }
 
-fn sys_fall(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
-    water::fall(&mut w.0, config.threads);
+fn sys_fall(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>, pool: Option<Res<WaterPool>>) {
+    water::fall(&mut w.0, water_threads(&config, pool.as_deref()));
 }
 
-fn sys_exchange(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
-    water::exchange(&mut w.0, config.threads);
+fn sys_exchange(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>, pool: Option<Res<WaterPool>>) {
+    water::exchange(&mut w.0, water_threads(&config, pool.as_deref()));
 }
 
-fn sys_drain(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
-    water::drain(&mut w.0, config.threads);
+fn sys_drain(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>, pool: Option<Res<WaterPool>>) {
+    water::drain(&mut w.0, water_threads(&config, pool.as_deref()));
 }
 
-fn sys_water_table(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>) {
-    water::water_table(&mut w.0, config.threads);
+fn sys_water_table(mut w: ResMut<VoxelWorld>, config: Res<SimConfig>, pool: Option<Res<WaterPool>>) {
+    water::water_table(&mut w.0, water_threads(&config, pool.as_deref()));
 }
 
 fn sys_spring(mut w: ResMut<VoxelWorld>) {
