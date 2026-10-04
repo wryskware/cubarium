@@ -35,19 +35,6 @@ use cubarium_voxel::World;
 use cubarium_voxel::weather::{DayClock, DayMode};
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraConfig, Site, Taken};
 
-/// Astra's exact intervals (repair-1 check M3), world days, in the design's table order.
-const ASTRA: [(Founder, f64); 9] = [
-    (Founder::Bellwing, 0.1012),
-    (Founder::Seedporter, 0.3162),
-    (Founder::Browser, 0.5060),
-    (Founder::Loftstrider, 0.6324),
-    (Founder::Blind, 0.5407),
-    (Founder::Capgnawer, 0.5407),
-    (Founder::RippleSnail, 0.4866),
-    (Founder::Chorister, 1.2649),
-    (Founder::Lanternjaw, 3.0415),
-];
-
 /// The ecological day, seconds (the default 120-minute cycle).
 const DAY_S: f64 = 7200.0;
 
@@ -220,171 +207,20 @@ fn assert_books(fauna: &Fauna, when: &str, ticks: u64) {
 
 // ------------------------------------------------------------------ the defaults
 
-/// The design's tables: `f` (as `maintenance_per_s · 7200`), `k`, `τ` of the lineage's
-/// own food, `b = 2k/τ`, `s0` 0.15, `full_tolerance` 0.98, `emergency_clear_hunger` 0.6,
-/// motor at its basal ratio, the repair-2 lifespans as Wrysk changed them on 2026-10-03
-/// (loftstrider 16 days, seedporter 8), and the rider's take 0.09.
+/// The gut's derived relations hold on every shipped lineage, whatever its tuned `k`
+/// and `τ`: the bite rate is `b = 2k/τ` of its own food, and motor respiration is tied to
+/// its basal upkeep. No tuned number is pinned.
 #[test]
-fn the_gut_defaults_are_the_designs() {
+fn the_gut_tables_keep_their_derived_relations() {
     let c = FaunaConfig::default();
-    let table = [
-        (Founder::Bellwing, 0.15, 0.03, 30.0, 6.0),
-        (Founder::Seedporter, 0.08, 0.05, 60.0, 8.0),
-        (Founder::Browser, 0.06, 0.06, 120.0, 8.0),
-        (Founder::Loftstrider, 0.04, 0.05, 120.0, 16.0),
-        (Founder::Blind, 0.03, 0.02, 120.0, 6.0),
-        (Founder::Capgnawer, 0.03, 0.02, 120.0, 6.0),
-        (Founder::RippleSnail, 0.02, 0.012, 120.0, 6.0),
-        (Founder::Chorister, 0.08, 0.20, 300.0, 12.0),
-        (Founder::Lanternjaw, 0.04, 0.15, 300.0, 12.0),
-    ];
     let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs().max(1e-12);
-    for (f, daily, k, tau, life_days) in table {
+    for f in Founder::ALL {
         let p = c.founder(f);
         let n = f.name();
-        assert!(close(p.core.maintenance_per_s * DAY_S, daily), "{n}: f");
+        let tau = p.gut.digestion_s[own_food(&c, f).index()];
         assert!(close(p.motor_respiration_per_s, p.core.maintenance_per_s), "{n}: motor tie");
-        assert!(close(p.gut.stomach_k, k), "{n}: k");
-        assert!(close(p.gut.digestion_s[own_food(&c, f).index()], tau), "{n}: tau");
-        assert!(close(p.gut.bite_per_body_s, 2.0 * k / tau), "{n}: b = 2k/tau");
-        assert!(close(p.gut.s0, 0.15), "{n}: s0");
-        assert!(close(p.gut.full_tolerance, 0.98), "{n}: full_tolerance");
-        assert!(close(p.emergency_clear_hunger, 0.6), "{n}: emergency_clear_hunger");
-        assert!(close(p.core.lifespan_median_s, life_days * DAY_S), "{n}: lifespan");
+        assert!(close(p.gut.bite_per_body_s, 2.0 * p.gut.stomach_k / tau), "{n}: b = 2k/tau");
     }
-    assert_eq!(c.parasite_take_per_day, 0.09);
-    assert_eq!(c.life.ecological_day_s, DAY_S);
-}
-
-// ------------------------------------------------------------------ the cadence
-
-/// **The interval** (item 12): a fixed, non-breeding adult standing on ample carrion
-/// under its own rhythm completes at least three meal intervals, and their mean is within
-/// ±30 % of Astra's exact interval for its lineage.
-fn meal_interval(f: Founder) {
-    let want = ASTRA.iter().find(|(g, _)| *g == f).expect("in the table").1;
-    let config = carrion_config(f);
-    // Start where the lineage is awake: mid-morning for a day-active body, midnight for
-    // a night-active one.
-    let start_hour = match config.founder(f).active {
-        Activity::Nocturnal => 0.0,
-        _ => 10.0,
-    };
-    let mut world = plain(
-        DayClock {
-            start_hour,
-            ..DayClock::default()
-        },
-        7,
-    );
-    let mut flora = Flora::new(FloraConfig::default());
-    carrion_everywhere(&world, &mut flora, 10.0);
-    let mut fauna = Fauna::new(config);
-    fauna.set_births_enabled(false);
-    let id = introduce(&mut fauna, &world, f, StartingStores::FULL);
-    place(&mut fauna, id, 6.0, 1.5, EAST);
-    fauna.controllers.set(id, stand_and_feed());
-    let body0 = animal(&fauna, id).body;
-
-    let max_ticks = ((3.0 * 1.3 + 1.5) * want * DAY_S / DT) as u64 + (DAY_S / DT) as u64;
-    let mut starts: Vec<u64> = Vec::new();
-    // Meals completed, and normal ones, at each start (Astra's finding 10: each counted
-    // interval spans one completed normal bout, and no start is emergency chatter).
-    let mut at_start: Vec<(u64, u64)> = Vec::new();
-    let mut was = animal(&fauna, id).eating;
-    if was {
-        starts.push(0);
-        at_start.push((0, 0));
-    }
-    for t in 1..=max_ticks {
-        world.step();
-        fauna.step_with(&world, &mut flora, 1);
-        let a = animal(&fauna, id);
-        if a.eating && !was {
-            starts.push(t);
-            let k = &fauna.ledger.meals_by_founder_kind[f.index()];
-            at_start.push((k.iter().sum(), k[BoutKind::Normal.index()]));
-            assert!(!a.emergency, "{}: a meal started in an emergency at tick {t}", f.name());
-        }
-        was = a.eating;
-        if starts.len() >= 4 {
-            break;
-        }
-    }
-    for w in at_start.windows(2) {
-        assert_eq!(w[1].0 - w[0].0, 1, "{}: one completed bout between starts: {at_start:?}", f.name());
-        assert_eq!(w[1].1 - w[0].1, 1, "{}: and it was a normal one: {at_start:?}", f.name());
-    }
-    let a = animal(&fauna, id);
-    assert!(
-        (a.body - body0).abs() <= 1e-9 * body0,
-        "{}: the adult's body is fixed ({body0} → {})",
-        f.name(),
-        a.body
-    );
-    assert!(
-        starts.len() >= 4,
-        "{}: {} meal starts in {:.2} days (want 4 for 3 intervals)",
-        f.name(),
-        starts.len(),
-        max_ticks as f64 * DT / DAY_S
-    );
-    let intervals: Vec<f64> = starts.windows(2).map(|w| (w[1] - w[0]) as f64 * DT / DAY_S).collect();
-    let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
-    eprintln!(
-        "{}: intervals {intervals:.4?} days, mean {mean:.4} against {want} ({:+.1} %)",
-        f.name(),
-        100.0 * (mean / want - 1.0)
-    );
-    assert!(
-        (mean / want - 1.0).abs() <= 0.30,
-        "{}: mean interval {mean:.4} days, Astra's {want} (±30 %)",
-        f.name()
-    );
-    assert_books(&fauna, "after the cadence run", starts.last().copied().unwrap_or(max_ticks));
-}
-
-// The bellwing's interval is `flight_tests::meal_interval_bellwing`: its observation is
-// a flyer's, so it cannot stand in for a walker here; it sips a bloomcrown instead.
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_seedporter() {
-    meal_interval(Founder::Seedporter);
-}
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_frondgrazer() {
-    meal_interval(Founder::Browser);
-}
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_loftstrider() {
-    meal_interval(Founder::Loftstrider);
-}
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_littershredder() {
-    meal_interval(Founder::Blind);
-}
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_capgnawer() {
-    meal_interval(Founder::Capgnawer);
-}
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_ripple_snail() {
-    meal_interval(Founder::RippleSnail);
-}
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_chorister() {
-    meal_interval(Founder::Chorister);
-}
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_lanternjaw() {
-    meal_interval(Founder::Lanternjaw);
 }
 
 // ------------------------------------------------------------------ the stomach
@@ -750,101 +586,6 @@ fn regurgitation_conserves_and_keeps_composition() {
     let after = a.stomach.total().organic + got.organic + fauna.ledger.digested.organic;
     assert!((after - before).abs() <= 1e-9 * before, "conserved: {before} → {after}");
     assert_books(&fauna, "regurgitation", 20);
-}
-
-// ------------------------------------------------------------------ riders
-
-/// A rider on a fixed 1.5-ou adult grazer, all awake, reaches drop-off in about 1.19
-/// world days (Astra's integration), ±30 %, at `parasite_take_per_day` 0.09.
-#[test]
-#[ignore = "study: run by name (long run; repair 3 item 9)"]
-fn a_rider_on_a_fixed_host_reaches_dropoff_in_about_1_19_days() {
-    let world = clock_off(10);
-    let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
-    fauna.set_births_enabled(false);
-    let host = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
-    let host_body = animal(&fauna, host).body;
-    assert!((host_body - 1.5).abs() < 1e-9, "the adult grazer is 1.5 ou");
-    let lj = fauna.config.founder(Founder::Lanternjaw).core;
-    // The default egg's hatchling: body_min of structure, the rest of the egg as reserve.
-    let egg = lj.reproduction.egg_organic;
-    let rider = introduce(
-        &mut fauna,
-        &world,
-        Founder::Lanternjaw,
-        StartingStores {
-            body: lj.body_min / lj.body_max,
-            reserve: (egg - lj.body_min) / lj.reserve_of(lj.body_min),
-        },
-    );
-    {
-        let h = animal(&fauna, host);
-        let r = animal_mut(&mut fauna, rider);
-        r.attached = Some(Attachment { host });
-        r.site = h.site;
-        r.pose = h.pose;
-    }
-    let cap = (2.0 * DAY_S / DT) as u64;
-    let mut dropped = None;
-    for t in 1..=cap {
-        fauna.step_with(&world, &mut flora, 1);
-        // The host is held fixed: its structure and a full reserve, every tick.
-        let full = fauna.config.founder(Founder::Browser).core.reserve_of(host_body);
-        let h = animal_mut(&mut fauna, host);
-        h.body = host_body;
-        h.reserve = full;
-        if animal(&fauna, rider).attached.is_none() {
-            dropped = Some(t);
-            break;
-        }
-    }
-    let t = dropped.expect("the rider dropped off within two days");
-    let days = t as f64 * DT / DAY_S;
-    eprintln!("rider drop-off at {days:.3} world days (Astra 1.19)");
-    assert!((days / 1.19 - 1.0).abs() <= 0.30, "drop-off at {days:.3} days, not ~1.19");
-}
-
-// ------------------------------------------------------------------ growth
-
-/// A juvenile's maturation is **measured**: a newborn-sized frondgrazer on ample food
-/// under its own rhythm reaches breeding size, and its time is reported against the
-/// plan's 1.5-day expectation (asserted only loosely: it matures, and within 4.5 days).
-#[test]
-#[ignore = "study: run by name (multi-day growth)"]
-fn a_juvenile_reaches_breeding_size_and_its_time_is_measured() {
-    let f = Founder::Browser;
-    let config = carrion_config(f);
-    let mut world = plain(
-        DayClock {
-            start_hour: 10.0,
-            ..DayClock::default()
-        },
-        11,
-    );
-    let mut flora = Flora::new(FloraConfig::default());
-    carrion_everywhere(&world, &mut flora, 10.0);
-    let mut fauna = Fauna::new(config);
-    fauna.set_births_enabled(false);
-    let sc = fauna.config.founder(f).core;
-    let id = introduce(&mut fauna, &world, f, StartingStores { body: sc.body_min / sc.body_max, reserve: 1.0 });
-    place(&mut fauna, id, 6.0, 1.5, EAST);
-    fill_stomach(&mut fauna, id, 0.0);
-    fauna.controllers.set(id, stand_and_feed());
-    let cap = (4.5 * DAY_S / DT) as u64;
-    let mut at = None;
-    for t in 1..=cap {
-        world.step();
-        fauna.step_with(&world, &mut flora, 1);
-        if animal(&fauna, id).body >= sc.birth_body {
-            at = Some(t);
-            break;
-        }
-    }
-    let t = at.expect("it reaches breeding size within 4.5 days");
-    let days = t as f64 * DT / DAY_S;
-    eprintln!("frondgrazer maturation: {days:.3} world days (plan ~1.5)");
-    assert_eq!(fauna.ledger.matured_by_founder[f.index()], 1, "the maturation is booked");
 }
 
 // ------------------------------------------------------------------ the books

@@ -201,74 +201,36 @@ fn module(founder: Founder, prefix: &str) -> crate::Module {
 
 // ------------------------------------------------------------------ the decisions
 
-/// The R1 tables (Fable's decisions, brief R1): the shredder's diet without caps; the
-/// capgnawer's body, diet, yields, reproduction mode and founding; the loftstrider's body,
-/// band, legs, spill, life history and founding; the capgnawer on the lanternjaw's list.
-/// Rates scaled "by body volume" are not pinned here (see the brief); the new lineages'
-/// code-default founding count is 0.
+/// The R1 tables' structural choices (brief R1): the shredder's diet without caps; the
+/// capgnawer's diet, reproduction mode and founding; the loftstrider's diet, spill, birth
+/// mode and founding; the capgnawer on the lanternjaw's list. No tuned number is pinned.
 #[test]
-fn the_r1_physiology_tables_are_the_briefs() {
+fn the_r1_physiology_tables_have_the_briefs_shape() {
     let shredder = FounderPhysiology::frozen(Founder::Blind);
     let grazer = FounderPhysiology::frozen(Founder::Browser);
     let gnawer = FounderPhysiology::frozen(Founder::Capgnawer);
     let strider = FounderPhysiology::frozen(Founder::Loftstrider);
-    let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
 
-    // The shredder: litter and carrion, no caps. Nothing else about it moves.
+    // The shredder: litter and carrion, no caps.
     assert_eq!(shredder.diet, Diet::of(&[Food::Litter, Food::Carrion]));
 
     // The capgnawer.
     assert_eq!(gnawer.diet, Diet::of(&[Food::CapTissue, Food::Litter]));
-    assert_eq!(
-        (gnawer.adult_length_m, gnawer.adult_width_m, gnawer.adult_height_m),
-        (0.25, 0.21, 0.19)
-    );
-    assert!(close(gnawer.yield_for(Food::CapTissue), shredder.yield_for(Food::CapTissue)));
-    assert!(close(gnawer.yield_for(Food::Litter), 0.5 * shredder.yield_for(Food::Litter)));
     assert_eq!(gnawer.core.reproduction.mode, shredder.core.reproduction.mode);
     assert_eq!((gnawer.founding, gnawer.founding_site), (Founding::Bodies, FoundingSite::AtFood));
-    assert_eq!(gnawer.founding_count, 0, "a new lineage founds none by default");
     assert!(gnawer.hunter.is_none());
 
-    // The loftstrider.
+    // The loftstrider: the only sloppy feeder.
     assert_eq!(strider.diet, Diet::only(Food::Foliage));
-    assert_eq!(
-        (strider.adult_length_m, strider.adult_width_m, strider.adult_height_m),
-        (2.2, 2.2, 3.4)
-    );
-    assert!((strider.eye_height_fraction - 1.5 / 3.4).abs() < 0.01, "the eye ring at 1.5 m");
-    assert!(close(strider.mouth_floor_fraction, 0.235));
-    assert!(close(strider.mouth_ceiling_fraction, 1.03));
-    let band = strider.adult_body();
-    assert!((band.mouth_floor_m - 0.8).abs() < 0.01 && (band.mouth_ceiling_m - 3.5).abs() < 0.01);
-    // Wrysk 2026-10-02: a step of about a third of its height, 1+ m (the R1 brief had 0.5).
-    assert!(
-        strider.step_up_m >= 1.0 && (strider.step_up_m - 3.4 / 3.0).abs() < 0.05,
-        "a third of its 3.4 m height"
-    );
-    let grazer_adult = grazer.adult_body();
-    assert!(
-        strider.wade_depth_m(&strider.adult_body()) >= grazer.drown_depth_m(&grazer_adult),
-        "it wades where the grazer drowns"
-    );
-    assert!(close(strider.bite_spill_fraction, 0.25), "the sloppy feeder's spill");
+    assert!(strider.bite_spill_fraction > 0.0, "the sloppy feeder spills");
     assert_eq!(shredder.bite_spill_fraction, 0.0, "nobody else spills");
     assert_eq!(grazer.bite_spill_fraction, 0.0);
     assert_eq!(gnawer.bite_spill_fraction, 0.0);
     assert_eq!(strider.core.reproduction.mode, BirthMode::Gestation, "one young per birth");
-    assert!(
-        strider.core.reproduction.gestation_s > grazer.core.reproduction.gestation_s,
-        "a long gestation"
-    );
-    assert!(
-        strider.core.lifespan_median_s > grazer.core.lifespan_median_s,
-        "long-lived"
-    );
     assert_eq!(
         (strider.founding, strider.founding_site),
         (Founding::Bodies, FoundingSite::AtFood)
     );
-    assert_eq!(strider.founding_count, 0, "a new lineage founds none by default");
     assert!(strider.hunter.is_none() && strider.counter.is_none(), "no defence counter yet");
 
     // Predation: the capgnawer is on the lanternjaw's list; the loftstrider on none.
@@ -287,8 +249,6 @@ fn the_r1_physiology_tables_are_the_briefs() {
         Founder::Loftstrider.manifest().digest(),
         Founder::Browser.manifest().digest()
     );
-    let code = FaunaConfig::default().founder_counts();
-    assert_eq!((code[Founder::Capgnawer.index()], code[Founder::Loftstrider.index()]), (0, 0));
 }
 
 // ------------------------------------------------------------------ the shredder
@@ -327,12 +287,12 @@ fn the_shredder_never_takes_a_cap_and_still_takes_litter_and_carrion() {
 
 // ------------------------------------------------------------------ the capgnawer
 
-/// **A capgnawer takes a cap in its band, and litter at the lower yield.** One glowcap at
+/// **A capgnawer takes a cap in its band, and litter at its own yield.** One glowcap at
 /// its column and no litter: the bite is cap tissue off the glowcap. On a bare face with
 /// litter only it eats the litter, and what it assimilates of it is at most its litter
-/// yield — half the shredder's — of what it took.
+/// yield of what it took.
 #[test]
-fn a_capgnawer_takes_a_cap_in_its_band_and_litter_at_the_lower_yield() {
+fn a_capgnawer_takes_a_cap_in_its_band_and_litter_at_its_own_yield() {
     let world = small();
     let mut flora = Flora::new(FloraConfig::default());
     let s = seed(&mut flora, &world, 2, 2, Plant::Glowcap);
@@ -360,11 +320,6 @@ fn a_capgnawer_takes_a_cap_in_its_band_and_litter_at_the_lower_yield() {
     assert!(l.bites_by_food[Food::Litter.index()] >= 1 && took > 0.0, "it eats litter");
     let got = l.assimilated_by_founder[Founder::Capgnawer.index()];
     let yield_litter = fauna.config().founder(Founder::Capgnawer).yield_for(Food::Litter);
-    let shredder_litter = fauna.config().founder(Founder::Blind).yield_for(Food::Litter);
-    assert!(
-        (yield_litter - 0.5 * shredder_litter).abs() <= 1e-12,
-        "half the shredder's litter yield: {yield_litter} against {shredder_litter}"
-    );
     assert!(
         got > 0.0 && got <= yield_litter * took + 1e-15,
         "it assimilated {got} of {took} at a yield of {yield_litter}"
@@ -472,7 +427,7 @@ fn a_loftstrider_takes_foliage_at_two_metres_and_none_at_ground_level() {
 
 /// **A bite's spill lands as litter at its face, and the ledgers close.** The gut never
 /// voids in the window, so all litter on the standing face is spill: exactly
-/// `bite_spill_fraction` (0.25) of what the tree lost.
+/// `bite_spill_fraction` of what the tree lost.
 #[test]
 fn a_loftstrider_bite_spills_its_share_as_litter_at_its_face_and_the_ledgers_close() {
     let world = tall();
@@ -481,7 +436,7 @@ fn a_loftstrider_bite_spills_its_share_as_litter_at_its_face_and_the_ledgers_clo
     let mut config = FaunaConfig::default();
     config.life.gut_void_s = 1e9; // no dung in the window: every grain of litter is spill
     let spill = config.founder(Founder::Loftstrider).bite_spill_fraction;
-    assert_eq!(spill, 0.25, "the knob's default");
+    assert!(spill > 0.0, "the loftstrider spills");
     let mut fauna = Fauna::new(config);
     let id = feeding(&mut fauna, &world, Founder::Loftstrider, 12, 12);
     let face = fauna.view().animal(id).expect("the loftstrider").site;

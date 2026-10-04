@@ -576,14 +576,15 @@ mod tests {
     fn decode_matches_the_spec_at_size_one() {
         let cfg = WorldConfig::default().organism;
         let g = founder();
+        assert_eq!((g.size, g.reserve, g.speed, g.mouth, g.metabolism), (1.0, 1.0, 1.0, 1.0, 1.0));
         let p = decode(&g, &cfg);
-        assert_eq!(p.structure_adult, 1.0);
-        assert_eq!(p.reserve_max, 1.0);
-        assert_eq!(p.energy_max, 2.0);
+        assert_eq!(p.structure_adult, cfg.structure_adult);
+        assert_eq!(p.reserve_max, cfg.reserve_max);
+        assert_eq!(p.energy_max, cfg.energy_max);
         assert_eq!(p.speed_max, cfg.speed_max);
-        assert_eq!(p.mouth_rate, 0.05);
-        assert_eq!(p.sense_radius, 6.0);
-        assert_eq!(p.maintenance, 0.005);
+        assert_eq!(p.mouth_rate, cfg.mouth_rate);
+        assert_eq!(p.sense_radius, f64::from(g.sense));
+        assert_eq!(p.maintenance, cfg.maintenance);
         // Core, head, and (speed 1.0 > 0.6) tail.
         let want = [(0.0, 0.0, 1.4), (1.6, 0.0, 0.9), (-1.4, 0.0, 0.7)];
         assert_eq!(p.lobes.len(), want.len());
@@ -609,12 +610,12 @@ mod tests {
         g.mouth = 0.5;
         g.speed = 0.5; // ≤ 0.6: no tail lobe.
         let p = decode(&g, &cfg);
-        assert_eq!(p.structure_adult, 2.0);
-        assert_eq!(p.reserve_max, 3.0);
-        assert_eq!(p.energy_max, 4.0);
+        assert_eq!(p.structure_adult, 2.0 * cfg.structure_adult);
+        assert_eq!(p.reserve_max, 1.5 * 2.0 * cfg.reserve_max);
+        assert_eq!(p.energy_max, 2.0 * cfg.energy_max);
         assert!((p.speed_max - 0.5 * cfg.speed_max * 2.0f64.powf(-0.25)).abs() < 1e-15);
-        assert!((p.mouth_rate - 0.5 * 0.05 * 2.0f64.powf(0.75)).abs() < 1e-15);
-        assert_eq!(p.maintenance, 0.01);
+        assert!((p.mouth_rate - 0.5 * cfg.mouth_rate * 2.0f64.powf(0.75)).abs() < 1e-15);
+        assert_eq!(p.maintenance, 2.0 * cfg.maintenance);
         assert_eq!(p.lobes.len(), 2);
         assert_eq!(p.lobes[0], (0.0, 0.0, 1.9));
         assert!((p.lobes[1].0 - 3.2).abs() < 1e-12 && (p.lobes[1].2 - 1.2).abs() < 1e-12);
@@ -747,7 +748,9 @@ mod tests {
         let mut g = founder();
         g.form = 3;
         assert_ne!(g.digest(), base, "form: digest did not change");
-        let cfg = WorldConfig::default().organism;
+        let mut cfg = WorldConfig::default().organism;
+        cfg.capability_gate = 0.2;
+        cfg.capability_exponent = 1.0;
         let mut g = founder();
         g.diet = 0.25;
         g.depth = 1.0;
@@ -756,9 +759,9 @@ mod tests {
         let p = decode(&g, &cfg);
         assert!((p.diet - f64::from(0.25f32)).abs() < 1e-12);
         // `design/ecology-v1-contract.md` §6.1: one mouth rate whatever the food, and `diet`
-        // allocates the digestive investment. At `diet = 0.25` the foliage share is below
-        // `θ = 0.2`? No — 0.25 clears the gate, and 0.75 clears it too, so this genome is a
-        // (lopsided) generalist and `γ = 1` makes the two yields sum to one.
+        // allocates the digestive investment. With the gate set here to `θ = 0.2`, 0.25
+        // clears it and 0.75 clears it too, so this genome is a (lopsided) generalist and
+        // `γ = 1` makes the two yields sum to one.
         assert!((p.cap_foliage - f64::from(0.25f32)).abs() < 1e-15);
         assert!((p.cap_detrital - (1.0 - f64::from(0.25f32))).abs() < 1e-15);
         assert!(

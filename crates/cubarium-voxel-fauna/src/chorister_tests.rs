@@ -188,23 +188,20 @@ fn choristers(fauna: &Fauna) -> Vec<u64> {
 
 // ------------------------------------------------------------------ the table
 
-/// Brief R3's decisions are the defaults: the lineage, its body, the lanternjaw's table by
-/// body volume at twice the specific upkeep, live birth, diurnal, carrion, its prey list
+/// Brief R3's structural choices: the lineage, the lanternjaw's table scaled by body
+/// volume, live birth, diurnal, carrion, its prey list
 /// (Fable: a **grounded** seedporter too, as on the lanternjaw's), its founding mode, its
-/// pack numbers, and a manifest with no lure.
+/// pack, and a manifest with no lure. No tuned number is pinned.
 #[test]
-fn the_r3_chorister_table_is_the_briefs() {
+fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
     assert_eq!(C.name(), "chorister");
     assert_eq!(C.role(), "pack_hunter");
 
     let ch = FounderPhysiology::placeholder(C);
     let lj = FounderPhysiology::placeholder(Founder::Lanternjaw);
-    assert_eq!(
-        (ch.adult_length_m, ch.adult_width_m, ch.adult_height_m),
-        (1.4, 0.35, 0.6),
-        "the body; the 0.8 m tail is geometry only"
-    );
-    let r = (1.4 * 0.35 * 0.6) / (1.0 * 0.25 * 0.45);
+    // The stocks scale from the lanternjaw's by the two tables' own body volumes.
+    let r = (ch.adult_length_m * ch.adult_width_m * ch.adult_height_m)
+        / (lj.adult_length_m * lj.adult_width_m * lj.adult_height_m);
     let near = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1e-12);
     for (what, got, base) in [
         ("body_max", ch.core.body_max, lj.core.body_max),
@@ -221,11 +218,6 @@ fn the_r3_chorister_table_is_the_briefs() {
             "{what}: {got}, not the lanternjaw's {base} x {r}"
         );
     }
-    assert!(
-        near(ch.core.maintenance_per_s, 2.0 * lj.core.maintenance_per_s),
-        "specific upkeep twice the lanternjaw's: {}",
-        ch.core.maintenance_per_s
-    );
     assert_eq!(
         ch.core.reserve_cap, lj.core.reserve_cap,
         "a fraction of body, not scaled"
@@ -282,24 +274,15 @@ fn the_r3_chorister_table_is_the_briefs() {
             .collect::<Vec<_>>()
     );
 
-    // Founded as packs, none by default.
+    // Founded as packs; the shipped count is the table's own knob.
     assert_eq!(ch.founding, Founding::Pack);
-    assert_eq!(ch.founding_count, 0);
-    assert_eq!(FaunaConfig::default().founder_counts()[C.index()], 0);
-    let day = DayClock::default().day_s();
+    assert_eq!(
+        FaunaConfig::default().founder_counts()[C.index()],
+        FounderPhysiology::frozen(C).founding_count
+    );
     let p = ch.pack.expect("a pack lineage");
-    assert_eq!(p.pack_radius_m, 6.0);
-    assert_eq!(p.pack_size, 4);
-    assert_eq!(p.den_cover_m, 3.0);
-    assert_eq!(p.den_radius_m, 4.0);
-    assert_eq!(p.litter_size_max, 4);
-    assert_eq!(p.litter_interval_s, 3.0 * day, "three clock-days");
-    assert_eq!(p.independence_age_s, day, "one clock-day");
-    assert_eq!(p.provision_reserve_fraction, 0.6);
-    assert_eq!(p.provision_efficiency, 0.7);
-    assert_eq!(p.territory_radius_m, 10.0);
-    assert_eq!(p.chase_give_up_s, 20.0);
-    assert_eq!(p.call_s, 1.0);
+    assert!(p.pack_size > 0 && p.litter_size_max > 0);
+    assert!(p.pack_radius_m > 0.0 && p.den_radius_m > 0.0 && p.territory_radius_m > 0.0);
     assert!(p.provision_rate_per_s > 0.0 && p.flank_offset_m > 0.0);
     assert!((0.0..1.0).contains(&p.chase_reserve_floor) && p.chase_reserve_floor > 0.0);
     for f in Founder::ALL.into_iter().filter(|&f| f != C) {
@@ -342,13 +325,30 @@ fn the_r3_chorister_table_is_the_briefs() {
 
 // ------------------------------------------------------------------ the size window
 
+/// The size-window fixture: the test's own 6 m `pack_radius_m`, and a window ratio set
+/// from the two tables' own bodies so that an adult loftstrider is twice what one
+/// chorister may take and two-thirds of what three may.
+fn size_window_config(pack_size: usize) -> FaunaConfig {
+    let mut c = config_with(|p| {
+        p.pack_size = pack_size;
+        p.pack_radius_m = 6.0;
+    });
+    let ratio = 0.5 * c.founder(Founder::Loftstrider).core.body_max / c.founder(C).core.body_max;
+    c.founders[C.index()]
+        .hunter
+        .as_mut()
+        .expect("a hunter")
+        .prey_max_ratio = ratio;
+    c
+}
+
 /// One case of the pack seam: `pack_size` choristers per pack, `packs` packs, the striker
 /// (the first pack's first member) facing an adult loftstrider in its capsule with `feed`
 /// held, every other chorister `others_behind_m` behind it. The strikes begun in 60 ticks.
 fn loftstrider_strikes(pack_size: usize, packs: usize, others_behind_m: f64) -> u64 {
     let world = lane(192, 3);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(config_with(|p| p.pack_size = pack_size));
+    let mut fauna = Fauna::new(size_window_config(pack_size));
     let prey = introduce(
         &mut fauna,
         &world,
@@ -381,12 +381,12 @@ fn loftstrider_strikes(pack_size: usize, packs: usize, others_behind_m: f64) -> 
 }
 
 /// The pack seam (Brief R3): the size window measures prey against the summed body of
-/// packmates within `pack_radius_m` (6 m), so a lone chorister does not take an adult
-/// loftstrider and a pack does. Packmates further than the radius, or choristers of
-/// another pack beside it, do not count.
+/// packmates within `pack_radius_m` (the fixture's 6 m), so a lone chorister does not take
+/// an adult loftstrider and a pack does. Packmates further than the radius, or choristers
+/// of another pack beside it, do not count.
 #[test]
 fn a_lone_chorister_does_not_take_a_loftstrider_and_a_pack_does() {
-    let c = FaunaConfig::default();
+    let c = size_window_config(1);
     let (ch, ls) = (c.founder(C), c.founder(Founder::Loftstrider));
     let h = ch.hunter.expect("a hunter");
     assert!(
@@ -614,6 +614,7 @@ fn a_chorister_can_kill_a_lanternjaw() {
 /// speak of, so only the pack rules hold a birth back.
 fn breeding_config(litter_size_max: u32, litter_interval_s: f64) -> FaunaConfig {
     let mut c = config_with(|p| {
+        p.pack_size = 4;
         p.litter_size_max = litter_size_max;
         p.litter_interval_s = litter_interval_s;
     });
@@ -782,7 +783,8 @@ fn when_the_breeder_dies_the_oldest_adult_breeds() {
 // ------------------------------------------------------------------ pups
 
 /// Provisioning: an adult at the den whose reserve is above `provision_reserve_fraction`
-/// passes reserve to the hungriest pup there at `provision_efficiency` (0.7), the loss
+/// passes reserve to the hungriest pup there at `provision_efficiency` (the test's 0.7,
+/// above the test's 0.6 fraction), the loss
 /// respired, and the books close. An adult under the fraction, or away from the den, gives
 /// nothing.
 #[test]
@@ -792,7 +794,11 @@ fn an_adult_at_the_den_feeds_the_hungriest_pup_at_seventy_percent() {
         let mut flora = Flora::new(FloraConfig::default());
         // The minimal gut: empty founding stomachs, so the adult has nothing to
         // regurgitate and the reserve route (the fallback) is what this case weighs.
-        let mut config = config_with(|p| p.pack_size = 1);
+        let mut config = config_with(|p| {
+            p.pack_size = 1;
+            p.provision_reserve_fraction = 0.6;
+            p.provision_efficiency = 0.7;
+        });
         config.founders[C.index()].gut.s0 = 0.0;
         let mut fauna = Fauna::new(config);
         fauna.set_births_enabled(false);
@@ -948,10 +954,17 @@ fn a_pup_stays_within_den_radius_under_its_heuristic() {
 /// 21 m — inside pack B's territory when B's den is at 30 m. With `b_pack`, B's two members
 /// stand at their den under their heuristic. Returns the nearest any A member came to B's
 /// den and the nearest any B member came to A's den over 200 ticks.
+/// The territory fixture's own radius, which the den and grazer placements are laid out
+/// around.
+const TERRITORY_M: f64 = 10.0;
+
 fn territory_case(b_pack: bool) -> (f64, f64) {
     let world = lane(256, 14);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(config_with(|p| p.pack_size = 2));
+    let mut fauna = Fauna::new(config_with(|p| {
+        p.pack_size = 2;
+        p.territory_radius_m = TERRITORY_M;
+    }));
     let (den_a, den_b) = (face_at(4.0, LANE_Z), face_at(30.0, LANE_Z));
     let a = found_pack(&mut fauna, &world, den_a, HUNTING_CHORISTER);
     let a_members = members(&fauna, a);
@@ -990,16 +1003,12 @@ fn territory_case(b_pack: bool) -> (f64, f64) {
 }
 
 /// Territory: with two packs, neither pack's members enter the other's
-/// `territory_radius_m` (10 m) around its den, though pack A's members stand 1–1.5 m from a
+/// `territory_radius_m` (the fixture's 10 m) around its den, though pack A's members stand 1–1.5 m from a
 /// grazer just inside B's. The control: with no pack B, A's members do go after it, past
 /// where B's territory would begin.
 #[test]
 fn with_two_packs_neither_enters_the_others_territory() {
-    let radius = FaunaConfig::default()
-        .founder(C)
-        .pack
-        .expect("a pack lineage")
-        .territory_radius_m;
+    let radius = TERRITORY_M;
     let (a_near_b, _) = territory_case(false);
     assert!(
         a_near_b < radius - 0.25,
@@ -1018,7 +1027,7 @@ fn with_two_packs_neither_enters_the_others_territory() {
 
 // ------------------------------------------------------------------ call and snapshot
 
-/// The call: a member that begins a strike calls for `call_s` (1 s, 20 ticks) and then
+/// The call: a member that begins a strike calls for its `call_s` and then
 /// stops.
 #[test]
 fn a_member_that_strikes_calls_for_call_s() {

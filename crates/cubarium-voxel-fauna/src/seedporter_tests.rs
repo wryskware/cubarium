@@ -383,15 +383,12 @@ fn lanternberry_seeds(flora: &Flora) -> f64 {
 // ------------------------------------------------------------------ the table
 
 /// **The seedporter's table** (Brief F3, §3.9): the specimen's name and role; a fruit
-/// diet; the 0.5 × 0.25 × 0.2 m body; the browser's table scaled by body volume (r =
-/// 0.025 / 0.1055, so `body_max` ≈ 0.012 in the x1 table); walk 1 BL/s, climb 0.5 of it
-/// at the shredder's wall-climb cost; the glider table (glide from 1 m at ratio 2.5, 3
-/// BL/s, 1.2 × basal; climbs stands from 1 m); gut seeds; diurnal; founded by bodies at
-/// food at a code-default count of 0; on the lanternjaw's list; not a flyer. Its own
-/// manifest at the browser's 37 inputs and three actions. Fruit is a food class, not a
-/// ground pool.
+/// diet; the browser's table scaled by the two tables' body volumes; the shredder's
+/// wall-climb cost; a glider that carries seeds in its gut; diurnal; founded by bodies at
+/// food; on the lanternjaw's list; not a flyer. Its own manifest at the browser's width
+/// and three actions. Fruit is a food class, not a ground pool. No tuned number is pinned.
 #[test]
-fn the_f3_seedporter_table_is_the_briefs() {
+fn the_seedporter_table_scales_the_browsers_and_glides() {
     assert_eq!(SP.name(), "seedporter", "the specimen key");
     assert_eq!(SP.role(), "glider");
     assert!(Founder::ALL.contains(&SP));
@@ -404,29 +401,17 @@ fn the_f3_seedporter_table_is_the_briefs() {
     let sp = FounderPhysiology::frozen(SP);
     let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
     assert_eq!(sp.diet, Diet::only(Food::Fruit));
-    assert_eq!((sp.adult_length_m, sp.adult_width_m, sp.adult_height_m), (0.5, 0.25, 0.2));
-    let r = (0.5 * 0.25 * 0.2) / (grazer.adult_length_m * grazer.adult_width_m * grazer.adult_height_m);
+    let r = (x1.adult_length_m * x1.adult_width_m * x1.adult_height_m)
+        / (grazer.adult_length_m * grazer.adult_width_m * grazer.adult_height_m);
     assert!(close(x1.core.body_max, grazer.core.body_max * r), "the browser's by volume");
-    assert!((x1.core.body_max - 0.012).abs() <= 0.0006, "body_max ≈ 0.012: {}", x1.core.body_max);
-    // The minimal gut: its own daily need, f 0.08 over the 7,200-s day.
-    assert!(close(x1.core.maintenance_per_s * 7200.0, 0.08), "upkeep is its own daily need");
-    let _ = &grazer;
-    assert!(close(sp.cruise_body_lengths_per_s, 1.0), "walk 1 BL/s");
-    assert!(close(sp.climb_speed_fraction, 0.5), "climb at half its walking pace");
     assert!(close(sp.wall_climb_cost_factor, shredder.wall_climb_cost_factor), "the shredder's climb cost");
     assert_eq!(sp.active, crate::Activity::Diurnal);
     assert_eq!((sp.founding, sp.founding_site), (Founding::Bodies, FoundingSite::AtFood));
-    assert_eq!(sp.founding_count, 0, "a new lineage founds none by default");
-    assert_eq!(FaunaConfig::default().founder_counts()[SP.index()], 0);
     assert!(sp.hunter.is_none());
     assert!(sp.flight.is_none(), "it glides, it does not fly");
 
     let g = sp.glider.expect("the seedporter glides");
-    assert!(close(g.climb_min_stand_m, 1.0));
-    assert!(close(g.glide_ratio, 2.5));
-    assert!(close(g.glide_body_lengths_per_s, 3.0));
-    assert!(close(g.glide_cost_factor, 1.2));
-    assert!(close(g.glide_min_height_m, 1.0));
+    assert!(g.glide_ratio > 0.0 && g.glide_body_lengths_per_s > 0.0);
     for other in Founder::ALL.into_iter().filter(|&o| o != SP) {
         let p = FounderPhysiology::frozen(other);
         assert!(p.glider.is_none() && p.gut_seeds.is_none(), "{other:?} neither glides nor carries seeds");
@@ -441,7 +426,7 @@ fn the_f3_seedporter_table_is_the_briefs() {
 
     // Its own manifest, the browser's width and actions.
     let m = SP.manifest();
-    assert_eq!(m.inputs(), Founder::Browser.manifest().inputs(), "37 inputs");
+    assert_eq!(m.inputs(), Founder::Browser.manifest().inputs(), "the browser's width");
     assert_eq!(m.actions.len(), 3);
     assert_ne!(m.digest(), Founder::Browser.manifest().digest());
 }

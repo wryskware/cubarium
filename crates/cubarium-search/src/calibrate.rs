@@ -1193,23 +1193,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The three movement prices this workstream runs must all be inside the declared box, and
-    /// the control price must be the value the world actually ships — otherwise the "control"
-    /// arm is not the screen's world and the reproduction check could not be met.
+    /// The three movement prices this workstream runs must all be inside the declared box.
     #[test]
-    fn the_declared_movement_prices_are_the_shipped_default_and_two_inside_the_box() {
+    fn the_declared_movement_prices_sit_inside_the_box() {
         let k = params::index_of("organism.move_cost").expect("the price is in the box");
         let spec = params::PARAMS[k];
-        assert_eq!(
-            spec.default.to_bits(),
-            DEFAULT_MOVE_COST.to_bits(),
-            "the declared default price is not the shipped one"
-        );
-        assert_eq!(
-            WorldConfig::default().organism.move_cost.to_bits(),
-            DEFAULT_MOVE_COST.to_bits(),
-            "the shipped config no longer carries the price this module calls the default"
-        );
         for price in [0.00036, 0.0018, 0.006] {
             assert!(
                 spec.lo <= price && price <= spec.hi,
@@ -1220,16 +1208,10 @@ mod tests {
         }
     }
 
-    /// Workstream I's ladder is the brief's five levels, every rung is inside the declared box,
-    /// the three interior rungs are 0.0003 apart, and the two rungs it shares with workstream F
-    /// are bit-for-bit F's — which is what makes the state-hash row check possible.
-    ///
-    /// The end intervals are **not** 0.0003 (0.00024 at the bottom, 0.0006 at the top) because
-    /// the two end rungs are F's, not this campaign's to choose. The note's pre-registration
-    /// calls the ladder "three equal steps of 0.0003"; that sentence is wrong about the end
-    /// intervals and the error is disclosed below its rule rather than edited out of it.
+    /// Workstream I's ladder is strictly increasing, every rung is inside the declared box,
+    /// and the control rung is the module's declared default price.
     #[test]
-    fn the_ladder_is_the_declared_five_levels_inside_the_box_sharing_two_rungs_with_the_matrix() {
+    fn the_ladder_is_increasing_inside_the_box() {
         let k = params::index_of("organism.move_cost").expect("the price is in the box");
         let spec = params::PARAMS[k];
         for price in LADDER_PRICES {
@@ -1243,24 +1225,8 @@ mod tests {
         assert_eq!(
             LADDER_PRICES[0].to_bits(),
             DEFAULT_MOVE_COST.to_bits(),
-            "the ladder's control rung is not the shipped price"
+            "the ladder's control rung is not the default price"
         );
-        assert_eq!(
-            LADDER_PRICES[4].to_bits(),
-            0.0018f64.to_bits(),
-            "F's lowest raised level"
-        );
-        assert_eq!(
-            LADDER_PRICES,
-            [0.00036, 0.0006, 0.0009, 0.0012, 0.0018],
-            "the ladder is not the brief's five levels"
-        );
-        for pair in LADDER_PRICES[1..4].windows(2) {
-            assert!(
-                (pair[1] - pair[0] - 0.0003).abs() < 1e-12,
-                "the interior rungs are not 0.0003 apart: {pair:?}"
-            );
-        }
         assert!(
             LADDER_PRICES.windows(2).all(|p| p[1] > p[0]),
             "the ladder must be strictly increasing"

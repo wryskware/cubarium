@@ -1041,8 +1041,6 @@ mod tests {
         for index in 0..6 {
             let baseline = profile_for(&config, index, ProfileVariant::Baseline);
             let candidate = profile_for(&config, index, ProfileVariant::ReserveTargetsV1);
-            assert_eq!(baseline.seek_reserve_fraction, 0.35);
-            assert_eq!(baseline.perch_reserve_fraction, 0.65);
             let mut expected = baseline.clone();
             expected.seek_reserve_fraction = 0.80;
             expected.perch_reserve_fraction = 0.90;

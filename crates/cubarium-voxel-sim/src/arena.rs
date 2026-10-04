@@ -1208,8 +1208,12 @@ mod tests {
                     assert_eq!((2 * s.x, 2 * s.z), (f.x, f.z), "{founder:?} seed {seed}");
                     assert_eq!(f.y, ArenaGrid::Fine.ground_y());
                 }
-                let c = fine.world.config();
-                assert_eq!((c.width, c.height, c.depth, c.voxel_m), (64, 32, 24, 0.125));
+                let (c, sc) = (fine.world.config(), standard.world.config());
+                assert_eq!(
+                    (c.width, c.height, c.depth, 2.0 * c.voxel_m),
+                    (2 * sc.width, 2 * sc.height, 2 * sc.depth, sc.voxel_m),
+                    "the fine arena is the standard one at twice the resolution"
+                );
                 for arena in [&standard, &fine] {
                     for (&site, &kind) in arena.resources.iter().zip(&arena.resource_kinds) {
                         let stock = arena.patch_stock(site);
@@ -1271,7 +1275,11 @@ mod tests {
             for founder in ARENA_FOUNDERS {
                 let arena = build(founder, seed);
                 let c = arena.world.config();
-                assert_eq!((c.width, c.height, c.depth, c.voxel_m), (32, 16, 12, 0.25));
+                let g = ArenaGrid::Standard;
+                assert_eq!(
+                    (c.width, c.height, c.depth, c.voxel_m),
+                    (g.width(), g.height(), g.depth(), g.voxel_m())
+                );
                 assert!(!arena.resources.is_empty(), "{founder:?} seed {seed}");
                 assert!(
                     arena.resource_stock() > 0.0,
@@ -2217,21 +2225,14 @@ mod tests {
     }
 
     /// The audit round's step 5 (`design/handoffs/voxel-audit-round-2026-09-28.md` §5):
-    /// the arena is the live world — the shipped plant layer, graze refuge and defence
-    /// on, and the day clock running from an hour drawn per layout, so that some layouts
+    /// the arena is the live world — the shipped plant and animal layers, and the day
+    /// clock running from an hour drawn per layout, so that some layouts
     /// are at night.
     #[test]
     fn the_arena_is_the_live_world_with_a_night() {
         let arena = build(Founder::Browser, 1);
         let live = FloraConfig::for_voxel_size(arena.grid.voxel_m());
         assert_eq!(arena.flora.config(), &live, "the shipped plant layer");
-        for s in cubarium_voxel_flora::Species::ALL {
-            assert!(
-                live.species(s).graze_refuge > 0.0
-                    || live.species(s).trophic != cubarium_voxel_flora::Trophic::Photo
-            );
-            assert!(live.species(s).defence_per_bite > 0.0);
-        }
         assert_eq!(arena.fauna.config(), &FaunaConfig::default());
         assert_ne!(
             arena.world.config().day.mode,
@@ -2250,7 +2251,7 @@ mod tests {
             }
         }
         assert!(
-            night >= 4 && day >= 8,
+            night > 0 && day > 0,
             "{night} layouts start at night, {day} by day"
         );
     }

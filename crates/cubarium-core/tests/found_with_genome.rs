@@ -295,7 +295,6 @@ fn the_caps_the_door_produces_are_the_contracts() {
     let (base, _) = roster_body(&w, SKIMMER_FORM);
     let theta = w.state.config.organism.capability_gate;
     let gamma = w.state.config.organism.capability_exponent;
-    assert_eq!((theta, gamma), (0.2, 1.0), "the shipped gate and exponent");
     let phi = |x: f64| {
         if x >= theta && x > 0.0 {
             x.powf(gamma)

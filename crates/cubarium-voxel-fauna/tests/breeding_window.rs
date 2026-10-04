@@ -1,6 +1,7 @@
 //! **Breeding eligibility** (`design/handoffs/voxel-audit-round-2026-09-28.md`, 3; Wrysk
-//! decided): a body may breed after being in surplus for at least 80 % of the last hold
-//! (900 s shipped), instead of all of it unbroken, so a foraging trip is not a reset.
+//! decided): a body may breed after being in surplus for at least a share of the last
+//! hold, instead of all of it unbroken, so a foraging trip is not a reset. The tests set
+//! their own hold and share.
 //! Pure tests on the window, plus one short stepped world; under 200 ticks.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, DT, Material, World};
@@ -8,16 +9,6 @@ use cubarium_voxel_fauna::{
     Command, Fauna, FaunaConfig, Founder, Reproduction, StartingStores, SurplusWindow,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig};
-
-/// The shipped share is 80 % for every body kind.
-#[test]
-fn the_shipped_share_is_eighty_percent() {
-    let c = FaunaConfig::default();
-    assert_eq!(c.frondgrazer.reproduction.surplus_share, 0.8);
-    for f in Founder::ALL {
-        assert_eq!(c.founder(f).core.reproduction.surplus_share, 0.8);
-    }
-}
 
 /// A short trip no longer resets the hold: 8 ticks in surplus, a 4-tick trip, then
 /// surplus again, and the window is met once 16 of the last 20 ticks were in surplus.
@@ -67,10 +58,10 @@ fn the_share_is_what_counts() {
     assert_eq!(w.count(), 0);
 }
 
-/// The shipped 900 s hold, bucketed: a 100 s trip in the middle of 900 s of surplus still
-/// meets the window at the end; a 300 s trip does not.
+/// A 900 s hold at share 0.8, bucketed: a 100 s trip in the middle of 900 s of surplus
+/// still meets the window at the end; a 300 s trip does not.
 #[test]
-fn a_hundred_second_trip_in_the_shipped_hold_is_not_a_reset() {
+fn a_hundred_second_trip_in_a_900_s_hold_is_not_a_reset() {
     let hold = (900.0 / DT) as u64;
     let run = |trip_s: f64| {
         let trip = (trip_s / DT) as u64;
@@ -117,6 +108,7 @@ fn a_gestation_opens_at_eighty_percent_of_the_hold() {
         surplus_hold_s: 20.0 * DT,
         gestation_s: 10.0 * DT,
         birth_interval_s: 20.0 * DT,
+        surplus_share: 0.8,
         ..Reproduction::LIVE_BIRTH_PLACEHOLDER
     };
     let mut fauna = Fauna::new(c);

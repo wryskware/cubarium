@@ -2755,53 +2755,6 @@ mod tests {
         );
     }
 
-    /// **Study, not a test** (four minutes in release): the WX1d regression itself. The
-    /// desk terrarium at seed 2 (`config/desktop/terrarium.toml`) is founded with its lake
-    /// at rest, and its water table reaches the lake, so WX1b's low-table ring rule never
-    /// touched its re-entry floor or its lake drain.
-    #[test]
-    #[ignore = "study: run by name"]
-    fn the_desk_terrarium_at_seed_2_is_founded_with_its_lake_at_rest() {
-        let cfg = Config {
-            width: 256,
-            height: 128,
-            depth: 48,
-            voxel_m: 0.125,
-            seed: 2,
-            landform: cubarium_voxel::Landform::Terrarium(cubarium_voxel::Terrarium::DESK),
-            ..Config::default()
-        };
-        let mut world = World::new(cfg);
-        let lake0 = cubarium_voxel::hydrate::lake(&world);
-        let table = world.aquifer_head_m();
-        let lake_head = f64::from(lake0.level_y.saturating_sub(1)) * world.config().voxel_m;
-        assert!(
-            table + 1e-9 >= lake_head,
-            "the terrarium's table reaches its lake: {table} against {lake_head}"
-        );
-        let (floor, drain) = (
-            world.config().reentry_floor_head_m,
-            world.config().lake_drain_m2_per_s,
-        );
-        let pre = pre_roll(&mut world, true);
-        let founded = cubarium_voxel::hydrate::lake(&world).volume_m3;
-        for _ in 0..10 * 60 * cubarium_voxel::TICK_HZ {
-            world.step();
-        }
-        let later = cubarium_voxel::hydrate::lake(&world).volume_m3;
-        eprintln!(
-            "founded at {founded:.2} m³ (tick {}), {later:.2} m³ ten minutes on; floor \
-             {floor}, drain {drain}; {:?}",
-            pre.report.ticks, pre.report
-        );
-        assert_eq!(world.config().reentry_floor_head_m, floor);
-        assert_eq!(world.config().lake_drain_m2_per_s, drain);
-        assert!(
-            (founded - later).abs() <= 0.1 * later,
-            "founded at {founded:.2} m³, {later:.2} m³ ten minutes on"
-        );
-    }
-
     /// **The pre-roll** (item 1). The world opens with its shower: by the time anything
     /// is planted it has fallen and ended, and a dry gap is drawn. A face that stood
     /// under more than a species' drown depth **during** the shower is not offered to
@@ -2951,16 +2904,11 @@ mod tests {
         assert!((1..=3).contains(&browsers), "the preset's three, at most: {got:?}");
     }
 
-    /// Roster R1: **a preset that founds six capgnawers founds up to six, near glowcaps;
-    /// the code default founds none.** The capgnawer's founding site is at its food, and
+    /// Roster R1: **a preset that founds six capgnawers founds up to six, near glowcaps.** The capgnawer's founding site is at its food, and
     /// its food in a stand is a glowcap's cap, so every placed body stands within two cells
     /// of a stocked glowcap. The other lineages are switched off so the count is its own.
     #[test]
-    fn a_preset_capgnawer_count_founds_up_to_six_near_glowcaps_and_the_default_none() {
-        let code = cubarium_voxel_fauna::FaunaConfig::default().founder_counts();
-        assert_eq!(code[Founder::Capgnawer.index()], 0, "the code default founds none");
-        assert_eq!(code[Founder::Loftstrider.index()], 0, "the code default founds none");
-
+    fn a_preset_capgnawer_count_founds_up_to_six_near_glowcaps() {
         let file: toml::Table = r#"
             [fauna.founders.littershredder]
             founding_count = 0
@@ -3064,23 +3012,14 @@ mod tests {
     }
 
     /// Roster R2b: **film at founding is a flora knob, and the ripple-snail is founded on
-    /// it.** With `seed_film_at_founding` false (the code default, so co-training worlds do
-    /// not change) a founded world has no film, and a preset asking for eight snails places
-    /// none and reports the shortfall. With it true the founding seeds the film
+    /// it.** With `seed_film_at_founding` false a founded world has no film, and a preset
+    /// asking for eight snails places none and reports the shortfall. With it true the
+    /// founding seeds the film
     /// (`Flora::seed_film`), and the same preset founds up to eight snails, every one on a
     /// face holding film. The other lineages are switched off so the count is its own.
     #[test]
     fn film_at_founding_is_a_knob_and_a_preset_of_eight_founds_snails_on_film() {
-        assert!(
-            !cubarium_voxel_flora::FloraConfig::default().seed_film_at_founding,
-            "the code default seeds no film"
-        );
         let snail = Founder::RippleSnail;
-        assert_eq!(
-            cubarium_voxel_fauna::FaunaConfig::default().founder_counts()[snail.index()],
-            0,
-            "the code default founds no snail"
-        );
         let resolve = |film: bool| {
             let file: toml::Table = format!(
                 r#"
@@ -3148,19 +3087,14 @@ mod tests {
     }
 
     /// F1 (the roster brief's "F1 overrides"): **a preset of six bellwings founds up to six,
-    /// perched within reach of nectar; the code default founds none.** Bellwings are seeded
+    /// perched within reach of nectar.** Bellwings are seeded
     /// at world start only where the startup acceptance finds nectar sources in reach: every
     /// placed body is a perched flyer within its fan's 4 m (horizontally, on the ring) of a
     /// bloomcrown past its seedling profile or of a latticevine-covered face. The other
     /// lineages are switched off so the count is its own.
     #[test]
-    fn a_preset_of_six_bellwings_founds_them_perched_near_nectar_and_the_default_none() {
+    fn a_preset_of_six_bellwings_founds_them_perched_near_nectar() {
         let bw = Founder::Bellwing;
-        assert_eq!(
-            cubarium_voxel_fauna::FaunaConfig::default().founder_counts()[bw.index()],
-            0,
-            "the code default founds none"
-        );
         let file: toml::Table = r#"
             [fauna.founders.littershredder]
             founding_count = 0
@@ -3227,19 +3161,13 @@ mod tests {
     }
 
     /// F3 (Brief F3, "Founding"): **a preset of four seedporters founds up to four, at
-    /// food — near a fruiting lanternberry or a latticevine-covered face; the code default
-    /// founds none.** The seedporter eats fruit only; every placed body stands within 4 m
+    /// food — near a fruiting lanternberry or a latticevine-covered face.** The seedporter eats fruit only; every placed body stands within 4 m
     /// (horizontally, on the ring) of a lanternberry past its seedling profile or of a
     /// latticevine-covered face. The other lineages are switched off so the count is its
     /// own.
     #[test]
-    fn a_preset_of_four_seedporters_founds_them_near_lanternberry_and_latticevine_and_the_default_none() {
+    fn a_preset_of_four_seedporters_founds_them_near_lanternberry_and_latticevine() {
         let sp = Founder::Seedporter;
-        assert_eq!(
-            cubarium_voxel_fauna::FaunaConfig::default().founder_counts()[sp.index()],
-            0,
-            "the code default founds none"
-        );
         let file: toml::Table = r#"
             [fauna.founders.littershredder]
             founding_count = 0
@@ -3362,14 +3290,12 @@ mod tests {
     }
 
     /// R3 (Brief R3, "Founding"): **a preset of one chorister pack founds `pack_size`
-    /// choristers with one pack id and a breeder, the den covered; the code default founds
-    /// none.** The authored scene, the other lineages at their defaults (the prey are
+    /// choristers with one pack id and a breeder, the den covered.** The authored scene, the other lineages at their defaults (the prey are
     /// there).
     #[test]
-    fn a_preset_of_one_chorister_pack_founds_a_pack_on_a_covered_den_and_the_default_none() {
+    fn a_preset_of_one_chorister_pack_founds_a_pack_on_a_covered_den() {
         let c = Founder::Chorister;
         let code = cubarium_voxel_fauna::FaunaConfig::default();
-        assert_eq!(code.founder_counts()[c.index()], 0, "the code default founds none");
         let cover = code.founder(c).pack.expect("a pack lineage").den_cover_m;
         {
             let world = crate::scene::authored(config());
@@ -3801,16 +3727,12 @@ mod tests {
         );
     }
 
-    /// Founders arrive grown and **full** ([`founder_arrival`]; night survival, brief test
-    /// 8): every founder's reserve is its cap × `founding.arrival_reserve`, and the knob's
-    /// default is 1. (It was half until 2026-10-02: a full founder slept at its lineage's
-    /// night with no appetite; Part 1a of `design/ecology-timescales-2026-10-02.md` wants
-    /// it to enter that sleep full.)
+    /// Founders arrive grown with the knob's reserve ([`founder_arrival`]; night survival,
+    /// brief test 8): every founder's reserve is its cap × `founding.arrival_reserve`.
     #[test]
-    fn a_seeded_founder_arrives_grown_and_full() {
+    fn a_seeded_founder_arrives_grown_with_the_knobs_reserve() {
         let world = plain(24, 6);
         let knob = cubarium_voxel_fauna::FoundingConfig::default().arrival_reserve;
-        assert_eq!(knob, 1.0, "the knob's default");
         for founder in Founder::ALL {
             let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());
             install_heuristics(&mut fauna);

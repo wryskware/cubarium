@@ -38,6 +38,14 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
     let mut senses = Senses::new();
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    let seeded = sim
+        .fauna()
+        .view()
+        .animals
+        .iter()
+        .filter(|a| a.founder.is_some())
+        .count();
+    assert!(seeded > 0, "the habitat seeds founders");
     let seeded_layers: std::collections::HashSet<u32> = sim
         .fauna()
         .view()
@@ -67,7 +75,7 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
         .collect();
     poses.sort_by_key(|p| p.0);
 
-    assert_eq!(poses.len(), 16, "eight founders of each lineage");
+    assert_eq!(poses.len(), seeded, "every seeded founder is still there");
     // Every founder still stands on a support face: the step rule moves `site.y` and
     // `step::terrain` removes anything whose site is not one, so a body that stepped
     // wrong would be gone rather than wrong.

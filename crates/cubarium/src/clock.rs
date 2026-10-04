@@ -292,15 +292,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_simulation_is_twenty_hertz_and_rendering_defaults_to_sixty() {
-        assert_eq!(TICK_HZ, 20);
-        assert_eq!(RENDER_HZ, 60);
-        assert!((DT - 0.05).abs() < 1e-12);
-        assert_eq!(tick_period(), Duration::from_millis(50));
-        // Three render frames per tick at the default rate.
+    fn the_tick_and_render_periods_follow_their_rates() {
+        assert!((DT - 1.0 / f64::from(TICK_HZ)).abs() < 1e-12);
+        assert_eq!(
+            tick_period(),
+            Duration::from_nanos(1_000_000_000 / u64::from(TICK_HZ))
+        );
+        // Render frames per tick at the default rate.
         assert_eq!(
             tick_period().as_nanos() / render_period(RENDER_HZ).as_nanos(),
-            3
+            u128::from(RENDER_HZ / TICK_HZ)
         );
         assert_eq!(clamp_fps(0), MIN_FPS);
         assert_eq!(clamp_fps(10_000), MAX_FPS);

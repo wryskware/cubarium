@@ -9,11 +9,27 @@ use super::screen::{ScreenSpec, rsf};
 
 const VOXEL_M: f64 = 0.125;
 
+/// The bands, margin and weights are set here by hand, so the checks below read these
+/// numbers and never the shipped ones.
+fn spec() -> ScreenSpec {
+    ScreenSpec {
+        r: [0.02, 0.3],
+        s: [0.02, 0.2],
+        f_min: 10.0,
+        base: 200.0,
+        k: 10.0,
+        run_margin: 2.0,
+        k_soft: 5.0,
+        r_readout: false,
+        ..ScreenSpec::default()
+    }
+}
+
 /// A hand-built world where parking wins by arithmetic — one founded turf whose regrowth
 /// alone keeps a parked browser fed many times over — is rejected, on R.
 #[test]
 fn the_screen_rejects_a_world_where_parking_wins_by_arithmetic() {
-    let spec = ScreenSpec::default();
+    let spec = spec();
     let mut flora = FloraConfig::for_voxel_size(VOXEL_M);
     let turf = flora.species_mut(Species::Springturf);
     turf.foliage_rate *= 1000.0;
@@ -39,7 +55,7 @@ fn the_screen_rejects_a_world_where_parking_wins_by_arithmetic() {
 /// and F alike (audit §1.4's one lever).
 #[test]
 fn the_three_numbers_fall_with_the_browsers_mass() {
-    let spec = ScreenSpec::default();
+    let spec = spec();
     let flora = FloraConfig::for_voxel_size(VOXEL_M);
     let light = FaunaConfig::default();
     let mut heavy = light;
@@ -57,7 +73,7 @@ fn the_three_numbers_fall_with_the_browsers_mass() {
 /// The bands: inside all three passes; each side of each band fails and names it.
 #[test]
 fn the_bands_pass_inside_and_fail_outside() {
-    let spec = ScreenSpec::default();
+    let spec = spec();
     let mut s = rsf(
         &FloraConfig::for_voxel_size(VOXEL_M),
         &FaunaConfig::default(),
@@ -87,7 +103,7 @@ fn the_bands_pass_inside_and_fail_outside() {
 /// the log-distance outside each, and always above the worst candidate that ran.
 #[test]
 fn the_screen_penalty_grows_with_the_distance_outside_the_bands() {
-    let spec = ScreenSpec::default();
+    let spec = spec();
     let mut s = rsf(
         &FloraConfig::for_voxel_size(VOXEL_M),
         &FaunaConfig::default(),
@@ -146,8 +162,7 @@ fn the_shipped_start_sets_its_genes_and_refuses_unknown_ones() {
 #[test]
 fn the_soft_margin_runs_near_misses_and_refuses_the_rest() {
     use super::screen::Verdict;
-    let spec = ScreenSpec::default();
-    assert_eq!((spec.run_margin, spec.k_soft), (2.0, 5.0), "the defaults");
+    let spec = spec();
     let mut s = rsf(
         &FloraConfig::for_voxel_size(VOXEL_M),
         &FaunaConfig::default(),

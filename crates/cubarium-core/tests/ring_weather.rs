@@ -214,21 +214,14 @@ fn the_latitude_span_is_sixty_point_five_degrees() {
 // Weather is unchanged
 // ---------------------------------------------------------------------------
 
-/// §5a: "the config is unchanged … `blobs_per_channel` stays **3** and `amplitude` is
-/// unchanged".
+/// §5a: the weather config needs nothing ring-specific; a ring world's blobs are the
+/// configured number per channel, each a unit centre with a perpendicular unit axis.
 #[test]
-fn blobs_per_channel_is_three_and_the_cap_is_fifty_five_degrees() {
+fn the_weather_makes_the_configured_blobs_per_channel() {
     let cfg = WeatherConfig::default();
-    assert_eq!(
-        cfg.blobs_per_channel, 3,
-        "§5a's conclusion: the cube's defaults transfer"
-    );
-    assert_eq!(cfg.blob_radius_deg, 55.0);
-    assert_eq!(cfg.amplitude, 0.3);
-
     let weather = Weather::new(&cfg, SEED);
-    assert_eq!(weather.light.len(), 3);
-    assert_eq!(weather.moisture.len(), 3);
+    assert_eq!(weather.light.len(), cfg.blobs_per_channel as usize);
+    assert_eq!(weather.moisture.len(), cfg.blobs_per_channel as usize);
     for b in weather.light.iter().chain(weather.moisture.iter()) {
         assert!(
             (dot(b.center, b.center) - 1.0).abs() <= 1e-12,

@@ -1147,10 +1147,12 @@ mod tests {
         assert_eq!(algae_light(0.0, 0.1, &cfg), 0.1);
         assert_eq!(algae_light(f64::NAN, 0.1, &cfg), 0.1);
         let full = cfg.water.algae_light;
-        assert!((algae_light(0.15, 0.0, &cfg) - 0.5 * full).abs() < 1e-12);
-        assert!((algae_light(0.3, 0.0, &cfg) - full).abs() < 1e-12);
-        assert!((algae_light(5.0, 0.0, &cfg) - full).abs() < 1e-12);
-        assert_eq!(algae_light(1.0, 0.9, &cfg), 0.9);
+        let depth = cfg.water.algae_depth;
+        assert!((algae_light(0.5 * depth, 0.0, &cfg) - 0.5 * full).abs() < 1e-12);
+        assert!((algae_light(depth, 0.0, &cfg) - full).abs() < 1e-12);
+        assert!((algae_light(10.0 * depth, 0.0, &cfg) - full).abs() < 1e-12);
+        let brighter = 0.5 * (1.0 + full);
+        assert_eq!(algae_light(10.0 * depth, brighter, &cfg), brighter);
 
         // A dark cell grows nothing dry and something wet; a flooded dark cell drowns.
         let mut h = Harness::new(cfg);
@@ -1243,7 +1245,8 @@ mod tests {
     #[test]
     fn the_initial_litter_lies_where_it_is_dark() {
         let cfg = WorldConfig::default();
-        assert_eq!(cfg.detritus.initial_dark, 1.2);
+        let dark = cfg.detritus.initial_dark;
+        assert!(dark > 0.0, "this test reads a non-zero initial_dark");
         let mut light: Box<[f64]> = vec![0.0f64; CUBE_CELL_COUNT].into_boxed_slice();
         let moisture: Box<[f64]> = vec![1.0f64; CUBE_CELL_COUNT].into_boxed_slice();
         light[0] = 1.0;
@@ -1251,8 +1254,8 @@ mod tests {
         light[2] = 0.25;
         let f = Fields::new(&cfg, &light, &moisture);
         assert_eq!(f.d[0], 0.0, "a fully lit cell gets no litter");
-        assert_eq!(f.d[1], 1.2, "a dark cell gets initial_dark");
-        assert_eq!(f.d[2], 1.2 * 0.75);
+        assert_eq!(f.d[1], dark, "a dark cell gets initial_dark");
+        assert_eq!(f.d[2], dark * 0.75);
         assert_eq!(
             f.de[2],
             cfg.detritus.energy_cap * f.d[2],

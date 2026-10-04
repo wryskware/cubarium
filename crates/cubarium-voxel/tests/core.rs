@@ -1694,6 +1694,8 @@ fn staircase() -> World {
         depth: 1,
         voxel_m: 1.0,
         seed: 11,
+        // No water table: the fixture's own, not the default's.
+        initial_aquifer_head_m: 0.0,
         // 0.0025 and not 0.01 since package 1c
         // (`design/handoffs/voxel-water-units-2026-09-22.md`). This fixture's premise,
         // stated on both tests below, is that the rain is far under what the soil can
@@ -1872,7 +1874,7 @@ fn a_table_at_zero_changes_nothing() {
     assert_eq!(
         w.config().initial_aquifer_head_m,
         0.0,
-        "the default is a dry aquifer"
+        "the fixture is a dry aquifer"
     );
     // 1600 ticks and not 400: the fixture's rain is a quarter of what it was (see
     // `staircase`), so it takes four times as long to deliver the same 0.2 m3 a column

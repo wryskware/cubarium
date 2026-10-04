@@ -1974,9 +1974,8 @@ fn a_cubes_bend_budgets_are_the_nine_pixel_ones_and_a_rings_scale_with_its_stamp
     }
 
     // The panel's rung: `9·S = 18`, still well inside the ring's 180, and every clip of
-    // the shipped pack is then past the tip its species asks for. The two that were
-    // clipped on the cube are `tendrilfan` (0.314 px of budget against a wanted 0.55) and
-    // `glasscane` (0.465 against 0.50); both draw their whole tip here.
+    // the shipped pack is then past the tip its species asks for, including the ones the
+    // cube's 9-pixel budget clips.
     let panel = ArtGeometry::new(Topology::Ring { w: 640, h: 360 }, Scale::new(2.0));
     assert_eq!(panel.bend_footprint(), 18.0);
     for p in &pack.plants {
@@ -2002,8 +2001,14 @@ fn a_cubes_bend_budgets_are_the_nine_pixel_ones_and_a_rings_scale_with_its_stamp
 
     // And a presenter built for a cube and *fitted* to the panel's ring re-measures them:
     // the budgets are a property of the pack and of the world, not of the pack alone.
+    let tendrilfan = pack
+        .plants
+        .iter()
+        .find(|p| p.name == "tendrilfan")
+        .map(plant_bend_budget)
+        .expect("the pack carries tendrilfan");
     let mut presenter = ArtPresenter::new(pack);
-    assert_eq!(presenter.bend_budget("tendrilfan"), 0.3142539178559581);
+    assert_eq!(presenter.bend_budget("tendrilfan"), tendrilfan);
     presenter.fit(Topology::Ring { w: 640, h: 360 }, Scale::new(2.0));
     assert!(presenter.bend_budget("tendrilfan") > 10.0);
 }

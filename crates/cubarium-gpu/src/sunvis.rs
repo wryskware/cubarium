@@ -303,16 +303,27 @@ mod tests {
 
     #[test]
     fn a_switched_off_effect_is_off_in_the_pipeline_and_the_flat_tier_has_none() {
+        let all = Effects {
+            shadows: true,
+            reflections: true,
+            volumetric: true,
+            glow: true,
+            ao: true,
+            ..Effects::default()
+        };
         let e = Effects {
             shadows: false,
-            volumetric: true,
-            ..Effects::default()
+            ..all
         };
         assert_eq!(e.spec_constants(true), [1, 0, 1, 1, 1, 1]);
         assert_eq!(e.spec_constants(false), [0; 6]);
-        assert_eq!(Effects::default().spec_constants(true), [1, 1, 1, 0, 1, 1]);
+        let no_volume = Effects {
+            volumetric: false,
+            ..all
+        };
+        assert_eq!(no_volume.spec_constants(true), [1, 1, 1, 0, 1, 1]);
         assert!(e.volume_on(true) && !e.volume_on(false));
-        assert!(!Effects::default().volume_on(true));
+        assert!(!no_volume.volume_on(true));
     }
 
     #[test]

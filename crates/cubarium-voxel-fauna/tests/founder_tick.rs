@@ -1004,10 +1004,10 @@ fn the_motor_respiration_counter_and_the_ledger_split_track_one_interval() {
 /// **fresh** controller of the parent's kind: its own memory, never the parent's
 /// instance.
 ///
-/// The parent here is a browser founder at full stores: `body_max` 0.05 is above the
-/// `birth_body` 0.03 and a full reserve 0.025 is above the `birth_cost` 0.01 plus this
-/// test's `surplus_floor`, so it is eligible from the first tick. The shipped hold,
-/// gestation and interval are minutes long, so this test runs the rule on **its own**
+/// The parent here is a browser founder at full stores: its `body_max` is above its
+/// `birth_body` and a full reserve is above its `birth_cost` plus this test's
+/// `surplus_floor`, so it is eligible from the first tick. The shipped hold, gestation and
+/// interval are long, so this test runs the rule on **its own**
 /// short placeholders — a quarter-second hold, a quarter-second gestation, a
 /// half-second interval — which is what keeps it inside the round's 200-tick bar
 /// without weakening what it asserts. Nothing is free: the parcel leaves the parent's

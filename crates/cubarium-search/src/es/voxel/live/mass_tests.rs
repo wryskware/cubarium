@@ -376,16 +376,12 @@ fn round_two_centres_load_only_as_a_transfer() {
 
 /// The scale sweep runs the world the desktop host runs: `voxel-ecology-check --world
 /// config/desktop/terrarium.toml` founds from that file's `[world]`, read as the app reads
-/// it (the designed terrarium at 256 x 128 x 48, 0.125 m).
+/// it.
 #[test]
 fn the_check_reads_a_host_world_file() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../config/desktop/terrarium.toml");
     let c = super::search::check_world_config(Some(&path)).expect("the desktop terrarium");
-    assert_eq!(
-        (c.width, c.height, c.depth, c.voxel_m),
-        (256, 128, 48, 0.125)
-    );
     assert!(matches!(c.landform, cubarium_voxel::Landform::Terrarium(_)));
     let small = super::search::check_world_config(None).expect("the default");
     assert_eq!(small, super::world::training_config());

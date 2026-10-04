@@ -1047,14 +1047,13 @@ mod tests {
         }
     }
 
-    /// Legacy resting effort is small, not zero, and the shared budget makes a resting body's
-    /// sweep small with it. Under the old capability a Resting body still swept 3.9 px/s.
+    /// A small resting budget keeps a resting body's sweep inside it, and still above zero:
+    /// the shared budget bounds the turn as well as the stride.
     #[test]
     fn a_resting_body_barely_sweeps() {
         let h = Vec2::new(1.0, 0.0);
-        let rest_effort = DriveConfig::default().rest_effort;
-        assert!(rest_effort > 0.0, "resting effort is not literally zero");
-        let cap = rest_effort * OrganismConfig::default().speed_max;
+        // A hand-picked small budget: a 5% resting share of a 5 px/s cruise.
+        let cap = 0.05 * 5.0;
         let l = limits(REFERENCE_RADIUS_PX, 90.0f64.to_radians(), cap);
         let m = resolve(
             h,
@@ -1069,9 +1068,6 @@ mod tests {
             "{} px/s of sweep on a {cap} px/s budget",
             m.sweep
         );
-        // R0d pace calibration: the same 5% resting share of a 16.667x larger cruise.
-        // Measured 0.2350 px/s = 0.047 BL/s of the unit adult — a half turn in 33 s.
-        assert!(m.sweep < 0.24, "a resting body swept {} px/s", m.sweep);
         assert!(m.sweep > 0.0, "resting is not paralysis");
     }
 

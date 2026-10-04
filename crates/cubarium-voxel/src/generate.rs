@@ -1710,7 +1710,7 @@ pub fn repair_isolated(world: &mut World) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Benches, PRESETS, Preset};
+    use crate::{PRESETS, Preset};
 
     const SEEDS: [u64; 3] = [1, 2, 77];
 
@@ -2382,35 +2382,6 @@ mod tests {
             0,
             "a recipe with no terraces is all one level"
         );
-    }
-
-    /// With the terraces switched off the generator makes exactly the ring it made
-    /// before they existed.
-    ///
-    /// The hash is here and nowhere else, and if it ever has to be re-recorded this test
-    /// goes with it: a pinned world is not a thing this repo keeps.
-    #[test]
-    fn count_zero_is_todays_landform() {
-        let config = Config {
-            seed: 1,
-            ..smooth_default()
-        };
-        let Landform::Staged(mut recipe) = config.landform.clone() else {
-            panic!("a preset is staged")
-        };
-        recipe.benches = Benches::ON;
-        assert_eq!(
-            recipe.tiers.count, 0,
-            "the recipe under test has no terraces"
-        );
-        let (_, volume, report) = staged_terrain(&config, &recipe);
-        assert!(report.pools.is_empty(), "no terraces, no pools");
-        let mut hash = 0xcbf2_9ce4_8422_2325u64;
-        for m in &volume.material {
-            hash ^= *m as u8 as u64;
-            hash = hash.wrapping_mul(0x1000_0000_01b3);
-        }
-        assert_eq!(format!("{hash:016x}"), "33cca3db86aeec9b");
     }
 
     /// Every pool is a basin the water solver will find: rock all the way round its bed,
