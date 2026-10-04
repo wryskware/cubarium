@@ -906,7 +906,13 @@ fn a_broad_crown_is_reached_by_its_cells_and_a_stripped_stand_is_not_listed() {
 #[test]
 fn a_stand_stripped_every_tick_burns_reserve_and_grows_no_wood_and_regrows_when_left_alone() {
     let mut world = pillars(8, &[0, 2], 0.6);
-    let mut flora = Flora::new(no_refuge());
+    let mut config = no_refuge();
+    // The reflush the reserve carries through 200 stripped ticks: the earlier turf's
+    // `foliage_rate`. The 2026-10-03 grass (0.06) with no refuge spends its whole reserve
+    // on reflushing within those ticks and then has nothing to regrow from; a live grass
+    // keeps its basal buds (`graze_refuge` 0.4), which is what this fixture takes away.
+    config.springturf.foliage_rate = 0.02;
+    let mut flora = Flora::new(config);
     let grazed = plant(&mut flora, &world, 0, Species::Springturf);
     let quiet = plant(&mut flora, &world, 2, Species::Springturf);
 

@@ -170,8 +170,12 @@ fn species_rows() -> Vec<Row> {
         r("clonal_share", "fraction of packages", fraction, "runner/rhizome share").search(0.0, 1.0).grade("C").prov("tuned"),
         r("spore_tries", "tries", Range::at_least(1.0), "a spore package's landing attempts").evolve().grade("C").prov("tuned"),
         r("seed_mass", "minimum packages", Range::at_least(1.0), "seed size and lottery weight").evolve().grade("D"),
-        r("overtop_per_check", "probability per check", fraction, "a woody seedling comes up through a ground cover")
+        r("overtop_per_check", "probability per check", fraction, "a seedling comes up through a ground cover overtop_covers allows")
             .evolve().grade("C").prov("tuned"),
+        // A list of species names, not a number: the row documents it, and no numeric
+        // leaf ever matches it (hence optional). Empty = any ground cover (the woody rule).
+        r("overtop_covers", "species names ([] = any ground cover)", finite, "the ground covers a seedling may come up through")
+            .optional().grade("N").prov("decision"),
         r("crown_height_m.*", "m", nonneg, "crown top above the support [min, max]").evolve().grade("B"),
         r("crown_radius_m.*", "m", nonneg, "crown half-width [min, max]").evolve().grade("B"),
         r("graze_refuge", "fraction of each layer's capacity", Range::closed(0.0, 1.0).open_hi(), "foliage no bite can take")
