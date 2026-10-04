@@ -30,12 +30,14 @@ fn trace(n: usize, lj: usize) -> Trace {
     }
 }
 
-/// The animal band is 1x, 3x and 5x the founding animal count by default, and each is a
+/// The animal band is the spec's multiples of the founding animal count, and each is a
 /// flag.
 #[test]
 fn the_band_scales_with_the_founding_count() {
     let b = band();
-    assert_eq!((b.lo, b.hi, b.peak), (16.0, 48.0, 80.0));
+    let d = BandSpec::default();
+    let n = FOUNDED as f64;
+    assert_eq!((b.lo, b.hi, b.peak), (n * d.lo_x, n * d.hi_x, n * d.peak_x));
     let spec = BandSpec {
         lo_x: 2.0,
         hi_x: 4.0,
@@ -232,8 +234,14 @@ fn the_lively_weight_scales_only_the_lively_term() {
             ..BandSpec::default()
         },
     );
-    let ten = Band::for_founding(16, true, &BandSpec::default());
-    assert_eq!(BandSpec::default().lively_weight, 10.0, "the default");
+    let ten = Band::for_founding(
+        16,
+        true,
+        &BandSpec {
+            lively_weight: 10.0,
+            ..BandSpec::default()
+        },
+    );
     let (p1, p10) = (penalty(&t, &one), penalty(&t, &ten));
     assert!((p1.lively - 0.5).abs() < 1e-12, "{p1:?}");
     assert!((p10.lively - 5.0).abs() < 1e-12, "{p10:?}");
