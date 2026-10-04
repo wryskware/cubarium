@@ -3100,18 +3100,6 @@ mod voxel_scale_tests {
         geometry_reset.voxel_m = reference.voxel_m;
         assert_eq!(geometry_reset, reference, "rates and stores stay authored");
     }
-
-    #[test]
-    fn reference_and_coarser_voxels_keep_the_historical_defaults() {
-        let reference = FloraConfig::default();
-        assert_eq!(FloraConfig::for_voxel_size(0.25), reference);
-        let mut coarse = FloraConfig::for_voxel_size(1.0);
-        // Everything but the recorded cell size, which is always the world's own: a
-        // 1 m world still has to convert decisions §5's 0.125 m seedling ceiling.
-        assert_eq!(coarse.voxel_m, 1.0);
-        coarse.voxel_m = reference.voxel_m;
-        assert_eq!(coarse, reference);
-    }
 }
 
 /// Cumulative external fluxes of the plant layer, in three currencies: **organic

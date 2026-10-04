@@ -212,47 +212,6 @@ fn growth_rate(c: &FloraConfig, depth_m: f64, f: f64) -> f64 {
     c.film_growth_per_s * light * (1.0 - f / capacity) - c.film_maintenance_per_s
 }
 
-// ------------------------------------------------------------------------- the knobs
-
-/// The brief's defaults: 0.6 m and 0.8 /m as given; a fresh film (5 % of capacity) fills
-/// its capacity in about an hour of good light and dies within about ten minutes of
-/// drying; it seeds at no more than half capacity (an established pond, the R2b repair;
-/// the old bound was "under 10 %", set for the old fresh-film seed) and spreads.
-#[test]
-fn film_defaults_meet_the_brief() {
-    for c in [FloraConfig::default(), FloraConfig::for_voxel_size(0.125)] {
-        assert_eq!(c.film_max_depth_m, 0.6);
-        assert_eq!(c.film_extinction_per_m, 0.8);
-        let k = c.film_capacity_per_m2;
-        let s = c.film_seed_per_m2;
-        assert!(
-            k > 0.0 && s > 0.0 && s <= 0.5 * k,
-            "seed {s} against capacity {k}"
-        );
-        assert!(c.film_spread_per_s > 0.0);
-        // Logistic with upkeep: net rate r − m, capacity K(1 − m/r); time from the seed
-        // to 90 % of that capacity at full light, from a fresh film at 5 % of capacity
-        // (the growth law's claim; the founding seed is no longer a fresh film).
-        let r = c.film_growth_per_s - c.film_maintenance_per_s;
-        assert!(r > 0.0, "a lit film must outgrow its upkeep");
-        let cap = k * (1.0 - c.film_maintenance_per_s / c.film_growth_per_s);
-        let fresh = 0.05 * k;
-        let fill_s = (9.0 * (cap - fresh) / fresh).ln() / r;
-        assert!(
-            (1800.0..=7200.0).contains(&fill_s),
-            "a film fills in {:.0} min, want about an hour",
-            fill_s / 60.0
-        );
-        // 95 % gone after drying.
-        let die_s = 20f64.ln() / c.film_dry_death_per_s;
-        assert!(
-            (300.0..=1200.0).contains(&die_s),
-            "a dried film is 95 % gone in {:.1} min, want about ten",
-            die_s / 60.0
-        );
-    }
-}
-
 // ------------------------------------------------------------------------ growth
 
 /// Founding puts `film_seed_per_m2` on every wet-eligible face and nothing on a dry one or

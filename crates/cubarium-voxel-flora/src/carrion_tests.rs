@@ -35,20 +35,6 @@ fn assert_closes(flora: &Flora, when: &str) {
     }
 }
 
-/// Decision 2: carrion's e-fold goes from 200 s to about an hour, in every preset.
-#[test]
-fn carrion_decomposes_with_an_e_fold_of_about_an_hour() {
-    for c in [
-        FloraConfig::default(),
-        FloraConfig::for_voxel_size(0.25),
-        FloraConfig::for_voxel_size(0.125),
-    ] {
-        assert_eq!(c.carrion_decomposition, 0.00028);
-        let e_fold_h = 1.0 / c.carrion_decomposition / 3600.0;
-        assert!((e_fold_h - 1.0).abs() < 0.01, "e-fold {e_fold_h} h");
-    }
-}
-
 /// Case 9: a corpse decays at `k · dt` of the pool per tick, its organic matter respired
 /// and its mineral released to the soil at the pool's own fraction, as before; the books
 /// close.

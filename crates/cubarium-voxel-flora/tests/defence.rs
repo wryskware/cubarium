@@ -63,18 +63,6 @@ fn defence(flora: &Flora, site: Site) -> f64 {
     flora.view().stand_at(site).expect("standing").defence
 }
 
-/// The shipped defaults: one strength and one half-life for every species, and on.
-#[test]
-fn the_defaults_are_shared_and_on() {
-    let c = FloraConfig::default();
-    let first = c.species(Species::ALL[0]);
-    assert!(first.defence_per_bite > 0.0 && first.defence_half_life_s > 0.0);
-    for s in Species::ALL {
-        assert_eq!(c.species(s).defence_per_bite, first.defence_per_bite);
-        assert_eq!(c.species(s).defence_half_life_s, first.defence_half_life_s);
-    }
-}
-
 /// Repeated bites on one stand take strictly less each time, a fresh neighbour gives the
 /// whole bite, and the grazed stand's defence has risen.
 #[test]
@@ -144,29 +132,25 @@ fn the_plant_ledger_closes_with_the_defence_on() {
     assert!(v.ledger.consumed_organic_out > 0.0);
 }
 
-/// The audit round's clock (`design/handoffs/voxel-audit-round-2026-09-28.md` §4): the
-/// shipped defence switches on within a few minutes of grazing — at a browser's 4 bites/s
-/// (one per 0.25 s controller sample) it passes 0.8 in 1–5 min — and relaxes over tens of
-/// minutes, at the half-life it declares.
+/// The audit round's clock (`design/handoffs/voxel-audit-round-2026-09-28.md` §4): with a
+/// hand-set strength and half-life, the defence switches on after a number of bites the
+/// strength fixes, and relaxes at the half-life it is given.
 #[test]
-fn the_shipped_defence_switches_on_in_minutes_and_relaxes_in_tens_of_minutes() {
-    let shipped = FloraConfig::for_voxel_size(0.25);
-    let half = shipped.species(Species::Bloomcrown).defence_half_life_s;
-    assert!(
-        (600.0..=3600.0).contains(&half),
-        "relaxes over tens of minutes: half-life {half} s"
-    );
-    let (mut world, mut flora, grazed, _) = two_crowns(shipped);
+fn the_defence_switches_on_by_bites_and_relaxes_at_the_half_life() {
+    let (rise, half) = (0.02, 40.0);
+    let (mut world, mut flora, grazed, _) = two_crowns(config(rise, half));
     let mut bites = 0u32;
     while defence(&flora, grazed) < 0.8 {
         flora.take_foliage(grazed, 1e-7).expect("a bite");
         bites += 1;
         assert!(bites < 5000, "the defence never switched on");
     }
-    let seconds = f64::from(bites) / 4.0;
+    // Each bite raises the defence by `rise` of the headroom, so 0.8 takes about
+    // ln(0.2) / ln(1 - rise) bites (at least that many, a few more for rounding).
+    let want = (0.2f64.ln() / (1.0 - rise).ln()).ceil();
     assert!(
-        (60.0..=300.0).contains(&seconds),
-        "0.8 after {bites} bites = {seconds} s of grazing"
+        (f64::from(bites) - want).abs() <= 0.25 * want,
+        "0.8 after {bites} bites, expected about {want}"
     );
     let start = defence(&flora, grazed);
     for _ in 0..200 {

@@ -718,7 +718,11 @@ fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
 #[test]
 fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
     let mut world = plain(16, 8, 0.6);
-    let mut flora = Flora::new(FloraConfig::default().minimum_seeds());
+    let mut config = FloraConfig::default().minimum_seeds();
+    // The fixture's own inputs: the reach and the slow rate this arm reads.
+    config.bloomcrown.hop = 2;
+    config.bloomcrown.propagule_rate = 2e-4;
+    let mut flora = Flora::new(config);
     assert!(flora.apply(
         &world,
         Command::Seed {
@@ -729,7 +733,6 @@ fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
         }
     ));
     let sc = flora.config().species(Species::Bloomcrown).clone();
-    assert_eq!(sc.hop, 2, "the placeholder hop this test reads");
     let package = sc.alive_min / sc.propagule_split[0];
     let net = sc.propagule_rate * cubarium_voxel::DT / (1.0 + sc.build);
 

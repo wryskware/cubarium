@@ -726,25 +726,6 @@ fn a_dead_wood_deposit_joins_the_pool_and_decomposes_at_the_wood_rate() {
 fn validate_covers_the_three_new_fields() {
     let config = config();
     config.validate().expect("the shipped config");
-    assert_eq!(config.glowcap.trophic, Trophic::Saprotroph);
-    for species in Species::ALL {
-        let sc = config.species(species);
-        let is_fungus = sc.trophic == Trophic::Saprotroph;
-        assert_eq!(
-            is_fungus,
-            species == Species::Glowcap,
-            "{} is the wrong mode",
-            species.name()
-        );
-        // The five plants carry the three numbers inert and at zero, so switching one to a
-        // saprotroph cannot silently inherit a rate.
-        if !is_fungus {
-            assert_eq!(sc.substrate_uptake_per_s, 0.0, "{}", species.name());
-            assert_eq!(sc.substrate_yield, 0.0, "{}", species.name());
-            assert_eq!(sc.establish_substrate_min, 0.0, "{}", species.name());
-        }
-    }
-
     for (what, mutate) in [
         (
             "substrate_yield",

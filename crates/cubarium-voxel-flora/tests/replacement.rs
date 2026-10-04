@@ -756,7 +756,8 @@ fn a_bank_emptied_and_refilled_in_one_tick_still_names_its_recipient() {
 #[test]
 fn a_tick_with_no_delivery_leaves_no_receipt() {
     let world = pillars(6, &[0, 1], 0.5);
-    // The shipped rates: 6,001 ticks to fund one package, so the first few deliver nothing.
+    // At the config's rates a package takes far longer than a few ticks to fund, so the
+    // first few deliver nothing.
     let mut flora = Flora::new(FloraConfig::default());
     plant(&mut flora, &world, 0, Species::Bloomcrown);
     let mut stepped = world.clone();

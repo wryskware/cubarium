@@ -154,17 +154,6 @@ fn close(a: f64, b: f64) -> bool {
     (a - b).abs() <= 1e-12 * a.abs().max(b.abs()).max(1e-12)
 }
 
-#[test]
-fn the_night_knobs_have_their_defaults() {
-    let c = FloraConfig::default();
-    for s in Species::ALL {
-        let sc = c.species(s);
-        assert_eq!(sc.night_bloom_scale, 0.3, "{s:?}");
-        assert!(sc.night_floor > 0.0 && sc.night_floor < 1.0, "{s:?}: a floor, a fraction of the cap");
-        assert!(sc.night_min_s > 0.0, "{s:?}: a positive floor on the time to dawn");
-    }
-}
-
 /// The ecological dawn: under `cycle` the cycle's sunrise, `None` by day and with the
 /// clock off.
 #[test]

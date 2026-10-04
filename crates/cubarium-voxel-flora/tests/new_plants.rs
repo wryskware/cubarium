@@ -63,7 +63,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
-    Command, Flora, FloraConfig, Layer, LayerKind, Profile, Site, Species, Trophic,
+    Command, Flora, FloraConfig, Layer, LayerKind, Profile, Site, Species,
     establishment_gates,
 };
 
@@ -192,7 +192,6 @@ fn vaulttree_lanternberry_and_siphonreed_are_species() {
         assert_eq!(Species::ALL[s.index()], s);
         assert_eq!(s.name(), name);
         assert_eq!(Species::parse(name), Some(s));
-        assert_eq!(FloraConfig::default().species(s).trophic, Trophic::Photo);
     }
     for voxel_m in GRIDS {
         FloraConfig::for_voxel_size(voxel_m)

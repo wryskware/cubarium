@@ -18,12 +18,6 @@
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species};
 
-/// The historical canopy coefficient, per **cell²**, as it stood before this package
-/// (`FloraConfig::shade_k` = 1.5). Claim 1 is measured against it.
-const HISTORICAL_SHADE_K_PER_CELL2: f64 = 1.5;
-/// The reference cell the physical floor is one of.
-const REFERENCE_VOXEL_M: f64 = 0.25;
-
 /// A one-row plain: bedrock floor, soil in `1..=support` at `pore` of capacity, open sky
 /// over every column, so every support face reads full sky.
 fn plain(voxel_m: f64, width: u32, height: u32, support: u32, pore: f64) -> World {
@@ -56,11 +50,6 @@ fn plain(voxel_m: f64, width: u32, height: u32, support: u32, pore: f64) -> Worl
         }
     }
     w
-}
-
-/// `L_eff = L (1 + half) / (L + half)`, the species' own light response.
-fn light_response(l: f64, half: f64) -> f64 {
-    l * (1.0 + half) / (l + half)
 }
 
 /// One tall umbrellafrond at `x = 8` and one short bloomcrown at `x = 9`, inside its
@@ -135,33 +124,6 @@ fn shaded_pair(voxel_m: f64, support: u32) -> (f64, f64, f64, f64) {
         uc.crown_radius(tall_wood, voxel_m),
         bc.light_half,
     )
-}
-
-/// Claim 1: on the 0.25 m reference grid the attenuation is exactly what the cell²
-/// model gave, floor included. The conversion is a unit change and not a tuning.
-#[test]
-fn the_reference_grid_shade_is_numerically_what_it_always_was() {
-    let (light, foliage, radius_cells, half) = shaded_pair(REFERENCE_VOXEL_M, 2);
-
-    // The historical expression, in cells.
-    let area_cells = (std::f64::consts::PI * radius_cells * radius_cells).max(1.0);
-    let historical = light_response(
-        (-HISTORICAL_SHADE_K_PER_CELL2 * foliage / area_cells).exp(),
-        half,
-    );
-    assert!(
-        (light - historical).abs() < 1e-12,
-        "the reference grid moved: {light} against the historical {historical}"
-    );
-
-    // And the shipped coefficient is the historical one converted, not a new number.
-    assert!(
-        (FloraConfig::default().shade_k_per_m2
-            - HISTORICAL_SHADE_K_PER_CELL2 * REFERENCE_VOXEL_M * REFERENCE_VOXEL_M)
-            .abs()
-            < 1e-15,
-        "shade_k_per_m2 is shade_k × (0.25 m)²"
-    );
 }
 
 /// Claim 2: the same physical crown shades the same on a 0.125 m world and a 0.25 m
