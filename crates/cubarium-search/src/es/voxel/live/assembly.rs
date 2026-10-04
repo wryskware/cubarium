@@ -329,6 +329,14 @@ pub struct RecipeRecord {
 
 /// **E1**: found `seed` with no animals, grow its plants `recipe.plant_hours`, construct
 /// the fauna. `log` hears each growth row.
+///
+/// The grown plants-only state is kept in `cache` (a start of recipe `e1-grown`, its
+/// `recipe.toml` naming its hours) and reused when it matches this build, world, policy and
+/// plant age, so a change to the fauna construction does not regrow the plants. A body is
+/// placed only on a face dry **now** (the water as it stands at construction): over hours
+/// of showers nearly every exposed face has held a film of water at some tick, which the
+/// founding's whole-history rule would read as never dry.
+#[allow(clippy::too_many_arguments)]
 pub fn e1_start(
     world_cfg: &Config,
     eco: &EcologyParams,
@@ -336,43 +344,74 @@ pub fn e1_start(
     recipe: &E1Recipe,
     policy: Vec<String>,
     sim_threads: usize,
+    cache: Option<&std::path::Path>,
     log: &(dyn Fn(&str) + Sync),
 ) -> Result<(Sim, Manifest, RecipeRecord), String> {
     eco.params()?;
     let started = Instant::now();
-    let f = found::found(world_cfg, &eco.layers(world_cfg.voxel_m), [0; Founder::COUNT], found::Seeds::Asked(seed), false);
-    let accepted = f.accepted;
-    let mut sim = Sim::ambient(f.world, f.flora, f.fauna, SimConfig { threads: sim_threads.max(1), overlap: false });
-    let sites = habitat::support_sites(sim.world());
-    let depth = |w: &World, wettest: &mut [f64]| {
-        let view = w.view();
-        for (d, s) in wettest.iter_mut().zip(&sites) {
-            *d = d.max(view.water_depth_m(i64::from(s.x), s.y, s.z));
+    let sim_config = SimConfig { threads: sim_threads.max(1), overlap: false };
+    let expect = super::start::Expect::new(world_cfg, eco, policy.clone());
+    let cached = cache.and_then(|dir| {
+        let r: RecipeRecord = toml::from_str(&std::fs::read_to_string(dir.join(RECIPE_FILE)).ok()?).ok()?;
+        if r.plant_hours != recipe.plant_hours || r.seed != seed {
+            return None;
         }
+        let s = super::start::load_start(dir, &expect).ok()?;
+        Some((s, r))
+    });
+    let (mut sim, accepted, growth) = if let Some((s, r)) = cached {
+        log(&format!("e1 seed {seed}: the grown plants from {}", s.dir.display()));
+        (Sim::ambient(s.world, s.flora, s.fauna, sim_config), r.accepted, r.growth)
+    } else {
+        let f = found::found(world_cfg, &eco.layers(world_cfg.voxel_m), [0; Founder::COUNT], found::Seeds::Asked(seed), false);
+        let accepted = f.accepted;
+        let mut sim = Sim::ambient(f.world, f.flora, f.fauna, sim_config);
+        let minutes = (recipe.plant_hours * 60.0).round() as u64;
+        let mut growth = vec![GrowthRow::of(0, sim.flora())];
+        for minute in 1..=minutes {
+            for _ in 0..TICKS_PER_MIN {
+                sim.step();
+            }
+            if minute % 30 == 0 || minute == minutes {
+                let row = GrowthRow::of(minute, sim.flora());
+                log(&format!(
+                    "e1 seed {seed} minute {minute}: stands {} vaulttrees {} donors {} vines {} vine faces {} ({:.0} s)",
+                    row.stands,
+                    row.vaulttree_stands,
+                    row.vaulttree_donors,
+                    row.vines,
+                    row.vine_faces,
+                    started.elapsed().as_secs_f64()
+                ));
+                growth.push(row);
+            }
+        }
+        if let Some(dir) = cache {
+            let (w, fl, fa) = sim.layers();
+            let m = Manifest::of("e1-grown", seed, accepted, Identity::this_build(world_cfg, policy.clone()), w, fl, fa);
+            let r = RecipeRecord {
+                recipe: "e1-grown".into(),
+                seed,
+                commit: crate::evaluate::BUILD_ID.into(),
+                world_config: world_hash(world_cfg),
+                params: m.params.clone(),
+                accepted,
+                plant_hours: recipe.plant_hours,
+                growth: growth.clone(),
+                ..RecipeRecord::default()
+            };
+            std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+            let text = toml::to_string(&r).map_err(|e| format!("cannot write the grown record: {e}"))?;
+            std::fs::write(dir.join(RECIPE_FILE), text).map_err(|e| format!("cannot write {}: {e}", dir.display()))?;
+            write_start(dir, &m, w, fl, fa)?;
+        }
+        (sim, accepted, growth)
     };
-    let mut wettest = vec![0.0; sites.len()];
-    depth(sim.world(), &mut wettest);
-    let minutes = (recipe.plant_hours * 60.0).round() as u64;
-    let mut growth = vec![GrowthRow::of(0, sim.flora())];
-    for minute in 1..=minutes {
-        for _ in 0..TICKS_PER_MIN {
-            sim.step();
-        }
-        depth(sim.world(), &mut wettest);
-        if minute % 30 == 0 || minute == minutes {
-            let row = GrowthRow::of(minute, sim.flora());
-            log(&format!(
-                "e1 seed {seed} minute {minute}: stands {} vaulttrees {} donors {} vines {} vine faces {} ({:.0} s)",
-                row.stands,
-                row.vaulttree_stands,
-                row.vaulttree_donors,
-                row.vines,
-                row.vine_faces,
-                started.elapsed().as_secs_f64()
-            ));
-            growth.push(row);
-        }
-    }
+    let sites = habitat::support_sites(sim.world());
+    let wettest: Vec<f64> = {
+        let view = sim.world().view();
+        sites.iter().map(|s| view.water_depth_m(i64::from(s.x), s.y, s.z)).collect()
+    };
     let today = eco.fauna().founder_counts();
     let report = sim.with_layers_mut(|w, fl, fa| construct_fauna(w, fl, fa, recipe, today, &sites, &wettest));
     let (w, fl, fa) = sim.layers();
@@ -450,7 +489,9 @@ pub fn generate_library(spec: &StartsSpec) -> Result<(), String> {
             };
             (b.manifest.clone(), record, Layers::Built(b))
         } else {
-            let (sim, m, r) = e1_start(&spec.world, &spec.eco, seed, &spec.e1, spec.policy.clone(), spec.sim_threads, &log)?;
+            let cache = spec.out.join("grown").join(format!("seed-{seed}"));
+            let (sim, m, r) =
+                e1_start(&spec.world, &spec.eco, seed, &spec.e1, spec.policy.clone(), spec.sim_threads, Some(&cache), &log)?;
             (m, r, Layers::Sim(Box::new(sim)))
         };
         record.world = spec.world_name.clone();
