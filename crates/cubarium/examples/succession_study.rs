@@ -443,18 +443,25 @@ fn sample(
         let mut food = 0.0;
         let mut litter = 0.0;
         let mut n = 0usize;
+        // Velvetpad and springturf donors on these sites.
+        let mut donors = [0u64; 2];
         for site in sites {
             n += 1;
             let st = fv.stand_at(site);
             v[occ_index(st.map(|s| s.species))] += 1;
             if let Some(s) = st {
                 food += edible(&fv, s);
+                for (k, sp) in [PAD, TURF].into_iter().enumerate() {
+                    if s.species == sp && s.wood >= config.species(sp).donor_min {
+                        donors[k] += 1;
+                    }
+                }
             }
             litter += fv.ground_at(site).map_or(0.0, |g| g.litter);
         }
-        (v, food, litter, n)
+        (v, food, litter, n, donors)
     };
-    let line = |name: &str, (v, food, litter, n): (Vec<u64>, f64, f64, usize)| {
+    let line = |name: &str, (v, food, litter, n, donors): (Vec<u64>, f64, f64, usize, [u64; 2])| {
         let photo: u64 = Species::ALL
             .iter()
             .filter(|s| config.species(**s).trophic == Trophic::Photo)
@@ -462,8 +469,10 @@ fn sample(
             .sum();
         let parts: Vec<String> = (0..=Species::COUNT).filter(|&i| v[i] > 0).map(|i| format!("{}={}", occ_name(i), v[i])).collect();
         println!(
-            "occ,{arm},{minute},{name},n={n},photo={photo},fungal={},edible={food:.4},edible_per_m2={:.5},litter={litter:.4},{}",
+            "occ,{arm},{minute},{name},n={n},photo={photo},fungal={},pad_donors={},turf_donors={},edible={food:.4},edible_per_m2={:.5},litter={litter:.4},{}",
             v[Species::Glowcap.index()],
+            donors[0],
+            donors[1],
             food / (n.max(1) as f64 * area),
             parts.join(",")
         );
