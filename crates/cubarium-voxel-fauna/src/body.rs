@@ -483,6 +483,13 @@ pub struct FounderPhysiology {
     /// transit time. `None` for every other lineage.
     #[serde(default)]
     pub gut_seeds: Option<GutSeeds>,
+    /// **Coat factor for burrs** (springturf spread, 2026-10-04): how readily a seed that
+    /// latches on a passing body holds to this lineage's coat, multiplying the plant's
+    /// per-contact pickup chance (`flora.*.burr_pickup`). 0 picks up nothing; 1 is a
+    /// coat as catchy as the plant's chance assumes. Proposed from each body
+    /// (`placeholder`'s `burr_coat_of`), for Wrysk to judge.
+    #[serde(default)]
+    pub burr_coat: f64,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -951,6 +958,12 @@ impl FounderPhysiology {
     /// the value its comment derives, `mass_scale` 1. [`FounderPhysiology::frozen`] is
     /// this x [`crate::SHIPPED_MASS_SCALE`].
     pub fn placeholder(founder: Founder) -> FounderPhysiology {
+        let mut p = FounderPhysiology::placeholder_table(founder);
+        p.burr_coat = burr_coat_of(founder);
+        p
+    }
+
+    fn placeholder_table(founder: Founder) -> FounderPhysiology {
         match founder {
             Founder::Blind => FounderPhysiology {
                 core: SpeciesConfig {
@@ -1044,6 +1057,7 @@ impl FounderPhysiology {
                 flight: None,
                 glider: None,
                 gut_seeds: None,
+                burr_coat: 0.0,
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1108,6 +1122,7 @@ impl FounderPhysiology {
                 flight: None,
                 glider: None,
                 gut_seeds: None,
+                burr_coat: 0.0,
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1189,6 +1204,7 @@ impl FounderPhysiology {
                 flight: None,
                 glider: None,
                 gut_seeds: None,
+                burr_coat: 0.0,
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -4683,5 +4699,35 @@ mod step_rule_tests {
         // A climb of zero is the old receptor exactly: the ledge is a wall again.
         let reading = contact_readings(&ledge.view(), &pose, 2, &body, 0);
         assert_eq!(reading.front, 1.0);
+    }
+}
+
+/// **The coat factors, proposed from each body** (`design/animal-body-reimagining-2026-09-24.md`
+/// and the roster briefs): how readily an awned grass seed holds to the coat. Plates and
+/// shells shed burrs; bristles, folds and legs that wade through a sward catch them.
+/// Wrysk judges these; they are knobs (`fauna.founders.<lineage>.burr_coat`).
+pub fn burr_coat_of(founder: Founder) -> f64 {
+    match founder {
+        // The littershredder: a low segmented body under smooth plates, but six legs and
+        // plate seams in the litter: a little.
+        Founder::Blind => 0.3,
+        // The frondgrazer: a sward grazer whose legs and belly brush the turf all day; the
+        // saddle shield is smooth, the rest is not.
+        Founder::Browser => 0.6,
+        // The lanternjaw: a low scorpid of overlapping plates, still for long ambushes.
+        Founder::Lanternjaw => 0.3,
+        // The capgnawer: bristle tufts on its back, the catchiest coat on the roster.
+        Founder::Capgnawer => 0.8,
+        // The loftstrider: long legs wading through grass, the body far above it.
+        Founder::Loftstrider => 0.4,
+        // The ripple-snail: a shell and a wet mantle, and it lives in the water.
+        Founder::RippleSnail => 0.1,
+        // The bellwing: a small flyer; only when grounded (the burr pass reads that).
+        Founder::Bellwing => 0.3,
+        // The seedporter: skin membranes and grasping limbs, mostly up in the crowns.
+        Founder::Seedporter => 0.5,
+        // The Veilhound: a six-footed runner under back plates that crosses the open
+        // hills at a run; legs and the call membrane's folds catch.
+        Founder::Chorister => 0.5,
     }
 }

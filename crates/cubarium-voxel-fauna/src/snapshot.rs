@@ -37,7 +37,8 @@ use crate::Fauna;
 //     lines, `FounderPhysiology::{gut, emergency_clear_hunger}`, `Hunter` without its
 //     satiated rest, `Rest` without `Satiated`, `FaunaConfig::parasite_take_per_day`,
 //     `LifeConfig::ecological_day_s`; per-day upkeep and the new lifespans.
-pub const SCHEMA: u32 = 36;
+// 37: springturf spread — `FounderPhysiology::burr_coat`.
+pub const SCHEMA: u32 = 37;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -36,13 +36,13 @@
 use cubarium_voxel::{DT, VoxelView, World};
 
 use crate::step::{
-    DOMAIN_ATTRITION, DOMAIN_CLONAL, DOMAIN_DISPERSAL, DOMAIN_GERMINATION, DOMAIN_OVERTOP,
-    DOMAIN_RUNNER, DOMAIN_SPORES, DOMAIN_WATER, DOMAIN_WIND, Rng, add_litter_cap, die, establishes,
+    DOMAIN_ATTRITION, DOMAIN_BURR, DOMAIN_BURR_HOLD, DOMAIN_CLONAL, DOMAIN_DISPERSAL, DOMAIN_GERMINATION,
+    DOMAIN_OVERTOP, DOMAIN_RUNNER, DOMAIN_SPORES, DOMAIN_WATER, DOMAIN_WIND, Rng, add_litter_cap, die, establishes,
     establishment_gates_with_sky, mix, provisioned_slot, pull_mineral, standing_water_beside, substrate_pools_in_box,
 };
 use crate::{
-    DeliveryReceipt, Dispersal, Flora, FloraConfig, FloraLedger, Gates, Ground, SeedCohort, Site,
-    Species, SpeciesConfig, Stage, Stand, highest_support,
+    Burr, Carrier, CarrierMark, DeathCause, DeathRecord, DeliveryReceipt, Dispersal, Flora, FloraConfig,
+    FloraLedger, Gates, Ground, SeedCohort, Site, Species, SpeciesConfig, Stage, Stand, Via, highest_support,
 };
 
 /// How many ticks apart a banked site's checks are: [`FloraConfig::seed_check_s`] in
@@ -105,6 +105,15 @@ pub struct Attempts {
     pub gate_fail: u32,
     /// ... at which they passed.
     pub gate_pass: u32,
+    /// The failed checks split by the gate that shut — light (terrain sky, or night),
+    /// moisture (the pore gate), saturation (the aeration ceiling) and flooding (standing
+    /// water over the face) — each failing gate counted, so a check that failed two
+    /// counts in both; `gate_other` is a failure none of the four explains.
+    pub gate_light: u32,
+    pub gate_moisture: u32,
+    pub gate_saturation: u32,
+    pub gate_flooding: u32,
+    pub gate_other: u32,
     /// A draw was held with it among the candidates and another species won it.
     pub lottery_lost: u32,
     /// It won the lottery under a cover and lost the overtopping draw.
@@ -335,6 +344,7 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
         sky,
         bank_wheel,
         attempts,
+        death_log,
         ..
     } = flora;
     let mut attempts = attempts.as_deref_mut();
@@ -367,12 +377,12 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
             .collect();
         germinate(
             config, tick, world_seed, &view, stands, ground, ledger, sky, &every, daylight,
-            attempts.as_deref_mut(),
+            attempts.as_deref_mut(), death_log,
         );
     } else {
         germinate(
             config, tick, world_seed, &view, stands, ground, ledger, sky, &due, daylight,
-            attempts.as_deref_mut(),
+            attempts.as_deref_mut(), death_log,
         );
     }
     for &gi in &due {
@@ -449,6 +459,7 @@ fn germinate(
     tested: &[usize],
     daylight: f64,
     mut trace: Option<&mut AttemptTrace>,
+    death_log: &mut Vec<DeathRecord>,
 ) {
     let traced = trace.as_ref().map(|t| t.species);
     // (site, winner, the ground cover it comes up through)
@@ -488,6 +499,17 @@ fn germinate(
             }
             if !establishes(view, sky, ground, site, sc, daylight) {
                 rec.gate_fail += u32::from(mine);
+                if mine {
+                    let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
+                    let vis = crate::step::sky_at(sky, view, site);
+                    let g = establishment_gates_with_sky(view, site, sc, vis, dead_wood, litter);
+                    let night = sc.trophic == crate::Trophic::Photo && daylight <= 0.0;
+                    rec.gate_light += u32::from(night || !g.light_ok);
+                    rec.gate_moisture += u32::from(!g.pore_ok);
+                    rec.gate_saturation += u32::from(!g.aeration_ok);
+                    rec.gate_flooding += u32::from(!g.depth_ok);
+                    rec.gate_other += u32::from(!night && g.passes());
+                }
                 continue;
             }
             rec.gate_pass += u32::from(mine);
@@ -535,6 +557,11 @@ fn germinate(
             r.cover_forbidden += rec.cover_forbidden;
             r.gate_fail += rec.gate_fail;
             r.gate_pass += rec.gate_pass;
+            r.gate_light += rec.gate_light;
+            r.gate_moisture += rec.gate_moisture;
+            r.gate_saturation += rec.gate_saturation;
+            r.gate_flooding += rec.gate_flooding;
+            r.gate_other += rec.gate_other;
             r.lottery_lost += rec.lottery_lost;
             r.draw_failed += rec.draw_failed;
             r.arms += rec.arms;
@@ -570,7 +597,7 @@ fn germinate(
         };
         if let Ok(si) = held {
             let cover = stands.remove(si);
-            die(config, view, &cover, ground, ledger);
+            die(config, view, &cover, ground, ledger, DeathCause::Overtopped, death_log);
             ledger.overtopped[cover.species.index()] += 1;
             ledger.overtop_pairs[cover.species.index()][species.index()] += 1;
             ledger.overtopped_organic[cover.species.index()] += cover.material();
@@ -649,6 +676,8 @@ fn newborn(
         fruit: 0.0,
         fruit_age_s: 0.0,
         fruit_rest_s: 0.0,
+        cured: false,
+        dry_s: 0.0,
     };
     // A newborn's foliage goes into its seedling profile bottom-up, like any other tissue.
     born.bin_foliage(sc, config.voxel_m);
@@ -730,6 +759,7 @@ struct Daughter {
     organic: f64,
     mineral: f64,
     donor: u64,
+    origin: Site,
 }
 
 /// §4.8: the donor's saving rule, and the two ways a package leaves.
@@ -760,6 +790,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
         deliveries,
         sky,
         bank_wheel,
+        death_log,
         ..
     } = flora;
     let tick = *tick;
@@ -775,6 +806,10 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
         let e_v = sc.energy_density;
         let slot = donor.species.index();
         let build = 1.0 + sc.build;
+        // A cured stand is dormant: it funds nothing and sends nothing until it wakes.
+        if donor.cured {
+            continue;
+        }
 
         // ---- what the rate asks for, and what the reserve can fund.
         if donor.wood >= sc.donor_min {
@@ -810,7 +845,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
         if sc.clonal_share > 0.0
             && Rng::keyed(DOMAIN_CLONAL, world_seed, home_index, tick).unit() < sc.clonal_share
             && let Some(site) = runner_target(
-                &view, sky, ground, stands, &daughters, home, sc, world_seed, tick, daylight,
+                &view, config, sky, ground, stands, &daughters, home, donor.species, world_seed, tick, daylight,
             )
         {
             let before = stands[si].material();
@@ -823,6 +858,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
                 organic: package,
                 mineral,
                 donor: donor.id,
+                origin: home,
             });
             continue;
         }
@@ -854,6 +890,8 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
                 recipient: site,
                 organic: package,
                 mineral,
+                origin: home,
+                via: Via::Seed,
             });
         } else {
             add_litter_cap(
@@ -874,6 +912,25 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
     for d in daughters {
         let slot = d.species.index();
         let gi = provisioned_slot(config, ground, d.site, ledger);
+        // A runner onto a ground cover its species may root through
+        // ([`SpeciesConfig::runners_overtop`]): the cover dies the ordinary death, booked
+        // as overtopped by a runner, and the daughter takes the face.
+        if let Ok(si) = stands.binary_search_by_key(&d.site, |s| s.site)
+            && runner_may_take(config, d.species, stands[si].species)
+        {
+            let cover = stands.remove(si);
+            die(config, &view, &cover, ground, ledger, DeathCause::Displaced, death_log);
+            let c = cover.species.index();
+            ledger.overtopped[c] += 1;
+            ledger.overtop_pairs[c][slot] += 1;
+            ledger.overtopped_organic[c] += cover.material();
+            ledger.runner_displaced[c] += 1;
+        }
+        let gi = if ground.get(gi).is_some_and(|g| g.site == d.site) {
+            gi
+        } else {
+            provisioned_slot(config, ground, d.site, ledger)
+        };
         let taken = stands.binary_search_by_key(&d.site, |s| s.site).is_ok()
             || born.iter().any(|b| b.site == d.site);
         if taken {
@@ -905,29 +962,46 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
             recipient: d.site,
             organic: d.organic,
             mineral: d.mineral,
+            origin: d.origin,
+            via: Via::Runner,
         });
     }
     crate::step::insert_sorted(stands, born);
 }
 
-/// The face a runner roots on: one of the eight neighbouring columns' support faces
-/// within one voxel of the parent's height (a runner crawls; it does not climb a cliff or
-/// drop off one), with no stand on it, not claimed by another runner this tick, and
+/// Whether a runner of `species` may root on a face `cover` holds: the species roots
+/// through covers ([`SpeciesConfig::runners_overtop`]), `cover` is a ground cover, and the
+/// species' [`SpeciesConfig::overtop_covers`] names it (empty: any ground cover). Moss
+/// never takes grass this way unless velvetpad's own list says so.
+pub(crate) fn runner_may_take(config: &FloraConfig, species: Species, cover: Species) -> bool {
+    let sc = config.species(species);
+    sc.runners_overtop
+        && cover != species
+        && config.species(cover).ground_cover
+        && (sc.overtop_covers.is_empty() || sc.overtop_covers.contains(&cover))
+}
+
+/// The face a runner roots on: one of the neighbouring columns' support faces within
+/// `runner_reach` and within one voxel of the parent's height (a runner crawls; it does not
+/// climb a cliff or drop off one), with no stand on it — or a ground cover the species may
+/// root through ([`runner_may_take`]) — not claimed by another runner this tick, and
 /// passing the species' predicate. Drawn uniformly from the parent's own stream; `None`
 /// when there is no such face.
 #[allow(clippy::too_many_arguments)]
 fn runner_target(
     view: &VoxelView<'_>,
+    config: &FloraConfig,
     sky: &mut Vec<(Site, f64)>,
     ground: &[Ground],
     stands: &[Stand],
     claimed: &[Daughter],
     home: Site,
-    sc: &SpeciesConfig,
+    species: Species,
     world_seed: u64,
     tick: u64,
     daylight: f64,
 ) -> Option<Site> {
+    let sc = config.species(species);
     let c = view.config;
     let mut free: Vec<Site> = Vec::new();
     let reach = i64::from(sc.runner_reach);
@@ -944,9 +1018,13 @@ fn runner_target(
             let Some(site) = support_near(view, x, z as u32, home.y) else {
                 continue;
             };
+            let held = stands
+                .binary_search_by_key(&site, |s| s.site)
+                .ok()
+                .map(|si| stands[si].species);
             if site == home
                 || free.contains(&site)
-                || stands.binary_search_by_key(&site, |s| s.site).is_ok()
+                || held.is_some_and(|cover| !runner_may_take(config, species, cover))
                 || claimed.iter().any(|d| d.site == site)
                 || !establishes(view, sky, ground, site, sc, daylight)
             {
@@ -1006,6 +1084,114 @@ pub(crate) fn landing(
             .map_or(Landing::Retry, Landing::Bank),
         Dispersal::Spores => spore_target(view, ground, sc, home, world_seed, home_index, tick),
         Dispersal::Water => water_target(view, sc, home, world_seed, home_index, tick),
+        Dispersal::Wald => wald_target(view, config, sc, home, world_seed, home_index, tick)
+            .map_or(Landing::Retry, Landing::Bank),
+    }
+}
+
+/// **One WALD distance** (inverse Gaussian, mean `mean`, shape `shape`, both metres), by
+/// Michael, Schucany and Haas (1976): `ν ~ N(0,1)`, `y = ν²`,
+/// `x = μ + μ²y/(2λ) − μ/(2λ)·√(4μλy + μ²y²)`, then `x` with probability `μ/(μ + x)`, else
+/// `μ²/x`. Zero for a non-positive mean or shape. Mean `μ`, variance `μ³/λ`.
+pub(crate) fn wald_distance(rng: &mut Rng, mean: f64, shape: f64) -> f64 {
+    if !(mean > 0.0 && shape > 0.0) {
+        return 0.0;
+    }
+    let nu = standard_normal(rng);
+    let y = nu * nu;
+    let mu = mean;
+    let x = mu + mu * mu * y / (2.0 * shape) - mu / (2.0 * shape) * (4.0 * mu * shape * y + mu * mu * y * y).sqrt();
+    if rng.unit() * (mu + x) <= mu { x } else { mu * mu / x }
+}
+
+/// A standard normal draw (Box–Muller, one of the pair).
+fn standard_normal(rng: &mut Rng) -> f64 {
+    let u1 = 1.0 - rng.unit();
+    let u2 = rng.unit();
+    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+}
+
+/// `ln Γ(x)` for `x > 0` (Lanczos, g = 7, nine terms): the Weibull's scale from its mean.
+pub(crate) fn ln_gamma(x: f64) -> f64 {
+    const G: [f64; 9] = [
+        0.999_999_999_999_809_9,
+        676.520_368_121_885_1,
+        -1_259.139_216_722_402_8,
+        771.323_428_777_653_1,
+        -176.615_029_162_140_6,
+        12.507_343_278_686_905,
+        -0.138_571_095_265_720_12,
+        9.984_369_578_019_572e-6,
+        1.505_632_735_149_311_6e-7,
+    ];
+    if x < 0.5 {
+        // Reflection.
+        return (std::f64::consts::PI / (std::f64::consts::PI * x).sin()).ln() - ln_gamma(1.0 - x);
+    }
+    let x = x - 1.0;
+    let mut a = G[0];
+    let t = x + 7.5;
+    for (i, g) in G.iter().enumerate().skip(1) {
+        a += g / (x + i as f64);
+    }
+    0.5 * (std::f64::consts::TAU).ln() + (x + 0.5) * t.ln() - t + a.ln()
+}
+
+/// The Weibull scale whose mean is `mean` at shape `k`: `mean / Γ(1 + 1/k)`.
+pub(crate) fn weibull_scale(mean: f64, k: f64) -> f64 {
+    mean / ln_gamma(1.0 + 1.0 / k).exp()
+}
+
+/// **One burr's retention distance**, metres walked: a Weibull draw of mean `mean` and
+/// shape `k` ([`SpeciesConfig::burr_retention_shape`]), `scale · (−ln U)^(1/k)`. Zero for a
+/// non-positive mean or shape (it falls off at the first step).
+pub(crate) fn retention_distance(rng: &mut Rng, mean: f64, k: f64) -> f64 {
+    if !(mean > 0.0 && k > 0.0) {
+        return 0.0;
+    }
+    let u = 1.0 - rng.unit();
+    weibull_scale(mean, k) * (-u.ln()).powf(1.0 / k)
+}
+
+/// **WALD wind** ([`Dispersal::Wald`]): a [`wald_distance`] in metres, converted to whole
+/// columns at the world's cell size, capped at the world's larger side, in a uniform
+/// direction; wrapped round the ring and reflected off the walls, onto the column's
+/// highest support face, never the donor's own. Up to `wind_tries` draws.
+fn wald_target(
+    view: &VoxelView<'_>,
+    config: &FloraConfig,
+    sc: &SpeciesConfig,
+    home: Site,
+    world_seed: u64,
+    home_index: u64,
+    tick: u64,
+) -> Option<Site> {
+    let c = view.config;
+    let cap = f64::from(c.width.max(c.depth));
+    let mut rng = Rng::keyed(DOMAIN_WIND, world_seed, home_index, tick);
+    for _ in 0..config.wind_tries {
+        let (dx, dz) = wald_offset(&mut rng, sc, c.voxel_m, cap);
+        let z = reflect(home.z as i64 + dz, c.depth);
+        if let Some(site) = highest_support(view, home.x as i64 + dx, z)
+            && site != home
+        {
+            return Some(site);
+        }
+    }
+    None
+}
+
+/// One WALD offset in whole columns (`voxel_m` the cell), capped at `cap` columns; a
+/// seed that would fall back on its own column lands one column out in its direction.
+pub(crate) fn wald_offset(rng: &mut Rng, sc: &SpeciesConfig, voxel_m: f64, cap: f64) -> (i64, i64) {
+    let r = (wald_distance(rng, sc.wald_mean_m, sc.wald_shape_m) / voxel_m.max(1e-9)).min(cap);
+    let theta = std::f64::consts::TAU * rng.unit();
+    let (s, co) = theta.sin_cos();
+    let (dx, dz) = ((r * co).round() as i64, (r * s).round() as i64);
+    if (dx, dz) == (0, 0) {
+        (co.round() as i64, s.round() as i64)
+    } else {
+        (dx, dz)
     }
 }
 
@@ -1287,6 +1473,212 @@ fn water_target(
     }
     let mut rng = Rng::keyed(DOMAIN_WATER, world_seed, home_index, tick);
     Landing::Bank(pool[rng.below(pool.len())])
+}
+
+// ------------------------------------------------------------------- burrs (epizoochory)
+
+/// The horizontal distance between two body positions, metres, `x` wrapped round a ring
+/// `ring_m` long.
+fn walked(a: &CarrierMark, c: &Carrier, ring_m: f64) -> f64 {
+    let mut dx = (c.x_m - a.x_m).abs();
+    if ring_m > 0.0 {
+        dx %= ring_m;
+        dx = dx.min(ring_m - dx);
+    }
+    let dz = c.z_m - a.z_m;
+    (dx * dx + dz * dz).sqrt()
+}
+
+/// Drop one burr into the bank at `site`: the arrival bin of this tick, the site on the
+/// check wheel, a receipt ([`Via::Burr`]).
+fn drop_burr(
+    config: &FloraConfig,
+    tick: u64,
+    ground: &mut Vec<Ground>,
+    ledger: &mut FloraLedger,
+    bank_wheel: &mut [Vec<Site>],
+    deliveries: &mut Vec<DeliveryReceipt>,
+    burr: &Burr,
+    site: Site,
+) {
+    let sc = config.species(burr.species);
+    let gi = provisioned_slot(config, ground, site, ledger);
+    if ground[gi].seeds.is_empty() && !bank_wheel.is_empty() {
+        let period = bank_wheel.len() as u64;
+        bank_wheel[check_phase(site, period) as usize].push(site);
+    }
+    add_cohort(&mut ground[gi], burr.species, burr.organic, burr.mineral, tick, sc);
+    ledger.seeds_landed[burr.species.index()] += 1;
+    deliveries.push(DeliveryReceipt {
+        tick,
+        donor: burr.donor,
+        species: burr.species,
+        recipient: site,
+        organic: burr.organic,
+        mineral: burr.mineral,
+        origin: burr.from,
+        via: Via::Burr,
+    });
+}
+
+/// **Burrs** ([`Flora::carry_burrs`]), once per animal tick, carriers in id order:
+///
+/// 1. a carrier marked last time and absent now has died or left the world: every burr it
+///    carried drops into the bank of its **last** face (its carcass's);
+/// 2. each burr of a present carrier adds the distance its carrier walked since the last
+///    pass, and one that has walked its drawn retention distance drops into the bank of
+///    the face the carrier stands over now;
+/// 3. a carrier that has stepped onto a new face, **on the ground**, with coat factor
+///    `coat` and room under [`FloraConfig::burr_cap`], meets the stand on that face: a
+///    donor (`wood ≥ donor_min`, not cured) of a species with a positive
+///    [`SpeciesConfig::burr_pickup`] sheds one seed onto it with probability
+///    `min(1, burr_pickup · coat)` — one whole package paid out of its parcel and then its
+///    reserve above the donor floor, construction respired as a parcel's is — with a
+///    retention distance drawn from its species' Weibull.
+///
+/// A dropped seed then waits in the bank and germinates only through its species' own
+/// gates. Nothing crosses the layer's boundary: a burr is this layer's material
+/// throughout ([`FloraView::organic`] counts it).
+pub(crate) fn carry_burrs(flora: &mut Flora, world: &World, carriers: &[Carrier]) {
+    ensure_wheel(flora);
+    let view = world.view();
+    let ring_m = f64::from(view.config.width) * view.config.voxel_m;
+    let world_seed = view.config.seed;
+    let Flora {
+        config,
+        tick,
+        stands,
+        ground,
+        ledger,
+        deliveries,
+        bank_wheel,
+        burrs,
+        burr_marks,
+        ..
+    } = flora;
+    let tick = *tick;
+    let mut present: Vec<&Carrier> = carriers.iter().collect();
+    present.sort_by_key(|c| c.id);
+
+    // 1. Carriers gone since the last pass.
+    if !burrs.is_empty() {
+        let mut kept = Vec::with_capacity(burrs.len());
+        for b in std::mem::take(burrs) {
+            if present.binary_search_by_key(&b.carrier, |c| c.id).is_ok() {
+                kept.push(b);
+                continue;
+            }
+            let Ok(mi) = burr_marks.binary_search_by_key(&b.carrier, |m| m.id) else {
+                kept.push(b);
+                continue;
+            };
+            let site = burr_marks[mi].site;
+            let k = b.species.index();
+            ledger.burrs_dropped_at_carcass[k] += 1;
+            ledger.burr_carcass_organic[k] += b.organic;
+            drop_burr(config, tick, ground, ledger, bank_wheel, deliveries, &b, site);
+        }
+        *burrs = kept;
+    }
+
+    let mut marks: Vec<CarrierMark> = Vec::with_capacity(present.len());
+    for c in present {
+        let last = burr_marks
+            .binary_search_by_key(&c.id, |m| m.id)
+            .ok()
+            .map(|mi| burr_marks[mi]);
+        marks.push(CarrierMark {
+            id: c.id,
+            site: c.site,
+            x_m: c.x_m,
+            z_m: c.z_m,
+        });
+        let Some(last) = last else {
+            continue;
+        };
+        // 2. Retention: the distance walked, and the burrs that have walked theirs.
+        let moved = walked(&last, c, ring_m);
+        let mut carried = 0u32;
+        if moved > 0.0 || burrs.iter().any(|b| b.carrier == c.id && b.walked_m >= b.hold_m) {
+            let mut kept = Vec::with_capacity(burrs.len());
+            for mut b in std::mem::take(burrs) {
+                if b.carrier != c.id {
+                    kept.push(b);
+                    continue;
+                }
+                b.walked_m += moved;
+                if b.walked_m >= b.hold_m {
+                    let k = b.species.index();
+                    ledger.burrs_dropped[k] += 1;
+                    ledger.burr_dropped_organic[k] += b.organic;
+                    drop_burr(config, tick, ground, ledger, bank_wheel, deliveries, &b, c.site);
+                } else {
+                    kept.push(b);
+                }
+            }
+            *burrs = kept;
+        }
+        carried += burrs.iter().filter(|b| b.carrier == c.id).count() as u32;
+        // 3. Pickup, on a step onto a new face.
+        if c.site == last.site || !c.grounded || !(c.coat > 0.0) || carried >= config.burr_cap {
+            continue;
+        }
+        let Ok(si) = stands.binary_search_by_key(&c.site, |s| s.site) else {
+            continue;
+        };
+        let sc = config.species(stands[si].species);
+        let donor = stands[si];
+        if !(sc.burr_pickup > 0.0) || donor.cured || donor.wood < sc.donor_min {
+            continue;
+        }
+        let mut rng = Rng::keyed(DOMAIN_BURR, world_seed, c.id, tick);
+        if rng.unit() >= (sc.burr_pickup * c.coat).min(1.0) {
+            continue;
+        }
+        let package = package_of(sc);
+        if !(package > 0.0) {
+            continue;
+        }
+        // Funded as a parcel is: what the parcel lacks, gross of construction, out of the
+        // reserve above the donor floor — or no seed at all.
+        let build = 1.0 + sc.build;
+        let lack = (package - donor.parcel).max(0.0);
+        let gross = lack * build;
+        let floor = sc.donor_reserve_floor * sc.reserve_cap * donor.wood;
+        if donor.reserve - floor < gross {
+            continue;
+        }
+        let e_v = sc.energy_density;
+        let k = donor.species.index();
+        let s = &mut stands[si];
+        if gross > 0.0 {
+            s.reserve -= gross;
+            s.parcel += lack;
+            ledger.propagule_funded[k] += lack;
+            ledger.respired_out += gross - lack;
+            ledger.heat_out += e_v * (gross - lack);
+        }
+        let before = s.material();
+        s.parcel = (s.parcel - package).max(0.0);
+        let mineral = pull_mineral(s, before, package);
+        ledger.propagule_landed[k] += package;
+        ledger.burrs_picked[k] += 1;
+        ledger.burr_picked_organic[k] += package;
+        let site_index = view.config.index(c.site.x as i64, c.site.y, c.site.z) as u64;
+        let mut hold = Rng::keyed(DOMAIN_BURR_HOLD, world_seed, c.id ^ site_index.rotate_left(32), tick);
+        burrs.push(Burr {
+            carrier: c.id,
+            species: donor.species,
+            organic: package,
+            mineral,
+            donor: donor.id,
+            from: donor.site,
+            picked_tick: tick,
+            hold_m: retention_distance(&mut hold, sc.burr_retention_mean_m, sc.burr_retention_shape),
+            walked_m: 0.0,
+        });
+    }
+    *burr_marks = marks;
 }
 
 #[cfg(test)]
@@ -2166,10 +2558,8 @@ mod tests {
         }
         config.velvetpad.propagule_rate = 0.0;
         config.umbrellafrond.propagule_rate = 0.0;
-        assert!(
-            !config.springturf.overtop_per_check.is_normal(),
-            "springturf is no tree"
-        );
+        // The subject is the woody rule: the grass's own (velvetpad-only) overtopping off.
+        config.springturf.overtop_per_check = 0.0;
         assert!(
             !config.umbrellafrond.ground_cover,
             "a frond is not a ground cover"
@@ -2261,7 +2651,6 @@ mod tests {
         let config = FloraConfig::default();
         assert_eq!(config.velvetpad.spore_tries, 2);
         assert_eq!(config.umbrellafrond.spore_tries, 8);
-        assert_eq!(config.springturf.clonal_share, 0.3);
         let (width, depth) = (16u32, 16u32);
         let mut world = slab(width, depth, 0.05);
         for z in 0..depth {

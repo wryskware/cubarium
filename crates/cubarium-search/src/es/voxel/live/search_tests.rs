@@ -116,7 +116,9 @@ fn foliage_rate_speeds_regrowth() {
         let before = foliage(&flora);
         flora.take_foliage(site, before * 0.9).expect("cropped");
         let cropped = foliage(&flora);
-        for _ in 0..200 {
+        // Few enough ticks that neither rate reaches the reflush ceiling (`reflush_below`
+        // of the cap), where both would stop at the same foliage.
+        for _ in 0..20 {
             world.step_with(1);
             flora.step(&mut world);
         }

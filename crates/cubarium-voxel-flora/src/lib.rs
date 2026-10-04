@@ -54,6 +54,8 @@ mod seed_marks_tests;
 mod overtop_covers_tests;
 #[cfg(test)]
 mod carrion_tests;
+#[cfg(test)]
+mod spread_tests;
 mod film;
 #[cfg(test)]
 mod film_tests;
@@ -396,6 +398,15 @@ pub struct Stand {
     /// it is positive ([`SpeciesConfig::fruit_rest_s`]).
     #[serde(default)]
     pub fruit_rest_s: f64,
+    /// **Cured** (drought dormancy, [`SpeciesConfig::cure_after_s`]): its foliage dropped
+    /// to the litter, it fixes nothing, pays a fraction of its maintenance out of its
+    /// reserve and waits for water. The presenter draws it in the species' cured colour.
+    #[serde(default)]
+    pub cured: bool,
+    /// Seconds the stand has been dry below [`SpeciesConfig::cure_water`] while green, and
+    /// seconds it has been dormant once cured.
+    #[serde(default)]
+    pub dry_s: f64,
 }
 
 impl Stand {
@@ -748,6 +759,22 @@ pub enum Dispersal {
     /// Lands only on a standing-water margin within a wide radius `hop`, downhill first;
     /// with no margin in reach it is litter under the parent.
     Water,
+    /// **Wind, on the WALD kernel** (springturf spread, 2026-10-04): an inverse-Gaussian
+    /// distance with mean [`SpeciesConfig::wald_mean_m`] and shape
+    /// [`SpeciesConfig::wald_shape_m`], in metres, in a uniform direction, wrapped round
+    /// the ring and reflected off the walls like [`Dispersal::Wind`], onto the column's
+    /// highest support face; habitat unscreened.
+    ///
+    /// Why WALD and not [`Dispersal::Wind`]'s Lomax: the WALD is the mechanistic wind
+    /// kernel (Katul et al. 2005, Am. Nat. 166: 368–381) — the first-passage distance of a
+    /// seed released at height `H`, carried at wind speed `U` and falling at `F` through
+    /// turbulence — so its mean `H·U/F` is a physical "wind" knob of its own, per species,
+    /// and its variance `μ³/λ` is finite, with a right tail that fattens as the wind
+    /// rises. The Lomax shipped for stonecushion has its scale and shape as two
+    /// layer-wide knobs in integer `hop`s (a mean of `2.5 · hop` columns cannot be 6) and
+    /// infinite variance at its shape of 2. The exponential has no tail to speak of and
+    /// the 2Dt is a phenomenological fit with no wind in it.
+    Wald,
 }
 
 /// The shipped defence rise per bite (`defence_per_bite`). A browser at a crown bites on
@@ -1149,6 +1176,71 @@ pub struct SpeciesConfig {
     /// count of voxels, **not** rescaled with the voxel size. Only read when
     /// `clonal_share > 0`.
     pub runner_reach: u32,
+    /// **Runners root through covers** (springturf spread, 2026-10-04): a runner may root on
+    /// a face held by a [`SpeciesConfig::ground_cover`] its [`SpeciesConfig::overtop_covers`]
+    /// allows (empty: any ground cover) as well as on a free one, when this species' own
+    /// gates pass there. The daughter is the parent's paid package, as on a free face, and
+    /// the cover it displaces dies the ordinary death, booked as an overtopped one
+    /// ([`FloraLedger::overtopped`], [`FloraLedger::runner_displaced`]). `false` at the
+    /// base: runners take free faces only. Not a number, so its registry row is a switch.
+    pub runners_overtop: bool,
+    /// **The WALD wind kernel's mean distance**, metres ([`Dispersal::Wald`]). The
+    /// inverse-Gaussian `μ`, which in the mechanistic WALD model (Katul et al. 2005) is
+    /// `H · U / F` — release height times wind speed over the seed's terminal velocity —
+    /// so this is the "wind" knob: more wind is a longer mean. In metres and not
+    /// rescaled with the voxel size. Inert on every other mode.
+    pub wald_mean_m: f64,
+    /// **The WALD kernel's shape** `λ`, metres: `(H / σ)²` in the mechanistic model, the
+    /// release height against the turbulent spread. It does not change with the wind, so a
+    /// stronger wind (a larger mean) also fattens the tail relatively: the coefficient of
+    /// variation is `√(μ / λ)`. Inert on every other mode.
+    pub wald_shape_m: f64,
+    /// **Burrs** (epizoochory): the chance, per contact, that a donor stand's seed latches
+    /// onto an animal of coat factor 1 that steps onto its face; scaled by the animal's
+    /// own coat factor (`cubarium_voxel_fauna`'s `burr_coat`). The seed is one whole
+    /// package paid out of the donor's propagule budget — its parcel, then its reserve
+    /// above `donor_reserve_floor`, at the construction cost a parcel pays — so a donor
+    /// that cannot fund a package sheds none. 0, no burrs, at the base.
+    pub burr_pickup: f64,
+    /// **Burr retention: mean distance**, metres the carrier walks before the seed falls
+    /// off. The retention clock runs in **distance moved**, not time: what pulls a burr
+    /// off is the coat brushing through vegetation and the animal grooming as it goes, so a
+    /// resting animal does not shed (Mouissie et al. 2005 measured adhesive retention
+    /// against distance walked). Metres, not rescaled.
+    pub burr_retention_mean_m: f64,
+    /// **Burr retention: shape** `k` of the Weibull ("power exponential", the stretched
+    /// exponential) retention curve `S(d) = exp(−(d / scale)^k)`, scale set by the mean.
+    /// `k = 1` is the constant-detachment exponential; `k < 1` a detachment rate that
+    /// falls the longer a seed has held on. Bullock et al. 2011 (Oikos 120: 1201–1208), over
+    /// 52 retention data sets on sheep, cattle, deer, goats and mice, found the exponential
+    /// adequate for short records and this power exponential, with the dropping rate
+    /// decreasing in time, best for long ones, and slower dropping for seeds with
+    /// adhesive structures. Dimensionless, positive.
+    pub burr_retention_shape: f64,
+    /// **Curing** (drought dormancy): a stand whose root box's mean **available water**
+    /// stays below this for [`SpeciesConfig::cure_after_s`] cures — drops
+    /// [`SpeciesConfig::cure_shed`] of its foliage to the litter and goes dormant. On the
+    /// available-water scale (0 at the wilting point, 1 at field capacity).
+    pub cure_water: f64,
+    /// Seconds below [`SpeciesConfig::cure_water`] before a stand cures. **0: never cures**
+    /// (every species but springturf).
+    pub cure_after_s: f64,
+    /// The share of its foliage a curing stand drops to the litter at once (booked as
+    /// shed foliage). The rest stands as straw: no photosynthesis, no senescence.
+    pub cure_shed: f64,
+    /// A cured stand's maintenance, as a fraction of its waking rate: the root crowns
+    /// alive on the reserve. Its wood still diebacks on maintenance it cannot pay.
+    pub cure_upkeep: f64,
+    /// Available water at and above which a cured stand wakes and regrows its foliage from
+    /// its reserve (the ordinary reflush). Above `cure_water`: a passing shower is not
+    /// the end of a drought.
+    pub cure_resume_water: f64,
+    /// Seconds a stand may stay cured before the drought kills it. 0: no limit (it dies
+    /// only when its reserve runs out and its wood diebacks).
+    pub cure_max_s: f64,
+    /// **Look, not ecology**: the sRGB colour the plain-voxel draw gives a cured stand's
+    /// crown (`0x00RRGGBB`). Wrysk judges it; 0 keeps the species' own palette.
+    pub cured_srgb: u32,
     /// **Founding** (the habitat seeder, `cubarium-voxel-sim`): founders per square metre
     /// of habitat this species can actually live in (the faces where its own gates pass).
     /// Zero founds none of this species.
@@ -1523,6 +1615,20 @@ impl SpeciesConfig {
             night_min_s: default_night_min_s(),
             // A runner roots on the next column over (the eight neighbours).
             runner_reach: 1,
+            runners_overtop: false,
+            // No WALD kernel, no burrs, no curing: springturf's preset says why it has them.
+            wald_mean_m: 0.0,
+            wald_shape_m: 0.0,
+            burr_pickup: 0.0,
+            burr_retention_mean_m: 0.0,
+            burr_retention_shape: 1.0,
+            cure_water: 0.0,
+            cure_after_s: 0.0,
+            cure_shed: 0.0,
+            cure_upkeep: 1.0,
+            cure_resume_water: 0.0,
+            cure_max_s: 0.0,
+            cured_srgb: 0,
             // No founders: every preset that is seeded says so.
             founder_per_m2: 0.0,
             founder_colony: 1,
@@ -1778,8 +1884,8 @@ impl SpeciesConfig {
     /// where these replace them; the crown, profile and colours are unchanged (the look is
     /// Wrysk's). The presets carry the same relative changes (`alpha` 1.285 → 4,
     /// `foliage_rate` × 3, `senescence` 0.00156 → 0.0026, the bank × 2).
-    /// - **Productive.** `alpha` 6.2 (× 3.1) and `wood_max` 0.3 (× 5): a site's foliage
-    ///   capacity is `α · W`, about 15 times the earlier turf's and above velvetpad's.
+    /// - **Productive.** `wood_max` 0.3 (× 5); `alpha` was 6.2 here and is 1.5 since the
+    ///   spread package (below): 1.93× velvetpad's edible foliage per mature stand.
     ///   `foliage_rate` 0.06 (× 3) and `graze_refuge` 0.4 (basal buds) regrow a cropped
     ///   sward fast. `senescence` 0.00167 (× 1.67 the base): heavy thatch.
     /// - **Drought-tolerant.** `wilt_water` 0 and `full_water` 0.3, `rooting_depth` 2: it
@@ -1789,8 +1895,11 @@ impl SpeciesConfig {
     ///   (deeper) box over a twentieth stresses it, and a half-saturated box takes its net
     ///   below zero (the viability grid), so soggy ground goes back to velvetpad.
     /// - **Seeds.** The bank lives 24 h (`seed_max_age_s` 86,400); a large adult funds
-    ///   many packages. It comes up through velvetpad when `overtop_per_check` is
-    ///   positive (`overtop_covers` velvetpad; the rate itself is 0 here).
+    ///   many packages. It comes up through velvetpad (`overtop_covers` velvetpad).
+    ///
+    /// **Spread (2026-10-04, `design/handoffs/springturf-spread-2026-10-04.md`).** Wind on
+    /// the WALD kernel, burrs on passing animals, runners that root through velvetpad, and
+    /// curing in drought; each number is stated where it is set.
     pub fn springturf() -> SpeciesConfig {
         SpeciesConfig {
             founder_per_m2: 0.6,
@@ -1815,16 +1924,55 @@ impl SpeciesConfig {
             // under whatever replaced it for the next bare ground. A ground cover: a seedling
             // with a positive overtop (the woody species) can come up through it.
             hop: 3,
-            clonal_share: 0.3,
             ground_cover: true,
             overtop_covers: vec![Species::Velvetpad],
+            // **Spread** (2026-10-04, Wrysk: "springturf not spreading is the problem"):
+            // - comes up through velvetpad at the succession study's pick, 0.03 a check;
+            dispersal: Dispersal::Wald,
+            overtop_per_check: 0.03,
+            // - wind: a WALD kernel with a mean of 1.5 m (12 voxels at 0.125 m, the middle
+            //   of Astra's 6/12/24 arms) and a shape of 0.5 m, of the order of a grass
+            //   head's release height: most seed lands within a few decimetres and the tail
+            //   crosses the patch gaps (CV √3 at this mean);
+            wald_mean_m: 1.5,
+            wald_shape_m: 0.5,
+            // - runners: a sward spreads by stolons and rhizomes, so 0.4 of the packages
+            //   (was 0.3) root up to two columns out (25 cm at 0.125 m, a stolon's
+            //   internode or two), and through velvetpad as well as onto bare ground;
+            clonal_share: 0.4,
+            runner_reach: 2,
+            runners_overtop: true,
+            // - burrs: an awned seed head catches a passing coat a tenth of the time at
+            //   coat factor 1, and stays on for a mean 3 m walked (a Weibull of shape 0.7:
+            //   most fall off in the first metre, the hooked ones ride far).
+            burr_pickup: 0.1,
+            burr_retention_mean_m: 3.0,
+            burr_retention_shape: 0.7,
+            // **Curing** (Wrysk: "grass can turn brown when its dried out and produce a lot
+            // of litter ... then it regrows from reserves in the roots"): below available
+            // water 0.1 — where the drought probe's turf began to die — for half an hour,
+            // it drops 0.8 of its foliage to the litter and goes dormant on a tenth of its
+            // maintenance; it wakes at 0.25 and reflushes from the reserve; six hours
+            // dormant (three days of the 2 h clock) kills it. Drawn straw brown.
+            cure_water: 0.1,
+            cure_after_s: 1800.0,
+            cure_shed: 0.8,
+            cure_upkeep: 0.1,
+            cure_resume_water: 0.25,
+            cure_max_s: 21_600.0,
+            cured_srgb: 0x00C2_A15A,
             seed_max_age_s: 86_400.0,
             seed_attrition_per_s: 1.0 / 86_400.0,
             wood_max: 0.3,
             alive_min: 0.006,
             donor_min: 0.03,
             maintenance: 0.002,
-            alpha: 6.2,
+            // Production (2026-10-04, Wrysk: "grass should have more foliage than moss"):
+            // a mature stand carries `(1 − graze_refuge) · alpha · wood_max` above its
+            // floor, 0.6 · 1.5 · 0.3 = 0.27 against velvetpad's 0.7 · 1.0 · 0.2 = 0.14 —
+            // 1.93×, in the 1.5–2× the brief asks (the presets: 3.0 against 2.0, the same
+            // ratio). Was 6.2 (presets 4.0, 2.57×).
+            alpha: 1.5,
             senescence: 0.00167,
             foliage_rate: 0.06,
             wood_rate: 0.01,
@@ -1995,7 +2143,11 @@ impl SpeciesConfig {
             establish_light_min: 0.05,
             stress_rate_per_s: 0.1,
             relax_rate_per_s: 0.05,
-            establish_saturated_max: 0.6,
+            // Waterlogged ground (2026-10-04, Wrysk: velvetpad may sprout there): a moss
+            // takes a saturated, unflooded box — 1.0 is no saturation ceiling and no
+            // aeration stress — and drowning under more than `drown_depth_m` of standing
+            // water stays the separate limit. Was 0.6.
+            establish_saturated_max: 1.0,
             drown_depth_m: 0.1,
             // Seeds: **spores to damp ground** within a wide `hop` 6, and
             // **runners** for half the packages — a pad spreads across the floor it is on
@@ -2577,6 +2729,9 @@ pub struct FloraConfig {
     /// **Wind seed: kernel scale** `a`, in the species' `hop`s (distances in `hop`
     /// multiples, so it follows the voxel rescale through `hop`).
     pub wind_scale_hops: f64,
+    /// **Burrs: the most seeds one animal carries** at once ([`SpeciesConfig::burr_pickup`]);
+    /// a full coat picks up no more until one falls off. Count.
+    pub burr_cap: u32,
     /// A carcass is drawn as **remains** rather than the body once the carrion pool is
     /// below this fraction of the organic matter the body died with. Fraction.
     pub carcass_remains_fraction: f64,
@@ -2679,6 +2834,8 @@ impl Default for FloraConfig {
             wind_tries: 4,
             wind_shape: 2.0,
             wind_scale_hops: 2.5,
+            // A handful: a coat holds many burrs, but one burr here is a whole package.
+            burr_cap: 6,
             carcass_remains_fraction: 0.3,
             carcass_gone_fraction: 0.02,
             seed_mark_recent_s: 120.0,
@@ -3109,6 +3266,46 @@ pub struct FloraLedger {
     /// plant). A diagnostic counter in no `expected_*` total; each row sums to
     /// `overtopped[cover]`.
     pub overtop_pairs: [[u64; Species::COUNT]; Species::COUNT],
+    /// Of the `overtopped` deaths, those a **runner** caused, rooting on the cover's face
+    /// ([`SpeciesConfig::runners_overtop`]), per **cover** species. Counted under their
+    /// pair in `overtop_pairs` as well.
+    #[serde(default)]
+    pub runner_displaced: [u64; Species::COUNT],
+    /// **Deaths by cause** (`[cause][species]`, [`DeathCause::index`]): every stand death
+    /// in `deaths`, once, under what killed it. A diagnostic in no `expected_*` total.
+    #[serde(default)]
+    pub deaths_by_cause: [[u64; Species::COUNT]; DeathCause::COUNT],
+    /// **Burrs**, per seed species, cumulative counts and organic matter — diagnostics in
+    /// no `expected_*` total, since the carried seed is still this layer's material
+    /// ([`Flora::burrs`]):
+    ///
+    /// - `burrs_picked`: seeds that latched onto a passing animal, paid by their donor;
+    /// - `burrs_dropped`: seeds that fell off a live carrier into the bank where it stood;
+    /// - `burrs_dropped_at_carcass`: seeds whose carrier died or left the world, dropped
+    ///   into the bank at its last face.
+    ///
+    /// `picked = carried + dropped + dropped_at_carcass`, seed for seed and organic unit
+    /// for organic unit.
+    #[serde(default)]
+    pub burrs_picked: [u64; Species::COUNT],
+    #[serde(default)]
+    pub burrs_dropped: [u64; Species::COUNT],
+    #[serde(default)]
+    pub burrs_dropped_at_carcass: [u64; Species::COUNT],
+    #[serde(default)]
+    pub burr_picked_organic: [f64; Species::COUNT],
+    #[serde(default)]
+    pub burr_dropped_organic: [f64; Species::COUNT],
+    #[serde(default)]
+    pub burr_carcass_organic: [f64; Species::COUNT],
+    /// **Curing**, per species: stands that cured, cured stands that woke, and the foliage
+    /// curing dropped to the litter (also in `shed_organic`).
+    #[serde(default)]
+    pub cures: [u64; Species::COUNT],
+    #[serde(default)]
+    pub cure_wakes: [u64; Species::COUNT],
+    #[serde(default)]
+    pub cure_shed_organic: [f64; Species::COUNT],
     /// **Food-side diagnostics** per species, indexed by [`Species::index`], cumulative
     /// organic matter, in no `expected_*` total (plant succession, Astra finding 5):
     ///
@@ -3315,6 +3512,8 @@ pub struct FloraView<'a> {
     /// against its stand, and [`FloraView::stands_near`]; a view built by hand passes
     /// [`CrownCache::none`] and computes every crown.
     pub crowns: &'a CrownCache,
+    /// The seeds riding animals' coats ([`Burr`]).
+    pub burrs: &'a [Burr],
 }
 
 /// Every layer of `stand`, bottom-up, with its geometry resolved and its stock read.
@@ -3840,7 +4039,8 @@ impl<'a> FloraView<'a> {
     /// Organic matter in every living and dead stock, the seed banks and the latticevines
     /// included. The site's mineral pool is not organic matter and is not in here.
     pub fn organic(&self) -> f64 {
-        self.cover.organic(&self.config.latticevine)
+        self.burrs.iter().map(|b| b.organic).sum::<f64>()
+            + self.cover.organic(&self.config.latticevine)
             + self.stands.iter().map(|s| s.material()).sum::<f64>()
             + self
                 .ground
@@ -3859,7 +4059,8 @@ impl<'a> FloraView<'a> {
     /// Mineral in every stock: the sites' pools, the mineral held in litter, dead wood
     /// and the seed banks, and the mineral standing in living tissue.
     pub fn mineral(&self) -> f64 {
-        self.stands.iter().map(|s| s.mineral).sum::<f64>()
+        self.burrs.iter().map(|b| b.mineral).sum::<f64>()
+            + self.stands.iter().map(|s| s.mineral).sum::<f64>()
             + self.cover.vines().iter().map(|v| v.mineral).sum::<f64>()
             + self
                 .ground
@@ -4049,7 +4250,11 @@ impl<'a> FloraView<'a> {
 
     /// Energy in every living and dead stock, the latticevines included.
     pub fn energy(&self) -> f64 {
-        self.config.latticevine.energy_density * self.cover.organic(&self.config.latticevine)
+        self.burrs
+            .iter()
+            .map(|b| self.config.species(b.species).energy_density * b.organic)
+            .sum::<f64>()
+            + self.config.latticevine.energy_density * self.cover.organic(&self.config.latticevine)
             + self
                 .stands
                 .iter()
@@ -4160,6 +4365,113 @@ pub struct Deposit {
     pub energy: f64,
 }
 
+/// What killed a stand ([`FloraLedger::deaths_by_cause`], [`DeathRecord`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DeathCause {
+    /// Its wood fell below `alive_min`: unpaid maintenance, dieback (light, water, a
+    /// grazer's crop, waterlogging — whatever starved it).
+    Starved,
+    /// Standing water over its face deeper than its `drown_depth_m`.
+    Drowned,
+    /// A seedling came up through it (a ground cover).
+    Overtopped,
+    /// A runner rooted on its face (a ground cover, [`SpeciesConfig::runners_overtop`]).
+    Displaced,
+    /// Cured past its species' `cure_max_s`: the drought outlasted the dormancy.
+    Drought,
+}
+
+impl DeathCause {
+    pub const ALL: [DeathCause; 5] = [
+        DeathCause::Starved,
+        DeathCause::Drowned,
+        DeathCause::Overtopped,
+        DeathCause::Displaced,
+        DeathCause::Drought,
+    ];
+    pub const COUNT: usize = DeathCause::ALL.len();
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            DeathCause::Starved => "starved",
+            DeathCause::Drowned => "drowned",
+            DeathCause::Overtopped => "overtopped",
+            DeathCause::Displaced => "displaced",
+            DeathCause::Drought => "drought",
+        }
+    }
+}
+
+/// One stand's death, as the tick saw it: **observation, not state**, like
+/// [`DeliveryReceipt`] — cleared at the start of every [`Flora::step`], never saved. A
+/// stand that leaves without one of these was removed (terrain, a command), not killed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeathRecord {
+    pub id: u64,
+    pub site: Site,
+    pub species: Species,
+    pub cause: DeathCause,
+}
+
+/// **A burr**: one seed package riding an animal's coat ([`Flora::carry_burrs`]). Still
+/// this layer's organic matter, mineral and energy (the species' `energy_density`), in
+/// [`FloraView::organic`] and its siblings, until it falls into a seed bank.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Burr {
+    /// The carrier's animal id.
+    pub carrier: u64,
+    pub species: Species,
+    pub organic: f64,
+    pub mineral: f64,
+    /// The donor stand's id and face.
+    pub donor: u64,
+    pub from: Site,
+    pub picked_tick: u64,
+    /// The distance it holds on for, metres walked, drawn at pickup from the species'
+    /// retention curve; and the distance walked so far.
+    pub hold_m: f64,
+    pub walked_m: f64,
+}
+
+/// One animal as the burr pass sees it ([`Flora::carry_burrs`]): who it is, the face it
+/// stands over, where its body is (metres, `x` along the ring), whether it is on the
+/// ground (a flyer in the air, a climber on a stem or a rider picks nothing up), and its
+/// coat factor.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Carrier {
+    pub id: u64,
+    pub site: Site,
+    pub x_m: f64,
+    pub z_m: f64,
+    pub grounded: bool,
+    pub coat: f64,
+}
+
+/// Where a carrier was last tick, kept by the burr pass to measure the distance walked
+/// and to see a step onto a new face.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CarrierMark {
+    pub id: u64,
+    pub site: Site,
+    pub x_m: f64,
+    pub z_m: f64,
+}
+
+/// How a package reached its recipient ([`DeliveryReceipt::via`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Via {
+    /// A seed landed by the species' dispersal mode.
+    Seed,
+    /// A runner daughter rooted.
+    Runner,
+    /// A burr fell off a carrier (or its carcass).
+    Burr,
+}
+
 /// One package leaving one donor for one site, exactly as `propagate` sent it:
 /// **observation, not state**.
 ///
@@ -4192,6 +4504,10 @@ pub struct DeliveryReceipt {
     pub organic: f64,
     /// The mineral that travelled with it, by the donor's own fraction rule.
     pub mineral: f64,
+    /// The donor's face, so a reader can measure how far the package went.
+    pub origin: Site,
+    /// How it travelled.
+    pub via: Via,
 }
 
 /// The plant layer. Owns its stands and ground stocks; borrows the world per call.
@@ -4236,6 +4552,17 @@ pub struct Flora {
     /// to the live world. Not state: not saved, and a clone starts empty.
     #[serde(skip)]
     pub(crate) drink: step::DrinkSlot,
+    /// **Burrs** riding animals' coats ([`Flora::carry_burrs`]), in pickup order: this
+    /// layer's material in transit, saved with it.
+    #[serde(default)]
+    pub(crate) burrs: Vec<Burr>,
+    /// Every carrier's place at the last burr pass, sorted by id.
+    #[serde(default)]
+    pub(crate) burr_marks: Vec<CarrierMark>,
+    /// This tick's stand deaths ([`DeathRecord`]): **observation, not state**, cleared at
+    /// the start of every tick, never saved.
+    #[serde(skip)]
+    pub(crate) death_log: Vec<DeathRecord>,
 }
 
 impl Flora {
@@ -4329,6 +4656,9 @@ impl Flora {
             attempts: None,
             crowns: CrownCache::default(),
             drink: step::DrinkSlot::default(),
+            burrs: Vec::new(),
+            burr_marks: Vec::new(),
+            death_log: Vec::new(),
         }
     }
 
@@ -4408,7 +4738,28 @@ impl Flora {
             ledger: &self.ledger,
             cover: &self.cover,
             crowns: &self.crowns,
+            burrs: &self.burrs,
         }
+    }
+
+    /// **Burrs** (epizoochory, `seeds.rs`'s `carry_burrs`): the animal layer hands over
+    /// every animal once per tick, after it has moved; carried seeds walk, fall off into
+    /// the bank where their carrier stands (or where it died), and a carrier stepping onto
+    /// a donor's face on the ground may pick one up. Applied between plant ticks, like a
+    /// consumer's withdrawals; its receipts join this tick's [`Flora::deliveries`].
+    pub fn carry_burrs(&mut self, world: &World, carriers: &[Carrier]) {
+        seeds::carry_burrs(self, world, carriers);
+    }
+
+    /// The seeds riding animals' coats.
+    pub fn burrs(&self) -> &[Burr] {
+        &self.burrs
+    }
+
+    /// This tick's stand deaths, with their causes. Cleared at the start of the next
+    /// [`Flora::step`]: **observation, not state** ([`DeathRecord`]).
+    pub fn death_log(&self) -> &[DeathRecord] {
+        &self.death_log
     }
 
     /// Advance one tick against the world's current state. Call after `World::step`.
@@ -4596,6 +4947,8 @@ impl Flora {
             fruit: 0.0,
             fruit_age_s: 0.0,
             fruit_rest_s: 0.0,
+            cured: false,
+            dry_s: 0.0,
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);

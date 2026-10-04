@@ -216,12 +216,53 @@ fn tick_inner(
         });
         cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora, dusk) });
         cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
+        // Burrs ride the bodies as they now stand: a seed latches on a step onto a donor's
+        // face, falls off as its carrier walks, and drops where a body died.
+        burrs(fauna, world, flora);
         #[cfg(feature = "profile")]
         cubarium_voxel::profile::add(
             cubarium_voxel::profile::Count::Animals,
             fauna.animals.len() as u64,
         );
     });
+}
+
+/// **Whether a body is on the ground** for the burr pass: walking on its support face, or
+/// perched on a ground face; not flying, gliding, climbing a stem or a wall, perched in a
+/// crown, or riding a host.
+pub(crate) fn grounded(a: &Animal) -> bool {
+    if a.attached.is_some() {
+        return false;
+    }
+    match a.mobility.mode {
+        crate::MobilityMode::Ground => true,
+        crate::MobilityMode::Perched => {
+            matches!(a.mobility.perch, Some(p) if matches!(p.anchor, crate::PerchAnchor::Face(_)))
+        }
+        _ => false,
+    }
+}
+
+/// One body as the plant layer's burr pass sees it ([`cubarium_voxel_flora::Carrier`]):
+/// its face, its place, whether it is on the ground, and its lineage's coat factor (0 for a
+/// body with no lineage).
+pub(crate) fn burr_carrier(fauna: &Fauna, a: &Animal) -> cubarium_voxel_flora::Carrier {
+    let coat = a.founder.map_or(0.0, |f| fauna.config.founder(f).burr_coat);
+    cubarium_voxel_flora::Carrier {
+        id: a.id,
+        site: a.site,
+        x_m: a.pose.x,
+        z_m: a.pose.z,
+        grounded: grounded(a),
+        coat,
+    }
+}
+
+/// The burr pass: every body handed to [`Flora::carry_burrs`] once a tick.
+fn burrs(fauna: &Fauna, world: &World, flora: &mut Flora) {
+    let carriers: Vec<cubarium_voxel_flora::Carrier> =
+        fauna.animals.iter().map(|a| burr_carrier(fauna, a)).collect();
+    flora.carry_burrs(world, &carriers);
 }
 
 /// Step 1: an animal standing on what is no longer a support face leaves the world.

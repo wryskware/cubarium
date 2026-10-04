@@ -1500,6 +1500,17 @@ pub fn style_of(flora: FloraView<'_>, stand: &Stand) -> Style {
     let crown = mix(mix(crown, wood, CROWN_BARE), crown, fill);
     let heart = mix(crown, heart, HEART_TINT * fill);
 
+    // Cured (drought dormancy): the crown is drawn in the species' cured colour — straw for
+    // the grass — whatever is left of its foliage, its heart a lighter straw, no wilt on
+    // top. A species with no cured colour keeps its own palette.
+    if stand.cured && sc.cured_srgb != 0 {
+        let straw = srgb_linear(sc.cured_srgb);
+        return Style {
+            wood,
+            crown: straw,
+            heart: mix(straw, [1.0, 1.0, 1.0], 0.25),
+        };
+    }
     // Wilt: `μ` is the moisture the model last read, so `1 − μ` is how dry the stand is.
     let wilt = 1.0 - stand.moisture.clamp(0.0, 1.0) as f32;
     Style {
@@ -1756,6 +1767,7 @@ mod tests {
             ledger: &ledger,
             cover: &cubarium_voxel_flora::Cover::default(),
             crowns: cubarium_voxel_flora::CrownCache::none(),
+            burrs: &[],
         };
         let view = world.view();
         let mut stands = Stands::empty(32, 16, 4);
@@ -1865,6 +1877,8 @@ mod tests {
                     fruit: 0.0,
                     fruit_age_s: 0.0,
                     fruit_rest_s: 0.0,
+                    cured: false,
+                    dry_s: 0.0,
                 };
                 // A hand-built stand bins its own foliage, as every stand the model
                 // makes does.
@@ -2016,6 +2030,8 @@ mod tests {
                     fruit: 0.0,
                     fruit_age_s: 0.0,
                     fruit_rest_s: 0.0,
+                    cured: false,
+                    dry_s: 0.0,
                 };
                 stand.bin_layers(flora.config());
                 let parts = parts_of(flora.view(), &stand, 0);
@@ -2087,6 +2103,8 @@ mod tests {
                 fruit: 0.0,
                 fruit_age_s: 0.0,
                     fruit_rest_s: 0.0,
+                    cured: false,
+                    dry_s: 0.0,
             };
             stand.bin_layers(flora.config());
             // **Distinct cells**, not parts: since the layers package two layers of one
@@ -2274,6 +2292,8 @@ mod tests {
                 fruit: 0.0,
                 fruit_age_s: 0.0,
                     fruit_rest_s: 0.0,
+                    cured: false,
+                    dry_s: 0.0,
             };
             stand.bin_layers(flora.config());
             let parts = parts_of(flora.view(), &stand, 0);

@@ -785,6 +785,9 @@ fn a_velvetpad_package_on_a_wholly_saturated_box_is_refused_and_an_adult_there_s
     let mut config = fast_donor(Species::Velvetpad);
     config.velvetpad.seed_max_age_s = 0.1;
     config.decomposition = 0.0;
+    // The subject is a ceiling below 1 (the shipped moss has none since 2026-10-04: it
+    // takes waterlogged ground), so the fixture states one.
+    config.velvetpad.establish_saturated_max = 0.6;
     let package = config.velvetpad.alive_min / config.velvetpad.propagule_split[0];
 
     // 0.98 of capacity is over `saturated_pore` 0.95, so every voxel of the box counts as
