@@ -1,58 +1,70 @@
 //! The plant succession study (`design/handoffs/plant-succession-study-2026-10-03.md`,
-//! Astra's review `design/7_Research/astra-plant-succession-review-2026-10-03.md`).
+//! Astra's review `design/7_Research/astra-plant-succession-review-2026-10-03.md`), with the
+//! springturf-spread repairs (`design/handoffs/springturf-spread-2026-10-04.md` §8,
+//! `design/7_Research/astra-succession-results-review-2026-10-04.md` findings 2, 3, 9).
 //!
 //! ```text
-//! succession_study found  seed=N save=DIR [minutes=120] [threads=T] [config=FILE] [set=P=V ...]
-//! succession_study plants load=DIR/mM arm=NAME hours=H [every=30] [save=DIR save_min=M,..] [set=...]
+//! succession_study found  seed=N save=DIR [minutes=120] [fauna=1] [threads=T] [config=FILE] [set=P=V ...]
+//! succession_study plants load=DIR/mM arm=NAME hours=H [every=30] [cohort=FILE] [map=FILE] [save=DIR save_min=M,..] [set=...]
 //! succession_study fauna  load=DIR/mM arm=NAME hours=H [set=...]
 //! succession_study fate   from=DIR/mM to=DIR2/mN
 //! ```
 //!
-//! - `fate`: the too-damp sites, read on the `from` save with its own config: each soil
-//!   face where springturf's aeration or standing-water gate fails (`wet`), and the
-//!   subset whose velvetpad box is soggy (saturated fraction ≥ 0.6). For each, the
-//!   occupant at `from` against the occupant at `to`; and the same classes read on the
-//!   `to` save's water (still with `from`'s config), occupied by what.
-//!
 //! Every subcommand resolves the layers as `velvet_niche` does: code defaults, the file's
 //! `[flora]`/`[fauna]` (default `config/desktop/terrarium.toml`), then `set=` lines and a
-//! `sets=` file. `load=` **replaces** the saved plant config with the resolved one.
+//! `sets=` file.
 //!
-//! - `found`: the plants-only terrarium (no fauna) from founding to `minutes`, saved at the
-//!   end (`DIR/mM`). One per seed: the shared baseline save every arm branches from.
-//! - `plants`: branch a save under the resolved config. The cohorts are **fixed at the
-//!   load**, from the save alone, by the rule below, before any step: the same sites in
-//!   every arm. Samples every `every` minutes; a summary at the end.
+//! - `found`: the terrarium from founding to `minutes`, saved at the end (`DIR/mM`), with
+//!   its **cohort file** (`DIR/mM/cohort.csv`) read off the untouched save. `fauna=1`
+//!   founds the config's own founding table with it (burrs need animals from the start);
+//!   without it, plants only. One per seed: the shared baseline every arm branches from.
+//! - `plants`: branch a save under the resolved config, with whatever animals it holds.
+//!   The cohorts are built from the **untouched** loaded layer and its own config, before
+//!   the arm's config replaces it (finding 2), and, given `cohort=FILE`, asserted equal to
+//!   the founding's file site for site and class for class. Samples every `every` minutes;
+//!   at minutes 240 and 360 (hours 4 and 6) the S1 sites' states go to `map=FILE`
+//!   (`x,y,z,state` lines: the geographic coverage map). At the end: flux windows, deaths
+//!   by cause and disappearances on the tracked sites, delivery receipts, burr deliveries,
+//!   the attempt classes with the failed gates split, and with animals present the fauna
+//!   balance per lineage with the Veilhound's kills, carcasses, bites and assimilation.
 //! - `fauna`: branch a save, introduce the code-default founding table through the
-//!   seeder's own fauna placement (`habitat::seed_pre_rolled`, with every plant founder
-//!   zeroed so nothing is planted), and run with the heuristics, one line per lineage per
-//!   window (first and second half) and over the run.
+//!   seeder's own fauna placement, and run with the heuristics (the earlier study's arm).
 //!
-//! **Cohorts** (on soil support faces, read at the load; springturf's own gates):
+//! **Cohorts** (on soil support faces, read at the load; the save's springturf gates):
 //! - `S1` (succession): velvetpad-held, springturf's water, aeration and standing-water
 //!   gates pass, its light gate (terrain sky ≥ `establish_light_min`) passes, and the raw
-//!   light at a turf crown's top `L = sky · canopy ≥ l_min` (0.5: the r2 grid's adult and
-//!   newborn viability for springturf).
+//!   light at a turf crown's top `L = sky · canopy ≥ l_min` (0.5).
 //! - `S2` (refuge): velvetpad-held and **wet** (turf's aeration or standing-water gate
 //!   fails) or **shaded** (turf's water gates pass, its sky gate or the `l_min` band
 //!   fails). A velvetpad site failing only turf's water minimum is **dry**, reported apart.
 //! - `D` (drained ground, S3): every soil face, any occupant, where turf's water, aeration
 //!   and standing-water gates pass.
+//! - `W` (waterlogged): every soil face whose velvetpad root box is at least
+//!   [`WET_SATURATED`] saturated and whose standing water is within velvetpad's drown
+//!   depth — the faces the old pad ceiling (0.6) refused and the new one (1.0) admits —
+//!   split by occupant at the load; the vacant ones are the "vacant wet faces".
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use cubarium_search::es::voxel::live::balance;
 use cubarium_voxel::{Material, World};
 use cubarium_voxel_fauna::{Departure, Fauna, Food, Founder, TICK_HZ};
 use cubarium_voxel_flora::study::canopy_at;
-use cubarium_voxel_flora::{Flora, FloraConfig, FloraLedger, Site, Species, Trophic, establishment_gates_with_sky};
+use cubarium_voxel_flora::{
+    DeathCause, Flora, FloraConfig, FloraLedger, Site, Species, Trophic, Via, establishment_gates_with_sky,
+};
 use cubarium_voxel_sim::params::{Layers, Params};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 const WOODY: [Species; 3] = [Species::Bloomcrown, Species::Lanternberry, Species::Vaulttree];
 const TURF: Species = Species::Springturf;
 const PAD: Species = Species::Velvetpad;
+/// The readout's "waterlogged" threshold: velvetpad's root box at least this saturated
+/// (its establishment ceiling before 2026-10-04). A study threshold, not a model knob.
+const WET_SATURATED: f64 = 0.6;
+/// The map's minutes: hours 2 (the load), 4 and 6.
+const MAP_MINUTES: [u64; 3] = [120, 240, 360];
 
 fn arg<'a>(args: &'a [String], k: &str) -> Option<&'a str> {
     args.iter().find_map(|a| a.strip_prefix(k))
@@ -106,7 +118,7 @@ fn main() {
         Some("plants") => plants(&args),
         Some("fauna") => fauna(&args),
         Some("fate") => fate(&args),
-        _ => panic!("usage: succession_study found|plants|fauna [...]"),
+        _ => panic!("usage: succession_study found|plants|fauna|fate [...]"),
     }
 }
 
@@ -120,26 +132,42 @@ fn save(dir: &Path, sim: &Sim, minute: u64) {
     eprintln!("saved {} at minute {minute}", dir.display());
 }
 
-/// A save, its plant config replaced by `want`; the save's own config is returned too
-/// (the cohorts are read on it, so an arm that changes springturf's gates reads the same
-/// sites as the baseline).
-fn load(dir: &Path, want: &FloraConfig) -> (World, Flora, Fauna, u64, FloraConfig) {
+/// A save, **untouched**: its own plant config is still the layer's.
+fn load_raw(dir: &Path) -> (World, Flora, Fauna, u64) {
     let read = |n: &str| std::fs::read(dir.join(n)).unwrap_or_else(|e| panic!("{}/{n}: {e}", dir.display()));
     let world = World::load(&read("world.bin")).expect("world");
-    let mut flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin")).expect("flora");
+    let flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin")).expect("flora");
     let fauna = Fauna::load(&read("fauna.bin")).expect("fauna");
     let minute: u64 = String::from_utf8(read("minute")).unwrap().trim().parse().unwrap();
-    let saved = flora.config().clone();
+    (world, flora, fauna, minute)
+}
+
+/// Replace a loaded layer's plant config with the arm's.
+fn arm_config(flora: &mut Flora, want: &FloraConfig, what: &str) {
     flora.replace_config(want.clone()).expect("the resolved config validates");
     assert!(flora.config() == want, "the configuration replacement took");
     let t = flora.config().species(TURF);
     eprintln!(
-        "loaded {} at minute {minute}; springturf overtop {} covers {:?}; woody overtop {:?}",
-        dir.display(),
+        "{what}: springturf overtop {} covers {:?} dispersal {:?} wald {} m burr {} runners {} x{} through covers {} cure {} s alpha {}; velvetpad saturated max {}",
         t.overtop_per_check,
         t.overtop_covers,
-        WOODY.map(|w| flora.config().species(w).overtop_per_check)
+        t.dispersal,
+        t.wald_mean_m,
+        t.burr_pickup,
+        t.clonal_share,
+        t.runner_reach,
+        t.runners_overtop,
+        t.cure_after_s,
+        t.alpha,
+        flora.config().species(PAD).establish_saturated_max,
     );
+}
+
+/// A save, its plant config replaced by `want`; the save's own config is returned too.
+fn load(dir: &Path, want: &FloraConfig) -> (World, Flora, Fauna, u64, FloraConfig) {
+    let (world, mut flora, fauna, minute) = load_raw(dir);
+    let saved = flora.config().clone();
+    arm_config(&mut flora, want, &format!("loaded {} at minute {minute}", dir.display()));
     (world, flora, fauna, minute, saved)
 }
 
@@ -149,8 +177,13 @@ fn found(args: &[String]) {
     let params = resolve(args);
     let seed: u64 = arg(args, "seed=").map_or(1, |s| s.parse().unwrap());
     let minutes: u64 = arg(args, "minutes=").map_or(120, |m| m.parse().unwrap());
+    let with_fauna = arg(args, "fauna=").is_some_and(|v| v == "1");
+    let l_min: f64 = arg(args, "l_min=").map_or(0.5, |v| v.parse().unwrap());
     let dir = Path::new(arg(args, "save=").expect("save=DIR"));
     let wc = params.world.clone();
+    // The plants on the asked terrain seed (no animals in the habitat judgement, so the
+    // seed is the terrain the earlier studies used), then — with `fauna=1` — the
+    // config's founding table introduced at minute 0 through the seeder's own placement.
     let founded = cubarium::voxel::found(
         &wc,
         &cubarium::voxel::LayerConfig::new(&params, wc.voxel_m),
@@ -162,9 +195,16 @@ fn found(args: &[String]) {
         "founded seed {} ({}): stands {}",
         founded.seed,
         if founded.accepted { "accepted" } else { "NOT accepted" },
-        founded.seeded.stands
+        founded.seeded.stands,
     );
-    let mut sim = Sim::ambient(founded.world, founded.flora, founded.fauna, SimConfig::default());
+    let (mut world, mut flora, mut fauna) = (founded.world, founded.flora, founded.fauna);
+    if with_fauna {
+        introduce(&arg(args, "arm=").unwrap_or("found").to_string(), 0, &params, &mut world, &mut flora, &mut fauna);
+    }
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    if with_fauna {
+        sim.set_overlap(false);
+    }
     let per_min = 60 * u64::from(TICK_HZ);
     let t0 = std::time::Instant::now();
     for minute in 1..=minutes {
@@ -172,10 +212,17 @@ fn found(args: &[String]) {
             sim.step();
         }
         if minute % 10 == 0 {
-            eprintln!("minute {minute} ({:.0} s wall)", t0.elapsed().as_secs_f64());
+            eprintln!("minute {minute} ({:.0} s wall, {} animals)", t0.elapsed().as_secs_f64(), sim.fauna().view().animals.len());
         }
     }
-    save(&dir.join(format!("m{minutes}")), &sim, minutes);
+    let at = dir.join(format!("m{minutes}"));
+    save(&at, &sim, minutes);
+    // The cohort file, off the untouched save (read back, so it is exactly what an arm
+    // will load).
+    let (world, flora, _, _) = load_raw(&at);
+    let co = cohorts(&world, &flora, flora.config(), l_min);
+    std::fs::write(at.join("cohort.csv"), co.to_csv()).unwrap();
+    eprintln!("wrote {}", at.join("cohort.csv").display());
 }
 
 // ------------------------------------------------------------------------ cohorts
@@ -188,16 +235,46 @@ enum Class {
     Dry,
 }
 
+impl Class {
+    fn name(self) -> &'static str {
+        match self {
+            Class::S1 => "S1",
+            Class::Wet => "wet",
+            Class::Shaded => "shaded",
+            Class::Dry => "dry",
+        }
+    }
+}
+
 struct Cohorts {
     /// Velvetpad-held sites at the load, by class.
     pad: Vec<(Site, Class)>,
     /// Drained ground (any occupant): turf's water gates pass.
     drained: Vec<Site>,
+    /// Waterlogged, unflooded faces (`W`), with their occupant at the load.
+    wet: Vec<(Site, Option<Species>)>,
     /// Soil faces in all.
     soil: usize,
     /// Each S1 site's distance to the nearest springturf donor at the load, voxels
     /// (horizontal, the ring wrapped).
     reach: HashMap<Site, f64>,
+}
+
+impl Cohorts {
+    /// One line per site: `kind,x,y,z,class` — what an arm's cohort is asserted against.
+    fn to_csv(&self) -> String {
+        let mut out = String::new();
+        for (s, c) in &self.pad {
+            out += &format!("pad,{},{},{},{}\n", s.x, s.y, s.z, c.name());
+        }
+        for s in &self.drained {
+            out += &format!("drained,{},{},{},-\n", s.x, s.y, s.z);
+        }
+        for (s, o) in &self.wet {
+            out += &format!("wet,{},{},{},{}\n", s.x, s.y, s.z, occ_name(occ_index(*o)));
+        }
+        out
+    }
 }
 
 fn soil_faces(world: &World) -> Vec<Site> {
@@ -216,6 +293,14 @@ fn soil_faces(world: &World) -> Vec<Site> {
     out
 }
 
+/// Whether a face is waterlogged and unflooded by `reference`'s velvetpad box.
+fn waterlogged(view: &cubarium_voxel::VoxelView<'_>, site: Site, reference: &FloraConfig) -> bool {
+    let pad = reference.species(PAD);
+    let sky = view.sky_visibility(site.x as i64, site.y, site.z);
+    let p = establishment_gates_with_sky(view, site, pad, sky, 0.0, 0.0);
+    p.saturated_fraction >= WET_SATURATED && p.water_depth_m <= pad.drown_depth_m
+}
+
 fn cohorts(world: &World, flora: &Flora, reference: &FloraConfig, l_min: f64) -> Cohorts {
     let view = world.view();
     let c = view.config;
@@ -226,6 +311,7 @@ fn cohorts(world: &World, flora: &Flora, reference: &FloraConfig, l_min: f64) ->
     let mut out = Cohorts {
         pad: Vec::new(),
         drained: Vec::new(),
+        wet: Vec::new(),
         soil: 0,
         reach: HashMap::new(),
     };
@@ -244,6 +330,9 @@ fn cohorts(world: &World, flora: &Flora, reference: &FloraConfig, l_min: f64) ->
         if water {
             out.drained.push(site);
         }
+        if waterlogged(&view, site, reference) {
+            out.wet.push((site, fv.stand_at(site).map(|s| s.species)));
+        }
         if fv.stand_at(site).is_none_or(|s| s.species != PAD) {
             continue;
         }
@@ -261,12 +350,7 @@ fn cohorts(world: &World, flora: &Flora, reference: &FloraConfig, l_min: f64) ->
         if class == Class::S1 {
             let d = donors
                 .iter()
-                .map(|d| {
-                    let dx = (f64::from(d.x) - f64::from(site.x)).rem_euclid(w);
-                    let dx = dx.min(w - dx);
-                    let dz = f64::from(d.z) - f64::from(site.z);
-                    (dx * dx + dz * dz).sqrt()
-                })
+                .map(|d| wrapped(*d, site, w))
                 .fold(f64::INFINITY, f64::min);
             out.reach.insert(site, d);
         }
@@ -274,21 +358,76 @@ fn cohorts(world: &World, flora: &Flora, reference: &FloraConfig, l_min: f64) ->
     out
 }
 
+/// Horizontal distance between two faces, voxels, `x` wrapped round a ring `w` wide.
+fn wrapped(a: Site, b: Site, w: f64) -> f64 {
+    let dx = (f64::from(a.x) - f64::from(b.x)).rem_euclid(w);
+    let dx = dx.min(w - dx);
+    let dz = f64::from(a.z) - f64::from(b.z);
+    (dx * dx + dz * dz).sqrt()
+}
+
 // ------------------------------------------------------------------------- plants
 
-/// What each S1 site has been through, from the per-minute occupancy.
+/// What one tracked site has been through, from the tick's death log and receipts and the
+/// per-minute occupancy.
 #[derive(Clone, Copy, Default)]
 struct Track {
-    turf_seen: bool,
-    turf_donor_seen: bool,
-    /// A woody stand seen after turf was.
-    woody_after_turf: bool,
+    /// The occupant at the last minute check.
+    cur: Option<(Species, u64)>,
+    /// The **current** turf stand has reached donor size: its own tenure, so an unrelated
+    /// later seedling does not inherit an earlier one's (finding 3).
+    tenure_donor: bool,
+    /// The current woody stand came up through a donor-size turf on this site: the
+    /// continuous turf → woody trajectory.
+    woody_from_turf: bool,
+    /// A turf here died overtopped since the last check: whether it was donor size.
+    overtopped_turf: Option<bool>,
     /// A woody stand seen before any turf.
     woody_direct: bool,
-    /// Turf births seen (a new turf stand id).
-    turf_ids: u32,
-    last_id: Option<u64>,
+    turf_seen: bool,
+    turf_births: u32,
+    pad_births: u32,
+    /// Turf packages received, by [`Via`] (seed, runner, burr).
+    receipts: [u32; 3],
+    /// Deaths here by cause, `[turf, pad]` (the death log: events, not inferences).
+    deaths: [[u32; DeathCause::COUNT]; 2],
+    /// An occupant gone between checks with no death record: removed, not killed.
+    disappeared: u32,
 }
+
+impl Track {
+    fn success(&self) -> bool {
+        match self.cur {
+            Some((s, _)) if s == TURF => self.tenure_donor,
+            Some((s, _)) if is_woody(s) => self.woody_from_turf,
+            _ => false,
+        }
+    }
+
+    fn state(&self) -> &'static str {
+        match self.cur {
+            None => "vacant",
+            Some((s, _)) if s == TURF && self.tenure_donor => "turf_donor",
+            Some((s, _)) if s == TURF => "turf_young",
+            Some((s, _)) if is_woody(s) && self.woody_from_turf => "woody_from_turf",
+            Some((s, _)) if is_woody(s) => "woody_other",
+            Some((s, _)) if s == PAD => "pad",
+            Some(_) => "other",
+        }
+    }
+}
+
+fn via_index(v: Via) -> usize {
+    match v {
+        Via::Seed => 0,
+        Via::Runner => 1,
+        Via::Burr => 2,
+    }
+}
+
+const VIA_NAMES: [&str; 3] = ["seed", "runner", "burr"];
+/// Delivery distance bins, voxels.
+const DIST_BINS: [(f64, &str); 5] = [(6.0, "<=6"), (12.0, "6-12"), (24.0, "12-24"), (48.0, "24-48"), (f64::INFINITY, ">48")];
 
 fn is_woody(s: Species) -> bool {
     WOODY.contains(&s)
@@ -312,6 +451,26 @@ struct Window {
     minute: u64,
 }
 
+/// Everything the run tracks besides the cohorts.
+struct Watch {
+    track: HashMap<Site, Track>,
+    /// The tracked sites' classes: S1, the refuge classes.
+    class: HashMap<Site, Class>,
+    /// Ids the death log has recorded (so a vanished id is a death, not a removal).
+    died: HashSet<u64>,
+    /// Refuge velvetpad births observed (minute checks) and deaths (events) per two-hour
+    /// window and class.
+    refuge_bd: HashMap<(u64, Class), (u64, u64)>,
+    /// Turf deliveries, all sites: count and distance histogram by via.
+    deliveries: [[u64; DIST_BINS.len()]; 3],
+    /// Burr landings waiting to be seen established: site → the birth counter at landing.
+    burr_pending: HashMap<Site, u64>,
+    burr_sites: u64,
+    burr_established: u64,
+    /// The most cured turf stands seen at any minute check.
+    cured_max: usize,
+}
+
 fn plants(args: &[String]) {
     let hours: f64 = arg(args, "hours=").map_or(4.0, |h| h.parse().unwrap());
     let every: u64 = arg(args, "every=").map_or(30, |m| m.parse().unwrap());
@@ -320,35 +479,73 @@ fn plants(args: &[String]) {
     let params = resolve(args);
     let want = params.flora_for_world();
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
-    let (world, mut flora, fauna, minute0, saved) = load(dir, &want);
-    // The cohorts, from the save alone (its own config), before any step.
+    let (world, mut flora, fauna, minute0) = load_raw(dir);
+    // The cohorts, from the untouched save under its own config, before the arm's
+    // config replaces it (finding 2).
+    let saved = flora.config().clone();
     let co = cohorts(&world, &flora, &saved, l_min);
+    if let Some(file) = arg(args, "cohort=") {
+        let expect = std::fs::read_to_string(file).unwrap_or_else(|e| panic!("cohort {file}: {e}"));
+        let got = co.to_csv();
+        assert!(
+            expect == got,
+            "the cohort differs from {file}: {} against {} lines",
+            got.lines().count(),
+            expect.lines().count()
+        );
+        eprintln!("cohort matches {file}: {} sites and classes", got.lines().count());
+    }
+    arm_config(&mut flora, &want, &format!("{arm} at minute {minute0}"));
     let count = |k: Class| co.pad.iter().filter(|(_, c)| *c == k).count();
     let pads = co.pad.len();
+    let wet_vacant: Vec<Site> = co.wet.iter().filter(|w| w.1.is_none()).map(|w| w.0).collect();
     println!(
-        "cohort,{arm},{minute0},soil={},pad_sites={pads},s1={},wet={},shaded={},dry={},drained={},s1_share_of_pad={:.4}",
+        "cohort,{arm},{minute0},soil={},pad_sites={pads},s1={},wet={},shaded={},dry={},drained={},waterlogged={},waterlogged_vacant={},s1_share_of_pad={:.4}",
         co.soil,
         count(Class::S1),
         count(Class::Wet),
         count(Class::Shaded),
         count(Class::Dry),
         co.drained.len(),
+        co.wet.len(),
+        wet_vacant.len(),
         count(Class::S1) as f64 / pads.max(1) as f64
     );
     flora.trace_attempts(Some(TURF));
+    let with_fauna = !fauna.view().animals.is_empty();
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    if with_fauna {
+        sim.set_overlap(false);
+    }
     let save_dir = arg(args, "save=");
     let save_min: Vec<u64> = arg(args, "save_min=").map_or(Vec::new(), |m| m.split(',').map(|v| v.parse().unwrap()).collect());
+    let mut map = arg(args, "map=").map(|f| std::fs::File::create(f).unwrap_or_else(|e| panic!("map {f}: {e}")));
     let s1: Vec<Site> = co.pad.iter().filter(|(_, c)| *c == Class::S1).map(|(s, _)| *s).collect();
     let refuge: Vec<(Site, Class)> = co.pad.iter().filter(|(_, c)| matches!(c, Class::Wet | Class::Shaded)).copied().collect();
-    let mut track: HashMap<Site, Track> = s1.iter().map(|&s| (s, Track::default())).collect();
-    // Refuge velvetpad births and deaths per two-hour window from the load, wet and shaded.
-    let mut refuge_last: HashMap<Site, Option<(Species, u64)>> = HashMap::new();
-    let mut refuge_bd: HashMap<(u64, Class), (u64, u64)> = HashMap::new();
+    let mut w = Watch {
+        track: HashMap::new(),
+        class: HashMap::new(),
+        died: HashSet::new(),
+        refuge_bd: HashMap::new(),
+        deliveries: [[0; DIST_BINS.len()]; 3],
+        burr_pending: HashMap::new(),
+        burr_sites: 0,
+        burr_established: 0,
+        cured_max: 0,
+    };
     {
         let fv = sim.flora().view();
-        for &(site, _) in &refuge {
-            refuge_last.insert(site, fv.stand_at(site).map(|s| (s.species, s.id)));
+        for &(site, class) in co.pad.iter().filter(|(_, c)| *c != Class::Dry) {
+            let cur = fv.stand_at(site).map(|s| (s.species, s.id));
+            w.track.insert(
+                site,
+                Track {
+                    cur,
+                    turf_seen: cur.is_some_and(|c| c.0 == TURF),
+                    ..Track::default()
+                },
+            );
+            w.class.insert(site, class);
         }
     }
     let start = Window {
@@ -358,50 +555,116 @@ fn plants(args: &[String]) {
     let mut windows: Vec<Window> = vec![start];
     let per_min = 60 * u64::from(TICK_HZ);
     let end = minute0 + (hours * 60.0).round() as u64;
+    let total = (end - minute0) * per_min;
+    let mut fw = FaunaWatch::new(&sim, total / 2);
+    let width = f64::from(sim.world().config().width);
     let t0 = std::time::Instant::now();
-    sample(&sim, &arm, minute0, &co, &s1, &refuge, &track, &windows[0]);
+    sample(&sim, &arm, minute0, &co, &s1, &refuge, &w, &wet_vacant, &saved, &windows[0]);
+    if let Some(f) = map.as_mut() {
+        write_map(f, &arm, minute0, &s1, &w);
+    }
+    let mut tick = 0u64;
     for minute in minute0 + 1..=end {
+        let win = (minute - minute0 - 1) / 120;
         for _ in 0..per_min {
             sim.step();
-        }
-        let fv = sim.flora().view();
-        let sc = fv.config.species(TURF);
-        for &site in &s1 {
-            let t = track.get_mut(&site).unwrap();
-            if let Some(s) = fv.stand_at(site) {
-                if s.species == TURF {
-                    t.turf_seen = true;
-                    if s.wood >= sc.donor_min {
-                        t.turf_donor_seen = true;
-                    }
-                    if t.last_id != Some(s.id) {
-                        t.turf_ids += 1;
-                    }
-                } else if is_woody(s.species) {
-                    if t.turf_seen {
-                        t.woody_after_turf = true;
-                    } else {
-                        t.woody_direct = true;
-                    }
-                }
-                t.last_id = Some(s.id);
-            } else {
-                t.last_id = None;
+            tick += 1;
+            if with_fauna {
+                fw.tick(&sim, &params, tick);
             }
-        }
-        let win = (minute - minute0 - 1) / 120;
-        for &(site, class) in &refuge {
-            let now = fv.stand_at(site).map(|s| (s.species, s.id));
-            let was = refuge_last.insert(site, now).flatten();
-            if was.map(|w| w.1) != now.map(|n| n.1) {
-                let e = refuge_bd.entry((win, class)).or_default();
-                if was.is_some_and(|w| w.0 == PAD) {
-                    e.1 += 1;
+            // The tick's deaths and receipts.
+            let flora = sim.flora();
+            for d in flora.death_log() {
+                let Some(t) = w.track.get_mut(&d.site) else {
+                    continue;
+                };
+                w.died.insert(d.id);
+                let k = match d.species {
+                    s if s == TURF => 0,
+                    s if s == PAD => 1,
+                    _ => continue,
+                };
+                t.deaths[k][d.cause.index()] += 1;
+                if d.species == TURF && d.cause == DeathCause::Overtopped {
+                    t.overtopped_turf = Some(t.cur.is_some_and(|c| c.1 == d.id) && t.tenure_donor);
                 }
-                if now.is_some_and(|n| n.0 == PAD) {
-                    e.0 += 1;
+                if d.species == PAD
+                    && let Some(&class) = w.class.get(&d.site)
+                    && class != Class::S1
+                {
+                    w.refuge_bd.entry((win, class)).or_default().1 += 1;
                 }
             }
+            let births = flora.view().ledger.births;
+            for d in flora.deliveries() {
+                if d.species != TURF {
+                    continue;
+                }
+                let v = via_index(d.via);
+                let dist = wrapped(d.origin, d.recipient, width);
+                let b = DIST_BINS.iter().position(|(hi, _)| dist <= *hi).unwrap();
+                w.deliveries[v][b] += 1;
+                if let Some(t) = w.track.get_mut(&d.recipient) {
+                    t.receipts[v] += 1;
+                }
+                if d.via == Via::Burr && !w.burr_pending.contains_key(&d.recipient) {
+                    w.burr_pending.insert(d.recipient, births);
+                    w.burr_sites += 1;
+                }
+            }
+        }
+        // The minute check: births, disappearances, tenure, burr establishment.
+        {
+            let fv = sim.flora().view();
+            let sc = fv.config.species(TURF);
+            for (site, t) in w.track.iter_mut() {
+                let now = fv.stand_at(*site);
+                let now_id = now.map(|s| (s.species, s.id));
+                if now_id.map(|n| n.1) != t.cur.map(|c| c.1) {
+                    if let Some((_, id)) = t.cur
+                        && !w.died.contains(&id)
+                    {
+                        t.disappeared += 1;
+                    }
+                    t.tenure_donor = false;
+                    t.woody_from_turf = false;
+                    if let Some(s) = now {
+                        if s.species == TURF {
+                            t.turf_births += 1;
+                            t.turf_seen = true;
+                            t.tenure_donor = s.wood >= sc.donor_min;
+                        } else if is_woody(s.species) {
+                            t.woody_from_turf = t.overtopped_turf == Some(true);
+                            if !t.turf_seen {
+                                t.woody_direct = true;
+                            }
+                        } else if s.species == PAD {
+                            t.pad_births += 1;
+                            if let Some(&class) = w.class.get(site)
+                                && class != Class::S1
+                            {
+                                w.refuge_bd.entry((win, class)).or_default().0 += 1;
+                            }
+                        }
+                    }
+                    t.overtopped_turf = None;
+                    t.cur = now_id;
+                } else if let Some(s) = now
+                    && s.species == TURF
+                    && s.wood >= sc.donor_min
+                {
+                    t.tenure_donor = true;
+                }
+            }
+            w.burr_pending.retain(|site, at| {
+                let up = fv.stand_at(*site).is_some_and(|s| s.species == TURF && s.id >= *at);
+                if up {
+                    w.burr_established += 1;
+                }
+                !up
+            });
+            w.cured_max = w.cured_max.max(fv.stands.iter().filter(|s| s.cured).count());
+            w.died.clear();
         }
         if (minute - minute0) % every == 0 || minute == end {
             if (minute - minute0) % 120 == 0 {
@@ -410,8 +673,13 @@ fn plants(args: &[String]) {
                     minute,
                 });
             }
-            sample(&sim, &arm, minute, &co, &s1, &refuge, &track, &windows[0]);
+            sample(&sim, &arm, minute, &co, &s1, &refuge, &w, &wet_vacant, &saved, &windows[0]);
             eprintln!("minute {minute} ({:.0} s wall)", t0.elapsed().as_secs_f64());
+        }
+        if MAP_MINUTES.contains(&minute)
+            && let Some(f) = map.as_mut()
+        {
+            write_map(f, &arm, minute, &s1, &w);
         }
         if let Some(d) = save_dir
             && save_min.contains(&minute)
@@ -423,20 +691,34 @@ fn plants(args: &[String]) {
     for pair in windows.windows(2) {
         flux_line(&arm, &pair[0], &pair[1], sim.flora().view().config);
     }
-    for ((win, class), (b, d)) in {
-        let mut v: Vec<_> = refuge_bd.iter().collect();
-        v.sort_by_key(|((w, c), _)| (*w, format!("{c:?}")));
-        v
-    } {
+    let mut bd: Vec<_> = w.refuge_bd.iter().collect();
+    bd.sort_by_key(|((win, c), _)| (*win, c.name()));
+    for ((win, class), (b, d)) in bd {
         println!(
-            "refuge_bd,{arm},{}-{},{class:?},births={b},deaths={d}",
+            "refuge_bd,{arm},{}-{},{},births_observed={b},death_events={d}",
             minute0 + win * 120,
-            minute0 + (win + 1) * 120
+            minute0 + (win + 1) * 120,
+            class.name()
         );
     }
-    attempts(&sim, &arm, &co, &s1, &track);
+    tracked_line(&arm, &w);
+    deliveries_line(&arm, &w);
+    plant_ledger_line(&arm, &windows[0].ledger, sim.flora().view().ledger);
+    attempts(&sim, &arm, &co, &s1, &w);
+    if with_fauna {
+        fw.report(&sim, &params, &arm);
+    }
 }
 
+fn write_map(f: &mut std::fs::File, arm: &str, minute: u64, s1: &[Site], w: &Watch) {
+    use std::io::Write;
+    for site in s1 {
+        let t = w.track[site];
+        writeln!(f, "{arm},{minute},{},{},{},{}", site.x, site.y, site.z, t.state()).unwrap();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn sample(
     sim: &Sim,
     arm: &str,
@@ -444,7 +726,9 @@ fn sample(
     co: &Cohorts,
     s1: &[Site],
     refuge: &[(Site, Class)],
-    track: &HashMap<Site, Track>,
+    w: &Watch,
+    wet_vacant: &[Site],
+    reference: &FloraConfig,
     start: &Window,
 ) {
     let fv = sim.flora().view();
@@ -494,27 +778,33 @@ fn sample(
     line("shaded", occ(&mut refuge.iter().filter(|r| r.1 == Class::Shaded).map(|r| r.0)));
     line("dry", occ(&mut co.pad.iter().filter(|r| r.1 == Class::Dry).map(|r| r.0)));
     line("drained", occ(&mut co.drained.iter().copied()));
-    // S1 progress: success (turf reached donor size and is turf or gave way to woody).
+    line("waterlogged_vacant_at_load", occ(&mut wet_vacant.iter().copied()));
+    // The waterlogged faces on the water as it is now, by the same rule.
+    {
+        let view = sim.world().view();
+        let now: Vec<Site> = soil_faces(sim.world())
+            .into_iter()
+            .filter(|s| waterlogged(&view, *s, reference))
+            .collect();
+        line("waterlogged_now", occ(&mut now.iter().copied()));
+    }
+    // S1: success is a donor-size turf in its own tenure, or a woody stand that came up
+    // through one (the continuous trajectory).
     let (mut success, mut turf_now, mut direct_woody) = (0usize, 0usize, 0usize);
-    for &site in s1 {
-        let t = track[&site];
-        let now = fv.stand_at(site).map(|s| s.species);
-        if t.turf_donor_seen && now.is_some_and(|s| s == TURF || is_woody(s)) {
-            success += 1;
-        }
-        if now == Some(TURF) {
-            turf_now += 1;
-        }
-        if t.woody_direct {
-            direct_woody += 1;
-        }
+    for site in s1 {
+        let t = w.track[site];
+        success += usize::from(t.success());
+        turf_now += usize::from(t.cur.is_some_and(|c| c.0 == TURF));
+        direct_woody += usize::from(t.woody_direct);
     }
     println!(
         "s1,{arm},{minute},n={},success={success},share={:.4},turf_now={turf_now},direct_woody={direct_woody}",
         s1.len(),
         success as f64 / s1.len().max(1) as f64
     );
-    // The world: stands, donors and edible foliage per species; litter and dead wood.
+    // The world: stands, donors and edible foliage per species; litter and dead wood;
+    // the mature stand's edible foliage for turf and pad (donor-size stands: mean and
+    // median); cured turf.
     let mut parts = Vec::new();
     for sp in Species::ALL {
         let sc = config.species(sp);
@@ -526,6 +816,16 @@ fn sample(
         let food: f64 = st.iter().map(|s| edible(&fv, s)).sum();
         parts.push(format!("{}={}/{donors}/{food:.3}", sp.name(), st.len()));
     }
+    let mature = |sp: Species| {
+        let sc = config.species(sp);
+        let mut e: Vec<f64> = fv.stands.iter().filter(|s| s.species == sp && s.wood >= sc.donor_min).map(|s| edible(&fv, s)).collect();
+        e.sort_by(f64::total_cmp);
+        let mean = e.iter().sum::<f64>() / e.len().max(1) as f64;
+        let median = if e.is_empty() { 0.0 } else { e[e.len() / 2] };
+        (e.len(), mean, median)
+    };
+    let (tn, tmean, tmed) = mature(TURF);
+    let (pn, pmean, pmed) = mature(PAD);
     let litter: f64 = fv.ground.iter().map(|g| g.litter).sum();
     let wood: f64 = fv.ground.iter().map(|g| g.dead_wood).sum();
     let food: f64 = fv
@@ -534,14 +834,19 @@ fn sample(
         .filter(|s| config.species(s.species).trophic == Trophic::Photo)
         .map(|s| edible(&fv, s))
         .sum();
+    let cured = fv.stands.iter().filter(|s| s.cured).count();
     let l = fv.ledger;
     let p = |a: Species, b: Species| l.overtop_pairs[a.index()][b.index()] - start.ledger.overtop_pairs[a.index()][b.index()];
     let woody_from = |a: Species| WOODY.iter().map(|&w| p(a, w)).sum::<u64>();
     println!(
-        "world,{arm},{minute},edible={food:.4},litter={litter:.4},dead_wood={wood:.4},pad_to_turf={},pad_to_woody={},turf_to_woody={},stands/donors/edible: {}",
+        "world,{arm},{minute},edible={food:.4},litter={litter:.4},edible_plus_litter={:.4},dead_wood={wood:.4},pad_to_turf={},pad_to_turf_by_runner={},pad_to_woody={},turf_to_woody={},mature_turf_n={tn},mature_turf_edible_mean={tmean:.5},mature_turf_edible_median={tmed:.5},mature_pad_n={pn},mature_pad_edible_mean={pmean:.5},mature_pad_edible_median={pmed:.5},turf_over_pad_mean={:.3},cured_turf={cured},burrs_riding={},stands/donors/edible: {}",
+        food + litter,
         p(PAD, TURF),
+        l.runner_displaced[PAD.index()] - start.ledger.runner_displaced[PAD.index()],
         woody_from(PAD),
         woody_from(TURF),
+        if pmean > 0.0 { tmean / pmean } else { f64::NAN },
+        fv.burrs.len(),
         parts.join(" ")
     );
 }
@@ -564,7 +869,7 @@ fn flux_line(arm: &str, a: &Window, b: &Window, config: &FloraConfig) {
             .join(" ")
     };
     println!(
-        "flux,{arm},{}-{},built={:.4},shed={:.4},overtop_pulse={:.4},foliage_taken={:.4},litter_taken={:.4} | built: {} | shed: {} | pulse: {}",
+        "flux,{arm},{}-{},built={:.4},shed={:.4},overtop_pulse={:.4},foliage_taken={:.4},litter_taken={:.4},turf_cure_shed={:.4} | built: {} | shed: {} | pulse: {}",
         a.minute,
         b.minute,
         sum(&la.foliage_built, &lb.foliage_built),
@@ -572,49 +877,161 @@ fn flux_line(arm: &str, a: &Window, b: &Window, config: &FloraConfig) {
         Species::ALL.iter().map(|&s| d(&la.overtopped_organic, &lb.overtopped_organic, s)).sum::<f64>(),
         sum(&la.foliage_taken, &lb.foliage_taken),
         lb.litter_taken - la.litter_taken,
+        d(&la.cure_shed_organic, &lb.cure_shed_organic, TURF),
         per(&la.foliage_built, &lb.foliage_built),
         per(&la.shed_organic, &lb.shed_organic),
         per(&la.overtopped_organic, &lb.overtopped_organic),
     );
 }
 
+/// The tracked sites' events over the run, by class: deaths **with causes** (the death
+/// log), disappearances (an occupant gone with no death: removed), births observed at the
+/// minute checks, and turf receipts by route.
+fn tracked_line(arm: &str, w: &Watch) {
+    for class in [Class::S1, Class::Wet, Class::Shaded] {
+        let mut deaths = [[0u64; DeathCause::COUNT]; 2];
+        let (mut gone, mut turf_b, mut pad_b) = (0u64, 0u64, 0u64);
+        let mut receipts = [0u64; 3];
+        let mut receiving = 0u64;
+        for (site, t) in &w.track {
+            if w.class.get(site) != Some(&class) {
+                continue;
+            }
+            for k in 0..2 {
+                for c in 0..DeathCause::COUNT {
+                    deaths[k][c] += u64::from(t.deaths[k][c]);
+                }
+            }
+            gone += u64::from(t.disappeared);
+            turf_b += u64::from(t.turf_births);
+            pad_b += u64::from(t.pad_births);
+            for v in 0..3 {
+                receipts[v] += u64::from(t.receipts[v]);
+            }
+            receiving += u64::from(t.receipts.iter().any(|r| *r > 0));
+        }
+        let causes = |k: usize| {
+            DeathCause::ALL
+                .iter()
+                .filter(|c| deaths[k][c.index()] > 0)
+                .map(|c| format!("{}={}", c.name(), deaths[k][c.index()]))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        println!(
+            "tracked,{arm},{},turf_deaths=[{}],pad_deaths=[{}],disappearances={gone},turf_births_observed={turf_b},pad_births_observed={pad_b},turf_receipts_seed={},turf_receipts_runner={},turf_receipts_burr={},sites_receiving_turf={receiving}",
+            class.name(),
+            causes(0),
+            causes(1),
+            receipts[0],
+            receipts[1],
+            receipts[2]
+        );
+    }
+}
+
+/// Every turf delivery in the world over the run: counts and distance histogram by
+/// route; burr landings and how many sites a turf then established on.
+fn deliveries_line(arm: &str, w: &Watch) {
+    for (v, name) in VIA_NAMES.iter().enumerate() {
+        let n: u64 = w.deliveries[v].iter().sum();
+        let bins: Vec<String> = DIST_BINS.iter().zip(w.deliveries[v]).map(|((_, b), c)| format!("{b}:{c}")).collect();
+        println!("delivered,{arm},{name},n={n},distance_voxels=[{}]", bins.join(" "));
+    }
+    println!(
+        "burr_fate,{arm},sites_landed={},turf_established_after={},share={:.4},still_waiting={}",
+        w.burr_sites,
+        w.burr_established,
+        w.burr_established as f64 / w.burr_sites.max(1) as f64,
+        w.burr_pending.len()
+    );
+    println!("cured,{arm},max_cured_turf_at_a_minute={}", w.cured_max);
+}
+
+/// The plant ledger's spread and cure lines over the run.
+fn plant_ledger_line(arm: &str, a: &FloraLedger, b: &FloraLedger) {
+    let k = TURF.index();
+    let d = |x: u64, y: u64| y - x;
+    let causes: Vec<String> = DeathCause::ALL
+        .iter()
+        .flat_map(|c| {
+            [TURF, PAD].into_iter().map(move |s| {
+                format!(
+                    "{}_{}={}",
+                    s.name(),
+                    c.name(),
+                    b.deaths_by_cause[c.index()][s.index()] - a.deaths_by_cause[c.index()][s.index()]
+                )
+            })
+        })
+        .collect();
+    println!(
+        "plantledger,{arm},burrs_picked={},burrs_dropped={},burrs_dropped_at_carcass={},burr_picked_organic={:.5},turf_runner_births={},pad_displaced_by_runner={},turf_seeds_germinated={},cures={},cure_wakes={},cure_shed={:.4},{}",
+        d(a.burrs_picked[k], b.burrs_picked[k]),
+        d(a.burrs_dropped[k], b.burrs_dropped[k]),
+        d(a.burrs_dropped_at_carcass[k], b.burrs_dropped_at_carcass[k]),
+        b.burr_picked_organic[k] - a.burr_picked_organic[k],
+        d(a.clonal_births[k], b.clonal_births[k]),
+        d(a.runner_displaced[PAD.index()], b.runner_displaced[PAD.index()]),
+        d(a.seeds_germinated[k], b.seeds_germinated[k]),
+        d(a.cures[k], b.cures[k]),
+        d(a.cure_wakes[k], b.cure_wakes[k]),
+        b.cure_shed_organic[k] - a.cure_shed_organic[k],
+        causes.join(",")
+    );
+}
+
 /// The S1 attempt classification at the end, by reach to the nearest turf donor at the
-/// load, with the trace's totals behind each class.
-fn attempts(sim: &Sim, arm: &str, co: &Cohorts, s1: &[Site], track: &HashMap<Site, Track>) {
-    let fv = sim.flora().view();
+/// load, with the trace's totals behind each class and the failed gates split.
+fn attempts(sim: &Sim, arm: &str, co: &Cohorts, s1: &[Site], w: &Watch) {
     let trace = sim.flora().attempts().expect("tracing");
     const BINS: [(f64, &str); 4] = [(6.0, "<=6"), (12.0, "6-12"), (24.0, "12-24"), (f64::INFINITY, ">24")];
-    const CLASSES: [&str; 9] = [
+    const CLASSES: [&str; 13] = [
         "success",
-        "turf_juvenile",
-        "post_birth_loss",
+        "turf_young",
+        "turf_born_then_lost",
         "direct_woody",
-        "failed_arm",
-        "failed_gate",
+        "arm_lost",
+        "gate_light",
+        "gate_moisture",
+        "gate_saturation",
+        "gate_flooding",
+        "gate_other",
         "cover_changed",
-        "no_arrival",
+        "no_traced_check",
         "other",
     ];
     let mut table = vec![[0u64; CLASSES.len()]; BINS.len()];
     let mut totals = cubarium_voxel_flora::Attempts::default();
+    let mut received = vec![[0u64; 2]; BINS.len()];
     for &site in s1 {
-        let t = track[&site];
+        let t = w.track[&site];
         let a = trace.sites.get(&site).copied().unwrap_or_default();
         totals.bank_checks += a.bank_checks;
         totals.cover_forbidden += a.cover_forbidden;
         totals.gate_fail += a.gate_fail;
         totals.gate_pass += a.gate_pass;
+        totals.gate_light += a.gate_light;
+        totals.gate_moisture += a.gate_moisture;
+        totals.gate_saturation += a.gate_saturation;
+        totals.gate_flooding += a.gate_flooding;
+        totals.gate_other += a.gate_other;
         totals.lottery_lost += a.lottery_lost;
         totals.draw_failed += a.draw_failed;
         totals.arms += a.arms;
         totals.arm_lost += a.arm_lost;
         totals.births_bare += a.births_bare;
         totals.births_through_cover += a.births_through_cover;
-        let now = fv.stand_at(site).map(|s| s.species);
-        let born = a.births_bare + a.births_through_cover > 0 || t.turf_seen;
-        let class = if t.turf_donor_seen && now.is_some_and(|s| s == TURF || is_woody(s)) {
+        let now_turf = t.cur.is_some_and(|c| c.0 == TURF);
+        let born = a.births_bare + a.births_through_cover > 0 || t.turf_births > 0 || t.turf_seen;
+        // The gate that shut most often, for a site whose checks all failed on gates.
+        let gate = {
+            let g = [a.gate_light, a.gate_moisture, a.gate_saturation, a.gate_flooding, a.gate_other];
+            5 + g.iter().enumerate().max_by_key(|(_, v)| **v).map_or(4, |(i, _)| i)
+        };
+        let class = if t.success() {
             0
-        } else if now == Some(TURF) {
+        } else if now_turf {
             1
         } else if born {
             2
@@ -623,31 +1040,39 @@ fn attempts(sim: &Sim, arm: &str, co: &Cohorts, s1: &[Site], track: &HashMap<Sit
         } else if a.gate_pass > 0 {
             4
         } else if a.gate_fail > 0 {
-            5
+            gate
         } else if a.cover_forbidden > 0 {
-            6
+            10
         } else if a.bank_checks == 0 {
-            7
+            11
         } else {
-            8
+            12
         };
         let r = co.reach[&site];
         let bin = BINS.iter().position(|(hi, _)| r <= *hi).unwrap();
         table[bin][class] += 1;
+        received[bin][usize::from(t.receipts.iter().any(|r| *r > 0))] += 1;
     }
-    println!("attempts,{arm},reach,{}", CLASSES.join(","));
+    println!("attempts,{arm},reach,{},no_receipt,receipt", CLASSES.join(","));
     for (b, row) in table.iter().enumerate() {
         println!(
-            "attempts,{arm},{},{}",
+            "attempts,{arm},{},{},{},{}",
             BINS[b].1,
-            row.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+            row.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","),
+            received[b][0],
+            received[b][1]
         );
     }
     println!(
-        "trace,{arm},bank_checks={},cover_forbidden={},gate_fail={},gate_pass={},lottery_lost={},draw_failed={},arms={},arm_lost={},births_bare={},births_through_cover={}",
+        "trace,{arm},bank_checks={},cover_forbidden={},gate_fail={},gate_light={},gate_moisture={},gate_saturation={},gate_flooding={},gate_other={},gate_pass={},lottery_lost={},draw_failed={},arms={},arm_lost={},births_bare={},births_through_cover={}",
         totals.bank_checks,
         totals.cover_forbidden,
         totals.gate_fail,
+        totals.gate_light,
+        totals.gate_moisture,
+        totals.gate_saturation,
+        totals.gate_flooding,
+        totals.gate_other,
         totals.gate_pass,
         totals.lottery_lost,
         totals.draw_failed,
@@ -656,6 +1081,167 @@ fn attempts(sim: &Sim, arm: &str, co: &Cohorts, s1: &[Site], track: &HashMap<Sit
         totals.births_bare,
         totals.births_through_cover
     );
+}
+
+// ------------------------------------------------------------------- fauna watch
+
+/// The fauna's books over a run, in two halves and whole: per lineage B and its parts,
+/// and the Veilhound's (`chorister`'s) kills, carcasses, bites and assimilation
+/// (finding 9).
+struct FaunaWatch {
+    half: u64,
+    seen: HashSet<u64>,
+    born: [[u64; Founder::COUNT]; 2],
+    adult_ticks: [[u64; Founder::COUNT]; 2],
+    body_ticks: [[u64; Founder::COUNT]; 2],
+    books0: Vec<balance::Books>,
+    books_mid: Vec<balance::Books>,
+    l0: cubarium_voxel_fauna::FaunaLedger,
+    l_mid: cubarium_voxel_fauna::FaunaLedger,
+    fl0: FloraLedger,
+    fl_mid: FloraLedger,
+    ticks: u64,
+}
+
+impl FaunaWatch {
+    fn new(sim: &Sim, half: u64) -> FaunaWatch {
+        let books: Vec<balance::Books> = Founder::ALL.iter().map(|&f| balance::Books::of(sim.fauna().view().ledger, f)).collect();
+        FaunaWatch {
+            half,
+            seen: sim.fauna().view().animals.iter().map(|a| a.id).collect(),
+            born: [[0; Founder::COUNT]; 2],
+            adult_ticks: [[0; Founder::COUNT]; 2],
+            body_ticks: [[0; Founder::COUNT]; 2],
+            books0: books.clone(),
+            books_mid: books,
+            l0: sim.fauna().view().ledger.clone(),
+            l_mid: sim.fauna().view().ledger.clone(),
+            fl0: sim.flora().view().ledger.clone(),
+            fl_mid: sim.flora().view().ledger.clone(),
+            ticks: 0,
+        }
+    }
+
+    fn tick(&mut self, sim: &Sim, params: &Params, tick: u64) {
+        self.ticks = tick;
+        let w = usize::from(tick > self.half);
+        for a in sim.fauna().view().animals {
+            let Some(f) = a.founder else { continue };
+            self.body_ticks[w][f.index()] += 1;
+            if balance::is_adult(a, &params.fauna) {
+                self.adult_ticks[w][f.index()] += 1;
+            }
+            if self.seen.insert(a.id) {
+                self.born[w][f.index()] += 1;
+            }
+        }
+        if tick == self.half {
+            self.books_mid = Founder::ALL.iter().map(|&f| balance::Books::of(sim.fauna().view().ledger, f)).collect();
+            self.l_mid = sim.fauna().view().ledger.clone();
+            self.fl_mid = sim.flora().view().ledger.clone();
+            println!("stocks,mid,{},{}", tick / u64::from(TICK_HZ) / 60, stocks(sim));
+            println!("bodies,mid,{},{}", tick / u64::from(TICK_HZ) / 60, bodies(sim, params));
+        }
+    }
+
+    fn report(&self, sim: &Sim, params: &Params, arm: &str) {
+        let v = sim.fauna().view();
+        let l = v.ledger;
+        let total = self.ticks;
+        let half = self.half.min(total);
+        println!("stocks,{arm},end,{}", stocks(sim));
+        println!("bodies,{arm},end,{}", bodies(sim, params));
+        let books_end: Vec<balance::Books> = Founder::ALL.iter().map(|&f| balance::Books::of(l, f)).collect();
+        let hzf = f64::from(TICK_HZ);
+        type Span<'a> = (&'a str, &'a Vec<balance::Books>, &'a Vec<balance::Books>, &'a cubarium_voxel_fauna::FaunaLedger, &'a cubarium_voxel_fauna::FaunaLedger, f64, [usize; 2]);
+        let spans: [Span<'_>; 3] = [
+            ("early", &self.books0, &self.books_mid, &self.l0, &self.l_mid, half as f64 / hzf, [0, 1]),
+            ("late", &self.books_mid, &books_end, &self.l_mid, l, (total - half) as f64 / hzf, [1, 2]),
+            ("all", &self.books0, &books_end, &self.l0, l, total as f64 / hzf, [0, 2]),
+        ];
+        for (name, b0, b1, la, lb, secs, [w0, w1]) in spans {
+            let days = balance::days(secs, v.config);
+            for f in Founder::ALL {
+                let i = f.index();
+                let bt: u64 = (w0..w1).map(|w| self.body_ticks[w][i]).sum();
+                let br: u64 = (w0..w1).map(|w| self.born[w][i]).sum();
+                if bt == 0 && br == 0 {
+                    continue;
+                }
+                let at: u64 = (w0..w1).map(|w| self.adult_ticks[w][i]).sum();
+                let books = b1[i].since(&b0[i]);
+                let adult_days = balance::days(at as f64 / hzf, v.config);
+                let ctx = balance::context(v.animals, v.config, f, adult_days, days);
+                let m = balance::measures(&books, &ctx);
+                let deaths: Vec<String> = Departure::ALL
+                    .iter()
+                    .filter_map(|d| {
+                        let n = lb.deaths_by_founder_cause[i][d.index()] - la.deaths_by_founder_cause[i][d.index()];
+                        (n > 0).then(|| format!("{}={n}", d.name()))
+                    })
+                    .collect();
+                let bites: Vec<String> = Food::ALL
+                    .iter()
+                    .filter_map(|food| {
+                        let n = lb.bites_by_founder_food[i][food.index()] - la.bites_by_founder_food[i][food.index()];
+                        (n > 0).then(|| format!("{}={n}", food.name()))
+                    })
+                    .collect();
+                println!(
+                    "balance,{arm},{name},{},B={:.3},r_hat={:.3},access={:.3},sated={:.3},assim={:.6},spend={:.6},born={br},eggs_laid={},eggs_hatched={},deaths=[{}],bites=[{}],body_days={:.3}",
+                    f.name(),
+                    m.energy_balance,
+                    m.r_hat,
+                    m.access,
+                    m.sated_share,
+                    books.assimilated,
+                    books.spend(),
+                    lb.eggs_laid_by_founder[i] - la.eggs_laid_by_founder[i],
+                    lb.eggs_hatched_by_founder[i] - la.eggs_hatched_by_founder[i],
+                    deaths.join(" "),
+                    bites.join(" "),
+                    balance::days(bt as f64 / hzf, v.config),
+                );
+            }
+            // The Veilhound: kills, the carcasses the roster produced (every death but a
+            // removal leaves carrion), the carrion it ate, its bites and assimilation.
+            let c = Founder::Chorister.index();
+            let removed = Departure::Removed.index();
+            let carcasses: u64 = Founder::ALL
+                .iter()
+                .map(|q| {
+                    let qi = q.index();
+                    (0..Departure::COUNT)
+                        .filter(|&d| d != removed)
+                        .map(|d| lb.deaths_by_founder_cause[qi][d] - la.deaths_by_founder_cause[qi][d])
+                        .sum::<u64>()
+                })
+                .sum();
+            println!(
+                "veilhound,{arm},{name},kills={},pack_chases={},pack_chase_kills={},carcasses_all={carcasses},carrion_eaten={:.5},carrion_bites={},bites={},assimilated={:.6}",
+                balance::kills(la, lb, Founder::Chorister),
+                lb.pack_chases - la.pack_chases,
+                lb.pack_chase_kills - la.pack_chase_kills,
+                lb.eaten_carrion_by_founder[c] - la.eaten_carrion_by_founder[c],
+                lb.bites_by_founder_food[c][Food::Carrion.index()] - la.bites_by_founder_food[c][Food::Carrion.index()],
+                lb.bites_by_founder[c] - la.bites_by_founder[c],
+                lb.assimilated_by_founder[c] - la.assimilated_by_founder[c],
+            );
+        }
+        let fl = sim.flora().view().ledger;
+        for (name, a, b) in [("early", &self.fl0, &self.fl_mid), ("late", &self.fl_mid, fl)] {
+            let sum = |x: &[f64; Species::COUNT], y: &[f64; Species::COUNT]| (0..Species::COUNT).map(|i| y[i] - x[i]).sum::<f64>();
+            println!(
+                "plantflux,{arm},{name},built={:.4},shed={:.4},overtop_pulse={:.4},foliage_taken={:.4},litter_taken={:.4},pad_to_turf={}",
+                sum(&a.foliage_built, &b.foliage_built),
+                sum(&a.shed_organic, &b.shed_organic),
+                sum(&a.overtopped_organic, &b.overtopped_organic),
+                sum(&a.foliage_taken, &b.foliage_taken),
+                b.litter_taken - a.litter_taken,
+                b.overtop_pairs[PAD.index()][TURF.index()] - a.overtop_pairs[PAD.index()][TURF.index()],
+            );
+        }
+    }
 }
 
 // -------------------------------------------------------------------------- fauna
@@ -724,8 +1310,16 @@ fn fauna(args: &[String]) {
     let want = params.flora_for_world();
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
     let (mut world, mut flora, mut fauna, minute0, _) = load(dir, &want);
-    // The introduction: the seeder's own fauna placement on the world as it stands, with
-    // no plant founders (every producer, glowcap, vine and film founding zeroed).
+    introduce(&arm, minute0, &params, &mut world, &mut flora, &mut fauna);
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    fauna_run(&arm, hours, &params, &mut sim);
+}
+
+/// The introduction: the seeder's own fauna placement on the world as it stands, with no
+/// plant founders (every producer, glowcap, vine and film founding zeroed), then the
+/// layer's own config back.
+fn introduce(arm: &str, minute0: u64, params: &Params, world: &mut World, flora: &mut Flora, fauna: &mut Fauna) {
+    let want = flora.config().clone();
     let mut founding = want.clone();
     for sp in Species::ALL {
         let sc = founding.species_mut(sp);
@@ -749,7 +1343,7 @@ fn fauna(args: &[String]) {
     let stands_before = flora.view().stands.len();
     let seeded_before = flora.view().ledger.seeded_organic_in;
     let counts = params.fauna.founder_counts();
-    let seeded = cubarium_voxel_sim::habitat::seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, counts);
+    let seeded = cubarium_voxel_sim::habitat::seed_pre_rolled(world, flora, fauna, &pre, counts);
     assert_eq!(flora.view().stands.len(), stands_before, "no plant was founded");
     flora.replace_config(want.clone()).expect("the arm's config");
     println!(
@@ -762,7 +1356,11 @@ fn fauna(args: &[String]) {
         flora.view().ledger.seeded_organic_in - seeded_before,
         seeded.imported_organic
     );
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+}
+
+/// The earlier study's fauna window: `hours` with the heuristics, one line per lineage per
+/// window (first and second half) and over the run.
+fn fauna_run(arm: &str, hours: f64, params: &Params, sim: &mut Sim) {
     sim.set_overlap(false);
     let hz = u64::from(TICK_HZ);
     let total = (hours * 3600.0).round() as u64 * hz;
