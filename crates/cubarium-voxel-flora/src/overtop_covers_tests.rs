@@ -303,3 +303,36 @@ fn overtop_covers_is_a_list_of_species_names() {
         .expect("set by path");
     assert_eq!(f.springturf.overtop_covers, vec![PAD]);
 }
+
+/// The study's attempt trace and the replacement's food readouts: a traced springturf
+/// seed under velvetpad is banked at two checks, passes its gates at both, arms at the
+/// first and comes up through the cover at the second; under stonecushion every check is
+/// a forbidden cover. The overtopped pad's whole material is booked as the pulse.
+#[test]
+fn the_attempt_trace_follows_one_seed_through_arming_and_birth() {
+    let mut world = slab();
+    let mut flora = Flora::new(config());
+    plant(&mut flora, &world, PAD);
+    let pad = flora.view().stand_at(SITE).expect("pad").material();
+    land(&mut flora, TURF);
+    flora.trace_attempts(Some(TURF));
+    to_next_check(&mut flora, &mut world);
+    to_next_check(&mut flora, &mut world);
+    let r = flora.attempts().expect("tracing").sites[&SITE];
+    assert_eq!(
+        (r.bank_checks, r.gate_pass, r.arms, r.births_through_cover, r.births_bare),
+        (2, 2, 1, 1, 0),
+        "{r:?}"
+    );
+    assert_eq!((r.lottery_lost, r.draw_failed, r.arm_lost, r.cover_forbidden), (0, 0, 0, 0));
+    let booked = flora.view().ledger.overtopped_organic[PAD.index()];
+    assert!(booked > 0.5 * pad, "{booked}: the pad held {pad} when planted");
+
+    let (mut flora, mut world, _) = fixture(config(), STONE, TURF);
+    flora.trace_attempts(Some(TURF));
+    for _ in 0..3 {
+        to_next_check(&mut flora, &mut world);
+    }
+    let r = flora.attempts().expect("tracing").sites[&SITE];
+    assert_eq!((r.bank_checks, r.cover_forbidden, r.gate_pass, r.arms), (3, 3, 0, 0), "{r:?}");
+}

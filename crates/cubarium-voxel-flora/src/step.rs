@@ -2414,6 +2414,8 @@ fn grow(
         for k in 0..3 {
             line[k] += b.night[k];
         }
+        ledger.foliage_built[s.species.index()] += b.built;
+        ledger.shed_organic[s.species.index()] += b.shed;
     }
     let dead: Vec<usize> = (0..n).filter(|&si| dying[si]).collect();
 
@@ -2440,6 +2442,10 @@ pub(crate) struct Booked {
     /// The night budget's spend on `[reflush, nectar, fruit]` (1b), the reflush with its
     /// construction respiration: `FloraLedger::night_spend`'s line for this stand.
     night: [f64; 3],
+    /// Foliage built this tick (`FloraLedger::foliage_built`) and foliage shed to the
+    /// litter (`FloraLedger::shed_organic`), this stand's line.
+    built: f64,
+    shed: f64,
 }
 
 impl Booked {
@@ -2706,6 +2712,7 @@ pub(crate) fn grow_stand(
         0.0
     };
     stand.foliage += dp_a + dp_q;
+    book.built = dp_a + dp_q;
     // Where the new foliage goes: **bottom-up to each layer's capacity**, in
     // profile order, which is what makes a browsed plant refill its floor tissue
     // first and look browsed from below (decisions §4). The capacities are read at
@@ -2804,6 +2811,7 @@ pub(crate) fn grow_stand(
 
     // ---- 4.5 senescence
     let shed = (sc.senescence * night * stand.foliage * DT).min(stand.foliage);
+    book.shed = shed;
     let organic_before = stand.material();
     stand.foliage -= shed;
     // Senescence loses from the **top** foliage layer first: a plant drops its

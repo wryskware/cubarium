@@ -58,6 +58,7 @@ mod film;
 #[cfg(test)]
 mod film_tests;
 mod seeds;
+pub use seeds::{AttemptTrace, Attempts};
 pub mod snapshot;
 mod step;
 #[doc(hidden)]
@@ -3078,6 +3079,22 @@ pub struct FloraLedger {
     /// plant). A diagnostic counter in no `expected_*` total; each row sums to
     /// `overtopped[cover]`.
     pub overtop_pairs: [[u64; Species::COUNT]; Species::COUNT],
+    /// **Food-side diagnostics** per species, indexed by [`Species::index`], cumulative
+    /// organic matter, in no `expected_*` total (plant succession, Astra finding 5):
+    ///
+    /// - `foliage_built`: foliage constructed (growth and reflush) — the regrowth.
+    /// - `shed_organic`: foliage senescence sent to the litter — the new shedding.
+    /// - `overtopped_organic`: the whole material of the ground covers that died
+    ///   overtopped, per **cover** species — the replacement's one-time pulse to dead
+    ///   wood and litter.
+    /// - `foliage_taken`: foliage the consumers took ([`Flora::take_foliage`]).
+    ///
+    /// And `litter_taken`, the litter the consumers took ([`Flora::take_litter`]).
+    pub foliage_built: [f64; Species::COUNT],
+    pub shed_organic: [f64; Species::COUNT],
+    pub overtopped_organic: [f64; Species::COUNT],
+    pub foliage_taken: [f64; Species::COUNT],
+    pub litter_taken: f64,
     /// **Glassfilm budget** (R2a), organic matter, cumulative diagnostics: what
     /// [`Flora::seed_film`] introduced (also in `seeded_organic_in`), what the film grew
     /// (also in `fixed_in`), what it respired (also in `respired_out`), what dying sent to
@@ -4175,6 +4192,10 @@ pub struct Flora {
     /// shower's end, when every bank is tested at once.
     #[serde(default)]
     pub(crate) was_raining: bool,
+    /// A study's record of one species' germination attempts, site by site
+    /// ([`Flora::trace_attempts`]). Observation only, off unless asked for, never saved.
+    #[serde(skip)]
+    pub(crate) attempts: Option<Box<seeds::AttemptTrace>>,
     /// Every stand's crown geometry, entry for entry with `stands` ([`Crown`]). Derived
     /// and not saved: refreshed at the end of every tick and command and after a decode.
     #[serde(skip)]
@@ -4275,6 +4296,7 @@ impl Flora {
             deliveries: Vec::new(),
             bank_wheel: Vec::new(),
             was_raining: false,
+            attempts: None,
             crowns: CrownCache::default(),
             drink: step::DrinkSlot::default(),
         }
@@ -4297,6 +4319,25 @@ impl Flora {
     /// re-binned into its (possibly new) profile and the crowns refreshed. For a diagnostic
     /// that continues a saved world under other parameters; no host calls it.
     #[doc(hidden)]
+    /// Record, site by site, every seed-bank check at which `species` held a whole seed —
+    /// what stopped it (a cover it may not take, a gate, the lottery, the overtopping
+    /// draw, an arm lost before it sprouted) or that it was born — from now on; `None`
+    /// stops and drops the record. A diagnostic for a study (plant succession's attempt
+    /// classification): it changes nothing in the tick and is never saved.
+    pub fn trace_attempts(&mut self, species: Option<Species>) {
+        self.attempts = species.map(|species| {
+            Box::new(seeds::AttemptTrace {
+                species,
+                sites: Default::default(),
+            })
+        });
+    }
+
+    /// The record [`Flora::trace_attempts`] keeps, if one is being kept.
+    pub fn attempts(&self) -> Option<&seeds::AttemptTrace> {
+        self.attempts.as_deref()
+    }
+
     pub fn replace_config(&mut self, config: FloraConfig) -> Result<(), String> {
         config.validate()?;
         self.config = config;
@@ -4660,6 +4701,7 @@ impl Flora {
             mineral,
             energy: e_v * organic,
         });
+        self.ledger.foliage_taken[self.stands[i].species.index()] += organic;
         if rise > 0.0 {
             let d = &mut self.stands[i].defence;
             *d += rise.min(1.0) * (1.0 - *d);
@@ -4697,6 +4739,7 @@ impl Flora {
             &mut g.litter_energy,
             want,
         )?;
+        self.ledger.litter_taken += taken.organic;
         Some(self.book_consumed(taken))
     }
 
