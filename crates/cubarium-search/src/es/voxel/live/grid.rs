@@ -850,7 +850,7 @@ pub fn grid(spec: &GridSpec) -> Result<(), String> {
             l
         }
     };
-    if list.seeds.len() < spec.seeds && spec.seed_list.is_none() {
+    if list.seeds.len() < spec.seeds && spec.seed_list.is_none() && !spec.start.established() {
         eprintln!("grid: only {} distinct accepted worlds found", list.seeds.len());
     }
     for (s, why) in &list.skipped {
