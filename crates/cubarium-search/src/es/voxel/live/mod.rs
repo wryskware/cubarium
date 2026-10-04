@@ -30,11 +30,13 @@ use super::EpisodeDriver;
 
 pub mod balance;
 pub mod curiosity;
+pub mod assembly;
 pub mod ecology;
 pub mod grid;
 pub mod readout;
 pub mod screen;
 pub mod search;
+pub mod start;
 pub mod targets;
 pub mod threads;
 pub mod trainer;
@@ -76,6 +78,8 @@ mod search_tests;
 mod targets_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod start_tests;
 
 /// Install one centre per lineage on a whole layer, as the ambient host does: the birth
 /// factory and every standing body of that lineage.

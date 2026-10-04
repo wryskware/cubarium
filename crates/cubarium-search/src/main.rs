@@ -847,6 +847,18 @@ enum Command {
         /// `weight × novelty` in the brains' window score. Without it every weight is 0.
         #[arg(long)]
         curiosity: Option<PathBuf>,
+        /// Where every candidate starts: `e0` (today's founding, the default) or `e1`
+        /// (needs `--starts`). (`--start` is the CMA's starting genome here.)
+        #[arg(long)]
+        start_set: Option<String>,
+        /// A start library (`voxel-starts --out DIR`): each generation's worlds are its
+        /// seeds in turn, every candidate on the same ones, rate-only genes applied and the
+        /// rest frozen at the start's values.
+        #[arg(long)]
+        starts: Option<PathBuf>,
+        /// The burn-in's minimum, simulated minutes (0 on E0, 20 on a library by default).
+        #[arg(long)]
+        burn_in_min: Option<f64>,
     },
     /// The R/S/F pre-screen of an ecology on a world: the three stay-or-go numbers and
     /// each founded species' row.
@@ -955,6 +967,54 @@ enum Command {
         #[arg(long = "centre")]
         centres: Vec<String>,
         #[arg(long, default_value = "runs/ecology-grid")]
+        out: PathBuf,
+        /// Where every cell starts: `e0` (today's founding, the default) or `e1` (the
+        /// constructed rich start; needs `--starts`).
+        #[arg(long)]
+        start: Option<String>,
+        /// A start library (`voxel-starts --out DIR`): every cell on its seeds, loaded
+        /// through the episode initializer.
+        #[arg(long)]
+        starts: Option<PathBuf>,
+        /// The burn-in's minimum, simulated minutes, before scoring starts on the day
+        /// clock's window grid: 0 on E0, 20 on a library by default.
+        #[arg(long)]
+        burn_in_min: Option<f64>,
+        /// These worlds exactly (`1,3`), each founded as asked, instead of `--seeds` picked
+        /// from `--first-seed`.
+        #[arg(long)]
+        seed_list: Option<String>,
+    },
+    /// **Start libraries** (`design/handoffs/assembly-step1-2026-10-03.md`): one start
+    /// directory per seed, in the whole-world save layout plus `start.toml` and
+    /// `recipe.toml`, for `--starts`. Resumable: a seed already written is skipped.
+    VoxelStarts {
+        /// `e0` (today's founding) or `e1` (constructed rich).
+        #[arg(long)]
+        recipe: String,
+        #[arg(long, default_value = "1")]
+        seeds: String,
+        /// As the grid's `--world`: a host config file (its `[world]`, its `[flora]`/`[fauna]`
+        /// the start's own parameters) or a preset's name.
+        #[arg(long, default_value = "config/desktop/terrarium.toml")]
+        world: String,
+        /// `<lineage>=<brain>`: the policy the starts are made for (recorded and checked).
+        #[arg(long = "centre")]
+        centres: Vec<String>,
+        /// The E1 recipe's numbers, a TOML file (`live::assembly::E1Recipe`); the defaults
+        /// without.
+        #[arg(long)]
+        recipe_file: Option<PathBuf>,
+        /// E1: hours of plants-only growth (over the recipe file's).
+        #[arg(long)]
+        plant_hours: Option<f64>,
+        /// Seeds made at once.
+        #[arg(long, default_value_t = 2)]
+        threads: usize,
+        /// Simulation threads per seed during E1's grow.
+        #[arg(long, default_value_t = 1)]
+        sim_threads: usize,
+        #[arg(long)]
         out: PathBuf,
     },
     /// Live-world training (`design/handoffs/voxel-live-world-training-2026-09-24.md`):
@@ -1229,6 +1289,79 @@ fn machine_cores(tail_cores: usize) -> usize {
         std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
     } else {
         tail_cores
+    }
+}
+
+/// The grid's `--world`: a host config file (its `[world]`, and the file as the cells'
+/// base) or a preset's name.
+fn world_and_base(world: &str) -> Result<(cubarium_voxel::Config, Option<PathBuf>), String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let file = [PathBuf::from(world), root.join(world)].into_iter().find(|p| p.is_file());
+    Ok(match file {
+        Some(f) => (cubarium_voxel::world_config_from_file(&f)?, Some(f)),
+        None => {
+            let preset = cubarium_voxel::Preset::find(world)
+                .ok_or_else(|| format!("--world {world}: neither a file nor a preset"))?;
+            (preset.config(), None)
+        }
+    })
+}
+
+/// `1,3,5` or `1-4`.
+fn parse_seed_list(s: &str) -> Result<Vec<u64>, String> {
+    let mut out = Vec::new();
+    for part in s.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        if let Some((a, b)) = part.split_once('-') {
+            let (a, b): (u64, u64) = (
+                a.trim().parse().map_err(|e| format!("seeds {part}: {e}"))?,
+                b.trim().parse().map_err(|e| format!("seeds {part}: {e}"))?,
+            );
+            out.extend(a..=b);
+        } else {
+            out.push(part.parse().map_err(|e| format!("seeds {part}: {e}"))?);
+        }
+    }
+    if out.is_empty() {
+        return Err(format!("no seeds in `{s}`"));
+    }
+    Ok(out)
+}
+
+/// **The start set** from `--start` / `--starts` / `--burn-in-min`: E0 by default; a
+/// library opened and checked against this run (its world, its x1 `reference`, its launch
+/// policy). The burn-in ends on the `window_ticks` grid of the day clock; its minimum is 0
+/// on E0 (today's scoring from the founding) and 20 minutes on a library.
+fn start_set(
+    start: Option<&str>,
+    starts: Option<&std::path::Path>,
+    burn_in_min: Option<f64>,
+    window_ticks: u64,
+    world: &cubarium_voxel::Config,
+    reference: &es::voxel::live::ecology::EcologyParams,
+    centres: &[(cubarium_voxel_fauna::Founder, PathBuf)],
+) -> Result<(es::voxel::live::start::StartSet, es::voxel::live::start::BurnIn), String> {
+    use es::voxel::live::start::{BurnIn, Expect, StartLibrary, StartSet, policy_identity};
+    let ticks = |min: f64| (min * 60.0 * f64::from(cubarium_voxel_fauna::TICK_HZ)).round() as u64;
+    match (start, starts) {
+        (None | Some("e0"), None) => {
+            let min = ticks(burn_in_min.unwrap_or(0.0));
+            Ok((StartSet::E0, BurnIn { min_ticks: min, align_ticks: if min > 0 { window_ticks } else { 0 } }))
+        }
+        (Some("e1"), None) => Err("--start e1 needs --starts DIR: make one with `cubarium-search voxel-starts \
+             --recipe e1 --seeds 1,3 --out DIR`"
+            .into()),
+        (want, Some(dir)) => {
+            let lib = StartLibrary::open(dir, Expect::new(world, reference, policy_identity(centres)?))?;
+            if let Some(w) = want
+                && w != lib.recipe
+            {
+                return Err(format!("--start {w}, but {} holds recipe {}", dir.display(), lib.recipe));
+            }
+            println!("starts: {} (seeds {:?})", lib.label(), lib.seeds);
+            let burn = BurnIn { min_ticks: ticks(burn_in_min.unwrap_or(20.0)), align_ticks: window_ticks };
+            Ok((StartSet::Library(std::sync::Arc::new(lib)), burn))
+        }
+        (Some(other), None) => Err(format!("--start takes e0 or e1, not {other}")),
     }
 }
 
@@ -1697,6 +1830,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             persist_only,
             resume,
             curiosity,
+            start_set: start_set_name,
+            starts,
+            burn_in_min,
         } => {
             let hz = f64::from(cubarium_voxel_fauna::TICK_HZ);
             let genome = match es::voxel::live::ecology::EcologyParams::load(&search)? {
@@ -1761,8 +1897,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 None => None,
             };
+            let centres = centres_or_brains(&centres, &genome.rest)?;
+            let reference = match &start {
+                Some(g) => es::voxel::live::search::start_from(&genome, g)?,
+                None => genome.clone(),
+            };
+            (eval.start, eval.burn_in) = start_set(
+                start_set_name.as_deref(),
+                starts.as_deref(),
+                burn_in_min,
+                (window_min * 60.0 * hz).round() as u64,
+                &eval.world,
+                &es::voxel::live::ecology::EcologyParams::Genome(reference),
+                &centres,
+            )?;
             let spec = es::voxel::live::search::SearchSpec {
-                centres: centres_or_brains(&centres, &genome.rest)?,
+                centres,
                 genome,
                 start,
                 screen,
@@ -1956,6 +2106,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             abort_animals,
             centres,
             out,
+            start,
+            starts,
+            burn_in_min,
+            seed_list,
         } => {
             use es::voxel::live::grid;
             let mut parsed = Vec::new();
@@ -1967,17 +2121,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for a in &axes {
                 parsed.push(grid::Axis::parse(a)?);
             }
-            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            let file = [PathBuf::from(&world), root.join(&world)].into_iter().find(|p| p.is_file());
-            let (world_cfg, base) = match file {
-                Some(f) => (cubarium_voxel::world_config_from_file(&f)?, Some(f)),
-                None => {
-                    let preset = cubarium_voxel::Preset::find(&world)
-                        .ok_or_else(|| format!("--world {world}: neither a file nor a preset"))?;
-                    (preset.config(), None)
-                }
-            };
+            let (world_cfg, base) = world_and_base(&world)?;
             let centres = centres_or_brains(&centres, &toml::Table::new())?;
+            let (start, burn_in) = start_set(
+                start.as_deref(),
+                starts.as_deref(),
+                burn_in_min,
+                grid::WINDOW_MIN * es::voxel::live::window::TICKS_PER_MIN,
+                &world_cfg,
+                &grid::neutral_ecology(base.as_deref())?,
+                &centres,
+            )?;
+            let seed_list = seed_list.map(|l| parse_seed_list(&l)).transpose()?;
             grid::grid(&grid::GridSpec {
                 world: world_cfg,
                 world_name: world,
@@ -1991,6 +2146,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 water_every,
                 abort_animals,
                 centres,
+                out,
+                start,
+                burn_in,
+                seed_list,
+            })?;
+            Ok(())
+        }
+        Command::VoxelStarts {
+            recipe,
+            seeds,
+            world,
+            centres,
+            recipe_file,
+            plant_hours,
+            threads,
+            sim_threads,
+            out,
+        } => {
+            use es::voxel::live::{assembly, grid, start};
+            let (world_cfg, base) = world_and_base(&world)?;
+            let centres = centres_or_brains(&centres, &toml::Table::new())?;
+            let mut e1 = match recipe_file {
+                Some(p) => toml::from_str::<assembly::E1Recipe>(
+                    &std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?,
+                )
+                .map_err(|e| format!("{}: {e}", p.display()))?,
+                None => assembly::E1Recipe::default(),
+            };
+            if let Some(h) = plant_hours {
+                e1.plant_hours = h;
+            }
+            assembly::generate_library(&assembly::StartsSpec {
+                recipe,
+                seeds: parse_seed_list(&seeds)?,
+                world: world_cfg,
+                world_name: world,
+                eco: grid::neutral_ecology(base.as_deref())?,
+                e1,
+                policy: start::policy_identity(&centres)?,
+                threads,
+                sim_threads,
                 out,
             })?;
             Ok(())

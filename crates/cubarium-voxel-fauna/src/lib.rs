@@ -3123,6 +3123,22 @@ impl Fauna {
     pub fn config(&self) -> &FaunaConfig {
         &self.config
     }
+
+    /// **A loaded layer's configuration replacement** (the episode initializer,
+    /// `design/handoffs/assembly-step1-2026-10-03.md`): `config` replaces the saved one
+    /// whole, after [`FaunaConfig::validate`], and the route and air caches built from the
+    /// old one are dropped. Bodies, clutches, packs and the ledger are left exactly as they
+    /// are: the caller changes only rates that leave stored state valid. The controllers'
+    /// recipes read the config when they are installed, so a caller reinstalls them after.
+    #[doc(hidden)]
+    pub fn replace_config(&mut self, config: FaunaConfig) -> Result<(), String> {
+        config.validate()?;
+        self.config = config;
+        self.pack_routes.clear();
+        self.pack_paths.clear();
+        self.open_air = None;
+        Ok(())
+    }
     /// Whether paid births run. Live-world default: `true`.
     pub fn births_enabled(&self) -> bool {
         self.births_enabled
@@ -3176,10 +3192,27 @@ impl Fauna {
         stores: StartingStores,
         heading_rad: f64,
     ) -> Option<u64> {
-        let table = self.config.founder(founder).pack?;
+        let size = self.config.founder(founder).pack?.pack_size;
+        self.found_pack_sized(world, den, founder, stores, heading_rad, size)
+    }
+
+    /// [`Command::FoundPack`] with `size` adults instead of the table's `pack_size`: a
+    /// constructed start's pack sized to the prey present
+    /// (`design/handoffs/assembly-step1-2026-10-03.md`). Booked as every introduced adult
+    /// is; `None` (nothing changed) as [`Command::FoundPack`] refuses, or for size 0.
+    pub fn found_pack_sized(
+        &mut self,
+        world: &World,
+        den: Site,
+        founder: Founder,
+        stores: StartingStores,
+        heading_rad: f64,
+        size: usize,
+    ) -> Option<u64> {
+        self.config.founder(founder).pack?;
         let id = self.next_pack;
         let mut members = Vec::new();
-        for _ in 0..table.pack_size {
+        for _ in 0..size {
             if !self.apply(
                 world,
                 Command::IntroduceFounderOnFace {

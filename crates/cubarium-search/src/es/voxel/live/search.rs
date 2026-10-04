@@ -360,6 +360,12 @@ pub struct EvalSpec {
     /// Found exactly the world `base` names (`Seeds::Asked`), not the first accepted from
     /// it: the grid keeps one world per seed across its cells.
     pub asked_seed: bool,
+    /// Where every candidate starts ([`super::start`]): today's founding (E0) or a start
+    /// library.
+    #[serde(skip)]
+    pub start: super::start::StartSet,
+    /// The burn-in before scoring.
+    pub burn_in: super::start::BurnIn,
 }
 
 impl EvalSpec {
@@ -380,6 +386,8 @@ impl EvalSpec {
             score_horizon_ticks: horizon_ticks,
             curiosity: Curiosity::default(),
             asked_seed: false,
+            start: super::start::StartSet::E0,
+            burn_in: super::start::BurnIn::default(),
         }
     }
 }
@@ -471,6 +479,12 @@ pub struct Evaluation {
     pub wall_s: f64,
     #[serde(skip)]
     pub body_scores: Vec<BodyScore>,
+    /// How it started ([`super::start::StartRecord`]).
+    #[serde(default)]
+    pub start: super::start::StartRecord,
+    /// The ledger baselines: the burn-in's end and every window boundary.
+    #[serde(default)]
+    pub baselines: Vec<super::start::Baseline>,
 }
 
 /// One hunter's measured balance (Astra A6's conditional ceiling, on this world's own
@@ -669,6 +683,9 @@ pub struct EvalRun {
     adult_ticks: [u64; Founder::COUNT],
     /// The shared thread budget this world re-reads every simulated minute, if any.
     budget: Option<std::sync::Arc<super::threads::ThreadBudget>>,
+    /// How it started, and its baselines ([`super::start`]).
+    record: super::start::StartRecord,
+    baselines: Vec<super::start::Baseline>,
 }
 
 impl EvalRun {
@@ -680,16 +697,132 @@ impl EvalRun {
         drivers: &[(Founder, EpisodeDriver)],
         spec: &EvalSpec,
     ) -> EvalRun {
+        use super::start::{self, Residuals, StartRecord, StartSet};
         let started = Instant::now();
-        let seeds = if spec.asked_seed {
-            cubarium_voxel_sim::found::Seeds::Asked(base)
-        } else {
-            cubarium_voxel_sim::found::Seeds::from(base)
+        let mut spec = spec.clone();
+        let (mut sim, info, mut record) = match &spec.start {
+            StartSet::E0 => {
+                let seeds = if spec.asked_seed {
+                    cubarium_voxel_sim::found::Seeds::Asked(base)
+                } else {
+                    cubarium_voxel_sim::found::Seeds::from(base)
+                };
+                let (mut sim, info) = world::found_world_from(&spec.world, seeds, spec.founders, params);
+                super::install_centres(sim.fauna_mut(), drivers);
+                let (w, fl, fa) = sim.layers();
+                let hash = start::params_hash(&start::layers_of(fl, fa));
+                let record = StartRecord {
+                    set: spec.start.label(),
+                    seed: info.seed,
+                    start_tick: w.tick(),
+                    start_params: hash.clone(),
+                    candidate_params: hash.clone(),
+                    installed_params: hash,
+                    residuals: vec![("found".into(), Residuals::of(w, fl, fa))],
+                    ..StartRecord::default()
+                };
+                (sim, info, record)
+            }
+            StartSet::Library(lib) => {
+                // **The initializer**: load and check, the candidate's rates over the
+                // loaded state, the result installed in every layer, fresh controllers.
+                let s = lib
+                    .load(base)
+                    .unwrap_or_else(|e| panic!("start {} seed {base}: {e}", lib.dir.display()));
+                let mut residuals = vec![("load".to_string(), Residuals::of(&s.world, &s.flora, &s.fauna))];
+                let start_layers = start::layers_of(&s.flora, &s.fauna);
+                let candidate = params.layers(s.world.config().voxel_m);
+                let o = start::rate_override(&start_layers, &candidate)
+                    .unwrap_or_else(|e| panic!("start {} seed {base}: the override: {e}", lib.dir.display()));
+                let (world, mut flora, mut fauna, manifest) = (s.world, s.flora, s.fauna, s.manifest);
+                start::install(&mut flora, &mut fauna, &o.installed)
+                    .unwrap_or_else(|e| panic!("start {} seed {base}: installing: {e}", lib.dir.display()));
+                residuals.push(("override".into(), Residuals::of(&world, &flora, &fauna)));
+                // Controller memory is not saved: every body gets a fresh controller.
+                cubarium_voxel_sim::habitat::reinstall_heuristics(&mut fauna);
+                let start_tick = world.tick();
+                let mut sim = cubarium_voxel_sim::Sim::ambient(
+                    world,
+                    flora,
+                    fauna,
+                    cubarium_voxel_sim::SimConfig { threads: 1, overlap: false },
+                );
+                super::install_centres(sim.fauna_mut(), drivers);
+                let pop = window::population(&sim);
+                let info = world::FoundInfo {
+                    seed: manifest.seed,
+                    accepted: manifest.accepted,
+                    lake_rejected: 0,
+                    habitat_rejected: 0,
+                    founders: pop,
+                    stands: sim.flora().view().stands.len(),
+                };
+                // The established setting scores every lineage (R1).
+                if let Some(stage) = &mut spec.band.stage {
+                    stage.readout_only = [false; Founder::COUNT];
+                }
+                let record = StartRecord {
+                    set: spec.start.label(),
+                    seed: manifest.seed,
+                    start_tick,
+                    start_params: manifest.params.clone(),
+                    candidate_params: start::params_hash(&candidate),
+                    installed_params: start::params_hash(&o.installed),
+                    changed: o.changed.len(),
+                    frozen: o.frozen,
+                    residuals,
+                    ..StartRecord::default()
+                };
+                (sim, info, record)
+            }
         };
-        let (mut sim, info) = world::found_world_from(&spec.world, seeds, spec.founders, params);
-        super::install_centres(sim.fauna_mut(), drivers);
         sim.world_mut().set_water_every(spec.water_every);
-        let founded = founded_lineages(&info.founders, &eggs(&sim));
+        // **The burn-in**: fixed per start, the same for every candidate, ending on the
+        // day clock's window grid. A failure in it is recorded, never excluded.
+        let present: Vec<bool> = {
+            let pop = window::population(&sim);
+            let e = eggs(&sim);
+            (0..Founder::COUNT).map(|i| pop[i] + e[i] > 0).collect()
+        };
+        let burn = start::burn_in_ticks(
+            record.start_tick,
+            spec.burn_in.min_ticks,
+            spec.burn_in.align_ticks,
+            &sim.world().config().day,
+        );
+        let mut burnt = 0u64;
+        while burnt < burn {
+            sim.step();
+            burnt += 1;
+            if burnt.is_multiple_of(TICKS_PER_MIN) {
+                let total = sim.fauna().view().animals.len();
+                if total > spec.abort_animals {
+                    record.burn_in_stopped = Some(format!(
+                        "burn-in: {total} animals at minute {}",
+                        burnt / TICKS_PER_MIN
+                    ));
+                    break;
+                }
+            }
+        }
+        record.burn_in_ticks = burnt;
+        {
+            let pop = window::population(&sim);
+            let e = eggs(&sim);
+            record.burn_in_lost = Founder::ALL
+                .iter()
+                .filter(|f| present[f.index()] && pop[f.index()] + e[f.index()] == 0)
+                .map(|f| f.name().to_string())
+                .collect();
+        }
+        let (w, fl, fa) = sim.layers();
+        record.residuals.push(("burn-in".into(), Residuals::of(w, fl, fa)));
+        record.scoring_tick = w.tick();
+        record.scoring_phase = w.config().day.cycle_phase(w.tick());
+        let baselines = vec![start::Baseline::of(w, fl, fa)];
+        let stopped = record.burn_in_stopped.clone();
+        let founders = if spec.start.established() { window::population(&sim) } else { info.founders };
+        let founded = founded_lineages(&founders, &eggs(&sim));
         let lj = Founder::Lanternjaw.index();
         let readout = spec.band.stage.map_or([false; Founder::COUNT], |s| s.readout_only);
         let animals0: usize =
@@ -710,7 +843,7 @@ impl EvalRun {
             ..Trace::default()
         };
         EvalRun {
-            spec: spec.clone(),
+            spec,
             base,
             started,
             sim,
@@ -724,7 +857,7 @@ impl EvalRun {
             readiness: vec![(0.0, 0); Founder::COUNT],
             readouts: Vec::new(),
             body_scores: Vec::new(),
-            stopped: None,
+            stopped,
             elapsed: 0,
             keys: Vec::new(),
             memory: Memory::default(),
@@ -739,7 +872,19 @@ impl EvalRun {
             body_minutes: [0; Founder::COUNT],
             adult_ticks: [0; Founder::COUNT],
             budget: None,
+            record,
+            baselines,
         }
+    }
+
+    /// How this run started ([`super::start::StartRecord`]).
+    pub fn start_record(&self) -> &super::start::StartRecord {
+        &self.record
+    }
+
+    /// The ledger baselines: the burn-in's end and every window boundary since.
+    pub fn baselines(&self) -> &[super::start::Baseline] {
+        &self.baselines
     }
 
     /// What the last window counted per lineage (all zero before the first).
@@ -890,6 +1035,8 @@ impl EvalRun {
         self.readouts.push(r.readout);
         self.keys.push(key);
         self.stopped = halt;
+        let (w, fl, fa) = self.sim.layers();
+        self.baselines.push(super::start::Baseline::of(w, fl, fa));
         r.scores
     }
 
@@ -919,6 +1066,8 @@ impl EvalRun {
             births_late,
             body_minutes,
             adult_ticks,
+            record,
+            baselines,
             ..
         } = self;
         let readiness: Vec<f64> = readiness
@@ -1045,6 +1194,8 @@ impl EvalRun {
             ticks: elapsed,
             wall_s: started.elapsed().as_secs_f64(),
             body_scores,
+            start: record,
+            baselines,
         }
     }
 }
@@ -1782,6 +1933,22 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         })
         .collect();
     let start = spec.genome.clone();
+    if let super::start::StartSet::Library(lib) = &spec.eval.start {
+        // Established starts take rate-only genes; a gene on any other path is frozen at
+        // the start's value there (recorded per evaluation as `start.frozen`).
+        let frozen: Vec<&str> = start
+            .genes
+            .iter()
+            .filter(|g| !g.frozen && g.paths.iter().chain(&g.inverse).any(|p| !super::start::is_rate_path(p)))
+            .map(|g| g.name.as_str())
+            .collect();
+        println!(
+            "# starts: {} — every candidate on seeds {:?}; genes frozen at the start's values there: {}",
+            lib.label(),
+            lib.seeds,
+            if frozen.is_empty() { "none".to_string() } else { frozen.join(", ") }
+        );
+    }
     let bounds = start.search_bounds();
     let mean0 = match &spec.start {
         Some(s) => start_from(&start, s)?.to_search(),
@@ -1846,8 +2013,12 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         let started = Instant::now();
         let seeds: Vec<u64> = (0..spec.seeds_per_generation)
             .map(|s| {
-                spec.seed_base
-                    + (u64::from(generation) * spec.seeds_per_generation as u64 + s as u64) * 1000
+                let k = u64::from(generation) * spec.seeds_per_generation as u64 + s as u64;
+                match &spec.eval.start {
+                    // A library's starts in turn: every candidate on the same ones.
+                    super::start::StartSet::Library(lib) => lib.seeds[(k % lib.seeds.len() as u64) as usize],
+                    super::start::StartSet::E0 => spec.seed_base + k * 1000,
+                }
             })
             .collect();
         let (mean_start, sigma_start) = (cma.mean().to_vec(), cma.sigma());
