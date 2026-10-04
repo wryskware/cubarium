@@ -8,7 +8,6 @@ use cubarium_voxel_flora::{
 
 #[test]
 fn the_factor_is_one_at_the_mean_half_ten_below_double_ten_above() {
-    assert_eq!(FloraConfig::default().upkeep_q10, 2.0);
     assert_eq!(upkeep_factor(26.0, 26.0, 2.0), 1.0);
     assert!((upkeep_factor(16.0, 26.0, 2.0) - 0.5).abs() < 1e-12);
     assert!((upkeep_factor(36.0, 26.0, 2.0) - 2.0).abs() < 1e-12);

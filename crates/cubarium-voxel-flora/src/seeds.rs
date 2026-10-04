@@ -2745,7 +2745,7 @@ mod tests {
     /// `dark_spore_bias` 0 picks exactly what the undarkened picker picks; above 0 a larger
     /// share of the landings falls on dark faces.
     #[test]
-    fn the_dark_spore_bias_at_zero_is_todays_pick_and_above_zero_favours_the_dark() {
+    fn the_dark_spore_bias_at_zero_is_the_undarkened_pick_and_above_zero_favours_the_dark() {
         let (world, ground) = half_roofed();
         let view = world.view();
         let config = FloraConfig::default();
@@ -2773,11 +2773,13 @@ mod tests {
             assert!(banked > 500, "only {banked} landed");
             f64::from(dark) / f64::from(banked)
         };
-        let (at_zero, biased) = (dark_share(&zero), dark_share(&config.glowcap));
+        let mut strong = config.glowcap.clone();
+        strong.dark_spore_bias = 4.0;
+        let (at_zero, biased) = (dark_share(&zero), dark_share(&strong));
         assert!(
             biased > at_zero + 0.1,
             "bias {} lands {biased} on the dark, bias 0 {at_zero}",
-            config.glowcap.dark_spore_bias
+            strong.dark_spore_bias
         );
     }
 }

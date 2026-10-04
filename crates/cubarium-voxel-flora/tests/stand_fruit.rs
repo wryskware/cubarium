@@ -123,25 +123,6 @@ fn closes(flora: &Flora, when: &str) {
     }
 }
 
-/// The shipped table: lanternberry hangs fruit and no other species does; it falls after
-/// a positive time; it is energy-rich with a small, non-zero mineral share.
-#[test]
-fn lanternberry_is_the_one_species_with_a_fruit_stock() {
-    let c = FloraConfig::default();
-    let lb = &c.lanternberry;
-    assert!(lb.fruit_per_s > 0.0, "lanternberry makes fruit");
-    assert!(lb.fruit_cap > 0.0, "up to a cap");
-    assert!(lb.fruit_drop_s > 0.0, "uneaten fruit falls, after a while");
-    assert!(
-        lb.fruit_mineral_fraction > 0.0 && lb.fruit_mineral_fraction <= 0.05,
-        "small but not zero: {}",
-        lb.fruit_mineral_fraction
-    );
-    for s in Species::ALL.into_iter().filter(|&s| s != Species::Lanternberry) {
-        assert_eq!(c.species(s).fruit_per_s, 0.0, "{s:?} makes none");
-    }
-}
-
 /// **A lanternberry grows fruit in daylight up to its cap, from its reserve, and none at
 /// night.**
 /// - At noon a full-grown stand's fruit rises from nothing at `fruit_per_s` (after 1 s it

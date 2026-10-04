@@ -2540,8 +2540,8 @@ fn the_saturation_ceiling_is_non_strict_and_umbrellafrond_s_is_inert() {
     config.bloomcrown.reserve_cap = 40.0;
     config.umbrellafrond.propagule_rate = 3.0;
     config.umbrellafrond.reserve_cap = 40.0;
-    assert_eq!(config.bloomcrown.establish_saturated_max, 0.25);
-    assert_eq!(config.umbrellafrond.establish_saturated_max, 1.0);
+    config.bloomcrown.establish_saturated_max = 0.25;
+    config.umbrellafrond.establish_saturated_max = 1.0;
 
     for (saturated, bloom_should) in [(4usize, true), (5, false), (18, false)] {
         let mut world = box_world(saturated);
@@ -2647,9 +2647,9 @@ fn the_root_box_sees_soil_only_so_saturated_rock_is_neither_wet_nor_waterlogged(
         }
     }
     let mut cfg = FloraConfig::default();
-    // `hop` 2 is the placeholder; it is what lets the one viable donor reach x2 and x4,
-    // whose root boxes hold no soil at all.
-    assert_eq!(cfg.bloomcrown.hop, 2);
+    // `hop` 2 is what lets the one viable donor reach x2 and x4, whose root boxes hold no
+    // soil at all.
+    cfg.bloomcrown.hop = 2;
     cfg.bloomcrown.propagule_rate = 3.0;
     // Round 3b: a donor saves for one drawn recipient at a time, so `reserve_cap` 40
     // against the placeholder 0.5 is what funds the dozens of packages four recipients

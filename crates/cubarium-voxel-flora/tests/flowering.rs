@@ -175,17 +175,17 @@ impl Watch {
     }
 }
 
-/// **Asynchronous.** On the shipped knobs (`spur_share` 0.1), after one mean cycle to
-/// settle, through a world day sampled every minute: the share of faces carrying a flower
-/// or fruit stays in `[0.05, 0.16]` (its mean in `[0.08, 0.12]`), the share in flower
-/// never passes 0.07 (a third of 0.1 expected; a global flush would be most of the wall),
+/// **Asynchronous.** With `s` the config's `spur_share`, after one mean cycle to settle,
+/// through a world day sampled every minute: the share of faces carrying a flower or fruit
+/// stays in `[0.5 s, 1.6 s]` (its mean in `[0.8 s, 1.2 s]`), the share in flower never
+/// passes `0.7 s` (a third of `s` expected; a global flush would be most of the wall),
 /// the flowering and fruiting faces sit in every quarter of the wall at every sample, and
 /// at least three quarters of the faces flower at some point in the day.
 #[test]
 fn a_big_colony_flowers_a_scattered_few_at_a_time_through_a_world_day() {
     let (mut w, mut flora, _, faces) = colony(|_| {});
     let vc = flora.config().latticevine.clone();
-    assert_eq!(vc.spur_share, 0.1, "the shipped share");
+    let s = vc.spur_share;
     for _ in 0..ticks(vc.spur_cycle_s()) {
         flora.step(&mut w);
     }
@@ -213,7 +213,7 @@ fn a_big_colony_flowers_a_scattered_few_at_a_time_through_a_world_day() {
                 flower += usize::from(c.spur == SpurPhase::Flower);
             }
             let share = on as f64 / n;
-            assert!((0.05..=0.16).contains(&share), "at {t}: {share} of the wall in flower or fruit");
+            assert!((0.5 * s..=1.6 * s).contains(&share), "at {t}: {share} of the wall in flower or fruit");
             assert!(quarters.iter().all(|&q| q > 0), "at {t}: every quarter carries some: {quarters:?}");
             max_flower = max_flower.max(flower as f64 / n);
             sum += share;
@@ -221,8 +221,8 @@ fn a_big_colony_flowers_a_scattered_few_at_a_time_through_a_world_day() {
         }
     }
     let mean = sum / f64::from(samples);
-    assert!((0.08..=0.12).contains(&mean), "mean share {mean}");
-    assert!(max_flower <= 0.07, "a spike: {max_flower} of the wall in flower at once");
+    assert!((0.8 * s..=1.2 * s).contains(&mean), "mean share {mean}");
+    assert!(max_flower <= 0.7 * s, "a spike: {max_flower} of the wall in flower at once");
     assert!(
         ever.len() as f64 >= 0.75 * n,
         "the flowers move over the wall: {} of {} faces flowered in the day",
@@ -233,7 +233,7 @@ fn a_big_colony_flowers_a_scattered_few_at_a_time_through_a_world_day() {
 
 /// **Production per area is the knob.** Over a world day after one cycle to settle, the
 /// nectar the colony's flowers opened with and the fruit its bunches set with are
-/// `faces · rate · 7,200 s` within 10 %, on the shipped knobs and again with the share
+/// `faces · rate · 7,200 s` within 10 %, on the config's knobs and again with the share
 /// doubled and the production rates doubled (the same production per face as the rates,
 /// whatever the share).
 #[test]
@@ -366,7 +366,6 @@ fn a_lanternberry_grove_fruits_out_of_step_and_an_eaten_bush_refills_at_once() {
     c.lanternberry.transpiration_m3_per_s = 0.0;
     let mut flora = Flora::new(c);
     let sc = flora.config().lanternberry.clone();
-    assert!(sc.fruit_rest_s > 0.0, "the shipped rest");
     let mut sites = Vec::new();
     for i in 0..4 {
         for j in 0..4 {

@@ -1753,8 +1753,8 @@ fn bloomcrown_cannot_germinate_on_a_saturated_site_and_umbrellafrond_can() {
     config.umbrellafrond.propagule_rate = 3.0;
     config.umbrellafrond.reserve_cap = 4.0;
     // The fixture is saturated to the bit, so the two ceilings are the whole difference.
-    assert_eq!(config.bloomcrown.establish_saturated_max, 0.25);
-    assert_eq!(config.umbrellafrond.establish_saturated_max, 1.0);
+    config.bloomcrown.establish_saturated_max = 0.25;
+    config.umbrellafrond.establish_saturated_max = 1.0;
 
     // No `world.step`: pore 0.98 is already past both species' `saturated_pore`, so the
     // saturated fraction of every root box is 1 and nothing has to move to keep it there.

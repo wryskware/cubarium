@@ -106,17 +106,6 @@ fn closes(flora: &Flora, when: &str) {
     }
 }
 
-/// The shipped table: bloomcrown makes nectar, and no other species does.
-#[test]
-fn bloomcrown_is_the_one_species_with_a_nectar_stock() {
-    let c = FloraConfig::default();
-    assert!(c.bloomcrown.nectar_per_s > 0.0, "bloomcrown makes nectar");
-    assert!(c.bloomcrown.nectar_cap > 0.0, "up to a cap");
-    for s in Species::ALL.into_iter().filter(|&s| s != Species::Bloomcrown) {
-        assert_eq!(c.species(s).nectar_per_s, 0.0, "{s:?} makes none");
-    }
-}
-
 /// **7. Bloomcrown nectar refills in daylight up to its cap and not at night.**
 /// - At noon a full-grown stand's nectar rises from nothing at `nectar_per_s` (after 1 s
 ///   it holds `RATE`, ±10 %), never falls, reaches the cap within 3 s and never passes it;

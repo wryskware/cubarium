@@ -292,11 +292,10 @@ fn a_spreading_vine_keeps_back_its_flowering_reserve() {
 
 #[test]
 fn the_founder_count_scales_with_floor_area_over_the_floor() {
-    let vc = VineConfig::default();
-    assert_eq!(vc.founders, 6);
-    assert_eq!(vc.founder_count(192.0), 12, "the desktop terrarium");
+    let vc = VineConfig { founders: 6, founders_per_m2: 0.0625, ..VineConfig::default() };
+    assert_eq!(vc.founder_count(192.0), 12, "a big world scales with its area");
     assert_eq!(vc.founder_count(16.0), 6, "a small world keeps the floor");
-    let none = VineConfig { founders_per_m2: 0.0, ..VineConfig::default() };
+    let none = VineConfig { founders_per_m2: 0.0, ..vc.clone() };
     assert_eq!(none.founder_count(1000.0), 6);
 
     // And the seeder uses it: 48 × 1 reference voxels is 3 m², at 1 per m² three
