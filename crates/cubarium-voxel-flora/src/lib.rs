@@ -51,6 +51,8 @@ mod layers;
 #[cfg(test)]
 mod seed_marks_tests;
 #[cfg(test)]
+mod overtop_covers_tests;
+#[cfg(test)]
 mod carrion_tests;
 mod film;
 #[cfg(test)]
@@ -186,6 +188,30 @@ impl Species {
 
     pub fn parse(s: &str) -> Option<Species> {
         Species::ALL.into_iter().find(|sp| sp.name() == s)
+    }
+}
+
+/// A species list written as names (`["velvetpad", "stonecushion"]`), the way the
+/// registry and the presets name species: [`Species::name`] out, [`Species::parse`] in,
+/// an unknown name refused.
+mod species_names {
+    use super::Species;
+    use serde::{Deserialize, Deserializer, Serializer, de::Error, ser::SerializeSeq};
+
+    pub fn serialize<S: Serializer>(list: &[Species], s: S) -> Result<S::Ok, S::Error> {
+        let mut seq = s.serialize_seq(Some(list.len()))?;
+        for sp in list {
+            seq.serialize_element(sp.name())?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Species>, D::Error> {
+        let names: Vec<String> = Vec::deserialize(d)?;
+        names
+            .iter()
+            .map(|n| Species::parse(n).ok_or_else(|| D::Error::custom(format!("unknown species `{n}`"))))
+            .collect()
     }
 }
 
@@ -1007,16 +1033,27 @@ pub struct SpeciesConfig {
     /// of material, and its seedling starts ahead. 1 — the minimum package — at the base
     /// and for the ground covers. At least 1.
     pub seed_mass: u32,
-    /// **A ground cover**: a stand a woody seedling can come up through. The
-    /// role, not a name: springturf, velvetpad and stonecushion carry it.
+    /// **A ground cover**: a stand a seedling with a positive
+    /// [`SpeciesConfig::overtop_per_check`] can come up through. The role, not a name:
+    /// springturf, velvetpad and stonecushion carry it.
     pub ground_cover: bool,
-    /// **Woody**: the chance, per check of its site, that this species' banked seed comes
-    /// up through a [`SpeciesConfig::ground_cover`] holding the site. The
-    /// site's gates must pass for it as if the site were free, its bank must win the gap
-    /// lottery among the woody banks there, and then this draw; on a success the cover
-    /// dies an *overtopped* death ([`FloraLedger::overtopped`]) and the seedling
-    /// establishes as usual. Zero — cannot — at the base; `0..=1`.
+    /// **Overtopping**: the chance, per check of its site, that this species' banked seed
+    /// comes up through a [`SpeciesConfig::ground_cover`] holding the site — one its
+    /// [`SpeciesConfig::overtop_covers`] allows. The site's gates must pass for it as if
+    /// the site were free, its bank must win the gap lottery among the banks allowed
+    /// there, and then this draw; on a success the cover dies an *overtopped* death
+    /// ([`FloraLedger::overtopped`]) and the seedling establishes as usual. Zero —
+    /// cannot — at the base; `0..=1`. The woody species carry it at 0.1; a ground cover
+    /// may carry it too, restricted by `overtop_covers` (plant succession, 2026-10-03:
+    /// springturf through velvetpad).
     pub overtop_per_check: f64,
+    /// **Which ground covers** this species' seedlings can come up through, by species
+    /// name (`overtop_covers = ["velvetpad"]`). **Empty means any ground cover** — the
+    /// woody species' rule. Inert while `overtop_per_check` is zero. The occupant is read
+    /// when the site is armed, again when the seedling sprouts, and once more at the
+    /// replacement itself, so an arm never outlives a change to a cover it may not take.
+    #[serde(with = "species_names")]
+    pub overtop_covers: Vec<Species>,
     /// Crown geometry from wood, shared by the shade model and the presenter so what
     /// shades is exactly what is drawn: crown top above the support face and crown
     /// half-width, both **in metres**, `[min, max]`. They are physical sizes
@@ -1462,6 +1499,7 @@ impl SpeciesConfig {
             seed_mass: 1,
             ground_cover: false,
             overtop_per_check: 0.0,
+            overtop_covers: Vec::new(),
             crown_height_m: [0.25, 0.75],
             crown_radius_m: [0.125, 0.375],
             // The refuge a plant the brief does not name keeps (`graze_refuge`'s doc).
@@ -3034,6 +3072,12 @@ pub struct FloraLedger {
     /// **cover** species: a death, counted in `deaths` too, with its tissue booked to
     /// dead wood and litter like any other.
     pub overtopped: [u64; Species::COUNT],
+    /// **Replacement events** by pair, `[cover][seedling]`, both indexed by
+    /// [`Species::index`]: each overtopped death above, under the species that came up
+    /// through it (velvetpad → springturf, velvetpad → a woody plant, springturf → a woody
+    /// plant). A diagnostic counter in no `expected_*` total; each row sums to
+    /// `overtopped[cover]`.
+    pub overtop_pairs: [[u64; Species::COUNT]; Species::COUNT],
     /// **Glassfilm budget** (R2a), organic matter, cumulative diagnostics: what
     /// [`Flora::seed_film`] introduced (also in `seeded_organic_in`), what the film grew
     /// (also in `fixed_in`), what it respired (also in `respired_out`), what dying sent to

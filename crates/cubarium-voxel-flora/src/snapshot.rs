@@ -29,7 +29,8 @@ use crate::Flora;
 //     fruit_per_face_s}` replace `{spur_window_s, spur_jitter_s, nectar, fruit}`, a bare
 //     spur's timer is its random rest, `Cover`'s shower tick goes; `Stand::fruit_rest_s`,
 //     `SpeciesConfig::fruit_rest_s`; founders rank walls by lit open area.
-pub const SCHEMA: u32 = 22;
+// 23: plant succession — `SpeciesConfig::overtop_covers`, `FloraLedger::overtop_pairs`.
+pub const SCHEMA: u32 = 23;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
