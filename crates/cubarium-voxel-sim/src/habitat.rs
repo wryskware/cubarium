@@ -1889,7 +1889,7 @@ fn faces_at_food(
 /// Every support face in the world, at any height, sorted low to high: the ground, the
 /// shelves and the hollow floors alike. A strided sample of it spreads over the whole
 /// strip rather than one end of it.
-fn support_sites(world: &World) -> Vec<Site> {
+pub fn support_sites(world: &World) -> Vec<Site> {
     let view = world.view();
     let c = world.config();
     let mut out: Vec<Site> = Vec::new();

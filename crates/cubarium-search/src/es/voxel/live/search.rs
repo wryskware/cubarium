@@ -360,6 +360,12 @@ pub struct EvalSpec {
     /// Found exactly the world `base` names (`Seeds::Asked`), not the first accepted from
     /// it: the grid keeps one world per seed across its cells.
     pub asked_seed: bool,
+    /// Where every candidate starts ([`super::start`]): today's founding (E0) or a start
+    /// library.
+    #[serde(skip)]
+    pub start: super::start::StartSet,
+    /// The burn-in before scoring.
+    pub burn_in: super::start::BurnIn,
 }
 
 impl EvalSpec {
@@ -380,6 +386,8 @@ impl EvalSpec {
             score_horizon_ticks: horizon_ticks,
             curiosity: Curiosity::default(),
             asked_seed: false,
+            start: super::start::StartSet::E0,
+            burn_in: super::start::BurnIn::default(),
         }
     }
 }
@@ -740,6 +748,16 @@ impl EvalRun {
             adult_ticks: [0; Founder::COUNT],
             budget: None,
         }
+    }
+
+    /// How this run started ([`super::start::StartRecord`]).
+    pub fn start_record(&self) -> &super::start::StartRecord {
+        todo!()
+    }
+
+    /// The ledger baselines: the burn-in's end and every window boundary since.
+    pub fn baselines(&self) -> &[super::start::Baseline] {
+        todo!()
     }
 
     /// What the last window counted per lineage (all zero before the first).
