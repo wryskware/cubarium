@@ -1342,3 +1342,44 @@ fn a_bellwing_never_lays_under_a_low_perch_or_in_closed_air() {
     assert!(!laid.contains(&low), "no egg under the low roof: {laid:?}");
     assert!(!laid.contains(&boxed), "no egg in the closed box: {laid:?}");
 }
+
+// ------------------------------------------------------------------ burrs
+
+/// **Burrs and flight** (springturf spread): a bellwing aloft is no burr carrier on the
+/// ground, and the same lineage on a ground face is. Carried through the plant layer's
+/// burr pass, at a pickup of 1 and a coat of 1, the grounded one picks up a springturf
+/// seed stepping onto a donor's face and the flying one, crossing the same faces, does not.
+#[test]
+fn a_grounded_bellwing_picks_up_burrs_and_one_in_flight_does_not() {
+    let world = plain(8, 12, 3);
+    let mut fconfig = FaunaConfig::default();
+    fconfig.founders[BW.index()].burr_coat = 1.0;
+    let mut fauna = Fauna::new(fconfig);
+    let (x, z) = centre(2, 1);
+    let up = aloft(&mut fauna, &world, x, z, SURFACE + 1.0, EAST, StartingStores::FULL);
+    let down = on_ground(&mut fauna, &world, BW, 2, 1, StartingStores::FULL);
+    let flying = animal(&fauna, up);
+    let walking = animal(&fauna, down);
+    assert_eq!(flying.mobility.mode, MobilityMode::Fly);
+    assert!(!crate::step::grounded(&flying), "aloft is not grounded");
+    assert!(crate::step::grounded(&walking), "on its face it is");
+
+    let mut pconfig = FloraConfig::default();
+    pconfig.springturf.burr_pickup = 1.0;
+    for (body, expect) in [(flying, false), (walking, true)] {
+        let mut flora = Flora::new(pconfig.clone());
+        for x in 0..8u32 {
+            let site = Site { x, y: 2, z: 1 };
+            let wood = pconfig.springturf.wood_max;
+            assert!(flora.apply(&world, FloraCommand::SeedOnFace { site, species: Plant::Springturf, wood }));
+        }
+        let mut c = crate::step::burr_carrier(&fauna, &body);
+        assert_eq!(c.coat, 1.0, "the lineage's coat");
+        flora.carry_burrs(&world, &[c]);
+        c.site.x += 1;
+        c.x_m += V;
+        flora.carry_burrs(&world, &[c]);
+        let picked = flora.view().ledger.burrs_picked[Plant::Springturf.index()];
+        assert_eq!(picked > 0, expect, "grounded {}", c.grounded);
+    }
+}

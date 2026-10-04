@@ -24,6 +24,9 @@
 //! moisture (or at `--wilt W`, a moisture of `1 − W`), with full foliage. The picture is
 //! written at 2× nearest, the panel's own upscale.
 //!
+//! `--cured` draws every stand of a species that cures (springturf) cured: its foliage
+//! dropped and its crown in the species' cured colour.
+//!
 //! `--rider` puts a parasite lanternjaw hatchling on the first grazer's back (its interim
 //! plain-voxel look, `design/handoffs/voxel-predation-parasite-2026-10-01.md`).
 
@@ -81,6 +84,7 @@ fn main() -> Result<()> {
     let mut out = None;
     let mut glyphs = false;
     let mut wilt = 0.0f64;
+    let mut cured = false;
     let mut gpu = false;
     let mut px = 6u32;
     let mut textures: Option<PathBuf> = None;
@@ -104,6 +108,7 @@ fn main() -> Result<()> {
                 layered = false;
             }
             "--wilt" => wilt = args.next().context("--wilt W")?.parse()?,
+            "--cured" => cured = true,
             _ if out.is_none() => out = Some(PathBuf::from(a)),
             _ => bail!("unexpected argument {a}"),
         }
@@ -287,6 +292,11 @@ fn main() -> Result<()> {
             .zip(&columns)
             .any(|(&(sp, _, ripe), &x)| ripe && sp == s.species && i64::from(s.site.x) == x);
         s.parcel = if ripe { sc.propagule_package() } else { 0.0 };
+        // `--cured`: every stand of a species that cures, cured (its foliage dropped).
+        if cured && sc.cure_after_s > 0.0 {
+            s.cured = true;
+            s.foliage *= 1.0 - sc.cure_shed;
+        }
     }
     let view = FloraView {
         stands: &stands,

@@ -361,7 +361,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (801 rows)
+**`flora.*`** (928 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -430,6 +430,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.bloomcrown.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.bloomcrown.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.bloomcrown.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.bloomcrown.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.bloomcrown.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.bloomcrown.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.bloomcrown.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.bloomcrown.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.bloomcrown.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.bloomcrown.cure_water` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.bloomcrown.cure_after_s` | 0.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.bloomcrown.cure_shed` | 0.0 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.bloomcrown.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.bloomcrown.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.bloomcrown.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.bloomcrown.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.bloomcrown.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.bloomcrown.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.bloomcrown.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -511,6 +525,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.umbrellafrond.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.umbrellafrond.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.umbrellafrond.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.umbrellafrond.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.umbrellafrond.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.umbrellafrond.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.umbrellafrond.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.umbrellafrond.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.umbrellafrond.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.umbrellafrond.cure_water` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.umbrellafrond.cure_after_s` | 0.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.umbrellafrond.cure_shed` | 0.0 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.umbrellafrond.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.umbrellafrond.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.umbrellafrond.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.umbrellafrond.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.umbrellafrond.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.umbrellafrond.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.umbrellafrond.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -531,7 +559,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.springturf.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
-| `flora.springturf.alpha` | 6.2 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.springturf.alpha` | 1.5 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
 | `flora.springturf.wood_max` | 0.3 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.springturf.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.springturf.maintenance` | 0.002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
@@ -570,10 +598,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.drown_depth_m` | 0.03 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
 | `flora.springturf.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
 | `flora.springturf.hop` | 3 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
-| `flora.springturf.clonal_share` | 0.3 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
+| `flora.springturf.clonal_share` | 0.4 | fraction of packages | [0, 1] | 0–1 | C | tuned | runner/rhizome share |
 | `flora.springturf.spore_tries` | 8 | tries | [1, inf) | yes | C | tuned | a spore package's landing attempts |
 | `flora.springturf.seed_mass` | 1 | minimum packages | [1, inf) | yes | D | placeholder | seed size and lottery weight |
-| `flora.springturf.overtop_per_check` | 0.0 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
+| `flora.springturf.overtop_per_check` | 0.03 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
 | `flora.springturf.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.springturf.crown_height_m.*` | 0.125, 0.1875 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
 | `flora.springturf.crown_radius_m.*` | 0.125, 0.25 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
@@ -591,7 +619,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.springturf.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.springturf.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
-| `flora.springturf.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.springturf.runner_reach` | 2 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.springturf.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.springturf.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.springturf.wald_mean_m` | 1.5 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.springturf.wald_shape_m` | 0.5 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.springturf.burr_pickup` | 0.1 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.springturf.burr_retention_mean_m` | 3.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.springturf.burr_retention_shape` | 0.7 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.springturf.cure_water` | 0.1 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.springturf.cure_after_s` | 1800.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.springturf.cure_shed` | 0.8 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.springturf.cure_upkeep` | 0.1 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.springturf.cure_resume_water` | 0.25 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.springturf.cure_max_s` | 21600.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.springturf.cured_srgb` | 12755290 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.springturf.founder_per_m2` | 0.6 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.springturf.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.springturf.founder_cap` | 160 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -673,6 +715,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.stonecushion.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.stonecushion.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.stonecushion.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.stonecushion.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.stonecushion.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.stonecushion.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.stonecushion.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.stonecushion.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.stonecushion.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.stonecushion.cure_water` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.stonecushion.cure_after_s` | 0.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.stonecushion.cure_shed` | 0.0 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.stonecushion.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.stonecushion.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.stonecushion.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.stonecushion.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.stonecushion.founder_per_m2` | 0.2 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.stonecushion.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.stonecushion.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -728,7 +784,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.saturated_pore` | 0.95 | pore fraction of capacity | (-inf, inf) | 0.8–1 | B | placeholder | a root voxel at or above this is saturated |
 | `flora.velvetpad.stress_rate_per_s` | 0.1 | /s fraction of gap | [0, inf) | 0.001–0.2 log | D | placeholder | aeration stress rise |
 | `flora.velvetpad.relax_rate_per_s` | 0.05 | /s fraction of gap | [0, inf) | yes | B | placeholder | aeration stress recovery |
-| `flora.velvetpad.establish_saturated_max` | 0.6 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
+| `flora.velvetpad.establish_saturated_max` | 1.0 | fraction of root box saturated | (-inf, inf) | yes | C | placeholder | germination ceiling and adult stress onset |
 | `flora.velvetpad.drown_depth_m` | 0.1 | m of water | [0, inf) | yes | D | tuned | standing water over the support that kills the stand |
 | `flora.velvetpad.water_depth_min_m` | 0.0 | m of settled standing water | [0, inf) | yes | B | placeholder | needed on or beside the site |
 | `flora.velvetpad.hop` | 6 | reference voxels (0.25 m) | [0, inf) | yes | D | placeholder | dispersal radius / wind kernel scale |
@@ -754,6 +810,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.velvetpad.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.velvetpad.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.velvetpad.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.velvetpad.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.velvetpad.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.velvetpad.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.velvetpad.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.velvetpad.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.velvetpad.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.velvetpad.cure_water` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.velvetpad.cure_after_s` | 0.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.velvetpad.cure_shed` | 0.0 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.velvetpad.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.velvetpad.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.velvetpad.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.velvetpad.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.velvetpad.founder_per_m2` | 0.4 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.velvetpad.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.velvetpad.founder_cap` | 120 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -835,6 +905,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.glowcap.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.glowcap.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.glowcap.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.glowcap.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.glowcap.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.glowcap.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.glowcap.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.glowcap.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.glowcap.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.glowcap.cure_water` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.glowcap.cure_after_s` | 0.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.glowcap.cure_shed` | 0.0 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.glowcap.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.glowcap.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.glowcap.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.glowcap.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.glowcap.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.glowcap.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.glowcap.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -916,6 +1000,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.vaulttree.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.vaulttree.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.vaulttree.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.vaulttree.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.vaulttree.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.vaulttree.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.vaulttree.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.vaulttree.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.vaulttree.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.vaulttree.cure_water` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.vaulttree.cure_after_s` | 0.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.vaulttree.cure_shed` | 0.0 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.vaulttree.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.vaulttree.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.vaulttree.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.vaulttree.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.vaulttree.founder_per_m2` | 0.1 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.vaulttree.founder_colony` | 1 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.vaulttree.founder_cap` | 12 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -997,6 +1095,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.lanternberry.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.lanternberry.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.lanternberry.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.lanternberry.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.lanternberry.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.lanternberry.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.lanternberry.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.lanternberry.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.lanternberry.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.lanternberry.cure_water` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.lanternberry.cure_after_s` | 0.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.lanternberry.cure_shed` | 0.0 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.lanternberry.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.lanternberry.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.lanternberry.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.lanternberry.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.lanternberry.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.lanternberry.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.lanternberry.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -1078,6 +1190,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.siphonreed.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.siphonreed.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
+| `flora.siphonreed.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.siphonreed.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
+| `flora.siphonreed.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.siphonreed.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.siphonreed.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
+| `flora.siphonreed.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
+| `flora.siphonreed.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
+| `flora.siphonreed.cure_water` | 0.0 | available water (0 wp, 1 fc) | [0, inf) | 0–0.5 | - | placeholder | curing: the root box counts as dry below this |
+| `flora.siphonreed.cure_after_s` | 0.0 | s (0 = never cures) | [0, inf) | 0–7200 | - | placeholder | curing: dry this long, the stand drops its foliage and goes dormant |
+| `flora.siphonreed.cure_shed` | 0.0 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
+| `flora.siphonreed.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
+| `flora.siphonreed.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
+| `flora.siphonreed.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.siphonreed.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.siphonreed.founder_per_m2` | 4.0 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.siphonreed.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.siphonreed.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -1143,6 +1269,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.seed_check_s` | 30.0 | s | [0, inf) |  | N | numerics | how often a banked site is tested |
 | `flora.upkeep_q10` | 2.0 | x per 10 C | (0, inf) | 1–4 | - | placeholder | Q10 of plant upkeep around the climate's mean |
 | `flora.wind_tries` | 4 | tries | [1, inf) | 1–16 | - | placeholder | a wind seed's draws before the donor keeps its package |
+| `flora.burr_cap` | 6 | seeds per animal | [0, inf) | 1–20 | - | placeholder | burrs: the most seeds one animal's coat carries at once |
 | `flora.wind_shape` | 2.0 | - | (0, inf) | 1.2–4 | - | placeholder | wind kernel: Lomax shape k (larger is a thinner tail) |
 | `flora.wind_scale_hops` | 2.5 | hops | (0, inf) | 0.5–8 | - | placeholder | wind kernel: Lomax scale a, in the species' hops |
 | `flora.carcass_remains_fraction` | 0.3 | fraction of the body's organic matter | [0, 1] | 0.1–0.6 | - | placeholder | carrion below this draws as remains, not the body |
@@ -1167,7 +1294,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1113 rows)
+**`fauna.*`** (1122 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1248,6 +1375,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.littershredder.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.littershredder.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1359,6 +1487,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.frondgrazer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.frondgrazer.burr_coat` | 0.6 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1470,6 +1599,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.lanternjaw.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.lanternjaw.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1581,6 +1711,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.capgnawer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.capgnawer.burr_coat` | 0.8 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1692,6 +1823,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.loftstrider.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.loftstrider.burr_coat` | 0.4 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1803,6 +1935,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.ripple-snail.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.ripple-snail.burr_coat` | 0.1 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1914,6 +2047,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.bellwing.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.bellwing.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2025,6 +2159,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.seedporter.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.seedporter.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2136,6 +2271,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.chorister.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.chorister.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |

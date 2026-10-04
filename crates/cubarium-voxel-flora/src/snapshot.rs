@@ -31,7 +31,11 @@ use crate::Flora;
 //     `SpeciesConfig::fruit_rest_s`; founders rank walls by lit open area.
 // 23: plant succession — `SpeciesConfig::overtop_covers`, `FloraLedger::{overtop_pairs,
 //     foliage_built, shed_organic, overtopped_organic, foliage_taken, litter_taken}`.
-pub const SCHEMA: u32 = 23;
+// 24: springturf spread — `SpeciesConfig::{runners_overtop, wald_mean_m, wald_shape_m,
+//     burr_pickup, burr_retention_mean_m, burr_retention_shape, cure_*, cured_srgb}`,
+//     `Dispersal::Wald`, `FloraConfig::burr_cap`, `Stand::{cured, dry_s}`,
+//     `Flora::{burrs, burr_marks}`, the ledger's runner, death-cause, burr and cure lines.
+pub const SCHEMA: u32 = 24;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

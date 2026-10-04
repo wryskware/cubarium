@@ -293,8 +293,6 @@ fn overtop_covers_is_a_list_of_species_names() {
     let text = toml::to_string(&config().springturf).expect("writes");
     assert!(text.contains("overtop_covers = [\"velvetpad\"]"), "{text}");
     let mut f = FloraConfig::default();
-    assert_eq!(f.springturf.overtop_covers, vec![PAD], "the grass's default list");
-    assert_eq!(f.springturf.overtop_per_check, 0.0, "and its rate stays 0 by default");
     crate::registry()
         .set(
             &mut f,

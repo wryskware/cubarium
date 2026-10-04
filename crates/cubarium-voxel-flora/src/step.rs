@@ -117,7 +117,7 @@
 use cubarium_voxel::organism::{Budget, settle_mineral, tissue_funded};
 use cubarium_voxel::{Command as WorldCommand, DT, Material, Materials, VoxelView, World};
 
-use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic};
+use crate::{DeathCause, DeathRecord, Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
 /// draws; the seed bank's and dispersal's are drawn in `seeds.rs`.
@@ -133,6 +133,9 @@ pub(crate) const DOMAIN_CLONAL: u64 = 7;
 pub(crate) const DOMAIN_RUNNER: u64 = 8;
 pub(crate) const DOMAIN_ATTRITION: u64 = 9;
 pub(crate) const DOMAIN_OVERTOP: u64 = 10;
+/// The burr pass's streams: pickup draws and retention draws.
+pub(crate) const DOMAIN_BURR: u64 = 13;
+pub(crate) const DOMAIN_BURR_HOLD: u64 = 14;
 
 pub(crate) use cubarium_voxel::{KeyedRng as Rng, mix};
 
@@ -179,6 +182,7 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
     // describe only the tick that is about to run, and a caller that never reads them must not
     // accumulate them (Astra R10.3, `DeliveryReceipt`).
     flora.deliveries.clear();
+    flora.death_log.clear();
     // The stocks decomposition is allowed to draw on: what each site held when the tick
     // started, taken before anything at all moves. Litter, dead wood and carrion deposited
     // by this tick's drownings, senescence and deaths are eligible from the next tick, per
@@ -484,6 +488,7 @@ fn drown(flora: &mut Flora, world: &World, threads: usize) {
         stands,
         ground,
         ledger,
+        death_log,
         ..
     } = flora;
     let view = world.view();
@@ -507,7 +512,7 @@ fn drown(flora: &mut Flora, world: &World, threads: usize) {
         .concat()
     };
     for &i in doomed.iter().rev() {
-        die(config, &view, &stands[i], ground, ledger);
+        die(config, &view, &stands[i], ground, ledger, DeathCause::Drowned, death_log);
     }
     remove_at(stands, &doomed);
 }
@@ -1022,6 +1027,10 @@ pub(crate) struct Drink {
     /// moisture read the cave damp at, and what its seep income is paid at. Zero for a
     /// species with no dark habitat.
     pub(crate) darkness: f64,
+    /// The root box's mean **available water** (0 at the wilting point, 1 at field
+    /// capacity; the cave damp included), what `μ` is the ramp of: curing reads it. Zero
+    /// for an empty box.
+    pub(crate) available: f64,
 }
 
 /// Collect every stand's demand per voxel, then withdraw once per voxel and split what
@@ -1291,9 +1300,9 @@ fn drink_read(
             d.darkness = sc.darkness(sky);
         }
         let mean = (band > 0.0).then(|| water / band);
-        d.moisture = sc
-            .damp_available(mean, d.darkness)
-            .map_or(0.0, |a| sc.moisture_at(a));
+        let available = sc.damp_available(mean, d.darkness);
+        d.available = available.unwrap_or(0.0);
+        d.moisture = available.map_or(0.0, |a| sc.moisture_at(a));
         // A species that needs standing water and has lost it reads
         // `μ = 0`: it earns nothing and pays its upkeep out of reserve.
         if sc.water_depth_min_m > 0.0
@@ -2312,6 +2321,7 @@ fn grow(
         stands,
         ground,
         ledger,
+        death_log,
         ..
     } = flora;
     // Every stand's ground slot first — a stand's growth draws on its site's pool and
@@ -2326,7 +2336,7 @@ fn grow(
     // order, which is the one-pass loop's order.
     let n = stands.len();
     let mut books = vec![Booked::default(); n];
-    let mut dying = vec![false; n];
+    let mut dying = vec![None::<DeathCause>; n];
     {
         let config = &*config;
         let chunks = chunk_count(n, threads);
@@ -2337,7 +2347,7 @@ fn grow(
             &mut [Ground],
             usize,
             &mut [Booked],
-            &mut [bool],
+            &mut [Option<DeathCause>],
         )> = Vec::with_capacity(chunks);
         let (mut st, mut gr, mut bk, mut dy) = (
             &mut stands[..],
@@ -2374,11 +2384,11 @@ fn grow(
             &mut [Ground],
             usize,
             &mut [Booked],
-            &mut [bool],
+            &mut [Option<DeathCause>],
         )| {
             for (k, stand) in stands.iter_mut().enumerate() {
                 let si = first + k;
-                dying[k] = grow_stand(
+                dying[k] = grow_stand_cause(
                     config,
                     stand,
                     &mut ground[slots[si] - base],
@@ -2417,11 +2427,18 @@ fn grow(
         ledger.foliage_built[s.species.index()] += b.built;
         ledger.shed_organic[s.species.index()] += b.shed;
     }
-    let dead: Vec<usize> = (0..n).filter(|&si| dying[si]).collect();
+    for (b, s) in books.iter().zip(stands.iter()) {
+        let k = s.species.index();
+        ledger.cures[k] += u64::from(b.cured);
+        ledger.cure_wakes[k] += u64::from(b.woke);
+        ledger.cure_shed_organic[k] += b.cure_shed;
+    }
+    let dead: Vec<usize> = (0..n).filter(|&si| dying[si].is_some()).collect();
 
     let view = world.view();
     for &si in dead.iter().rev() {
-        die(config, &view, &stands[si], ground, ledger);
+        let cause = dying[si].expect("dying");
+        die(config, &view, &stands[si], ground, ledger, cause, death_log);
     }
     remove_at(stands, &dead);
 }
@@ -2446,6 +2463,10 @@ pub(crate) struct Booked {
     /// litter (`FloraLedger::shed_organic`), this stand's line.
     built: f64,
     shed: f64,
+    /// Curing this tick: the stand cured (and dropped `cure_shed` of foliage), or woke.
+    cured: bool,
+    woke: bool,
+    cure_shed: f64,
 }
 
 impl Booked {
@@ -2547,6 +2568,7 @@ fn saprotrophy(substrate: Substrate, e_v: f64, book: &mut Booked) -> (f64, f64) 
 
 /// §4.1–4.6 for one stand on its own site's ground `g`: the loop body of [`grow`]. Its
 /// ledger lines go into `book`. Returns whether the stand dies (§4.7).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn grow_stand(
     config: &FloraConfig,
     stand: &mut Stand,
@@ -2557,6 +2579,21 @@ pub(crate) fn grow_stand(
     substrate: Substrate,
     book: &mut Booked,
 ) -> bool {
+    grow_stand_cause(config, stand, g, light, climate, drink, substrate, book).is_some()
+}
+
+/// [`grow_stand`], saying what killed the stand.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn grow_stand_cause(
+    config: &FloraConfig,
+    stand: &mut Stand,
+    g: &mut Ground,
+    light: f64,
+    climate: Climate,
+    drink: Drink,
+    substrate: Substrate,
+    book: &mut Booked,
+) -> Option<DeathCause> {
     let Climate {
         daylight,
         upkeep,
@@ -2591,6 +2628,31 @@ pub(crate) fn grow_stand(
         was
     };
     stand.aeration_stress = stress;
+
+    // ---- 4.0 curing (drought dormancy, [`SpeciesConfig::cure_after_s`]): a green stand
+    // dry below `cure_water` for `cure_after_s` cures — drops `cure_shed` of its foliage
+    // to the litter and goes dormant — and a cured stand wakes at `cure_resume_water` and
+    // regrows by the ordinary rules below (the reflush from its reserve). While cured it
+    // runs [`dormant`] instead of the rest of this function.
+    if sc.cure_after_s > 0.0 && sc.trophic == Trophic::Photo {
+        if stand.cured {
+            if drink.available >= sc.cure_resume_water {
+                stand.cured = false;
+                stand.dry_s = 0.0;
+                book.woke = true;
+            } else {
+                return dormant(config, stand, g, upkeep * night, book);
+            }
+        } else if drink.available < sc.cure_water {
+            stand.dry_s += DT;
+            if stand.dry_s >= sc.cure_after_s {
+                cure(config, stand, g, book);
+                return dormant(config, stand, g, upkeep * night, book);
+            }
+        } else {
+            stand.dry_s = 0.0;
+        }
+    }
 
     // ---- 4.1 income, 4.2 demands
     //
@@ -2851,7 +2913,64 @@ pub(crate) fn grow_stand(
     stand.resync_layers(config.species(species));
 
     // ---- 4.7 death
-    stand.wood < sc.alive_min
+    (stand.wood < sc.alive_min).then_some(DeathCause::Starved)
+}
+
+/// **A stand cures**: `cure_shed` of its foliage falls to its site's litter, from the top
+/// layer down like senescence, with its share of the stand's mineral and its energy —
+/// booked as shed foliage — and it is marked cured with its dormancy clock at zero.
+fn cure(config: &FloraConfig, stand: &mut Stand, g: &mut Ground, book: &mut Booked) {
+    let sc = config.species(stand.species);
+    let e_v = sc.energy_density;
+    let shed = (sc.cure_shed.clamp(0.0, 1.0) * stand.foliage).max(0.0);
+    let before = stand.material();
+    stand.foliage -= shed;
+    let n = sc.foliage_layer_count(stand.wood);
+    crate::layers::shed_from_top(stand.layer_stocks_mut(n), shed);
+    stand.settle_layers(n);
+    let mineral = pull_mineral(stand, before, shed);
+    let mut heat = FloraLedger::default();
+    add_litter(config, g, shed, mineral, e_v * shed, &mut heat);
+    if heat.heat_out != 0.0 {
+        book.heat(heat.heat_out);
+    }
+    book.shed = shed;
+    book.cure_shed = shed;
+    book.cured = true;
+    stand.cured = true;
+    stand.dry_s = 0.0;
+}
+
+/// **One dormant tick** of a cured stand: no income at all — no photosynthesis, no
+/// growth, no senescence, no reflush — and `cure_upkeep` of its maintenance (`scale` the
+/// temperature and night factors) paid from its reserve; maintenance it cannot pay
+/// diebacks its wood as usual. Its dormancy clock runs, and past `cure_max_s` the drought
+/// kills it.
+fn dormant(config: &FloraConfig, stand: &mut Stand, g: &mut Ground, scale: f64, book: &mut Booked) -> Option<DeathCause> {
+    let sc = config.species(stand.species);
+    let e_v = sc.energy_density;
+    let m = (sc.maintenance * scale * sc.cure_upkeep * stand.wood * DT).max(0.0);
+    let mut budget = Budget::new(0.0, 0.0);
+    let unpaid = budget.upkeep(&mut stand.reserve, m).unpaid;
+    let respired = budget.close();
+    book.respired(respired);
+    book.heat(e_v * respired);
+    let die_back = stand.wood.min(sc.dieback * unpaid);
+    let before = stand.material();
+    stand.wood -= die_back;
+    let die_back_mineral = pull_mineral(stand, before, die_back);
+    g.dead_wood += die_back;
+    g.dead_wood_mineral += die_back_mineral;
+    g.dead_wood_energy += e_v * die_back;
+    stand.resync_layers(sc);
+    stand.dry_s += DT;
+    if stand.wood < sc.alive_min {
+        Some(DeathCause::Starved)
+    } else if sc.cure_max_s > 0.0 && stand.dry_s >= sc.cure_max_s {
+        Some(DeathCause::Drought)
+    } else {
+        None
+    }
 }
 
 /// The mineral belonging to `moved` units of a stand's organic matter, taken out of the
@@ -2892,6 +3011,8 @@ pub(crate) fn die(
     stand: &Stand,
     ground: &mut Vec<Ground>,
     ledger: &mut FloraLedger,
+    cause: DeathCause,
+    log: &mut Vec<DeathRecord>,
 ) {
     let sc = config.species(stand.species);
     let e_v = sc.energy_density;
@@ -2942,6 +3063,13 @@ pub(crate) fn die(
         ledger,
     );
     ledger.deaths += 1;
+    ledger.deaths_by_cause[cause.index()][stand.species.index()] += 1;
+    log.push(DeathRecord {
+        id: stand.id,
+        site: stand.site,
+        species: stand.species,
+        cause,
+    });
 }
 
 /// **The fall**: where a falling stand's wood lands, as
@@ -3679,6 +3807,7 @@ mod tests {
                 taken_m3: 0.0,
                 saturated: 0.0,
                 darkness: 0.0,
+                available: 1.0,
             };
             2
         ];
@@ -4189,6 +4318,7 @@ mod tests {
                     taken_m3: 1e-9 * i as f64,
                     saturated: [0.0, 0.7][i % 2],
                     darkness: 0.0,
+                    available: 1.0,
                 })
                 .collect();
             let substrate = feed(&mut flora, &world, &drink, 1);

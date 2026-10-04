@@ -133,6 +133,8 @@ pub fn start_stand(config: &FloraConfig, species: Species, start: Start) -> Stan
         fruit: 0.0,
         fruit_age_s: 0.0,
         fruit_rest_s: 0.0,
+        cured: false,
+        dry_s: 0.0,
     };
     s.bin_foliage(sc, config.voxel_m);
     s
@@ -170,6 +172,7 @@ pub fn probe(
             taken_m3: 0.0,
             saturated: h.saturated,
             darkness: 0.0,
+            available: h.water,
         };
         let mut book = Booked::default();
         let died = grow_stand(
@@ -188,7 +191,7 @@ pub fn probe(
             out.died_s = Some((t + 1) as f64 * crate::DT);
             break;
         }
-        if stand.wood >= sc.donor_min {
+        if stand.wood >= sc.donor_min && !stand.cured {
             let ask = (sc.propagule_rate * crate::DT).max(0.0);
             let floor = sc.donor_reserve_floor * sc.reserve_cap * stand.wood;
             let take = (stand.reserve - floor).max(0.0).min(ask).min(stand.reserve.max(0.0));

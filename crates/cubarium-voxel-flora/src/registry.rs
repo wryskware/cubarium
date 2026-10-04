@@ -203,6 +203,34 @@ fn species_rows() -> Vec<Row> {
             .search(60.0, 3600.0).log().grade("N").prov("numerics"),
         r("runner_reach", "voxels (not rescaled)", nonneg, "columns sideways a runner daughter may root from its parent")
             .search(1.0, 3.0),
+        r("runners_overtop", "switch (true / false)", finite, "a runner may root on a ground cover overtop_covers allows, displacing it")
+            .optional().grade("N").prov("decision"),
+        r("dispersal", "mode (Drop, Wind, Spores, Water, Wald)", finite, "how the species' seeds travel")
+            .optional().grade("N").prov("decision"),
+        r("wald_mean_m", "m", nonneg, "Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob")
+            .search(0.25, 6.0).log(),
+        r("wald_shape_m", "m", nonneg, "Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda)")
+            .search(0.1, 4.0).log(),
+        r("burr_pickup", "probability per contact at coat 1", fraction, "burrs: a donor's seed latches onto an animal stepping onto its face")
+            .search(0.0, 0.5),
+        r("burr_retention_mean_m", "m walked", nonneg, "burrs: mean distance a seed rides before it falls off (Weibull)")
+            .search(0.5, 16.0).log(),
+        r("burr_retention_shape", "-", Range::positive(), "burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate)")
+            .search(0.3, 2.0),
+        r("cure_water", "available water (0 wp, 1 fc)", nonneg, "curing: the root box counts as dry below this")
+            .search(0.0, 0.5),
+        r("cure_after_s", "s (0 = never cures)", nonneg, "curing: dry this long, the stand drops its foliage and goes dormant")
+            .search(0.0, 7200.0),
+        r("cure_shed", "fraction of foliage", fraction, "curing: share of the foliage dropped to the litter at once")
+            .search(0.0, 1.0),
+        r("cure_upkeep", "fraction of maintenance", fraction, "curing: a dormant stand's maintenance against its waking rate")
+            .search(0.0, 1.0),
+        r("cure_resume_water", "available water", nonneg, "curing: a dormant stand wakes and reflushes at and above this")
+            .search(0.0, 1.0),
+        r("cure_max_s", "s (0 = no limit)", nonneg, "curing: dormant this long, the drought kills the stand")
+            .search(0.0, 86400.0),
+        r("cured_srgb", "sRGB 0x00RRGGBB (look, 0 = the species' palette)", nonneg, "the plain-voxel colour of a cured stand's crown")
+            .optional().grade("N").prov("decision"),
         r("founder_per_m2", "founders per m2 of habitat", nonneg, "founding: stands per square metre of ground the species' own gates pass on")
             .search(0.0, 10.0),
         r("founder_colony", "stands", Range::at_least(1.0), "founding: the size of one founder colony").search(1.0, 12.0),
@@ -319,6 +347,8 @@ fn rows() -> Vec<Row> {
         r("flora.upkeep_q10", "x per 10 C", positive, "Q10 of plant upkeep around the climate's mean").search(1.0, 4.0),
         r("flora.wind_tries", "tries", Range::at_least(1.0), "a wind seed's draws before the donor keeps its package")
             .search(1.0, 16.0),
+        r("flora.burr_cap", "seeds per animal", nonneg, "burrs: the most seeds one animal's coat carries at once")
+            .search(1.0, 20.0),
         r("flora.wind_shape", "-", positive, "wind kernel: Lomax shape k (larger is a thinner tail)").search(1.2, 4.0),
         r("flora.wind_scale_hops", "hops", positive, "wind kernel: Lomax scale a, in the species' hops").search(0.5, 8.0),
         r("flora.carcass_remains_fraction", "fraction of the body's organic matter", fraction, "carrion below this draws as remains, not the body")
