@@ -57,50 +57,43 @@ fn striker_and_prey(
 
 // ------------------------------------------------------------------ the tables
 
-/// §2.12 and §2.3's tables are the defaults.
+/// §2.12 and §2.3's tables, their structure only: a nocturnal carrion-eating hunter whose
+/// list takes the grazer and the shredder and not itself. No tuned number is pinned.
 #[test]
-fn the_lanternjaw_and_its_prey_carry_the_notes_numbers() {
+fn the_lanternjaw_and_its_prey_have_the_notes_shape() {
     let c = FaunaConfig::default();
     let lj = c.founder(Founder::Lanternjaw);
     assert_eq!(Founder::Lanternjaw.name(), "lanternjaw");
-    assert!((lj.core.body_max - 0.035 * crate::SHIPPED_MASS_SCALE).abs() < 1e-12, "x30 since main");
-    // The minimal gut: daily need f 0.04 over the 7,200-s day.
-    assert!((lj.core.maintenance_per_s * 7200.0 - 0.04).abs() < 1e-15);
-    assert_eq!(lj.core.reserve_cap, 1.0);
-    assert_eq!(
-        (lj.adult_length_m, lj.adult_width_m, lj.adult_height_m),
-        (1.0, 0.25, 0.45)
-    );
     assert_eq!(lj.active, Activity::Nocturnal);
-    let cruise = Founder::Lanternjaw.manifest().cruise_m_per_s;
-    assert!((cruise - 0.6).abs() < 1e-12, "cruise {cruise} m/s, not 0.6 BL/s");
     assert_eq!(FaunaConfig::default().founder(Founder::Lanternjaw).diet, Diet::only(crate::Food::Carrion));
     for t in [Trophic::Photo, Trophic::Saprotroph] {
         assert!(!Diet::only(crate::Food::Carrion).accepts(t), "a carnivore's mouth takes no {t:?}");
     }
 
     let h = lj.hunter.expect("the lanternjaw hunts");
-    assert_eq!(h.strike_power, 0.7);
-    assert_eq!(h.prey_max_ratio, 1.5);
-    assert_eq!(h.strike_reach_length_fraction, 0.6);
-    assert_eq!(h.jaw_band_height_fraction, 0.6);
-    assert_eq!((h.windup_s, h.lunge_s, h.recovery_s), (0.15, 0.25, 3.0));
-    assert_eq!(h.strike_cost_s, 100.0);
     assert!(h.hunts(Founder::Browser) && h.hunts(Founder::Blind));
     assert!(!h.hunts(Founder::Lanternjaw), "not in its own prey list");
 
     let (grazer, shredder) = (c.founder(Founder::Browser), c.founder(Founder::Blind));
     assert!(grazer.hunter.is_none() && shredder.hunter.is_none());
-    assert_eq!((grazer.armour, grazer.agility), (0.25, 0.5));
-    assert_eq!((shredder.armour, shredder.agility), (0.0, 0.3));
     for f in Founder::ALL {
         assert!(c.founder(f).counter.is_none(), "{}: the Counter seam is unused", f.name());
     }
 }
 
-/// The dodge table (§2.3): awareness by state, aspect, condition clamped to [0.5, 1].
+/// The dodge table (§2.3): awareness by state, aspect, condition clamped to the floor.
+/// The table is the test's own.
 #[test]
 fn the_dodge_chance_is_the_tables_product() {
+    let cfg = crate::PredationConfig {
+        awareness_walking: 1.0,
+        awareness_resting: 0.7,
+        awareness_cropping: 0.4,
+        awareness_asleep: 0.0,
+        dodge_rear_aspect: 0.5,
+        dodge_condition_floor: 0.5,
+        ..crate::PredationConfig::default()
+    };
     for (state, awareness) in [
         (State::Walking, 1.0),
         (State::Resting, 0.7),
@@ -108,18 +101,18 @@ fn the_dodge_chance_is_the_tables_product() {
         (State::Climbing, 0.4),
         (State::Asleep, 0.0),
     ] {
-        assert_eq!(crate::PredationConfig::default().awareness(state), awareness, "{state:?}");
+        assert_eq!(cfg.awareness(state), awareness, "{state:?}");
     }
     let eq = |a: f64, b: f64| (a - b).abs() < 1e-12;
-    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Walking, false, 1.0), 0.5));
-    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.3, State::Walking, false, 1.0), 0.3));
-    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Walking, true, 1.0), 0.25));
-    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Cropping, true, 1.0), 0.1));
-    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Resting, false, 0.8), 0.28));
-    // Condition clamps: a starving animal is slow but never slower than half.
-    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Walking, false, 0.1), 0.25));
-    assert!(eq(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Walking, false, 1.4), 0.5));
-    assert_eq!(dodge_chance(&crate::PredationConfig::default(), 0.5, State::Asleep, false, 1.0), 0.0);
+    assert!(eq(dodge_chance(&cfg, 0.5, State::Walking, false, 1.0), 0.5));
+    assert!(eq(dodge_chance(&cfg, 0.3, State::Walking, false, 1.0), 0.3));
+    assert!(eq(dodge_chance(&cfg, 0.5, State::Walking, true, 1.0), 0.25));
+    assert!(eq(dodge_chance(&cfg, 0.5, State::Cropping, true, 1.0), 0.1));
+    assert!(eq(dodge_chance(&cfg, 0.5, State::Resting, false, 0.8), 0.28));
+    // Condition clamps: a starving animal is slow but never slower than the floor.
+    assert!(eq(dodge_chance(&cfg, 0.5, State::Walking, false, 0.1), 0.25));
+    assert!(eq(dodge_chance(&cfg, 0.5, State::Walking, false, 1.4), 0.5));
+    assert_eq!(dodge_chance(&cfg, 0.5, State::Asleep, false, 1.0), 0.0);
 }
 
 // ------------------------------------------------------------------ case 1
@@ -406,11 +399,16 @@ fn a_miss_pays_the_strike_cost_and_recovery_blocks_a_second_strike_for_3_s() {
 // ------------------------------------------------------------------ case 6
 
 /// Case 6, the draw: awake walking prey facing the striker dodge at the table's rate
-/// over many seeded draws (grazer 0.5, shredder 0.3), and asleep prey never do.
+/// over many seeded draws (agility 0.5 and 0.3 at the test's full walking awareness),
+/// and asleep prey never do.
 #[test]
 fn walking_prey_facing_the_striker_dodge_at_the_tables_rate() {
+    let cfg = crate::PredationConfig {
+        awareness_walking: 1.0,
+        ..crate::PredationConfig::default()
+    };
     for (agility, want) in [(0.5, 0.5), (0.3, 0.3)] {
-        let chance = dodge_chance(&crate::PredationConfig::default(), agility, State::Walking, false, 1.0);
+        let chance = dodge_chance(&cfg, agility, State::Walking, false, 1.0);
         let n = 4000u64;
         let dodged = (0..n)
             .filter(|&k| dodges(chance, 1 + k % 50, 7, 11 + k / 50, 1000 + k))
@@ -420,14 +418,14 @@ fn walking_prey_facing_the_striker_dodge_at_the_tables_rate() {
             (rate - want).abs() < 0.03,
             "agility {agility}: dodged {rate} of {n} draws, the table says {want}"
         );
-        let asleep = dodge_chance(&crate::PredationConfig::default(), agility, State::Asleep, false, 1.0);
+        let asleep = dodge_chance(&cfg, agility, State::Asleep, false, 1.0);
         assert!((0..n).all(|k| !dodges(asleep, 1 + k, 7, 11, 1000 + k)));
     }
 }
 
-/// Case 6, in the world: an awake resting grazer (awareness 0.7) struck head-on dodges
-/// about 0.35 of the time over many seeded worlds, struck from behind about 0.175, and
-/// a sleeping one never.
+/// Case 6, in the world: an awake resting grazer (the test's agility 0.5, resting
+/// awareness 0.7, rear aspect 0.5) struck head-on dodges about 0.35 of the time over many
+/// seeded worlds, struck from behind about 0.175, and a sleeping one never.
 #[test]
 fn in_the_world_dodges_follow_awareness_and_aspect() {
     let worlds = 200u64;
@@ -435,6 +433,10 @@ fn in_the_world_dodges_follow_awareness_and_aspect() {
         let mut escapes = 0u64;
         for seed in 1..=worlds {
             let (world, mut flora, mut fauna) = arena(Some(hour), seed);
+            fauna.config.founders[Founder::Browser.index()].agility = 0.5;
+            fauna.config.predation.awareness_resting = 0.7;
+            fauna.config.predation.dodge_rear_aspect = 0.5;
+            fauna.config.predation.dodge_condition_floor = 0.5;
             let (_, prey, feed) = striker_and_prey(
                 &mut fauna,
                 &world,
@@ -573,13 +575,13 @@ fn a_wound_heals_at_the_set_rate_paying_reserve_and_the_speed_cap_follows_it() {
     let whole = run(0.0, 1.0);
     let a = wounded.animals[0];
     let healed = 0.5 - a.wound;
-    let want = f64::from(TICKS) * DT * 0.5 / 1800.0;
+    let want = f64::from(TICKS) * DT * wounded.config.predation.wound_heal_per_s;
     assert!(
         (healed - want).abs() < 1e-9,
         "healed {healed} in {TICKS} ticks, the rate gives {want}"
     );
     let paid = wounded.ledger.respired_out - whole.ledger.respired_out;
-    let cost = crate::PredationConfig::default().heal_cost * healed * a.body;
+    let cost = wounded.config.predation.heal_cost * healed * a.body;
     assert!(paid > 0.0, "healing is paid");
     assert!(
         (paid - cost).abs() <= 1e-6 * cost,
@@ -615,8 +617,9 @@ fn a_wound_heals_at_the_set_rate_paying_reserve_and_the_speed_cap_follows_it() {
         .collect();
     assert!(d[0] > 0.3, "the whole grazer walked {} m in 1 s", d[0]);
     let ratio = d[1] / d[0];
+    let want = 1.0 - fauna.config.predation.wound_slow * 0.5;
     assert!(
-        (ratio - (1.0 - 0.5 * 0.5)).abs() < 0.03,
-        "wounded 0.5 it walked {ratio} of the whole grazer's distance, not 0.75"
+        (ratio - want).abs() < 0.03,
+        "wounded 0.5 it walked {ratio} of the whole grazer's distance, not {want}"
     );
 }

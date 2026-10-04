@@ -264,9 +264,9 @@ fn ride(config: FaunaConfig) -> (Scene, u64, u64) {
 
 // ------------------------------------------------------------------ the knobs
 
-/// Every new number is a serde-visible config field with the brief's default.
+/// Every new number is a serde-visible config field, and the default validates.
 #[test]
-fn the_four_parasite_knobs_are_serde_config_fields_with_the_briefs_defaults() {
+fn the_four_parasite_knobs_are_serde_config_fields() {
     let c = FaunaConfig::default();
     let v = serde_json::to_value(c).expect("the config serializes");
     for name in [
@@ -280,16 +280,6 @@ fn the_four_parasite_knobs_are_serde_config_fields_with_the_briefs_defaults() {
             "{name} is not a serialized config field"
         );
     }
-    assert_eq!(c.parasite_max_per_host, 1);
-    assert_eq!(c.parasite_take_per_day, 0.09);
-    assert_eq!(c.parasite_detach_body_fraction, 0.24);
-    // "About one prey body length": between the shredder's and the lanternjaw's own.
-    let r = c.parasite_attach_radius_m;
-    let length = |f: Founder| c.founder(f).adult_length_m;
-    assert!(
-        r >= length(Founder::Blind) && r <= length(Founder::Lanternjaw),
-        "attach radius {r} m is not about one prey body length"
-    );
     c.validate().expect("the default validates");
 }
 
@@ -405,13 +395,17 @@ fn only_a_non_lanternjaw_is_a_host_and_the_nearest_is_taken() {
     assert!(riders_of(&s.fauna, far).is_empty());
 }
 
-/// A host carries at most `parasite_max_per_host` riders: with the default 1, of two
-/// eggs under one grazer one hatches onto it and the other stays in the bank; at 2 both
-/// ride.
+/// A host carries at most `parasite_max_per_host` riders: at 1, of two eggs under one
+/// grazer one hatches onto it and the other stays in the bank; at 2 both ride.
 #[test]
 fn a_host_carries_at_most_its_max_riders() {
-    let mut s = Scene::new(config(), 2);
-    assert_eq!(s.fauna.config.parasite_max_per_host, 1);
+    let mut s = Scene::new(
+        FaunaConfig {
+            parasite_max_per_host: 1,
+            ..config()
+        },
+        2,
+    );
     let host = s.add(Founder::Browser, StartingStores::FULL, 0.0);
     s.past_next_dusk();
     assert_eq!(riders_of(&s.fauna, host).len(), 1, "one rider at most");

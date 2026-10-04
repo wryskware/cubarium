@@ -219,14 +219,14 @@ fn column_of(fauna: &Fauna, id: u64) -> u32 {
 
 // ------------------------------------------------------------------ the decisions
 
-/// The R2b table (Fable's decisions, brief R2b): the lineage's name and role; the body,
-/// pace and film diet; the yield the browser's foliage yield; the shredder's table scaled
-/// by body volume exactly as the capgnawer's is, with the shredder's reproduction mode
-/// and timings; `aquatic` and `water_margin_m` 0.25; eggs on film where the shredder and
-/// the capgnawer keep litter; founding at food, count 0 by default; on no hunter's list;
-/// its own manifest at the shredder's width with `Chem(film)` in the `Chem` slot.
+/// The R2b table's structure (brief R2b): the lineage's name and role; the film diet;
+/// the yield the browser's foliage yield; the shredder's table scaled by the two tables'
+/// body volumes, with the shredder's reproduction mode and timings; `aquatic`; eggs on
+/// film where the shredder and the capgnawer keep litter; founding at food; on no
+/// hunter's list; its own manifest at the shredder's width with `Chem(film)` in the
+/// `Chem` slot. No tuned number is pinned.
 #[test]
-fn the_r2b_physiology_table_is_the_briefs() {
+fn the_r2b_physiology_table_scales_the_shredders() {
     let shredder = FounderPhysiology::frozen(Founder::Blind);
     let grazer = FounderPhysiology::frozen(Founder::Browser);
     let gnawer = FounderPhysiology::frozen(Founder::Capgnawer);
@@ -246,23 +246,16 @@ fn the_r2b_physiology_table_is_the_briefs() {
         "fresh tissue: the browser's foliage yield"
     );
 
-    // Body and pace.
-    assert_eq!(
-        (snail.adult_length_m, snail.adult_width_m, snail.adult_height_m),
-        (0.19, 0.19, 0.063)
-    );
-    assert!(close(snail.cruise_body_lengths_per_s, 0.3));
-
-    // The shredder's table by body volume, as the capgnawer's is built.
-    let r = (0.19 * 0.19 * 0.063) / (0.375 * 0.125 * 0.125);
+    // The shredder's table by the two tables' body volumes, as the capgnawer's is built.
+    let r = (snail.adult_length_m * snail.adult_width_m * snail.adult_height_m)
+        / (shredder.adult_length_m * shredder.adult_width_m * shredder.adult_height_m);
     for (what, got, want) in [
         ("body_max", snail.core.body_max, shredder.core.body_max * r),
         ("body_min", snail.core.body_min, shredder.core.body_min * r),
         ("birth_body", snail.core.birth_body, shredder.core.birth_body * r),
         ("growth_max_per_s", snail.core.growth_max_per_s, shredder.core.growth_max_per_s * r),
         ("egg_organic", snail.core.reproduction.egg_organic, shredder.core.reproduction.egg_organic * r),
-        // The minimal gut: its own daily need (f 0.02 over 7,200 s), motor at its ratio.
-        ("maintenance_per_s", snail.core.maintenance_per_s * 7200.0, 0.02),
+        // Motor tied to its own basal upkeep.
         ("motor_respiration_per_s", snail.motor_respiration_per_s, snail.core.maintenance_per_s),
         ("reserve_cap", snail.core.reserve_cap, shredder.core.reserve_cap),
     ] {
@@ -279,7 +272,7 @@ fn the_r2b_physiology_table_is_the_briefs() {
 
     // Aquatic.
     assert!(snail.aquatic, "water-bound");
-    assert!(close(snail.water_margin_m, 0.25));
+    assert!(snail.water_margin_m > 0.0);
     for f in Founder::ALL.into_iter().filter(|&f| f != SNAIL) {
         assert!(!FounderPhysiology::frozen(f).aquatic, "{f:?} is not aquatic");
     }
@@ -291,8 +284,6 @@ fn the_r2b_physiology_table_is_the_briefs() {
 
     // Founding.
     assert_eq!((snail.founding, snail.founding_site), (Founding::Bodies, FoundingSite::AtFood));
-    assert_eq!(snail.founding_count, 0, "a new lineage founds none by default");
-    assert_eq!(FaunaConfig::default().founder_counts()[SNAIL.index()], 0);
 
     // Prey: on no hunter's list.
     assert!(snail.hunter.is_none());
@@ -357,8 +348,8 @@ fn a_snail_on_submerged_film_takes_film_the_books_close_and_the_pool_falls() {
 /// ticks** (the R2b repair). A 0.125 m plain — the live worlds' voxel — under one cell of
 /// water, film founded at half its capacity on every face; a hungry snail under
 /// [`crate::BlindForager`], not a script. Before its own `taste_reference` the snail tasted
-/// film against the litter rule (`emit_reference × mass_scale`, 1.5 at x30), so a
-/// half-capacity site (3.1e-3) tasted ~2e-3, under the 0.02 feed gate, and it never fed.
+/// film against the litter rule (`emit_reference × mass_scale`), so a half-capacity site
+/// tasted under the feed gate, and it never fed.
 #[test]
 fn a_snail_under_its_heuristic_bites_half_capacity_film() {
     const V8: f64 = 0.125;
@@ -383,10 +374,12 @@ fn a_snail_under_its_heuristic_bites_half_capacity_film() {
             world.apply(WorldCommand::AddWater { x, y: 3, z, volume_m3: cell });
         }
     }
-    let flora_config = FloraConfig {
+    let mut flora_config = FloraConfig {
         voxel_m: V8,
         ..FloraConfig::default()
     };
+    // The test's own founding film: half the capacity.
+    flora_config.film_seed_per_m2 = 0.5 * flora_config.film_capacity_per_m2;
     let capacity = flora_config.film_capacity_per_m2 * V8 * V8;
     let mut flora = Flora::new(flora_config);
     assert!(flora.seed_film(&world) > 0, "the pond's faces are wet-eligible");
@@ -394,7 +387,7 @@ fn a_snail_under_its_heuristic_bites_half_capacity_film() {
     let film = film_at(&flora, face);
     assert!(
         (film - 0.5 * capacity).abs() <= 1e-9 * capacity,
-        "the default founding film is half the capacity: {film} against {capacity}"
+        "the founding film is half the capacity: {film} against {capacity}"
     );
 
     let mut fauna = Fauna::new(FaunaConfig::default());

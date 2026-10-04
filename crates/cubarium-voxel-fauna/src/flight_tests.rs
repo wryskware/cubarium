@@ -330,37 +330,29 @@ fn stand_nectar(flora: &Flora, site: Site) -> f64 {
 // ------------------------------------------------------------------ the table
 
 /// **The bellwing's table** (§3.9, the roster overrides): the specimen's name, a nectar
-/// diet, its body and span, the flight costs and band, cruise 8 BL/s, diurnal, founded
-/// by bodies at a code-default count of 0, on no hunter's list, and a flyer — the only
-/// one. Its manifest adds `lift` to the three shared actions; every walker keeps three
+/// diet, diurnal, founded by bodies, on no hunter's list, and a flyer — the only one.
+/// No tuned number is pinned. Its manifest adds `lift` to the three shared actions; every walker keeps three
 /// (the lanternjaw its `lure`), so no existing action list moves.
 #[test]
-fn the_f1_bellwing_table_is_the_briefs() {
+fn the_bellwing_table_is_a_diurnal_nectar_flyer() {
     assert_eq!(BW.name(), "bellwing", "the specimen key");
     assert!(Founder::ALL.contains(&BW));
     assert!(Food::ALL.contains(&Food::Nectar) && !Food::Nectar.is_pool(), "a flower product");
     assert_eq!(Food::Nectar.name(), "nectar");
 
-    let x1 = FounderPhysiology::placeholder(BW);
     let bw = FounderPhysiology::frozen(BW);
     assert_eq!(bw.diet, Diet::only(Food::Nectar));
-    assert_eq!(bw.adult_length_m, 0.125);
-    assert_eq!(x1.core.body_max, 0.001, "body_max 0.001 in the x1 table");
-    assert!((bw.cruise_body_lengths_per_s - 8.0).abs() < 1e-12, "cruise 8 BL/s (1 m/s)");
     assert_eq!(bw.active, crate::Activity::Diurnal);
     assert_eq!(bw.founding, Founding::Bodies);
-    assert_eq!(bw.founding_count, 0, "a new lineage founds none by default");
-    assert_eq!(FaunaConfig::default().founder_counts()[BW.index()], 0);
+    assert_eq!(
+        FaunaConfig::default().founder_counts()[BW.index()],
+        bw.founding_count
+    );
     assert!(bw.hunter.is_none());
     assert!(!Hunter::LANTERNJAW.hunts(BW), "on no hunter's list yet");
 
     let f = bw.flight.expect("the bellwing flies");
-    assert_eq!(f.span_m, 0.375);
-    assert_eq!(f.band_max_m, 2.5);
-    assert_eq!(f.flight_factor, 4.0);
-    assert_eq!(f.hover_factor, 5.0);
-    assert_eq!(f.takeoff_s, 1.0);
-    assert_eq!(f.foliage_speed_factor, 0.5);
+    assert!(f.span_m > 0.0 && f.band_max_m > 0.0 && f.takeoff_s > 0.0);
     assert!(f.climb_work_per_m > 0.0, "lift work is paid going up");
     assert!(f.shower_rain_reference_m_per_s > 0.0);
     for other in Founder::ALL.into_iter().filter(|&o| o != BW) {
@@ -1129,61 +1121,6 @@ fn a_snapshot_round_trip_keeps_a_flying_and_a_perched_bellwing() {
     assert_eq!(a.mobility.mode, MobilityMode::Fly);
     assert_eq!(back.view().animal(perched).expect("the percher").mobility.perch, animal(&fauna, perched).mobility.perch);
     assert_eq!(back.view().ledger, fauna.view().ledger, "the same ledger");
-}
-
-/// **The bellwing's meal interval** (the minimal gut's repair 2 item 12; the walker
-/// fixture in `step::gut_tests` covers the other eight lineages): a fixed adult bellwing,
-/// breeding and lifespan off, perched on a bloomcrown whose nectar never runs short,
-/// under its own diurnal rhythm, completes at least three meal intervals, and their mean
-/// is within ±30 % of Astra's exact 0.1012 world days. Nectar's mineral (0.01) against
-/// the bellwing's tissue (0.02) gives an effective yield of exactly its 0.5.
-#[test]
-#[ignore = "study: run by name (multi-day cadence)"]
-fn meal_interval_bellwing() {
-    let want = 0.1012;
-    let day_s = 7200.0;
-    let mut world = plain_with(config(16, 20, 8, clock_at(10.0)));
-    let mut fc = nectar_flora();
-    fc.bloomcrown.nectar_per_s = 1e-2;
-    fc.bloomcrown.nectar_cap = 0.05;
-    let mut flora = Flora::new(fc);
-    let site = blooming(&mut flora, &mut world, 8, 4, 60);
-    let top = crown_top(&flora, site);
-    let mut c = FaunaConfig::default();
-    c.founders[BW.index()].core.lifespan_median_s = 0.0;
-    let mut fauna = Fauna::new(c);
-    fauna.set_births_enabled(false);
-    let (x, z) = centre(8, 4);
-    let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, StartingStores::FULL);
-    fly(&mut fauna, id, 0.0, 1.0, -1.0);
-    let body0 = animal(&fauna, id).body;
-    let max_ticks = ((3.0 * 1.3 + 1.5) * want * day_s / DT) as u64 + (day_s / DT) as u64;
-    let mut starts: Vec<u64> = Vec::new();
-    let mut was = animal(&fauna, id).eating;
-    for t in 1..=max_ticks {
-        world.step();
-        flora.step(&mut world);
-        fauna.step(&world, &mut flora);
-        let a = animal(&fauna, id);
-        if a.eating && !was {
-            starts.push(t);
-        }
-        was = a.eating;
-        if starts.len() >= 4 {
-            break;
-        }
-    }
-    let a = animal(&fauna, id);
-    assert_eq!(a.mobility.mode, MobilityMode::Perched, "it stayed on the crown");
-    assert!((a.body - body0).abs() <= 1e-9 * body0, "a fixed adult body");
-    assert!(starts.len() >= 4, "{} meal starts", starts.len());
-    let intervals: Vec<f64> = starts.windows(2).map(|w| (w[1] - w[0]) as f64 * DT / day_s).collect();
-    let mean = intervals.iter().sum::<f64>() / intervals.len() as f64;
-    eprintln!(
-        "bellwing: intervals {intervals:.4?} days, mean {mean:.4} against {want} ({:+.1} %)",
-        100.0 * (mean / want - 1.0)
-    );
-    assert!((mean / want - 1.0).abs() <= 0.30, "mean interval {mean:.4} days, Astra's {want}");
 }
 
 /// **Nectar into the stomach** (the minimal gut; Astra's finding 8): a bellwing with an

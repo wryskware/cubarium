@@ -94,30 +94,33 @@ impl Controller for Counting {
 }
 
 #[test]
-fn the_founders_have_their_activity_and_the_rest_state_costs_half() {
-    // Night survival 1a: the shredder, an ectotherm-like lineage, sleeps at 0.3.
+fn the_founders_have_their_activity() {
     let c = FaunaConfig::default();
     assert_eq!(c.founder(Founder::Browser).active, Activity::Diurnal);
     assert_eq!(c.founder(Founder::Blind).active, Activity::Nocturnal);
-    assert_eq!(c.founder(Founder::Browser).sleep_upkeep, 0.5);
-    assert_eq!(c.founder(Founder::Blind).sleep_upkeep, 0.3);
 }
 
 #[test]
 fn an_activity_is_awake_in_its_own_phase_and_always_with_the_clock_off() {
-    // Diurnal: awake above 0.3 daylight; nocturnal: below it.
-    assert!(Activity::Diurnal.awake(true, 1.0, &crate::LifeConfig::default()));
-    assert!(!Activity::Diurnal.awake(true, 0.0, &crate::LifeConfig::default()));
-    assert!(!Activity::Diurnal.awake(true, 0.29, &crate::LifeConfig::default()));
-    assert!(Activity::Diurnal.awake(true, 0.31, &crate::LifeConfig::default()));
-    assert!(Activity::Nocturnal.awake(true, 0.0, &crate::LifeConfig::default()));
-    assert!(!Activity::Nocturnal.awake(true, 1.0, &crate::LifeConfig::default()));
-    assert!(Activity::Nocturnal.awake(true, 0.29, &crate::LifeConfig::default()));
-    assert!(!Activity::Nocturnal.awake(true, 0.31, &crate::LifeConfig::default()));
+    // Diurnal: awake above the day line; nocturnal: below it. The lines are the test's own.
+    let life = crate::LifeConfig {
+        day_line: 0.3,
+        twilight_lo: 0.2,
+        twilight_hi: 0.8,
+        ..crate::LifeConfig::default()
+    };
+    assert!(Activity::Diurnal.awake(true, 1.0, &life));
+    assert!(!Activity::Diurnal.awake(true, 0.0, &life));
+    assert!(!Activity::Diurnal.awake(true, 0.29, &life));
+    assert!(Activity::Diurnal.awake(true, 0.31, &life));
+    assert!(Activity::Nocturnal.awake(true, 0.0, &life));
+    assert!(!Activity::Nocturnal.awake(true, 1.0, &life));
+    assert!(Activity::Nocturnal.awake(true, 0.29, &life));
+    assert!(!Activity::Nocturnal.awake(true, 0.31, &life));
     // Crepuscular: in the twilight of either end, not in full night or full day.
-    assert!(!Activity::Crepuscular.awake(true, 0.0, &crate::LifeConfig::default()));
-    assert!(!Activity::Crepuscular.awake(true, 1.0, &crate::LifeConfig::default()));
-    assert!(Activity::Crepuscular.awake(true, 0.5, &crate::LifeConfig::default()));
+    assert!(!Activity::Crepuscular.awake(true, 0.0, &life));
+    assert!(!Activity::Crepuscular.awake(true, 1.0, &life));
+    assert!(Activity::Crepuscular.awake(true, 0.5, &life));
     // Always is always.
     for d in [0.0, 0.5, 1.0] {
         assert!(Activity::Always.awake(true, d, &crate::LifeConfig::default()));

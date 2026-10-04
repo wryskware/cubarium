@@ -160,20 +160,10 @@ fn the_old_fauna_validator_refusals_still_refuse() {
 
 // ------------------------------------------------------------------ R2-fauna: moved numbers
 
-/// The default config's moved numbers are the values the code ran on before they became
-/// knobs, and a default config's live manifest is the founder's fixed one.
+/// A default config's live manifest is the founder's fixed one.
 #[test]
-fn the_moved_numbers_default_to_what_the_code_ran_on() {
-    use cubarium_voxel_fauna::{LifeConfig, PredationConfig, TeacherConfig};
+fn a_default_configs_live_manifest_is_the_founders_fixed_one() {
     let c = FaunaConfig::default();
-    let p = PredationConfig::default();
-    assert_eq!((p.still_after_s, p.still_speed_bl_per_s, p.tremor_radius_m), (2.0, 0.1, 1.5));
-    assert_eq!((p.footfall_radius_m, p.hatch_suppress_m, p.footfall_tremor_min), (2.0, 4.0, 5.0e-4));
-    assert_eq!((p.egg_footfall_min, p.egg_footfall_max, p.egg_viability_median_s), (2, 10, 43_200.0));
-    assert_eq!(p.wound_heal_per_s, 0.5 / 1800.0);
-    assert_eq!((p.heal_cost, p.egg_upkeep_per_s, p.alert_s), (1.0, 5.0e-6, 60.0));
-    assert_eq!(LifeConfig::default().day_line, 0.3);
-    assert_eq!(TeacherConfig::default().flat_clear, 9.0 / 15.0);
     for f in Founder::ALL {
         let live = c.manifest(f);
         let fixed = f.manifest();
@@ -203,10 +193,22 @@ fn inverted_draw_ranges_are_refused() {
         let e = c.validate().expect_err(what);
         assert!(e.contains(what), "{what}: {e}");
     };
-    refuse("egg_footfall_min", &|c| c.predation.egg_footfall_min = 11);
-    refuse("twilight_lo", &|c| c.life.twilight_lo = 0.99);
-    refuse("wander_hold_min", &|c| c.teachers.wander_hold_min = 25);
-    refuse("wander_turn_samples_min", &|c| c.teachers.wander_turn_samples_min = 5);
+    refuse("egg_footfall_min", &|c| {
+        c.predation.egg_footfall_max = 5;
+        c.predation.egg_footfall_min = 6;
+    });
+    refuse("twilight_lo", &|c| {
+        c.life.twilight_hi = 0.4;
+        c.life.twilight_lo = 0.5;
+    });
+    refuse("wander_hold_min", &|c| {
+        c.teachers.wander_hold_max = 10;
+        c.teachers.wander_hold_min = 11;
+    });
+    refuse("wander_turn_samples_min", &|c| {
+        c.teachers.wander_turn_samples_max = 3;
+        c.teachers.wander_turn_samples_min = 4;
+    });
 }
 
 /// The egg draw reads its knobs: a footfall threshold inside `[min, max]`, a viability

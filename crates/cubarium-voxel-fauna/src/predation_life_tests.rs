@@ -176,16 +176,17 @@ fn wx4_sleep_is_a_rest_with_its_own_reason() {
 
 // ------------------------------------------------------------------ case 15
 
-/// Case 15, laying: a lanternjaw in sustained surplus lays a clutch of 3 buried eggs on
-/// its own face, each dormant; the books close.
+/// Case 15, laying: a lanternjaw in sustained surplus lays a clutch of its
+/// `clutch_size` buried eggs on its own face, each dormant; the books close.
 #[test]
-fn a_lanternjaw_in_surplus_lays_three_dormant_eggs() {
+fn a_lanternjaw_in_surplus_lays_its_clutch_of_dormant_eggs() {
     let world = clock_off(15);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
     let rule = fauna.config.founder(Founder::Lanternjaw).core.reproduction;
     assert_eq!(rule.mode, crate::BirthMode::Eggs);
-    assert_eq!(rule.clutch_size, 3);
+    let n = rule.clutch_size as usize;
+    assert!(n > 0, "the fixture needs a clutch");
     let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     // Main's breeding window (schema 20) reads the hold off the surplus history, so the
     // history is filled rather than the counter set.
@@ -196,13 +197,13 @@ fn a_lanternjaw_in_surplus_lays_three_dormant_eggs() {
     step_until(&mut fauna, &world, &mut flora, 3, |f| !eggs(f).is_empty())
         .expect("a full lanternjaw past its hold lays");
     let laid = eggs(&fauna);
-    assert_eq!(laid.len(), 3);
-    assert_eq!(fauna.ledger.eggs_laid, 3);
+    assert_eq!(laid.len(), n);
+    assert_eq!(fauna.ledger.eggs_laid as usize, n);
     for c in &laid {
         assert_eq!((c.site, c.count), (site, 1));
         assert!(c.dormancy.is_some(), "a laid egg is dormant");
     }
-    assert_eq!(fauna.view().eggs_by_founder(Founder::Lanternjaw), 3);
+    assert_eq!(fauna.view().eggs_by_founder(Founder::Lanternjaw) as usize, n);
     assert_closes(&fauna, "laid");
 }
 
@@ -340,12 +341,17 @@ fn a_dead_egg_goes_to_litter_and_the_books_close() {
     assert_closes(&fauna, "egg died");
 }
 
-/// Case 15, the draws: each egg's viability has a median of about 12 h and its footfall
+/// Case 15, the draws: with the test's own 12 h median viability and footfall
+/// thresholds drawn from 2..=10, each egg's viability has a median of about 12 h and its
 /// threshold a mean of about 6, spread wide.
 #[test]
 fn eggs_draw_a_12_h_median_viability_and_thresholds_around_6() {
     let world = clock_off(15);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut c = FaunaConfig::default();
+    c.predation.egg_viability_median_s = 12.0 * 3600.0;
+    c.predation.egg_footfall_min = 2;
+    c.predation.egg_footfall_max = 10;
+    let mut fauna = Fauna::new(c);
     for k in 0..60u32 {
         let site = Site {
             x: (k * 7) % 48,
@@ -383,15 +389,20 @@ fn eggs_draw_a_12_h_median_viability_and_thresholds_around_6() {
 
 // ------------------------------------------------------------------ case 16
 
-/// The hatching trigger itself: footfall at its threshold, at dusk, no adult within 4 m.
+/// The hatching trigger itself: footfall at its threshold, at dusk, no adult within the
+/// test's own 4 m suppression radius.
 #[test]
 fn the_hatching_trigger_needs_footfall_dusk_and_no_adult_within_4_m() {
-    assert!(egg_hatches(&crate::PredationConfig::default(), 3, 3, true, None));
-    assert!(egg_hatches(&crate::PredationConfig::default(), 3, 5, true, None));
-    assert!(!egg_hatches(&crate::PredationConfig::default(), 3, 2, true, None), "not before its threshold");
-    assert!(!egg_hatches(&crate::PredationConfig::default(), 3, 3, false, None), "not by day");
-    assert!(!egg_hatches(&crate::PredationConfig::default(), 3, 3, true, Some(3.9)), "an adult within 4 m suppresses");
-    assert!(egg_hatches(&crate::PredationConfig::default(), 3, 3, true, Some(4.1)));
+    let cfg = crate::PredationConfig {
+        hatch_suppress_m: 4.0,
+        ..crate::PredationConfig::default()
+    };
+    assert!(egg_hatches(&cfg, 3, 3, true, None));
+    assert!(egg_hatches(&cfg, 3, 5, true, None));
+    assert!(!egg_hatches(&cfg, 3, 2, true, None), "not before its threshold");
+    assert!(!egg_hatches(&cfg, 3, 3, false, None), "not by day");
+    assert!(!egg_hatches(&cfg, 3, 3, true, Some(3.9)), "an adult within 4 m suppresses");
+    assert!(egg_hatches(&cfg, 3, 3, true, Some(4.1)));
 }
 
 /// A fast day (6 s, 120 ticks) from 16:00, and the step at which its daylight first

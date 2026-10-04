@@ -4329,8 +4329,8 @@ mod tests {
     }
 
     /// The counterfactual behind the band: the **same** fixture, the same mouth columns
-    /// and the same two crowns, read with the adult browser's 0.49875 m ceiling and again
-    /// with a 0.75 m one. The crown two 0.25 m voxels above the head layer is out of the
+    /// and the same two crowns, read with a 0.49875 m mouth ceiling and again with a
+    /// 0.75 m one. The crown two 0.25 m voxels above the head layer is out of the
     /// adult's physical band, and the crown at the head layer is in it either way. The
     /// band is what decides, and the manifest's `mouth_reach_up_voxels` is not read at
     /// all.
@@ -4343,13 +4343,16 @@ mod tests {
         // The subject is the **band**, so the plants are the one-disc lollipops this
         // test was written against: what an adult bloomcrown's basal rosette does under
         // the same band is `tests/plant_layers.rs`'s claim.
-        let mut flora = Flora::new(FloraConfig::default().one_layer_species());
-        // A bloomcrown at wood 0.30 is 0.6875 m tall, a three-voxel crown whose cell is
-        // the body's head layer plus two; a half-grown springturf rounds to one voxel and
-        // sits at the head.
-        let turf = 0.5 * flora.config().springturf.wood_max;
+        // The crowns are the test's own: a bloomcrown three 0.25 m voxels tall, whose cell
+        // is the body's head layer plus two, and a springturf one voxel tall at the head.
+        let mut config = FloraConfig::default().one_layer_species();
+        config.bloomcrown.crown_height_m = [0.75, 0.75];
+        config.springturf.crown_height_m = [0.25, 0.25];
+        let mut flora = Flora::new(config);
+        let bloom = flora.config().bloomcrown.wood_max;
+        let turf = flora.config().springturf.wood_max;
         for (x, species, wood) in [
-            (2i64, Plant::Bloomcrown, 0.30),
+            (2i64, Plant::Bloomcrown, bloom),
             (5, Plant::Springturf, turf),
         ] {
             assert!(flora.apply(
@@ -4363,10 +4366,12 @@ mod tests {
             ));
         }
         let v = flora.config().voxel_m;
-        assert_eq!(flora.config().bloomcrown.crown_voxels(0.30, v), 3);
+        assert_eq!(flora.config().bloomcrown.crown_voxels(bloom, v), 3);
         assert_eq!(flora.config().springturf.crown_voxels(turf, v), 1);
         let fv = flora.view();
-        let browser = adult(Founder::Browser);
+        // The band is the test's own too: an adult-browser-sized 0.49875 m ceiling.
+        let mut browser = adult(Founder::Browser);
+        browser.mouth_ceiling_m = 0.49875;
 
         let cols_over = mouth_columns(&view, &pose_at(2.5 * 0.25, 2.5 * 0.25, 0.0), &browser);
         let cols_head = mouth_columns(&view, &pose_at(5.5 * 0.25, 2.5 * 0.25, 0.0), &browser);
