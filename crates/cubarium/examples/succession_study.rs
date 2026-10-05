@@ -110,6 +110,8 @@ fn resolve(args: &[String]) -> Params {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     if let Some(n) = arg(&args, "threads=").and_then(|s| s.parse().ok()) {
         cubarium_voxel::set_thread_override(n);
     }
@@ -209,10 +211,8 @@ fn found(args: &[String]) {
     if with_fauna {
         introduce(&arg(args, "arm=").unwrap_or("found").to_string(), 0, &params, &mut world, &mut flora, &mut fauna);
     }
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
-    if with_fauna {
-        sim.set_overlap(false);
-    }
+    // The overlapped tick, as the display runs it, animals or not.
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     let per_min = 60 * u64::from(TICK_HZ);
     let t0 = std::time::Instant::now();
     for minute in 1..=minutes {
@@ -521,10 +521,8 @@ fn plants(args: &[String]) {
     );
     flora.trace_attempts(Some(TURF));
     let with_fauna = !fauna.view().animals.is_empty();
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
-    if with_fauna {
-        sim.set_overlap(false);
-    }
+    // The overlapped tick, as the display runs it, animals or not.
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     let save_dir = arg(args, "save=");
     let save_min: Vec<u64> = arg(args, "save_min=").map_or(Vec::new(), |m| m.split(',').map(|v| v.parse().unwrap()).collect());
     let mut map = arg(args, "map=").map(|f| std::fs::File::create(f).unwrap_or_else(|e| panic!("map {f}: {e}")));
@@ -1319,7 +1317,7 @@ fn fauna(args: &[String]) {
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
     let (mut world, mut flora, mut fauna, minute0, _) = load(dir, &want);
     introduce(&arm, minute0, &params, &mut world, &mut flora, &mut fauna);
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     fauna_run(&arm, hours, &params, &mut sim);
 }
 
@@ -1369,7 +1367,6 @@ fn introduce(arm: &str, minute0: u64, params: &Params, world: &mut World, flora:
 /// The earlier study's fauna window: `hours` with the heuristics, one line per lineage per
 /// window (first and second half) and over the run.
 fn fauna_run(arm: &str, hours: f64, params: &Params, sim: &mut Sim) {
-    sim.set_overlap(false);
     let hz = u64::from(TICK_HZ);
     let total = (hours * 3600.0).round() as u64 * hz;
     let half = total / 2;

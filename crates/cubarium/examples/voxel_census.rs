@@ -104,6 +104,8 @@ const PRESET_SEED_BASE: u64 = 1;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     // `threads=N`: this run's share of the machine. The gate runs many of these side by
     // side; without it each takes every core (`cubarium_voxel::set_thread_override`).
     if let Some(n) = args
@@ -301,7 +303,7 @@ fn main() {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
         introduce_into(&world, &flora, &mut fauna);
-        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
         run(&mut sim, hours, 0, save.as_ref(), &timing);
         return;
     }
@@ -393,7 +395,7 @@ fn main() {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
         introduce_into(&world, &flora, &mut fauna);
-        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
         run(&mut sim, hours, 0, save.as_ref(), &timing);
         return;
     }
@@ -457,7 +459,7 @@ fn main() {
     // same way before the first tick.
     let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    let mut sim = Sim::new(world, flora, fauna, SimConfig::experiment(), Some(senses));
 
     run(&mut sim, hours, 0, save.as_ref(), &timing);
 }
@@ -721,7 +723,7 @@ fn load_run(
     } else {
         install_founders_with(&mut fauna, policies).expect("the founder centres validate");
     }
-    let sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    let sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     (sim, minute)
 }
 

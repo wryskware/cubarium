@@ -1,7 +1,7 @@
 //! Phase profiler: `succession_study` frozen as of 2026-10-04 plus a `prof` subcommand that
 //! steps a loaded save (or a fresh founding) and prints ms/tick per phase. Build with
 //! `cargo run --release -p cubarium --example phase_profile -- prof load=DIR/mM minutes=5
-//! [threads=T] [overlap=0|1] [water_every=K] [config=FILE] [set=P=V ...]`.
+//! [threads=T] [overlap=0|1] [water_every=K] [step_every=N] [config=FILE] [set=P=V ...]`.
 //!
 //! The plant succession study (`design/handoffs/plant-succession-study-2026-10-03.md`,
 //! Astra's review `design/7_Research/astra-plant-succession-review-2026-10-03.md`), with the
@@ -115,6 +115,8 @@ fn resolve(args: &[String]) -> Params {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     if let Some(n) = arg(&args, "threads=").and_then(|s| s.parse().ok()) {
         cubarium_voxel::set_thread_override(n);
     }
@@ -215,7 +217,7 @@ fn found(args: &[String]) {
     if with_fauna {
         introduce(&arg(args, "arm=").unwrap_or("found").to_string(), 0, &params, &mut world, &mut flora, &mut fauna);
     }
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     if with_fauna {
         sim.set_overlap(false);
     }
@@ -527,7 +529,7 @@ fn plants(args: &[String]) {
     );
     flora.trace_attempts(Some(TURF));
     let with_fauna = !fauna.view().animals.is_empty();
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     if with_fauna {
         sim.set_overlap(false);
     }
@@ -1325,7 +1327,7 @@ fn fauna(args: &[String]) {
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
     let (mut world, mut flora, mut fauna, minute0, _) = load(dir, &want);
     introduce(&arm, minute0, &params, &mut world, &mut flora, &mut fauna);
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     fauna_run(&arm, hours, &params, &mut sim);
 }
 
@@ -1603,7 +1605,7 @@ mod tests {
 
 // ------------------------------------------------------------------ scratch profiler
 
-/// `prof [load=DIR | seed=N] [minutes=5] [warm=1] [overlap=0|1] [threads=T] [config=FILE]`
+/// `prof [load=DIR | seed=N] [minutes=5] [warm=1] [overlap=0|1] [threads=T] [water_every=K] [step_every=N] [config=FILE]`
 fn prof(args: &[String]) {
     use cubarium_voxel::profile::{self, Phase};
     let minutes: u64 = arg(args, "minutes=").map_or(5, |m| m.parse().unwrap());
@@ -1632,13 +1634,16 @@ fn prof(args: &[String]) {
     };
     let c = world.config().clone();
     println!("world,{}x{}x{},cells={},found_or_load_s={:.1}", c.width, c.height, c.depth, c.width as u64 * c.height as u64 * c.depth as u64, t_found.elapsed().as_secs_f64());
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     let overlap = arg(args, "overlap=").map_or(false, |v| v == "1");
     sim.set_overlap(overlap);
-    if let Some(k) = arg(args, "water_every=").map(|v| v.parse::<u32>().unwrap()) {
-        sim.world_mut().set_water_every(k);
-        println!("water_every,{k}");
+    if let Some(n) = arg(args, "step_every=").map(|v| v.parse::<u32>().unwrap()) {
+        let mut c = sim.flora().config().clone();
+        c.step_every = n;
+        sim.flora_mut().replace_config(c).expect("step_every");
     }
+    println!("water_every,{}", sim.world().water_every());
+    println!("step_every,{}", sim.flora().config().step_every);
     println!("config,threads={},overlap={overlap},minute0={minute0}", sim.config().threads);
     let per_min = 60 * u64::from(TICK_HZ);
     for _ in 0..warm * per_min {

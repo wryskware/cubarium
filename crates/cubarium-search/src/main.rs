@@ -800,7 +800,7 @@ enum Command {
         hours: f64,
         #[arg(long, default_value_t = es::voxel::live::window::DEFAULT_WINDOW_MIN)]
         window_min: f64,
-        #[arg(long, default_value_t = 4)]
+        #[arg(long, default_value_t = cubarium_voxel_sim::EXPERIMENT_WATER_EVERY)]
         water_every: u32,
         #[arg(long, default_value_t = 240)]
         abort_animals: usize,
@@ -891,7 +891,8 @@ enum Command {
         hours: f64,
         #[arg(long, default_value_t = es::voxel::live::window::DEFAULT_WINDOW_MIN)]
         window_min: f64,
-        #[arg(long, default_value_t = 1)]
+        /// Coarse water (training, search and experiment runs; the display runs 1).
+        #[arg(long, default_value_t = cubarium_voxel_sim::EXPERIMENT_WATER_EVERY)]
         water_every: u32,
         #[arg(long, default_value_t = 8)]
         threads: usize,
@@ -958,7 +959,8 @@ enum Command {
         /// every world on one thread throughout.
         #[arg(long, default_value_t = 0)]
         tail_cores: usize,
-        #[arg(long, default_value_t = 1)]
+        /// Coarse water (training, search and experiment runs; the display runs 1).
+        #[arg(long, default_value_t = cubarium_voxel_sim::EXPERIMENT_WATER_EVERY)]
         water_every: u32,
         /// Stop a world holding more animals than this.
         #[arg(long, default_value_t = 600)]
@@ -1049,7 +1051,7 @@ enum Command {
         world_seed: u64,
         /// Training-only coarse water: the lateral and groundwater phases on one tick in
         /// this many. `1` is the live water.
-        #[arg(long, default_value_t = 4)]
+        #[arg(long, default_value_t = cubarium_voxel_sim::EXPERIMENT_WATER_EVERY)]
         water_every: u32,
         #[arg(long, default_value_t = 240)]
         population_cap: usize,

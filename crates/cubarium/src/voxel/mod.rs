@@ -198,6 +198,15 @@ pub struct VoxelConfig {
     /// [`std::thread::available_parallelism`]. Execution only — it reaches no rule, no
     /// number and no picture. **Placeholder** (`design/backlog.md` §1).
     pub threads: usize,
+    /// **The display's coarse water** ([`cubarium_voxel::World::set_water_every`],
+    /// `cubarium_voxel_sim::SimConfig::water_every`): the lateral and groundwater phases
+    /// on one tick in this many. `1`, the live water, is the display's setting (Wrysk,
+    /// 2026-10-04); training, search and experiment runs take their own preset.
+    pub water_every: u32,
+    /// **Hook, not read yet:** the coarse water a future fast-forward display mode would
+    /// switch to while it runs above 1× (and back to [`VoxelConfig::water_every`] at 1×),
+    /// with the plant clock and the rest of the speed settings beside it. No mode reads it.
+    pub fast_forward_water_every: u32,
     /// The world to build. Extents follow the core; the ambient display uses 0.125 m
     /// cells so organisms retain their physical size with more cells of visual detail.
     #[serde(deserialize_with = "ambient_world_config")]
@@ -231,6 +240,8 @@ impl Default for VoxelConfig {
             lighting: Lighting::Flat,
             light: LightConfig::default(),
             threads: 0,
+            water_every: 1,
+            fast_forward_water_every: cubarium_voxel_sim::EXPERIMENT_WATER_EVERY,
             // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
             // TOML generates a staged world, not the ridge. `Config::default()` stays
             // `Landform::Ridge` for fixtures and frozen arenas, and `landform = "ridge"`
@@ -1269,6 +1280,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         } else {
             cfg.threads
         },
+        water_every: cfg.water_every.max(1),
         ..SimConfig::default()
     };
     let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
@@ -1556,14 +1568,15 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         )?,
     };
 
-    // Coarse water is a training-only mode (`World::set_water_every`): the ambient run
-    // refuses it rather than showing a world whose water steps once in several ticks.
-    anyhow::ensure!(
-        sim.world().water_every() == 1,
-        "the ambient run steps the water every tick; coarse water ({} ticks per step) is \
-         a training-only mode",
-        sim.world().water_every()
-    );
+    // The display's water fidelity is its config's (`water_every`, live by default); a
+    // coarse one is said, since it changes how fast water spreads on screen.
+    sim.world_mut().set_water_every(cfg.water_every.max(1));
+    if sim.world().water_every() > 1 {
+        eprintln!(
+            "cubarium voxel: coarse water, the lateral phases once every {} ticks",
+            sim.world().water_every()
+        );
+    }
 
     // The world that was built is the world the config drew, unless a snapshot was
     // resumed that describes a different one — then the founding output is on the wrong

@@ -349,7 +349,7 @@ pub fn e1_start(
 ) -> Result<(Sim, Manifest, RecipeRecord), String> {
     eco.params()?;
     let started = Instant::now();
-    let sim_config = SimConfig { threads: sim_threads.max(1), overlap: false };
+    let sim_config = SimConfig { threads: sim_threads.max(1), overlap: false, water_every: 1 };
     let expect = super::start::Expect::new(world_cfg, eco, policy.clone());
     let cached = cache.and_then(|dir| {
         let r: RecipeRecord = toml::from_str(&std::fs::read_to_string(dir.join(RECIPE_FILE)).ok()?).ok()?;

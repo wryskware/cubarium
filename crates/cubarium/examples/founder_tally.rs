@@ -85,6 +85,8 @@ const GROVE_M: f64 = 2.0;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     let path = args
         .get(1)
         .map_or("config/desktop/terrarium.toml", String::as_str);
@@ -165,7 +167,7 @@ fn main() {
         founded.world,
         founded.flora,
         founded.fauna,
-        SimConfig::default(),
+        SimConfig::experiment(),
     );
     sim.set_overlap(false);
     t0_report(&sim, &params);
