@@ -36,7 +36,8 @@ use crate::Flora;
 //     `Dispersal::Wald`, `FloraConfig::burr_cap`, `Stand::{cured, dry_s}`,
 //     `Flora::{burrs, burr_marks}`, the ledger's runner, death-cause, burr and cure lines.
 // 25: the plant clock — `FloraConfig::step_every`, `Flora::since_step`.
-pub const SCHEMA: u32 = 25;
+// 26: a seedling's reflush answers to its seed's leaf — `SpeciesConfig::seedling_below`.
+pub const SCHEMA: u32 = 26;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
