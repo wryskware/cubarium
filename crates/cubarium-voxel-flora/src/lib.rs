@@ -2052,6 +2052,8 @@ impl SpeciesConfig {
     /// - **Not a bog plant.** `establish_saturated_max` 0.05: a saturated share of the
     ///   (deeper) box over a twentieth stresses it, and a half-saturated box takes its net
     ///   below zero (the viability grid), so soggy ground goes back to velvetpad.
+    /// - **Perennial upkeep.** `maintenance` 0.0002, twice velvetpad's, replaces the
+    ///   short-lived bullet above (2026-10-05; the measurement is where it is set).
     /// - **Seeds.** The bank lives 24 h (`seed_max_age_s` 86,400); a large adult funds
     ///   many packages. It comes up through velvetpad (`overtop_covers` velvetpad).
     ///
@@ -2125,7 +2127,14 @@ impl SpeciesConfig {
             wood_max: 0.3,
             alive_min: 0.006,
             donor_min: 0.03,
-            maintenance: 0.002,
+            // Upkeep (2026-10-05, Wrysk: "why is grass upkeep so much higher?"): twice
+            // velvetpad's 0.0001, the base. The earlier 0.002 (ten times the base) belonged
+            // to the short-lived pioneer turf above, which was meant to die as soon as its
+            // light or water went; a perennial grass that cures and regrows from its roots
+            // can't burn its reserve in 250 s. On `patch` (8 seeds, 4 h from m120) the old
+            // upkeep shrank mature turf 500 → 392 and turf on drained ground 616 → 405;
+            // at twice velvetpad's, both held (553, 612). The presets carry the same 2×.
+            maintenance: 0.0002,
             // Production (2026-10-04, Wrysk: "grass should have more foliage than moss"):
             // a mature stand carries `(1 − graze_refuge) · alpha · wood_max` above its
             // floor, 0.6 · 3.15 · 0.3 = 0.57 against velvetpad's 0.7 · 1.0 · 0.2 = 0.14 on

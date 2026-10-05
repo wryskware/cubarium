@@ -573,7 +573,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.alpha` | 3.15 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
 | `flora.springturf.wood_max` | 0.3 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.springturf.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
-| `flora.springturf.maintenance` | 0.002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
+| `flora.springturf.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
 | `flora.springturf.senescence` | 0.00167 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.springturf.foliage_rate` | 0.06 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.springturf.wood_rate` | 0.01 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
