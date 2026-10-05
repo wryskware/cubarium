@@ -58,6 +58,8 @@ mod carrion_tests;
 mod spread_tests;
 #[cfg(test)]
 mod shared_face_tests;
+#[cfg(test)]
+mod canopy_establish_tests;
 mod film;
 #[cfg(test)]
 mod film_tests;
@@ -409,6 +411,21 @@ pub struct Stand {
     /// seconds it has been dormant once cured.
     #[serde(default)]
     pub dry_s: f64,
+    /// **A runner daughter's support** from its parent ([`SpeciesConfig::runner_support_s`]):
+    /// `Some` while the parent still feeds it, `None` for every other stand and once the
+    /// daughter pays its own upkeep, the time runs out, or the parent is gone.
+    #[serde(default)]
+    pub support: Option<Support>,
+}
+
+/// A runner daughter's tie to the parent that feeds it ([`Stand::support`]): the parent's
+/// id and site, so the parent is found by the stands' own key and checked by its id, and
+/// the seconds of support left.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Support {
+    pub parent: u64,
+    pub parent_site: Site,
+    pub left_s: f64,
 }
 
 impl Stand {
@@ -865,6 +882,21 @@ fn default_night_min_s() -> f64 {
     600.0
 }
 
+/// [`SpeciesConfig::establish_light_margin`]'s default: the break-even itself.
+fn default_establish_light_margin() -> f64 {
+    1.0
+}
+
+/// [`SpeciesConfig::runner_support_s`]'s default: an hour.
+fn default_runner_support_s() -> f64 {
+    3600.0
+}
+
+/// [`SpeciesConfig::runner_support_share`]'s default: the whole shortfall.
+fn default_runner_support_share() -> f64 {
+    1.0
+}
+
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
 /// the terrain couplings that replace the old noise fields.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1255,6 +1287,30 @@ pub struct SpeciesConfig {
     /// ([`FloraLedger::overtopped`], [`FloraLedger::runner_displaced`]). `false` at the
     /// base: runners take free faces only. Not a number, so its registry row is a switch.
     pub runners_overtop: bool,
+    /// **The canopy gate's margin** (turf-establish, 2026-10-05): a photosynthetic seed
+    /// comes up, and a runner roots, only where its newborn's income at full daylight —
+    /// under the light that reaches its own layers through every other stand's taller
+    /// foliage (the light model's own sweep), at the site's moisture and mineral — is at
+    /// least this multiple of its upkeep (maintenance plus the construction of replacing
+    /// its senescing leaves): the break-even of the stand's own carbon budget, read off its
+    /// own config ([`crate::step::break_even_cover`]). Below it a seed stays in the bank,
+    /// waiting for a gap, and a runner tries another face or stays in its parent's
+    /// parcel. A multiple of the upkeep; 0 opens the gate. Saprotrophs have no light gate
+    /// and never read it. **Placeholder**: 1, the break-even itself.
+    #[serde(default = "default_establish_light_margin")]
+    pub establish_light_margin: f64,
+    /// **How long a runner daughter is fed by its parent**, seconds: from its birth the
+    /// parent pays [`SpeciesConfig::runner_support_share`] of the daughter's shortfall
+    /// (its upkeep less its own income, each tick) out of the parent's reserve above its
+    /// donor floor, until this runs out or the daughter's own income pays its upkeep. 0: no
+    /// support. Photosynthetic species only. **Placeholder**: an hour.
+    #[serde(default = "default_runner_support_s")]
+    pub runner_support_s: f64,
+    /// **The share of a supported runner daughter's shortfall its parent pays**, each
+    /// tick ([`SpeciesConfig::runner_support_s`]). Fraction; 1 pays all of it.
+    /// **Placeholder**: 1.
+    #[serde(default = "default_runner_support_share")]
+    pub runner_support_share: f64,
     /// **The WALD wind kernel's mean distance**, metres ([`Dispersal::Wald`]). The
     /// inverse-Gaussian `μ`, which in the mechanistic WALD model (Katul et al. 2005) is
     /// `H · U / F` — release height times wind speed over the seed's terminal velocity —
@@ -1713,6 +1769,10 @@ impl SpeciesConfig {
             // A runner roots on the next column over (the eight neighbours).
             runner_reach: 1,
             runners_overtop: false,
+            // turf-establish: the canopy gate at break-even, and a runner fed for an hour.
+            establish_light_margin: default_establish_light_margin(),
+            runner_support_s: default_runner_support_s(),
+            runner_support_share: default_runner_support_share(),
             // No WALD kernel, no burrs, no curing: springturf's preset says why it has them.
             wald_mean_m: 0.0,
             wald_shape_m: 0.0,
@@ -3368,6 +3428,30 @@ pub struct FloraLedger {
     pub seeds_died: [u64; Species::COUNT],
     pub seeds_lost: [u64; Species::COUNT],
     pub clonal_births: [u64; Species::COUNT],
+    /// **The canopy gate** ([`SpeciesConfig::establish_light_margin`]), per species, as
+    /// cumulative diagnostics in no `expected_*` total: seed-bank checks at which a
+    /// species' seeds passed every other gate and the light through the taller foliage
+    /// could not pay its newborn's upkeep (the seeds stayed banked); runner faces it
+    /// refused; runner packages that found no face and stayed in the parent's parcel.
+    #[serde(default)]
+    pub canopy_refused: [u64; Species::COUNT],
+    #[serde(default)]
+    pub runner_canopy_refused: [u64; Species::COUNT],
+    #[serde(default)]
+    pub runner_kept: [u64; Species::COUNT],
+    /// **Runner support** ([`SpeciesConfig::runner_support_s`]), per species: organic
+    /// matter (and its mineral) parents moved from their reserves into their runner
+    /// daughters' — an internal transfer, in no `expected_*` total — and supports that
+    /// ended because the daughter paid its own upkeep (weaned) or because the time ran out
+    /// or the parent was gone (ended).
+    #[serde(default)]
+    pub runner_support_organic: [f64; Species::COUNT],
+    #[serde(default)]
+    pub runner_support_mineral: [f64; Species::COUNT],
+    #[serde(default)]
+    pub runner_weaned: [u64; Species::COUNT],
+    #[serde(default)]
+    pub runner_support_ended: [u64; Species::COUNT],
     /// **Latticevine counters** ([`cover`]), cumulative diagnostics in no `expected_*`
     /// total: founders and hand-seeded vines, sisters rooted, vines dead, faces covered by
     /// spreading, faces lost (terrain, starvation), faces that changed hands in a contest,
@@ -5183,6 +5267,7 @@ impl Flora {
             fruit_rest_s: 0.0,
             cured: false,
             dry_s: 0.0,
+            support: None,
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);

@@ -1788,6 +1788,8 @@ fn a_descendant_born_and_dead_inside_the_window_is_still_a_birth() {
     config.bloomcrown.hop = 1;
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.maintenance = 0.4;
+    // A newborn that cannot pay is the fixture: the canopy gate would keep it banked.
+    config.bloomcrown.establish_light_margin = 0.0;
     // 0.75 (placeholder 0.5): the founder's starting reserve funds exactly **one** package.
     // A second one would be a whole seed that waits in the bank (package S) and recruits
     // into the gap the first descendant leaves, which is a second lineage in the window.
@@ -2119,6 +2121,8 @@ fn a_founder_replaced_by_its_own_species_in_one_tick_is_still_a_death_and_a_birt
         .minimum_seeds();
     config.bloomcrown.assimilation = 0.0;
     config.bloomcrown.maintenance = 0.4;
+    // A newborn that cannot pay is the fixture: the canopy gate would keep it banked.
+    config.bloomcrown.establish_light_margin = 0.0;
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
     let mut world = strip_gap(0.6);
