@@ -917,3 +917,128 @@ fn the_light_memo_reads_what_the_direct_call_reads() {
         assert_eq!(h, d, "after the bodies moved");
     }
 }
+
+// ------------------------------------------------------------------ FAUNA-PAR: the split
+
+/// **The bands build what one pass builds** (FAUNA-PAR): the controller stage's grids,
+/// laid in interleaved bands of cell layers side by side, are the cells, pools and bodies the one-pass
+/// builder lays — windowed or whole, one cell per body or bodies with volume, several
+/// grids at once, at any thread count.
+#[test]
+fn the_occupancy_bands_build_what_one_pass_builds() {
+    for seed in [3u64, 17] {
+        let (world, flora, fauna) = landscape(seed);
+        let (v, fv, av) = (world.view(), flora.view(), fauna.view());
+        let window: Vec<bool> = (0..W).map(|x| x % 3 == 0 || (10..20).contains(&x)).collect();
+        let asks = || {
+            vec![
+                senses::OccupancyAsk { window: Some(window.clone()), volume: false },
+                senses::OccupancyAsk { window: None, volume: true },
+                senses::OccupancyAsk { window: None, volume: false },
+            ]
+        };
+        let want: Vec<senses::ConeOccupancy> = asks()
+            .iter()
+            .map(|a| senses::build_occupancy_as(&v, &fv, &av, true, a.window.as_deref(), a.volume))
+            .collect();
+        // One scratch throughout: later builds lay over earlier builds' dirty grids.
+        let mut scratch = senses::GridScratch::default();
+        for threads in [1, 2, 3, 4, 7, 4] {
+            let got = senses::build_occupancies(&v, &fv, &av, &asks(), threads, &mut scratch);
+            assert!(got == want, "seed {seed}, {threads} threads: the bands differ from one pass");
+            for occ in got {
+                scratch.give(occ);
+            }
+        }
+    }
+}
+
+/// A controller that writes down every observation it reads and answers with a choice
+/// that depends on all of it and on its own memory.
+struct Recorder {
+    id: u64,
+    log: std::sync::Arc<std::sync::Mutex<Vec<(u64, Vec<f64>)>>>,
+    drives: u32,
+}
+
+impl crate::controller::Controller for Recorder {
+    fn drive(&mut self, observation: &[f64]) -> crate::controller::Response {
+        self.log.lock().expect("the log").push((self.id, observation.to_vec()));
+        self.drives += 1;
+        let s: f64 = observation
+            .iter()
+            .enumerate()
+            .map(|(k, x)| x * (k as f64 + 1.0).sin())
+            .sum();
+        crate::controller::Response::Bounded(crate::controller::Actions {
+            forward: 0.5 + 0.5 * s.sin(),
+            turn: (1.7 * s).cos(),
+            feed: f64::from(self.drives % 2),
+        })
+    }
+
+    fn reset(&mut self) {}
+}
+
+/// **The controller stage reads and chooses the same on one thread and four**
+/// (FAUNA-PAR): twin fixtures — browsers, blind founders (a chem trend in the senses), a
+/// lanternjaw (the predation window), a held light memo — every body driven by a
+/// [`Recorder`]. Stepped side by side, one with one thread and one with four, every
+/// observation every controller reads and every body after every tick are the same.
+#[test]
+fn the_controller_stage_reads_and_chooses_the_same_on_one_thread_and_four() {
+    let make = || {
+        let (world, flora, mut fauna) = landscape(29);
+        // Awake whatever the hour, so every lineage's controller is consulted.
+        for f in Founder::ALL {
+            fauna.config.founders[f.index()].active = crate::Activity::Always;
+        }
+        assert!(fauna.apply(
+            &world,
+            Command::IntroduceFounder {
+                x: 12,
+                z: 4,
+                founder: Founder::Lanternjaw,
+                stores: StartingStores { body: 1.0, reserve: 0.6 },
+                heading_rad: 0.3,
+            },
+        ));
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let ids: Vec<u64> = fauna.view().animals.iter().map(|a| a.id).collect();
+        for id in ids {
+            fauna.set_controller(
+                id,
+                Box::new(Recorder { id, log: std::sync::Arc::clone(&log), drives: 0 }),
+            );
+        }
+        let mut s = senses::Senses::new();
+        s.settle(&world.view(), &flora.view());
+        s.hold_light();
+        (world, flora, fauna, s, log)
+    };
+    let (world, mut flora_1, mut fauna_1, mut senses_1, log_1) = make();
+    let (_, mut flora_4, mut fauna_4, mut senses_4, log_4) = make();
+    let mut read = [0usize; Founder::COUNT];
+    for tick in 0..40 {
+        fauna_1.step_with_senses(&world, &mut flora_1, 1, &mut senses_1);
+        fauna_4.step_with_senses(&world, &mut flora_4, 4, &mut senses_4);
+        let mut one = std::mem::take(&mut *log_1.lock().expect("the log"));
+        let mut four = std::mem::take(&mut *log_4.lock().expect("the log"));
+        one.sort_by_key(|e| e.0);
+        four.sort_by_key(|e| e.0);
+        assert!(one == four, "tick {tick}: the observations differ");
+        for (id, _) in &one {
+            if let Some(f) = fauna_1.view().animal(*id).and_then(|a| a.founder) {
+                read[f.index()] += 1;
+            }
+        }
+        assert_eq!(
+            format!("{:?}", fauna_1.view().animals),
+            format!("{:?}", fauna_4.view().animals),
+            "tick {tick}: the bodies diverged"
+        );
+    }
+    for f in [Founder::Browser, Founder::Blind, Founder::Lanternjaw] {
+        assert!(read[f.index()] > 0, "no {} observation was read", f.name());
+    }
+}

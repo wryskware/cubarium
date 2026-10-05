@@ -6,6 +6,12 @@ rust-version.workspace = true
 description = "Consumers on the voxel strip: founder lineages with continuous bodies, senses and controllers, paid through the flora layer's bounded transfers, handing their bodies back as carrion. No drawing."
 
 [features]
+default = ["parallel"]
+# The controller stage's occupancy grids, observations and controller evaluations split
+# across the `bevy_tasks` compute pool when a caller steps with more than one thread
+# (`Fauna::step_with`). Results fold back in body order, so the split changes no number;
+# `default-features = false` builds without it.
+parallel = ["dep:bevy_tasks"]
 # Per-phase timers for the tick profile, forwarding to the core's accumulator. Measurement
 # only; see `design/7_Research/voxel-tick-profile-2026-09-18.md`.
 profile = ["cubarium-voxel/profile", "cubarium-voxel-flora/profile"]
@@ -17,6 +23,7 @@ postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1", features = ["derive"] }
 anyhow = { workspace = true }
 rustc-hash = { workspace = true }
+bevy_tasks = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The parasite knob test reads the default config's serialized field names.
