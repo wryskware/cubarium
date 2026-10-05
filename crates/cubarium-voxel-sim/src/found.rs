@@ -69,15 +69,29 @@ pub enum Seeds {
     Asked(u64),
     /// `base`, `base + stride`, …: the same founding every time.
     Counting { base: u64, stride: u64 },
+    /// `base` first, then redraws hashed from `base` and the attempt: the same founding
+    /// every time, and two bases never redraw into the same world (with `base + 1`
+    /// redraws, seeds 1, 2 and 3 of `patch` all founded seed 4's world).
+    Derived { base: u64 },
     /// Whatever the function draws: the ambient run's fresh world.
     Drawn(fn() -> u64),
 }
 
 impl Seeds {
-    /// `base`, `base + 1`, …
+    /// `base`, then redraws hashed from it ([`Seeds::Derived`]).
     pub fn from(base: u64) -> Seeds {
-        Seeds::Counting { base, stride: 1 }
+        Seeds::Derived { base }
     }
+}
+
+/// The `k`-th redraw after `base` (`k ≥ 1`): splitmix64 over the pair, so redraws of
+/// different bases don't land on each other.
+fn derived_seed(base: u64, k: u64) -> u64 {
+    let mut z = base ^ k.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(29);
+    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 /// A founded world: generated, lake-gated, pre-rolled, **already seeded** and judged.
@@ -141,6 +155,17 @@ fn found_judged(
                 Box::new(move || {
                     let seed = next;
                     next = next.wrapping_add(stride);
+                    seed
+                }),
+            )
+        }
+        Seeds::Derived { base } => {
+            let mut k = 0u64;
+            (
+                None,
+                Box::new(move || {
+                    let seed = if k == 0 { base } else { derived_seed(base, k) };
+                    k += 1;
                     seed
                 }),
             )
@@ -403,6 +428,22 @@ mod tests {
     /// A generated world has to have water somebody can see. The gate redraws until it
     /// does, keeps the wettest when no seed obliges, and never argues with a seed that
     /// was asked for by name.
+    /// **Different seeds found different worlds.** With `base + 1` redraws a rejected seed
+    /// 1 redrew into seed 2's world, and seeds 1, 2 and 3 of `patch` all founded seed 4's.
+    /// Every base's own seed and redraws are distinct from every other base's.
+    #[test]
+    fn neighbouring_seeds_never_redraw_into_each_other() {
+        let mut seen = std::collections::HashMap::new();
+        for base in 0..64u64 {
+            for k in 0..16u64 {
+                let seed = if k == 0 { base } else { derived_seed(base, k) };
+                if let Some(other) = seen.insert(seed, base) {
+                    assert_eq!(other, base, "seeds {other} and {base} both draw {seed}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_gate_rejects_and_redraws() {
         // A short staged ring, so four generations stay well inside a second.
@@ -488,7 +529,7 @@ mod tests {
         };
         let founded = found_judged(&cfg, &layers, [2, 2, 0, 0, 0, 0, 0, 0, 0], Seeds::from(5), false, first_fails);
         assert_eq!(judged.get(), 2, "two worlds were judged");
-        assert_eq!(founded.seed, 6, "the refused first draw was replaced");
+        assert_eq!(founded.seed, derived_seed(5, 1), "the refused first draw was replaced by the first redraw");
         assert!(founded.accepted && founded.habitat_rejected == 1);
         assert!(
             founded.seeded.stands > 0,
