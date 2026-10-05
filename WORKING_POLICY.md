@@ -157,6 +157,27 @@ edit", so future workers must not start with them. The audit
 - **Long runs are soaks, off the critical path.** 8 seeds × 8 h on eidolon, overnight
   or per merge batch. A soak never blocks an edit.
 
+## Staged runs and scenario maps — Wrysk, 2026-10-04
+
+A 5 h study batch ran for 2 h with every animal frozen: the study's load path dropped
+their controllers. Nobody looked until the end. Wrysk: "we absolutely cannot be doing
+multi-hour runs without doing pause or checking in or reevaluating."
+- **Every run is staged.** It saves a checkpoint each segment and can be paused, resumed
+  and branched from it.
+- **A scripted liveness check** runs after every load and after the first short segment
+  (a few sim-minutes). It checks that:
+  - animals move and eat;
+  - each mechanism under test fires (its counters are nonzero);
+  - the ledgers conserve.
+
+  If it fails, the run stops and reports. Nothing runs on unattended.
+- **Re-evaluate before continuing.** Read the first segments' readouts, then continue,
+  stop arms that are clearly out, or fix the setup.
+- **Pick the map for the question.** Small (Tachyon-size) maps suit plant and grazing
+  questions. Predators need larger ones. Branch from saved starts rather than founding
+  each time.
+- **Target:** one ecological change answered in under 30 minutes.
+
 ## Every number is a knob — Wrysk, 2026-10-01
 
 A large tuning pass over all parameters comes later, so don't tune new mechanisms to
