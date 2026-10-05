@@ -30,6 +30,7 @@
 //!   Each sample also prints a `juv` line (turf-establish): springturf that starved
 //!   without ever being seen at donor size, and turf births, per 10 minutes since the last
 //!   sample, with the share of the births that came up within two columns of a mature turf.
+//!   A `canopy` line gives the canopy gate's and runner support's ledger counters.
 //! - `fauna`: branch a save, introduce the code-default founding table through the
 //!   seeder's own fauna placement, and run with the heuristics (the earlier study's arm).
 //!
@@ -804,6 +805,17 @@ fn plants(args: &[String]) {
             }
             sample(&sim, &arm, minute, &co, &s1, &refuge, &w, &wet_vacant, &saved, &windows[0]);
             juv.line(&arm, minute);
+            {
+                // The canopy gate and runner support, cumulative since the load.
+                let l = &sim.flora().view().ledger;
+                let (t, p) = (TURF.index(), PAD.index());
+                println!(
+                    "canopy,{arm},{minute},turf_refused={},turf_runner_refused={},turf_runner_kept={},turf_support={:.4},turf_weaned={},turf_support_ended={},pad_refused={},pad_runner_refused={},pad_support={:.4}",
+                    l.canopy_refused[t], l.runner_canopy_refused[t], l.runner_kept[t], l.runner_support_organic[t],
+                    l.runner_weaned[t], l.runner_support_ended[t], l.canopy_refused[p], l.runner_canopy_refused[p],
+                    l.runner_support_organic[p]
+                );
+            }
             if with_fauna {
                 fw.minute_line(&sim, &arm, minute);
             }

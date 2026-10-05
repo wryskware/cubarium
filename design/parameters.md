@@ -364,7 +364,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (938 rows)
+**`flora.*`** (965 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -435,6 +435,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.bloomcrown.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.bloomcrown.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.bloomcrown.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.bloomcrown.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.bloomcrown.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.bloomcrown.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.bloomcrown.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.bloomcrown.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -531,6 +534,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.umbrellafrond.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.umbrellafrond.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.umbrellafrond.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.umbrellafrond.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.umbrellafrond.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.umbrellafrond.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.umbrellafrond.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.umbrellafrond.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -627,6 +633,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.springturf.runner_reach` | 2 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.springturf.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.springturf.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.springturf.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.springturf.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.springturf.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.springturf.wald_mean_m` | 3.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.springturf.wald_shape_m` | 0.5 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -723,6 +732,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.stonecushion.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.stonecushion.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.stonecushion.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.stonecushion.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.stonecushion.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.stonecushion.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.stonecushion.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.stonecushion.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -819,6 +831,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.velvetpad.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.velvetpad.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.velvetpad.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.velvetpad.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.velvetpad.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.velvetpad.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.velvetpad.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.velvetpad.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -915,6 +930,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.glowcap.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.glowcap.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.glowcap.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.glowcap.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.glowcap.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.glowcap.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.glowcap.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.glowcap.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -1011,6 +1029,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.vaulttree.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.vaulttree.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.vaulttree.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.vaulttree.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.vaulttree.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.vaulttree.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.vaulttree.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.vaulttree.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -1107,6 +1128,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.lanternberry.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.lanternberry.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.lanternberry.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.lanternberry.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.lanternberry.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.lanternberry.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.lanternberry.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.lanternberry.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -1203,6 +1227,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
 | `flora.siphonreed.runner_reach` | 1 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.siphonreed.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
+| `flora.siphonreed.establish_light_margin` | 1.0 | multiple of upkeep (0 = no gate) | [0, inf) | 0–2 | N | decision | canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep |
+| `flora.siphonreed.runner_support_s` | 3600.0 | s | [0, inf) | 0–7200 | N | decision | how long a parent feeds its runner daughter's shortfall (0 = none) |
+| `flora.siphonreed.runner_support_share` | 1.0 | fraction of the shortfall | [0, 1] | 0–1 | N | decision | share of a supported runner daughter's shortfall its parent pays |
 | `flora.siphonreed.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.siphonreed.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.siphonreed.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
@@ -1279,7 +1306,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.litter_energy_cap` | 2.0 | energy per org-unit | [0, inf) |  | C | placeholder | retained energy cap per unit of litter |
 | `flora.initial_mineral` | 1.0 | mineral per site | [0, inf) | yes | D | placeholder | mineral a site is provisioned with |
 | `flora.seed_check_s` | 30.0 | s | [0, inf) |  | N | numerics | how often a banked site is tested |
-| `flora.step_every` | 5 | ticks | [1, inf) |  | N | numerics | the plant clock: one plant step per this many world ticks |
+| `flora.step_every` | 4 | ticks | [1, inf) |  | N | numerics | the plant clock: one plant step per this many world ticks |
 | `flora.upkeep_q10` | 2.0 | x per 10 C | (0, inf) | 1–4 | - | placeholder | Q10 of plant upkeep around the climate's mean |
 | `flora.wind_tries` | 4 | tries | [1, inf) | 1–16 | - | placeholder | a wind seed's draws before the donor keeps its package |
 | `flora.burr_cap` | 6 | seeds per animal | [0, inf) | 1–20 | - | placeholder | burrs: the most seeds one animal's coat carries at once |

@@ -130,7 +130,7 @@ use cubarium_voxel::{DT, Material, Materials, VoxelView, World};
 #[cfg(test)]
 use cubarium_voxel::Command as WorldCommand;
 
-use crate::{DeathCause, DeathRecord, Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic};
+use crate::{DeathCause, DeathRecord, Flora, FloraConfig, FloraLedger, Ground, Site, Species, SpeciesConfig, Stand, Taken, Trophic};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
 /// draws; the seed bank's and dispersal's are drawn in `seeds.rs`.
@@ -411,6 +411,8 @@ fn finish_step(flora: &mut Flora, world: &World, step: PlantStep, threads: usize
     decay_defences(flora, dt);
     let substrate =
         cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads, dt) });
+    // Runner daughters' support, out of their parents' reserves, before either grows.
+    cubarium_voxel::voxel_phase!(Grow, { support_runners(flora, &light, &moisture, climate) });
     cubarium_voxel::voxel_phase!(Grow, {
         grow(flora, world, &light, climate, &moisture, &substrate, threads)
     });
@@ -2504,6 +2506,99 @@ pub fn upkeep_factor(t_c: f64, t_mean_c: f64, q10: f64) -> f64 {
     q10.powf((t_c - t_mean_c) / 10.0)
 }
 
+/// **Runner support** ([`SpeciesConfig::runner_support_s`]): each runner daughter still
+/// tied to its parent ([`Stand::support`]) is paid
+/// [`SpeciesConfig::runner_support_share`] of this tick's shortfall — its upkeep
+/// (maintenance at this tick's temperature and night, plus the construction of replacing
+/// the foliage it sheds) less its income (this tick's light, daylight, moisture, aeration
+/// stress and site mineral) — out of the parent's reserve above the parent's donor floor
+/// (`donor_reserve_floor · reserve_cap · W`, the floor propagules are funded above), so the
+/// parent never goes below it. The organic matter moves reserve to reserve with its share
+/// of the parent's mineral: an internal transfer, booked in
+/// [`FloraLedger::runner_support_organic`] / `_mineral`.
+///
+/// The tie ends when the daughter is established — past its seedling size
+/// ([`SpeciesConfig::seedling_below`]) with its own income paying its upkeep at full
+/// daylight ([`break_even_cover`] at least one): **weaned** — or when its time runs out or
+/// the parent is gone (**ended**). A seedling that pays by day is still carried through
+/// the night: its shortfall then is its whole upkeep.
+fn support_runners(flora: &mut Flora, light: &[f64], moisture: &[Drink], climate: Climate) {
+    let Flora {
+        config,
+        stands,
+        ground,
+        ledger,
+        ..
+    } = flora;
+    if light.len() != stands.len() || moisture.len() != stands.len() {
+        return;
+    }
+    let Climate {
+        daylight,
+        upkeep,
+        night,
+        dt,
+        ..
+    } = climate;
+    for i in 0..stands.len() {
+        let Some(tie) = stands[i].support else {
+            continue;
+        };
+        let d = stands[i];
+        let sc = config.species(d.species);
+        let slot = d.species.index();
+        let parent = crate::find_stand(config, stands, tie.parent_site, config.face_layer(d.species))
+            .ok()
+            .filter(|&j| stands[j].id == tie.parent && j != i);
+        let Some(j) = parent else {
+            stands[i].support = None;
+            ledger.runner_support_ended[slot] += 1;
+            continue;
+        };
+        let n = match ground.binary_search_by_key(&d.site, |g| g.site) {
+            Ok(gi) => ground[gi].mineral,
+            Err(_) => config.initial_mineral,
+        };
+        let f = monod(sc, n);
+        let mu = moisture[i].moisture * (1.0 - d.aeration_stress).clamp(0.0, 1.0);
+        let l = light[i];
+        // Established: past its seedling size ([`SpeciesConfig::seedling_below`]) and
+        // paying its own upkeep at full daylight.
+        if d.wood >= sc.seedling_below * sc.alive_min && break_even_cover(sc, d.wood, d.foliage, l, mu, f) >= 1.0 {
+            stands[i].support = None;
+            ledger.runner_weaned[slot] += 1;
+            continue;
+        }
+        if !d.cured {
+            let need = (sc.maintenance * upkeep * night * d.wood
+                + (1.0 + sc.build) * sc.senescence * d.foliage)
+                * dt;
+            let income = sc.assimilation * l * d.foliage * daylight * mu * f * dt;
+            let want = sc.runner_support_share.max(0.0) * (need - income).max(0.0);
+            let p = stands[j];
+            let psc = config.species(p.species);
+            let floor = psc.donor_reserve_floor * psc.reserve_cap * p.wood;
+            let pay = want.min((p.reserve - floor).max(0.0));
+            if pay > 0.0 {
+                let before = stands[j].material();
+                stands[j].reserve -= pay;
+                let mineral = pull_mineral(&mut stands[j], before, pay);
+                stands[i].reserve += pay;
+                stands[i].mineral += mineral;
+                ledger.runner_support_organic[slot] += pay;
+                ledger.runner_support_mineral[slot] += mineral;
+            }
+        }
+        let left = tie.left_s - dt;
+        if left <= 0.0 {
+            stands[i].support = None;
+            ledger.runner_support_ended[slot] += 1;
+        } else if let Some(t) = stands[i].support.as_mut() {
+            t.left_s = left;
+        }
+    }
+}
+
 /// What the world's clock and air ask of every plant this tick, stands and vines alike.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Climate {
@@ -3600,20 +3695,215 @@ fn decompose_pool(
 /// because one that comes up in the dark has no income until dawn and a reserve sized for
 /// minutes. The public habitat predicates ([`establishment_gates`] and its forms) are about
 /// the site, not the hour: a host founding a world at night still finds its habitat.
+///
+/// A site that passes every gate is then asked the **canopy gate**
+/// ([`SpeciesConfig::establish_light_margin`]): whether the light that reaches the
+/// species' newborn through the taller foliage around it pays the newborn's upkeep
+/// ([`canopy_pays`]). The answer says which of the two refused.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn establishes(
     view: &VoxelView<'_>,
     sky: &mut Vec<(Site, f64)>,
     ground: &[Ground],
+    stands: &[Stand],
+    config: &FloraConfig,
     site: Site,
-    sc: &SpeciesConfig,
+    species: Species,
     daylight: f64,
-) -> bool {
+) -> Establish {
+    let sc = config.species(species);
     if sc.trophic == Trophic::Photo && daylight <= 0.0 {
-        return false;
+        return Establish::Gates;
     }
     let visibility = sky_at(sky, view, site);
     let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
-    establishment_gates_with_sky(view, site, sc, visibility, dead_wood, litter).passes()
+    let g = establishment_gates_with_sky(view, site, sc, visibility, dead_wood, litter);
+    if !g.passes() {
+        return Establish::Gates;
+    }
+    if !canopy_pays(config, view, ground, stands, site, species, visibility, &g) {
+        return Establish::Canopy;
+    }
+    Establish::Yes
+}
+
+/// [`establishes`]'s answer: refused by the site's gates, refused by the canopy gate, or
+/// a newborn may come up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Establish {
+    Gates,
+    Canopy,
+    Yes,
+}
+
+
+/// The mineral Monod factor of §4.1's income, `N / (N + K_N)`, on a site pool `n`.
+pub(crate) fn monod(sc: &SpeciesConfig, n: f64) -> f64 {
+    if n + sc.nutrient_half > 0.0 {
+        n / (n + sc.nutrient_half)
+    } else {
+        0.0
+    }
+}
+
+/// **A photosynthetic stand's carbon break-even, as a cover ratio**: its income at full
+/// daylight over its upkeep,
+///
+/// `assimilation · L_eff · P · μ · monod / (maintenance · W + (1 + c_g) · senescence · P)`,
+///
+/// where the upkeep is maintenance plus the construction cost of replacing the foliage it
+/// sheds — the break-even [`SpeciesConfig::velvetpad`]'s doc states for a full-foliage
+/// stand, here at the stand's own `W` and `P`. Read at the reference temperature, with no
+/// aeration stress (a newborn has none) and the night out of it: a statement about the
+/// stand's light, moisture and mineral, not about the hour. One or more pays. Infinity for
+/// a saprotroph, which is not judged on light, and for a stand with no upkeep.
+pub fn break_even_cover(
+    sc: &SpeciesConfig,
+    wood: f64,
+    foliage: f64,
+    l_eff: f64,
+    moisture: f64,
+    monod: f64,
+) -> f64 {
+    if sc.trophic != Trophic::Photo {
+        return f64::INFINITY;
+    }
+    let upkeep = sc.maintenance * wood.max(0.0) + (1.0 + sc.build) * sc.senescence * foliage.max(0.0);
+    let income = sc.assimilation * l_eff * foliage.max(0.0) * moisture * monod;
+    if upkeep <= 0.0 {
+        return f64::INFINITY;
+    }
+    (income / upkeep).max(0.0)
+}
+
+/// **The canopy gate** ([`SpeciesConfig::establish_light_margin`]): whether a newborn of
+/// `species` on `site` — the stand one package builds ([`crate::seeds::newborn_stand`]) —
+/// would earn at least the margin times its upkeep under the light reaching it through
+/// every other stand's taller foliage ([`canopy_light`]), at the site's moisture (`gates`'
+/// root-box reading through the species' ramp) and the site's mineral. `visibility` is
+/// the site's terrain sky, as the gates read it. Always true for a saprotroph and for a
+/// margin of zero.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn canopy_pays(
+    config: &FloraConfig,
+    view: &VoxelView<'_>,
+    ground: &[Ground],
+    stands: &[Stand],
+    site: Site,
+    species: Species,
+    visibility: f64,
+    gates: &Gates,
+) -> bool {
+    let sc = config.species(species);
+    if sc.trophic != Trophic::Photo || !(sc.establish_light_margin > 0.0) {
+        return true;
+    }
+    let newborn = crate::seeds::newborn_stand(config, site, species);
+    let l_eff = canopy_light(config, stands, view, visibility, &newborn);
+    let mu = gates.mean_water.map_or(0.0, |m| sc.moisture_at(m));
+    let n = match ground.binary_search_by_key(&site, |g| g.site) {
+        Ok(gi) => ground[gi].mineral,
+        Err(_) => config.initial_mineral,
+    };
+    break_even_cover(sc, newborn.wood, newborn.foliage, l_eff, mu, monod(sc, n))
+        >= sc.establish_light_margin
+}
+
+/// The farthest any stand's foliage can reach sideways, in whole cells of `voxel_m`: the
+/// widest crown radius any species reaches at any size, times its widest layer.
+fn shade_reach(config: &FloraConfig, voxel_m: f64) -> i64 {
+    Species::ALL
+        .iter()
+        .map(|&sp| {
+            let sc = config.species(sp);
+            let layer = sc
+                .profile
+                .iter()
+                .flat_map(|p| p.layers.iter())
+                .filter(|l| l.kind.bears_foliage())
+                .map(|l| l.radius)
+                .fold(0.0f64, f64::max);
+            let r = sc.crown_radius_m[0].max(sc.crown_radius_m[1]).max(0.0) / voxel_m;
+            (r * layer).ceil() as i64 + 1
+        })
+        .max()
+        .unwrap_or(1)
+}
+
+/// **The light a stand would earn on its site now**, `L_eff`: [`light_per_stand`]'s sweep
+/// for one receiver that is not (yet) in `stands` — the open sky over its site times what
+/// every foliage layer of another site's stand whose top is strictly above each of its
+/// layers and whose footprint holds its column lets through, averaged over its layers by
+/// their stock, through the species' light response. A stand on its own site (the cover
+/// a seedling comes up through, the glowcap under a plant) shades it not at all.
+///
+/// The stands are `(site, place)`-sorted, so the shaders are the runs of the columns
+/// within [`shade_reach`] in `x`, filtered in `z`.
+pub(crate) fn canopy_light(
+    config: &FloraConfig,
+    stands: &[Stand],
+    view: &VoxelView<'_>,
+    open: f64,
+    receiver: &Stand,
+) -> f64 {
+    let voxel_m = view.config.voxel_m;
+    let width = view.config.width;
+    let mut mine: Vec<Shade> = Vec::with_capacity(4);
+    shade_layers_into(config, receiver, voxel_m, &mut mine);
+    let mut through: Vec<f64> = vec![1.0; mine.len()];
+    let lowest = mine.iter().map(|l| l.top).fold(f64::INFINITY, f64::min);
+    let reach = shade_reach(config, voxel_m);
+    let (x0, z0) = (i64::from(receiver.site.x), i64::from(receiver.site.z));
+    let w = i64::from(width);
+    let xs: Vec<u32> = if 2 * reach + 1 >= w {
+        (0..width).collect()
+    } else {
+        (-reach..=reach).map(|dx| (x0 + dx).rem_euclid(w) as u32).collect()
+    };
+    let mut theirs: Vec<Shade> = Vec::with_capacity(4);
+    for x in xs {
+        let a = stands.partition_point(|s| s.site.x < x);
+        let b = a + stands[a..].partition_point(|s| s.site.x <= x);
+        for s in &stands[a..b] {
+            if s.site == receiver.site || (i64::from(s.site.z) - z0).abs() > reach {
+                continue;
+            }
+            let sc = config.species(s.species);
+            // The envelope first: a crown whose top is not above the receiver's lowest
+            // layer shades none of it.
+            if f64::from(s.site.y) + sc.crown_height(s.wood, voxel_m) <= lowest {
+                continue;
+            }
+            theirs.clear();
+            shade_layers_into(config, s, voxel_m, &mut theirs);
+            for (k, layer) in mine.iter().enumerate() {
+                for above in &theirs {
+                    if above.top <= layer.top {
+                        continue;
+                    }
+                    let dx = wrapped_delta(above.x, layer.x, f64::from(width));
+                    let dz = above.z - layer.z;
+                    if dx * dx + dz * dz > above.radius * above.radius {
+                        continue;
+                    }
+                    through[k] *= above.attenuation;
+                }
+            }
+        }
+    }
+    let total: f64 = mine.iter().map(|l| l.stock).sum();
+    let mut l = 0.0;
+    let mut weighed = 0.0;
+    for (k, layer) in mine.iter().enumerate() {
+        let wgt = if total > 0.0 { layer.stock } else { layer.share };
+        if !(wgt > 0.0) {
+            continue;
+        }
+        l += wgt * open * through[k];
+        weighed += wgt;
+    }
+    let l = if weighed > 0.0 { l / weighed } else { open };
+    light_response(config.species(receiver.species), l)
 }
 
 /// What each gate of the germination predicate read at one site, and which of them
@@ -3821,6 +4111,9 @@ pub(crate) fn standing_water_beside(view: &VoxelView<'_>, site: Site) -> f64 {
 #[cfg(test)]
 #[path = "night_budget_tests.rs"]
 mod night_budget_tests;
+#[cfg(test)]
+#[path = "runner_support_tests.rs"]
+mod runner_support_tests;
 
 #[cfg(test)]
 mod tests {
