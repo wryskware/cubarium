@@ -1,0 +1,32 @@
+# Scenario map `range`: twice the desk ring (512 x 128 x 48 at 0.125 m: 64 m around, 6 m
+# deep), for Veilhound packs and the lanternjaw.
+#
+# Why this size: a pack never paths within `pack.territory_radius_m` (10 m) of another
+# pack's den, so one territory spans about 20 m of ring. The desk's 32 m holds one pack
+# with no room beside it; 64 m holds the two packs the scaled table founds (1 pack at the
+# desk's density, x2) with a third of the ring between their territories, and the prey
+# they hunt at the desk's density. Twice the cells costs about twice the desk's ms/tick,
+# which keeps a run at a few times real time.
+#
+#   voxel_census 2 config=config/scenarios/range.toml seed=N heuristic run=DIR
+base = "../desktop/terrarium.toml"
+
+water_every = 4
+
+[world]
+width = 512
+
+# The desk generator over twice the ring: twice the shelves (halls under them) and arches,
+# and a lake twice as long, so the features keep their density; spires stay one or two.
+[world.landform]
+preset = "terrarium"
+shelves = [6, 8]
+arches = [2, 4]
+lake_m = [8.0, 12.0]
+
+[world.landform.water]
+min_stream_m = 6.0
+min_halls = 2
+
+[fauna.founding]
+reference_land_m2 = 190.0

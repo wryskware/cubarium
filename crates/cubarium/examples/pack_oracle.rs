@@ -8,7 +8,7 @@
 //!     [--state DIR | --seed 1 --found-ticks 6000] [--px 6] [--ticks 1200] [--shower-at 100]
 //! ```
 //!
-//! `--state DIR` loads a saved world (`world.voxel`, `flora.bin`, `fauna.bin`, as
+//! `--state DIR` loads a saved world (`world.voxel` or `world.bin`, `flora.bin`, `fauna.bin`, as
 //! `light_capture --state` writes them); without it the world is founded from `--seed`
 //! and stepped `--found-ticks` first. The frames follow random legal interleavings
 //! (`PackOracle::tick_random`, `--rng SEED`): packs refused while both buffers are read,
@@ -138,10 +138,9 @@ fn main() -> Result<()> {
 
 fn load_or_found(cfg: &VoxelConfig, seed: u64, ticks: u64, state: Option<&PathBuf>) -> Result<(World, Flora, Fauna)> {
     if let Some(d) = state {
-        let world = World::load(&std::fs::read(d.join("world.voxel"))?)?;
-        let flora = cubarium_voxel_flora::snapshot::decode(&std::fs::read(d.join("flora.bin"))?)?;
-        let fauna = Fauna::load(&std::fs::read(d.join("fauna.bin"))?)?;
-        return Ok((world, flora, fauna));
+        // The one safe load: the bodies get their heuristics back, or they rest.
+        let s = cubarium_voxel_sim::saved::load(d, &[]).map_err(anyhow::Error::msg)?;
+        return Ok((s.world, s.flora, s.fauna));
     }
     let params = params_of(cfg, &[])?;
     let founded = found_habitat(

@@ -78,6 +78,7 @@ use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
 use cubarium::voxel::{install_founders_with, policy_args};
 use cubarium::voxel::scene;
+use cubarium_voxel_sim::staged;
 use cubarium_voxel::{Command as WorldCommand, World};
 use cubarium_voxel_fauna::{
     Departure, Fauna, Founder, Senses, Species as Beast, TICK_HZ,
@@ -102,8 +103,27 @@ const CLOSED_EVAPORATION_M_PER_S: f64 = 0.0001;
 /// host draws at random, and an arm has to be re-runnable.
 const PRESET_SEED_BASE: u64 = 1;
 
+/// Arguments that only shape a fresh world: `resume=` leaves them out (the checkpoint
+/// carries the world). A bare word matches exactly; `k=` matches a prefix.
+const FOUNDING_ONLY: &[&str] = &[
+    "preset=", "config=", "seed=", "generated", "closed", "nofauna", "set=", "eggbank=", "introduce=", "world=",
+    "gap=", "night=", "still", "save=", "save_min=", "params=",
+];
+
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let raw: Vec<String> = std::env::args().collect();
+    // `resume=DIR` continues a staged run from its latest checkpoint
+    // (`cubarium_voxel_sim::staged`).
+    let mut args = staged::resume_args(&raw, FOUNDING_ONLY).unwrap_or_else(|e| panic!("{e}"));
+    // A map's own `water_every` (`config/scenarios/*.toml`), unless one is given.
+    if !args.iter().any(|a| a.starts_with("water_every="))
+        && let Some(p) = args.iter().find_map(|a| a.strip_prefix("config="))
+        && let Some(n) = cubarium::voxel::config_water_every(std::path::Path::new(p)).unwrap_or_else(|e| panic!("{e:#}"))
+    {
+        args.push(format!("water_every={n}"));
+    }
+    let stage = staged::StageConfig::from_args(&args).unwrap_or_else(|e| panic!("{e}"));
+    let stage = stage.map(|cfg| (cfg, args.clone()));
     // `threads=N`: this run's share of the machine. The gate runs many of these side by
     // side; without it each takes every core (`cubarium_voxel::set_thread_override`).
     if let Some(n) = args
@@ -243,7 +263,7 @@ fn main() {
     if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("load=")) {
         assert!(sets.is_empty(), "set= is refused beside load=: the saved layers carry their own");
         let (mut sim, minute0) = load_run(std::path::Path::new(dir), &args, heuristic, &policies);
-        run(&mut sim, hours, minute0, save.as_ref(), &timing);
+        run(&mut sim, hours, minute0, save.as_ref(), &timing, stage);
         return;
     }
     let nofauna = args.iter().any(|a| a == "nofauna");
@@ -302,7 +322,7 @@ fn main() {
         }
         introduce_into(&world, &flora, &mut fauna);
         let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
-        run(&mut sim, hours, 0, save.as_ref(), &timing);
+        run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
         return;
     }
     // `config=<path>` is a landscape arm from a host TOML (the Tachyon terrarium, say),
@@ -352,6 +372,7 @@ fn main() {
         // comes back already seeded.
         let params = resolve(arm_config);
         let arm_config = params.world.clone();
+        let founding_started = std::time::Instant::now();
         let founded = cubarium::voxel::found(
             &arm_config,
             &cubarium::voxel::LayerConfig::new(&params, arm_config.voxel_m),
@@ -359,6 +380,7 @@ fn main() {
             cubarium::voxel::Seeds::from(seed_base),
             false,
         );
+        eprintln!("founded in {:.1} s", founding_started.elapsed().as_secs_f64());
         let (world, flora, mut fauna, seeded) =
             (founded.world, founded.flora, founded.fauna, founded.seeded);
         eprintln!(
@@ -375,7 +397,7 @@ fn main() {
         );
         eprintln!(
             "seeded: stands={} logs={} litter_tiles={} founders={:?} animals={} \
-             lanternjaw_eggs={}{}",
+             lanternjaw_eggs={}{} land_m2={:.1} land_scale={:.3} wanted={:?} shortfall={:?}",
             seeded.stands,
             seeded.logs,
             seeded.litter_tiles,
@@ -386,6 +408,10 @@ fn main() {
                 .founding_bank_refused
                 .as_ref()
                 .map_or(String::new(), |why| format!(" (no egg bank: {why})")),
+            seeded.land_m2,
+            seeded.land_scale,
+            seeded.wanted,
+            seeded.shortfall,
         );
         if heuristic {
             eprintln!("founders: the observation-only heuristic (control)");
@@ -394,7 +420,7 @@ fn main() {
         }
         introduce_into(&world, &flora, &mut fauna);
         let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
-        run(&mut sim, hours, 0, save.as_ref(), &timing);
+        run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
         return;
     }
     let params = resolve(cfg.world.clone());
@@ -459,7 +485,7 @@ fn main() {
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
 
-    run(&mut sim, hours, 0, save.as_ref(), &timing);
+    run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
 }
 
 /// How the tick is run and timed: `overlap=`, `ab=` and `modes=`.
@@ -478,7 +504,14 @@ struct Timing {
 /// Step the coupled layers for the asked-for hours, writing one row a simulated minute.
 /// Both arms end here, so a preset world is measured by the same code path as the ridge.
 /// A loaded run starts at `minute0` and prints from the minute after it.
-fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &Timing) {
+fn run(
+    sim: &mut Sim,
+    hours: f64,
+    minute0: u64,
+    save: Option<&SaveAt>,
+    timing: &Timing,
+    stage: Option<(staged::StageConfig, Vec<String>)>,
+) {
     if let Some(on) = timing.overlap {
         sim.set_overlap(on);
     }
@@ -487,7 +520,20 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &
     if let Some(n) = timing.nice_water {
         cubarium::voxel::chiplet::nice_water_pools(n);
     }
-    let total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
+    let mut total_ticks = (hours * 3600.0 * f64::from(TICK_HZ)) as u64;
+    // A staged run (`run=DIR`): checkpoints, `STOP`, the liveness check; a resumed one
+    // keeps its own end.
+    let mut runner = stage.map(|(cfg, args)| {
+        let end = minute0 + total_ticks / TICKS_PER_MIN;
+        staged::Runner::start(cfg, &args, sim, minute0, end).unwrap_or_else(|e| {
+            eprintln!("staged: the load check failed — {e}");
+            std::process::exit(2)
+        })
+    });
+    if let Some(r) = &runner {
+        total_ticks = (r.end_minute() - minute0) * TICKS_PER_MIN;
+        eprintln!("staged run {} to minute {}", r.dir().display(), r.end_minute());
+    }
     let save_min = save.map(|s| s.minute.unwrap_or(minute0 + total_ticks / TICKS_PER_MIN));
     print_header();
     if minute0 == 0 {
@@ -509,6 +555,9 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &
         tick += 1;
         weather.poll(sim);
         deaths.poll(sim, tick);
+        if let Some(r) = runner.as_mut() {
+            r.tick(sim);
+        }
         if tick % TICKS_PER_MIN == 0 {
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
             let minute = tick / TICKS_PER_MIN;
@@ -530,6 +579,15 @@ fn run(sim: &mut Sim, hours: f64, minute0: u64, save: Option<&SaveAt>, timing: &
                 s.write(sim, tick / TICKS_PER_MIN);
             }
             since = std::time::Instant::now();
+            if let Some(r) = runner.as_mut()
+                && let Some(ended) = r.minute(sim, tick / TICKS_PER_MIN)
+            {
+                eprintln!("staged: {ended:?} at minute {}", tick / TICKS_PER_MIN);
+                if ended != staged::Ended::Done {
+                    window.report(tick, sim);
+                    break;
+                }
+            }
         }
         if tick % (60 * TICKS_PER_MIN) == 0 || tick == total_ticks {
             window.report(tick, sim);
@@ -693,18 +751,11 @@ fn load_run(
         shaping.is_empty(),
         "load= resumes a saved world; {shaping:?} only shape a new one — drop them"
     );
-    let read = |name: &str| {
-        std::fs::read(dir.join(name))
-            .unwrap_or_else(|e| panic!("load: {}: {e}", dir.join(name).display()))
-    };
-    let world = World::load(&read("world.bin")).unwrap_or_else(|e| panic!("load world: {e:#}"));
-    let flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin"))
-        .unwrap_or_else(|e| panic!("load flora: {e:#}"));
-    let mut fauna = Fauna::load(&read("fauna.bin")).unwrap_or_else(|e| panic!("load fauna: {e:#}"));
-    let minute: u64 = String::from_utf8(read("minute"))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .expect("load: `minute` holds the saved sim minute");
+    // The one safe load: every body's heuristic back, and a lineage the save ran on a
+    // policy refused unless this run drives it by one (the built-in centres, `policy=`).
+    let driven_by_policy = if heuristic { Vec::new() } else { cubarium::voxel::policy_founders(policies) };
+    let saved = cubarium_voxel_sim::saved::load(dir, &driven_by_policy).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, flora, mut fauna, minute) = (saved.world, saved.flora, saved.fauna, saved.minute);
     eprintln!(
         "loaded {} at minute {minute}: {}x{}x{} stands {} animals {}",
         dir.display(),
@@ -714,8 +765,6 @@ fn load_run(
         flora.view().stands.len(),
         fauna.view().animals.len()
     );
-    // Controllers are not saved: the loaded bodies get their heuristics back first.
-    habitat::reinstall_heuristics(&mut fauna);
     if heuristic {
         eprintln!("founders: the observation-only heuristic (control)");
     } else {

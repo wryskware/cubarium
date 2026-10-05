@@ -87,13 +87,18 @@ const FLOOR_Y: i32 = 3;
 ///
 /// Which generator runs is [`crate::Config::landform`]. [`Landform::Ridge`] is the
 /// original one below, unchanged; [`Landform::Staged`] is [`staged`], relief in metres.
-pub fn landform(world: &mut World) {
+/// A terrarium's build report comes back; the other generators report nothing.
+pub fn landform(world: &mut World) -> Option<crate::terrarium::Report> {
     match world.config.landform.clone() {
-        Landform::Ridge => ridge(world),
-        Landform::Staged(recipe) => staged(world, &recipe),
-        Landform::Terrarium(t) => {
-            crate::terrarium::build(world, &t);
+        Landform::Ridge => {
+            ridge(world);
+            None
         }
+        Landform::Staged(recipe) => {
+            staged(world, &recipe);
+            None
+        }
+        Landform::Terrarium(t) => Some(crate::terrarium::build(world, &t)),
     }
 }
 

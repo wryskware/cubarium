@@ -846,6 +846,16 @@ pub struct Water {
     /// Visible surface cells a pool needs before the host's seed gate counts it (four is
     /// a quarter of a square metre at 0.25 m: under that a pool is a glint).
     pub min_pool_cells: u32,
+    /// Shortest **stream**, spring to lake, metres, a generated terrarium is accepted
+    /// with; a seed below it is redrawn like a seed with no lake. Zero asks for none.
+    /// Read only by the founding's seed gate (scenario maps, 2026-10-04).
+    pub min_stream_m: f64,
+    /// Fewest **halls** (roofed floors: the dark habitat) a generated terrarium is
+    /// accepted with. Zero asks for none.
+    pub min_halls: u32,
+    /// Fewest **grove sites** (floors the tallest trees fit on) a generated terrarium is
+    /// accepted with. Zero asks for none.
+    pub min_groves: u32,
 }
 
 impl Default for Water {
@@ -877,6 +887,9 @@ impl Water {
         lake_floor_band: 2,
         pool_min_fill: 0.05,
         min_pool_cells: 4,
+        min_stream_m: 0.0,
+        min_halls: 0,
+        min_groves: 0,
     };
 
     /// The staged presets' inventory: half a metre of water over the footprint, six per
@@ -936,6 +949,9 @@ impl Water {
         lake_floor_band: 2,
         pool_min_fill: 0.05,
         min_pool_cells: 4,
+        min_stream_m: 0.0,
+        min_halls: 0,
+        min_groves: 0,
     };
 
     /// What a **hand-built fixture** is charged with: the cycle and the rates, at the

@@ -74,7 +74,9 @@ pub mod habitat;
 pub mod params;
 #[cfg(test)]
 mod introduce_tests;
+pub mod saved;
 pub mod scene;
+pub mod staged;
 pub use arena::{
     ARENA_BYSTANDERS, ARENA_FOUNDERS, ARENA_DEPTH, ARENA_HEIGHT, ARENA_VOXEL_M, ARENA_WIDTH, Arena, ArenaGrid,
     arena_start_hour,

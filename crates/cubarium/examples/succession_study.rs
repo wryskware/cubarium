@@ -55,6 +55,7 @@ use cubarium_voxel_flora::{
     DeathCause, Flora, FloraConfig, FloraLedger, Site, Species, Trophic, Via, establishment_gates_with_sky,
 };
 use cubarium_voxel_sim::params::{Layers, Params};
+use cubarium_voxel_sim::staged;
 use cubarium_voxel_sim::{Sim, SimConfig};
 
 const WOODY: [Species; 3] = [Species::Bloomcrown, Species::Lanternberry, Species::Vaulttree];
@@ -108,8 +109,20 @@ fn resolve(args: &[String]) -> Params {
     .unwrap_or_else(|e| panic!("the parameter set: {e}"))
 }
 
+/// Arguments that only shape a fresh founding: `resume=` leaves them out (the checkpoint
+/// carries the world). A bare word matches exactly; `k=` matches a prefix.
+const FOUNDING_ONLY: &[&str] = &["seed=", "minutes=", "save=", "save_min=", "cohort=", "fauna="];
+
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let raw: Vec<String> = std::env::args().collect();
+    // `resume=DIR` continues a staged run (`run=DIR`) from its latest checkpoint
+    // (`cubarium_voxel_sim::staged`). `found` resumes as nothing: branch its checkpoints
+    // with `plants load=DIR/ckpt/mN`.
+    let args = staged::resume_args(&raw, FOUNDING_ONLY).unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        !(staged::resumed(&args) && args.get(1).map(String::as_str) == Some("found")),
+        "a founding is not resumed: branch from its checkpoints with `plants load=DIR/ckpt/mN`"
+    );
     if let Some(n) = arg(&args, "threads=").and_then(|s| s.parse().ok()) {
         cubarium_voxel::set_thread_override(n);
     }
@@ -133,21 +146,36 @@ fn save(dir: &Path, sim: &Sim, minute: u64) {
 }
 
 /// A save, **untouched**: its own plant config is still the layer's. Its founder bodies
-/// get the founding's heuristics back (controllers are not saved).
+/// get the founding's heuristics back through the one safe load
+/// (`cubarium_voxel_sim::saved`; controllers are not saved), and a policy-driven save is
+/// refused: this study runs heuristics.
 fn load_raw(dir: &Path) -> (World, Flora, Fauna, u64) {
-    let read = |n: &str| std::fs::read(dir.join(n)).unwrap_or_else(|e| panic!("{}/{n}: {e}", dir.display()));
-    let world = World::load(&read("world.bin")).expect("world");
-    let flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin")).expect("flora");
-    let mut fauna = Fauna::load(&read("fauna.bin")).expect("fauna");
-    // Controllers are session state and the snapshot skips them: without this every
-    // loaded body rests where it stands (no steps, no bites, no burrs). `found` runs the
-    // seeder's heuristics, so those go back; a policy-driven save has no driver here.
-    for f in Founder::ALL {
-        assert!(!fauna.policy_driven(f), "{}: {} founders were policy-driven; this study runs heuristics", dir.display(), f.name());
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    (s.world, s.flora, s.fauna, s.minute)
+}
+
+/// The staged run (`run=DIR`), started on the world as it stands at `minute0`; `None`
+/// unstaged. A failed load check exits with status 2 and `FAILED` written.
+fn stage(args: &[String], sim: &mut Sim, minute0: u64, end: u64) -> Option<staged::Runner> {
+    let cfg = staged::StageConfig::from_args(args).unwrap_or_else(|e| panic!("{e}"))?;
+    let r = staged::Runner::start(cfg, args, sim, minute0, end).unwrap_or_else(|e| {
+        eprintln!("staged: the load check failed — {e}");
+        std::process::exit(2)
+    });
+    eprintln!("staged run {} to minute {}", r.dir().display(), r.end_minute());
+    Some(r)
+}
+
+/// Tell the runner a minute ended; true means stop.
+fn stop_at(runner: &mut Option<staged::Runner>, sim: &Sim, minute: u64) -> bool {
+    let Some(r) = runner.as_mut() else { return false };
+    match r.minute(sim, minute) {
+        None => false,
+        Some(ended) => {
+            eprintln!("staged: {ended:?} at minute {minute}");
+            ended != staged::Ended::Done
+        }
     }
-    cubarium_voxel_sim::habitat::reinstall_heuristics(&mut fauna);
-    let minute: u64 = String::from_utf8(read("minute")).unwrap().trim().parse().unwrap();
-    (world, flora, fauna, minute)
 }
 
 /// Replace a loaded layer's plant config with the arm's.
@@ -215,12 +243,19 @@ fn found(args: &[String]) {
     }
     let per_min = 60 * u64::from(TICK_HZ);
     let t0 = std::time::Instant::now();
+    let mut runner = stage(args, &mut sim, 0, minutes);
     for minute in 1..=minutes {
         for _ in 0..per_min {
             sim.step();
+            if let Some(r) = runner.as_mut() {
+                r.tick(&sim);
+            }
         }
         if minute % 10 == 0 {
             eprintln!("minute {minute} ({:.0} s wall, {} animals)", t0.elapsed().as_secs_f64(), sim.fauna().view().animals.len());
+        }
+        if stop_at(&mut runner, &sim, minute) {
+            return;
         }
     }
     let at = dir.join(format!("m{minutes}"));
@@ -492,7 +527,11 @@ fn plants(args: &[String]) {
     // config replaces it (finding 2).
     let saved = flora.config().clone();
     let co = cohorts(&world, &flora, &saved, l_min);
-    if let Some(file) = arg(args, "cohort=") {
+    let resumed = staged::resumed(args);
+    if resumed {
+        eprintln!("resumed at minute {minute0}: the cohorts and every readout cover the run from here");
+    }
+    if let Some(file) = arg(args, "cohort=").filter(|_| !resumed) {
         let expect = std::fs::read_to_string(file).unwrap_or_else(|e| panic!("cohort {file}: {e}"));
         let got = co.to_csv();
         assert!(
@@ -562,7 +601,8 @@ fn plants(args: &[String]) {
     };
     let mut windows: Vec<Window> = vec![start];
     let per_min = 60 * u64::from(TICK_HZ);
-    let end = minute0 + (hours * 60.0).round() as u64;
+    let mut runner = stage(args, &mut sim, minute0, minute0 + (hours * 60.0).round() as u64);
+    let end = runner.as_ref().map_or(minute0 + (hours * 60.0).round() as u64, staged::Runner::end_minute);
     let total = (end - minute0) * per_min;
     let mut fw = FaunaWatch::new(&sim, total / 2);
     let width = f64::from(sim.world().config().width);
@@ -577,6 +617,9 @@ fn plants(args: &[String]) {
         for _ in 0..per_min {
             sim.step();
             tick += 1;
+            if let Some(r) = runner.as_mut() {
+                r.tick(&sim);
+            }
             if with_fauna {
                 fw.tick(&sim, &params, tick);
             }
@@ -693,6 +736,9 @@ fn plants(args: &[String]) {
             && save_min.contains(&minute)
         {
             save(&Path::new(d).join(format!("m{minute}")), &sim, minute);
+        }
+        if stop_at(&mut runner, &sim, minute) {
+            break;
         }
     }
     // Flux windows: the ledger's food-side lines over each two hours.
@@ -1318,9 +1364,14 @@ fn fauna(args: &[String]) {
     let want = params.flora_for_world();
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
     let (mut world, mut flora, mut fauna, minute0, _) = load(dir, &want);
-    introduce(&arm, minute0, &params, &mut world, &mut flora, &mut fauna);
+    // A resumed arm already holds its introduced animals.
+    if !staged::resumed(args) {
+        introduce(&arm, minute0, &params, &mut world, &mut flora, &mut fauna);
+    }
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
-    fauna_run(&arm, hours, &params, &mut sim);
+    let mut runner = stage(args, &mut sim, minute0, minute0 + (hours * 60.0).round() as u64);
+    let hours = runner.as_ref().map_or(hours, |r| (r.end_minute() - minute0) as f64 / 60.0);
+    fauna_run(&arm, hours, &params, &mut sim, minute0, &mut runner);
 }
 
 /// The introduction: the seeder's own fauna placement on the world as it stands, with no
@@ -1368,7 +1419,7 @@ fn introduce(arm: &str, minute0: u64, params: &Params, world: &mut World, flora:
 
 /// The earlier study's fauna window: `hours` with the heuristics, one line per lineage per
 /// window (first and second half) and over the run.
-fn fauna_run(arm: &str, hours: f64, params: &Params, sim: &mut Sim) {
+fn fauna_run(arm: &str, hours: f64, params: &Params, sim: &mut Sim, minute0: u64, runner: &mut Option<staged::Runner>) {
     sim.set_overlap(false);
     let hz = u64::from(TICK_HZ);
     let total = (hours * 3600.0).round() as u64 * hz;
@@ -1386,8 +1437,15 @@ fn fauna_run(arm: &str, hours: f64, params: &Params, sim: &mut Sim) {
     println!("stocks,{arm},0,{}", stocks(&sim));
     println!("bodies,{arm},0,{}", bodies(&sim, &params));
     let t0 = std::time::Instant::now();
+    let per_min = 60 * hz;
     for tick in 1..=total {
         sim.step();
+        if let Some(r) = runner.as_mut() {
+            r.tick(sim);
+        }
+        if tick % per_min == 0 && stop_at(runner, sim, minute0 + tick / per_min) {
+            break;
+        }
         let w = usize::from(tick > half);
         for a in sim.fauna().view().animals {
             let Some(f) = a.founder else { continue };

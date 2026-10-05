@@ -87,14 +87,10 @@ fn assemble(world: World, flora: Flora, mut fauna: Fauna, threads: usize) -> Sim
 }
 
 fn load(dir: &Path, threads: usize) -> (Sim, u64) {
-    let read = |name: &str| std::fs::read(dir.join(name)).expect("a snapshot file");
-    let world = World::load(&read("world.bin")).expect("world");
-    let flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin")).expect("flora");
-    let fauna = Fauna::load(&read("fauna.bin")).expect("fauna");
-    let minute: u64 = String::from_utf8(read("minute"))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0);
+    // The one safe load: every lineage's heuristic back (the ones without a built-in
+    // centre rested here before), the built-in centres installed over it by `assemble`.
+    let s = cubarium_voxel_sim::saved::load(dir, &cubarium::voxel::policy_founders(&[])).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, flora, fauna, minute) = (s.world, s.flora, s.fauna, s.minute);
     eprintln!(
         "loaded {} at minute {minute}: stands {} ground {} animals {}",
         dir.display(),

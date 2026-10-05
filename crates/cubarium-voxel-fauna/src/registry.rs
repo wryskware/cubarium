@@ -441,6 +441,7 @@ fn knob_rows() -> Vec<Row> {
         f("starter_litter_energy_density", "energy per organic unit", nonneg, "retained energy density of the starter litter").search(0.5, 4.0),
         f("accept_founder_hours", "founder-hours", nonneg, "founder-hours of adult upkeep a component's stock must cover per founder").search(0.1, 6.0),
         f("clearance_margin_m", "m", nonneg, "slack added to the founder's disc radius when choosing where founders may be placed"),
+        f("reference_land_m2", "m2", nonneg, "dry support area the founding counts are written for; positive scales counts and plant founder caps by the world's own area (0: counts as written)").prov("decision"),
     ]);
     rows
 }

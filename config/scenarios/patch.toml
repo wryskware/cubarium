@@ -1,0 +1,38 @@
+# Scenario map `patch`: the Tachyon panel's ring (160 x 72 x 24 at 0.125 m, the
+# `terrarium-small` generator) under the desktop ecology. For plant and grazing questions.
+#
+# Why Tachyon size and not a quarter of the desk: the desk generator at a quarter size
+# (128 x 64 x 24) made a stream on 2 of 6 seeds and lost its caves and grove sites
+# (scratchpad profile, 2026-10-04), while `terrarium-small` is drawn for this size and made
+# a spring-fed stream (6-13 m), 1-2 halls and 0-3 grove sites on all of seeds 1-8. The
+# floor is about a third of the desk's.
+#
+#   voxel_census 1 config=config/scenarios/patch.toml seed=N heuristic run=DIR
+base = "../desktop/terrarium.toml"
+
+water_every = 4
+
+[world]
+width = 160
+height = 72
+depth = 24
+
+[world.landform]
+preset = "terrarium-small"
+
+# The seed gate: no stream, no patch.
+[world.landform.water]
+min_stream_m = 3.0
+
+# The founding table scales with the dry support area (`habitat::land_m2`): 190 m² is
+# the desk terrarium's (181-197 m² over seeds 1-5), so densities match it.
+[fauna.founding]
+reference_land_m2 = 190.0
+
+# Left out on purpose (too big a range for this map; predator questions go to `range`):
+# lanternjaw (its egg bank) and chorister (Veilhound packs).
+[fauna.founders.lanternjaw]
+founding_count = 0
+
+[fauna.founders.chorister]
+founding_count = 0

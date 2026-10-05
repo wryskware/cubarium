@@ -1,0 +1,14 @@
+# Scenario map `dry-hills`: the `patch` ring drier and steeper, so drained ground (the
+# springturf's) gains on the velvetpad's wet faces. Against `wet-valley`.
+#
+# Visible effect: a lower water table and less water in the world (inventory 1.0 m
+# against 1.5 m), and ground that falls toward the lake twice as steeply, so more
+# faces drain.
+base = "patch.toml"
+
+[world.landform]
+water_level_m = 0.125
+ground_fall = 0.16
+
+[world.landform.water]
+inventory_m = 1.0

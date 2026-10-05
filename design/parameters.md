@@ -4,7 +4,7 @@
 
 Every number of the voxel world's `Config`, the plants' `FloraConfig` and the animals' `FaunaConfig`, one row per path, at the code defaults (`design/ecology-parameter-registry-2026-09-28.md`, package R1). Set them in a config TOML's `[world]` / `[flora]` / `[fauna]` tables or with `--set PATH=VALUE`; a run writes its resolved set as `params.toml` beside its output.
 
-**`world.*`** (352 rows)
+**`world.*`** (355 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -177,6 +177,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.*.water.lake_floor_band` | (absent) | voxels | [0, inf) | 0–4 | - | placeholder | how far above the lowest standing water a body is still the lake |
 | `world.landform.*.water.pool_min_fill` | (absent) | fraction of a cell | [0, 1] | 0.01–0.2 | - | placeholder | how full a void cell must be to count as pool water rather than runoff |
 | `world.landform.*.water.min_pool_cells` | (absent) | visible surface cells | [0, inf) | 1–12 | - | placeholder | visible surface cells a pool needs before the seed gate counts it |
+| `world.landform.*.water.min_stream_m` | (absent) | m | [0, inf) | 0–12 | - | decision (scenario maps 2026-10-04) | shortest spring-to-lake stream a generated terrarium is accepted with (0: any) |
+| `world.landform.*.water.min_halls` | (absent) | halls | [0, inf) | 0–3 | - | decision (scenario maps 2026-10-04) | fewest roofed halls (dark habitat) a generated terrarium is accepted with |
+| `world.landform.*.water.min_groves` | (absent) | grove sites | [0, inf) | 0–20 | - | decision (scenario maps 2026-10-04) | fewest grove sites a generated terrarium is accepted with |
 | `world.landform.staged.base_m` | (absent) | m above y=0 | [0, inf) | 1–6 | - | placeholder | elevation the front edge is built around |
 | `world.landform.staged.back_rise_m` | (absent) | m | [0, inf) | 0.5–5 | - | placeholder | how much higher the back wall stands than the front |
 | `world.landform.staged.basin_floor_m` | (absent) | m above y=0 | [0, inf) | 0.5–3 | - | placeholder | relief below this is compressed rather than cut |
@@ -1294,7 +1297,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1122 rows)
+**`fauna.*`** (1123 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -2415,6 +2418,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founding.starter_litter_energy_density` | 2.0 | energy per organic unit | [0, inf) | 0.5–4 | - | placeholder | retained energy density of the starter litter |
 | `fauna.founding.accept_founder_hours` | 1.0 | founder-hours | [0, inf) | 0.1–6 | - | placeholder | founder-hours of adult upkeep a component's stock must cover per founder |
 | `fauna.founding.clearance_margin_m` | 0.03 | m | [0, inf) |  | - | placeholder | slack added to the founder's disc radius when choosing where founders may be placed |
+| `fauna.founding.reference_land_m2` | 0.0 | m2 | [0, inf) |  | - | decision | dry support area the founding counts are written for; positive scales counts and plant founder caps by the world's own area (0: counts as written) |
 | `fauna.hatch_chance_per_dusk` | 0.3333333333333333 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
 | `fauna.parasite_attach_radius_m` | 0.75 | m | [0, inf) | 0.25–2 | N | placeholder | host search radius from a hatching egg |
 | `fauna.parasite_max_per_host` | 1 | count | [0, inf) | 0–4 | N | placeholder | riders one host carries (0: dormant eggs never hatch) |

@@ -1022,6 +1022,13 @@ impl World {
     /// Generate a world from its config. Deterministic in `config.seed`. Panics on a
     /// config [`Config::validate`] refuses.
     pub fn new(config: Config) -> World {
+        World::new_reporting(config).0
+    }
+
+    /// [`World::new`], with what a terrarium build made ([`crate::terrarium::Report`]:
+    /// its stream, halls and grove sites), for a seed gate that asks for them. `None`
+    /// for the other generators.
+    pub fn new_reporting(config: Config) -> (World, Option<crate::terrarium::Report>) {
         config.validate().expect("World::new needs a valid Config");
         // A staged landscape states the weather that keeps its inventory moving, and it
         // states it before anything is built, so the config the world runs on — and the
@@ -1054,7 +1061,7 @@ impl World {
             solid: SolidColumns::default(),
             config,
         };
-        crate::generate::landform(&mut world);
+        let report = crate::generate::landform(&mut world);
         world.aquifer_m3 = world
             .config
             .aquifer_volume_for_head(world.config.initial_aquifer_head_m);
@@ -1080,7 +1087,7 @@ impl World {
         // The active sets are built here rather than lazily so that a world is never in a
         // state where its cache disagrees with its arrays.
         world.rebuild_active_sets();
-        world
+        (world, report)
     }
 
     /// An all-air world over one bedrock floor row: the fixture builder for tests and
