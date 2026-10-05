@@ -1068,74 +1068,41 @@ fn controllers(
         }
     }
     let fv = flora.view();
-    // The cone occupancy is built once per stage, and only over the columns the due
-    // browsers' rays can reach: a ray reads exactly what it would against
-    // the whole world, and a stage with one browser due indexes one browser's share of
-    // the ring. A static episode's senses hold it instead (cone-speed item 4): built
-    // once, patched from bites and deaths, bodies re-indexed — the same grid either way.
-    // The v2 cone (every sighted forager's: a cone and no hunter's table) reads one cell
-    // per body, exactly as before predation.
+    // The occupancies every due body's rays read: one grid of stand classes and ground
+    // pools held across stages and patched where something moved (SPEED-MATURE,
+    // `senses::LiveGrid`), with the bodies laid in two flavours — the v2 cone's one cell
+    // per body (every sighted forager's: a cone and no hunter's table) and the predation
+    // occupancy's bodies with volume (predation §2.2: the lanternjaw's own sight and a
+    // heuristic prey's look for a threat). A static episode's senses hold the v2 cone
+    // instead (cone-speed item 4): built once, patched from bites and deaths, bodies
+    // re-indexed — the same grid either way.
     let v2_cone: [bool; Founder::COUNT] = Founder::ALL
         .map(|f| f.manifest().cone_range_m > 0.0 && fauna.config.founder(f).hunter.is_none());
-    let observers: Vec<f64> = due
+    let observers = due
         .iter()
-        .filter(|&&i| fauna.animals[i].founder.is_some_and(|f| v2_cone[f.index()]))
-        .map(|&i| fauna.animals[i].pose.x)
-        .collect();
+        .any(|&i| fauna.animals[i].founder.is_some_and(|f| v2_cone[f.index()]));
     let mut held = senses.as_deref_mut().and_then(|s| s.take_cone());
-    // The **predation** occupancy (bodies with volume, predation §2.2) is built only while
-    // a hunter is in the world: the lanternjaw's own sight and a heuristic prey's look for
-    // a threat, out to `flee_sight_m`. It becomes the cone's at contract v3 (P2).
+    // The predation occupancy is read only while a hunter is in the world.
     let hunters_here = fauna
         .animals
         .iter()
         .any(|a| a.founder.is_some_and(|f| fauna.config.founder(f).hunter.is_some()));
-    let predators: Vec<f64> = if hunters_here {
-        due.iter()
-            .filter(|&&i| fauna.animals[i].founder.is_some_and(|f| f.manifest().cone_range_m > 0.0))
-            .map(|&i| fauna.animals[i].pose.x)
-            .collect()
-    } else {
-        Vec::new()
-    };
-    // Both windowed grids are built together, side by side on the compute pool.
-    let mut asks = Vec::new();
-    let cone_ask = (!observers.is_empty() && held.is_none()).then(|| {
-        // The widest cone among the due sighted lineages (a flyer's fan reaches 4 m).
-        let range = due
+    let predators = hunters_here
+        && due
             .iter()
-            .filter_map(|&i| fauna.animals[i].founder)
-            .filter(|f| v2_cone[f.index()])
-            .map(|f| f.manifest().cone_range_m)
-            .fold(Founder::Browser.manifest().cone_range_m, f64::max);
-        asks.push(crate::senses::OccupancyAsk {
-            window: crate::senses::window_columns(view, observers.iter().copied(), range),
-            volume: false,
-        });
-        asks.len() - 1
-    });
-    let predation_ask = (!predators.is_empty()).then(|| {
-        asks.push(crate::senses::OccupancyAsk {
-            window: crate::senses::window_columns(
-                view,
-                predators.iter().copied(),
-                Founder::Browser.manifest().cone_range_m.max(fauna.config.predation.flee_sight_m),
-            ),
-            volume: true,
-        });
-        asks.len() - 1
-    });
-    let mut scratch = std::mem::take(&mut fauna.grid_scratch);
-    let mut built =
-        crate::senses::build_occupancies(view, &fv, &fauna.view(), &asks, threads, &mut scratch);
-    let predation_occupancy = predation_ask.map(|k| std::mem::take(&mut built[k]));
-    let windowed = cone_ask.map(|k| std::mem::take(&mut built[k]));
-    let cone_occupancy = if observers.is_empty() {
+            .any(|&i| fauna.animals[i].founder.is_some_and(|f| f.manifest().cone_range_m > 0.0));
+    let mut live = std::mem::take(&mut fauna.grid_scratch);
+    if predators || (observers && held.is_none()) {
+        live.refresh(view, &fv, &fauna.view(), threads);
+    }
+    let predation_occupancy =
+        predators.then(|| crate::senses::Occ::Live(live.view(view, crate::senses::Flavour::Volume)));
+    let cone_occupancy = if !observers {
         None
     } else if let Some(held) = held.as_mut() {
-        Some(&*held.refresh(view, &fv, &fauna.view()))
+        Some(crate::senses::Occ::Grid(held.refresh(view, &fv, &fauna.view())))
     } else {
-        windowed.as_ref()
+        Some(crate::senses::Occ::Live(live.view(view, crate::senses::Flavour::Flat)))
     };
 
     // **Read side**: every due body's observation and its controller's answer, side by
@@ -1162,7 +1129,7 @@ fn controllers(
             let occupancy = if v2_cone[founder.index()] {
                 cone_occupancy
             } else {
-                predation_occupancy.as_ref()
+                predation_occupancy
             };
             let (obs, writes) =
                 body::observation_read(fauna, i, view, fv, &manifest, senses, occupancy);
@@ -1226,7 +1193,7 @@ fn controllers(
             }
         }
         if driven && hunters_here && fauna.controllers.flees(id) {
-            if let Some(flee) = flee(fauna, i, view, predation_occupancy.as_ref()) {
+            if let Some(flee) = flee(fauna, i, view, predation_occupancy) {
                 actions = flee;
                 lure = 0.0;
                 lift = 0.0;
@@ -1298,10 +1265,7 @@ fn controllers(
     if let Some(s) = senses {
         s.return_cone(held);
     }
-    for occ in predation_occupancy.into_iter().chain(windowed) {
-        scratch.give(occ);
-    }
-    fauna.grid_scratch = scratch;
+    fauna.grid_scratch = live;
 }
 
 /// **The flee rule** of the prey heuristics (predation §2.7), `None` when there is
@@ -1313,7 +1277,7 @@ fn flee(
     fauna: &Fauna,
     i: usize,
     view: &VoxelView<'_>,
-    occupancy: Option<&crate::senses::ConeOccupancy>,
+    occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Option<Actions> {
     let a = &fauna.animals[i];
     let founder = a.founder?;
@@ -1372,7 +1336,7 @@ fn flee(
         }
         let dir = (ex / dist, ey / dist, ez / dist);
         let seen = matches!(
-            crate::senses::ray_first_hit(view, occupancy, a.id, origin, dir, dist + og.width_m),
+            crate::senses::ray_first_hit(view, &occupancy, a.id, origin, dir, dist + og.width_m),
             Some((hit, crate::senses::Fine::Body)) if hit >= dist - og.width_m - v
         );
         if seen {

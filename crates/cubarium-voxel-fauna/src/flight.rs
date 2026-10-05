@@ -955,11 +955,11 @@ pub(crate) fn fruit_in_reach(
 
 /// A flyer's fan ray, first hit named, [`ConeHit::Bloom`] among them.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn fan_first_hit(
+pub(crate) fn fan_first_hit<O: crate::senses::CellOccupancy>(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     blooms: &Blooms,
-    occupancy: &crate::senses::ConeOccupancy,
+    occupancy: &O,
     observer: u64,
     origin: (f64, f64, f64),
     dir: (f64, f64, f64),

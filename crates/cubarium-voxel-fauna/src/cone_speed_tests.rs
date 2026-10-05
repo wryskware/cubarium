@@ -918,38 +918,96 @@ fn the_light_memo_reads_what_the_direct_call_reads() {
     }
 }
 
-// ------------------------------------------------------------------ FAUNA-PAR: the split
+// ------------------------------------------------------------------ SPEED-MATURE: the live grid
 
-/// **The bands build what one pass builds** (FAUNA-PAR): the controller stage's grids,
-/// laid in interleaved bands of cell layers side by side, are the cells, pools and bodies the one-pass
-/// builder lays — windowed or whole, one cell per body or bodies with volume, several
-/// grids at once, at any thread count.
-#[test]
-fn the_occupancy_bands_build_what_one_pass_builds() {
-    for seed in [3u64, 17] {
-        let (world, flora, fauna) = landscape(seed);
-        let (v, fv, av) = (world.view(), flora.view(), fauna.view());
-        let window: Vec<bool> = (0..W).map(|x| x % 3 == 0 || (10..20).contains(&x)).collect();
-        let asks = || {
-            vec![
-                senses::OccupancyAsk { window: Some(window.clone()), volume: false },
-                senses::OccupancyAsk { window: None, volume: true },
-                senses::OccupancyAsk { window: None, volume: false },
-            ]
-        };
-        let want: Vec<senses::ConeOccupancy> = asks()
-            .iter()
-            .map(|a| senses::build_occupancy_as(&v, &fv, &av, true, a.window.as_deref(), a.volume))
-            .collect();
-        // One scratch throughout: later builds lay over earlier builds' dirty grids.
-        let mut scratch = senses::GridScratch::default();
-        for threads in [1, 2, 3, 4, 7, 4] {
-            let got = senses::build_occupancies(&v, &fv, &av, &asks(), threads, &mut scratch);
-            assert!(got == want, "seed {seed}, {threads} threads: the bands differ from one pass");
-            for occ in got {
-                scratch.give(occ);
+/// Refresh `live` and compare both of its flavours, cell by cell and for every observer,
+/// with a fresh one-pass build of the same state.
+fn assert_live_is_fresh(
+    live: &mut senses::LiveGrid,
+    world: &World,
+    flora: &Flora,
+    fauna: &Fauna,
+    threads: usize,
+) {
+    let (v, fv, av) = (world.view(), flora.view(), fauna.view());
+    live.refresh(&v, &fv, &av, threads);
+    let mut observers: Vec<u64> = av.animals.iter().map(|a| a.id).collect();
+    observers.push(u64::MAX);
+    for (flavour, volume) in [(senses::Flavour::Flat, false), (senses::Flavour::Volume, true)] {
+        let want = senses::build_occupancy_as(&v, &fv, &av, true, None, volume);
+        assert_same_cells(&v, &live.view(&v, flavour), &want, &observers);
+        // And whole rays from every skyline eye, a body's own and a stranger's.
+        for &o in origins(&v).iter().step_by(7) {
+            for &dir in fan().iter().step_by(11) {
+                for &id in [observers[0], u64::MAX].iter() {
+                    assert_eq!(
+                        ray_first_hit_cell_in(&v, &live.view(&v, flavour), id, o, dir, 2.0),
+                        ray_first_hit_cell_in(&v, &want, id, o, dir, 2.0),
+                    );
+                }
             }
         }
+    }
+}
+
+/// **The live grid patched equals a fresh build** (SPEED-MATURE): held between stages and
+/// patched only where something moved — a bite that strips a crown, a meal off a heap, a
+/// death and its carrion, bodies moving (two in one cell among them), a stand seeded and
+/// one cleared, plant steps that grow the crowns — every cell, pool top and body reads as
+/// the one-pass build reads it, both flavours, at one thread and three; and the patch
+/// path, not only the rebuild, is what ran.
+#[test]
+fn the_live_grid_patched_reads_as_a_fresh_build() {
+    for (seed, threads) in [(3u64, 1usize), (17, 3)] {
+        let (mut world, mut flora, mut fauna) = landscape(seed);
+        let mut live = senses::LiveGrid::default();
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        // A bite that strips a crown.
+        let site = {
+            let fv = flora.view();
+            fv.stands
+                .iter()
+                .find(|s| fv.layers(s).any(|l| l.edible() > 0.0))
+                .map(|s| s.site)
+                .expect("a stand with edible foliage")
+        };
+        assert!(flora.take_foliage(site, 1e9).is_some());
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        // A partial meal off a heap.
+        let pool = flora.view().ground.iter().find(|g| g.litter > 0.3).map(|g| g.site).expect("a heap");
+        assert!(flora.take_litter(pool, 0.25).is_some());
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        // A death: the body leaves, its carrion lands.
+        let dead = fauna.animals.remove(2);
+        assert!(flora.deposit(
+            dead.site,
+            Deposit { kind: DepositKind::Carrion, organic: 0.9, mineral: 0.02, energy: 1.8 },
+        ));
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        // Bodies move.
+        fauna.animals[1].pose.x += 1.3 * V;
+        fauna.animals[3].pose.z += 0.6 * V;
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        // A stand seeded, another cleared.
+        let gone = flora.view().stands[5].site;
+        let free = (0..W)
+            .flat_map(|x| (0..D).map(move |z| (x, z)))
+            .find(|&(x, z)| flora.view().stands.iter().all(|s| (s.site.x, s.site.z) != (x, z)))
+            .expect("a bare column");
+        assert!(flora.apply(
+            &world,
+            FloraCommand::Seed { x: i64::from(free.0), z: free.1, species: Plant::Bloomcrown, wood: 0.5 },
+        ));
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        flora.apply(&world, FloraCommand::Clear { x: i64::from(gone.x), z: gone.z });
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        // Plant steps: crowns grow and refill.
+        for _ in 0..6 {
+            flora.step_with(&mut world, threads);
+            assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        }
+        assert!(live.patches > 3, "seed {seed}: the patch path never ran ({live:?})");
     }
 }
 

@@ -3013,7 +3013,7 @@ pub struct Fauna {
     /// The controller stage's occupancy grids, kept warm between stages. Session state:
     /// not saved and not cloned.
     #[serde(skip)]
-    grid_scratch: senses::GridScratch,
+    grid_scratch: senses::LiveGrid,
     /// How to build a fresh controller for a founder **born** here, one recipe per
     /// lineage. Skipped by the snapshot for the same reason the controllers are, but
     /// cloned with the layer: see [`FounderFactories`].
@@ -3205,7 +3205,7 @@ impl Fauna {
             ledger: FaunaLedger::default(),
             births_enabled: true,
             controllers: FounderControllers::default(),
-            grid_scratch: senses::GridScratch::default(),
+            grid_scratch: senses::LiveGrid::default(),
             factories: FounderFactories::default(),
             policy_driven: [false; Founder::COUNT],
             policy_digest: [0; Founder::COUNT],

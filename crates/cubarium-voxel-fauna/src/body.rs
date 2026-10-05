@@ -3129,7 +3129,7 @@ pub(crate) fn observation(
     fv: &FloraView<'_>,
     manifest: &Manifest,
     senses: Option<&mut crate::Senses>,
-    cone_occupancy: Option<&crate::senses::ConeOccupancy>,
+    cone_occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Vec<f64> {
     let (obs, writes) = observation_read(fauna, i, view, fv, manifest, senses.as_deref(), cone_occupancy);
     if let Some(s) = senses {
@@ -3149,7 +3149,7 @@ pub(crate) fn observation_read(
     fv: &FloraView<'_>,
     manifest: &Manifest,
     senses: Option<&crate::Senses>,
-    cone_occupancy: Option<&crate::senses::ConeOccupancy>,
+    cone_occupancy: Option<crate::senses::Occ<'_>>,
 ) -> (Vec<f64>, crate::senses::SenseWrites) {
     let mut writes = crate::senses::SenseWrites::default();
     let a = &fauna.animals[i];
@@ -3304,7 +3304,7 @@ pub(crate) fn observation_read(
     // memory, no expansion, no body identity. Geometry alone, so it reads with or without
     // a senses handle.
     if let Some(cn) = module_opt(manifest, "Cone(3, foliage/body)") {
-        let occupancy = cone_occupancy.expect("browser observations prepare cone occupancy");
+        let occupancy = &cone_occupancy.expect("browser observations prepare cone occupancy");
         let fruit = manifest.cone_counts_fruit.then_some(fv);
         let cone = crate::senses::cone_readings_in(
             view, fruit, occupancy, a.id, &a.pose, standing_y, manifest, &body,
@@ -3340,7 +3340,7 @@ fn flyer_observation(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     manifest: &Manifest,
-    cone_occupancy: Option<&crate::senses::ConeOccupancy>,
+    cone_occupancy: Option<crate::senses::Occ<'_>>,
     flight: &crate::Flight,
 ) -> Vec<f64> {
     let a = &fauna.animals[i];
@@ -3412,7 +3412,7 @@ fn flyer_observation(
                     [a.pose.x],
                     manifest.cone_range_m,
                 );
-                &owned
+                crate::senses::Occ::Grid(&owned)
             }
         };
         let origin = crate::flight::eye(a, &body);
@@ -3426,7 +3426,7 @@ fn flyer_observation(
             for &oyaw in manifest.ray_yaw_offsets_deg {
                 for &opitch in manifest.ray_pitch_offsets_deg {
                     let dir = crate::senses::ray_direction(a.pose.heading_rad, centre, oyaw, opitch);
-                    match crate::flight::fan_first_hit(view, fv, &blooms, occupancy, a.id, origin, dir, range) {
+                    match crate::flight::fan_first_hit(view, fv, &blooms, &occupancy, a.id, origin, dir, range) {
                         None => clear += 1,
                         Some((d, h)) => {
                             let p = (1.0 - d / range).clamp(0.0, 1.0);
@@ -4334,7 +4334,7 @@ mod tests {
             &fv,
             &Founder::Browser.manifest(),
             None,
-            Some(&cone_occupancy),
+            Some((&cone_occupancy).into()),
         );
         assert_eq!(obs.len(), 37);
         assert_eq!(obs[36], 1.0, "the cone reads the real world");
