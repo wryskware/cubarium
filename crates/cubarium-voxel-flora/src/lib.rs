@@ -4866,7 +4866,7 @@ impl Flora {
     /// the layer's sky cache and drink scratch until [`Flora::plan_drink`]. Reads `stands`,
     /// the config and the world; a caller may read the layer beside it.
     pub fn read_planned(&self, step: &mut PlantStep, world: &World, threads: usize) {
-        step.read(self, world, threads);
+        cubarium_voxel::voxel_phase!(FloraStep, { step.read(self, world, threads) });
     }
 
     /// The drink planned off the read: each stand's and vine's share credited, the sky

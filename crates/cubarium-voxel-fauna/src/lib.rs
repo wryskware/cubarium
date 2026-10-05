@@ -3323,7 +3323,7 @@ impl Fauna {
     /// The first part: the clock, the terrain and maintenance. Its voiding (dung, gut
     /// seeds) writes the plant layer's ground.
     pub fn begin_tick(&mut self, world: &World, flora: &mut Flora) -> FaunaTick {
-        FaunaTick(step::begin(self, world, flora))
+        cubarium_voxel::voxel_phase!(FaunaStep, { FaunaTick(step::begin(self, world, flora)) })
     }
 
     /// The read side: the litter field's due update and the controller stage. Reads the
@@ -3336,13 +3336,15 @@ impl Fauna {
         senses: Option<&mut Senses>,
         threads: usize,
     ) {
-        step::read(self, world, flora, senses, &tick.0, threads);
+        cubarium_voxel::voxel_phase!(FaunaStep, {
+            step::read(self, world, flora, senses, &tick.0, threads)
+        });
     }
 
     /// The writes: the act (feeding through the plant layer's `take_*`), births, deaths
     /// and the burr pass.
     pub fn finish_tick(&mut self, tick: FaunaTick, world: &World, flora: &mut Flora) {
-        step::finish(self, world, flora, tick.0);
+        cubarium_voxel::voxel_phase!(FaunaStep, { step::finish(self, world, flora, tick.0) });
     }
 
     /// Apply a command now, between ticks, the way the plant layer's are applied. Returns
