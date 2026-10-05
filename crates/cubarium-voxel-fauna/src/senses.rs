@@ -667,8 +667,24 @@ impl Senses {
 
     /// The standing face's sky visibility through the held memo, or `None` when this
     /// senses handle does not hold one.
+    #[cfg(test)]
     pub(crate) fn held_sky(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> Option<f64> {
         self.light.as_deref_mut().map(|m| m.sky(view, x, y, z))
+    }
+
+    /// [`Senses::held_sky`] without writing: `None` when no memo is held, `Some(None)`
+    /// when the memo has not computed that face yet. The parallel observation stage reads
+    /// this and hands a miss back as a [`SenseWrites`] to remember.
+    pub(crate) fn peek_sky(&self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> Option<Option<f64>> {
+        self.light.as_deref().map(|m| m.peek(view, x, y, z))
+    }
+
+    /// Make sure the held light memo (if any) is indexed for the current terrain, so a
+    /// read-only [`Senses::peek_sky`] can hit it.
+    pub(crate) fn index_light(&mut self, view: &VoxelView<'_>) {
+        if let Some(m) = self.light.as_deref_mut() {
+            m.ensure_index(view);
+        }
     }
 
     /// Lend the held occupancy out for a controller stage (see [`Senses::return_cone`]).
@@ -750,28 +766,57 @@ impl Senses {
     /// Advance a body's trend state and return the trend channel for this sample. The
     /// first sample of a body (a birth, or the start of a fresh episode) initializes the
     /// history from itself and emits **zero** — no false gradient.
+    #[cfg(test)]
     pub(crate) fn advance_chem_trend(
         &mut self,
         id: u64,
         response: f64,
         manifest: &Manifest,
     ) -> f64 {
+        let (trend, smoothed) = self.peek_chem_trend(id, response, manifest);
+        self.set_chem_trend(id, smoothed);
+        trend
+    }
+
+    /// [`Senses::advance_chem_trend`] without writing: the trend channel and the smoothed
+    /// value the body's store holds afterwards ([`Senses::set_chem_trend`]). A body's store
+    /// is its own, so the stores of a stage's bodies can be written back in any order.
+    pub(crate) fn peek_chem_trend(&self, id: u64, response: f64, manifest: &Manifest) -> (f64, f64) {
         let dt = manifest.controller_period_s.max(1e-9);
         let tau = manifest.tunings.chem_tau_s.max(1e-9);
         let scale = manifest.tunings.trend_scale_s;
-        let entry = self
-            .chem_trend
-            .entry(id)
-            .or_insert_with(|| ChemTrend { smoothed: response });
-        let prev = entry.smoothed;
+        let prev = self.chem_trend.get(&id).map_or(response, |e| e.smoothed);
         let alpha = 1.0 - (-(dt / tau)).exp();
         let s = prev + alpha * (response - prev);
         if !s.is_finite() {
-            return 0.0;
+            return (0.0, prev);
         }
-        entry.smoothed = s;
         let rate = (s - prev) / dt;
-        (rate * scale).clamp(-1.0, 1.0)
+        ((rate * scale).clamp(-1.0, 1.0), s)
+    }
+
+    pub(crate) fn set_chem_trend(&mut self, id: u64, smoothed: f64) {
+        self.chem_trend.insert(id, ChemTrend { smoothed });
+    }
+}
+
+/// What one observation would have written into the [`Senses`] handle, held back so the
+/// observation itself only reads (the parallel controller stage): the body's chem-trend
+/// store and a light-memo miss. [`SenseWrites::apply`] writes them.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SenseWrites {
+    pub chem: Option<(u64, f64)>,
+    pub sky: Option<(i64, u32, u32, f64)>,
+}
+
+impl SenseWrites {
+    pub(crate) fn apply(self, senses: &mut Senses, view: &VoxelView<'_>) {
+        if let Some((id, smoothed)) = self.chem {
+            senses.set_chem_trend(id, smoothed);
+        }
+        if let (Some((x, y, z, v)), Some(m)) = (self.sky, senses.light.as_deref_mut()) {
+            m.remember(view, x, y, z, v);
+        }
     }
 }
 
@@ -991,27 +1036,11 @@ impl ConeOccupancy {
         view: &VoxelView<'_>,
         fv: &FloraView<'_>,
         window: Option<&[bool]>,
-        mut claim: impl FnMut(usize, usize, usize),
+        claim: impl FnMut(usize, usize, usize),
     ) {
-        for foliage_pass in [true, false] {
-            for (si, stand) in fv.stands.iter().enumerate() {
-                for (li, layer) in fv.profile_layers(stand).iter().enumerate() {
-                    if layer.kind.bears_foliage() != foliage_pass {
-                        continue;
-                    }
-                    let code = env_code(layer_class(layer));
-                    for_each_layer_cell(view, stand.site, layer, window, |cell| {
-                        let b = &mut self.cells[cell];
-                        if *b & ENV_MASK == 0 {
-                            *b |= code;
-                            if foliage_pass {
-                                claim(cell, si, li);
-                            }
-                        }
-                    });
-                }
-            }
-        }
+        let discs = StandDiscs::of(fv, view.config.height, 1);
+        let mut band = Band::whole(&mut self.cells, view);
+        band.lay_stands(view, &discs, window, claim);
     }
 
     /// Ground pools occlude up to their physical height over the face (D3): organic /
@@ -1026,24 +1055,11 @@ impl ConeOccupancy {
         density: f64,
     ) {
         let c = view.config;
-        for g in ground {
-            let Some(top) = pool_top_m(g, c.voxel_m, density) else {
-                continue;
-            };
-            if !column_seen(c, window, i64::from(g.site.x)) {
-                continue;
-            }
-            let mut y = g.site.y + 1;
-            while y < c.height && f64::from(y) * c.voxel_m < top {
-                let cell = c.index(i64::from(g.site.x), y, g.site.z);
-                let b = &mut self.cells[cell];
-                if *b & (ENV_MASK | POOL_BIT) == 0 {
-                    *b |= POOL_BIT;
-                    self.pools.push((cell as u32, top));
-                }
-                y += 1;
-            }
-        }
+        let tops = ground
+            .into_iter()
+            .filter_map(|g| pool_top_m(g, c.voxel_m, density).map(|top| (g.site, top)));
+        let mut band = Band::whole(&mut self.cells, view);
+        band.lay_pools(view, tops, window, &mut self.pools);
     }
 
     /// Clear every body's bit and forget the list, for a re-index.
@@ -1065,13 +1081,7 @@ impl ConeOccupancy {
         self.lay_bodies_as(view, fauna, window, false);
     }
 
-    /// `volume` false is [`ConeOccupancy::lay_bodies`]'s one cell per body. `volume` true
-    /// is **bodies with volume** (`design/predation-and-flight-2026-09-28.md` §2.2), the
-    /// predation queries' occupancy until contract v3: every body fills its footprint disc
-    /// — the columns whose centres lie within its radius, and always its own — times its
-    /// current height, from the layer over its standing face up through
-    /// `ceil(height / voxel)` layers, in animal order. A 0.45 m lanternjaw is four cells
-    /// tall at 0.125 m. Movement still ignores other animals.
+    /// [`Band::lay_bodies`] over the whole grid.
     fn lay_bodies_as(
         &mut self,
         view: &VoxelView<'_>,
@@ -1079,13 +1089,299 @@ impl ConeOccupancy {
         window: Option<&[bool]>,
         volume: bool,
     ) {
+        let mut band = Band::whole(&mut self.cells, view);
+        band.lay_bodies(view, fauna, window, volume, &mut self.bodies);
+        // Stable: bodies sharing a cell stay in animal order.
+        self.bodies.sort_by_key(|&(cell, _)| cell);
+    }
+}
+
+/// One profile layer's disc as the occupancy lays it, read once from the plant layer: its
+/// stand's column, its rows, its radius and the class it shows an eye.
+#[derive(Clone, Copy, Debug)]
+struct LayerDisc {
+    x: i64,
+    z: i64,
+    rows: (i64, i64),
+    span: i64,
+    r2: f64,
+    code: u8,
+    stand: u32,
+    layer: u32,
+}
+
+impl LayerDisc {
+    fn of(site: Site, layer: &StandLayer, si: usize, li: usize) -> LayerDisc {
+        LayerDisc {
+            x: i64::from(site.x),
+            z: i64::from(site.z),
+            rows: layer.cells,
+            span: layer.radius_v.ceil() as i64,
+            r2: layer.radius_v * layer.radius_v,
+            code: env_code(layer_class(layer)),
+            stand: si as u32,
+            layer: li as u32,
+        }
+    }
+}
+
+/// The bands among `bands` (band `k` owns layers `y % bands == k`) that own a layer of
+/// `from..=to` a lay can touch (`0 < y < height`), in band order.
+fn bands_of(from: i64, to: i64, height: u32, bands: usize, mut f: impl FnMut(usize)) {
+    let (from, to) = (from.max(1), to.min(i64::from(height) - 1));
+    if from > to {
+        return;
+    }
+    if (to - from + 1) as usize >= bands {
+        (0..bands).for_each(f);
+        return;
+    }
+    // Fewer consecutive layers than bands: each falls to a different band.
+    for y in from..=to {
+        f(y as usize % bands);
+    }
+}
+
+/// Every stand's layer discs in the order [`Band::lay_stands`] lays them — the
+/// foliage-bearing layers of every stand (stand order, then layer order), then the
+/// trunks likewise — sorted into the bands that own their layers. Read once per stage
+/// (it was read once per pass per grid), in stand chunks across the compute pool when
+/// `threads` allows; a band reads its own discs chunk by chunk, in the same order.
+struct StandDiscs {
+    /// `[chunk][band]`: the chunk's foliage discs, and its trunk discs, a band lays.
+    parts: Vec<(Vec<Vec<LayerDisc>>, Vec<Vec<LayerDisc>>)>,
+}
+
+impl StandDiscs {
+    /// Read serially: the one-band whole-grid build's.
+    fn of(fv: &FloraView<'_>, height: u32, bands: usize) -> StandDiscs {
+        StandDiscs {
+            parts: vec![StandDiscs::read(fv, height, bands, 0..fv.stands.len())],
+        }
+    }
+
+    /// One chunk of stands' discs, by band.
+    fn read(fv: &FloraView<'_>, height: u32, bands: usize, stands: std::ops::Range<usize>) -> DiscPart {
+        let (mut foliage, mut trunks) = (vec![Vec::new(); bands], vec![Vec::new(); bands]);
+        let mut buf = Vec::new();
+        for si in stands {
+            let stand = &fv.stands[si];
+            buf.clear();
+            fv.profile_layers_into(stand, &mut buf);
+            for (li, layer) in buf.iter().enumerate() {
+                let disc = LayerDisc::of(stand.site, layer, si, li);
+                let lists = if layer.kind.bears_foliage() { &mut foliage } else { &mut trunks };
+                bands_of(disc.rows.0, disc.rows.1, height, bands, |b| lists[b].push(disc));
+            }
+        }
+        (foliage, trunks)
+    }
+}
+
+type DiscPart = (Vec<Vec<LayerDisc>>, Vec<Vec<LayerDisc>>);
+type TopPart = Vec<Vec<(Site, f64)>>;
+
+/// Every ground pool's top ([`pool_top_m`]), `(site, top)` in ground order, sorted into
+/// the bands that own the layers it reaches, in ground chunks like [`StandDiscs`].
+struct PoolTops {
+    /// `[chunk][band]`.
+    parts: Vec<TopPart>,
+}
+
+impl PoolTops {
+    /// One chunk of ground's pool tops, by band.
+    fn read(view: &VoxelView<'_>, ground: &[Ground], density: f64, bands: usize) -> TopPart {
+        let c = view.config;
+        let mut out = vec![Vec::new(); bands];
+        for g in ground {
+            let Some(top) = pool_top_m(g, c.voxel_m, density) else {
+                continue;
+            };
+            // The layers it reaches: from the one over its face while under its top.
+            let from = g.site.y + 1;
+            let mut to = from;
+            while to < c.height && f64::from(to) * c.voxel_m < top {
+                to += 1;
+            }
+            if to > from {
+                bands_of(i64::from(from), i64::from(to) - 1, c.height, bands, |b| {
+                    out[b].push((g.site, top));
+                });
+            }
+        }
+        out
+    }
+}
+
+/// The stage's discs and pool tops, read in stand and ground chunks in one go on the
+/// compute pool.
+fn read_discs_and_tops(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    density: f64,
+    bands: usize,
+    threads: usize,
+) -> (StandDiscs, PoolTops) {
+    enum Part {
+        Discs(DiscPart),
+        Tops(TopPart),
+    }
+    let height = view.config.height;
+    let mut jobs: Vec<crate::par::Job<'_, Part>> = Vec::new();
+    for r in crate::par::ranges(fv.stands.len(), threads, STANDS_PER_JOB) {
+        jobs.push(Box::new(move || Part::Discs(StandDiscs::read(fv, height, bands, r))));
+    }
+    for r in crate::par::ranges(fv.ground.len(), threads, GROUND_PER_JOB) {
+        jobs.push(Box::new(move || Part::Tops(PoolTops::read(view, &fv.ground[r], density, bands))));
+    }
+    let (mut discs, mut tops) = (StandDiscs { parts: Vec::new() }, PoolTops { parts: Vec::new() });
+    // Job order is stand chunks, then ground chunks, each in order.
+    for part in crate::par::run(threads, jobs) {
+        match part {
+            Part::Discs(d) => discs.parts.push(d),
+            Part::Tops(t) => tops.parts.push(t),
+        }
+    }
+    (discs, tops)
+}
+
+/// The fewest stands one job reads layers for.
+const STANDS_PER_JOB: usize = 128;
+/// The fewest ground entries one job reads pool tops for.
+const GROUND_PER_JOB: usize = 1024;
+
+/// Some cell layers of a dense occupancy grid ([`cubarium_voxel::Config::index`] is
+/// `y`-major, so one layer is one contiguous run of `plane` cells): `rows[y]` is layer
+/// `y`'s cells when this band owns it. Every lay below touches only its own layers' cells,
+/// in the whole grid's order, so a band holds exactly what the same layers hold after a
+/// whole-grid build: bands can be laid side by side and their side lists joined and
+/// sorted by cell. A band owns interleaved layers (`y % bands`), so the ground's few
+/// busy layers are shared out.
+struct Band<'a> {
+    /// Which band of [`Band::interleaved`]'s this is (0 for a whole grid).
+    index: usize,
+    rows: Vec<Option<&'a mut [u8]>>,
+    owns: Vec<bool>,
+    plane: usize,
+}
+
+impl<'a> Band<'a> {
+    fn whole(cells: &'a mut [u8], view: &VoxelView<'_>) -> Band<'a> {
+        let plane = view.config.width as usize * view.config.depth as usize;
+        let rows: Vec<Option<&mut [u8]>> = cells.chunks_mut(plane).map(Some).collect();
+        Band {
+            index: 0,
+            owns: vec![true; rows.len()],
+            rows,
+            plane,
+        }
+    }
+
+    /// Grid `cells` split into `n` bands, band `k` owning the layers `y % n == k`.
+    fn interleaved(cells: &'a mut [u8], view: &VoxelView<'_>, n: usize) -> Vec<Band<'a>> {
+        let plane = view.config.width as usize * view.config.depth as usize;
+        let height = view.config.height as usize;
+        let mut bands: Vec<Band<'a>> = (0..n)
+            .map(|index| Band {
+                index,
+                rows: (0..height).map(|_| None).collect(),
+                owns: vec![false; height],
+                plane,
+            })
+            .collect();
+        for (y, row) in cells.chunks_mut(plane).enumerate() {
+            let b = &mut bands[y % n];
+            b.rows[y] = Some(row);
+            b.owns[y] = true;
+        }
+        bands
+    }
+
+    /// The byte of `cell`, which is in owned layer `y`.
+    #[inline]
+    fn byte<'r>(rows: &'r mut [Option<&'a mut [u8]>], plane: usize, cell: usize, y: u32) -> &'r mut u8 {
+        let row = rows[y as usize].as_deref_mut().expect("a band lays only its own layers");
+        &mut row[cell - y as usize * plane]
+    }
+
+    fn lay_stands(
+        &mut self,
+        view: &VoxelView<'_>,
+        discs: &StandDiscs,
+        window: Option<&[bool]>,
+        mut claim: impl FnMut(usize, usize, usize),
+    ) {
+        let Band { index, rows, owns, plane } = self;
+        let (k, plane) = (*index, *plane);
+        for foliage_pass in [true, false] {
+            let lists = discs.parts.iter().map(|(f, t)| if foliage_pass { &f[k] } else { &t[k] });
+            for d in lists.flatten() {
+                for_each_disc_cell(view.config, d, window, owns, |cell, y| {
+                    let b = Band::byte(rows, plane, cell, y);
+                    if *b & ENV_MASK == 0 {
+                        *b |= d.code;
+                        if foliage_pass {
+                            claim(cell, d.stand as usize, d.layer as usize);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    /// See [`ConeOccupancy::lay_pools`]: `tops` is every ground entry holding organic
+    /// matter, in ground order, with its pool top ([`pool_top_m`]). The pools reaching this
+    /// band's cells are pushed onto `pools` in ground order.
+    fn lay_pools(
+        &mut self,
+        view: &VoxelView<'_>,
+        tops: impl IntoIterator<Item = (Site, f64)>,
+        window: Option<&[bool]>,
+        pools: &mut Vec<(u32, f64)>,
+    ) {
+        let c = view.config;
+        for (site, top) in tops {
+            if !column_seen(c, window, i64::from(site.x)) {
+                continue;
+            }
+            let mut y = site.y + 1;
+            while y < c.height && f64::from(y) * c.voxel_m < top {
+                if self.owns[y as usize] {
+                    let cell = c.index(i64::from(site.x), y, site.z);
+                    let b = Band::byte(&mut self.rows, self.plane, cell, y);
+                    if *b & (ENV_MASK | POOL_BIT) == 0 {
+                        *b |= POOL_BIT;
+                        pools.push((cell as u32, top));
+                    }
+                }
+                y += 1;
+            }
+        }
+    }
+
+    /// `volume` false is [`ConeOccupancy::lay_bodies`]'s one cell per body. `volume` true
+    /// is **bodies with volume** (`design/predation-and-flight-2026-09-28.md` §2.2), the
+    /// predation queries' occupancy until contract v3: every body fills its footprint disc
+    /// — the columns whose centres lie within its radius, and always its own — times its
+    /// current height, from the layer over its standing face up through
+    /// `ceil(height / voxel)` layers, in animal order. A 0.45 m lanternjaw is four cells
+    /// tall at 0.125 m. Movement still ignores other animals. The slab's cells are pushed
+    /// onto `bodies` in animal order, unsorted.
+    fn lay_bodies(
+        &mut self,
+        view: &VoxelView<'_>,
+        fauna: &crate::FaunaView<'_>,
+        window: Option<&[bool]>,
+        volume: bool,
+        bodies: &mut Vec<(u32, u64)>,
+    ) {
         let c = view.config;
         let v = c.voxel_m;
         for a in fauna.animals {
             let Some((ax, az)) = a.pose.column(v, c.depth) else {
                 continue;
             };
-            let base = i64::from(a.sense_layer(v)) + 1;
+            let first = i64::from(a.sense_layer(v)) + 1;
             let geometry = if volume { crate::body_of(fauna.config, a) } else { None };
             let (radius, tall) = match geometry {
                 Some(b) => (
@@ -1094,6 +1390,10 @@ impl ConeOccupancy {
                 ),
                 None => (0.0, 1),
             };
+            let (from, to) = (first, first + tall);
+            if !(from..to).any(|y| y > 0 && y < i64::from(c.height) && self.owns[y as usize]) {
+                continue;
+            }
             let span = (radius / v).ceil() as i64;
             for dz in -span..=span {
                 let z = i64::from(az) + dz;
@@ -1114,19 +1414,17 @@ impl ConeOccupancy {
                     if !column_seen(c, window, wx) {
                         continue;
                     }
-                    for layer in base..base + tall {
-                        if layer <= 0 || layer >= i64::from(c.height) {
+                    for layer in from..to {
+                        if layer <= 0 || layer >= i64::from(c.height) || !self.owns[layer as usize] {
                             continue;
                         }
                         let cell = c.index(wx, layer as u32, z as u32);
-                        self.cells[cell] |= BODY_BIT;
-                        self.bodies.push((cell as u32, a.id));
+                        *Band::byte(&mut self.rows, self.plane, cell, layer as u32) |= BODY_BIT;
+                        bodies.push((cell as u32, a.id));
                     }
                 }
             }
         }
-        // Stable: bodies sharing a cell stay in animal order.
-        self.bodies.sort_by_key(|&(cell, _)| cell);
     }
 }
 
@@ -1155,38 +1453,54 @@ fn column_seen(c: &cubarium_voxel::Config, window: Option<&[bool]>, cx: i64) -> 
 
 /// Every cell a profile layer's disc covers — its rows, the integer disc of its radius
 /// around the stand's column, clipped to the strip's `z` range and the window.
-fn for_each_layer_cell(
-    view: &VoxelView<'_>,
-    site: Site,
-    layer: &StandLayer,
+fn for_each_disc_cell(
+    c: &cubarium_voxel::Config,
+    d: &LayerDisc,
     window: Option<&[bool]>,
-    mut f: impl FnMut(usize),
+    owns: &[bool],
+    mut f: impl FnMut(usize, u32),
 ) {
-    let c = view.config;
-    let span = layer.radius_v.ceil() as i64;
-    let r2 = layer.radius_v * layer.radius_v;
-    let root = i64::from(site.x);
-    if window.is_some() && !(root - span..=root + span).any(|cx| column_seen(c, window, cx)) {
+    // Only the layers the band being laid owns.
+    let owned = |y: i64| y > 0 && y < i64::from(c.height) && owns[y as usize];
+    if !(d.rows.0..=d.rows.1).any(owned) {
         return;
     }
-    for cell_y in layer.cells.0..=layer.cells.1 {
-        if cell_y <= 0 || cell_y as u32 >= c.height {
+    if window.is_some() && !(d.x - d.span..=d.x + d.span).any(|cx| column_seen(c, window, cx)) {
+        return;
+    }
+    let (width, depth) = (i64::from(c.width), i64::from(c.depth));
+    // A disc narrower than the ring wraps at most once either way.
+    let wrap = |x: i64| {
+        if d.span >= width {
+            x.rem_euclid(width)
+        } else if x < 0 {
+            x + width
+        } else if x >= width {
+            x - width
+        } else {
+            x
+        }
+    };
+    for cell_y in d.rows.0..=d.rows.1 {
+        if !owned(cell_y) {
             continue;
         }
-        for dz in -span..=span {
-            for dx in -span..=span {
-                if (dx * dx + dz * dz) as f64 > r2 {
+        for dz in -d.span..=d.span {
+            let z = d.z + dz;
+            if z < 0 || z >= depth {
+                continue;
+            }
+            // `Config::index` of `(·, cell_y, z)`.
+            let row = (cell_y * depth + z) * width;
+            for dx in -d.span..=d.span {
+                if (dx * dx + dz * dz) as f64 > d.r2 {
                     continue;
                 }
-                let z = i64::from(site.z) + dz;
-                if z < 0 || z >= i64::from(c.depth) {
+                let cx = wrap(d.x + dx);
+                if window.is_some_and(|w| !w[cx as usize]) {
                     continue;
                 }
-                let cx = (root + dx).rem_euclid(i64::from(c.width));
-                if !column_seen(c, window, cx) {
-                    continue;
-                }
-                f(c.index(cx, cell_y as u32, z as u32));
+                f((row + cx) as usize, cell_y as u32);
             }
         }
     }
@@ -1226,24 +1540,168 @@ pub(crate) fn cone_occupancy_window(
     observer_x_m: impl IntoIterator<Item = f64>,
     range_m: f64,
 ) -> ConeOccupancy {
+    let window = window_columns(view, observer_x_m, range_m);
+    build_occupancy(view, fv, fauna, true, window.as_deref())
+}
+
+/// The columns observers at `observer_x_m` can see within `range_m`, plus a column of
+/// margin either side; `None` (the whole ring) when that is every column or nothing sane
+/// bounds it.
+pub(crate) fn window_columns(
+    view: &VoxelView<'_>,
+    observer_x_m: impl IntoIterator<Item = f64>,
+    range_m: f64,
+) -> Option<Vec<bool>> {
     let c = view.config;
     let width = i64::from(c.width);
     let mut window = vec![false; c.width as usize];
     for x in observer_x_m {
         if !x.is_finite() || !range_m.is_finite() {
             // Nothing sane to bound: fall back to the whole ring.
-            return build_occupancy(view, fv, fauna, true, None);
+            return None;
         }
         let lo = ((x - range_m) / c.voxel_m).floor() as i64 - 1;
         let hi = ((x + range_m) / c.voxel_m).floor() as i64 + 1;
         if hi - lo + 1 >= width {
-            return build_occupancy(view, fv, fauna, true, None);
+            return None;
         }
         for cx in lo..=hi {
             window[cx.rem_euclid(width) as usize] = true;
         }
     }
-    build_occupancy(view, fv, fauna, true, Some(&window))
+    Some(window)
+}
+
+/// One occupancy a controller stage asks [`build_occupancies`] for: its window (`None`,
+/// the whole ring) and whether its bodies have volume (the predation occupancy) or are
+/// one cell (the v2 cone's). Ground pools always occlude.
+pub(crate) struct OccupancyAsk {
+    pub window: Option<Vec<bool>>,
+    pub volume: bool,
+}
+
+/// Occupancy grids kept between controller stages, so a stage reuses warm buffers instead
+/// of faulting in fresh pages for every grid. Session state, like the controllers: not
+/// saved and not cloned.
+#[derive(Default)]
+pub(crate) struct GridScratch {
+    grids: Vec<Vec<u8>>,
+}
+
+impl GridScratch {
+    /// A buffer of `cells` bytes, **not** cleared: a band clears its own layers.
+    fn take(&mut self, cells: usize) -> Vec<u8> {
+        match self.grids.pop() {
+            Some(mut g) => {
+                g.resize(cells, 0);
+                g
+            }
+            None => vec![0; cells],
+        }
+    }
+
+    /// Keep a finished stage's grid for the next stage.
+    pub(crate) fn give(&mut self, occ: ConeOccupancy) {
+        self.grids.push(occ.cells);
+    }
+}
+
+impl Clone for GridScratch {
+    fn clone(&self) -> Self {
+        GridScratch::default()
+    }
+}
+
+impl std::fmt::Debug for GridScratch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GridScratch({} grids)", self.grids.len())
+    }
+}
+
+/// **The controller stage's occupancies, side by side**: each ask is what
+/// [`build_occupancy_as`] builds for it (the same cells, pools and bodies), but the stand
+/// layers and the pool tops are read once for all of them, and every grid is laid in
+/// interleaved bands of cell layers ([`Band`]) on the compute pool when `threads` is
+/// more than one. The grids come from (and go back to) `scratch`.
+pub(crate) fn build_occupancies(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    fauna: &crate::FaunaView<'_>,
+    asks: &[OccupancyAsk],
+    threads: usize,
+    scratch: &mut GridScratch,
+) -> Vec<ConeOccupancy> {
+    if asks.is_empty() {
+        return Vec::new();
+    }
+    let c = view.config;
+    #[cfg(feature = "profile")]
+    let mut tm = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaWindowRead);
+    let plane = c.width as usize * c.depth as usize;
+    let height = c.height as usize;
+    // Bands per grid: one per worker (each grid is spread over every worker, and the
+    // pool takes the grids' bands as workers come free).
+    let bands = if cfg!(feature = "parallel") {
+        threads.clamp(1, height.max(1))
+    } else {
+        1
+    };
+    let density = fauna.config.cue.pool_bulk_density;
+    let (discs, tops) = read_discs_and_tops(view, fv, density, bands, threads);
+    #[cfg(feature = "profile")]
+    tm.next(cubarium_voxel::profile::Phase::FaunaWindowLay);
+    let mut grids: Vec<Vec<u8>> = asks.iter().map(|_| scratch.take(c.cells())).collect();
+    type Lists = (Vec<(u32, f64)>, Vec<(u32, u64)>);
+    let mut jobs: Vec<crate::par::Job<'_, Lists>> = Vec::new();
+    for (ask, grid) in asks.iter().zip(grids.iter_mut()) {
+        for mut band in Band::interleaved(grid, view, bands) {
+            let (discs, tops) = (&discs, &tops);
+            let window = ask.window.as_deref();
+            let volume = ask.volume;
+            jobs.push(Box::new(move || {
+                for row in band.rows.iter_mut().flatten() {
+                    row.fill(0);
+                }
+                let (mut pools, mut bodies) = (Vec::new(), Vec::new());
+                band.lay_stands(view, discs, window, |_, _, _| {});
+                let k = band.index;
+                band.lay_pools(view, tops.parts.iter().flat_map(|p| p[k].iter().copied()), window, &mut pools);
+                band.lay_bodies(view, fauna, window, volume, &mut bodies);
+                pools.sort_unstable_by_key(|&(cell, _)| cell);
+                // Stable: bodies sharing a cell stay in animal order.
+                bodies.sort_by_key(|&(cell, _)| cell);
+                (pools, bodies)
+            }));
+        }
+    }
+    let mut lists = crate::par::run(threads, jobs).into_iter();
+    grids
+        .into_iter()
+        .map(|cells| {
+            let parts: Vec<Lists> = lists.by_ref().take(bands).collect();
+            // Layer `y` is band `y % bands`'s, and each band's lists are sorted by cell:
+            // taking each layer's run from its band in layer order joins them sorted, with
+            // a cell's bodies in animal order — the one-pass build's lists.
+            let mut occ = ConeOccupancy {
+                cells,
+                pools: Vec::with_capacity(parts.iter().map(|p| p.0.len()).sum()),
+                bodies: Vec::with_capacity(parts.iter().map(|p| p.1.len()).sum()),
+            };
+            let mut at = vec![(0usize, 0usize); bands];
+            for y in 0..height {
+                let b = y % bands;
+                let end = ((y + 1) * plane) as u32;
+                let (pools, bodies) = &parts[b];
+                let (p, q) = at[b];
+                let p_end = p + pools[p..].partition_point(|&(cell, _)| cell < end);
+                let q_end = q + bodies[q..].partition_point(|&(cell, _)| cell < end);
+                occ.pools.extend_from_slice(&pools[p..p_end]);
+                occ.bodies.extend_from_slice(&bodies[q..q_end]);
+                at[b] = (p_end, q_end);
+            }
+            occ
+        })
+        .collect()
 }
 
 /// The one occupancy builder: every stand layer, ground pool and body, restricted to the
@@ -1258,7 +1716,7 @@ pub(crate) fn build_occupancy(
     build_occupancy_as(view, fv, fauna, pools_occlude, window, false)
 }
 
-fn build_occupancy_as(
+pub(crate) fn build_occupancy_as(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     fauna: &crate::FaunaView<'_>,
@@ -1280,39 +1738,13 @@ fn build_occupancy_as(
 /// volume**, over the whole ring. What the predation queries' sight lines read — the
 /// lanternjaw's cone, a heuristic prey's look for a threat — until contract v3 makes it
 /// the cone's own; the v2 cone keeps [`cone_occupancy`]'s one cell per body.
+#[cfg(test)]
 pub(crate) fn predation_occupancy(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     fauna: &crate::FaunaView<'_>,
 ) -> ConeOccupancy {
     build_occupancy_as(view, fv, fauna, true, None, true)
-}
-
-/// [`predation_occupancy`] windowed around observers, as [`cone_occupancy_window`] is.
-pub(crate) fn predation_occupancy_window(
-    view: &VoxelView<'_>,
-    fv: &FloraView<'_>,
-    fauna: &crate::FaunaView<'_>,
-    observer_x_m: impl IntoIterator<Item = f64>,
-    range_m: f64,
-) -> ConeOccupancy {
-    let c = view.config;
-    let width = i64::from(c.width);
-    let mut window = vec![false; c.width as usize];
-    for x in observer_x_m {
-        if !x.is_finite() || !range_m.is_finite() {
-            return predation_occupancy(view, fv, fauna);
-        }
-        let lo = ((x - range_m) / c.voxel_m).floor() as i64 - 1;
-        let hi = ((x + range_m) / c.voxel_m).floor() as i64 + 1;
-        if hi - lo + 1 >= width {
-            return predation_occupancy(view, fv, fauna);
-        }
-        for cx in lo..=hi {
-            window[cx.rem_euclid(width) as usize] = true;
-        }
-    }
-    build_occupancy_as(view, fv, fauna, true, Some(&window), true)
 }
 
 /// The `Light` receptor's memo for a frozen world (cone-speed follow-up): the sky
@@ -1333,7 +1765,7 @@ pub(crate) struct LightMemo {
 
 impl LightMemo {
     /// Index every support face of the current terrain, none of them computed yet.
-    fn ensure_index(&mut self, view: &VoxelView<'_>) {
+    pub(crate) fn ensure_index(&mut self, view: &VoxelView<'_>) {
         let c = view.config;
         let shape = (view.terrain_version, c.width, c.height, c.depth);
         let plane = c.width as usize * c.depth as usize;
@@ -1357,6 +1789,7 @@ impl LightMemo {
         self.col_start.push(self.faces.len() as u32);
     }
 
+    #[cfg(test)]
     pub(crate) fn sky(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> f64 {
         let c = view.config;
         if z >= c.depth {
@@ -1373,6 +1806,39 @@ impl LightMemo {
             entry.1 = view.sky_visibility(x, y, z);
         }
         entry.1
+    }
+
+    /// The memo's slot for a support face, when the index is current for `view`.
+    fn slot(&self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> Option<usize> {
+        let c = view.config;
+        let plane = c.width as usize * c.depth as usize;
+        if z >= c.depth
+            || self.shape != (view.terrain_version, c.width, c.height, c.depth)
+            || self.col_start.len() != plane + 1
+        {
+            return None;
+        }
+        let col = z as usize * c.width as usize + x.rem_euclid(i64::from(c.width)) as usize;
+        let (a, b) = (self.col_start[col] as usize, self.col_start[col + 1] as usize);
+        self.faces[a..b].iter().position(|f| f.0 == y).map(|k| a + k)
+    }
+
+    /// What [`LightMemo::sky`] would return if it is already known, without computing.
+    pub(crate) fn peek(&self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> Option<f64> {
+        self.slot(view, x, y, z)
+            .map(|k| self.faces[k].1)
+            .filter(|v| !v.is_nan())
+    }
+
+    /// Keep a face's computed value (`view.sky_visibility` there), as [`LightMemo::sky`]
+    /// would have on a miss.
+    pub(crate) fn remember(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32, v: f64) {
+        self.ensure_index(view);
+        if let Some(k) = self.slot(view, x, y, z)
+            && self.faces[k].1.is_nan()
+        {
+            self.faces[k].1 = v;
+        }
     }
 
     /// Compute every face not yet computed.
@@ -1493,6 +1959,7 @@ impl HeldCone {
             return &self.occ;
         }
         // Bites: re-class the crown cells of every stand whose stocked mask moved.
+        let every_layer = vec![true; view.config.height as usize];
         for (si, (old, new)) in self.stands.iter_mut().zip(&stands).enumerate() {
             if old.stocked == new.stocked {
                 continue;
@@ -1505,7 +1972,8 @@ impl HeldCone {
                 }
                 let (code, claim) = (env_code(layer_class(layer)), claim_code(si, li));
                 let (cells, claims) = (&mut self.occ.cells, &self.claims);
-                for_each_layer_cell(view, stand.site, layer, None, |cell| {
+                let disc = LayerDisc::of(stand.site, layer, si, li);
+                for_each_disc_cell(view.config, &disc, None, &every_layer, |cell, _| {
                     if claims[cell] == claim {
                         cells[cell] = (cells[cell] & !ENV_MASK) | code;
                     }

@@ -219,6 +219,28 @@ impl FounderControllers {
         Some(self.entries[at].1.drive(observation))
     }
 
+    /// Each of `ids`' controllers, mutably and at once (`None` for a body without one),
+    /// in `ids`' order: the controller stage drives them side by side. `ids` are distinct.
+    pub(crate) fn slots_mut(&mut self, ids: &[u64]) -> Vec<Option<&mut Box<dyn Controller>>> {
+        let mut want: Vec<(usize, usize)> = ids
+            .iter()
+            .enumerate()
+            .filter_map(|(k, id)| {
+                self.entries.binary_search_by_key(id, |e| e.0).ok().map(|at| (at, k))
+            })
+            .collect();
+        want.sort_unstable();
+        let mut slots: Vec<Option<&mut Box<dyn Controller>>> = ids.iter().map(|_| None).collect();
+        let mut next = want.into_iter().peekable();
+        for (at, entry) in self.entries.iter_mut().enumerate() {
+            if next.peek().is_some_and(|&(w, _)| w == at) {
+                let (_, k) = next.next().expect("peeked");
+                slots[k] = Some(&mut entry.1);
+            }
+        }
+        slots
+    }
+
     /// The lure a body's controller holds after its last drive; 0 with no controller.
     pub fn lure(&self, id: u64) -> f64 {
         self.entries

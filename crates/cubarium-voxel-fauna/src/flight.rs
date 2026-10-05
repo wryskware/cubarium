@@ -710,11 +710,33 @@ pub(crate) fn bloom_in_reach(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, 
     best.map(|(_, b, n)| (b, n))
 }
 
+/// Every nectar-holding stand's flower head as a fan reads it, `(x, z, cell layer,
+/// radius²)` in voxels: read once per fan rather than once per ray.
+pub(crate) struct Blooms(Vec<(i64, i64, i64, f64)>);
+
+impl Blooms {
+    pub(crate) fn of(fv: &FloraView<'_>) -> Blooms {
+        Blooms(
+            fv.stands
+                .iter()
+                .filter(|s| s.nectar > 0.0)
+                .filter_map(|s| {
+                    bloom_layer(fv, s).map(|l| {
+                        (i64::from(s.site.x), i64::from(s.site.z), l.cell, l.radius_v * l.radius_v)
+                    })
+                })
+                .collect(),
+        )
+    }
+}
+
 /// Whether a fan ray's first hit at `cell` is a bloom: a cell of a nectar-holding stand's
 /// flower head, or (for a terrain hit) a flowering vine face the ray entered.
+#[allow(clippy::too_many_arguments)]
 fn bloom_at_hit(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
+    blooms: &Blooms,
     cell: usize,
     terrain: bool,
     origin: (f64, f64, f64),
@@ -756,19 +778,16 @@ fn bloom_at_hit(
             .is_some_and(|cf| cf.spur == SpurPhase::Flower && cf.nectar > 0.0);
     }
     let w = i64::from(c.width);
-    fv.stands.iter().filter(|s| s.nectar > 0.0).any(|s| {
-        let Some(layer) = bloom_layer(fv, s) else {
-            return false;
-        };
-        if layer.cell != y {
+    blooms.0.iter().any(|&(sx, sz, layer_cell, r2)| {
+        if layer_cell != y {
             return false;
         }
-        let mut dx = (x - i64::from(s.site.x)).rem_euclid(w);
+        let mut dx = (x - sx).rem_euclid(w);
         if dx > w / 2 {
             dx -= w;
         }
-        let dz = i64::from(z) - i64::from(s.site.z);
-        ((dx * dx + dz * dz) as f64) <= layer.radius_v * layer.radius_v
+        let dz = i64::from(z) - sz;
+        ((dx * dx + dz * dz) as f64) <= r2
     })
 }
 
@@ -931,9 +950,11 @@ pub(crate) fn fruit_in_reach(
 }
 
 /// A flyer's fan ray, first hit named, [`ConeHit::Bloom`] among them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn fan_first_hit(
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
+    blooms: &Blooms,
     occupancy: &crate::senses::ConeOccupancy,
     observer: u64,
     origin: (f64, f64, f64),
@@ -943,8 +964,8 @@ pub(crate) fn fan_first_hit(
     let (t, fine, cell) = crate::senses::ray_first_hit_cell(view, occupancy, observer, origin, dir, range)?;
     let hit = crate::cone_hit_of(fine);
     let bloom = match hit {
-        ConeHit::FoliageCrown => bloom_at_hit(view, fv, cell, false, origin, dir, t),
-        ConeHit::Terrain => bloom_at_hit(view, fv, cell, true, origin, dir, t),
+        ConeHit::FoliageCrown => bloom_at_hit(view, fv, blooms, cell, false, origin, dir, t),
+        ConeHit::Terrain => bloom_at_hit(view, fv, blooms, cell, true, origin, dir, t),
         _ => false,
     };
     Some((t, if bloom { ConeHit::Bloom } else { hit }))

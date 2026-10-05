@@ -86,10 +86,20 @@ pub enum Phase {
     Crowns,
     FaunaField,
     FaunaBurrs,
+    /// Inside `FaunaSense`: picking the due bodies and building the occupancy windows.
+    FaunaWindows,
+    /// Inside `FaunaSense`: the due bodies' observations and their controllers' answers.
+    FaunaObserve,
+    /// Inside `FaunaSense`: the reflexes and holding the actions, serially.
+    FaunaReflex,
+    /// Inside `FaunaWindows`: the stand discs and pool tops read once for the stage.
+    FaunaWindowRead,
+    /// Inside `FaunaWindows`: the grids laid in bands and their lists joined.
+    FaunaWindowLay,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 47] = [
+    pub const ALL: [Phase; 52] = [
         Phase::WorldStep,
         Phase::Begin,
         Phase::Rain,
@@ -137,6 +147,11 @@ impl Phase {
         Phase::Crowns,
         Phase::FaunaField,
         Phase::FaunaBurrs,
+        Phase::FaunaWindows,
+        Phase::FaunaObserve,
+        Phase::FaunaReflex,
+        Phase::FaunaWindowRead,
+        Phase::FaunaWindowLay,
     ];
     pub const COUNT: usize = Phase::ALL.len();
 
@@ -151,6 +166,7 @@ impl Phase {
             Phase::WorldStep
                 | Phase::FloraStep
                 | Phase::FaunaStep
+                | Phase::FaunaSense
                 | Phase::Substeps
                 | Phase::WaterLeg
         )
@@ -205,6 +221,11 @@ impl Phase {
             Phase::Crowns => "  crown cache refresh",
             Phase::FaunaField => "  sense field update",
             Phase::FaunaBurrs => "  burrs",
+            Phase::FaunaWindows => "    due bodies and occupancy windows (part of sense)",
+            Phase::FaunaObserve => "    observations and controllers (part of sense)",
+            Phase::FaunaWindowRead => "      stand discs and pool tops (part of the windows)",
+            Phase::FaunaWindowLay => "      grids laid and joined (part of the windows)",
+            Phase::FaunaReflex => "    reflexes and held actions (part of sense)",
         }
     }
 }

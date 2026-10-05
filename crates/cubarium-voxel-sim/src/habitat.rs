@@ -3637,6 +3637,45 @@ mod tests {
         );
     }
 
+    /// **The books close with the animal step split four ways** (FAUNA-PAR): the seeded
+    /// habitat, stepped a few hundred ticks with four threads (the controller stage's
+    /// grids, observations and controllers on the compute pool), keeps the plant and
+    /// animal ledgers and the water closed, and its founders are driven throughout.
+    #[test]
+    fn the_seeded_habitat_conserves_with_the_animal_step_on_four_threads() {
+        let (world, flora, fauna, seeded) = seeded(crate::scene::authored(config()));
+        assert!(seeded.animals() > 0, "{seeded:?}");
+        let mut senses = cubarium_voxel_fauna::Senses::with_cue(fauna.config().cue);
+        senses.settle(&world.view(), &flora.view());
+        let mut sim = crate::Sim::new(world, flora, fauna, crate::SimConfig::with_threads(4), Some(senses));
+        for _ in 0..300 {
+            sim.step();
+        }
+        let (world, flora, fauna) = sim.layers();
+        let (fv, av) = (flora.view(), fauna.view());
+        assert!(
+            av.animals.iter().any(|a| a.founder_state.held != cubarium_voxel_fauna::Actions::REST),
+            "no body holds a chosen action"
+        );
+        for (got, what) in [
+            (fv.organic() - fv.ledger.expected_organic(), "organic"),
+            (fv.mineral() - fv.ledger.expected_mineral(), "mineral"),
+            (fv.energy() - fv.ledger.expected_energy(), "energy"),
+        ] {
+            assert!(got.abs() < 1e-6, "flora {what} residual {got:e}");
+        }
+        for (got, what) in [
+            (av.organic() - av.ledger.expected_organic(), "organic"),
+            (av.mineral() - av.ledger.expected_mineral(), "mineral"),
+            (av.energy() - av.ledger.expected_energy(), "energy"),
+        ] {
+            assert!(got.abs() < 1e-9, "fauna {what} residual {got:e}");
+        }
+        let water = world.view().total_residual();
+        let scale = world.view().total_water_m3().max(1.0);
+        assert!(water.abs() < 1e-9 * scale, "water residual {water:e} after 300 ticks");
+    }
+
     /// **The food check counts edible foliage** (seeder-sites item 2): a browser's
     /// component holds what its mouths could take — each reached layer's
     /// [`StandLayer::edible`], above the grazing floor — and not the refuge under it,

@@ -30,6 +30,7 @@ mod manifest;
 mod pose;
 mod predation;
 mod pack;
+mod par;
 pub use pack::centre as pack_centre;
 mod registry;
 pub use registry::registry;
@@ -405,13 +406,14 @@ pub fn flyer_fan_census(
     phys.flight?;
     let manifest = fauna.config.manifest(founder);
     let occupancy = senses::cone_occupancy(view, flora, fauna);
+    let blooms = flight::Blooms::of(flora);
     let geometry = phys.body_at(animal.body);
     let origin = flight::eye(animal, &geometry);
     let heading = animal.pose.heading_rad;
     let range = manifest.cone_range_m;
     let march = |sector: usize, yaw_deg: f64, pitch_deg: f64, dir: (f64, f64, f64)| {
         let (hit, distance_m) =
-            match flight::fan_first_hit(view, flora, &occupancy, animal.id, origin, dir, range) {
+            match flight::fan_first_hit(view, flora, &blooms, &occupancy, animal.id, origin, dir, range) {
                 None => (ConeHit::Clear, f64::INFINITY),
                 Some((d, hit)) => (hit, d),
             };
@@ -2809,6 +2811,10 @@ pub struct Fauna {
     /// ([`FounderControllers`]).
     #[serde(skip)]
     controllers: FounderControllers,
+    /// The controller stage's occupancy grids, kept warm between stages. Session state:
+    /// not saved and not cloned.
+    #[serde(skip)]
+    grid_scratch: senses::GridScratch,
     /// How to build a fresh controller for a founder **born** here, one recipe per
     /// lineage. Skipped by the snapshot for the same reason the controllers are, but
     /// cloned with the layer: see [`FounderFactories`].
@@ -2995,6 +3001,7 @@ impl Fauna {
             ledger: FaunaLedger::default(),
             births_enabled: true,
             controllers: FounderControllers::default(),
+            grid_scratch: senses::GridScratch::default(),
             factories: FounderFactories::default(),
             policy_driven: [false; Founder::COUNT],
             policy_digest: [0; Founder::COUNT],
@@ -3277,14 +3284,13 @@ impl Fauna {
     /// just moved and grows, and then the animals eat what is there. The order within the
     /// tick is [`step`]'s module doc, and it is written down in exactly one place.
     pub fn step(&mut self, world: &World, flora: &mut Flora) {
-        step::step(self, world, flora);
+        step::step(self, world, flora, 1);
     }
 
-    /// [`Fauna::step`], taking the host's thread count. The animal tick has no parallel
-    /// phase, so `threads` is not read; the signature matches the other layers' `step_with`.
+    /// [`Fauna::step`], taking the host's thread count: the controller stage's read side
+    /// (occupancy windows, observations, controllers) splits across the compute pool.
     pub fn step_with(&mut self, world: &World, flora: &mut Flora, threads: usize) {
-        let _ = threads;
-        step::step(self, world, flora);
+        step::step(self, world, flora, threads);
     }
 
     /// The **static arena's** stepping: [`Fauna::step_with`] with the arena's per-arena
@@ -3300,8 +3306,7 @@ impl Fauna {
         threads: usize,
         senses: &mut Senses,
     ) {
-        let _ = threads;
-        step::step_with_senses(self, world, flora, senses);
+        step::step_with_senses(self, world, flora, senses, threads);
     }
 
     /// Apply a command now, between ticks, the way the plant layer's are applied. Returns
