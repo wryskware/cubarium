@@ -2050,6 +2050,90 @@ pub(crate) fn ramp(value: f64, lo: f64, hi: f64) -> f64 {
 
 // --------------------------------------------------------------- 5b. substrate
 
+/// A mycelium box's extent ([`mycelium_sites_into`]'s): its rows `y_lo..=y_hi` and its
+/// half-width `r`, and whether a column can repeat (a box wider than the ring).
+#[derive(Clone, Copy)]
+struct MyceliumBox {
+    site: Site,
+    r: i64,
+    y_lo: u32,
+    y_hi: u32,
+    width: i64,
+    depth: i64,
+}
+
+impl MyceliumBox {
+    fn of(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> MyceliumBox {
+        let c = view.config;
+        let up_down = i64::from(sc.substrate_reach_up_down);
+        MyceliumBox {
+            site,
+            r: sc.rooting_radius as i64,
+            y_lo: (i64::from(site.y) - up_down).max(0) as u32,
+            y_hi: (i64::from(site.y) + up_down).min(i64::from(c.height.max(1) - 1)) as u32,
+            width: c.width.max(1) as i64,
+            depth: c.depth as i64,
+        }
+    }
+
+    /// Whether a column can be met twice: then the walks below do not hold, and the site
+    /// list does.
+    fn may_repeat(&self) -> bool {
+        2 * self.r + 1 > self.width
+    }
+
+    /// The position of `(dx, y, dz)` in [`mycelium_sites_into`]'s order (`dz`, then `y`,
+    /// then `dx`).
+    fn order(&self, dx: i64, y: u32, dz: i64) -> u64 {
+        let side = (2 * self.r + 1) as u64;
+        let rows = u64::from(self.y_hi - self.y_lo + 1);
+        (((dz + self.r) as u64 * rows) + u64::from(y - self.y_lo)) * side + (dx + self.r) as u64
+    }
+
+    /// Every ground entry in the box, `(order, ground index)` sorted in the site list's
+    /// order, found by one search per column of `x` in the site-sorted ground instead of
+    /// one per site. Not for a box that [`MyceliumBox::may_repeat`].
+    fn ground_sorted(&self, ground: &[Ground], out: &mut Vec<(u64, usize)>) {
+        out.clear();
+        let (z_lo, z_hi) = (i64::from(self.site.z) - self.r, i64::from(self.site.z) + self.r);
+        for dx in -self.r..=self.r {
+            let x = (i64::from(self.site.x) + dx).rem_euclid(self.width) as u32;
+            let from = ground.partition_point(|g| g.site < Site { x, y: self.y_lo, z: 0 });
+            for (gi, g) in ground.iter().enumerate().skip(from) {
+                if g.site.x != x || g.site.y > self.y_hi {
+                    break;
+                }
+                let z = i64::from(g.site.z);
+                if z >= z_lo && z <= z_hi && z < self.depth {
+                    out.push((self.order(dx, g.site.y, z - i64::from(self.site.z)), gi));
+                }
+            }
+        }
+        out.sort_unstable_by_key(|e| e.0);
+    }
+
+    /// [`MyceliumBox::ground_sorted`] through a [`GroundIndex`]: one short column per
+    /// `(x, z)` of the box.
+    fn ground_indexed(&self, index: &GroundIndex, out: &mut Vec<(u64, usize)>) {
+        out.clear();
+        for dz in -self.r..=self.r {
+            let z = i64::from(self.site.z) + dz;
+            if z < 0 || z >= self.depth {
+                continue;
+            }
+            for dx in -self.r..=self.r {
+                let x = (i64::from(self.site.x) + dx).rem_euclid(self.width) as usize;
+                for &(y, gi) in index.column(x, z as usize) {
+                    if y >= self.y_lo && y <= self.y_hi {
+                        out.push((self.order(dx, y, dz), gi as usize));
+                    }
+                }
+            }
+        }
+        out.sort_unstable_by_key(|e| e.0);
+    }
+}
+
 /// The **mycelium box** of a saprotroph on `site`: `|dx| <= rooting_radius`, `|dz| <=
 /// rooting_radius`, `|dy| <= `[`SpeciesConfig::substrate_reach_up_down`], `x` wrapped and
 /// `z` and `y` clipped at the walls, read as support **sites** rather than as soil voxels,
@@ -2124,10 +2208,21 @@ pub(crate) fn substrate_pools_in_box(
     }
     let mut dead_wood = 0.0;
     let mut litter = 0.0;
-    for gi in mycelium_sites(view, site, sc)
-        .into_iter()
-        .filter_map(|s| ground.binary_search_by_key(&s, |g| g.site).ok())
-    {
+    let b = MyceliumBox::of(view, site, sc);
+    if b.may_repeat() {
+        for gi in mycelium_sites(view, site, sc)
+            .into_iter()
+            .filter_map(|s| ground.binary_search_by_key(&s, |g| g.site).ok())
+        {
+            dead_wood += ground[gi].dead_wood;
+            litter += ground[gi].litter;
+        }
+        return (dead_wood, litter);
+    }
+    // The same entries summed in the same order as the site list's, found by column.
+    let mut found = Vec::new();
+    b.ground_sorted(ground, &mut found);
+    for &(_, gi) in &found {
         dead_wood += ground[gi].dead_wood;
         litter += ground[gi].litter;
     }
@@ -2202,6 +2297,7 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize, dt: f
             |range, _| {
                 let mut wants: Vec<Want> = Vec::new();
                 let mut sites: Vec<Site> = Vec::new();
+                let mut found: Vec<(u64, usize)> = Vec::new();
                 let mut pools: Vec<(usize, Pool, f64)> = Vec::new();
                 for si in range {
                     let stand = &stands[si];
@@ -2215,14 +2311,21 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize, dt: f
                         continue;
                     }
                     pools.clear();
-                    mycelium_sites_into(view, stand.site, sc, &mut sites);
-                    for &s in &sites {
-                        if let Some(gi) = index.get(s) {
-                            for pool in [Pool::DeadWood, Pool::Litter] {
-                                let held = pool.held(&ground[gi]);
-                                if held > 0.0 {
-                                    pools.push((gi, pool, held));
-                                }
+                    // The box's ground entries in the site list's order, found column by
+                    // column (or through the site list, for a box wider than the ring).
+                    let b = MyceliumBox::of(view, stand.site, sc);
+                    found.clear();
+                    if b.may_repeat() {
+                        mycelium_sites_into(view, stand.site, sc, &mut sites);
+                        found.extend(sites.iter().filter_map(|&s| index.get(s)).map(|gi| (0, gi)));
+                    } else {
+                        b.ground_indexed(index, &mut found);
+                    }
+                    for &(_, gi) in &found {
+                        for pool in [Pool::DeadWood, Pool::Litter] {
+                            let held = pool.held(&ground[gi]);
+                            if held > 0.0 {
+                                pools.push((gi, pool, held));
                             }
                         }
                     }
@@ -2369,6 +2472,15 @@ impl GroundIndex {
             start,
             entries,
         }
+    }
+
+    /// Column `(x, z)`'s entries, `(y, ground index)` ascending in `y`.
+    fn column(&self, x: usize, z: usize) -> &[(u32, u32)] {
+        if x >= self.width || z >= self.depth {
+            return &[];
+        }
+        let c = z * self.width + x;
+        &self.entries[self.start[c] as usize..self.start[c + 1] as usize]
     }
 
     /// The ground index of `site`, as `ground.binary_search_by_key(&site, ..).ok()`.
@@ -4119,6 +4231,78 @@ mod runner_support_tests;
 mod tests {
     use super::*;
     use crate::Species;
+
+    /// **The column walks find the site list's entries in its order** (SPEED-MATURE):
+    /// a mycelium box's ground entries found column by column — through the site-sorted
+    /// ground, and through a [`GroundIndex`] — are the entries the site list finds, in its
+    /// order, so the sums over them are its sums to the bit. On a hand-built ground: sites
+    /// at several rows in and around boxes on a small ring, near its wrap and its ends, a
+    /// box radius from 0 to 3 and a reach from 0 to 2.
+    #[test]
+    fn the_column_walks_find_the_site_lists_entries_in_its_order() {
+        let world = cubarium_voxel::World::empty(cubarium_voxel::Config {
+            width: 11,
+            height: 12,
+            depth: 7,
+            voxel_m: 0.25,
+            seed: 3,
+            ..cubarium_voxel::Config::default()
+        });
+        let view = world.view();
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let mut ground: Vec<Ground> = Vec::new();
+        for _ in 0..260 {
+            let site = Site { x: next(11) as u32, y: next(12) as u32, z: next(7) as u32 };
+            if ground.iter().any(|g| g.site == site) {
+                continue;
+            }
+            let mut g = Ground::new(site, 0.1);
+            g.litter = next(1000) as f64 * 1.37e-3;
+            g.dead_wood = next(1000) as f64 * 0.71e-3;
+            ground.push(g);
+        }
+        ground.sort_by_key(|g| g.site);
+        let index = GroundIndex::build(&ground, 11, 7);
+        let mut sc = FloraConfig::default().species(Species::Glowcap).clone();
+        let (mut found, mut walked) = (Vec::new(), Vec::new());
+        let mut boxes = 0;
+        for r in 0..=3u32 {
+            for reach in 0..=2u32 {
+                sc.rooting_radius = r;
+                sc.substrate_reach_up_down = reach;
+                for _ in 0..40 {
+                    let site = Site { x: next(11) as u32, y: next(12) as u32, z: next(7) as u32 };
+                    let want: Vec<usize> = mycelium_sites(&view, site, &sc)
+                        .into_iter()
+                        .filter_map(|s| ground.binary_search_by_key(&s, |g| g.site).ok())
+                        .collect();
+                    let b = MyceliumBox::of(&view, site, &sc);
+                    assert!(!b.may_repeat());
+                    b.ground_sorted(&ground, &mut found);
+                    b.ground_indexed(&index, &mut walked);
+                    let found: Vec<usize> = found.iter().map(|e| e.1).collect();
+                    let walked: Vec<usize> = walked.iter().map(|e| e.1).collect();
+                    assert_eq!(found, want, "r {r} reach {reach} at {site:?}, by the sorted ground");
+                    assert_eq!(walked, want, "r {r} reach {reach} at {site:?}, by the index");
+                    let (mut dead_wood, mut litter) = (0.0, 0.0);
+                    for &gi in &want {
+                        dead_wood += ground[gi].dead_wood;
+                        litter += ground[gi].litter;
+                    }
+                    let got = substrate_pools_in_box(&view, &ground, site, &sc);
+                    assert_eq!((got.0.to_bits(), got.1.to_bits()), (dead_wood.to_bits(), litter.to_bits()));
+                    boxes += usize::from(want.len() > 1);
+                }
+            }
+        }
+        assert!(boxes > 100, "too few boxes held more than one entry: {boxes}");
+    }
 
     #[test]
     fn a_share_is_proportional_and_never_zero_over_zero() {

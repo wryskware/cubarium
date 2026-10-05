@@ -909,6 +909,55 @@ pub(crate) struct ConeReading {
     pub sectors: [SectorReading; 3],
 }
 
+#[path = "live_grid.rs"]
+mod live_grid;
+pub(crate) use live_grid::{Flavour, LiveGrid, LiveView};
+
+/// The occupancy a stage's readers march: an owned grid (a diagnostic, a static
+/// episode's held cone, a test) or one flavour of the live stage's held grid.
+#[derive(Clone, Copy)]
+pub(crate) enum Occ<'a> {
+    Grid(&'a ConeOccupancy),
+    Live(LiveView<'a>),
+}
+
+impl<'a> From<&'a ConeOccupancy> for Occ<'a> {
+    fn from(o: &'a ConeOccupancy) -> Self {
+        Occ::Grid(o)
+    }
+}
+
+impl CellOccupancy for Occ<'_> {
+    #[inline]
+    fn any(&self, cell: usize) -> bool {
+        match self {
+            Occ::Grid(o) => o.any(cell),
+            Occ::Live(o) => o.any(cell),
+        }
+    }
+    #[inline]
+    fn other_body(&self, cell: usize, observer_id: u64) -> bool {
+        match self {
+            Occ::Grid(o) => o.other_body(cell, observer_id),
+            Occ::Live(o) => o.other_body(cell, observer_id),
+        }
+    }
+    #[inline]
+    fn environment(&self, cell: usize) -> Option<Fine> {
+        match self {
+            Occ::Grid(o) => o.environment(cell),
+            Occ::Live(o) => o.environment(cell),
+        }
+    }
+    #[inline]
+    fn pool_top(&self, cell: usize) -> Option<f64> {
+        match self {
+            Occ::Grid(o) => o.pool_top(cell),
+            Occ::Live(o) => o.pool_top(cell),
+        }
+    }
+}
+
 /// What the march asks of an occupancy, one cell at a time: another body than the
 /// observer's, a stand's class, a ground pool's top. [`ConeOccupancy`] is the live one;
 /// the march is generic so a test can run the very same march against a reference.
@@ -1182,77 +1231,6 @@ impl StandDiscs {
 }
 
 type DiscPart = (Vec<Vec<LayerDisc>>, Vec<Vec<LayerDisc>>);
-type TopPart = Vec<Vec<(Site, f64)>>;
-
-/// Every ground pool's top ([`pool_top_m`]), `(site, top)` in ground order, sorted into
-/// the bands that own the layers it reaches, in ground chunks like [`StandDiscs`].
-struct PoolTops {
-    /// `[chunk][band]`.
-    parts: Vec<TopPart>,
-}
-
-impl PoolTops {
-    /// One chunk of ground's pool tops, by band.
-    fn read(view: &VoxelView<'_>, ground: &[Ground], density: f64, bands: usize) -> TopPart {
-        let c = view.config;
-        let mut out = vec![Vec::new(); bands];
-        for g in ground {
-            let Some(top) = pool_top_m(g, c.voxel_m, density) else {
-                continue;
-            };
-            // The layers it reaches: from the one over its face while under its top.
-            let from = g.site.y + 1;
-            let mut to = from;
-            while to < c.height && f64::from(to) * c.voxel_m < top {
-                to += 1;
-            }
-            if to > from {
-                bands_of(i64::from(from), i64::from(to) - 1, c.height, bands, |b| {
-                    out[b].push((g.site, top));
-                });
-            }
-        }
-        out
-    }
-}
-
-/// The stage's discs and pool tops, read in stand and ground chunks in one go on the
-/// compute pool.
-fn read_discs_and_tops(
-    view: &VoxelView<'_>,
-    fv: &FloraView<'_>,
-    density: f64,
-    bands: usize,
-    threads: usize,
-) -> (StandDiscs, PoolTops) {
-    enum Part {
-        Discs(DiscPart),
-        Tops(TopPart),
-    }
-    let height = view.config.height;
-    let mut jobs: Vec<crate::par::Job<'_, Part>> = Vec::new();
-    for r in crate::par::ranges(fv.stands.len(), threads, STANDS_PER_JOB) {
-        jobs.push(Box::new(move || Part::Discs(StandDiscs::read(fv, height, bands, r))));
-    }
-    for r in crate::par::ranges(fv.ground.len(), threads, GROUND_PER_JOB) {
-        jobs.push(Box::new(move || Part::Tops(PoolTops::read(view, &fv.ground[r], density, bands))));
-    }
-    let (mut discs, mut tops) = (StandDiscs { parts: Vec::new() }, PoolTops { parts: Vec::new() });
-    // Job order is stand chunks, then ground chunks, each in order.
-    for part in crate::par::run(threads, jobs) {
-        match part {
-            Part::Discs(d) => discs.parts.push(d),
-            Part::Tops(t) => tops.parts.push(t),
-        }
-    }
-    (discs, tops)
-}
-
-/// The fewest stands one job reads layers for.
-const STANDS_PER_JOB: usize = 128;
-/// The fewest ground entries one job reads pool tops for.
-const GROUND_PER_JOB: usize = 1024;
-
 /// Some cell layers of a dense occupancy grid ([`cubarium_voxel::Config::index`] is
 /// `y`-major, so one layer is one contiguous run of `plane` cells): `rows[y]` is layer
 /// `y`'s cells when this band owns it. Every lay below touches only its own layers' cells,
@@ -1573,138 +1551,6 @@ pub(crate) fn window_columns(
         }
     }
     Some(window)
-}
-
-/// One occupancy a controller stage asks [`build_occupancies`] for: its window (`None`,
-/// the whole ring) and whether its bodies have volume (the predation occupancy) or are
-/// one cell (the v2 cone's). Ground pools always occlude.
-pub(crate) struct OccupancyAsk {
-    pub window: Option<Vec<bool>>,
-    pub volume: bool,
-}
-
-/// Occupancy grids kept between controller stages, so a stage reuses warm buffers instead
-/// of faulting in fresh pages for every grid. Session state, like the controllers: not
-/// saved and not cloned.
-#[derive(Default)]
-pub(crate) struct GridScratch {
-    grids: Vec<Vec<u8>>,
-}
-
-impl GridScratch {
-    /// A buffer of `cells` bytes, **not** cleared: a band clears its own layers.
-    fn take(&mut self, cells: usize) -> Vec<u8> {
-        match self.grids.pop() {
-            Some(mut g) => {
-                g.resize(cells, 0);
-                g
-            }
-            None => vec![0; cells],
-        }
-    }
-
-    /// Keep a finished stage's grid for the next stage.
-    pub(crate) fn give(&mut self, occ: ConeOccupancy) {
-        self.grids.push(occ.cells);
-    }
-}
-
-impl Clone for GridScratch {
-    fn clone(&self) -> Self {
-        GridScratch::default()
-    }
-}
-
-impl std::fmt::Debug for GridScratch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "GridScratch({} grids)", self.grids.len())
-    }
-}
-
-/// **The controller stage's occupancies, side by side**: each ask is what
-/// [`build_occupancy_as`] builds for it (the same cells, pools and bodies), but the stand
-/// layers and the pool tops are read once for all of them, and every grid is laid in
-/// interleaved bands of cell layers ([`Band`]) on the compute pool when `threads` is
-/// more than one. The grids come from (and go back to) `scratch`.
-pub(crate) fn build_occupancies(
-    view: &VoxelView<'_>,
-    fv: &FloraView<'_>,
-    fauna: &crate::FaunaView<'_>,
-    asks: &[OccupancyAsk],
-    threads: usize,
-    scratch: &mut GridScratch,
-) -> Vec<ConeOccupancy> {
-    if asks.is_empty() {
-        return Vec::new();
-    }
-    let c = view.config;
-    #[cfg(feature = "profile")]
-    let mut tm = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaWindowRead);
-    let plane = c.width as usize * c.depth as usize;
-    let height = c.height as usize;
-    // Bands per grid: one per worker (each grid is spread over every worker, and the
-    // pool takes the grids' bands as workers come free).
-    let bands = if cfg!(feature = "parallel") {
-        threads.clamp(1, height.max(1))
-    } else {
-        1
-    };
-    let density = fauna.config.cue.pool_bulk_density;
-    let (discs, tops) = read_discs_and_tops(view, fv, density, bands, threads);
-    #[cfg(feature = "profile")]
-    tm.next(cubarium_voxel::profile::Phase::FaunaWindowLay);
-    let mut grids: Vec<Vec<u8>> = asks.iter().map(|_| scratch.take(c.cells())).collect();
-    type Lists = (Vec<(u32, f64)>, Vec<(u32, u64)>);
-    let mut jobs: Vec<crate::par::Job<'_, Lists>> = Vec::new();
-    for (ask, grid) in asks.iter().zip(grids.iter_mut()) {
-        for mut band in Band::interleaved(grid, view, bands) {
-            let (discs, tops) = (&discs, &tops);
-            let window = ask.window.as_deref();
-            let volume = ask.volume;
-            jobs.push(Box::new(move || {
-                for row in band.rows.iter_mut().flatten() {
-                    row.fill(0);
-                }
-                let (mut pools, mut bodies) = (Vec::new(), Vec::new());
-                band.lay_stands(view, discs, window, |_, _, _| {});
-                let k = band.index;
-                band.lay_pools(view, tops.parts.iter().flat_map(|p| p[k].iter().copied()), window, &mut pools);
-                band.lay_bodies(view, fauna, window, volume, &mut bodies);
-                pools.sort_unstable_by_key(|&(cell, _)| cell);
-                // Stable: bodies sharing a cell stay in animal order.
-                bodies.sort_by_key(|&(cell, _)| cell);
-                (pools, bodies)
-            }));
-        }
-    }
-    let mut lists = crate::par::run(threads, jobs).into_iter();
-    grids
-        .into_iter()
-        .map(|cells| {
-            let parts: Vec<Lists> = lists.by_ref().take(bands).collect();
-            // Layer `y` is band `y % bands`'s, and each band's lists are sorted by cell:
-            // taking each layer's run from its band in layer order joins them sorted, with
-            // a cell's bodies in animal order — the one-pass build's lists.
-            let mut occ = ConeOccupancy {
-                cells,
-                pools: Vec::with_capacity(parts.iter().map(|p| p.0.len()).sum()),
-                bodies: Vec::with_capacity(parts.iter().map(|p| p.1.len()).sum()),
-            };
-            let mut at = vec![(0usize, 0usize); bands];
-            for y in 0..height {
-                let b = y % bands;
-                let end = ((y + 1) * plane) as u32;
-                let (pools, bodies) = &parts[b];
-                let (p, q) = at[b];
-                let p_end = p + pools[p..].partition_point(|&(cell, _)| cell < end);
-                let q_end = q + bodies[q..].partition_point(|&(cell, _)| cell < end);
-                occ.pools.extend_from_slice(&pools[p..p_end]);
-                occ.bodies.extend_from_slice(&bodies[q..q_end]);
-                at[b] = (p_end, q_end);
-            }
-            occ
-        })
-        .collect()
 }
 
 /// The one occupancy builder: every stand layer, ground pool and body, restricted to the
@@ -2107,9 +1953,9 @@ impl HeldCone {
 /// free water below its surface (D3), a body, a stand's cell, then a ground pool below
 /// its height (D3). Only the returned class is finer — [`Fine::coarse`] turns it back
 /// into what the policy reads.
-pub(crate) fn ray_first_hit(
+pub(crate) fn ray_first_hit<O: CellOccupancy>(
     view: &VoxelView<'_>,
-    occupancy: &ConeOccupancy,
+    occupancy: &O,
     observer_id: u64,
     origin: (f64, f64, f64),
     dir: (f64, f64, f64),
@@ -2122,9 +1968,9 @@ pub(crate) fn ray_first_hit(
 /// [`ray_first_hit`] with the **cell index** it struck, so a diagnostic can say which
 /// stand's crown a ray found rather than only that it found foliage. The march is the
 /// live one; [`ray_first_hit`] is this with the cell dropped.
-pub(crate) fn ray_first_hit_cell(
+pub(crate) fn ray_first_hit_cell<O: CellOccupancy>(
     view: &VoxelView<'_>,
-    occupancy: &ConeOccupancy,
+    occupancy: &O,
     observer_id: u64,
     origin: (f64, f64, f64),
     dir: (f64, f64, f64),
@@ -2381,9 +2227,9 @@ pub(crate) fn ray_direction(
 /// 2 m range at the manifest's fixed encoding reference, five pitches −40..+40 (45 rays;
 /// decisions §6). Each sector value is a fraction of the whole fan's ray count. It has
 /// no memory, no expansion and no body identity — a fresh reading per observation.
-pub(crate) fn cone_readings(
+pub(crate) fn cone_readings<O: CellOccupancy>(
     view: &VoxelView<'_>,
-    occupancy: &ConeOccupancy,
+    occupancy: &O,
     observer_id: u64,
     pose: &Pose,
     standing_y: u32,
@@ -2398,10 +2244,10 @@ pub(crate) fn cone_readings(
 /// only when it is fruit — a crown cell of a stand hanging fruit, or a latticevine face in
 /// fruit it entered — and plain foliage is an occluder.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn cone_readings_in(
+pub(crate) fn cone_readings_in<O: CellOccupancy>(
     view: &VoxelView<'_>,
     fruit: Option<&cubarium_voxel_flora::FloraView<'_>>,
-    occupancy: &ConeOccupancy,
+    occupancy: &O,
     observer_id: u64,
     pose: &Pose,
     standing_y: u32,

@@ -851,7 +851,7 @@ fn cone_class(fauna: &Fauna, i: usize, world: &World, flora: &Flora) -> Vec<(f64
     assert_eq!(m.width, 19, "the browser's cone layout");
     let (view, fv) = (world.view(), flora.view());
     let occupancy = crate::senses::cone_occupancy(&view, &fv, &fauna.view());
-    let obs = crate::body::observation(fauna, i, &view, &fv, &manifest, None, Some(&occupancy));
+    let obs = crate::body::observation(fauna, i, &view, &fv, &manifest, None, Some((&occupancy).into()));
     assert_eq!(obs[m.offset + m.width - 1], 1.0, "the cone is valid");
     (0..3).map(|k| (obs[m.offset + k * 6 + 2], obs[m.offset + k * 6 + 3])).collect()
 }
