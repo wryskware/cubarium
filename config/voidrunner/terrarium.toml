@@ -37,6 +37,26 @@ core.growth_max_per_s = 0.0002847088887750853
 core.reproduction.birth_interval_s = 1097.8253659193513
 core.reproduction.incubation_s = 182.97089431989187
 core.reproduction.surplus_hold_s = 548.9126829596756
+# The detritus web D1 (design/lanternjaw-detritus-web-proposal-2026-10-05.md §3.1 with
+# Astra's corrections): dark-active (awake where its own face is dark), breeding at 0.4 of
+# the adult with 0.12-adult hatchlings (egg 1.2 hatchlings, floor a quarter egg), the
+# clutch sized at laying from the surplus (eligible on one affordable egg), and the
+# nest-site brake shipped with it. Plausible, untuned.
+active = "DarkActive"
+core.birth_body = 0.25536
+core.body_min = 0.076608
+core.reproduction.egg_organic = 0.0919296
+core.reproduction.surplus_floor = 0.0229824
+core.reproduction.clutch_max = 3
+core.reproduction.nest_radius_m = 1.0
+core.reproduction.nest_crowd_max = 8
+# The capgnawer package (2026-10-05, proposal §3.1E): numbers that follow the fungus.
+# Eggs go within half a metre of a glowcap holding caps; a ready layer waits up to a
+# quarter of a world day for a reserve that pays for its full clutch, then lays what it
+# can. Plausible, untuned.
+egg_site = "fungus"
+core.reproduction.egg_fungus_radius_m = 0.5
+core.reproduction.clutch_hold_max_s = 1800.0
 
 [fauna.founders.loftstrider]
 founding_count = 2
@@ -66,6 +86,20 @@ core.reproduction.surplus_hold_s = 548.9126829596756
 # F1: the bellwing, a diurnal nectar flyer, founded perched within its fan's reach of
 # nectar (bloomcrown flowers, latticevine faces); the code default is 0, so training
 # worlds are unchanged.
+# The detritus web D1 (design/lanternjaw-detritus-web-proposal-2026-10-05.md §3.1 with
+# Astra's corrections): dark-active (awake where its own face is dark), breeding at 0.4 of
+# the adult with 0.12-adult hatchlings (egg 1.2 hatchlings, floor a quarter egg), the
+# clutch sized at laying from the surplus (eligible on one affordable egg), and the
+# nest-site brake shipped with it. Plausible, untuned.
+active = "DarkActive"
+core.birth_body = 0.0582221
+core.body_min = 0.0174666
+core.reproduction.egg_organic = 0.0209599
+core.reproduction.surplus_floor = 0.00523999
+core.reproduction.clutch_max = 3
+core.reproduction.nest_radius_m = 1.0
+core.reproduction.nest_crowd_max = 8
+
 [fauna.founders.bellwing]
 founding_count = 6
 # The curiosity gate's ecology (the block at the end of this file).
@@ -127,7 +161,7 @@ wood_rate = 0.0016396050372662204
 
 [flora.glowcap]
 defence_half_life_s = 731.8835772795675
-foliage_rate = 0.006558420149064882
+foliage_rate = 0.00024
 maintenance = 0.0003279210074532441
 propagule_rate = 0.0008198025186331102
 seed_attrition_per_s = 0.00022772292184253064
@@ -245,7 +279,7 @@ wood_rate = 0.003279210074532441
 core.growth_max_per_s = 0.00011628709313735143
 core.reproduction.birth_interval_s = 1097.8253659193513
 core.reproduction.incubation_s = 158.4026610179037
-core.reproduction.surplus_floor = 0.025121007560289194
+core.reproduction.surplus_floor = 0.0135
 core.reproduction.surplus_hold_s = 548.9126829596756
 yield_by_food.litter = 0.4781518604723609
 yield_by_food.cap_tissue = 0.4781518604723609
@@ -254,6 +288,18 @@ yield_by_food.foliage = 0.4781518604723609
 yield_by_food.film = 0.4781518604723609
 yield_by_food.nectar = 0.4781518604723609
 yield_by_food.fruit = 0.4781518604723609
+# The detritus web D1 (design/lanternjaw-detritus-web-proposal-2026-10-05.md §3.1 with
+# Astra's corrections): dark-active (awake where its own face is dark), breeding at 0.4 of
+# the adult with 0.12-adult hatchlings (egg 1.2 hatchlings, floor a quarter egg), the
+# clutch sized at laying from the surplus (eligible on one affordable egg), and the
+# nest-site brake shipped with it. Plausible, untuned.
+active = "DarkActive"
+core.birth_body = 0.15
+core.body_min = 0.045
+core.reproduction.egg_organic = 0.054
+core.reproduction.clutch_max = 3
+core.reproduction.nest_radius_m = 1.0
+core.reproduction.nest_crowd_max = 8
 
 [fauna.founders.frondgrazer]
 core.growth_max_per_s = 0.0003080440982147086
@@ -289,3 +335,7 @@ starter_litter_organic = 0.13232116851858008
 egg_upkeep_per_s = 0.000008198025186331102
 egg_viability_median_s = 26347.80878206443
 wound_heal_per_s = 0.00045544584368506117
+
+
+[fauna.cue]
+fungal_half_life_s = 300.0

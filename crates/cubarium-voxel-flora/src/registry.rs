@@ -131,6 +131,8 @@ fn species_rows() -> Vec<Row> {
         r("donor_min", "org-units of wood", nonneg, "wood needed before sending propagules").grade("C"),
         r("donor_reserve_floor", "fraction of Q_max", nonneg, "reserve a donor keeps back").search(0.0, 0.9).grade("C"),
         r("propagule_rate", "organic/s gross", nonneg, "reserve set aside for seed per second").evolve().log().grade("D"),
+        r("propagule_cap_share", "fraction", Range::fraction(), "share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off)")
+            .search(0.0, 1.0).prov("decision"),
         r("propagule_split.*", "fraction", nonneg, "how a landed package splits into wood, foliage and reserve (sums to 1)")
             .search(0.1, 0.8).grade("C"),
         r("energy_density", "energy per org-unit", nonneg, "e_v of plant tissue").grade("D"),

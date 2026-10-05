@@ -3115,6 +3115,17 @@ fn lay(
     if !rule.hold_met(&fauna.animals[i].reproduction) || fauna.animals[i].reproduction.retry_ticks > 0 {
         return;
     }
+    // **A full clutch first** (the capgnawer package): with a clutch from surplus and a
+    // wait, a body short of `clutch_max` eggs keeps feeding and lays when its reserve pays
+    // for the full clutch, or what it can at the end of the wait.
+    if rule.clutch_max > 0 {
+        let wait = rule.clutch_hold_max_ticks();
+        let a = &mut fauna.animals[i];
+        if wait > 0 && rule.clutch_for(a.reserve) < rule.clutch_max && a.reproduction.clutch_wait_ticks < wait {
+            a.reproduction.clutch_wait_ticks += 1;
+            return;
+        }
+    }
     // Not on a wall: a clutch goes on the litter the body is standing in.
     if fauna.animals[i].mobility.climb.is_some() {
         return;
@@ -3131,6 +3142,7 @@ fn lay(
         let fits = match fauna.config.founder(lineage).egg_site {
             crate::EggSite::Litter => ground.is_some_and(|g| g.litter > rule.litter_min),
             crate::EggSite::Film => ground.is_some_and(|g| g.film > 0.0),
+            crate::EggSite::Fungus => fungus_near(view, flora, site, rule.egg_fungus_radius_m),
         };
         if !fits {
             return;
@@ -3184,6 +3196,7 @@ fn lay(
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
+    a.reproduction.clutch_wait_ticks = 0;
     let laid_tick = fauna.tick;
     if rule.dormant {
         // One clutch per egg, each with its own dormancy; the last egg takes the
@@ -3231,6 +3244,41 @@ fn lay(
     fauna.ledger.clutches_by_founder[lineage.index()] += 1;
     fauna.ledger.eggs_laid_by_founder[lineage.index()] += u64::from(eggs);
     fauna.ledger.reproduction_by_founder[lineage.index()] += cost;
+}
+
+/// **A fungal egg site** ([`crate::EggSite::Fungus`]): whether a fungus holding cap tissue
+/// stands on a support face within `radius_m` of `site` — around the ring, across the
+/// strip, and on `site`'s own row or one up or down.
+fn fungus_near(view: &VoxelView<'_>, flora: &Flora, site: Site, radius_m: f64) -> bool {
+    let fv = flora.view();
+    let v = view.config.voxel_m;
+    let r = if radius_m.is_finite() && radius_m > 0.0 { radius_m } else { 0.0 };
+    let reach = (r / v).floor() as i64;
+    let (width, depth, height) = (i64::from(view.config.width), i64::from(view.config.depth), i64::from(view.config.height));
+    for dz in -reach..=reach {
+        let z = i64::from(site.z) + dz;
+        if z < 0 || z >= depth {
+            continue;
+        }
+        for dx in -reach..=reach {
+            let (fx, fz) = (dx as f64 * v, dz as f64 * v);
+            if fx * fx + fz * fz > r * r + 1e-12 {
+                continue;
+            }
+            let x = (i64::from(site.x) + dx).rem_euclid(width);
+            for dy in -1..=1i64 {
+                let y = i64::from(site.y) + dy;
+                if y < 0 || y >= height {
+                    continue;
+                }
+                let s = Site { x: x as u32, y: y as u32, z: z as u32 };
+                if fv.fungus_at(s).is_some_and(|f| f.foliage > 0.0) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// **Replacement** (the detritus web's readout): a body born in the world laying its first
@@ -3724,6 +3772,9 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     }
 }
 
+#[cfg(test)]
+#[path = "capgnawer_tests.rs"]
+mod capgnawer_tests;
 #[cfg(test)]
 #[path = "circadian_tests.rs"]
 mod circadian_tests;

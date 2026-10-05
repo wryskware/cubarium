@@ -280,7 +280,8 @@ fn the_r2b_physiology_table_scales_the_shredders() {
     // Eggs.
     assert_eq!(snail.egg_site, EggSite::Film);
     assert_eq!(shredder.egg_site, EggSite::Litter);
-    assert_eq!(gnawer.egg_site, EggSite::Litter);
+    // The capgnawer lays at the fungus (the capgnawer package, 2026-10-05).
+    assert_eq!(gnawer.egg_site, EggSite::Fungus);
 
     // Founding.
     assert_eq!((snail.founding, snail.founding_site), (Founding::Bodies, FoundingSite::AtFood));

@@ -596,7 +596,10 @@ impl Senses {
         Senses {
             field: DetritusField { cue, ..DetritusField::default() },
             fungal: DetritusField {
-                cue,
+                cue: CueConfig {
+                    half_life_s: cue.fungal_half_life_s,
+                    ..cue
+                },
                 source: CueSource::Fungal,
                 ..DetritusField::default()
             },
