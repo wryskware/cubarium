@@ -110,6 +110,42 @@ fn a_fruitless_wait_leaves_the_patch_and_skips_a_remembered_one() {
     assert_closes(&fauna, "after the patrol");
 }
 
+/// Carrion at the mouth: a carcass holds the patroller to eat (the patrol stands back), a
+/// smear under the teachers' feed gate does not (it walks on to its next patch).
+#[test]
+fn a_carcass_holds_the_patroller_and_a_smear_does_not() {
+    let hunt = HuntConfig { patrol: true, patrol_explore: 0.0, ..HuntConfig::default() };
+    let gate = crate::TeacherConfig::default().feed_gate;
+    let mut walked = Vec::new();
+    for carrion in [1.0, 1e-9] {
+        let world = clock_off(46);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(patrol_config(hunt));
+        litter_patch(&mut flora, 9.0, 1.5);
+        let lj = patroller(&mut fauna, &world, 4.0, 1.5, EAST, HUNTING);
+        // Carrion on the faces around its mouth.
+        let (mx, mz) = ahead_of(&fauna, lj, 0.5);
+        for dx in -2i32..=2 {
+            for dz in -1i32..=1 {
+                let site = Site {
+                    x: ((mx / VOXEL_M).floor() as i32 + dx) as u32,
+                    y: SURFACE_Y,
+                    z: ((mz / VOXEL_M).floor() as i32 + dz) as u32,
+                };
+                assert!(flora.deposit(site, Deposit { kind: DepositKind::Carrion, organic: carrion, mineral: 0.02 * carrion, energy: 2.0 * carrion }));
+            }
+        }
+        let start = animal(&fauna, lj).pose;
+        for _ in 0..60 {
+            fauna.step_with(&world, &mut flora, 1);
+        }
+        walked.push(dist(&fauna, lj, (start.x, start.z)));
+        assert_closes(&fauna, "after the carrion case");
+    }
+    assert!(walked[0] < 0.3, "a carcass holds it to eat: it moved {} m", walked[0]);
+    assert!(walked[1] > 0.5, "a smear under the feed gate ({gate}) does not: it moved {} m", walked[1]);
+}
+
 // ------------------------------------------------------------------ tremor
 
 /// A shredder walking away behind the hunter on its left (out of sight) turns it left; on

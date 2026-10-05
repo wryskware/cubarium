@@ -74,6 +74,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("found") => found(&args),
         Some("run") => run(&args),
+        Some("probe") => probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -139,6 +140,35 @@ fn found(args: &[String]) {
     let (w, fl, fa) = sim.layers();
     cubarium_voxel_sim::saved::save(&at, w, fl, fa, minutes).unwrap_or_else(|e| panic!("save: {e}"));
     println!("saved,{seed},{},{}", at.display(), counts(sim.fauna()));
+}
+
+/// `probe load=DIR`: every lanternjaw's state in a save, one line each.
+fn probe(args: &[String]) {
+    let params = resolve(args);
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let p = params.fauna.founder(LJ);
+    let sky = cubarium_voxel_sim::Sim::ambient(s.world, s.flora, s.fauna, SimConfig::experiment());
+    let v = sky.fauna().view();
+    println!("minute {} tick {}", s.minute, v.tick);
+    for a in v.animals.iter().filter(|a| a.founder == Some(LJ)) {
+        let k = p.gut.capacity(a.body);
+        println!(
+            "lj {} body={:.3} fullness={:.3} stomach/K={:.3} eating={} emergency={} state={:?} rest={:?} attached={} hunt={:?}/{} strike={}",
+            a.id,
+            a.body,
+            a.reserve / p.core.reserve_of(a.body).max(1e-300),
+            a.stomach.organic() / k.max(1e-300),
+            a.eating,
+            a.emergency,
+            a.state,
+            a.rest,
+            a.attached.is_some(),
+            a.hunt.mode,
+            a.hunt.samples,
+            a.strike.is_some(),
+        );
+    }
 }
 
 fn counts(fauna: &Fauna) -> String {

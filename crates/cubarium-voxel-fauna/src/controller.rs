@@ -1446,6 +1446,10 @@ impl Controller for LanternjawAmbush {
 #[derive(Clone, Debug)]
 pub struct LanternjawPatrol {
     ambush: LanternjawAmbush,
+    /// Whether the carrion its mouth tastes is over the teachers' `feed_gate`: the patrol
+    /// stands back for a carcass, not for crumbs (the ambush eats any carrion it tastes,
+    /// and a smear of it held patrolling lanternjaws in place all night, 2026-10-05).
+    meal: bool,
 }
 
 impl LanternjawPatrol {
@@ -1453,17 +1457,21 @@ impl LanternjawPatrol {
     pub fn with_config(cfg: TeacherConfig) -> LanternjawPatrol {
         LanternjawPatrol {
             ambush: LanternjawAmbush::with_config(cfg),
+            meal: false,
         }
     }
 }
 
 impl Controller for LanternjawPatrol {
     fn drive(&mut self, o: &[f64]) -> Response {
+        let t = self.ambush.taste.offset;
+        self.meal = o[t + 2] > 0.5 && o[t] > self.ambush.cfg.feed_gate;
         self.ambush.drive(o)
     }
 
     fn reset(&mut self) {
         self.ambush.reset();
+        self.meal = false;
     }
 
     fn lure(&self) -> f64 {
@@ -1471,7 +1479,7 @@ impl Controller for LanternjawPatrol {
     }
 
     fn at_carcass(&self) -> bool {
-        self.ambush.at_carcass()
+        self.ambush.at_carcass() && self.meal
     }
 
     fn hunt_patrol(&self) -> bool {
