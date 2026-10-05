@@ -114,7 +114,7 @@ fn crown(voxel_m: f64, species: Species, wood: f64) -> Crown {
         z: 0,
     };
     let view = flora.view();
-    let stand = view.stand_at(site).expect("the seeded stand");
+    let stand = view.stands_on(site).first().expect("the seeded stand");
     let resolved = view.profile_layers(stand);
     let stage = sc.profile_at(wood);
     assert_eq!(

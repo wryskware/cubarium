@@ -789,17 +789,23 @@ fn sample(
     let fv = sim.flora().view();
     let config = fv.config;
     let area = sim.world().config().cell_area();
+    // The occupant is the face's plant (`stand_at`); its fungus is counted on its own.
     let occ = |sites: &mut dyn Iterator<Item = Site>| {
         let mut v = vec![0u64; Species::COUNT + 1];
         let mut food = 0.0;
         let mut litter = 0.0;
         let mut n = 0usize;
+        let mut fungi = [0u64; 2];
         // Velvetpad and springturf donors on these sites.
         let mut donors = [0u64; 2];
         for site in sites {
             n += 1;
             let st = fv.stand_at(site);
             v[occ_index(st.map(|s| s.species))] += 1;
+            if fv.fungus_at(site).is_some() {
+                fungi[0] += 1;
+                fungi[1] += u64::from(st.is_some());
+            }
             if let Some(s) = st {
                 food += edible(&fv, s);
                 for (k, sp) in [PAD, TURF].into_iter().enumerate() {
@@ -810,9 +816,9 @@ fn sample(
             }
             litter += fv.ground_at(site).map_or(0.0, |g| g.litter);
         }
-        (v, food, litter, n, donors)
+        (v, food, litter, n, donors, fungi)
     };
-    let line = |name: &str, (v, food, litter, n, donors): (Vec<u64>, f64, f64, usize, [u64; 2])| {
+    let line = |name: &str, (v, food, litter, n, donors, fungi): (Vec<u64>, f64, f64, usize, [u64; 2], [u64; 2])| {
         let photo: u64 = Species::ALL
             .iter()
             .filter(|s| config.species(**s).trophic == Trophic::Photo)
@@ -820,8 +826,9 @@ fn sample(
             .sum();
         let parts: Vec<String> = (0..=Species::COUNT).filter(|&i| v[i] > 0).map(|i| format!("{}={}", occ_name(i), v[i])).collect();
         println!(
-            "occ,{arm},{minute},{name},n={n},photo={photo},fungal={},pad_donors={},turf_donors={},edible={food:.4},edible_per_m2={:.5},litter={litter:.4},{}",
-            v[Species::Glowcap.index()],
+            "occ,{arm},{minute},{name},n={n},photo={photo},fungal={},both={},pad_donors={},turf_donors={},edible={food:.4},edible_per_m2={:.5},litter={litter:.4},{}",
+            fungi[0],
+            fungi[1],
             donors[0],
             donors[1],
             food / (n.max(1) as f64 * area),
@@ -925,8 +932,10 @@ fn sample(
     }
     let g = Species::Glowcap.index();
     let taken: u64 = (0..Species::COUNT).map(|j| l.overtop_pairs[g][j] - start.ledger.overtop_pairs[g][j]).sum();
+    // Faces holding a plant and a fungus at once (`FaceLayer`), world-wide.
+    let both = fv.stands.windows(2).filter(|w| w[0].site == w[1].site).count();
     println!(
-        "glowcap,{arm},{minute},dark={dark},lit={lit},dark_drained={dark_drained},lit_drained={lit_drained},taken_by_plants={taken},taken_by_runner={}",
+        "glowcap,{arm},{minute},dark={dark},lit={lit},dark_drained={dark_drained},lit_drained={lit_drained},both={both},taken_by_plants={taken},taken_by_runner={}",
         l.runner_displaced[g] - start.ledger.runner_displaced[g]
     );
 }

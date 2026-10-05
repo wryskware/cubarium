@@ -296,11 +296,15 @@ pub(crate) fn foliage_layer_index(layer: &StandLayer) -> u8 {
 
 /// The layer a stand anchor names, now: `None` when the stand or the layer is gone or
 /// holds no foliage.
+///
+/// A face may hold a plant and a fungus (`FaceLayer`): the plant's layer first, then the
+/// fungus's, so a perch on a lone glowcap still finds its cap.
 fn anchored_layer(fv: &FloraView<'_>, site: Site, layer: u8) -> Option<StandLayer> {
-    let stand = fv.stand_at(site)?;
-    fv.profile_layers(stand)
-        .into_iter()
-        .find(|l| l.foliage_index == Some(usize::from(layer)) && l.stock > 0.0)
+    fv.stands_on(site).iter().find_map(|stand| {
+        fv.profile_layers(stand)
+            .into_iter()
+            .find(|l| l.foliage_index == Some(usize::from(layer)) && l.stock > 0.0)
+    })
 }
 
 /// Whether a perched body's perch still holds it (§3.4): the face is still a support face

@@ -143,7 +143,7 @@ fn a_dark_glowcap_with_no_substrate_grows_on_the_seep_and_the_ledgers_close() {
         }
     }
     assert_residuals(&flora, "end");
-    let stand = *flora.view().stand_at(CELLAR).expect("the glowcap lives");
+    let stand = *flora.view().fungus_at(CELLAR).expect("the glowcap lives");
     assert!(stand.wood > wood + 1e-6, "no growth on the seep: {} from {wood}", stand.wood);
     let l = &flora.view().ledger;
     let sc = &flora.config().glowcap;
@@ -159,7 +159,7 @@ fn a_dark_glowcap_with_no_substrate_grows_on_the_seep_and_the_ledgers_close() {
     }
     assert_residuals(&flora, "undarkened");
     assert_eq!(flora.view().ledger.seep_organic_in, 0.0);
-    let after = flora.view().stand_at(CELLAR).map_or(0.0, |s| s.wood);
+    let after = flora.view().fungus_at(CELLAR).map_or(0.0, |s| s.wood);
     assert!(after <= wood, "today's glowcap grew on bare rock: {after} from {wood}");
 }
 

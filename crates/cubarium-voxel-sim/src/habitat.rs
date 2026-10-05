@@ -635,6 +635,9 @@ pub fn seed_pre_rolled(
     // both sets of faces, and `dark_founder_share` of the founders go to the darkest
     // faces that pass with **no** substrate, with no log laid. The gates read the terrain
     // sky, which is what darkness is defined on.
+    // A face holds one plant and one fungus (`FaceLayer`): a glowcap founder skips only
+    // the faces another glowcap took, and goes under a plant founder's crown.
+    let mut taken_fungus: Vec<Site> = Vec::new();
     let sc = flora.config().species(Species::Glowcap).clone();
     let mut pool: Vec<Site> = Vec::new();
     let mut dark_pool: Vec<(Site, f64)> = Vec::new();
@@ -656,7 +659,7 @@ pub fn seed_pre_rolled(
             if on_log || dark {
                 seeded.eligible_by_species[Species::Glowcap.index()] += 1;
             }
-            if taken.contains(site) {
+            if taken_fungus.contains(site) {
                 continue;
             }
             if on_log {
@@ -693,12 +696,13 @@ pub fn seed_pre_rolled(
             },
         ) {
             taken.push(site);
+            taken_fungus.push(site);
             seeded.stands += 1;
             seeded.dark_glowcaps += 1;
             seeded.stands_by_species[Species::Glowcap.index()] += 1;
         }
     }
-    pool.retain(|s| !taken.contains(s));
+    pool.retain(|s| !taken_fungus.contains(s));
     let want = want.saturating_sub(seeded.dark_glowcaps).min(pool.len());
     for (i, site) in colonies(&pool, want, patch_size, spacing, width, rise)
         .into_iter()
@@ -726,6 +730,7 @@ pub fn seed_pre_rolled(
             },
         ) {
             taken.push(site);
+            taken_fungus.push(site);
             seeded.stands += 1;
             seeded.stands_by_species[Species::Glowcap.index()] += 1;
         }

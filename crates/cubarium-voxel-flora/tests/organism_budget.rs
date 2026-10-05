@@ -164,7 +164,7 @@ fn stands_close_the_plant_ledger_through_income_upkeep_build_and_dieback() {
         "unpaid upkeep sent no wood to dead wood"
     );
     assert!(
-        v.stand_at(fungus).is_some_and(|s| s.mineral > 0.0),
+        v.fungus_at(fungus).is_some_and(|s| s.mineral > 0.0),
         "the glowcap holds no mineral from its log"
     );
 }

@@ -2743,7 +2743,7 @@ mod tests {
         ));
         let cap = fungal
             .view()
-            .stand_at(site(2, 2))
+            .fungus_at(site(2, 2))
             .expect("the seeded glowcap")
             .foliage;
         assert!(cap > 0.0, "the cap holds tissue");

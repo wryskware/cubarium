@@ -27,6 +27,10 @@
 //! `--cured` draws every stand of a species that cures (springturf) cured: its foliage
 //! dropped and its crown in the species' cured colour.
 //!
+//! `--shared` puts a full-grown glowcap on the face of every adult photosynthetic producer
+//! (a face holds one plant and one fungus, `FaceLayer`): the presenter draws it one column
+//! over, beside the stem.
+//!
 //! `--rider` puts a parasite lanternjaw hatchling on the first grazer's back (its interim
 //! plain-voxel look, `design/handoffs/voxel-predation-parasite-2026-10-01.md`).
 
@@ -91,12 +95,14 @@ fn main() -> Result<()> {
     let mut layered = false;
     let mut lit = false;
     let mut rider = false;
+    let mut shared = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
             "--lit" => lit = true,
             "--rider" => rider = true,
+            "--shared" => shared = true,
             "--gpu" => gpu = true,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
@@ -221,6 +227,13 @@ fn main() -> Result<()> {
             },
         ) {
             bail!("could not seed {species:?} at x={x}");
+        }
+        // `--shared`: a glowcap on the adult producer's own face.
+        if shared && f >= 1.0 && flora_cfg.species(species).trophic == cubarium_voxel_flora::Trophic::Photo {
+            let glow = flora_cfg.species(Species::Glowcap).wood_max;
+            if !flora.apply(&world, FloraCommand::Seed { x, z: 1, species: Species::Glowcap, wood: glow }) {
+                bail!("could not seed a glowcap under {species:?} at x={x}");
+            }
         }
     }
     let mut fauna = Fauna::new(FaunaConfig::default());

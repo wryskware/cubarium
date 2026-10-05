@@ -2536,13 +2536,14 @@ fn founder_feed(
     let layers = body::mouth_crown_layers(site_y, geometry, view.config.voxel_m);
     // Whose tissue this is, read before the withdrawal, so the report says which
     // species was actually eaten.
+    // The place on the face is the food's: cap tissue off the fungus, foliage off the plant.
     let plant = match meal {
-        body::Meal::Stand { root, .. } => flora.view().stand_at(root).map(|s| s.species),
+        body::Meal::Stand { root, food } => flora.view().stand_in(root, food.face_layer()).map(|s| s.species),
         body::Meal::Pool { .. } => None,
     };
     let taken = match meal {
-        body::Meal::Stand { root, .. } => flora
-            .take_foliage_in_layers(root, bite, &layers)
+        body::Meal::Stand { root, food } => flora
+            .take_foliage_of(root, food.face_layer(), bite, &layers)
             .map(|t| t.taken),
         body::Meal::Pool { site, food } => match food {
             Food::Litter => flora.take_litter(site, bite),

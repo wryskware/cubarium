@@ -73,7 +73,7 @@ fn seed(flora: &mut Flora, world: &World, x: i64, z: u32, species: Plant, wood: 
     ));
     let s = site(x as u32, z);
     assert!(
-        flora.view().stand_at(s).expect("the seeded stand").foliage > 0.0,
+        flora.view().stands_on(s).first().expect("the seeded stand").foliage > 0.0,
         "the fixture needs a stand with foliage on it"
     );
     s
@@ -155,7 +155,7 @@ fn a_founder_whose_diet_lacks_cap_tissue_never_takes_the_cap_in_its_band() {
     let mut flora = Flora::new(FloraConfig::default());
     let wood_max = flora.config().species(Plant::Glowcap).wood_max;
     let s = seed(&mut flora, &world, 2, 2, Plant::Glowcap, wood_max);
-    let foliage_before = flora.view().stand_at(s).expect("the stand").foliage;
+    let foliage_before = flora.view().stands_on(s).first().expect("the stand").foliage;
 
     let mut config = FaunaConfig::default();
     config.founders[Founder::Blind.index()].diet =
@@ -168,7 +168,7 @@ fn a_founder_whose_diet_lacks_cap_tissue_never_takes_the_cap_in_its_band() {
     let l = &fauna.view().ledger;
     assert_eq!(l.bites, 0, "nothing on its list is at the mouth: {:?}", l.bites_by_food);
     assert_eq!(
-        flora.view().stand_at(s).expect("the stand").foliage,
+        flora.view().stands_on(s).first().expect("the stand").foliage,
         foliage_before,
         "the cap is untouched"
     );
@@ -190,7 +190,7 @@ fn a_founder_whose_diet_lacks_cap_tissue_never_takes_the_cap_in_its_band() {
     assert!(l.bites_by_food[Food::Litter.index()] >= 1, "it eats the litter: {:?}", l.bites_by_food);
     assert_eq!(l.bites_by_food[Food::CapTissue.index()], 0, "and never the cap");
     assert_eq!(
-        flora.view().stand_at(s).expect("the stand").foliage,
+        flora.view().stands_on(s).first().expect("the stand").foliage,
         foliage_before,
         "the cap is still untouched"
     );
@@ -213,7 +213,7 @@ fn a_blind_mouth_whose_diet_holds_caps_eats_the_glowcap_cap_in_its_band() {
     );
     let wood_max = flora.config().species(Plant::Glowcap).wood_max;
     let s = seed(&mut flora, &world, 2, 2, Plant::Glowcap, wood_max);
-    let foliage_before = flora.view().stand_at(s).expect("the stand").foliage;
+    let foliage_before = flora.view().stands_on(s).first().expect("the stand").foliage;
     let organic_before = flora.view().organic();
     assert_eq!(
         flora.view().ground_at(s).map_or(0.0, |g| g.litter),
@@ -245,7 +245,7 @@ fn a_blind_mouth_whose_diet_holds_caps_eats_the_glowcap_cap_in_its_band() {
         1,
         "and it came off the glowcap"
     );
-    let foliage_after = flora.view().stand_at(s).expect("the stand").foliage;
+    let foliage_after = flora.view().stands_on(s).first().expect("the stand").foliage;
     assert!(
         foliage_after < foliage_before,
         "the cap lost tissue: {foliage_before} -> {foliage_after}"
@@ -332,7 +332,7 @@ fn a_browser_refuses_the_glowcap_and_takes_the_rosette() {
         None,
         "fungal tissue is not in a browser's mouth"
     );
-    let foliage_before = fungal.view().stand_at(g).expect("the stand").foliage;
+    let foliage_before = fungal.view().stands_on(g).first().expect("the stand").foliage;
     for _ in 0..5 {
         fauna.step(&world, &mut fungal);
     }
@@ -342,7 +342,7 @@ fn a_browser_refuses_the_glowcap_and_takes_the_rosette() {
         "a browser never bites a glowcap"
     );
     assert_eq!(
-        fungal.view().stand_at(g).expect("the stand").foliage,
+        fungal.view().stands_on(g).first().expect("the stand").foliage,
         foliage_before,
         "and the cap is untouched"
     );

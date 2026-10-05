@@ -329,7 +329,10 @@ fn collect(s: &mut Stands, stamp: impl FnOnce(&mut Stands)) -> Vec<(u32, Part)> 
 fn stands(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>, lib: Option<&ModelLibrary>) {
     let seen = inc(s).seen;
     for (k, stand) in flora.stands.iter().enumerate() {
-        let order = site_key(stand.site);
+        // A face's plant before its fungus, as the full rebuild places them.
+        let order = (site_key(stand.site) << 1) | flora.config.face_layer(stand.species).index() as u64;
+        let moved = as_drawn(view, flora, stand);
+        let stand = moved.as_ref().unwrap_or(stand);
         let i = inc(s);
         let slot = match i.by_stand.get(&stand.id) {
             Some(&slot) => slot,
