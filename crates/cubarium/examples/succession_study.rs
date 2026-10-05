@@ -819,6 +819,7 @@ fn plants(args: &[String]) {
             if with_fauna {
                 fw.minute_line(&sim, &arm, minute);
             }
+            species_ledger_line(&arm, minute, &windows[0].ledger, sim.flora().view().ledger);
             eprintln!("minute {minute} ({:.0} s wall)", t0.elapsed().as_secs_f64());
         }
         if MAP_MINUTES.contains(&minute)
@@ -1161,6 +1162,48 @@ fn plant_ledger_line(arm: &str, a: &FloraLedger, b: &FloraLedger) {
         b.cure_shed_organic[k] - a.cure_shed_organic[k],
         causes.join(",")
     );
+}
+
+/// **Every species' demography since the load** (the whole-web model's flora half,
+/// `design/webmodel/flora.md`): one `sp` line per species and sample, cumulative from the
+/// load's ledger `a` to now `b` — seeds landed, germinated, died in the bank and lost as
+/// litter; runner births and runners kept; deaths by cause; stands overtopped (and by
+/// whom), runner-displaced; propagule organic funded and foliage built and shed; the
+/// canopy gate's refusals. Additive logging: no rule reads it.
+fn species_ledger_line(arm: &str, minute: u64, a: &FloraLedger, b: &FloraLedger) {
+    for sp in Species::ALL {
+        let k = sp.index();
+        let d = |x: u64, y: u64| y.saturating_sub(x);
+        let causes: Vec<String> = DeathCause::ALL
+            .iter()
+            .map(|c| format!("{}={}", c.name(), d(a.deaths_by_cause[c.index()][k], b.deaths_by_cause[c.index()][k])))
+            .collect();
+        let by: Vec<String> = Species::ALL
+            .iter()
+            .filter_map(|n| {
+                let v = d(a.overtop_pairs[k][n.index()], b.overtop_pairs[k][n.index()]);
+                (v > 0).then(|| format!("{}={v}", n.name()))
+            })
+            .collect();
+        println!(
+            "sp,{arm},{minute},{},landed={},germinated={},seeds_died={},seeds_lost={},runner_births={},runner_kept={},deaths=[{}],overtopped_by=[{}],runner_displaced={},funded={:.4},built={:.3},shed={:.3},canopy_refused={},runner_canopy_refused={}",
+            sp.name(),
+            d(a.seeds_landed[k], b.seeds_landed[k]),
+            d(a.seeds_germinated[k], b.seeds_germinated[k]),
+            d(a.seeds_died[k], b.seeds_died[k]),
+            d(a.seeds_lost[k], b.seeds_lost[k]),
+            d(a.clonal_births[k], b.clonal_births[k]),
+            d(a.runner_kept[k], b.runner_kept[k]),
+            causes.join(" "),
+            by.join(" "),
+            d(a.runner_displaced[k], b.runner_displaced[k]),
+            b.propagule_funded[k] - a.propagule_funded[k],
+            b.foliage_built[k] - a.foliage_built[k],
+            b.shed_organic[k] - a.shed_organic[k],
+            d(a.canopy_refused[k], b.canopy_refused[k]),
+            d(a.runner_canopy_refused[k], b.runner_canopy_refused[k]),
+        );
+    }
 }
 
 /// The S1 attempt classification at the end, by reach to the nearest turf donor at the
