@@ -10,7 +10,7 @@ decision_refs: []
 
 Code: `crates/cubarium-webmodel/src/fauna/` (`config`, `laws`, `fits`, `model`, `rng`,
 `tests`). Runner: `crates/cubarium-webmodel/examples/fauna_model.rs`
-(`laws | young | fit [obs-only] | d1b | d2b | answers`).
+(`laws | young | fit [obs-only] | fitbrowser | d1b | d2b | ljdiag | answers | q2`).
 
 ## Form
 
@@ -23,9 +23,21 @@ Code: `crates/cubarium-webmodel/src/fauna/` (`config`, `laws`, `fits`, `model`, 
   stochastic twin: whole bodies, and every death, refusal, hatch and lost egg is a binomial
   draw.
 - **Speed.** One body over 10 h takes 10 ms. A D1b seed of three detritivores over 4 h takes
-  about 13 ms at `dt` = 1 s.
-  - Known slow spot: the 8 h observation runs with nest refusals (cohort splitting and the
-    O(n²) merge). The obs-only fit took 9 min. Profile before more grid fits.
+  about 13 ms at `dt` = 1 s; the whole `d1b` validation (40 runs to 4 h, 12 to 12 h) 3 s;
+  `d2b` with the hunter's fit 40 s; `q2` 80 s.
+  - **The cohort bound** (`max_cohorts` 48 per lineage, `min_cohort` 0.01 bodies, a pass every
+    60 s). A refused clutch splits a cohort into layers and the refused, who retry after
+    `nest_retry_s`; their clutch cycles never realign, so the count grew geometrically: 4,000
+    shredder cohorts and 2,600 egg cohorts by m660 (profiled: `step`, the old merge and the
+    arriving lifespan integral, all per cohort). Now each pass merges cohorts closer than 0.1
+    in `cohort_distance` (0.5 % body, 0.5 % of the reserve cap, 3 min of age, 1 % of the
+    clutch interval), folds mean-field cohorts under 0.01 bodies into their nearest
+    compatible cohort, then merges the closest compatible pairs down to the bound; egg
+    cohorts laid within 15 s with the same egg merge. Merges are body-weighted, so bodies and
+    matter are kept exactly (tested). The 8 h observation fit went from 9 min to 3.4 s.
+  - **What the bound costs**: against a bound of 96 the `d1b` cells move by at most 3 % at 48,
+    8 % at 24, 19 % at 12 (the held-out juveniles at m720 the most sensitive); the old
+    unbounded merge sat 5 % off.
 - **Numbers.** Every rule-level number comes from `FaunaConfig`, through the scenario file's
   `base` chain and `cubarium_voxel_sim::params::Params::resolve`. None is retyped. The sim's
   pure functions are called where they exist:
@@ -83,13 +95,24 @@ aggregation loses.
   - `share` is the wound law, `profitability`. The attack chance is profitability times
     preference 1 (main's opportunistic rule), and kill per strike is the share.
   - The size window applies.
-  - The corpse goes to a fresh-kill carcass, which the hunter eats at ψ = 1 and which decays
-    at `carrion_decomposition`.
+  - **The kill's reach** (fitted): that share of the corpse goes to the killer cohort's own
+    carcass (`Cohort::carcass`), which only it eats, at ψ = 1, and which decays at
+    `carrion_decomposition`; the rest goes to the carrion pool at once (`Returns::carrion`).
+    The sim lays the whole corpse as carrion on the prey's face (`kill` and `bury_corpse`, `step.rs:2199-2245`); the
+    patroller eats only what is at its mouth while it stays (`hunt.rs:45`).
+  - It leaves its carcass at `1 / carcass_stay_s` (to the carrion pool); not identifiable
+    from the logs, so infinite.
+  - Its general carrion response is 0: the patrol eats only at its kills.
   - Each kill costs `strikes_per_kill · strike_cost_s` of awake upkeep.
-  - Loses: patrol geometry, and the tremor and sight senses (all inside α). The Veilhound
-    (chorister) runs on the same code, but its α is unfitted (0).
+  - Loses: patrol geometry, the tremor and sight senses (all inside α), and **meal
+    lumpiness**: the mean field turns kills into a steady flux, so a hunter is either fed
+    by it or hungry all night, where the sim's is sated a third of its night after big
+    kills. The Veilhound (chorister) runs on the same code, but its α is unfitted (0).
 - **Bank and riders**:
   - Bank eggs pay `egg_upkeep` and die on a log-uniform viability.
+  - Dormant eggs are lost at laying at the lineage's egg-loss share, to carrion, as any
+    clutch is (the sim's `clutch_fate`, `step.rs:3388`, takes dormant clutches too; the
+    model had exempted them).
   - At dusk an egg hatches with chance `bank_trigger · hatch_chance_per_dusk`. The trigger is
     fitted and is currently 0.
   - A rider takes `parasite_take_per_day` of its host's body and drops off at
@@ -116,13 +139,22 @@ recomputes them.
   and the adults sleep.
 - The capgnawer's cap/litter split is not identifiable: the logs carry total intake only.
 
-**Observation refit.** Fitted on training seeds 4 5 7 8 only; held-out validation is still
-pending.
+**Observation refit** (`fit obs-only`, from the 4 h fits; training seeds 4 5 7 8; count,
+adults, juveniles and hatched at 360-720). Interference spans 0 to 3 × the 4 h median stock
+per other body; ψ_max keeps ψ at the 4 h median stock and count, and is no longer capped at 1
+(ψ itself is). A response whose interference the 4 h intake fit found (the capgnawer's) keeps
+it.
 
-| lineage | interference | aggregation κ | ψ_max |
-|---|---|---|---|
-| shredder | 2.8 per other body | 2 | 0.477 |
-| snail | 1.02 | 2 | 1.0 (at the grid's cap) |
+| lineage | interference | aggregation κ | ψ_max | error (best / none) |
+|---|---|---|---|---|
+| shredder | 2.8 per other body | 2 | 0.477 | 5.57 / 6.26 |
+| snail | 0.10 | 2 | 0.582 (half 3.4) | 20.27 / 20.51 |
+| capgnawer | 0.93 (4 h fit) | 1 | 0.26 | flat |
+
+- The snail's earlier 1.02 at ψ_max 1.0 sat on the grid's top and on the ψ_max cap, which cut
+  ψ at the median from 0.25 to 0.19. Widened, the snail's error is flat in interference
+  (20.3-21.7 up to 2 per body): its misfit is not about food sharing (below).
+- The shredder's interference is weakly identified (28 per body scores 5.94).
 
 **Behaviour.** From the D1b logs; IQRs in brackets.
 
@@ -132,17 +164,30 @@ pending.
 - Motor effort: 0.
 - Egg loss: 0 of 1,124.
 
-**Kill rates.** Fitted by simulation on the D2b `d2` arm (closest to main's opportunistic rule):
-kills summed over 8 seeds, minutes 120-240.
+**The frondgrazer** (`fitbrowser`): foliage ψ = 0.276·F/(F + 41.5), by simulation on the D1b
+branch runs (no hunters), its count every hour to 720 on each seed's clamped edible foliage
+(median 415), training seeds 4 5 7 8. Held out (9 12 13 15): sim 18/22/52 at 240/480/720,
+model 15/27/59, all pass. D2b logs no foliage, so D2b runs use the D1b median.
 
-| prey | kill rate (per prey body per hunting LJ-s) | kills matched |
+**The hunter** (`fit_hunter`, the `d2` arm, minutes 120-240, 8 seeds; refitted in each `d2b`,
+`ljdiag` and `q2` run, deterministic):
+
+| rate | value | from |
 |---|---|---|
-| shredder | 2.5e-4 | 52 |
-| capgnawer | 2.2e-4 | 25 |
-| snail | 1.1e-4 | 21 |
-| frondgrazer | 1.8e-4 | 27 |
+| dormant egg loss | 0.333 | 24 of 72 eggs gone from the bank in the first 10 min after laying (no egg old enough to die of age) |
+| general carrion response | 0 | the patrol eats only at its kills (`hunt.rs:45`) |
+| kill reach | 0.358 | hunters' assimilation 5.47 summed, matched (grid 0.05-1, then bisection) |
+| kill rate, shredder | 8.7e-5 per prey body per hunting LJ-s | kills matched, 125 vs 128 |
+| kill rate, capgnawer | 7.6e-5 | |
+| kill rate, snail | 3.9e-5 | |
+| kill rate, frondgrazer | 4.4e-5 | |
+| strikes per kill | 2.38 | 305 strikes / 128 kills |
+| stay at a kill | ∞ | not identifiable: the mean field's kill flux tops the carcass up |
 
-- Strikes per kill: 2.38 (305 strikes / 128 kills).
+- The check is the hunting time (hungry and awake): the sim's patroller samples
+  (`wait + travel + engaged`, 4 per s) give 4,513 LJ-s per seed over m120-240. The model now
+  hunts 6,909 (hungry all night); before the fix 2,436 (sated half the night).
+- Over the whole observation (to m600) the hunting time matches: 40,384 vs 40,109.
 
 ## Open-loop validation
 
@@ -161,12 +206,22 @@ Stocks are clamped per seed.
 - **Individual at the ceiling**, model vs sim's `young_budget`: maturation 186 vs 185,
   first clutch 293 vs 290, and clutches at 372/446/546 vs 369/442/541. The capgnawer matures
   at 347 vs 345.
-- **8 h observation** (240 to 720), before the refit:
-  - Shredder N passes. Adults are too many and juveniles too few by 720 (model 29/9 vs sim
-    15/23): the sim's juveniles stall under crowding.
-  - Snails mature too readily (model 7 vs sim 1 matured by 720).
-  - Refusals are under-predicted at κ = 1. This motivated the refit.
-- The refit with interference and aggregation needs `d1b` rerun on the held-out seeds.
+- **8 h observation, held-out seeds 9 12 13 15** (`d1b`, the refit as recorded): 83 of 99
+  cells pass.
+
+| lineage | N | adults | juveniles | matured | maturation | first clutch | clutch mean | hatched | refusals |
+|---|---|---|---|---|---|---|---|---|---|
+| shredder | 3/4 (m720 53 vs 32 [31-46]) | 2/4 (m600-720 27, 37 vs 14, 15) | 2/4 (m360-480 too many) | 2/4 | 4/4 | 4/4 | 4/4 | 3/4 | 4/4 |
+| capgnawer | 4/4 | 3/4 | 3/4 | 4/4 | 3/3 | 1/2 | 4/4 | 4/4 | 4/4 |
+| snail | 4/4 | 2/4 | 3/4 | 2/4 (m600 9 vs 1) | 2/2 | – | 4/4 | 4/4 | 4/4 |
+
+- **What fails points at one mechanism**: the model's juveniles mature together, the sim's
+  stall. The snail's nine juveniles of one clutch cohort all mature at m600 where one does
+  in the sim; the shredder's adults reach 37 against 15. ψ is shared equally per body in the
+  model; in the sim the food at a site is shared unequally (the adult at the bed, the
+  juvenile off it), so a juvenile's intake under crowding is lower and more spread. Wider
+  interference does not fix it (the snail's error is flat in it). It needs size-structured
+  access: ψ per stage, or a within-cohort spread of ψ.
 
 ### D2b
 
@@ -174,93 +229,181 @@ Starts at minute 120 from the census: the prey run from founding on the median s
 each lineage's adults and juveniles are scaled to the log. Hunters, riders and the bank come
 from the log.
 
-| arm | small prey at 240, sim | small prey at 240, model | LJ kills, sim | LJ kills, model | result |
+| arm | small prey at 240, sim | model | LJ kills, sim | model | result |
 |---|---|---|---|---|---|
-| d2 | 21 [15-28] | 22 | 17 | 16.9 | pass (the fit) |
+| d2 | 21 [15-28] | 22.1 | 17 | 16.8 | pass (the fit) |
 | d2b-1, 1 hunter (held out) | 30 | 29.9 | 8 [4-10] | 6.5 | pass |
 
 - **The 1-vs-3 hunter contrast reproduces**: 32 → 22 with three hunters, flat with one.
 - d2b, d2b-open and d2-chosen all pass. The model has no switching, and the sim shows those
   arms close to d2.
-- **Observation to minute 600**: small prey pass. Shredders decline more slowly in the model
-  (2.6 vs 0-1).
-- **Fails**:
-  - The lanternjaw lays too much: 33 vs 13 eggs by 600, and the bank 26 vs 5. The model's
-    hunter is richer, so check `lj.intake` in the rerun.
-  - The frondgrazer grows (37 vs 14): its ψ is unfitted (1).
-  - The `main` arm (`patrol=false`, the old physiology) is not representable with d2's α.
-    Its contrast with d2 is a behaviour change: α would need to be about 1/15.
+
+**The lanternjaw's intake, fixed.** The model's hunter was better fed than the sim's. Its
+causes (`ljdiag`, per seed):
+1. **It ate every corpse whole.** The model put each kill on one carcass pool all hunters ate
+   from at a full bite: 0.34 organic per kill (frondgrazers dominate), of which it swallowed
+   0.16 and assimilated 0.071, against the sim's 0.043 per kill (0.68 per seed over
+   m120-240 for 16 kills). Sated after every kill, it hunted only 2,436 LJ-s per seed (sim
+   4,513), so the kill-rate fit doubled α to match kills: few, fast kills, every one a full
+   meal. Now each kill's corpse is its killer's alone and only 0.36 of it is in reach; the
+   rest is carrion.
+2. **Its dormant eggs were never lost.** The sim's `clutch_fate` takes a third of them
+   (flooded or the face gone) in the first ten minutes; the model had exempted dormant
+   eggs. Now they are lost at the fitted share.
+3. **Its prey grew unchecked.** The frondgrazer's ψ was unfitted (1): 37 vs 14 by m600, and
+   the hunter's kills rose with it. Now fitted (above).
+- Kill rates, sleep and digestion were checked and are not causes: awake share 0.32 in
+  both, the gut is the sim's law, kills matched by construction.
+
+| readout (d2 observation, median of 8) | sim | before | after |
+|---|---|---|---|
+| intake to m240 | 0.7 [0.4-1.0] | 1.2 | 0.8 |
+| intake to m600 | 1.8 [0.9-2.6] | 5.2 FAIL | 2.7 pass |
+| laid to m600 | 13 [11-18] | 33 FAIL | 21 FAIL (1.6×) |
+| bank at m600 | 5 [2-10] | 25.7 FAIL | 10.5 pass |
+| kills to m600 | 44 [17-47] | 65 FAIL | 58 pass (factor) |
+| frondgrazers at m600 | 14 [2-39] | 37.7 | 21.4 pass |
+| hunting LJ-s to m600 | 40,109 | – | 40,384 pass |
+
+- **Still failing**: laying, 21 vs 13 by m600. The intake surplus left (1.5× over the
+  observation) is the sim's falling kill rate per prey: 12.8 kills per hunting LJ-hour over
+  m120-240, 2.1 over m240-600, three times lower per prey body. That is the patrol's
+  fruitless-patch memory and prey switching, spatial, which a constant α cannot follow.
+- The `main` arm (`patrol=false`, the old physiology) is not representable with d2's α. Its
+  contrast with d2 is a behaviour change.
 
 ## First answers
 
 ### Q1. Generation time
 
-Field conditions: patch median stocks, 12 neighbours.
+Field conditions: the D1b branch arm's median stocks (litter 298, caps 12.2, film 3.6), 12
+neighbours (`answers`, rerun with this branch's fits).
 
 | lineage | maturation | to surplus (brood fill) | hold | incubation | generation |
 |---|---|---|---|---|---|
-| shredder | 204 | 108 | 7 | 2.6 | **322** |
-| capgnawer | 501 | 301 | 7 | 3 | **813** |
-| snail | 518 | 307 | 7 | 3 | **835** |
+| shredder | 203 | 107 | 7 | 2.6 | **320** |
+| capgnawer | 596 | – | – | 3 | **none in 900 min** |
+| snail | 516 | 306 | 7 | 3 | **832** |
 
-- The shredder's 322 min matches the sim's D1b hatch → first clutch, 318 [296-375] + 2.6.
-- The capgnawer and the snail are food-limited: caps ~12 and film ~3.6.
+- The shredder's 320 min matches the sim's D1b hatch → first clutch, 318 [296-375] + 2.6.
+- The capgnawer (v1: 813) now lays no clutch within 900 min at these caps: with the 4 h fit's
+  interference 0.93 per other body and 12 neighbours its ψ is 0.14. On D2b's caps (443) its
+  generation is 515 min (Q2). The snail lays about one egg in its life.
 
-Knobs for a 120 min generation (shredder, field):
+Knobs for a 120 min generation (field):
 
-| knob | change | result |
-|---|---|---|
-| gut throughput (`digestion_s` ÷ 3.0, `bite_per_body_s` × 3.0) | ×3.02 | 120 min |
-| `stomach_k` and bite together | ×3.08 | 120 min |
-| `yield` | to 1.0 | 165 at best |
-| `mass_exponent` | 0.075 | 156 at best |
-| `growth_max` | any | no effect: it never binds |
-| `birth_body` | lower | blocked: `0.5 · birth_body` must hold `egg + floor` = 0.0675, so laying size ≥ 0.135 |
-| bigger hatchling | any | rejected by the registry's cross-rule (egg + floor ≤ cap at birth_body) |
+| lineage | knob | change | result |
+|---|---|---|---|
+| shredder | gut throughput (`digestion_s` ÷, `bite_per_body_s` ×) | ×3.00 | 120 min, 0.73 raw/day |
+| shredder | `stomach_k` and bite together | ×3.06 | 120 min |
+| shredder | `yield` / `mass_exponent` / `growth_max` | any | 164 / 155 / 305 at best |
+| capgnawer | gut throughput | ×8.4 | 120 min, 1.6 raw/day |
+| capgnawer | `stomach_k` and bite | ×8.6 (×55 for 60 min) | 120 min |
+| snail | gut throughput | ×7.6 | 120 min, 0.11 raw/day |
+| snail | `stomach_k` and bite | ×7.8 (×50 for 60 min) | 120 min |
+| snail | `yield` / `mass_exponent` / `growth_max` / `birth_body` | any | 410 / 374 / 821 / 795 at best |
 
-- **60 min is unreachable by any single knob.** The gut floor is 65 min, made of the hold
-  (7.3), incubation (2.6), `growth_max` (15 min for 0.105 of structure) and day sleep. It
-  needs gut ×≥ 5 plus `growth_max`, the hold and the sleep rule.
-- The capgnawer needs gut ×7.2 for 120 min.
-- **Energy honesty.**
-  - The shredder at ×3 eats about 1.0 raw/day per body. Forty bodies take about 40/day
-    against a litter flux of about 1,480/day (`decomposition × stock`), so litter pays easily.
-  - The capgnawer at ×7 would need about 17/day of caps from a ~12-unit stock: the flora half
-    must supply the cap production. The same holds for film (snail).
-- Snail knob rows did not print in run v1. Rerun `answers`.
+- `birth_body` lower is blocked (`0.5 · birth_body` must hold `egg + floor`); a bigger
+  hatchling is rejected by the registry's cross-rule.
+- **60 min is unreachable by any single knob** for the shredder (gut floor 65 min: the hold
+  7.3, incubation 2.6, `growth_max` 15 min for 0.105 of structure, day sleep).
+- **Energy honesty.** Forty shredders at ×3 take about 30 raw/day against a litter flux of
+  about 1,480/day. The capgnawer at ×8 would need about 1.6/day per body of caps, the snail
+  at ×7.6 0.11/day per body of film: the flora half's cap and film production decide
+  whether those are possible.
 
 ### Q2. Hunter carrying capacity
 
-**Not computed yet.** The design:
+`q2` (80 s). Per small-prey lineage: `r` from Euler–Lotka on the one-body life history
+(`history`, each clutch's age and eggs, survival the newborn lifespan draw, the egg loss);
+the kill rate per prey body per LJ-day `a = α / area × share² × hunting time` (the model's
+own, 2,303 s per LJ-day on d2: hungry all night); `H_max = r / a`. Then 1-6 hunters for three
+world days (m120 → 480) from each D2 seed's census, the mean field and ten twins per seed (80
+per row).
 
-- `r` comes from the Euler–Lotka equation on the individual's schedule (first clutch,
-  interval, eggs, lifespan).
-- The kill rate per prey body per LJ-day is `α × the hunting-seconds share`. The ledger's
-  `hunting_s` records the hunting seconds.
-- `H_max = r / a`.
-- Also simulate H = 1..6 for 3 days on clamped D2b stocks.
-- For the terrarium, set `area_scale` ≈ 3.2 and use soak v2 stocks: litter about 2,000,
-  caps about 1,700.
-- Then rerun at a 1-day turnover (gut ×3).
+- **Patch**: the D2 seeds' logged stocks, median m120-600 (litter 437, caps 443, film 3.3),
+  foliage the D1b median.
+- **Terrarium**: `area_scale` 3.2, soak v2 stocks (litter 2,000, caps 1,700, edible foliage
+  2,700), film 3.2 × patch's (soak v2 does not log film: an assumption); prey and bank 3.2 ×
+  the D2 census.
+- **Turnover**: as is, and the shredder's gut ×3 (its generation 311 → 117 min).
 
-Measured on patch: three hunters killed about 11 small prey in one night (model 16.9 kills of
-all prey, matched). Small-prey production over 2 h is ~1-3 at G ≈ 5-14 h. So three hunters
-exceed balance by roughly 5×, and one roughly matches it.
+| map | turnover | r/day: shredder, capgnawer, snail | a per LJ-day: shr, cap | H_max: shredder, capgnawer |
+|---|---|---|---|---|
+| patch | as is | 0.44, 0.14, none (no clutch) | 0.20, 0.18 | **2.2, 0.8** |
+| terrarium | as is | 0.46, 0.14, none | 0.063, 0.055 | **7.3, 2.6** |
+| patch | gut ×3 | 1.49, 0.14, none | 0.20, 0.18 | **7.4, 0.8** |
+| terrarium | gut ×3 | 1.53, 0.14, none | 0.063, 0.055 | **24, 2.6** |
+
+Three days, P(a small lineage gone) in the twin, and small prey left (mean field):
+
+| H | patch | patch, gut ×3 | terrarium | terrarium, gut ×3 |
+|---|---|---|---|---|
+| 1 | 0.00 (27) | 0.00 (74) | 0.00 (141) | 0.00 (255) |
+| 2 | 0.06 (17) | 0.01 (64) | 0.00 (113) | 0.00 (248) |
+| 3 | 0.25 (11) | 0.09 (53) | 0.00 (97) | 0.00 (240) |
+| 4 | 0.41 (7) | 0.35 (42) | 0.00 (76) | 0.00 (232) |
+| 5 | 0.76 (5) | 0.51 (27) | 0.00 (66) | 0.00 (218) |
+| 6 | 0.88 (3) | 0.74 (17) | 0.00 (57) | 0.00 (213) |
+
+- **The capgnawer sets H_max**: it cannot carry one hunter on patch (0.8) and carries 2.6 on
+  the terrarium; a faster shredder does not change that, since the hunter takes every listed
+  prey at its own rate. The lineage first lost on patch is the capgnawer.
+- **The snail declines without hunters**: it lays no clutch in its life on patch's film.
+  Its loss is food, not predation (D1b agrees: one snail of a dozen matures by m720).
+- **Confidence**: the kill rates are fitted on 3 hunters on patch over one night; `a` on
+  the terrarium assumes encounters fall with area (mass action), untested; three days is
+  short against the terrarium's numbers, so its zero extinction risk says little beyond
+  day 3; `r` is the mean-field individual's, which matures more readily than the sim's
+  (D1b held out above), so it is an upper bound.
 
 ## What this half cannot represent
 
-- Within-cohort spread: the sim has fast and slow individuals and bimodal satiation.
-- Space beyond the fitted rates: local litter beds, the stream.
-- Drowning.
+- Within-cohort spread: the sim has fast and slow individuals, bimodal satiation and unequal
+  access to food by size (the held-out D1b failure).
+- Meal lumpiness for the hunter (one corpse at a time).
+- Space beyond the fitted rates: local litter beds, the stream, the patrol's patch memory (the
+  kill rate per prey falls 3× over the D2b observation).
+- Drowning of bodies.
 - Patrol behaviour changes: the `main` arm.
 - The bellwing's flight, and the seedporter's gliding and seed-carrying costs (motor effort
   unfitted).
 - Veilhound packs (litters and provisioning are not modelled).
 
-## What the closed loop needs from the flora half
+## The closed loop: what passes each step
 
-- The productions of the foods the animals eat, not just the stocks: litter input, cap
-  regrowth, film growth, foliage, nectar and fruit.
-- The carrion pool and its decomposition: the open loop keeps the fresh-kill carcass
-  fauna-side.
-- Dung and spill go to litter via `Returns`.
+Not built yet. Each step of `dt` seconds, in this order:
+
+1. **Flora → fauna: `Supply`**, world totals in the sim's organic units, after the plants'
+   own step:
+   - `foliage[species]`: edible foliage per photosynthetic species (the frondgrazer's,
+     loftstrider's food, summed as `Food::Foliage` and taken back pro rata); `foliage[glowcap]`
+     is the cap tissue (the capgnawer's food);
+   - `litter`, `film`, `nectar`, `fruit`;
+   - `carrion`: the ground pool, the shredder's second food. The hunters do not eat from it.
+2. **Fauna steps** (`FaunaModel::step(&supply)`), returning:
+   - **`Take`**, the same fields: what was eaten, which the flora half removes from those
+     stocks (foliage per species, caps from the glowcap's tissue);
+   - **`Returns.litter`**: dung (`(1 − yield)` of what was digested), bite spill, and dead
+     bank eggs;
+   - **`Returns.carrion`**: corpses of every death but kills (the whole body, reserve and
+     stomach), lost eggs, **each kill's share beyond the hunter's reach (0.64 of the corpse)
+     at the kill**, carcass a hunter left, and its own carcass when it dies. The flora half
+     decomposes and the shredder scavenges the carrion pool.
+   - The hunter's reachable carcass stays fauna-side (`Cohort::carcass`) and decays there at
+     `flora.carrion_decomposition`; that decay is respired, booked in `carcass_decayed`.
+3. **Zones.** The fitted responses read world totals over `area_scale` patch-areas, so the
+   loop can run on totals. Zones matter for two lineages, and the exchange would then carry
+   per-zone stocks (`Supply` per zone, `Take` per zone):
+   - the **capgnawer**: caps grow on dark faces and it lays only near fungus
+     (`egg_site`): it needs caps per zone and the dark/fungal zones' share of its feeding;
+   - the **snail**: film is the stream's; its stock per zone is its food.
+   The shredder (litter everywhere, ψ flat) and the frondgrazer (foliage) can stay on totals.
+   The `exchange` types are the parent's: per-zone supply is a change to ask for, not made
+   here.
+4. **Units and clock**: world seconds (`dt` 1 s in the fauna half), minutes in the logs; the
+   flora half's checks run on their own clocks inside its step.
+
+What the closed loop needs from the flora half, beyond stocks: the *productions* of the foods
+(litter input, cap regrowth, film growth, foliage, nectar, fruit) respond to what was taken,
+and the carrion pool decomposes into litter and mineral.

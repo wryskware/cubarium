@@ -7,7 +7,10 @@
 //! fauna_model fit     gen=DIR lj=DIR                  the fitted rates from the D1b and D2b logs
 //! fauna_model d1b     gen=DIR [twin=N]                open-loop validation against D1b
 //! fauna_model d2b     lj=DIR gen=DIR [twin=N]         open-loop validation against D2b
-//! fauna_model answers gen=DIR lj=DIR                  generation time; hunter carrying capacity
+//! fauna_model answers gen=DIR lj=DIR                  Q1, generation time, and its knobs
+//! fauna_model q2      gen=DIR lj=DIR [twin=N]         Q2, hunter carrying capacity
+//! fauna_model ljdiag  gen=DIR lj=DIR [arm=d2] [end=600]  the lanternjaw's budget, model and sim
+//! fauna_model fitbrowser gen=DIR                      the frondgrazer's foliage response
 //! ```
 
 use std::collections::BTreeMap;
@@ -38,6 +41,12 @@ fn main() {
         Some("d1b") => d1b_cmd(&args),
         Some("d2b") => d2b_cmd(&args),
         Some("answers") => answers_cmd(&args),
+        Some("ljdiag") => ljdiag_cmd(&args),
+        Some("q2") => q2_cmd(&args),
+        Some("fitbrowser") => {
+            let mut fits = Fits::recorded();
+            fit_browser(&mut fits, Path::new(arg(&args, "gen=").expect("gen=DIR")), false);
+        }
         Some(other) => panic!("unknown command {other}"),
         None => panic!("usage: fauna_model laws|young|fit|d1b|d2b|answers"),
     }
@@ -530,25 +539,9 @@ fn fit_all_with(gdir: &Path, lj: Option<&Path>, quiet: bool, obs_only: bool) -> 
                 pts.push((*stock, psi_of_r(&table, *r)));
             }
         }
-        let (a, h, rms) = fit_holling(&pts);
-        let ratio: Vec<f64> = pts.iter().map(|(e, y)| y / (a * e / (e + h)).max(1e-9)).collect();
+        let (a, h, _) = fit_holling(&pts);
         fits.of_mut(f).response[food.index()] = Some(fits::Response::holling(a, h));
         say!("fit,{},first-pass (window r inverted through the gut) psi_max={a:.3} half={h:.3}", f.name());
-        let _ = rms;
-        let _ = ratio;
-        continue;
-        #[allow(unreachable_code)]
-        say!(
-            "fit,{},response[{}]: psi=psi_max*E/(E+half), psi_max={a:.3}, half={h:.3}, rms={rms:.3}, obs/fit IQR [{:.2}..{:.2}], stock range [{:.3}..{:.3}], n={}",
-            f.name(),
-            food.name(),
-            quantile(&ratio, 0.25),
-            quantile(&ratio, 0.75),
-            quantile(&pts.iter().map(|x| x.0).collect::<Vec<_>>(), 0.0),
-            quantile(&pts.iter().map(|x| x.0).collect::<Vec<_>>(), 1.0),
-            pts.len()
-        );
-        fits.fitted[i] = true;
     }
     // **The responses by simulation** (pattern-oriented): the per-window intake of each
     // detritivore across every D1b arm and seed, the model run alone on the seed's clamped
@@ -562,10 +555,7 @@ fn fit_all_with(gdir: &Path, lj: Option<&Path>, quiet: bool, obs_only: bool) -> 
         .collect();
     let minutes: Vec<u32> = (0..=24).map(|k| k * 10).collect();
     if obs_only {
-        fits = Fits::recorded();
-        for f in DETRITIVORES {
-            fits.of_mut(f).nest_aggregation = 1.0;
-        }
+        fits = Fits::recorded_4h();
     }
     for f in DETRITIVORES {
         if obs_only {
@@ -615,7 +605,7 @@ fn fit_all_with(gdir: &Path, lj: Option<&Path>, quiet: bool, obs_only: bool) -> 
         let mut best = (f64::INFINITY, fits.of(f).clone(), Vec::new());
         let halves: Vec<f64> = [0.0, 0.1, 0.3, 1.0, 3.0].iter().map(|k| k * s_med).collect();
         let litter_psi: Vec<f64> = if f == Founder::Capgnawer { vec![0.0, 0.1, 0.2, 0.3] } else { vec![-1.0] };
-        let mut try_one = |pl: f64, h: f64, ifr: f64, psi_max: f64, best: &mut (f64, fits::LineageFit, Vec<f64>)| {
+        let try_one = |pl: f64, h: f64, ifr: f64, psi_max: f64, best: &mut (f64, fits::LineageFit, Vec<f64>)| {
             let mut cand = fits.clone();
             cand.of_mut(f).response[food.index()] = Some(fits::Response { psi_max, half: h, interference: ifr });
             if pl >= 0.0 {
@@ -690,16 +680,23 @@ fn fit_all_with(gdir: &Path, lj: Option<&Path>, quiet: bool, obs_only: bool) -> 
         // The 4 h windows' median stock and count: interference is added keeping ψ there.
         let e_med = quantile(&runs.iter().flat_map(|(_, c, _, _)| c.pts.iter().filter(|p| p.0 <= 240.0).map(|p| match food { Food::Litter => p.1, Food::Film => p.2, _ => p.3 })).collect::<Vec<_>>(), 0.5);
         let n_med = quantile(&runs.iter().flat_map(|(_, _, _, l)| l.det.iter().filter(|((m, j), _)| *j == i && *m >= 20 && *m <= 240).map(|(_, w)| get(Some(w), "n"))).collect::<Vec<_>>(), 0.5);
-        let ifr_grid: Vec<f64> = if base_resp.interference > 0.0 { vec![base_resp.interference] } else { [0.0, 0.003, 0.01, 0.03, 0.1, 0.3].iter().map(|k| k * e_med).collect() };
+        // ψ at the 4 h median stock and count, kept as interference moves (so the 4 h fit
+        // stands): ψ_max = ψ_med · (E + half + i·(n − 1)) / E. ψ_max is not capped at 1 (ψ
+        // itself is, in `Response::psi`): with interference the asymptote can sit above the
+        // bite. The grid spans no interference to 3 × the median stock per other body. A
+        // response whose interference the 4 h intake fit already found (the capgnawer's) keeps
+        // it: only the aggregation is fitted here.
+        let crowd = (n_med - 1.0).max(0.0);
+        let psi_med = base_resp.psi(e_med, n_med);
+        let ifr_grid: Vec<f64> = if base_resp.interference > 0.0 {
+            vec![base_resp.interference]
+        } else {
+            [0.0, 0.003, 0.01, 0.03, 0.1, 0.3, 0.6, 1.0, 2.0, 3.0].iter().map(|k| k * e_med).collect()
+        };
         let mut best = (f64::INFINITY, 1.0, base_resp);
         let mut line = String::new();
         for &ifr in &ifr_grid {
-            let resp = if ifr == base_resp.interference {
-                base_resp
-            } else {
-                let k = (e_med + base_resp.half + ifr * (n_med - 1.0).max(0.0)) / (e_med + base_resp.half);
-                fits::Response { psi_max: (base_resp.psi_max * k).min(1.0), half: base_resp.half, interference: ifr }
-            };
+            let resp = fits::Response { psi_max: psi_med * (e_med + base_resp.half + ifr * crowd) / e_med.max(1e-12), half: base_resp.half, interference: ifr };
             for kappa in [1.0, 1.5, 2.0, 3.0, 4.0] {
                 let mut cand = fits.clone();
                 cand.of_mut(f).nest_aggregation = kappa;
@@ -766,6 +763,8 @@ fn fit_cmd(args: &[String]) {
 #[derive(Clone, Default)]
 struct Clamp {
     pts: Vec<(f64, f64, f64, f64)>,
+    /// (minute, the photosynthetic stands' edible foliage), where the log has it (D1b).
+    edible: Vec<(f64, f64)>,
 }
 
 impl Clamp {
@@ -777,12 +776,32 @@ impl Clamp {
             .filter(|p| p.1.is_finite())
             .collect();
         pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        Clamp { pts }
+        let mut edible: Vec<(f64, f64)> = log.stocks.iter().map(|(m, s)| (f64::from(*m), get(Some(s), "edible"))).filter(|p| p.1.is_finite()).collect();
+        edible.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        Clamp { pts, edible }
+    }
+
+    /// The edible foliage at `minute`, interpolated; `None` where the log has none.
+    fn edible_at(&self, minute: f64) -> Option<f64> {
+        let e = &self.edible;
+        let first = e.first()?;
+        if minute <= first.0 {
+            return Some(first.1);
+        }
+        let last = e.last()?;
+        if minute >= last.0 {
+            return Some(last.1);
+        }
+        let k = e.iter().position(|p| p.0 > minute)?;
+        let (a, b) = (e[k - 1], e[k]);
+        Some(a.1 + (b.1 - a.1) * (minute - a.0) / (b.0 - a.0).max(1e-9))
     }
 
     fn extend(&mut self, other: &Clamp) {
         let last = self.pts.last().map_or(-1.0, |p| p.0);
         self.pts.extend(other.pts.iter().filter(|p| p.0 > last).copied());
+        let last = self.edible.last().map_or(-1.0, |p| p.0);
+        self.edible.extend(other.edible.iter().filter(|p| p.0 > last).copied());
     }
 
     fn at(&self, minute: f64) -> Supply {
@@ -807,6 +826,9 @@ impl Clamp {
         s.litter = l;
         s.film = fm;
         s.foliage[cubarium_voxel_flora::Species::Glowcap.index()] = c;
+        if let Some(e) = self.edible_at(minute) {
+            s.foliage[cubarium_voxel_flora::Species::Springturf.index()] = e;
+        }
         s
     }
 }
@@ -1199,6 +1221,7 @@ fn run_d2b(p: &cubarium_voxel_sim::params::Params, fits: &Fits, med: &BTreeMap<u
     let mut out = BTreeMap::new();
     let mut last = 120u32;
     let a0 = m.ledger[Founder::Lanternjaw.index()].flows.assimilated;
+    let h0 = m.ledger[Founder::Lanternjaw.index()].hunting_s;
     while m.t_s < f64::from(end) * 60.0 - 1e-9 {
         let s = d2b_supply(med, &seed, m.t_s / 60.0);
         m.step(&s);
@@ -1224,6 +1247,7 @@ fn run_d2b(p: &cubarium_voxel_sim::params::Params, fits: &Fits, med: &BTreeMap<u
             r.insert("lj.laid".into(), l.laid);
             r.insert("lj.hatched".into(), l.hatched);
             r.insert("lj.awake".into(), if l.alive_s > 0.0 { l.awake_s / l.alive_s } else { f64::NAN });
+            r.insert("lj.hunting_s".into(), l.hunting_s - h0);
             r.insert("small".into(), [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail].iter().map(|f| m.census(*f).n).sum());
             out.insert(minute, r);
         }
@@ -1274,6 +1298,7 @@ fn d2b_sim(log: &RunLog, obs: Option<&RunLog>, minute: u32) -> BTreeMap<String, 
     }
     r.insert("lj.kills".into(), kills);
     r.insert("lj.intake".into(), intake);
+    r.insert("lj.hunting_s".into(), sim_hunting_s(log, 120, minute.min(240)) + obs.map_or(0.0, |o| sim_hunting_s(o, 240, minute)));
     r.insert("lj.laid".into(), laid);
     r.insert("lj.hatched".into(), hatched);
     r.insert("small".into(), [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail].iter().map(|f| get(src.det.get(&(minute, f.index())), "n")).sum());
@@ -1322,14 +1347,199 @@ fn fit_kills(fits: &mut Fits, med: &BTreeMap<u32, (f64, f64, f64, f64)>, gdir: &
     }
 }
 
+/// **The frondgrazer's food response** (foliage), by simulation on the D1b `branch` runs (no
+/// hunters): each seed's frondgrazers from its minute-0 count, the edible foliage clamped to
+/// the seed's own log, `ψ = ψ_max · F / (F + half)` on a grid, matched on the count at the
+/// logged minutes to 720 (4 h runs and the 8 h observation) in log space. Training seeds
+/// only ([`TRAIN_SEEDS`]); the held-out seeds and D2b are the checks.
+fn fit_browser(fits: &mut Fits, gdir: &Path, quiet: bool) {
+    let f = Founder::Browser;
+    let p = params_of("branch");
+    let starts = logs_of(&gdir.join("runs"), "branch");
+    let obs = logs_of(&gdir.join("obs"), "branch");
+    let runs: Vec<(Clamp, f64, Vec<(u32, f64)>, u32)> = starts
+        .iter()
+        .filter_map(|st| {
+            let o = obs.iter().find(|o| o.seed == st.seed)?;
+            let mut c = Clamp::of(st);
+            c.extend(&Clamp::of(o));
+            let n0 = get(st.stocks.get(&0), "frondgrazer");
+            let mut pts: Vec<(u32, f64)> = Vec::new();
+            for l in [st, o] {
+                for (m, w) in &l.stocks {
+                    if *m > 0 && *m % 60 == 0 {
+                        pts.push((*m, get(Some(w), "frondgrazer")));
+                    }
+                }
+            }
+            pts.sort_by_key(|x| x.0);
+            pts.dedup_by_key(|x| x.0);
+            Some((c, n0, pts, st.seed))
+        })
+        .collect();
+    let run = |fits: &Fits, clamp: &Clamp, n0: f64, end: u32| -> BTreeMap<u32, f64> {
+        let mut m = FaunaModel::new(&p, fits.clone(), 1.0);
+        for g in Founder::ALL {
+            m.enabled[g.index()] = g == f;
+        }
+        m.add(f, Cohort::founders(&p.fauna, f, n0));
+        let mut out = BTreeMap::new();
+        while m.t_s < f64::from(end) * 60.0 - 1e-9 {
+            let s = clamp.at(m.t_s / 60.0);
+            m.step(&s);
+            let minute = (m.t_s / 60.0).round() as u32;
+            if minute % 60 == 0 && (m.t_s - f64::from(minute) * 60.0).abs() < 0.5 {
+                out.insert(minute, m.census(f).n);
+            }
+        }
+        out
+    };
+    let err_of = |fits: &Fits, seeds: &dyn Fn(u32) -> bool| -> (f64, Vec<(u32, u32, f64, f64)>) {
+        let mut err = 0.0;
+        let mut rows = Vec::new();
+        for (c, n0, pts, seed) in runs.iter().filter(|r| seeds(r.3)) {
+            let out = run(fits, c, *n0, 720);
+            for (m, sim) in pts {
+                if let Some(model) = out.get(m) {
+                    err += ((model + 1.0).ln() - (sim + 1.0).ln()).powi(2);
+                    rows.push((*seed, *m, *sim, *model));
+                }
+            }
+        }
+        (err, rows)
+    };
+    let e_med = quantile(&runs.iter().flat_map(|r| r.0.edible.iter().map(|p| p.1)).collect::<Vec<_>>(), 0.5);
+    let mut best = (f64::INFINITY, fits::Response::ALWAYS);
+    let mut line = String::new();
+    for h in [0.0, 0.1, 0.3, 1.0, 3.0] {
+        for k in 0..16 {
+            let psi_max = 0.02 * 1.3f64.powi(k);
+            if psi_max > 1.0 {
+                break;
+            }
+            let mut cand = fits.clone();
+            let r = fits::Response::holling(psi_max, h * e_med);
+            cand.of_mut(f).response[Food::Foliage.index()] = Some(r);
+            let (e, _) = err_of(&cand, &|s| TRAIN_SEEDS.contains(&s));
+            if e < best.0 {
+                best = (e, r);
+            }
+            if k % 3 == 0 {
+                line += &format!(" h={h},psi={psi_max:.3}:{e:.2}");
+            }
+        }
+    }
+    fits.of_mut(f).response[Food::Foliage.index()] = Some(best.1);
+    fits.fitted[f.index()] = true;
+    if !quiet {
+        let (_, rows) = err_of(fits, &|s| !TRAIN_SEEDS.contains(&s));
+        println!(
+            "fit,frondgrazer,foliage response psi_max={:.3} half={:.1} (edible median {e_med:.0}), log error {:.2} on training seeds {:?}; grid:{line}",
+            best.1.psi_max,
+            best.1.half,
+            best.0,
+            TRAIN_SEEDS
+        );
+        for m in [240u32, 480, 720] {
+            let sim: Vec<f64> = rows.iter().filter(|r| r.1 == m).map(|r| r.2).collect();
+            let model: Vec<f64> = rows.iter().filter(|r| r.1 == m).map(|r| r.3).collect();
+            println!("  held-out frondgrazer N at m{m}: sim {} model {} {}", fmt_spread(&sim), fmt_spread(&model), verdict(&sim, &model, 1.5));
+        }
+    }
+}
+
+/// The sim's hunting time over a log's windows in `(from, to]`: the patroller's hungry
+/// controller samples (`wait + travel + engaged`, one per `CONTROLLER_PERIOD_S` = 0.25 s).
+fn sim_hunting_s(log: &RunLog, from: u32, to: u32) -> f64 {
+    log.lj.range(from + 1..=to).map(|(_, w)| (get(Some(w), "wait") + get(Some(w), "travel") + get(Some(w), "engaged")) * 0.25).sum()
+}
+
+/// **The hunter's fits** on the `d2` arm (minutes 120-240, 8 seeds), from the logs or by
+/// simulation:
+/// - the dormant eggs' **loss share**: eggs gone from the bank in the first window after the
+///   hunters lay (`bank₁₂₀ + laid − attached − bank₁₃₀`; none is old enough to die of age)
+///   over the eggs laid: the sim's `clutch_fate` takes them (flooded, the face gone);
+/// - the patrol eats carrion **only at its own kills** (its general carrion response 0);
+/// - **a kill's reach** (`kill_reach`): the share of each corpse the hunter eats from, on a
+///   grid refined by bisection, each value with the kill rates refitted ([`fit_kills`]),
+///   matched on the hunters' summed assimilation. The hunting time (hungry and awake) is
+///   not fitted: it is the check.
+fn fit_hunter(fits: &mut Fits, med: &BTreeMap<u32, (f64, f64, f64, f64)>, gdir: &Path, ljdir: &Path, quiet: bool) {
+    let logs = logs_of(&ljdir.join("mech"), "d2");
+    let lj = Founder::Lanternjaw;
+    let (mut laid, mut gone) = (0.0, 0.0);
+    for l in &logs {
+        let (a, b) = (l.lj.get(&120), l.lj.get(&130));
+        laid += get(b, "laid");
+        gone += get(a, "bank") + get(b, "laid") - get(b, "attached") - get(b, "bank");
+    }
+    fits.of_mut(lj).egg_loss = if laid > 0.0 { (gone / laid).clamp(0.0, 1.0) } else { 0.0 };
+    fits.of_mut(lj).response[Food::Carrion.index()] = Some(fits::Response::holling(0.0, 0.0));
+    let sim: f64 = logs.iter().map(|l| d2b_sim(l, None, 240).get("lj.intake").copied().unwrap_or(0.0)).sum();
+    let sim_k: f64 = logs.iter().map(|l| d2b_sim(l, None, 240).get("lj.kills").copied().unwrap_or(0.0)).sum();
+    let sim_h: f64 = logs.iter().map(|l| sim_hunting_s(l, 120, 240)).sum();
+    let p = params_of("d2");
+    let score = |fits: &mut Fits, reach: f64| -> (f64, f64, f64) {
+        fits.kill_reach = reach;
+        fit_kills(fits, med, gdir, ljdir, true);
+        let (mut intake, mut kills, mut hunting) = (0.0, 0.0, 0.0);
+        for l in &logs {
+            let out = run_d2b(&p, fits, med, gdir, l, None, 240, Draws::Mean);
+            let r = out.get(&240);
+            intake += r.and_then(|r| r.get("lj.intake")).copied().unwrap_or(0.0);
+            kills += r.and_then(|r| r.get("lj.kills")).copied().unwrap_or(0.0);
+            hunting += r.and_then(|r| r.get("lj.hunting_s")).copied().unwrap_or(0.0);
+        }
+        (intake, kills, hunting)
+    };
+    let mut line = String::new();
+    let grid = [1.0, 0.8, 0.6, 0.5, 0.4, 0.3, 0.25, 0.2, 0.15, 0.1, 0.05];
+    let mut vals = Vec::new();
+    for &reach in &grid {
+        let (intake, kills, hunting) = score(fits, reach);
+        line += &format!(" {reach}:{intake:.2}/{kills:.0}k/{:.0}s", hunting / logs.len() as f64);
+        vals.push((reach, intake));
+    }
+    // The reach whose intake brackets the sim's, refined by bisection (intake rises with reach).
+    let mut best = grid[0];
+    if let Some(w) = vals.windows(2).find(|w| (w[0].1 - sim) * (w[1].1 - sim) <= 0.0) {
+        let (mut lo, mut hi) = (w[1].0, w[0].0);
+        for _ in 0..10 {
+            let mid = 0.5 * (lo + hi);
+            if score(fits, mid).0 > sim { hi = mid } else { lo = mid }
+        }
+        best = 0.5 * (lo + hi);
+    } else if let Some(v) = vals.iter().min_by(|a, b| (a.1 / sim).ln().abs().partial_cmp(&(b.1 / sim).ln().abs()).unwrap()) {
+        best = v.0;
+    }
+    let (intake, kills, hunting) = score(fits, best);
+    if !quiet {
+        println!(
+            "fit,lanternjaw,egg_loss={:.3} ({gone:.0} of {laid:.0} eggs gone in the first window, d2 8 seeds); carrion only at its kills; kill_reach={best:.3}: model intake {intake:.3} vs sim {sim:.3}, kills {kills:.1} vs {sim_k:.0}, hunting LJ-s per seed {:.0} vs sim {:.0} (the check), d2 m120-240 over 8 seeds; grid (reach:intake/kills/hunting s per seed):{line}",
+            fits.of(lj).egg_loss,
+            hunting / logs.len() as f64,
+            sim_h / logs.len() as f64,
+        );
+        println!(
+            "fit,kills,{} strikes_per_kill={:.2}",
+            D2B_PREY.iter().map(|f| format!("{}={:.3e}", f.name(), fits.of(*f).kill_rate)).collect::<Vec<_>>().join(" "),
+            fits.strikes_per_kill
+        );
+    }
+}
+
 fn d2b_cmd(args: &[String]) {
     let gdir = PathBuf::from(arg(args, "gen=").expect("gen=DIR"));
     let ljdir = PathBuf::from(arg(args, "lj=").expect("lj=DIR"));
     let twins: usize = arg(args, "twin=").map_or(0, |t| t.parse().unwrap());
     let mut fits = if args.iter().any(|a| a == "refit") { fit_all(&gdir, None, true) } else { Fits::recorded() };
     let med = median_stocks(&gdir);
-    fit_kills(&mut fits, &med, &gdir, &ljdir, false);
-    let keys = ["small", "littershredder.n", "capgnawer.n", "ripple-snail.n", "frondgrazer.n", "lj.kills", "littershredder.killed", "capgnawer.killed", "ripple-snail.killed", "frondgrazer.killed", "lj.intake", "lj.fullness", "lj.laid", "lj.bank", "lj.hatched"];
+    if args.iter().any(|a| a == "old-hunter") {
+        fit_kills(&mut fits, &med, &gdir, &ljdir, false);
+    } else {
+        fit_hunter(&mut fits, &med, &gdir, &ljdir, false);
+    }
+    let keys = ["small", "littershredder.n", "capgnawer.n", "ripple-snail.n", "frondgrazer.n", "lj.kills", "littershredder.killed", "capgnawer.killed", "ripple-snail.killed", "frondgrazer.killed", "lj.intake", "lj.hunting_s", "lj.fullness", "lj.laid", "lj.bank", "lj.hatched"];
     for (arm, cfg_arm, obs_dir, minutes) in [
         ("d2", "d2", None, vec![150u32, 180, 210, 240]),
         ("d2b", "d2b", None, vec![150, 180, 210, 240]),
@@ -1388,8 +1598,10 @@ fn d2b_cmd(args: &[String]) {
 /// its lineage, minutes from hatching: maturation (through `birth_body`), the first tick it is
 /// in surplus, its first clutch; the clutches after it and their eggs, to `horizon_min`. With
 /// `ceiling`, the clock is off and food is under its mouth (ψ = 1): the young_budget probe.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct History {
+    /// Every clutch: (age from hatching, minutes; eggs).
+    schedule: Vec<(f64, f64)>,
     mature: f64,
     eligible: f64,
     first: f64,
@@ -1402,6 +1614,13 @@ struct History {
 }
 
 fn history(p: &cubarium_voxel_sim::params::Params, fits: &Fits, f: Founder, supply: &Supply, n_own: f64, ceiling: bool, horizon_min: f64) -> History {
+    history_on(p, fits, f, supply, n_own, ceiling, horizon_min, 1.0)
+}
+
+/// [`history`] on a floor `area` times patch's (the stocks and the neighbours read per
+/// patch-sized area, as [`FaunaModel::area_scale`] does).
+#[allow(clippy::too_many_arguments)]
+fn history_on(p: &cubarium_voxel_sim::params::Params, fits: &Fits, f: Founder, supply: &Supply, n_own: f64, ceiling: bool, horizon_min: f64, area: f64) -> History {
     let mut p = p.clone();
     {
         let ph = &mut p.fauna.founders[f.index()];
@@ -1417,6 +1636,7 @@ fn history(p: &cubarium_voxel_sim::params::Params, fits: &Fits, f: Founder, supp
         fits.of_mut(f).motor_effort = 0.0;
     }
     let mut m = FaunaModel::new(&p, fits, 1.0);
+    m.area_scale = area;
     for g in Founder::ALL {
         m.enabled[g.index()] = g == f;
     }
@@ -1443,6 +1663,7 @@ fn history(p: &cubarium_voxel_sim::params::Params, fits: &Fits, f: Founder, supp
         }
         let l = &m.ledger[f.index()];
         if l.clutches > h.clutches + 1e-9 {
+            h.schedule.push((min, l.laid - h.eggs));
             if h.first.is_nan() {
                 h.first = min;
                 h.eggs_first = l.laid;
@@ -1506,7 +1727,7 @@ fn answers_cmd(args: &[String]) {
     let ljdir = PathBuf::from(arg(args, "lj=").expect("lj=DIR"));
     let mut fits = Fits::recorded();
     let med = median_stocks(&gdir);
-    fit_kills(&mut fits, &med, &gdir, &ljdir, true);
+    fit_hunter(&mut fits, &med, &gdir, &ljdir, true);
     let supply = field_supply(&gdir);
     let base = params_of("branch");
     println!("=== Q1: generation time (minutes); field stocks litter {:.0}, film {:.2}, caps {:.1}; neighbours 12", supply.litter, supply.film, supply.foliage[cubarium_voxel_flora::Species::Glowcap.index()]);
@@ -1515,7 +1736,7 @@ fn answers_cmd(args: &[String]) {
         let field = history(&base, &fits, f, &supply, 12.0, false, 900.0);
         let sc = base.fauna.founder(f).core;
         let inc = sc.reproduction.incubation_s / 60.0;
-        for (name, h) in [("ceiling", ceil), ("field", field)] {
+        for (name, h) in [("ceiling", ceil), ("field", field.clone())] {
             println!(
                 "{},{name}: maturation {:.0} + to surplus {:.0} + hold/wait to first clutch {:.0} + incubation {:.1} = generation {:.0}; clutches after: every {:.0} min, eggs first {:.0} / mean {:.2}; raw intake {:.3}/day",
                 f.name(),
@@ -1584,5 +1805,312 @@ fn answers_cmd(args: &[String]) {
     let _ = ljdir;
 }
 
-#[allow(dead_code)]
-fn unused(_: &Path, _: PathBuf, _: BTreeMap<u8, u8>, _: Rng, _: Draws, _: fits::Response, _: model::Census) {}
+/// **The lanternjaw's budget, model against sim**, per D2 seed from minute 120 to `end`:
+/// kills, the carcass laid and where it went, intake, the hunter's time, its eggs.
+fn ljdiag_cmd(args: &[String]) {
+    let gdir = PathBuf::from(arg(args, "gen=").expect("gen=DIR"));
+    let ljdir = PathBuf::from(arg(args, "lj=").expect("lj=DIR"));
+    let arm = arg(args, "arm=").unwrap_or("d2");
+    let end: u32 = arg(args, "end=").map_or(600, |e| e.parse().unwrap());
+    let mut fits = Fits::recorded();
+    let med = median_stocks(&gdir);
+    if args.iter().any(|a| a == "old-hunter") {
+        fit_kills(&mut fits, &med, &gdir, &ljdir, true);
+    } else {
+        fit_hunter(&mut fits, &med, &gdir, &ljdir, true);
+    }
+    if let Some(x) = arg(args, "stay=") {
+        fits.carcass_stay_s = x.parse().unwrap();
+    }
+    let p = params_of(arm);
+    let logs = logs_of(&ljdir.join("mech"), arm);
+    let obs = logs_of(&ljdir.join("mech").join("obs"), arm);
+    let lj = Founder::Lanternjaw;
+    {
+        let ph = p.fauna.founder(lj);
+        println!(
+            "lanternjaw gut: stomach_k {} bite_per_body_s {} digestion_s(carrion) {} yield {} mass_exponent {} full_tolerance {}; body_max {} arrival body {}",
+            ph.gut.stomach_k, ph.gut.bite_per_body_s, ph.gut.digestion_s[Food::Carrion.index()], ph.yield_for(Food::Carrion), ph.gut.mass_exponent, ph.gut.full_tolerance, ph.core.body_max, p.fauna.founding.arrival_body * ph.core.body_max
+        );
+    }
+    for log in &logs {
+        let o = obs.iter().find(|x| x.seed == log.seed);
+        if end > 240 && o.is_none() {
+            continue;
+        }
+        let mut m = d2b_start(&p, &fits, &med, &gdir, log);
+        let mut seed = Clamp::of(log);
+        if let Some(o) = o {
+            seed.extend(&Clamp::of(o));
+        }
+        let l0 = m.ledger[lj.index()].clone();
+        let (c0, d0, e0) = (m.carcass_laid, m.carcass_decayed, m.carcass_left);
+        let mut prey_org = 0.0;
+        while m.t_s < f64::from(end) * 60.0 - 1e-9 {
+            let s = d2b_supply(&med, &seed, m.t_s / 60.0);
+            m.step(&s);
+        }
+        let l = &m.ledger[lj.index()];
+        let kills = l.kills - l0.kills;
+        prey_org += m.carcass_laid - c0;
+        let sw = l.swallowed[Food::Carrion.index()] - l0.swallowed[Food::Carrion.index()];
+        let sim = d2b_sim(log, o, end);
+        let c = m.census(lj);
+        println!(
+            "seed {}: model kills {kills:.1} carcass {prey_org:.3} ({:.3}/kill) swallowed {sw:.3} decayed {:.3} left {:.3} held {:.3}; assimilated {:.3} ({:.4}/kill) upkeep {:.3} motor {:.3} heat {:.3} egested {:.3} eggs_paid {:.3} laid {:.0}; hunting_s/LJ {:.0} awake {:.2}; fullness {:.2} | sim kills {:.0} intake {:.3} ({:.4}/kill) laid {:.0} fullness {:.2}",
+            log.seed,
+            prey_org / kills.max(1e-9),
+            m.carcass_decayed - d0,
+            m.carcass_left - e0,
+            m.pops[lj.index()].iter().map(|c| c.carcass).sum::<f64>(),
+            l.flows.assimilated - l0.flows.assimilated,
+            (l.flows.assimilated - l0.flows.assimilated) / kills.max(1e-9),
+            l.flows.upkeep - l0.flows.upkeep,
+            l.flows.motor - l0.flows.motor,
+            l.flows.digestion_heat - l0.flows.digestion_heat,
+            l.flows.egested - l0.flows.egested,
+            l.eggs_paid - l0.eggs_paid,
+            l.laid - l0.laid,
+            (l.hunting_s - l0.hunting_s) / (c.n - c.riders).max(1e-9),
+            (l.awake_s - l0.awake_s) / (l.alive_s - l0.alive_s).max(1e-9),
+            c.mean_fullness,
+            sim.get("lj.kills").copied().unwrap_or(f64::NAN),
+            sim.get("lj.intake").copied().unwrap_or(f64::NAN),
+            sim.get("lj.intake").copied().unwrap_or(f64::NAN) / sim.get("lj.kills").copied().unwrap_or(f64::NAN),
+            sim.get("lj.laid").copied().unwrap_or(f64::NAN),
+            sim.get("lj.fullness").copied().unwrap_or(f64::NAN),
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Q2: hunter carrying capacity.
+
+const SMALL_PREY: [Founder; 3] = [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail];
+
+/// **The intrinsic rate of increase** from a one-body life history (Euler–Lotka):
+/// `Σ_k l(t_k) · e_k · e^(−r t_k) = 1` over its clutches `k` at ages `t_k` from laying (the
+/// egg's incubation plus the age at the clutch), `e_k` eggs each surviving the egg loss,
+/// `l` the newborn lifespan draw's survival ([`laws::lifespan_survival`]). Per minute;
+/// bisection on `r`. NaN with no clutch.
+fn euler_lotka(p: &cubarium_voxel_sim::params::Params, fits: &Fits, f: Founder, h: &History) -> f64 {
+    let sc = p.fauna.founder(f).core;
+    let inc = sc.reproduction.incubation_s / 60.0;
+    let keep = 1.0 - fits.of(f).egg_loss;
+    let pts: Vec<(f64, f64)> = h
+        .schedule
+        .iter()
+        .map(|(age, eggs)| (inc + age, eggs * keep * laws::lifespan_survival(&p.fauna.life, sc.lifespan_median_s, age * 60.0, false)))
+        .collect();
+    if pts.is_empty() {
+        return f64::NAN;
+    }
+    let sum = |r: f64| pts.iter().map(|(t, m)| m * (-r * t).exp()).sum::<f64>();
+    let (mut lo, mut hi) = (-0.05, 0.05);
+    if sum(lo) < 1.0 || sum(hi) > 1.0 {
+        return f64::NAN;
+    }
+    for _ in 0..80 {
+        let mid = 0.5 * (lo + hi);
+        if sum(mid) > 1.0 { lo = mid } else { hi = mid }
+    }
+    0.5 * (lo + hi)
+}
+
+/// A map for Q2: its stocks, its floor against patch's, its prey at the start.
+struct Map {
+    name: &'static str,
+    supply: Supply,
+    area: f64,
+}
+
+/// The model's cohorts made whole bodies for the twin: each lineage's cohort sizes rounded
+/// so the lineage keeps its rounded total (largest remainder), egg cohorts likewise.
+fn to_whole(m: &mut FaunaModel) {
+    for v in m.pops.iter_mut() {
+        let total: f64 = v.iter().map(|c| c.n).sum();
+        let want = total.round();
+        let mut fl: Vec<(usize, f64)> = v.iter().enumerate().map(|(i, c)| (i, c.n - c.n.floor())).collect();
+        for c in v.iter_mut() {
+            c.n = c.n.floor();
+        }
+        let have: f64 = v.iter().map(|c| c.n).sum();
+        fl.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        for (i, _) in fl.into_iter().take((want - have).max(0.0) as usize) {
+            v[i].n += 1.0;
+        }
+        v.retain(|c| c.n > 0.0);
+    }
+    for e in m.eggs.iter_mut() {
+        e.n = e.n.round();
+    }
+    m.eggs.retain(|e| e.n > 0.0);
+}
+
+/// The prey and the bank of a D2 seed at minute 120 (the patch-hunters census), with `hunters`
+/// adult lanternjaws in place of the log's, on `map` (the prey and the bank scaled by its area).
+fn q2_start(p: &cubarium_voxel_sim::params::Params, fits: &Fits, med: &BTreeMap<u32, (f64, f64, f64, f64)>, gdir: &Path, log: &RunLog, map: &Map, hunters: f64) -> FaunaModel {
+    let mut m = d2b_start(p, fits, med, gdir, log);
+    let lj = Founder::Lanternjaw;
+    m.pops[lj.index()].retain(|c| c.host.is_some());
+    for v in m.pops.iter_mut() {
+        for c in v.iter_mut() {
+            c.n *= map.area;
+        }
+    }
+    for e in m.eggs.iter_mut() {
+        e.n *= map.area;
+    }
+    if hunters > 0.0 {
+        m.add(lj, Cohort::founders(&p.fauna, lj, hunters));
+    }
+    m.area_scale = map.area;
+    m
+}
+
+/// Q2 on one map and config: r, the per-prey kill rate and `H_max` per small-prey lineage;
+/// then 1-6 hunters for three world days on the map's clamped stocks from each D2 seed's
+/// census, the mean field and `twins` stochastic twins per seed.
+#[allow(clippy::too_many_arguments)]
+fn q2_map(p: &cubarium_voxel_sim::params::Params, fits: &Fits, med: &BTreeMap<u32, (f64, f64, f64, f64)>, gdir: &Path, logs: &[RunLog], map: &Map, label: &str, hunting_per_lj_day: f64, twins: usize) {
+    let lj = Founder::Lanternjaw;
+    let hp = *p.fauna.founder(lj);
+    println!("=== Q2 {} ({label}): stocks litter {:.0} caps {:.1} film {:.1} foliage {:.0}, area x{:.1}", map.name, map.supply.litter, map.supply.foliage[cubarium_voxel_flora::Species::Glowcap.index()], map.supply.film, map.supply.foliage[cubarium_voxel_flora::Species::Springturf.index()], map.area);
+    let mut h_min = f64::INFINITY;
+    for f in SMALL_PREY {
+        let sc = p.fauna.founder(f).core;
+        let hist = history_on(p, fits, f, &map.supply, 12.0 * map.area, false, (sc.lifespan_median_s / 60.0) * (p.fauna.life.lifespan_draw_min + p.fauna.life.lifespan_draw_span), map.area);
+        let r_day = euler_lotka(p, fits, f, &hist) * 120.0;
+        let g_min = generation(p, f, &hist);
+        let pp = *p.fauna.founder(f);
+        // The kill rate a body of this lineage meets per hunting second, at the adult's share
+        // (and the juvenile's, for the range).
+        let share_a = laws::strike_share(&hp, hp.core.body_max, &pp, sc.body_max);
+        let share_j = laws::strike_share(&hp, hp.core.body_max, &pp, sc.birth_body);
+        let alpha = fits.of(f).kill_rate / map.area;
+        let a_day = alpha * share_a * share_a * hunting_per_lj_day;
+        let h_max = r_day / a_day;
+        if h_max > 0.0 {
+            h_min = h_min.min(h_max);
+        }
+        println!(
+            "  {}: generation {:.0} min, eggs over a life {:.1}, r = {:.3}/day; kill rate per prey body per LJ-day {:.3} (alpha {:.2e} x share^2 {:.2} [juvenile {:.2}] x hunting {:.0} s/LJ-day); H_max = r/a = {:.2}",
+            f.name(),
+            g_min,
+            hist.schedule.iter().map(|x| x.1).sum::<f64>(),
+            r_day,
+            a_day,
+            fits.of(f).kill_rate,
+            share_a * share_a,
+            share_j * share_j,
+            hunting_per_lj_day,
+            h_max
+        );
+    }
+    println!("  H_max (the lowest of the lineages that grow without hunters): {h_min:.2} hunters");
+    println!("  H | small prey at day 3, mean field (median over seeds) [shredder capgnawer snail] | twin: P(a small lineage extinct by day 3), P(all three), median small prey");
+    for h in 1..=6 {
+        let mut mf: Vec<[f64; 4]> = Vec::new();
+        let (mut any, mut all, mut tot) = (0usize, 0usize, 0usize);
+        let mut twin_small: Vec<f64> = Vec::new();
+        let per_seed: Vec<Vec<(usize, Vec<f64>, f64)>> = std::thread::scope(|sc| {
+            let hs: Vec<_> = logs
+                .chunks(logs.len().div_ceil(4).max(1))
+                .map(|part| {
+                    sc.spawn(move || {
+                        let mut v = Vec::new();
+                        for log in part {
+                            for k in 0..=twins {
+                                let mut m = q2_start(p, fits, med, gdir, log, map, h as f64);
+                                if k > 0 {
+                                    to_whole(&mut m);
+                                    m.draws = Draws::Twin(Rng::new(u64::from(log.seed) * 104_729 + k as u64 * 31 + h as u64));
+                                }
+                                while m.t_s < (120.0 + 360.0) * 60.0 - 1e-9 {
+                                    m.step(&map.supply);
+                                }
+                                let n: Vec<f64> = SMALL_PREY.iter().map(|f| m.census(*f).n + m.census(*f).eggs).collect();
+                                let small: f64 = SMALL_PREY.iter().map(|f| m.census(*f).n).sum();
+                                v.push((k, n, small));
+                            }
+                        }
+                        v
+                    })
+                })
+                .collect();
+            hs.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for (k, n, small) in per_seed.into_iter().flatten() {
+            {
+                if k == 0 {
+                    mf.push([small, n[0], n[1], n[2]]);
+                } else {
+                    tot += 1;
+                    let gone = n.iter().filter(|x| **x < 0.5).count();
+                    if gone > 0 {
+                        any += 1;
+                    }
+                    if gone == 3 {
+                        all += 1;
+                    }
+                    twin_small.push(small);
+                }
+            }
+        }
+        let col = |i: usize| median(&mut mf.iter().map(|x| x[i]).collect::<Vec<_>>());
+        println!(
+            "  {h} | {:.1} [{:.1} {:.1} {:.1}] | {:.2} {:.2} {:.1} ({tot} twins)",
+            col(0),
+            col(1),
+            col(2),
+            col(3),
+            any as f64 / tot.max(1) as f64,
+            all as f64 / tot.max(1) as f64,
+            median(&mut twin_small)
+        );
+    }
+}
+
+/// **Q2, hunter carrying capacity**: patch and the terrarium, at the shredder's gut as it is
+/// and at ×3 (a one-day turnover).
+fn q2_cmd(args: &[String]) {
+    let gdir = PathBuf::from(arg(args, "gen=").expect("gen=DIR"));
+    let ljdir = PathBuf::from(arg(args, "lj=").expect("lj=DIR"));
+    let twins: usize = arg(args, "twin=").map_or(10, |t| t.parse().unwrap());
+    let mut fits = Fits::recorded();
+    let med = median_stocks(&gdir);
+    fit_hunter(&mut fits, &med, &gdir, &ljdir, true);
+    let logs = logs_of(&ljdir.join("mech"), "d2");
+    // The hunting time per hunter-day the kill rates were fitted with: the model's own on d2.
+    let p0 = params_of("d2");
+    let mut hunting = Vec::new();
+    for l in &logs {
+        let out = run_d2b(&p0, &fits, &med, &gdir, l, None, 240, Draws::Mean);
+        let n = get(l.lj.get(&120), "adults");
+        hunting.push(out.get(&240).and_then(|r| r.get("lj.hunting_s")).copied().unwrap_or(f64::NAN) / n.max(1.0));
+    }
+    let hunting_day = median(&mut hunting);
+    println!("fit,lanternjaw,kill_reach={:.3} egg_loss={:.3}; kill rates {}; the model's hunting time on d2 {hunting_day:.0} s per LJ-day", fits.kill_reach, fits.of(Founder::Lanternjaw).egg_loss, D2B_PREY.iter().map(|f| format!("{}={:.2e}", f.name(), fits.of(*f).kill_rate)).collect::<Vec<_>>().join(" "));
+    // Patch: the D2 seeds' own logged stocks (minutes 120-600, the arm and its observation),
+    // median; foliage from D1b (D2b does not log it).
+    let mut patch = field_supply(&gdir);
+    let obs = logs_of(&ljdir.join("mech").join("obs"), "d2");
+    let col = |k: &str| median(&mut logs.iter().chain(obs.iter()).flat_map(|l| l.stocks.values().map(|w| get(Some(w), k))).collect::<Vec<_>>());
+    patch.litter = col("litter");
+    patch.film = col("film");
+    patch.foliage[cubarium_voxel_flora::Species::Glowcap.index()] = col("cap_tissue");
+    let mut terr = Supply::default();
+    terr.litter = 2000.0;
+    terr.foliage[cubarium_voxel_flora::Species::Glowcap.index()] = 1700.0;
+    terr.foliage[cubarium_voxel_flora::Species::Springturf.index()] = 2700.0;
+    terr.film = patch.film * 3.2;
+    let maps = [Map { name: "patch", supply: patch, area: 1.0 }, Map { name: "terrarium", supply: terr, area: 3.2 }];
+    for (label, sets) in [("gut as is", Vec::<String>::new()), ("shredder gut x3", knob_sets(&p0, Founder::Blind, "gut_throughput", 3.0))] {
+        let (c, mut s) = arm_config("d2");
+        s.extend(sets);
+        let p = config::scenario(c, &s).expect("config");
+        for map in &maps {
+            q2_map(&p, &fits, &med, &gdir, &logs, map, label, hunting_day, twins);
+        }
+    }
+}
