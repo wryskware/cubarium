@@ -38,7 +38,8 @@ use crate::Fauna;
 //     satiated rest, `Rest` without `Satiated`, `FaunaConfig::parasite_take_per_day`,
 //     `LifeConfig::ecological_day_s`; per-day upkeep and the new lifespans.
 // 37: springturf spread — `FounderPhysiology::burr_coat`.
-pub const SCHEMA: u32 = 37;
+// 38: scenario maps — `FoundingConfig::reference_land_m2` in the saved config.
+pub const SCHEMA: u32 = 38;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

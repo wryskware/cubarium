@@ -1,0 +1,14 @@
+# Scenario map `wet-valley`: the `patch` ring wetter and flatter, so waterlogged ground
+# (the velvetpad's) gains on the springturf's drained faces. Against `dry-hills`.
+#
+# Visible effect: a higher water table and more water in the world (inventory 2.0 m
+# against 1.5 m), and ground that falls toward the lake at half the slope, so water
+# stands longer.
+base = "patch.toml"
+
+[world.landform]
+water_level_m = 0.375
+ground_fall = 0.04
+
+[world.landform.water]
+inventory_m = 2.0

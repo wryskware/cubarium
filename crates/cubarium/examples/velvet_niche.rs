@@ -29,7 +29,7 @@ use std::path::Path;
 
 use cubarium_voxel::World;
 use cubarium_voxel::Material;
-use cubarium_voxel_fauna::{Fauna, Founder, TICK_HZ};
+use cubarium_voxel_fauna::{Founder, TICK_HZ};
 use cubarium_voxel_flora::study::{ClimateSample, Held, Start, canopy_at, probe, start_stand};
 use cubarium_voxel_flora::{Flora, FloraConfig, Site, Species, establishment_gates_with_sky};
 use cubarium_voxel_sim::params::{Layers, Params};
@@ -575,11 +575,9 @@ fn run(args: &[String]) {
     let params = resolve(args);
     let (mut sim, minute0) = if let Some(dir) = arg(args, "load=") {
         let dir = Path::new(dir);
-        let read = |n: &str| std::fs::read(dir.join(n)).unwrap_or_else(|e| panic!("{n}: {e}"));
-        let world = World::load(&read("world.bin")).expect("world");
-        let mut flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin")).expect("flora");
-        let fauna = Fauna::load(&read("fauna.bin")).expect("fauna");
-        let minute: u64 = String::from_utf8(read("minute")).unwrap().trim().parse().unwrap();
+        // The one safe load: any animals in the save get their heuristics back.
+        let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+        let (world, mut flora, fauna, minute) = (s.world, s.flora, s.fauna, s.minute);
         let want = params.flora_for_world();
         let before = flora.config().species(Species::Velvetpad).clone();
         flora.replace_config(want.clone()).expect("the resolved config validates");

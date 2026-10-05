@@ -429,6 +429,15 @@ pub struct FoundingConfig {
     /// as the body, which the live body passes only on its exact centre line.
     #[serde(default = "default_clearance_margin_m")]
     pub clearance_margin_m: f64,
+    /// **The founding table's land area**, square metres: the dry support-face area the
+    /// lineages' `founding_count`s are written for. When positive, a founding scales every
+    /// lineage's count (and each plant species' founder cap) by the world's own dry
+    /// support area over this, so a smaller or larger map keeps the table's densities; a
+    /// lineage asked for at all keeps at least one. Zero, the default, takes the counts as
+    /// they are written. A map leaves a lineage out with `founding_count = 0`, never by
+    /// letting its placement fail (scenario maps, 2026-10-04).
+    #[serde(default)]
+    pub reference_land_m2: f64,
 }
 
 fn default_clearance_margin_m() -> f64 {
@@ -447,6 +456,7 @@ impl Default for FoundingConfig {
             starter_litter_energy_density: 2.0,
             accept_founder_hours: 1.0,
             clearance_margin_m: 0.03,
+            reference_land_m2: 0.0,
         }
     }
 }

@@ -184,10 +184,10 @@ fn found(a: &Args, cfg: &VoxelConfig) -> Result<(World, Flora, Fauna)> {
             "light_capture: loading the state in {}",
             a.state.as_ref().unwrap().display()
         );
-        let world = World::load(&std::fs::read(w)?)?;
-        let flora = cubarium_voxel_flora::snapshot::decode(&std::fs::read(f)?)?;
-        let fauna = Fauna::load(&std::fs::read(b)?)?;
-        return Ok((world, flora, fauna));
+        let _ = (w, f, b);
+        // The one safe load (this tool only draws the state, but a loader never forgets).
+        let s = cubarium_voxel_sim::saved::load(a.state.as_ref().unwrap(), &[]).map_err(anyhow::Error::msg)?;
+        return Ok((s.world, s.flora, s.fauna));
     }
     let started = Instant::now();
     let params = params_of(cfg, &[])?;

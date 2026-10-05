@@ -194,12 +194,11 @@ fn main() -> Result<()> {
 
 fn load_or_found(cfg: &VoxelConfig, seed: u64, ticks: u64, state: Option<&PathBuf>) -> Result<(World, Flora, Fauna)> {
     if let Some(d) = state
-        && d.join("world.voxel").exists()
+        && (d.join("world.bin").exists() || d.join("world.voxel").exists())
     {
-        let world = World::load(&std::fs::read(d.join("world.voxel"))?)?;
-        let flora = cubarium_voxel_flora::snapshot::decode(&std::fs::read(d.join("flora.bin"))?)?;
-        let fauna = Fauna::load(&std::fs::read(d.join("fauna.bin"))?)?;
-        return Ok((world, flora, fauna));
+        // The one safe load: the bodies get their heuristics back, or they rest.
+        let s = cubarium_voxel_sim::saved::load(d, &[]).map_err(anyhow::Error::msg)?;
+        return Ok((s.world, s.flora, s.fauna));
     }
     let params = params_of(cfg, &[])?;
     let founded = found_habitat(
@@ -221,9 +220,8 @@ fn load_or_found(cfg: &VoxelConfig, seed: u64, ticks: u64, state: Option<&PathBu
     }
     if let Some(d) = state {
         std::fs::create_dir_all(d)?;
-        std::fs::write(d.join("world.voxel"), world.save())?;
-        std::fs::write(d.join("flora.bin"), cubarium_voxel_flora::snapshot::encode(&flora))?;
-        std::fs::write(d.join("fauna.bin"), fauna.save())?;
+        let minute = world.tick() / (60 * u64::from(cubarium_voxel_fauna::TICK_HZ));
+        cubarium_voxel_sim::saved::save(d, &world, &flora, &fauna, minute).map_err(anyhow::Error::msg)?;
     }
     Ok((world, flora, fauna))
 }

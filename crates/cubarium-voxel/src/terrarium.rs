@@ -531,7 +531,8 @@ impl Terrarium {
     }
 }
 
-/// What one terrarium build made. Diagnostics: nothing reads it back.
+/// What one terrarium build made. Diagnostics, and the founding's seed gate reads its
+/// stream, halls and grove sites (`Water::{min_stream_m, min_halls, min_groves}`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Report {
     pub spires: usize,

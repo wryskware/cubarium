@@ -733,9 +733,49 @@ where
 ///
 /// Load a [`VoxelConfig`] from TOML.
 pub fn load_config(path: &Path) -> Result<VoxelConfig> {
+    let table = config_table(path)?;
+    table
+        .try_into()
+        .with_context(|| format!("parsing the voxel config {}", path.display()))
+}
+
+/// A config file's table with its `base` chain merged under it.
+///
+/// **`base = "<file>"`** (scenario maps, 2026-10-04): the file is read first, relative to
+/// this one, and this file's keys are laid over it — tables merged key by key, anything
+/// else replaced. A scenario map is its world and founding table over the desktop
+/// terrarium's ecology, not a copy of it.
+fn config_table(path: &Path) -> Result<toml::Table> {
+    config_chain(path, 0)
+}
+
+fn config_chain(path: &Path, depth: usize) -> Result<toml::Table> {
+    anyhow::ensure!(depth < 8, "the voxel config {}: `base` nests too deep", path.display());
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading the voxel config {}", path.display()))?;
-    toml::from_str(&text).with_context(|| format!("parsing the voxel config {}", path.display()))
+    let mut table: toml::Table =
+        toml::from_str(&text).with_context(|| format!("parsing the voxel config {}", path.display()))?;
+    let Some(base) = table.remove("base") else {
+        return Ok(table);
+    };
+    let base = base
+        .as_str()
+        .with_context(|| format!("the voxel config {}: `base` names a file", path.display()))?;
+    let base_path = path.parent().unwrap_or(Path::new(".")).join(base);
+    let mut merged = config_chain(&base_path, depth + 1)?;
+    merge_table(&mut merged, table);
+    Ok(merged)
+}
+
+fn merge_table(under: &mut toml::Table, over: toml::Table) {
+    for (k, v) in over {
+        match (under.get_mut(&k), v) {
+            (Some(toml::Value::Table(u)), toml::Value::Table(o)) => merge_table(u, o),
+            (_, v) => {
+                under.insert(k, v);
+            }
+        }
+    }
 }
 
 // --- The run -------------------------------------------------------------------------
@@ -2014,6 +2054,16 @@ pub fn install_founders_with(fauna: &mut Fauna, policies: &[(Founder, PathBuf)])
         );
     }
     Ok(())
+}
+
+/// The lineages [`install_founders_with`] drives by a policy for these `policies`: each
+/// one named, and every lineage with a built-in centre. What a loader passes to
+/// `cubarium_voxel_sim::saved::load` before installing them.
+pub fn policy_founders(policies: &[(Founder, PathBuf)]) -> Vec<Founder> {
+    Founder::ALL
+        .into_iter()
+        .filter(|f| policies.iter().any(|(p, _)| p == f) || BUILT_IN_POLICIES.iter().any(|(b, _, _)| b == f))
+        .collect()
 }
 
 /// The examples' `policy=<lineage>=<file>` arguments, in order: one per lineage at most.

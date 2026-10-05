@@ -258,6 +258,44 @@ pub struct Seeded {
     /// Everything the seeder brought in from outside, organic units: founder stands,
     /// logs, starter litter and founder bodies.
     pub imported_organic: f64,
+    /// The world's dry support area at seeding, square metres ([`land_m2`]).
+    pub land_m2: f64,
+    /// What the founding table was scaled by: the dry support area over
+    /// `FoundingConfig::reference_land_m2`, or 1 when that is zero.
+    pub land_scale: f64,
+    /// The founder counts the seeder asked for after scaling, by [`Founder::index`].
+    pub wanted: [usize; Founder::COUNT],
+}
+
+/// Standing water deeper than this share of a voxel makes a support face water, not
+/// land, for [`land_m2`]. A classification threshold, not a model number.
+const LAND_WATER_MAX_VOXELS: f64 = 0.5;
+
+/// **The dry support area**, square metres: the support faces with no more than half a
+/// voxel of standing water on them now. What a founding table's densities are per.
+pub fn land_m2(world: &World, sites: &[Site]) -> f64 {
+    let view = world.view();
+    let wet = LAND_WATER_MAX_VOXELS * world.config().voxel_m;
+    let dry = sites
+        .iter()
+        .filter(|s| view.water_depth_m(i64::from(s.x), s.y, s.z) <= wet)
+        .count();
+    dry as f64 * world.config().cell_area()
+}
+
+/// The factor a founding table is scaled by on a world of `land_m2`: `land_m2 /
+/// reference_land_m2`, or 1 when the reference is not positive (counts as written).
+pub fn land_scale(founding: &cubarium_voxel_fauna::FoundingConfig, land_m2: f64) -> f64 {
+    if founding.reference_land_m2 > 0.0 { land_m2 / founding.reference_land_m2 } else { 1.0 }
+}
+
+/// A count scaled by `scale`, rounded; a count asked for at all keeps at least one, and
+/// zero (a lineage the map leaves out) stays zero.
+pub fn scaled_count(count: usize, scale: f64) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    ((count as f64 * scale).round() as usize).max(1)
 }
 
 impl Seeded {
@@ -465,9 +503,19 @@ pub fn seed_pre_rolled(
     pre: &PreRoll,
     founder_counts: [usize; Founder::COUNT],
 ) -> Seeded {
+    // The founding table at this world's size: every count, and every plant species'
+    // founder cap below, scaled by the dry support area over the table's own
+    // (`FoundingConfig::reference_land_m2`; 1 when it is zero).
+    let land = land_m2(world, &pre.sites);
+    let scale = land_scale(&fauna.config().founding, land);
+    let founder_counts = founder_counts.map(|n| scaled_count(n, scale));
+    let scaled_cap = |cap: u32| scaled_count(cap as usize, scale);
     let mut seeded = Seeded {
         settle: pre.settle,
         pre_roll: pre.report,
+        land_m2: land,
+        land_scale: scale,
+        wanted: founder_counts,
         ..Seeded::default()
     };
     let organic_before = flora.view().ledger.seeded_organic_in
@@ -517,7 +565,7 @@ pub fn seed_pre_rolled(
         let (per_m2, patch_size, cap) = (
             sc.founder_per_m2,
             sc.founder_colony as usize,
-            sc.founder_cap as usize,
+            scaled_cap(sc.founder_cap),
         );
         let mut pool: Vec<Site> = Vec::new();
         {
@@ -622,7 +670,7 @@ pub fn seed_pre_rolled(
     let (per_m2, patch_size, cap) = (
         sc.founder_per_m2,
         sc.founder_colony as usize,
-        sc.founder_cap as usize,
+        scaled_cap(sc.founder_cap),
     );
     let habitat = seeded.eligible_by_species[Species::Glowcap.index()];
     let want = ((habitat as f64 * area * per_m2).round() as usize).min(cap);

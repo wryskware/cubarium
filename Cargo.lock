@@ -707,6 +707,8 @@ dependencies = [
  "cubarium-voxel",
  "cubarium-voxel-fauna",
  "cubarium-voxel-flora",
+ "serde",
+ "serde_json",
  "toml",
 ]
 

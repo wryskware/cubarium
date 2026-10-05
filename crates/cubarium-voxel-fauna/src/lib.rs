@@ -3046,6 +3046,12 @@ impl Fauna {
         true
     }
 
+    /// Whether body `animal_id` has a controller: a founder body without one rests where
+    /// it stands (a loader that forgot to put them back; the staged runs' liveness check).
+    pub fn has_controller(&self, animal_id: u64) -> bool {
+        self.controllers.has(animal_id)
+    }
+
     /// Take a body's controller back, if it has one: a driver that wants to replace or
     /// drop one between episodes.
     pub fn take_controller(&mut self, animal_id: u64) -> Option<Box<dyn Controller>> {

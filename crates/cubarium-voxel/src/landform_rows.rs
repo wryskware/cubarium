@@ -102,7 +102,10 @@ fn water(prefix: &'static str) -> Vec<Row> {
         .f("ring_stream_floor_m", "m", n, (0.0, 0.5), "how far under its founding table the aquifer-fed stream may draw it")
         .f("lake_floor_band", "voxels", Range::at_least(0.0), (0.0, 4.0), "how far above the lowest standing water a body is still the lake")
         .f("pool_min_fill", "fraction of a cell", f, (0.01, 0.2), "how full a void cell must be to count as pool water rather than runoff")
-        .f("min_pool_cells", "visible surface cells", Range::at_least(0.0), (1.0, 12.0), "visible surface cells a pool needs before the seed gate counts it");
+        .f("min_pool_cells", "visible surface cells", Range::at_least(0.0), (1.0, 12.0), "visible surface cells a pool needs before the seed gate counts it")
+        .f("min_stream_m", "m", n, (0.0, 12.0), "shortest spring-to-lake stream a generated terrarium is accepted with (0: any)")
+        .f("min_halls", "halls", Range::at_least(0.0), (0.0, 3.0), "fewest roofed halls (dark habitat) a generated terrarium is accepted with")
+        .f("min_groves", "grove sites", Range::at_least(0.0), (0.0, 20.0), "fewest grove sites a generated terrarium is accepted with");
     let mut rows = t.rows;
     // The tsv's sources.
     for r in &mut rows {
@@ -121,6 +124,7 @@ fn water(prefix: &'static str) -> Vec<Row> {
             "lake_depth_m" => r.provenance = "tuned (hollow-count vs readability)",
             "reentry_m3_per_s" => r.provenance = "tuned:T2 sweep",
             "lake_drain_m2_per_s" => r.provenance = "derived:100x reentry",
+            "min_stream_m" | "min_halls" | "min_groves" => r.provenance = "decision (scenario maps 2026-10-04)",
             _ => {}
         }
     }

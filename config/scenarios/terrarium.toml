@@ -1,0 +1,10 @@
+# Scenario map `terrarium`: today's desktop world, unchanged (256 x 128 x 48 at 0.125 m,
+# the `terrarium` generator, the desktop founding table as written). The reference the
+# other maps scale their founding table against.
+#
+#   voxel_census 2 config=config/scenarios/terrarium.toml seed=N heuristic run=DIR
+#
+# Staged runs and scenario maps: WORKING_POLICY.md, "Staged runs and scenario maps".
+base = "../desktop/terrarium.toml"
+
+# Study tools take the coarse water themselves (`SimConfig::experiment`, water_every 4).

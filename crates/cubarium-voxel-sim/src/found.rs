@@ -267,11 +267,17 @@ pub fn generate_with_a_lake(
         Landform::Terrarium(t) => (t.water.min_lake_m2, t.water.min_tier_pools as usize),
         Landform::Ridge => (0.0, 0),
     };
+    // What a scenario map needs beyond the lake (2026-10-04): a stream, halls, groves.
+    // A terrarium's build report says what it made; the other generators make none of
+    // them and ask for none.
+    let water = cfg.landform.water().copied();
     let build = |seed: u64| {
-        World::new(cubarium_voxel::Config {
+        let (world, report) = World::new_reporting(cubarium_voxel::Config {
             seed,
             ..cfg.clone()
-        })
+        });
+        let short = water.and_then(|w| features_short(&w, report.as_ref()));
+        (world, short)
     };
     // What the camera would make of this world's water — **after a short settle**, which
     // is the only reading that means anything. Out of `hydrate` the lake is a flat sheet
@@ -295,7 +301,10 @@ pub fn generate_with_a_lake(
     // by design. Keep the observation for development without redrawing their seeds.
     let walkable = |world: &World| cubarium_voxel::walk::around_the_ring(world, WALK_STEP_M);
     if let Some(seed) = asked {
-        let world = build(seed);
+        let (world, short) = build(seed);
+        if let Some(why) = short {
+            eprintln!("cubarium voxel: seed {seed} was asked for, so it is kept — but {why}");
+        }
         let (got, tiers) = read(&world);
         if (want > 0.0 && got < want) || tiers < want_tiers {
             eprintln!(
@@ -315,7 +324,13 @@ pub fn generate_with_a_lake(
     let mut best: Option<(f64, usize, u64, World)> = None;
     for k in 0..tries.max(1) {
         let seed = next_seed();
-        let world = build(seed);
+        let (world, short) = build(seed);
+        if let Some(why) = short {
+            // A world without what the scenario needs is no candidate at all: redrawn,
+            // and never kept as the wettest.
+            eprintln!("cubarium voxel: seed {seed} rejected: {why}");
+            continue;
+        }
         let (got, tiers) = read(&world);
         if got >= want && tiers >= want_tiers {
             if !walkable(&world) {
@@ -347,13 +362,38 @@ pub fn generate_with_a_lake(
             best = Some((got, tiers, seed, world));
         }
     }
-    let (got, tiers, seed, world) = best.expect("at least one try");
+    let Some((got, tiers, seed, world)) = best else {
+        panic!(
+            "cubarium voxel: none of {tries} seeds made what this map asks for (its \
+             `[world.landform.water]` min_stream_m / min_halls / min_groves); relax them or \
+             change the map"
+        );
+    };
     eprintln!(
         "cubarium voxel: NO SEED of {tries} had a lake of {want:.1} m² with {want_tiers} \
          pool(s) over it; keeping the wettest, seed {seed} with {got:.1} m² and {tiers} — \
          this world will look dry"
     );
     (world, seed, tries)
+}
+
+/// Why a terrarium build falls short of the water recipe's feature bar
+/// ([`cubarium_voxel::Water::min_stream_m`], `min_halls`, `min_groves`), or `None` when
+/// it does not. A bar of zero asks for nothing; a generator with no report makes none of
+/// the features, so any nonzero bar refuses it.
+pub fn features_short(water: &cubarium_voxel::Water, report: Option<&cubarium_voxel::terrarium::Report>) -> Option<String> {
+    let (stream, halls, groves) = report.map_or((0.0, 0, 0), |r| (r.river_m, r.halls, r.groves));
+    let mut short = Vec::new();
+    if water.min_stream_m > 0.0 && stream < water.min_stream_m {
+        short.push(format!("a {stream:.1} m stream against {:.1} m", water.min_stream_m));
+    }
+    if (halls as u32) < water.min_halls {
+        short.push(format!("{halls} hall(s) against {}", water.min_halls));
+    }
+    if (groves as u32) < water.min_groves {
+        short.push(format!("{groves} grove site(s) against {}", water.min_groves));
+    }
+    (!short.is_empty()).then(|| short.join(", "))
 }
 
 #[cfg(test)]

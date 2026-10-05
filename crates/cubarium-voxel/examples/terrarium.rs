@@ -1,5 +1,5 @@
 //! What a terrarium build made, per seed: `cargo run -p cubarium-voxel --example terrarium
-//! -- <terrarium|terrarium-small> <seed>...`. Development diagnostics only.
+//! -- <terrarium|terrarium-small> <seed>...` (`DIMS=WxHxD` for another size). Development diagnostics only.
 
 use cubarium_voxel::{Config, Landform, Terrarium, World, terrarium, tidy};
 
@@ -7,7 +7,15 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let name = args.next().unwrap_or_else(|| "terrarium-small".into());
     let t = Terrarium::preset(&name).expect("terrarium or terrarium-small");
-    let (width, height, depth) = match std::env::var("DIMS").ok() { Some(d) => { let v: Vec<u32> = d.split('x').map(|x| x.parse().unwrap()).collect(); (v[0], v[1], v[2]) } None => if name == "terrarium" { (256, 128, 48) } else { (160, 72, 24) } };
+    // `DIMS=WxHxD` builds the preset on another world size (the scenario maps' sizing).
+    let (width, height, depth) = match std::env::var("DIMS") {
+        Ok(d) => {
+            let v: Vec<u32> = d.split('x').map(|n| n.parse().expect("DIMS=WxHxD")).collect();
+            (v[0], v[1], v[2])
+        }
+        Err(_) if name == "terrarium" => (256, 128, 48),
+        Err(_) => (160, 72, 24),
+    };
     let seeds: Vec<u64> = args.map(|s| s.parse().expect("a seed")).collect();
     for seed in if seeds.is_empty() { vec![1, 2, 3] } else { seeds } {
         let config = Config {

@@ -323,9 +323,12 @@ pub fn load_start(dir: &Path, expect: &Expect) -> Result<Start, Reject> {
         std::fs::read(f).map_err(|e| Reject::Unreadable { file: f.display().to_string(), why: e.to_string() })
     };
     let bad = |f: &Path, e: &dyn std::fmt::Display| Reject::Unreadable { file: f.display().to_string(), why: format!("{e:#}") };
-    let world = World::load(&read(&files[0])?).map_err(|e| bad(&files[0], &format!("{e:#}")))?;
-    let flora = cubarium_voxel_flora::snapshot::decode(&read(&files[1])?).map_err(|e| bad(&files[1], &format!("{e:#}")))?;
-    let fauna = Fauna::load(&read(&files[2])?).map_err(|e| bad(&files[2], &format!("{e:#}")))?;
+    // The one safe load (`cubarium_voxel_sim::saved`): every body gets its heuristic
+    // back here. Any lineage may have been policy-driven: the identity check above
+    // already holds the run to the start's own policy, and the run installs it again
+    // over these (`install_centres`).
+    let (world, flora, fauna) = cubarium_voxel_sim::saved::decode(&read(&files[0])?, &read(&files[1])?, &read(&files[2])?, &Founder::ALL)
+        .map_err(|e| bad(dir, &e))?;
     for (layer, start, loaded) in [
         ("world", m.tick, world.tick()),
         ("flora", m.flora_tick, flora.tick()),
@@ -473,46 +476,8 @@ pub fn install(flora: &mut Flora, fauna: &mut Fauna, layers: &LayerConfig) -> Re
     fauna.replace_config(layers.fauna)
 }
 
-/// **The ledgers' residuals**, each relative to its stock: water (stored against the
-/// world ledger's expectation), and organic, mineral and energy in the plant and animal
-/// layers against theirs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Residuals {
-    pub water: f64,
-    pub flora: [f64; 3],
-    pub fauna: [f64; 3],
-}
-
-impl Residuals {
-    pub fn of(world: &World, flora: &Flora, fauna: &Fauna) -> Residuals {
-        let rel = |stock: f64, expected: f64| (stock - expected) / stock.abs().max(expected.abs()).max(1.0);
-        let w = world.view();
-        let fl = flora.view();
-        let fa = fauna.view();
-        Residuals {
-            water: rel(w.stored_m3(), w.ledger.expected_stored()),
-            flora: [
-                rel(fl.organic(), fl.ledger.expected_organic()),
-                rel(fl.mineral(), fl.ledger.expected_mineral()),
-                rel(fl.energy(), fl.ledger.expected_energy()),
-            ],
-            fauna: [
-                rel(fa.organic(), fa.ledger.expected_organic()),
-                rel(fa.mineral(), fa.ledger.expected_mineral()),
-                rel(fa.energy(), fa.ledger.expected_energy()),
-            ],
-        }
-    }
-
-    /// The largest residual, absolute.
-    pub fn worst(&self) -> f64 {
-        std::iter::once(self.water)
-            .chain(self.flora)
-            .chain(self.fauna)
-            .map(f64::abs)
-            .fold(0.0, f64::max)
-    }
-}
+/// **The ledgers' residuals**: the staged runs' own ([`cubarium_voxel_sim::staged::Residuals`]).
+pub use cubarium_voxel_sim::staged::Residuals;
 
 /// **The burn-in**, ticks from `start_tick`: at least `min_ticks`, then on to the next
 /// boundary of the day clock's window grid (every `align_ticks` from the clock's
