@@ -364,7 +364,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (929 rows)
+**`flora.*`** (938 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -393,6 +393,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.bloomcrown.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.bloomcrown.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.bloomcrown.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.bloomcrown.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.bloomcrown.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.bloomcrown.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
@@ -488,6 +489,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.umbrellafrond.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.umbrellafrond.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.umbrellafrond.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.umbrellafrond.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.umbrellafrond.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.umbrellafrond.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
@@ -583,6 +585,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.springturf.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.springturf.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.springturf.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.springturf.assimilation` | 0.008 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.springturf.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.springturf.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
@@ -678,6 +681,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.stonecushion.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.stonecushion.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.stonecushion.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.stonecushion.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.stonecushion.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.stonecushion.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
@@ -773,6 +777,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.velvetpad.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.velvetpad.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.velvetpad.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.velvetpad.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.velvetpad.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.velvetpad.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
@@ -868,6 +873,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.glowcap.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.glowcap.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.glowcap.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.glowcap.assimilation` | 0.0 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.glowcap.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.glowcap.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
@@ -963,6 +969,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.vaulttree.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.vaulttree.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.vaulttree.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.vaulttree.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.vaulttree.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.vaulttree.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
@@ -1058,6 +1065,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.lanternberry.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.lanternberry.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.lanternberry.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.lanternberry.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.lanternberry.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.lanternberry.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
@@ -1153,6 +1161,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.siphonreed.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.siphonreed.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
+| `flora.siphonreed.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
 | `flora.siphonreed.assimilation` | 0.004 | organic/s per unit foliage | [0, inf) | yes | B | placeholder | g: gross fixation at full light and moisture |
 | `flora.siphonreed.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.siphonreed.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
