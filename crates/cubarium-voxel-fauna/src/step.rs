@@ -180,12 +180,14 @@ fn tick_inner(
         });
         // Maintenance and age settle first. A due field update then reads the litter as
         // it stands after the previous tick's feeding, before this tick's controllers.
+        cubarium_voxel::voxel_phase!(FaunaField, {
         if let Some(s) = senses.as_deref_mut() {
             if tick % crate::UPDATE_TICKS == 0 {
                 let fv = flora.view();
                 s.update(&view, &fv);
             }
         }
+        });
         cubarium_voxel::voxel_phase!(FaunaSense, {
             // The controller stage: sample due founders and hold their actions, before
             // anything moves or eats this tick, from the same pre-action state every
@@ -218,7 +220,7 @@ fn tick_inner(
         cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
         // Burrs ride the bodies as they now stand: a seed latches on a step onto a donor's
         // face, falls off as its carrier walks, and drops where a body died.
-        burrs(fauna, world, flora);
+        cubarium_voxel::voxel_phase!(FaunaBurrs, { burrs(fauna, world, flora) });
         #[cfg(feature = "profile")]
         cubarium_voxel::profile::add(
             cubarium_voxel::profile::Count::Animals,
