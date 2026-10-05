@@ -3084,8 +3084,13 @@ impl Control {
                 // support face reports what grows there and what the ground holds.
                 let site = site_of(world, x, y, z);
                 let fv = flora.view();
-                match fv.stand_at(site) {
-                    Some(s) => eprintln!(
+                // A face holds a plant and a fungus (`FaceLayer`): each on its own line.
+                let here = fv.stands_on(site);
+                if here.is_empty() {
+                    eprintln!("cubarium voxel:   no stand");
+                }
+                for s in here {
+                    eprintln!(
                         "cubarium voxel:   {} {:?} W {:.4} P {:.4} Q {:.4} mineral {:.5} \
                          light {:.3} moisture {:.3} aeration stress {:.3}",
                         s.species.name(),
@@ -3097,8 +3102,7 @@ impl Control {
                         s.light,
                         s.moisture,
                         s.aeration_stress,
-                    ),
-                    None => eprintln!("cubarium voxel:   no stand"),
+                    );
                 }
                 // The animals standing on this face, in id order. More than one is
                 // ordinary: a newborn appears on its parent's face.

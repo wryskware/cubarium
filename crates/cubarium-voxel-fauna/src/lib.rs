@@ -2095,6 +2095,16 @@ impl Food {
         }
     }
 
+    /// The place on a face whose stand this food comes off ([`cubarium_voxel_flora::FaceLayer`]):
+    /// cap tissue is the face's fungus, every other stand food its plant. A face may hold
+    /// both, so a stand bite names its place by its food.
+    pub const fn face_layer(self) -> cubarium_voxel_flora::FaceLayer {
+        match self {
+            Food::CapTissue => cubarium_voxel_flora::FaceLayer::Fungus,
+            _ => cubarium_voxel_flora::FaceLayer::Plant,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Food::Litter => "litter",

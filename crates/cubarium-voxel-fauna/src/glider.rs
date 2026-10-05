@@ -72,8 +72,9 @@ fn climbable(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand, glider: &G
 }
 
 /// A stand's foliage layers holding foliage, lowest and highest.
+/// The face's plant, or its fungus where it holds no plant (`FaceLayer`).
 fn crown_span(fv: &FloraView<'_>, site: Site) -> Option<(StandLayer, StandLayer)> {
-    let stand = fv.stand_at(site)?;
+    let stand = fv.stands_on(site).first()?;
     let layers: Vec<StandLayer> = fv
         .profile_layers(stand)
         .into_iter()

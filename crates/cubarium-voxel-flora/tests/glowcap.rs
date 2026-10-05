@@ -174,7 +174,7 @@ fn plant_glowcap(flora: &mut Flora, world: &World, x: i64) -> Site {
     ));
     let site = cubarium_voxel_flora::highest_support(&world.view(), x, 0).expect("a support face");
     assert_eq!(
-        flora.view().stand_at(site).expect("a founder").species,
+        flora.view().fungus_at(site).expect("a founder").species,
         Species::Glowcap
     );
     site
@@ -219,15 +219,15 @@ fn a_glowcap_on_a_log_earns_and_one_on_a_bare_face_earns_nothing() {
     let (organic, _, _) = log_on(&mut flora, fed, 1.0);
     let fixed0 = flora.view().ledger.fixed_in;
     let (w0, q0) = {
-        let s = flora.view().stand_at(starved).expect("planted");
+        let s = flora.view().fungus_at(starved).expect("planted");
         (s.wood, s.reserve)
     };
 
     run(&mut flora, &mut world, 50);
 
     let v = flora.view();
-    let f = *v.stand_at(fed).expect("the fed stand died");
-    let s = *v.stand_at(starved).expect("the starved stand died in 1 s");
+    let f = *v.fungus_at(fed).expect("the fed stand died");
+    let s = *v.fungus_at(starved).expect("the starved stand died in 1 s");
     // The fed one took wood out of the log and grew on it.
     let gone = organic - dead_wood_at(&flora, fed);
     assert!(uptake(&flora) > 0.0, "nothing left the log for the fungus");
@@ -327,7 +327,7 @@ fn the_uptake_never_exceeds_the_pool_and_stops_when_it_is_empty() {
     // The mineral that came with the wood is in the fungus and in the site's pool, and
     // nowhere else: `arrived` over what the tissue needed is released to the soil.
     let v = flora.view();
-    let stand = *v.stand_at(site).expect("alive");
+    let stand = *v.fungus_at(site).expect("alive");
     let pool = v.ground_at(site).expect("ground").mineral;
     assert!(stand.mineral > 0.0 && pool > 0.0, "{stand:?} {pool}");
 
@@ -392,7 +392,7 @@ fn mineral_runs_from_wood_through_the_fungus_to_litter_and_the_site_pool_and_is_
 
     let v = flora.view();
     let g = v.ground_at(site).expect("ground").clone();
-    let stand = *v.stand_at(site).expect("the fungus died");
+    let stand = *v.fungus_at(site).expect("the fungus died");
     // Every link of the chain carries some of it.
     assert!(
         g.dead_wood_mineral < log_mineral,
@@ -438,7 +438,7 @@ fn a_small_finite_log_empties_and_then_the_reserve_falls() {
         let pool = dead_wood_at(&flora, site);
         let gained = uptake(&flora) - last_uptake;
         last_uptake = uptake(&flora);
-        let reserve = flora.view().stand_at(site).map_or(f64::NAN, |s| s.reserve);
+        let reserve = flora.view().fungus_at(site).map_or(f64::NAN, |s| s.reserve);
         windows.push((pool, gained, reserve));
     }
     for w in windows.windows(2) {
@@ -612,7 +612,7 @@ fn one_spore_package_births_a_glowcap_at_exactly_alive_min_and_only_over_the_sub
         v.ledger
     );
     let born = *v
-        .stand_at(at(2))
+        .fungus_at(at(2))
         .expect("nothing stands on the only landing site");
     assert_eq!(born.species, Species::Glowcap);
     assert_eq!(
@@ -644,7 +644,7 @@ fn one_spore_package_births_a_glowcap_at_exactly_alive_min_and_only_over_the_sub
         "a spore germinated over too little wood"
     );
     assert!(
-        v.stand_at(at(2)).is_none(),
+        v.stands_on(at(2)).is_empty(),
         "something stands on the refused face"
     );
     assert!(
@@ -1111,7 +1111,7 @@ fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
     let site = plant_glowcap(&mut flora, &world, 1);
     let (organic, _, energy) = log_with(&mut flora, site, 1.0, 0.0);
     let sc = flora.config().species(Species::Glowcap).clone();
-    let before = flora.view().stand_at(site).expect("the founder").clone();
+    let before = flora.view().fungus_at(site).expect("the founder").clone();
     assert_eq!(
         (before.wood, before.foliage, before.reserve),
         (0.05, 0.1, 0.025)
@@ -1129,7 +1129,7 @@ fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
     flora.step(&mut world);
 
     let v = flora.view();
-    let after = v.stand_at(site).expect("the founder").clone();
+    let after = v.fungus_at(site).expect("the founder").clone();
     let g = v.ground_at(site).expect("ground").clone();
     // What it ate: the rate on a full-moisture box, and the log still holds the rest.
     let want = sc.substrate_uptake_per_s * before.wood * 1.0 * DT;
@@ -1190,13 +1190,13 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
         let mut flora = Flora::new(budget_config());
         let site = plant_glowcap(&mut flora, &world, 1);
         log_with(&mut flora, site, 1.0, mineral);
-        let w0 = flora.view().stand_at(site).expect("the founder").wood;
+        let w0 = flora.view().fungus_at(site).expect("the founder").wood;
         flora.step(&mut world);
         assert_residuals(&flora, "one tick on a partly mineralised log");
         let v = flora.view();
         let g = v.ground_at(site).expect("ground").clone();
         (
-            v.stand_at(site).expect("the founder").wood - w0,
+            v.fungus_at(site).expect("the founder").wood - w0,
             g.mineral,
             mineral - g.dead_wood_mineral,
         )
@@ -1419,14 +1419,14 @@ fn a_glowcap_on_litter_alone_gains_tissue_and_the_pool_falls_by_what_it_took() {
     let mut flora = Flora::new(isolating());
     let site = plant_glowcap(&mut flora, &world, 1);
     let (organic, mineral, energy) = litter_on(&mut flora, site, 0.02);
-    let before = *flora.view().stand_at(site).expect("planted");
+    let before = *flora.view().fungus_at(site).expect("planted");
     assert_eq!(dead_wood_at(&flora, site), 0.0, "the fixture has no wood");
 
     run(&mut flora, &mut world, 100);
 
     let v = flora.view();
     let g = v.ground_at(site).expect("ground").clone();
-    let stand = *v.stand_at(site).expect("the fungus died on litter");
+    let stand = *v.fungus_at(site).expect("the fungus died on litter");
     let took = organic - g.litter;
     assert!(took > 0.0, "the fungus took nothing off a litter face");
     assert_eq!(
@@ -1560,7 +1560,7 @@ fn a_shredder_and_a_glowcap_on_one_pool_take_no_more_than_it_held() {
     let v = flora.view();
     let g = v.ground_at(site).expect("ground").clone();
     assert!(
-        v.stand_at(site).is_some(),
+        v.fungus_at(site).is_some(),
         "the fungus died and shed a pool this test is counting"
     );
     assert!(ate_o > 0.0 && uptake(&flora) > 0.0, "one eater got nothing");
@@ -1700,7 +1700,7 @@ fn the_five_photo_species_take_nothing_from_litter() {
             "{species:?} ate litter"
         );
         assert!(
-            v.stand_at(at(2)).is_none(),
+            v.stands_on(at(2)).is_empty(),
             "{species:?} spread onto the neighbour face and the comparison is not clean"
         );
         let (neighbour, control) = (

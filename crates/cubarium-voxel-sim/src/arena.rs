@@ -50,7 +50,7 @@
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Founder, Pose, Senses};
 use cubarium_voxel_flora::{
-    Command as FloraCommand, Deposit, DepositKind, Flora, Site, Species as Plant,
+    Command as FloraCommand, Deposit, DepositKind, FaceLayer, Flora, Site, Species as Plant,
     Taken,
 };
 
@@ -326,18 +326,21 @@ pub fn edible_stock(
         let carrion = if diet.eats(cubarium_voxel_fauna::Food::Carrion) { g.carrion } else { 0.0 };
         litter + carrion
     });
-    let stand = fv
-        .stand_at(site)
-        .filter(|s| diet.accepts(fv.config.species(s.species).trophic));
+    // Every stand on the face whose tissue the diet accepts: a plant, a fungus or both.
     pools
-        + stand.map_or(0.0, |s| {
-            // What a bite can lower: each band layer's stock above its graze floor
-            // (the arena has the live refuge since the audit round's step 5).
-            fv.layers(s)
-                .filter(|l| band.contains(&l.cell))
-                .map(|l| l.edible())
-                .sum()
-        })
+        + fv
+            .stands_on(site)
+            .iter()
+            .filter(|s| diet.accepts(fv.config.species(s.species).trophic))
+            .map(|s| {
+                // What a bite can lower: each band layer's stock above its graze floor
+                // (the arena has the live refuge since the audit round's step 5).
+                fv.layers(s)
+                    .filter(|l| band.contains(&l.cell))
+                    .map(|l| l.edible())
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
 }
 
 /// How full an arena founder arrives: **half its structure and no reserve** (P2-C).
@@ -1018,7 +1021,8 @@ impl Arena {
                 }
                 let left = want - got.organic;
                 if left > 0.0 {
-                    let t = self.flora.take_foliage_in_layers(site, left, &band);
+                    // The shredder's stand food is cap tissue: the face's fungus.
+                    let t = self.flora.take_foliage_of(site, FaceLayer::Fungus, left, &band);
                     add(&mut got, t.map(|t| t.taken));
                 }
             }
@@ -1086,11 +1090,13 @@ fn lay_patch(flora: &mut Flora, world: &World, site: Site, kind: PatchKind, orga
             "{species:?} seeded on the arena's ground at {site:?}"
         );
     };
+    // The place the patch's stand takes: a cap is the face's fungus, the rest its plant.
+    let place = if kind == PatchKind::Cap { FaceLayer::Fungus } else { FaceLayer::Plant };
     // The lowest foliage layer's cell of the stand on `site`: a rosette's.
     let lowest = |flora: &Flora| -> i64 {
         flora
             .view()
-            .layers_at(site)
+            .layers_in(site, place)
             .map(|l| l.cell)
             .min()
             .expect("a seeded stand has a foliage layer")
@@ -1101,7 +1107,7 @@ fn lay_patch(flora: &mut Flora, world: &World, site: Site, kind: PatchKind, orga
     let trim = |flora: &mut Flora, cells: std::ops::RangeInclusive<i64>, keep: f64| {
         let held: f64 = flora
             .view()
-            .layers_at(site)
+            .layers_in(site, place)
             .filter(|l| cells.contains(&l.cell))
             .map(|l| l.edible())
             .sum();
@@ -1111,7 +1117,7 @@ fn lay_patch(flora: &mut Flora, world: &World, site: Site, kind: PatchKind, orga
         );
         if held > keep {
             let taken = flora
-                .take_foliage_in_layers(site, held - keep, &cells)
+                .take_foliage_of(site, place, held - keep, &cells)
                 .expect("the seeded stand has foliage to trim");
             debug_assert!((taken.taken.organic - (held - keep)).abs() < 1e-12);
         }

@@ -293,3 +293,24 @@ fn a_snapshot_round_trip_keeps_both_stands_on_a_face() {
     assert_eq!(back.view().stands, flora.view().stands);
     assert_conserved(&back, "decoded");
 }
+
+/// **A glowcap under a plant takes none of its light.** Every photosynthetic species that
+/// passes on the lit slab, with and without a glowcap on its face: the light it received
+/// in one tick is the same.
+#[test]
+fn a_glowcap_under_a_plant_shades_nothing() {
+    for sp in photo_passing(&quiet()) {
+        let light = |with_glowcap: bool| {
+            let mut world = slab(3);
+            let mut flora = Flora::new(quiet());
+            litter(&mut flora, 1);
+            assert!(plant(&mut flora, &world, 1, sp));
+            if with_glowcap {
+                assert!(plant(&mut flora, &world, 1, GLOW));
+            }
+            flora.step(&mut world);
+            on(&flora, 1, sp).expect("the plant").light
+        };
+        assert_eq!(light(true), light(false), "{sp:?}");
+    }
+}

@@ -41,8 +41,9 @@ use crate::step::{
     establishment_gates_with_sky, mix, provisioned_slot, pull_mineral, standing_water_beside, substrate_pools_in_box,
 };
 use crate::{
-    Burr, Carrier, CarrierMark, DeathCause, DeathRecord, DeliveryReceipt, Dispersal, Flora, FloraConfig,
-    FloraLedger, Gates, Ground, SeedCohort, Site, Species, SpeciesConfig, Stage, Stand, Via, highest_support,
+    Burr, Carrier, CarrierMark, DeathCause, DeathRecord, DeliveryReceipt, Dispersal, FaceLayer, Flora,
+    FloraConfig, FloraLedger, Gates, Ground, SeedCohort, Site, Species, SpeciesConfig, Stage, Stand, Via,
+    find_stand, highest_support,
 };
 
 /// How many ticks apart a banked site's checks are: [`FloraConfig::seed_check_s`] in
@@ -378,6 +379,7 @@ fn seed_bank_at(flora: &mut Flora, world: &World, tick: u64, flush: bool) {
                 due.push(gi);
             } else {
                 ground[gi].sprouting = None;
+                ground[gi].sprouting_fungus = None;
             }
         }
     }
@@ -477,15 +479,19 @@ fn germinate(
     let mut winners: Vec<(Site, Species, Option<Species>)> = Vec::new();
     for &gi in tested {
         let site = ground[gi].site;
-        // A bare site takes any seed that passes; a site held by a **ground cover** takes
+        // Each place on the face ([`FaceLayer`]) runs its own lottery among its own
+        // species' banks, against its own occupant: a plant seed never meets the glowcap
+        // on its face and a spore never meets the plant.
+        for place in FaceLayer::ALL {
+        // A bare place takes any seed that passes; a place held by a **ground cover** takes
         // only a seed that may come up through that cover, on its own draw, and keeps an
-        // arm across checks — that is an overtopping arm; any other stand holds its site,
-        // and a site that has gained such a stand clears its arm.
-        let cover = match stands.binary_search_by_key(&site, |s| s.site) {
+        // arm across checks — that is an overtopping arm; any other stand holds its place,
+        // and a place that has gained such a stand clears its arm.
+        let cover = match find_stand(config, stands, site, place) {
             Err(_) => None,
             Ok(si) if config.species(stands[si].species).ground_cover => Some(stands[si].species),
             Ok(_) => {
-                ground[gi].sprouting = None;
+                *ground[gi].arm_mut(place) = None;
                 continue;
             }
         };
@@ -498,6 +504,9 @@ fn germinate(
         // The traced species' record for this check (a study's, [`AttemptTrace`]).
         let mut rec = Attempts::default();
         for species in Species::ALL {
+            if config.face_layer(species) != place {
+                continue;
+            }
             let n = counts[species.index()];
             let sc = config.species(species);
             let mine = traced == Some(species) && n > 0;
@@ -526,7 +535,9 @@ fn germinate(
             rec.gate_pass += u32::from(mine);
             candidates.push((species, lottery_weight(n, sc)));
         }
-        let site_index = view.config.index(site.x as i64, site.y, site.z) as u64;
+        // The plant's draw keeps the site's own key; the fungus's is its own stream.
+        let site_index = view.config.index(site.x as i64, site.y, site.z) as u64
+            ^ ((place.index() as u64) << 48);
         // Under a cover the lottery's winner must also win its per-check draw to arm (or,
         // without arming, to sprout): coming up through a mat is harder than a gap.
         let drawn = || {
@@ -540,9 +551,9 @@ fn germinate(
                     )
             })
         };
-        let armed_before = ground[gi].sprouting;
+        let armed_before = ground[gi].arm(place);
         let now = if config.sprout_after_arming {
-            arm_or_sprout(&mut ground[gi], &candidates, drawn)
+            arm_or_sprout(ground[gi].arm_mut(place), &candidates, drawn)
         } else {
             drawn()
         };
@@ -581,20 +592,21 @@ fn germinate(
         if let Some(species) = now {
             winners.push((site, species, cover));
         }
+        }
     }
-    // The births join `stands` in one merge after the loop; each winner's site is its own
-    // ground entry, so no two births share a site. A ground cover a winner comes up
-    // through leaves `stands` first.
+    // The births join `stands` in one merge after the loop; each winner's place is its
+    // own (a face's plant and fungus are two places), so no two births share one. A
+    // ground cover a winner comes up through leaves `stands` first.
     let mut born: Vec<Stand> = Vec::with_capacity(winners.len());
     for (site, species, cover) in winners {
         let sc = config.species(species);
         let Ok(gi) = ground.binary_search_by_key(&site, |g| g.site) else {
             continue;
         };
-        // The site as the draw saw it, or nothing happens: a seed is never spent on a
+        // The place as the draw saw it, or nothing happens: a seed is never spent on a
         // birth that does not happen. Under a cover, the occupant must still be that
         // cover, and one this seedling may take.
-        let held = stands.binary_search_by_key(&site, |s| s.site);
+        let held = find_stand(config, stands, site, config.face_layer(species));
         let same = match (held, cover) {
             (Err(_), None) => true,
             (Ok(si), Some(c)) => stands[si].species == c && may_overtop(config, species, c),
@@ -627,7 +639,7 @@ fn germinate(
         ledger.establishments += 1;
         ledger.seeds_germinated[species.index()] += 1;
     }
-    crate::step::insert_sorted(stands, born);
+    crate::step::insert_sorted(config, stands, born);
 }
 
 /// The one-check arming delay, for one tested site with no stand on it — or one a ground
@@ -639,16 +651,16 @@ fn germinate(
 /// The lottery is drawn once, at the arming check, and not again at the sprouting one: a
 /// second draw would make a winner win twice running, which squares the lottery's weights.
 pub(crate) fn arm_or_sprout(
-    g: &mut Ground,
+    arm: &mut Option<Species>,
     passing: &[(Species, u64)],
     draw: impl FnOnce() -> Option<Species>,
 ) -> Option<Species> {
-    if let Some(armed) = g.sprouting.take()
+    if let Some(armed) = arm.take()
         && passing.iter().any(|&(s, _)| s == armed)
     {
         return Some(armed);
     }
-    g.sprouting = draw();
+    *arm = draw();
     None
 }
 
@@ -926,7 +938,8 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
         // A runner onto a ground cover its species may root through
         // ([`SpeciesConfig::runners_overtop`]): the cover dies the ordinary death, booked
         // as overtopped by a runner, and the daughter takes the face.
-        if let Ok(si) = stands.binary_search_by_key(&d.site, |s| s.site)
+        let place = config.face_layer(d.species);
+        if let Ok(si) = find_stand(config, stands, d.site, place)
             && runner_may_take(config, d.species, stands[si].species)
         {
             let cover = stands.remove(si);
@@ -942,8 +955,8 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
         } else {
             provisioned_slot(config, ground, d.site, ledger)
         };
-        let taken = stands.binary_search_by_key(&d.site, |s| s.site).is_ok()
-            || born.iter().any(|b| b.site == d.site);
+        let taken = find_stand(config, stands, d.site, place).is_ok()
+            || born.iter().any(|b| b.site == d.site && config.face_layer(b.species) == place);
         if taken {
             // Unreachable — `runner_target` skips occupied and claimed faces — and
             // harmless if that changes: the paid package is banked where it fell.
@@ -977,7 +990,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
             via: Via::Runner,
         });
     }
-    crate::step::insert_sorted(stands, born);
+    crate::step::insert_sorted(config, stands, born);
 }
 
 /// Whether a runner of `species` may root on a face `cover` holds: the species roots
@@ -1029,14 +1042,15 @@ fn runner_target(
             let Some(site) = support_near(view, x, z as u32, home.y) else {
                 continue;
             };
-            let held = stands
-                .binary_search_by_key(&site, |s| s.site)
+            // Only the runner's own place on the face: a turf runner roots beside a glowcap.
+            let place = config.face_layer(species);
+            let held = find_stand(config, stands, site, place)
                 .ok()
                 .map(|si| stands[si].species);
             if site == home
                 || free.contains(&site)
                 || held.is_some_and(|cover| !runner_may_take(config, species, cover))
-                || claimed.iter().any(|d| d.site == site)
+                || claimed.iter().any(|d| d.site == site && config.face_layer(d.species) == place)
                 || !establishes(view, sky, ground, site, sc, daylight)
             {
                 continue;
@@ -1634,7 +1648,8 @@ pub(crate) fn carry_burrs(flora: &mut Flora, world: &World, carriers: &[Carrier]
         if c.site == last.site || !c.grounded || !(c.coat > 0.0) || carried >= config.burr_cap {
             continue;
         }
-        let Ok(si) = stands.binary_search_by_key(&c.site, |s| s.site) else {
+        // A burr is a plant's: the face's plant is the donor.
+        let Ok(si) = find_stand(config, stands, c.site, FaceLayer::Plant) else {
             continue;
         };
         let sc = config.species(stands[si].species);

@@ -85,7 +85,7 @@ fn seed(flora: &mut Flora, world: &World, x: u32, z: u32, species: Plant) -> Sit
         "the fixture seeds a {species:?}"
     );
     let s = site(x, z);
-    assert!(flora.view().stand_at(s).expect("the stand").foliage > 0.0);
+    assert!(flora.view().stands_on(s).first().expect("the stand").foliage > 0.0);
     s
 }
 
@@ -148,7 +148,7 @@ fn steps(fauna: &mut Fauna, world: &World, flora: &mut Flora, n: usize) {
 }
 
 fn foliage(flora: &Flora, s: Site) -> f64 {
-    flora.view().stand_at(s).expect("the stand").foliage
+    flora.view().stands_on(s).first().expect("the stand").foliage
 }
 
 fn litter_at(flora: &Flora, s: Site) -> f64 {
