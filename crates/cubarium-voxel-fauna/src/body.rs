@@ -890,10 +890,24 @@ pub struct Gut {
     /// before it wants food again. 0.1.
     #[serde(default = "default_refill_gap")]
     pub refill_gap: f64,
+    /// **The gut's mass exponent** `e` (package D1b): throughput scales with body as small
+    /// animals' does. The stomach stays `k · body`, but a body of `body` digests in
+    /// `τ · (body / body_max)^(1 − e)` and bites `b · (body / body_max)^(e − 1)` per unit
+    /// body ([`Gut::throughput_factor`]), so its intake at a full stomach goes as
+    /// `body^e` and its intake per unit body falls with size (Kleiber's `e` = 0.75; gut
+    /// capacity isometric, retention time growing as `body^0.25`). The adult's numbers are
+    /// unchanged; a hatchling digests faster per unit of its body. 1: every size the
+    /// adult's per-mass gut.
+    #[serde(default = "default_mass_exponent")]
+    pub mass_exponent: f64,
 }
 
 fn default_refill_gap() -> f64 {
     REFILL_GAP
+}
+
+fn default_mass_exponent() -> f64 {
+    1.0
 }
 
 impl Gut {
@@ -907,7 +921,19 @@ impl Gut {
             s0: APPETITE_FLOOR,
             full_tolerance: FULL_TOLERANCE,
             refill_gap: REFILL_GAP,
+            mass_exponent: 1.0,
         }
+    }
+
+    /// **The throughput factor** of a body of `body` against its lineage's `body_max`:
+    /// `(body / body_max)^(e − 1)` ([`Gut::mass_exponent`]), what its digestion rate and
+    /// bite per unit body are multiplied by. 1 at `body_max`, for `e` = 1, and for a
+    /// degenerate body.
+    pub fn throughput_factor(&self, body: f64, body_max: f64) -> f64 {
+        if self.mass_exponent == 1.0 || !(body > 0.0) || !(body_max > 0.0) {
+            return 1.0;
+        }
+        (body / body_max).powf(self.mass_exponent - 1.0)
     }
 
     /// `K`, raw organic matter, for a body of `body`.

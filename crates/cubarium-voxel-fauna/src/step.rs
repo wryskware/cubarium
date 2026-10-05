@@ -356,11 +356,21 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
     if !(want > 0.0) {
         return (0.0, 0.0);
     }
+    let brood_share = if fauna.animals[i].reproduction.brood > 0.0 {
+        body::effective_config(&fauna.config, &fauna.animals[i]).reproduction.brood_share
+    } else {
+        0.0
+    };
     let a = &mut fauna.animals[i];
     let (out, from_body) = withdraw(a, want);
     let paid = out.organic;
     if !(paid > 0.0) {
         return (0.0, 0.0);
+    }
+    // The brood pays its share of what the reserve respired (D1b): the κ-rule splits net
+    // income, so the soma's share of upkeep is not charged to the eggs.
+    if brood_share > 0.0 {
+        a.reproduction.brood = (a.reproduction.brood - brood_share * (paid - from_body)).max(0.0);
     }
     // The mineral that organic matter held is shed to the gut, so a body's mineral stays
     // in proportion to its tissue instead of banking for life; the energy leaves as heat.
@@ -787,7 +797,8 @@ fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, period_s: f64, effort: 
     if !a.eating || !(stock > 0.0) {
         return 0.0;
     }
-    let want = phys.gut.bite_per_body_s * a.body * period_s * effort;
+    // A small body bites faster per unit of itself (the gut's mass exponent, D1b).
+    let want = phys.gut.bite_per_body_s * phys.gut.throughput_factor(a.body, phys.core.body_max) * a.body * period_s * effort;
     if !(want > 0.0) {
         return 0.0;
     }
@@ -820,6 +831,8 @@ fn digest(fauna: &mut Fauna) {
         let phys = *fauna.config.founder(f);
         let sc = phys.core;
         let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
+        // A small body digests faster per unit of itself (the gut's mass exponent, D1b).
+        let speed = phys.gut.throughput_factor(a.body, sc.body_max);
         let mut raw = [0.0f64; Food::COUNT];
         let mut passing = [0.0f64; Food::COUNT];
         let mut yields = 0.0;
@@ -828,7 +841,7 @@ fn digest(fauna: &mut Fauna) {
             if !(p.organic > 0.0) {
                 continue;
             }
-            let tau = phys.gut.digestion_s[food.index()];
+            let tau = phys.gut.digestion_s[food.index()] / speed;
             let d = if tau > 0.0 { (p.organic * DT / tau).min(p.organic) } else { p.organic };
             let funded = if sc.n_tissue > 0.0 {
                 p.mineral / (sc.n_tissue * p.organic)
@@ -947,8 +960,11 @@ fn grow(fauna: &mut Fauna) {
     for i in 0..fauna.animals.len() {
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let a = &mut fauna.animals[i];
+        // The brood is at most the reserve; structure is built only above it (D1b).
+        a.reproduction.brood = a.reproduction.brood_held(a.reserve);
+        let free = a.reserve - a.reproduction.brood;
         let room = (sc.body_max - a.body).max(0.0);
-        if !(room > 0.0) || !(a.reserve > 0.0) {
+        if !(room > 0.0) || !(free > 0.0) {
             continue;
         }
         let cap = sc.reserve_of(a.body);
@@ -962,7 +978,7 @@ fn grow(fauna: &mut Fauna) {
         let before = a.body;
         a.body += build_from(
             &mut a.reserve,
-            (sc.growth_max_per_s * DT * fullness).min(room),
+            (sc.growth_max_per_s * DT * fullness).min(room).min(free),
             1.0,
         );
         // The measured maturation: the tick it grows through its breeding size.
@@ -983,7 +999,10 @@ pub(crate) fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
     if !(cap > 0.0) {
         return 0.0;
     }
-    (1.0 - a.reserve / cap).clamp(0.0, 1.0)
+    // The brood does not sate (D1b): a body saving for eggs is as hungry as the reserve
+    // above its brood says.
+    let fed = a.reserve - a.reproduction.brood_held(a.reserve);
+    (1.0 - fed / cap).clamp(0.0, 1.0)
 }
 
 /// One due body's read side of the controller stage: its manifest, what its observation
@@ -2678,6 +2697,15 @@ fn assimilate(
     let mut budget = Budget::new(assimilated, funded);
     let placed = budget.store((sc.reserve_of(a.body) - a.reserve).max(0.0));
     a.reserve += placed;
+    // The brood (D1b): a mature body earmarks its share of the income for its next clutch,
+    // up to what that clutch costs.
+    let rule = sc.reproduction;
+    if rule.brood_share > 0.0 && a.body >= sc.birth_body {
+        let target = rule.brood_target(sc, a.body);
+        if a.reproduction.brood < target {
+            a.reproduction.brood = (a.reproduction.brood + rule.brood_share * placed).min(target);
+        }
+    }
     let respired = unfunded + budget.close();
 
     // Energy: the density of what was eaten, so nothing is created for any food.
@@ -3121,7 +3149,9 @@ fn lay(
     if rule.clutch_max > 0 {
         let wait = rule.clutch_hold_max_ticks();
         let a = &mut fauna.animals[i];
-        if wait > 0 && rule.clutch_for(a.reserve) < rule.clutch_max && a.reproduction.clutch_wait_ticks < wait {
+        // Full: what this body's own reserve cap can pay for, at most `clutch_max` (D1b).
+        let full = rule.full_clutch(sc.reserve_of(a.body));
+        if wait > 0 && rule.clutch_for(a.reserve) < full && a.reproduction.clutch_wait_ticks < wait {
             a.reproduction.clutch_wait_ticks += 1;
             return;
         }
@@ -3192,6 +3222,8 @@ fn lay(
         mineral,
         energy,
     } = take_from_reserve(a, cost);
+    // The clutch is paid out of the brood first (D1b).
+    a.reproduction.brood = (a.reproduction.brood - paid).max(0.0).min(a.reserve);
     a.reproduction.given += paid;
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
@@ -3781,6 +3813,9 @@ mod circadian_tests;
 #[cfg(test)]
 #[path = "detritivore_tests.rs"]
 mod detritivore_tests;
+#[cfg(test)]
+#[path = "generation_tests.rs"]
+mod generation_tests;
 #[cfg(test)]
 #[path = "dung_tests.rs"]
 mod dung_tests;

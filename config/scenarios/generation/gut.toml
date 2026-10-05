@@ -1,0 +1,15 @@
+# Generation-time arm (D1b) "gut": only the gut's mass exponent; no brood, and the shredder
+# and snail lay at once as on main (the capgnawer keeps its full-clutch wait).
+# Founded and run under this file from minute 0 (detritus_study found minutes=0, then run).
+base = "../patch.toml"
+
+[fauna.founders.littershredder]
+core.reproduction.brood_share = 0.0
+core.reproduction.clutch_hold_max_s = 0.0
+
+[fauna.founders.capgnawer]
+core.reproduction.brood_share = 0.0
+
+[fauna.founders."ripple-snail"]
+core.reproduction.brood_share = 0.0
+core.reproduction.clutch_hold_max_s = 0.0
