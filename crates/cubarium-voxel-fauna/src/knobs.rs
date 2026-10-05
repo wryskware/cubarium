@@ -555,7 +555,9 @@ pub struct HuntConfig {
     /// met lineage's, raised to [`HuntConfig::switch_exponent`] ([`crate::attack_preference`]):
     /// a lineage that turns rare among the prey it meets is passed over even when met. Off,
     /// D2's rule on absolute contact over the exploration floor (`attack_half_s`,
-    /// `attack_explore`): the comparison arm.
+    /// `attack_explore`). Off by default (2026-10-05, Wrysk: a generalist hunter is
+    /// opportunistic, not loyal to a species; the 2 h arms showed no measurable refuge from
+    /// switching): with `attack_explore` 1 it takes whatever profitable prey it meets.
     pub share_switching: bool,
     /// **The switching exponent** `γ` (share switching): the preference is the relative
     /// encounter share to this power. Above 1 the preference falls faster than the share (a
@@ -573,7 +575,9 @@ pub struct HuntConfig {
     /// 60 s.
     pub attack_half_s: f64,
     /// (D2's rule, share switching off.) The attack preference for a prey it has not met
-    /// lately: the floor. 0.15.
+    /// lately: the floor. 1, opportunistic: every listed prey at full preference, so the
+    /// attack chance is its [`crate::profitability`] alone and the search image changes
+    /// nothing. (D2 had 0.15.)
     pub attack_explore: f64,
     /// One attack decision on one prey stands this long, seconds, so a prey it declined is
     /// not re-drawn every sample. 20 s.
@@ -581,7 +585,8 @@ pub struct HuntConfig {
     /// **Strike only what it chose** (D2b). On, a patroller's strike capsule takes only a
     /// prey its attack choice accepts this decision window (the same draw the patrol makes),
     /// so a prey it passes over is not struck because it stood in reach while the hunter
-    /// went for another. Off, any size-eligible prey in the capsule, as D2 did.
+    /// went for another. Off (the default, opportunistic), any size-eligible prey in the
+    /// capsule, as D2 did.
     pub strike_chosen_only: bool,
 }
 
@@ -601,13 +606,13 @@ impl Default for HuntConfig {
             sight_m: 2.0,
             tremor_turn: 0.003,
             search_memory_s: 600.0,
-            share_switching: true,
+            share_switching: false,
             switch_exponent: 2.0,
             attack_prior_s: 15.0,
             attack_half_s: 60.0,
-            attack_explore: 0.15,
+            attack_explore: 1.0,
             attack_decision_s: 20.0,
-            strike_chosen_only: true,
+            strike_chosen_only: false,
         }
     }
 }

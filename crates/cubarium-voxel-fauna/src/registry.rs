@@ -472,7 +472,7 @@ fn knob_rows() -> Vec<Row> {
         hk("switch_exponent", "exponent", pos, "share switching: the attack preference is the relative encounter share to this power").search(1.0, 4.0),
         hk("attack_prior_s", "s of contact", nonneg, "share switching: contact credited to every listed lineage before the shares are taken").search(1.0, 120.0).log(),
         hk("attack_half_s", "s of contact", pos, "D2's rule: encounter memory at which the attack preference is halfway to 1").search(5.0, 600.0).log(),
-        hk("attack_explore", "fraction", fraction, "D2's rule: the attack preference for a prey it has not met lately").search(0.0, 0.6),
+        hk("attack_explore", "fraction", fraction, "D2's rule: the attack preference for a prey it has not met lately (1: opportunistic)").search(0.0, 1.0),
         hk("attack_decision_s", "s", nonneg, "one attack decision on one prey stands this long").search(2.0, 120.0).log(),
     ]);
 

@@ -15,10 +15,12 @@
 //!    split left and right. Each lineage met is an **encounter**: it adds the sample's
 //!    seconds to the **search image** ([`HuntMemory::image`]), which decays with
 //!    [`HuntConfig::search_memory_s`].
-//! 2. **Attack preference** (D2b: switching on encounter share). Whether it takes on a
-//!    prey it meets is drawn once per [`HuntConfig::attack_decision_s`] per prey ([`accepts`]),
-//!    at its [`profitability`] (the share of a kill one strike makes) times
-//!    [`attack_preference`]: the lineage's **share** of its recent eligible encounters
+//! 2. **Attack preference.** Whether it takes on a prey it meets is drawn once per
+//!    [`HuntConfig::attack_decision_s`] per prey ([`accepts`]), at its [`profitability`] (the
+//!    share of a kill one strike makes) times [`attack_preference`]. By default it is
+//!    opportunistic: the preference is 1 for every listed prey (`attack_explore` 1, share
+//!    switching off), so profitability alone decides. With D2b's share switching on, the
+//!    preference is the lineage's **share** of its recent eligible encounters
 //!    relative to the most-met lineage's, raised to [`HuntConfig::switch_exponent`]. A
 //!    lineage that turns rare among the prey it meets is passed over even when met — the
 //!    falling per-prey risk at low density Astra asked for — and the image follows what it
