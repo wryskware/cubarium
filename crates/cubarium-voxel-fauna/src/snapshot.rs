@@ -43,7 +43,10 @@ use crate::Fauna;
 //     nest_radius_m, nest_crowd_max, nest_retry_s}`, `ReproductionState::{native,
 //     retry_ticks}`, `FaunaConfig::lineage_body_ceiling`, `TeacherConfig::{
 //     forage_stay_forward, forage_turn_back_samples}`, the readout ledger lines.
-pub const SCHEMA: u32 = 39;
+// 40: the capgnawer package — `EggSite::Fungus`, `Reproduction::{clutch_hold_max_s,
+//     egg_fungus_radius_m}`, `ReproductionState::clutch_wait_ticks`,
+//     `CueConfig::fungal_half_life_s`.
+pub const SCHEMA: u32 = 40;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

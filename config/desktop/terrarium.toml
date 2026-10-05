@@ -70,6 +70,13 @@ core.reproduction.surplus_floor = 0.0229824
 core.reproduction.clutch_max = 3
 core.reproduction.nest_radius_m = 1.0
 core.reproduction.nest_crowd_max = 8
+# The capgnawer package (2026-10-05, proposal §3.1E): numbers that follow the fungus.
+# Eggs go within half a metre of a glowcap holding caps; a ready layer waits up to a
+# quarter of a world day for a reserve that pays for its full clutch, then lays what it
+# can. Plausible, untuned.
+egg_site = "fungus"
+core.reproduction.egg_fungus_radius_m = 0.5
+core.reproduction.clutch_hold_max_s = 1800.0
 
 [fauna.founders.loftstrider]
 founding_count = 2
@@ -339,6 +346,13 @@ yield_by_food.foliage = 0.46905315573017675
 yield_by_food.film = 0.46905315573017675
 yield_by_food.nectar = 0.46905315573017675
 yield_by_food.fruit = 0.46905315573017675
+
+# The capgnawer package (2026-10-05): the fungal scent lasts 300 s, so a glowcap grove is
+# smelled a few metres off (the field falls by e over about 1.2 m at 0.125 m faces) and a
+# young capgnawer hatched or founded away from one can find it. The detritus and film
+# fields keep the shared 2 s.
+[fauna.cue]
+fungal_half_life_s = 300.0
 
 [fauna.founding]
 starter_litter_organic = 0.13232116851858008

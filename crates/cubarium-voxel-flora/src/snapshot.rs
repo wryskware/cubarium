@@ -40,7 +40,8 @@ use crate::Flora;
 // 27: a face holds one plant and one fungus (`FaceLayer`) — `Flora::stands` sorted by
 //     `(site, place)`, `Ground::sprouting_fungus`.
 // 28: the detritus web — `FloraConfig::film_graze_refuge`.
-pub const SCHEMA: u32 = 28;
+// 29: the capgnawer package — `SpeciesConfig::propagule_cap_share` (spores from caps).
+pub const SCHEMA: u32 = 29;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -1,0 +1,10 @@
+# The capgnawer package's numbers arm (2026-10-05): the shipped preset with the glowcap's
+# cap regrowth slowed from its preset 0.00656 /s per unit wood (a grazed cap back from its
+# refuge in about 260 s, 1/28 of a world day) to 0.00024 (about one world day, 7200 s:
+# 0.85 · alpha / foliage_rate). A fruiting body takes days, not minutes, to come back; at the
+# preset rate one glowcap regrows enough cap for about a hundred adult capgnawers' upkeep and
+# no grazer can thin the caps. Experimental arm, not the preset.
+base = "../patch.toml"
+
+[flora.glowcap]
+foliage_rate = 0.00024
