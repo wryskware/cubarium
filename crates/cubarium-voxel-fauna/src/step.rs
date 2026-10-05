@@ -1250,7 +1250,7 @@ fn controllers(
         // world's `hunt.patrol` is on). The carcass yield below still wins.
         if driven && fauna.controllers.hunt_patrol(id) && !fauna.controllers.at_carcass(id) {
             if let Some((go, lit)) =
-                crate::hunt::steer(fauna, i, view, &fv, predation_occupancy.as_ref())
+                crate::hunt::steer(fauna, i, view, &fv, predation_occupancy)
             {
                 actions = go;
                 lure = lit;
