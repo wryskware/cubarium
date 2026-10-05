@@ -263,6 +263,9 @@ fn busy(draws: Draws) -> (FaunaModel, Supply) {
     fits.of_mut(Founder::Blind).kill_rate = 2e-4;
     fits.of_mut(Founder::Browser).kill_rate = 1e-4;
     fits.bank_trigger_per_dusk = 0.5;
+    fits.carcass_stay_s = 600.0;
+    fits.kill_reach = 0.5;
+    fits.of_mut(Founder::Lanternjaw).egg_loss = 0.3;
     let mut m = FaunaModel::new(&p, fits, 2.0);
     m.draws = draws;
     for f in [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail, Founder::Browser, Founder::Lanternjaw] {
@@ -424,3 +427,219 @@ fn strike_power_moves_the_kill_hazard() {
     }
 }
 
+
+// --- Cohort bookkeeping (the merge is numerics, not ecology: it must not move the answer) ---
+
+/// A crowded laying world: one lineage at a nest-site count that refuses most clutches, so
+/// every laying attempt splits a cohort into the layers and the refused.
+fn crowded(draws: Draws, max_cohorts: usize, min_cohort: f64) -> FaunaModel {
+    let mut p = Params::defaults();
+    p.world.day.mode = DayMode::Off;
+    let f = Founder::Blind;
+    p.fauna.founders[f.index()].core.reproduction.nest_radius_m = 1.0;
+    p.fauna.founders[f.index()].core.reproduction.nest_crowd_max = 6;
+    let mut fits = Fits::unfitted();
+    // A Poisson mean of 0.25 · 23 ≈ 5.75 at a limit of 6: about a third of attempts refused.
+    fits.of_mut(f).crowd_per_body = 0.25;
+    fits.of_mut(f).motor_effort = 0.0;
+    let mut m = FaunaModel::new(&p, fits, 1.0);
+    m.draws = draws;
+    m.max_cohorts = max_cohorts;
+    m.min_cohort = min_cohort;
+    for g in Founder::ALL {
+        m.enabled[g.index()] = g == f;
+    }
+    m.add(f, Cohort::founders(&p.fauna, f, 24.0));
+    m
+}
+
+/// **Merging keeps bodies and matter**: a merge pass leaves the lineage's body count and the
+/// organic matter it holds exactly where they were, whatever it merges.
+#[test]
+fn merging_keeps_bodies_and_matter() {
+    let mut m = crowded(Draws::Mean, 4, 0.05);
+    let f = Founder::Blind;
+    let sc = m.phys(f).core;
+    // Hand-built: ten cohorts spread in body, reserve and timing, three of them tiny.
+    for k in 0..10 {
+        let x = f64::from(k) / 10.0;
+        let body = sc.birth_body * (1.0 + x);
+        let mut c = Cohort::new(if k < 3 { 0.01 } else { 1.0 + x }, body, 0.3 * x * sc.reserve_of(body));
+        c.age_s = 600.0 * x;
+        c.refractory_s = 100.0 * x;
+        c.b.stomach[Food::Litter.index()] = 0.001 * x;
+        m.add(f, c);
+    }
+    let n0: f64 = m.pops[f.index()].iter().map(|c| c.n).sum();
+    let held0 = m.organic_held();
+    m.merge_cohorts();
+    let n1: f64 = m.pops[f.index()].iter().map(|c| c.n).sum();
+    assert!(close(n0, n1, 1e-12), "bodies {n0} -> {n1}");
+    assert!(close(held0, m.organic_held(), 1e-12), "matter {held0} -> {}", m.organic_held());
+    assert!(m.pops[f.index()].len() <= 4, "the bound holds: {}", m.pops[f.index()].len());
+    assert!(m.pops[f.index()].iter().all(|c| c.n >= 0.05), "no cohort under the floor survives a pass");
+}
+
+/// **The bound holds under heavy refusals**, in the mean field and the twin: the count of
+/// cohorts stays near `max_cohorts` however often clutches split them.
+#[test]
+fn heavy_refusals_stay_bounded() {
+    for draws in [Draws::Mean, Draws::Twin(Rng::new(5))] {
+        let mut m = crowded(draws, 16, 0.01);
+        let mut s = Supply::default();
+        s.litter = 1e6;
+        let mut most = 0;
+        for _ in 0..5400 {
+            m.step(&s);
+            most = most.max(m.pops[Founder::Blind.index()].len());
+        }
+        assert!(m.ledger[Founder::Blind.index()].nest_refusals > 0.0, "the world refuses");
+        // Between passes a cohort can split once per retry: at most doubling, plus hatchlings.
+        assert!(most <= 2 * 16 + 64, "cohorts peaked at {most}");
+    }
+}
+
+/// **The bound does not move the mean field**: the same crowded world with a tight bound and
+/// with a loose one lays and keeps the same bodies, within a few per cent.
+#[test]
+fn the_bound_does_not_move_the_mean_field() {
+    let run = |max: usize, min: f64| {
+        let mut m = crowded(Draws::Mean, max, min);
+        let mut s = Supply::default();
+        s.litter = 1e6;
+        for _ in 0..7200 {
+            m.step(&s);
+        }
+        let l = &m.ledger[Founder::Blind.index()];
+        (m.census(Founder::Blind).n, l.laid, l.nest_refusals)
+    };
+    let (n_tight, laid_tight, ref_tight) = run(16, 0.01);
+    let (n_loose, laid_loose, ref_loose) = run(4096, 0.0);
+    assert!(close(n_tight, n_loose, 0.03), "bodies {n_tight} vs {n_loose}");
+    assert!(close(laid_tight, laid_loose, 0.03), "laid {laid_tight} vs {laid_loose}");
+    assert!(close(ref_tight, ref_loose, 0.05), "refusals {ref_tight} vs {ref_loose}");
+}
+
+// --- The hunter at its kill, and the bank's losses ---
+
+/// One lanternjaw cohort, clock off, hungry, nothing else stepped.
+fn lone_hunter(fits: Fits) -> (FaunaModel, Params) {
+    let mut p = Params::defaults();
+    p.world.day.mode = DayMode::Off;
+    let mut m = FaunaModel::new(&p, fits, 1.0);
+    for g in Founder::ALL {
+        m.enabled[g.index()] = g == Founder::Lanternjaw;
+    }
+    (m, p)
+}
+
+/// **A hunter eats its own kill**, not another's: of two hungry hunter cohorts, the one
+/// holding a carcass swallows carrion and the other, with no carrion in the pool, does not.
+#[test]
+fn a_hunter_eats_only_its_own_kill() {
+    let (mut m, p) = lone_hunter(Fits::unfitted());
+    let lj = Founder::Lanternjaw;
+    let sc = p.fauna.founder(lj).core;
+    for k in 0..2 {
+        let mut c = Cohort::new(1.0, sc.birth_body, 0.05 * sc.reserve_of(sc.birth_body));
+        c.b.eating = true;
+        if k == 0 {
+            c.carcass = 0.5;
+        }
+        m.add(lj, c);
+    }
+    let s = Supply::default();
+    for _ in 0..30 {
+        m.step(&s);
+    }
+    let fed: Vec<f64> = m.pops[lj.index()].iter().map(|c| c.b.stomach[Food::Carrion.index()]).collect();
+    let holder = m.pops[lj.index()].iter().position(|c| c.carcass > 0.0 || c.b.stomach_total() > 0.0).expect("the holder");
+    assert!(fed[holder] > 0.0, "the holder fed");
+    assert!(fed.iter().enumerate().all(|(k, f)| k == holder || *f == 0.0), "only the holder fed: {fed:?}");
+}
+
+/// **An abandoned carcass goes to the carrion pool**: a sated hunter's kill decays at
+/// `carrion_decomposition` and is left at `1 / carcass_stay_s`; what is left is returned as
+/// carrion, in the share the two rates set. Halving the stay leaves more of it.
+#[test]
+fn an_abandoned_carcass_goes_to_the_carrion_pool() {
+    let returned = |stay: f64| {
+        let mut fits = Fits::unfitted();
+        fits.carcass_stay_s = stay;
+        let (mut m, p) = lone_hunter(fits);
+        let lj = Founder::Lanternjaw;
+        let sc = p.fauna.founder(lj).core;
+        // Sated: a full reserve and stomach, so it neither eats nor hunts.
+        let mut c = Cohort::new(1.0, sc.birth_body, sc.reserve_of(sc.birth_body));
+        c.b.stomach[Food::Carrion.index()] = p.fauna.founder(lj).gut.capacity(sc.birth_body);
+        c.carcass = 1.0;
+        m.add(lj, c);
+        let mut back = 0.0;
+        let t = 600;
+        for _ in 0..t {
+            back += m.step(&Supply::default()).1.carrion;
+        }
+        let k = p.flora.carrion_decomposition;
+        let r = 1.0 / stay;
+        let want = r / (r + k) * (1.0 - (-(r + k) * f64::from(t)).exp());
+        (back, want)
+    };
+    let (b1, w1) = returned(300.0);
+    let (b2, w2) = returned(150.0);
+    assert!(close(b1, w1, 0.02), "returned {b1}, the rates say {w1}");
+    assert!(close(b2, w2, 0.02), "returned {b2}, the rates say {w2}");
+    assert!(b2 > b1);
+}
+
+/// **Dormant eggs are lost like any clutch** (the sim's `clutch_fate` takes dormant clutches
+/// too): at an egg-loss share of one half, half the bank's eggs go, as carrion.
+#[test]
+fn dormant_eggs_are_lost_like_any_clutch() {
+    let mut fits = Fits::unfitted();
+    fits.of_mut(Founder::Lanternjaw).egg_loss = 0.5;
+    let (mut m, p) = lone_hunter(fits);
+    let lj = Founder::Lanternjaw;
+    let sc = p.fauna.founder(lj).core;
+    let mut c = Cohort::new(1.0, sc.body_max, sc.reserve_of(sc.body_max));
+    c.matured = true;
+    m.add(lj, c);
+    let mut carrion = 0.0;
+    for _ in 0..1200 {
+        carrion += m.step(&Supply::default()).1.carrion;
+    }
+    let l = &m.ledger[lj.index()];
+    assert!(l.laid > 0.0, "it laid");
+    assert!(close(l.eggs_lost, 0.5 * l.laid, 1e-9), "lost {} of {}", l.eggs_lost, l.laid);
+    assert!(close(m.census(lj).bank, l.laid - l.eggs_lost, 1e-6));
+    assert!(carrion >= l.eggs_lost * sc.reproduction.egg_organic * (1.0 - 1e-9));
+}
+
+/// **A kill's reach**: of each corpse the hunter's mouth reaches `kill_reach`, held as its
+/// carcass; the rest goes to the carrion pool at once. Every corpse is booked one way or the
+/// other.
+#[test]
+fn a_kill_splits_by_its_reach() {
+    for reach in [1.0, 0.3] {
+        let mut fits = Fits::unfitted();
+        fits.kill_reach = reach;
+        fits.of_mut(Founder::Blind).kill_rate = 0.05;
+        let (mut m, p) = lone_hunter(fits);
+        m.enabled[Founder::Blind.index()] = true;
+        let lj = Founder::Lanternjaw;
+        let sc = p.fauna.founder(lj).core;
+        // Hungry and awake, so it hunts; it cannot eat (its stomach is full) so the carcass
+        // stays as laid.
+        let mut h = Cohort::new(1.0, sc.body_max, 0.0);
+        h.b.stomach[Food::Litter.index()] = p.fauna.founder(lj).gut.capacity(sc.body_max);
+        h.b.eating = true;
+        m.add(lj, h);
+        let bs = p.fauna.founder(Founder::Blind).core;
+        m.add(Founder::Blind, Cohort::new(10.0, bs.birth_body, 0.0));
+        let (_, r) = m.step(&Supply::default());
+        let held: f64 = m.pops[lj.index()].iter().map(|c| c.carcass).sum();
+        let total = m.carcass_laid + r.carrion - 0.0;
+        assert!(m.ledger[lj.index()].kills > 0.0, "it killed");
+        assert!(close(m.carcass_laid, reach * total, 1e-9), "reached {} of {total}", m.carcass_laid);
+        assert!(held <= m.carcass_laid * (1.0 + 1e-12));
+    }
+}

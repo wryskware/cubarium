@@ -99,6 +99,15 @@ pub struct Fits {
     /// and a host stands within reach (all spatial), before the sim's own
     /// `hatch_chance_per_dusk`.
     pub bank_trigger_per_dusk: f64,
+    /// **How long a hunter stays at its kill**, seconds (the mean of an exponential): its
+    /// fresh kill is at its mouth, and it alone eats from it, until it moves on; what is left
+    /// then goes to the carrion pool. Infinite: it never leaves (every kill is eaten or
+    /// decays).
+    pub carcass_stay_s: f64,
+    /// **A kill's reach**: the share of a corpse's organic matter the hunter's mouth reaches
+    /// and it alone eats; the rest goes to the carrion pool at the kill (left, scattered,
+    /// scavenged). 1: the whole corpse is its own.
+    pub kill_reach: f64,
     /// Whether each rate above came from telemetry (`true`) or is a default.
     pub fitted: [bool; Founder::COUNT],
 }
@@ -110,6 +119,8 @@ impl Fits {
             lineage: [LineageFit::UNFITTED; Founder::COUNT],
             strikes_per_kill: 1.0,
             bank_trigger_per_dusk: 0.0,
+            carcass_stay_s: f64::INFINITY,
+            kill_reach: 1.0,
             fitted: [false; Founder::COUNT],
         }
     }
@@ -130,31 +141,69 @@ impl Fits {
     ///   - ripple-snail, film: ψ = 0.50 · F / (F + 3.4) (median 1.00, IQR 0.73-1.39).
     /// - **Nest crowding** `crowd / (n − 1)`, D1b windows with adults, median [IQR]:
     ///   shredder 0.182 [0.119-0.273], capgnawer 0.143 [0-0.429], snail 0.469 [0.429-0.515].
-    /// - **The observation refit** (`fit obs-only`, D1b branch 8 h observation, training seeds
-    ///   4 5 7 8, count + adults + juveniles + hatched at 360-720): interference added at the 4 h
-    ///   median (ψ kept there) and nest aggregation on a grid. Shredder: ψ_max 0.477, interference
-    ///   2.805 per other body, aggregation 2. Snail: ψ_max 1.0 (the grid's cap: flagged),
-    ///   half 3.401, interference 1.020, aggregation 2. Capgnawer: unchanged, aggregation 1.
-    ///   **Not yet validated on the held-out seeds 9 12 13 15** (`d1b`'s holdout block).
-    /// - Superseded first pass: **nest-site aggregation** alone, on the D1b 8 h observation's training seeds (4 5 7 8; 9 12 13
-    ///   15 held out), the count and hatchlings at 360-720 matched over a grid: shredder 3
-    ///   (log-error 1.00 against 3.71 at 1), snail 3 (0.30 against 0.39); the capgnawer's
-    ///   error is flat (it never crowds on patch), left at 1.
+    /// - **The observation refit** (`fit obs-only`, from [`Fits::recorded_4h`]; D1b branch 8 h
+    ///   observation, training seeds 4 5 7 8, count + adults + juveniles + hatched at 360-720,
+    ///   log error): interference on a grid from 0 to 3 × the 4 h median stock per other body,
+    ///   ψ_max set so ψ at the 4 h median stock and count stays where the 4 h fit put it (ψ_max
+    ///   not capped at 1: ψ itself is), and nest aggregation 1-4. A response whose interference
+    ///   the 4 h intake fit found (the capgnawer's) keeps it.
+    ///   - Shredder: ψ_max 0.477, interference 2.805, aggregation 2 (error 5.57; no
+    ///     interference 6.26, the grid's 28 per body 5.94: weakly identified).
+    ///   - Snail: ψ_max 0.582, half 3.401, interference 0.102, aggregation 2 (error 20.27;
+    ///     flat in interference, 20.3-21.7 up to 2 per body). The earlier 1.02 at ψ_max 1.0 sat
+    ///     on the grid's top and on the ψ_max cap, which lowered ψ: an artefact.
+    ///   - Capgnawer: aggregation 1 (flat).
+    ///   - **Held out** (seeds 9 12 13 15, `d1b`): 83 of 99 cells pass; the shredder's adults
+    ///     and matured from m600, its count at m720, and the snail's matured fail (too many
+    ///     mature: the within-cohort spread the model lacks).
     /// - **Day on a dark face**: 0 for all three on patch (dark-awake share of daytime median
     ///   0, IQR to 0.01-0.07): their daytime waking is the emergency latch, which the model
     ///   runs as a law.
     /// - **Motor effort**: 0 (median of spend less upkeep, IQR −0.37 to 0.005): the heuristic
     ///   detritivores stand and feed.
     /// - **Egg loss**: 0 of 1,124 eggs laid.
-    /// - **Kill rates** and strikes per kill: [`Fits::recorded_hunt`].
+    /// - **The frondgrazer's foliage response** (`fitbrowser`): ψ = 0.276 · F / (F + 41.5), by
+    ///   simulation on the D1b branch runs (no hunters), its count at every hour to 720 on the
+    ///   seeds' clamped edible foliage (median 415), training seeds 4 5 7 8 (log error 1.65);
+    ///   the held-out seeds pass at 240/480/720 (sim 18/22/52, model 15/27/59).
+    /// - **The hunter** (`fit_hunter` in the example, refitted at each D2b run, deterministic):
+    ///   the dormant eggs' loss 0.333 (24 of 72 eggs gone from the bank in the first ten minutes
+    ///   after laying, d2, 8 seeds); carrion only at its own kills; a kill's reach 0.358 (the
+    ///   hunters' assimilation over d2 m120-240 matched, 5.47 summed over 8 seeds); then the
+    ///   kill rates per prey body per hunting LJ-second: shredder 8.7e-5, capgnawer 7.6e-5,
+    ///   snail 3.9e-5, frondgrazer 4.4e-5 (kills matched, 125 vs 128); 2.38 strikes per kill.
+    ///   The stay at a kill is not identifiable (the mean field's kill flux keeps the carcass
+    ///   topped up while the hunter hunts) and stays infinite.
     pub fn recorded() -> Fits {
-        let mut f = Fits::unfitted();
+        let mut f = Fits::recorded_4h();
         {
             let s = f.of_mut(Founder::Blind);
             s.response[Food::Litter.index()] = Some(Response { psi_max: 0.477, half: 0.0, interference: 2.805 });
+            s.nest_aggregation = 2.0;
+        }
+        {
+            let r = f.of_mut(Founder::RippleSnail);
+            r.response[Food::Film.index()] = Some(Response { psi_max: 0.582, half: 3.401, interference: 0.102 });
+            r.nest_aggregation = 2.0;
+        }
+        {
+            let g = f.of_mut(Founder::Browser);
+            g.response[Food::Foliage.index()] = Some(Response::holling(0.276, 41.5));
+            f.fitted[Founder::Browser.index()] = true;
+        }
+        f
+    }
+
+    /// **The 4 h fits alone**, before the observation refit: the responses by simulation
+    /// (no interference for the shredder and the snail), the behaviour rates, aggregation 1.
+    /// The observation refit (`fit obs-only`) starts here.
+    pub fn recorded_4h() -> Fits {
+        let mut f = Fits::unfitted();
+        {
+            let s = f.of_mut(Founder::Blind);
+            s.response[Food::Litter.index()] = Some(Response::holling(0.43, 0.0));
             s.response[Food::Carrion.index()] = Some(Response::holling(0.0, 0.0));
             s.crowd_per_body = 0.182;
-            s.nest_aggregation = 2.0;
             s.motor_effort = 0.0;
         }
         {
@@ -166,9 +215,8 @@ impl Fits {
         }
         {
             let r = f.of_mut(Founder::RippleSnail);
-            r.response[Food::Film.index()] = Some(Response { psi_max: 1.0, half: 3.401, interference: 1.020 });
+            r.response[Food::Film.index()] = Some(Response::holling(0.50, 3.401));
             r.crowd_per_body = 0.469;
-            r.nest_aggregation = 2.0;
             r.motor_effort = 0.0;
         }
         for x in [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail] {
