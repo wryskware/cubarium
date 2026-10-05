@@ -110,6 +110,38 @@ fn the_liveness_check_fails_frozen_animals() {
     assert!(why.contains("frozen"), "{why}");
 }
 
+/// **A lineage idle by choice passes; the same idleness without controllers does not**: a
+/// window in which every body was resting (a pack lying up at its den) and none moved or
+/// fed is noted as idle while every body is driven, and called frozen once the bodies lose
+/// their controllers.
+#[test]
+fn a_resting_driven_lineage_is_idle_and_an_undriven_one_is_frozen() {
+    let (world, flora, fauna, _) = seeded(64, None, 0.0);
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(1));
+    let dir = scratch("idle");
+    let (cfg, _) = stage(&dir, &[]);
+    std::fs::remove_dir_all(&dir).ok();
+    // A window with no ticks in it: nobody moved or fed, and every sample says resting.
+    let rested = |sim: &Sim| {
+        let mut window = Window::open(sim);
+        for f in Founder::ALL {
+            let s = &mut window.states[f.index()];
+            let n: u64 = s.values().sum();
+            s.clear();
+            s.insert("Resting".into(), n.max(1));
+            window.awake[f.index()] = true;
+        }
+        window
+    };
+    let ok = rested(&sim).verdict(&sim, &cfg).expect("resting, driven lineages pass");
+    assert!(ok.contains("idle"), "{ok}");
+    for (id, _) in founder_bodies(sim.fauna()) {
+        sim.fauna_mut().take_controller(id);
+    }
+    let why = rested(&sim).verdict(&sim, &cfg).expect_err("resting, undriven lineages fail");
+    assert!(why.contains("frozen"), "{why}");
+}
+
 /// **An expected counter that stays zero fails the check**: the arm asks for burrs, and
 /// no species carries any.
 #[test]
