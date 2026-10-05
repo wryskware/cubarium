@@ -946,6 +946,13 @@ pub struct SpeciesConfig {
     pub reserve_share: f64,
     /// `p_reflush`: reserve is spent on foliage only while `P < p_reflush · P_cap`.
     pub reflush_below: f64,
+    /// A stand is a **seedling** while its wood is below this multiple of `alive_min`:
+    /// its reflush answers to the leaf its seed gave it rather than to `alpha · W`
+    /// ([`SpeciesConfig::reflush_cap`]), so the adult foliage capacity never decides
+    /// whether a newborn spends its seed reserve on leaves. Multiple of `alive_min`; at 1
+    /// or below no living stand is a seedling. **Placeholder**: 2, a seedling until it has
+    /// doubled its seed's wood.
+    pub seedling_below: f64,
     /// `g`: gross assimilation per second per unit foliage at full light and moisture.
     pub assimilation: f64,
     /// `K_N`: mineral half-saturation of assimilation.
@@ -1372,6 +1379,31 @@ impl SpeciesConfig {
             .collect()
     }
 
+    /// The foliage the **reflush** answers to at `wood` (`step` §4.4: reserve is spent on
+    /// foliage only while `P < reflush_below · reflush_cap`, and up to that level).
+    ///
+    /// A stand past its seedling size — wood at least `seedling_below · alive_min` —
+    /// answers to its foliage cap `alpha · W`, so a grazed or cured stand regrows from its
+    /// reserve as it always has. A **seedling** answers to the leaf its seed gave it: the
+    /// newborn's foliage per unit wood, `propagule_split[1] / propagule_split[0]`, times its
+    /// wood, and never more than `alpha · W`. A seedling's reserve is its seed's, and
+    /// whether it spends it on leaves is set by the seed it came from, not by how much
+    /// foliage the species carries when grown: at an `alpha` that put the threshold above
+    /// the newborn's own leaf, every newborn spent its reserve within seconds and died at
+    /// `alive_min` on its first unpaid upkeep (`turf_trace`, 2026-10-04).
+    pub fn reflush_cap(&self, wood: f64) -> f64 {
+        let cap = self.alpha * wood.max(0.0);
+        if wood >= self.seedling_below * self.alive_min {
+            return cap;
+        }
+        let [w_frac, p_frac, _] = self.propagule_split;
+        if w_frac > 0.0 {
+            (p_frac.max(0.0) / w_frac * wood.max(0.0)).min(cap)
+        } else {
+            cap
+        }
+    }
+
     /// The **capped seedling** this species opens with, if it does: `(w0, cap)`, where
     /// `w0` is stage 0's `wood_fraction_max` and `cap` its `height_m_max`. Decisions §5's
     /// woody seedling (today bloomcrown and umbrellafrond). `None` for a species whose
@@ -1556,6 +1588,7 @@ impl SpeciesConfig {
             n_tissue: 0.02,
             reserve_share: 0.2,
             reflush_below: 0.25,
+            seedling_below: 2.0,
             assimilation: 0.004,
             nutrient_half: 0.5,
             nutrient_draw_max: 0.01,

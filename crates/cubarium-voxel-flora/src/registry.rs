@@ -140,6 +140,8 @@ fn species_rows() -> Vec<Row> {
         r("n_tissue", "mineral per org-unit", nonneg, "stoichiometry of built tissue").search(0.005, 0.05).log().grade("B"),
         r("reserve_share", "fraction", nonneg, "share of a tick's surplus to the reserve first").search(0.0, 0.6).grade("C"),
         r("reflush_below", "fraction of P_cap", nonneg, "reserve funds foliage only below this").search(0.0, 1.0).grade("C"),
+        r("seedling_below", "multiple of alive_min", nonneg, "a seedling's reflush answers to its seed's leaf, not alpha, below this wood")
+            .search(1.0, 5.0).grade("C"),
         r("assimilation", "organic/s per unit foliage", nonneg, "g: gross fixation at full light and moisture")
             .evolve().log().grade("B"),
         r("nutrient_half", "mineral units", nonneg, "K_N: mineral half-saturation").search(0.1, 2.0).log().grade("C"),

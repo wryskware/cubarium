@@ -2815,8 +2815,12 @@ pub(crate) fn grow_stand_cause(
         (Trophic::Photo, None) => daylight,
         _ => 1.0,
     };
-    let dp_q = if p0 < sc.reflush_below * p_cap {
-        let mut want = ((d_p - dp_a) * flush_light).min((sc.reflush_below * p_cap - p0 - dp_a).max(0.0));
+    // The level it reflushes below and up to is `reflush_below` of [`SpeciesConfig::reflush_cap`]:
+    // `alpha · W` once the stand is established, the leaf its seed gave it while it is not,
+    // so the adult foliage capacity never spends a seedling's seed reserve.
+    let flush_to = sc.reflush_below * sc.reflush_cap(w0);
+    let dp_q = if p0 < flush_to {
+        let mut want = ((d_p - dp_a) * flush_light).min((flush_to - p0 - dp_a).max(0.0));
         if let Some(left) = night_left {
             want = want.min(left / (1.0 + sc.build));
         }
@@ -4645,3 +4649,7 @@ mod clock_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "seedling_reflush_tests.rs"]
+mod seedling_reflush_tests;
