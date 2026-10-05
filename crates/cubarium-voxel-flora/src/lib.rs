@@ -56,6 +56,8 @@ mod overtop_covers_tests;
 mod carrion_tests;
 #[cfg(test)]
 mod spread_tests;
+#[cfg(test)]
+mod shared_face_tests;
 mod film;
 #[cfg(test)]
 mod film_tests;
@@ -586,7 +588,13 @@ pub struct Ground {
     /// gates passed and it won the lottery at the last check, and it germinates at the
     /// next one if they still pass. A one-check delay, so the presenter reads a flag and
     /// evaluates no gate per frame.
+    ///
+    /// The **plant's** arm ([`FaceLayer::Plant`]); a fungus has its own,
+    /// [`Ground::sprouting_fungus`], since each place runs its own lottery.
     pub sprouting: Option<Species>,
+    /// [`Ground::sprouting`] for the face's **fungus** place ([`FaceLayer::Fungus`]).
+    #[serde(default)]
+    pub sprouting_fungus: Option<Species>,
     /// **Glassfilm** (`design/handoffs/voxel-roster-2026-10-01.md`, R2a): the living film
     /// on a shallow submerged face, organic matter. A fourth pool beside litter, dead wood
     /// and carrion, stepped by `film.rs`: it grows from light on the site's `mineral`,
@@ -645,10 +653,26 @@ impl Ground {
             carcass: None,
             last_landing: None,
             sprouting: None,
+            sprouting_fungus: None,
             film: 0.0,
             film_mineral: 0.0,
             film_energy: 0.0,
             vine_seeds: None,
+        }
+    }
+
+    /// The arm of `place`'s lottery ([`Ground::sprouting`], [`Ground::sprouting_fungus`]).
+    pub fn arm(&self, place: FaceLayer) -> Option<Species> {
+        match place {
+            FaceLayer::Plant => self.sprouting,
+            FaceLayer::Fungus => self.sprouting_fungus,
+        }
+    }
+
+    pub(crate) fn arm_mut(&mut self, place: FaceLayer) -> &mut Option<Species> {
+        match place {
+            FaceLayer::Plant => &mut self.sprouting,
+            FaceLayer::Fungus => &mut self.sprouting_fungus,
         }
     }
 
@@ -668,9 +692,8 @@ impl Ground {
                 .iter()
                 .any(|c| c.species == sp && c.organic > 0.0)
         };
-        if let Some(sp) = self.sprouting
-            && held(sp)
-        {
+        // The plant's arm first, then the fungus's.
+        if let Some(sp) = self.sprouting.filter(|&sp| held(sp)).or(self.sprouting_fungus.filter(|&sp| held(sp))) {
             return Some(sp);
         }
         let recent = (config.seed_mark_recent_s * f64::from(TICK_HZ)).round() as u64;
@@ -739,6 +762,47 @@ pub enum Trophic {
     /// in the log or in the leaf fall. Carrion is not substrate: a corpse is a consumer's
     /// pool and out of scope.
     Saprotroph,
+}
+
+/// **A stand's place on its face** (2026-10-05, Wrysk: "glowcaps and plants can coincide
+/// ... like normal mushrooms grow under trees"): a support face holds at most **one plant
+/// and one fungus**. The place is the stand's [`Trophic`] mode, never a config number of
+/// its own: a [`Trophic::Photo`] stand is the face's plant, a [`Trophic::Saprotroph`] its
+/// fungus.
+///
+/// The two places share everything the face has — its ground (mineral pool, litter, dead
+/// wood, carrion), its root water and its seed bank — and nothing else: every way onto a
+/// face (the seed lottery, a runner, a founder) asks only its own place, so a plant comes
+/// up on a glowcap's face through its own gates and a glowcap comes up under a plant
+/// through its own, and neither displaces the other. Overtopping and runner displacement
+/// are plant against plant. The two stands of one face never shade each other: the cap
+/// grows under the plant's leaves (a glowcap's crown top is above a bloomcrown's basal
+/// rosette, so without this it would shade it), and a fungus earns nothing from light.
+///
+/// [`FloraView::stands`] is sorted by `(site, place)`, the plant first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum FaceLayer {
+    /// The face's photosynthetic stand: what [`FloraView::stand_at`] answers.
+    Plant,
+    /// The face's saprotroph: what [`FloraView::fungus_at`] answers.
+    Fungus,
+}
+
+impl FaceLayer {
+    pub const ALL: [FaceLayer; 2] = [FaceLayer::Plant, FaceLayer::Fungus];
+
+    /// The place a stand of this trophic mode takes.
+    pub fn of(trophic: Trophic) -> FaceLayer {
+        match trophic {
+            Trophic::Photo => FaceLayer::Plant,
+            Trophic::Saprotroph => FaceLayer::Fungus,
+        }
+    }
+
+    /// `0` for the plant, `1` for the fungus: an array slot.
+    pub fn index(self) -> usize {
+        self as usize
+    }
 }
 
 /// **How a species' seeds travel.** Every mode lands one whole seed — one package — per delivery; what differs is where.
@@ -3084,6 +3148,18 @@ impl FloraConfig {
         }
     }
 
+    /// The place on a face a stand of `species` takes ([`FaceLayer`]), by its trophic mode.
+    #[inline]
+    pub fn face_layer(&self, species: Species) -> FaceLayer {
+        FaceLayer::of(self.species(species).trophic)
+    }
+
+    /// `stand`'s sort key in [`FloraView::stands`]: its site, then its place.
+    #[inline]
+    pub(crate) fn stand_key(&self, stand: &Stand) -> (Site, FaceLayer) {
+        (stand.site, self.face_layer(stand.species))
+    }
+
     /// The same table, mutably: a harness or a fixture that has a [`Species`] in hand and
     /// wants to change that species' preset, without a sixth copy of the match.
     pub fn species_mut(&mut self, s: Species) -> &mut SpeciesConfig {
@@ -3544,12 +3620,30 @@ fn terrain_fingerprint(material: &[Material]) -> u64 {
     h
 }
 
+/// The run of `stands` — sorted by `(site, place)` — on `site`: none, one or two.
+pub(crate) fn on_site(stands: &[Stand], site: Site) -> std::ops::Range<usize> {
+    let a = stands.partition_point(|s| s.site < site);
+    let b = a + stands[a..].iter().take_while(|s| s.site == site).count();
+    a..b
+}
+
+/// Where the stand holding `layer` on `site` is in `stands`, or where it would go.
+pub(crate) fn find_stand(
+    config: &FloraConfig,
+    stands: &[Stand],
+    site: Site,
+    layer: FaceLayer,
+) -> Result<usize, usize> {
+    stands.binary_search_by(|s| config.stand_key(s).cmp(&(site, layer)))
+}
+
 /// Read-only access for drawing and inspection.
 #[derive(Clone, Copy, Debug)]
 pub struct FloraView<'a> {
     pub config: &'a FloraConfig,
     pub tick: u64,
-    /// Sorted by site. At most one stand per site.
+    /// Sorted by `(site, place)` ([`FaceLayer`]): at most one plant and one fungus per
+    /// site, the plant first.
     pub stands: &'a [Stand],
     /// Sorted by site. At most one entry per site.
     pub ground: &'a [Ground],
@@ -3816,7 +3910,7 @@ impl CrownCache {
     }
 
     /// Bring the entries up to `stands`, reusing every entry that still matches and
-    /// computing the rest (both lists are sorted by site, so an insertion or a removal in
+    /// computing the rest (both lists are sorted by `(site, place)`, so an insertion or a removal in
     /// the middle moves no other entry out of reach), and rebuild the reach index for a
     /// world of `dims` if anything it records moved. `dims` is `None` where no world is in
     /// hand, and the index is then dropped.
@@ -3829,7 +3923,9 @@ impl CrownCache {
             let mut k = 0;
             self.crowns.reserve(stands.len());
             for (i, stand) in stands.iter().enumerate() {
-                while k < old.len() && old[k].site < stand.site {
+                // Both lists in `(site, place)` order: a face's fungus finds its own entry.
+                let key = config.stand_key(stand);
+                while k < old.len() && (old[k].site, config.face_layer(old[k].species)) < key {
                     k += 1;
                 }
                 let crown = match old.get(k) {
@@ -4044,9 +4140,14 @@ impl<'a> FloraView<'a> {
         }
     }
 
-    /// [`FloraView::layers`] of whatever stands on `site`; empty if nothing does.
+    /// [`FloraView::layers`] of the **plant** on `site`; empty if there is none.
     pub fn layers_at(&self, site: Site) -> impl Iterator<Item = StandLayer> + use<> {
-        let stand = self.stand_at(site).copied();
+        self.layers_in(site, FaceLayer::Plant)
+    }
+
+    /// [`FloraView::layers`] of the stand holding `layer` on `site`; empty if none does.
+    pub fn layers_in(&self, site: Site, layer: FaceLayer) -> impl Iterator<Item = StandLayer> + use<> {
+        let stand = self.stand_in(site, layer).copied();
         stand
             .map(|s| layers_of(self.config, &s, self.config.voxel_m))
             .unwrap_or_default()
@@ -4064,11 +4165,27 @@ impl<'a> FloraView<'a> {
         out.extend(self.layer_iter_of(stand));
     }
 
+    /// The **plant** on `site` ([`FaceLayer::Plant`]): what a face's occupant has always
+    /// meant to its readers. A glowcap under it is [`FloraView::fungus_at`].
     pub fn stand_at(&self, site: Site) -> Option<&'a Stand> {
-        self.stands
-            .binary_search_by_key(&site, |s| s.site)
+        self.stand_in(site, FaceLayer::Plant)
+    }
+
+    /// The **fungus** on `site` ([`FaceLayer::Fungus`]).
+    pub fn fungus_at(&self, site: Site) -> Option<&'a Stand> {
+        self.stand_in(site, FaceLayer::Fungus)
+    }
+
+    /// The stand holding `layer` on `site`.
+    pub fn stand_in(&self, site: Site, layer: FaceLayer) -> Option<&'a Stand> {
+        find_stand(self.config, self.stands, site, layer)
             .ok()
             .map(|i| &self.stands[i])
+    }
+
+    /// Every stand on `site` — none, one or two — the plant first.
+    pub fn stands_on(&self, site: Site) -> &'a [Stand] {
+        &self.stands[on_site(self.stands, site)]
     }
 
     pub fn ground_at(&self, site: Site) -> Option<&'a Ground> {
@@ -4987,17 +5104,20 @@ impl Flora {
                 let Some(site) = highest_support(&view, x, z) else {
                     return false;
                 };
-                let Ok(at) = self.stands.binary_search_by_key(&site, |s| s.site) else {
+                // Both places: a `Clear` removes every stand the site held.
+                let run = on_site(&self.stands, site);
+                if run.is_empty() {
                     return false;
-                };
-                let s = self.stands.remove(at);
-                // The parcel goes out with the stand: it is organic matter this layer
-                // holds, and a `Clear` removes everything the site held.
-                let organic = s.material();
-                self.ledger.removed_organic_out += organic;
-                self.ledger.removed_mineral_out += s.mineral;
-                self.ledger.removed_energy_out +=
-                    self.config.species(s.species).energy_density * organic;
+                }
+                for s in self.stands.drain(run).collect::<Vec<_>>() {
+                    // The parcel goes out with the stand: it is organic matter this layer
+                    // holds, and a `Clear` removes everything the site held.
+                    let organic = s.material();
+                    self.ledger.removed_organic_out += organic;
+                    self.ledger.removed_mineral_out += s.mineral;
+                    self.ledger.removed_energy_out +=
+                        self.config.species(s.species).energy_density * organic;
+                }
                 true
             }
             Command::ClearBank { x, z, species } => {
@@ -5036,7 +5156,8 @@ impl Flora {
         if !(wood.is_finite() && wood >= sc.alive_min) {
             return false;
         }
-        let Err(at) = self.stands.binary_search_by_key(&site, |s| s.site) else {
+        // Only its own place: a glowcap founder goes under a plant, a plant over a glowcap.
+        let Err(at) = find_stand(&self.config, &self.stands, site, self.config.face_layer(species)) else {
             return false;
         };
         let mut stand = Stand {
@@ -5101,8 +5222,11 @@ impl Flora {
     /// (`step`'s step 6). Taking a stand's whole canopy does not kill it — death is
     /// `wood < alive_min` and wood is untouched — it starves it, which is the producer
     /// response the crate doc describes.
+    ///
+    /// The stand is the site's **plant** ([`FaceLayer::Plant`]); a fungus's cap tissue is
+    /// [`Flora::take_foliage_of`].
     pub fn take_foliage(&mut self, site: Site, want: f64) -> Option<Taken> {
-        self.withdraw_foliage(site, want, None).map(|t| t.taken)
+        self.withdraw_foliage(site, FaceLayer::Plant, want, None).map(|t| t.taken)
     }
 
     /// A consumer eats the foliage the **layers whose disc cells lie in `layers`** hold,
@@ -5121,13 +5245,28 @@ impl Flora {
     ///
     /// Everything else — the mineral fraction rule, the energy, the ledger entry, the
     /// `None` cases — is [`Flora::take_foliage`]'s, which is this with no layer bound.
+    ///
+    /// The stand is the site's **plant**; [`Flora::take_foliage_of`] names the place.
     pub fn take_foliage_in_layers(
         &mut self,
         site: Site,
         want: f64,
         layers: &std::ops::RangeInclusive<i64>,
     ) -> Option<TakenFoliage> {
-        self.withdraw_foliage(site, want, Some(layers))
+        self.withdraw_foliage(site, FaceLayer::Plant, want, Some(layers))
+    }
+
+    /// [`Flora::take_foliage_in_layers`] off the stand holding `place` on `site`: a bite's
+    /// food names its place — cap tissue is the fungus's, foliage the plant's — so a mouth
+    /// on a face holding both takes from the one its food is.
+    pub fn take_foliage_of(
+        &mut self,
+        site: Site,
+        place: FaceLayer,
+        want: f64,
+        layers: &std::ops::RangeInclusive<i64>,
+    ) -> Option<TakenFoliage> {
+        self.withdraw_foliage(site, place, want, Some(layers))
     }
 
     /// The one foliage withdrawal: lowest layer first, each layer giving at most its
@@ -5136,13 +5275,14 @@ impl Flora {
     fn withdraw_foliage(
         &mut self,
         site: Site,
+        place: FaceLayer,
         want: f64,
         layers: Option<&std::ops::RangeInclusive<i64>>,
     ) -> Option<TakenFoliage> {
         if !(want > 0.0) || !want.is_finite() {
             return None;
         }
-        let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
+        let i = find_stand(&self.config, &self.stands, site, place).ok()?;
         let e_v = self.config.species(self.stands[i].species).energy_density;
         // The induced defence: the bite takes `(1 − defence)` of what was asked, and a
         // bite that took anything raises the defence (below, once it is known).
@@ -5271,7 +5411,7 @@ impl Flora {
         if !(want > 0.0) || !want.is_finite() {
             return None;
         }
-        let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
+        let i = find_stand(&self.config, &self.stands, site, FaceLayer::Plant).ok()?;
         let sc = self.config.species(self.stands[i].species);
         let (fraction, e_v) = (sc.fruit_mineral_fraction.max(0.0), sc.energy_density);
         let stand = &mut self.stands[i];
@@ -5386,7 +5526,7 @@ impl Flora {
         if !(want > 0.0) || !want.is_finite() {
             return None;
         }
-        let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
+        let i = find_stand(&self.config, &self.stands, site, FaceLayer::Plant).ok()?;
         let sc = self.config.species(self.stands[i].species);
         let (fraction, e_v) = (sc.nectar_mineral_fraction.max(0.0), sc.energy_density);
         let stand = &mut self.stands[i];

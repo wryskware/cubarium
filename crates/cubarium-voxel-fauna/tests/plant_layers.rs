@@ -116,13 +116,21 @@ fn reached(fauna: &Fauna, world: &World, flora: &Flora, id: u64) -> Option<(Site
 
 /// The per-layer stocks of the stand at `s`.
 fn stocks(flora: &Flora, s: Site) -> Vec<f64> {
-    flora.view().layers_at(s).map(|l| l.stock).collect()
+    {
+        let fv = flora.view();
+        let stand = fv.stands_on(s).first().copied();
+        stand.map(|st| fv.layers(&st).map(|l| l.stock).collect()).unwrap_or_default()
+    }
 }
 
 /// The per-layer **edible** stocks of the stand at `s`: what stands above each layer's
 /// grazing floor (package G), which is what a mouth is offered.
 fn edible(flora: &Flora, s: Site) -> Vec<f64> {
-    flora.view().layers_at(s).map(|l| l.edible()).collect()
+    {
+        let fv = flora.view();
+        let stand = fv.stands_on(s).first().copied();
+        stand.map(|st| fv.layers(&st).map(|l| l.edible()).collect()).unwrap_or_default()
+    }
 }
 
 // ------------------------------------------------------------------ the claims
@@ -150,7 +158,7 @@ fn an_adult_bloomcrowns_reachable_stock_is_its_rosette() {
         layers[1].0 > layers[0].0,
         "and they sit at different cells: {layers:?}"
     );
-    let stand = flora.view().stand_at(s).expect("the stand").clone();
+    let stand = flora.view().stands_on(s).first().expect("the stand").clone();
     assert!(
         (layers[0].1 / stand.foliage - 0.25).abs() < 1e-9,
         "the rosette holds {} of {}",
@@ -188,7 +196,7 @@ fn a_seedling_bloomcrown_is_wholly_reachable() {
         "the fixture must be in the seedling stage"
     );
     let s = seed(&mut flora, &world, 2, 2, Plant::Bloomcrown, wood);
-    let stand = flora.view().stand_at(s).expect("the stand").clone();
+    let stand = flora.view().stands_on(s).first().expect("the stand").clone();
     assert_eq!(stocks(&flora, s).len(), 1, "one rosette layer");
 
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -220,7 +228,7 @@ fn a_juvenile_umbrellafrond_offers_its_lowest_tier_and_an_adult_nothing() {
         "the fixture must be in the juvenile stage"
     );
     let s = seed(&mut flora, &world, 2, 2, Plant::Umbrellafrond, wood);
-    let stand = flora.view().stand_at(s).expect("the stand").clone();
+    let stand = flora.view().stands_on(s).first().expect("the stand").clone();
     assert!(stand.foliage > 0.0);
     let layers = stocks(&flora, s);
     assert_eq!(layers.len(), 2, "a juvenile frond has two tiers");
@@ -333,11 +341,11 @@ fn the_layers_a_stand_reports_sum_to_its_foliage() {
             let wood = sc.alive_min + fraction * (sc.wood_max - sc.alive_min);
             let x = (i * 3 + j) as i64 % 8;
             let z = (i + j) as u32 % 6;
-            if flora.view().stand_at(site(x as u32, z)).is_some() {
+            if flora.view().stands_on(site(x as u32, z)).first().is_some() {
                 continue;
             }
             let s = seed(&mut flora, &world, x, z, *species, wood);
-            let stand = flora.view().stand_at(s).expect("the stand").clone();
+            let stand = flora.view().stands_on(s).first().expect("the stand").clone();
             let sum: f64 = stocks(&flora, s).iter().sum();
             assert!(
                 (sum - stand.foliage).abs() <= 1e-12 * stand.foliage.max(1.0),

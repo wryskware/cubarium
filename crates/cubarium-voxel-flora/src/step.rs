@@ -744,28 +744,29 @@ pub(crate) fn remove_at(stands: &mut Vec<Stand>, doomed: &[usize]) {
     });
 }
 
-/// Insert `born` into the site-sorted `stands`, keeping it sorted: every site in `born` is
-/// distinct and holds no stand yet. One merge instead of a `Vec::insert` (a shift of every
-/// later stand) per birth; a lone birth is still one insert.
-pub(crate) fn insert_sorted(stands: &mut Vec<Stand>, mut born: Vec<Stand>) {
+/// Insert `born` into `stands`, sorted by `(site, place)` ([`crate::FaceLayer`]), keeping
+/// it sorted: every `(site, place)` in `born` is distinct and holds no stand yet. One merge
+/// instead of a `Vec::insert` (a shift of every later stand) per birth; a lone birth is
+/// still one insert.
+pub(crate) fn insert_sorted(config: &FloraConfig, stands: &mut Vec<Stand>, mut born: Vec<Stand>) {
     if born.len() <= 1 {
         for s in born {
-            let at = stands
-                .binary_search_by_key(&s.site, |t| t.site)
-                .expect_err("a birth on a free site");
+            let at = crate::find_stand(config, stands, s.site, config.face_layer(s.species))
+                .expect_err("a birth in a free place");
             stands.insert(at, s);
         }
         return;
     }
-    born.sort_unstable_by_key(|s| s.site);
+    born.sort_unstable_by_key(|s| config.stand_key(s));
     let old = std::mem::take(stands);
     let mut out = Vec::with_capacity(old.len() + born.len());
     let mut born = born.into_iter().peekable();
     for s in old {
-        while let Some(b) = born.next_if(|b| b.site < s.site) {
+        let key = config.stand_key(&s);
+        while let Some(b) = born.next_if(|b| config.stand_key(b) < key) {
             out.push(b);
         }
-        debug_assert!(born.peek().is_none_or(|b| b.site != s.site));
+        debug_assert!(born.peek().is_none_or(|b| config.stand_key(b) != key));
         out.push(s);
     }
     out.extend(born);
@@ -890,6 +891,11 @@ fn light_per_stand(
             let mut here = open;
             for c in near {
                 if c.j as usize == i || c.top <= layer.top {
+                    continue;
+                }
+                // A face's plant and its fungus never shade each other (`FaceLayer`): the
+                // cap grows under the plant's leaves, and earns nothing from light.
+                if stands[c.j as usize].site == stand.site {
                     continue;
                 }
                 let sx = wrapped_delta(c.x, layer.x, width);
@@ -1839,9 +1845,8 @@ pub(crate) fn finish(flora: &mut Flora, plan: DrinkPlan) {
             for &(v, stand, want) in chunk.wants() {
                 let Some(d) = debit(v, want) else { continue };
                 let (site, id) = stand_ids[stand as usize];
-                if let Ok(j) = flora.stands.binary_search_by_key(&site, |s| s.site)
-                    && flora.stands[j].id == id
-                {
+                // The stand by id among the site's (a plant and a fungus may share it).
+                if let Some(j) = crate::on_site(&flora.stands, site).find(|&j| flora.stands[j].id == id) {
                     let s = &mut flora.stands[j];
                     s.water_m3 = (s.water_m3 - d).max(0.0);
                 }
@@ -2589,7 +2594,12 @@ fn grow(
         let mut first = 0;
         let mut ground_base = 0;
         while first < n {
-            let last = (first + per).min(n);
+            // A chunk ends between faces, never between a face's plant and its fungus:
+            // both grow on the one ground slot, which only one chunk may hold.
+            let mut last = (first + per).min(n);
+            while last < n && slots[last] == slots[last - 1] {
+                last += 1;
+            }
             let (s_here, s_rest) = std::mem::take(&mut st).split_at_mut(last - first);
             let (b_here, b_rest) = std::mem::take(&mut bk).split_at_mut(last - first);
             let (d_here, d_rest) = std::mem::take(&mut dy).split_at_mut(last - first);
@@ -2728,7 +2738,7 @@ impl Booked {
 }
 
 /// Make a ground slot for every stand's site that has none: a merge of the two
-/// site-sorted lists.
+/// site-sorted lists. A plant and a fungus on one face share its one slot.
 fn ensure_slots(ground: &mut Vec<Ground>, stands: &[Stand]) {
     let mut missing: Vec<Site> = Vec::new();
     let mut k = 0;
@@ -2736,7 +2746,7 @@ fn ensure_slots(ground: &mut Vec<Ground>, stands: &[Stand]) {
         while k < ground.len() && ground[k].site < s.site {
             k += 1;
         }
-        if k >= ground.len() || ground[k].site != s.site {
+        if (k >= ground.len() || ground[k].site != s.site) && missing.last() != Some(&s.site) {
             missing.push(s.site);
         }
     }
@@ -4166,7 +4176,7 @@ mod tests {
                 }
                 let mut here = open;
                 for (j, other) in crowns.iter().enumerate() {
-                    if j == i {
+                    if j == i || stands[j].site == stand.site {
                         continue;
                     }
                     let (top, radius) = envelope[j];
@@ -4732,10 +4742,10 @@ mod tests {
         // The dead are born again, handed over out of order, in batches of one and many.
         let born: Vec<Stand> = doomed.iter().rev().map(|&i| all[i]).collect();
         let mut merged = compacted.clone();
-        insert_sorted(&mut merged, born[..1].to_vec());
-        insert_sorted(&mut merged, born[1..].to_vec());
+        insert_sorted(&flora.config, &mut merged, born[..1].to_vec());
+        insert_sorted(&flora.config, &mut merged, born[1..].to_vec());
         assert_eq!(merged, all);
-        insert_sorted(&mut merged, Vec::new());
+        insert_sorted(&flora.config, &mut merged, Vec::new());
         assert_eq!(merged, all);
     }
 

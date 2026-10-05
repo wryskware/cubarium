@@ -723,6 +723,9 @@ fn plants(args: &[String]) {
                 });
             }
             sample(&sim, &arm, minute, &co, &s1, &refuge, &w, &wet_vacant, &saved, &windows[0]);
+            if with_fauna {
+                fw.minute_line(&sim, &arm, minute);
+            }
             eprintln!("minute {minute} ({:.0} s wall)", t0.elapsed().as_secs_f64());
         }
         if MAP_MINUTES.contains(&minute)
@@ -786,17 +789,23 @@ fn sample(
     let fv = sim.flora().view();
     let config = fv.config;
     let area = sim.world().config().cell_area();
+    // The occupant is the face's plant (`stand_at`); its fungus is counted on its own.
     let occ = |sites: &mut dyn Iterator<Item = Site>| {
         let mut v = vec![0u64; Species::COUNT + 1];
         let mut food = 0.0;
         let mut litter = 0.0;
         let mut n = 0usize;
+        let mut fungi = [0u64; 2];
         // Velvetpad and springturf donors on these sites.
         let mut donors = [0u64; 2];
         for site in sites {
             n += 1;
             let st = fv.stand_at(site);
             v[occ_index(st.map(|s| s.species))] += 1;
+            if fv.fungus_at(site).is_some() {
+                fungi[0] += 1;
+                fungi[1] += u64::from(st.is_some());
+            }
             if let Some(s) = st {
                 food += edible(&fv, s);
                 for (k, sp) in [PAD, TURF].into_iter().enumerate() {
@@ -807,9 +816,9 @@ fn sample(
             }
             litter += fv.ground_at(site).map_or(0.0, |g| g.litter);
         }
-        (v, food, litter, n, donors)
+        (v, food, litter, n, donors, fungi)
     };
-    let line = |name: &str, (v, food, litter, n, donors): (Vec<u64>, f64, f64, usize, [u64; 2])| {
+    let line = |name: &str, (v, food, litter, n, donors, fungi): (Vec<u64>, f64, f64, usize, [u64; 2], [u64; 2])| {
         let photo: u64 = Species::ALL
             .iter()
             .filter(|s| config.species(**s).trophic == Trophic::Photo)
@@ -817,8 +826,9 @@ fn sample(
             .sum();
         let parts: Vec<String> = (0..=Species::COUNT).filter(|&i| v[i] > 0).map(|i| format!("{}={}", occ_name(i), v[i])).collect();
         println!(
-            "occ,{arm},{minute},{name},n={n},photo={photo},fungal={},pad_donors={},turf_donors={},edible={food:.4},edible_per_m2={:.5},litter={litter:.4},{}",
-            v[Species::Glowcap.index()],
+            "occ,{arm},{minute},{name},n={n},photo={photo},fungal={},both={},pad_donors={},turf_donors={},edible={food:.4},edible_per_m2={:.5},litter={litter:.4},{}",
+            fungi[0],
+            fungi[1],
             donors[0],
             donors[1],
             food / (n.max(1) as f64 * area),
@@ -900,6 +910,33 @@ fn sample(
         if pmean > 0.0 { tmean / pmean } else { f64::NAN },
         fv.burrs.len(),
         parts.join(" ")
+    );
+    // Glowcap yield (2026-10-05): glowcap stands on dark terrain (the glowcap's own
+    // darkness above zero) against lit ones, which live on the litter and dead wood; the lit
+    // ones on drained ground; and the glowcap faces plants took since the load, by seed and
+    // by runner.
+    let gsc = config.species(Species::Glowcap);
+    let view = sim.world().view();
+    let drained: HashSet<Site> = co.drained.iter().copied().collect();
+    let (mut dark, mut lit, mut lit_drained, mut dark_drained) = (0usize, 0usize, 0usize, 0usize);
+    for st in fv.stands.iter().filter(|s| s.species == Species::Glowcap) {
+        let sky = view.sky_visibility(i64::from(st.site.x), st.site.y, st.site.z);
+        let on_drained = drained.contains(&st.site);
+        if gsc.darkness(sky) > 0.0 {
+            dark += 1;
+            dark_drained += usize::from(on_drained);
+        } else {
+            lit += 1;
+            lit_drained += usize::from(on_drained);
+        }
+    }
+    let g = Species::Glowcap.index();
+    let taken: u64 = (0..Species::COUNT).map(|j| l.overtop_pairs[g][j] - start.ledger.overtop_pairs[g][j]).sum();
+    // Faces holding a plant and a fungus at once (`FaceLayer`), world-wide.
+    let both = fv.stands.windows(2).filter(|w| w[0].site == w[1].site).count();
+    println!(
+        "glowcap,{arm},{minute},dark={dark},lit={lit},dark_drained={dark_drained},lit_drained={lit_drained},both={both},taken_by_plants={taken},taken_by_runner={}",
+        l.runner_displaced[g] - start.ledger.runner_displaced[g]
     );
 }
 
@@ -1194,6 +1231,32 @@ impl FaunaWatch {
             println!("stocks,mid,{},{}", tick / u64::from(TICK_HZ) / 60, stocks(sim));
             println!("bodies,mid,{},{}", tick / u64::from(TICK_HZ) / 60, bodies(sim, params));
         }
+    }
+
+    /// One line per sample for the capgnawer (glowcap yield, 2026-10-05): animals now,
+    /// births, `B` over the run so far, and its bites by food since the load.
+    fn minute_line(&self, sim: &Sim, arm: &str, minute: u64) {
+        let v = sim.fauna().view();
+        let l = v.ledger;
+        let f = Founder::Capgnawer;
+        let i = f.index();
+        let hzf = f64::from(TICK_HZ);
+        let n = v.animals.iter().filter(|a| a.founder == Some(f)).count();
+        let born: u64 = self.born.iter().map(|b| b[i]).sum();
+        let at: u64 = self.adult_ticks.iter().map(|b| b[i]).sum();
+        let books = balance::Books::of(l, f).since(&self.books0[i]);
+        let days = balance::days(self.ticks as f64 / hzf, v.config);
+        let ctx = balance::context(v.animals, v.config, f, balance::days(at as f64 / hzf, v.config), days);
+        let m = balance::measures(&books, &ctx);
+        let bites = |food: Food| l.bites_by_founder_food[i][food.index()] - self.l0.bites_by_founder_food[i][food.index()];
+        println!(
+            "capgnawer,{arm},{minute},n={n},born={born},B={:.3},assim={:.6},spend={:.6},bites_cap={},bites_litter={}",
+            m.energy_balance,
+            books.assimilated,
+            books.spend(),
+            bites(Food::CapTissue),
+            bites(Food::Litter),
+        );
     }
 
     fn report(&self, sim: &Sim, params: &Params, arm: &str) {

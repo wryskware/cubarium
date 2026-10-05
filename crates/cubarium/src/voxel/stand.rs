@@ -47,7 +47,7 @@
 
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_flora::{FaceDraw, FloraView, MAX_FOLIAGE_LAYERS, Species, Stand};
+use cubarium_voxel_flora::{FaceDraw, FaceLayer, FloraView, MAX_FOLIAGE_LAYERS, Site, Species, Stand};
 
 use crate::present::{mix, srgb_linear};
 
@@ -525,6 +525,42 @@ impl ModelKey {
     }
 }
 
+/// **Where a stand is drawn**: its own face, except a fungus that shares its face with a
+/// plant ([`FaceLayer`]) — it would sit in the plant's stem — which is drawn one column
+/// over, on a neighbouring face at the same height: beside the stem, under the crown.
+/// The neighbour is the first of the four, turning from one the stand's id picks, that
+/// has a support face at that height, preferring one with no plant of its own; with none,
+/// its own face. Placement only, with the existing glyphs and models: the look is Wrysk's.
+pub(crate) fn drawn_site(view: &VoxelView<'_>, flora: FloraView<'_>, stand: &Stand) -> Site {
+    if flora.config.face_layer(stand.species) != FaceLayer::Fungus || flora.stand_at(stand.site).is_none() {
+        return stand.site;
+    }
+    let c = view.config;
+    let w = i64::from(c.width);
+    const DIRS: [(i64, i64); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+    let mut fallback = None;
+    for k in 0..4 {
+        let (dx, dz) = DIRS[(stand.id as usize + k) % 4];
+        let x = (i64::from(stand.site.x) + dx).rem_euclid(w.max(1));
+        let z = i64::from(stand.site.z) + dz;
+        if z < 0 || z >= i64::from(c.depth) || !view.is_support(x, stand.site.y, z as u32) {
+            continue;
+        }
+        let site = Site { x: x as u32, y: stand.site.y, z: z as u32 };
+        if flora.stand_at(site).is_none() {
+            return site;
+        }
+        fallback.get_or_insert(site);
+    }
+    fallback.unwrap_or(stand.site)
+}
+
+/// `stand` as it is drawn ([`drawn_site`]): itself, or a copy on the face it is drawn on.
+pub(crate) fn as_drawn(view: &VoxelView<'_>, flora: FloraView<'_>, stand: &Stand) -> Option<Stand> {
+    let site = drawn_site(view, flora, stand);
+    (site != stand.site).then_some(Stand { site, ..*stand })
+}
+
 /// The cells of `stand`'s model at its crown height, if the library has one.
 fn model_cells<'l>(
     lib: &'l ModelLibrary,
@@ -764,6 +800,8 @@ impl Stands {
         // the grid is a pure function of the view and not of any iteration accident.
         for (k, stand) in flora.stands.iter().enumerate() {
             self.placing = k as u32 + 1;
+            let moved = as_drawn(view, flora, stand);
+            let stand = moved.as_ref().unwrap_or(stand);
             if let Some(cells) = lib.and_then(|lib| model_cells(lib, flora, stand)) {
                 if !self.stamp_model(view, flora, stand, cells) {
                     break;
@@ -2169,11 +2207,12 @@ mod tests {
                     flora.view(),
                     flora
                         .view()
-                        .stand_at(Site {
+                        .stands_on(Site {
                             x: x as u32 * 3,
                             y: 3,
                             z: 1
                         })
+                        .first()
                         .expect("seeded")
                 )
             );
@@ -2344,7 +2383,7 @@ mod tests {
         let style = stands.style(part).expect("it paints");
         let standing = flora
             .view()
-            .stand_at(Site { x: 7, y: 3, z: 1 })
+            .fungus_at(Site { x: 7, y: 3, z: 1 })
             .expect("seeded");
         assert_eq!(
             style,
