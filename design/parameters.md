@@ -364,7 +364,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (966 rows)
+**`flora.*`** (975 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -385,6 +385,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.donor_min` | 0.3 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.bloomcrown.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.bloomcrown.propagule_rate` | 0.0004 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.bloomcrown.propagule_cap_share` | 0.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.bloomcrown.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.bloomcrown.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.bloomcrown.seed_attrition_per_s` | 0.00003472222222222222 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -484,6 +485,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.donor_min` | 0.3 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.umbrellafrond.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.umbrellafrond.propagule_rate` | 0.0002 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.umbrellafrond.propagule_cap_share` | 0.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.umbrellafrond.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.umbrellafrond.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.umbrellafrond.seed_attrition_per_s` | 0.00006944444444444444 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -583,6 +585,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.donor_min` | 0.03 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.springturf.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.springturf.propagule_rate` | 0.002 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.springturf.propagule_cap_share` | 0.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.springturf.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.springturf.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.springturf.seed_attrition_per_s` | 0.000011574074074074073 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -682,6 +685,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.donor_min` | 0.05 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.stonecushion.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.stonecushion.propagule_rate` | 0.00005 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.stonecushion.propagule_cap_share` | 0.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.stonecushion.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.stonecushion.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.stonecushion.seed_attrition_per_s` | 0.000023148148148148147 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -781,6 +785,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.donor_min` | 0.1 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.velvetpad.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.velvetpad.propagule_rate` | 0.0005 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.velvetpad.propagule_cap_share` | 0.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.velvetpad.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.velvetpad.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.velvetpad.seed_attrition_per_s` | 0.00009259259259259259 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -872,7 +877,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.glowcap.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
 | `flora.glowcap.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
-| `flora.glowcap.foliage_rate` | 0.004 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
+| `flora.glowcap.foliage_rate` | 0.00015 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.glowcap.wood_rate` | 0.002 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.glowcap.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
 | `flora.glowcap.dieback` | 1.0 | wood per unit unpaid upkeep | [0, inf) | 0.3–3 log | C | placeholder | kappa: wood lost per unit maintenance not paid |
@@ -880,6 +885,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.donor_min` | 0.05 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.glowcap.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.glowcap.propagule_rate` | 0.0005 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.glowcap.propagule_cap_share` | 1.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.glowcap.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.glowcap.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.glowcap.seed_attrition_per_s` | 0.0001388888888888889 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -979,6 +985,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.donor_min` | 2.5 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.vaulttree.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.vaulttree.propagule_rate` | 0.0008 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.vaulttree.propagule_cap_share` | 0.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.vaulttree.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.vaulttree.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.vaulttree.seed_attrition_per_s` | 0.000046296296296296294 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -1078,6 +1085,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.donor_min` | 0.4 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.lanternberry.donor_reserve_floor` | 0.7 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.lanternberry.propagule_rate` | 0.0012 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.lanternberry.propagule_cap_share` | 0.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.lanternberry.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.lanternberry.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.lanternberry.seed_attrition_per_s` | 0.00003472222222222222 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -1177,6 +1185,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.donor_min` | 0.15 | org-units of wood | [0, inf) |  | C | placeholder | wood needed before sending propagules |
 | `flora.siphonreed.donor_reserve_floor` | 0.5 | fraction of Q_max | [0, inf) | 0–0.9 | C | placeholder | reserve a donor keeps back |
 | `flora.siphonreed.propagule_rate` | 0.0003 | organic/s gross | [0, inf) | yes | D | placeholder | reserve set aside for seed per second |
+| `flora.siphonreed.propagule_cap_share` | 0.0 | fraction | [0, 1] | 0–1 | - | decision | share of the propagule rate that follows foliage fullness P / (alpha W): spores from the caps (0 off) |
 | `flora.siphonreed.propagule_split.*` | 0.4, 0.4, 0.2 | fraction | [0, inf) | 0.1–0.8 | C | placeholder | how a landed package splits into wood, foliage and reserve (sums to 1) |
 | `flora.siphonreed.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | D | placeholder | e_v of plant tissue |
 | `flora.siphonreed.seed_attrition_per_s` | 0.00002777777777777778 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
@@ -1335,7 +1344,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1181 rows)
+**`fauna.*`** (1202 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1365,6 +1374,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.frondgrazer.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.frondgrazer.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.frondgrazer.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.frondgrazer.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.littershredder.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -1391,6 +1402,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.littershredder.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.littershredder.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.littershredder.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.littershredder.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1507,6 +1520,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.frondgrazer.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.frondgrazer.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.frondgrazer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.frondgrazer.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.000008333333333333334 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1623,6 +1638,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.lanternjaw.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.lanternjaw.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.lanternjaw.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.lanternjaw.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.000009722222222222223 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1739,6 +1756,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.capgnawer.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.capgnawer.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.capgnawer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.capgnawer.core.reproduction.egg_fungus_radius_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.capgnawer.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.capgnawer.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.capgnawer.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1855,6 +1874,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.loftstrider.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.loftstrider.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.loftstrider.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.loftstrider.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.loftstrider.motor_respiration_per_s` | 0.000005555555555555556 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.loftstrider.step_up_m` | 1.15 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.loftstrider.step_down_m` | 1.15 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1971,6 +1992,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.ripple-snail.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.ripple-snail.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.ripple-snail.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.ripple-snail.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.ripple-snail.motor_respiration_per_s` | 0.000002777777777777778 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.ripple-snail.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.ripple-snail.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2087,6 +2110,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.bellwing.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.bellwing.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.bellwing.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.bellwing.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.bellwing.motor_respiration_per_s` | 0.000020833333333333333 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.bellwing.step_up_m` | 0.0 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.bellwing.step_down_m` | 0.0 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2203,6 +2228,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.seedporter.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.seedporter.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.seedporter.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.seedporter.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.seedporter.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2319,6 +2346,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.chorister.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.chorister.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.chorister.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.chorister.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.chorister.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2449,6 +2478,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.life.ecological_day_s` | 7200.0 | s | (0, inf) |  | - | decision | the day per-day physiology is written in (daily need, a rider's take); fixed, not the picture clock |
 | `fauna.cue.emit_reference` | 0.05 | organic units | (0, inf) |  | C | placeholder | detritus stock at which a source emits at full strength; the taste reference |
 | `fauna.cue.half_life_s` | 2.0 | s | (0, inf) | 0.5–60 log | C | placeholder | cue half-life |
+| `fauna.cue.fungal_half_life_s` | 2.0 | s | (0, inf) | 2–1200 log | - | placeholder | the fungal field's half-life (the capgnawer's Chem(fungal)): a longer scent reaches farther groves |
 | `fauna.cue.diffuse_fraction` | 0.4 | fraction per update | [0, 1] | 0.05–0.9 | C | placeholder | convex nearest-neighbour diffusion mix |
 | `fauna.cue.threshold` | 0.00001 | cue units | [0, inf) |  | N | placeholder | cue values below this are dropped after an update |
 | `fauna.cue.pool_bulk_density` | 80.0 | organic units/m^3 | (0, inf) |  | D | placeholder, digest | bulk density a ground pool's physical height is computed with |

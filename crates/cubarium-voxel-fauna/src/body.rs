@@ -176,6 +176,10 @@ pub const CHORISTER_VOLUME_RATIO: f64 = (1.4 * 0.35 * 0.6) / (1.0 * 0.25 * 0.45)
 /// note's number) over the shredder's 0.0125.
 pub const BELLWING_MASS_RATIO: f64 = 0.001 / 0.0125;
 
+/// The capgnawer's shipped [`crate::Reproduction::egg_fungus_radius_m`], metres: eggs within
+/// half a metre of a glowcap with caps (about its own two body lengths). Plausible, untuned.
+const CAPGNAWER_EGG_FUNGUS_RADIUS_M: f64 = 0.5;
+
 /// The capgnawer's body volume over the littershredder's (roster R1): 0.25 × 0.21 ×
 /// 0.19 m over 0.375 × 0.125 × 0.125 m. A derivation, not a knob: the physiology fields
 /// it scales are the knobs.
@@ -756,6 +760,10 @@ pub enum EggSite {
     Litter,
     /// On a face holding glassfilm (the ripple-snail).
     Film,
+    /// **At the fungus** (the capgnawer, 2026-10-05; proposal §3.1E): on a face within
+    /// [`crate::Reproduction::egg_fungus_radius_m`] of a fungus holding cap tissue, so the
+    /// young hatch at their food and recruitment follows the fungus.
+    Fungus,
 }
 
 /// How a fresh world is founded with a lineage ([`FounderPhysiology::founding`]).
@@ -1235,6 +1243,9 @@ impl FounderPhysiology {
                 let mut core = shredder.core;
                 core.scale_mass(CAPGNAWER_VOLUME_RATIO);
                 core.maintenance_per_s = DAILY_CAPGNAWER / DAY_S;
+                // Its eggs go at the fungus (the capgnawer package, 2026-10-05): within
+                // half a metre of a glowcap holding caps, so the young hatch at their food.
+                core.reproduction.egg_fungus_radius_m = CAPGNAWER_EGG_FUNGUS_RADIUS_M;
                 FounderPhysiology {
                     core,
                     // A gripping six-legged walker on bark: it keeps the shredder's legs
@@ -1262,6 +1273,7 @@ impl FounderPhysiology {
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
+                    egg_site: EggSite::Fungus,
                     motor_respiration_per_s: DAILY_CAPGNAWER / DAY_S,
                     ..shredder
                 }

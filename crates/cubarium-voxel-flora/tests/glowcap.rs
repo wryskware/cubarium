@@ -218,9 +218,9 @@ fn a_glowcap_on_a_log_earns_and_one_on_a_bare_face_earns_nothing() {
     let starved = plant_glowcap(&mut flora, &world, 4);
     let (organic, _, _) = log_on(&mut flora, fed, 1.0);
     let fixed0 = flora.view().ledger.fixed_in;
-    let (w0, q0) = {
+    let (w0, q0, p0) = {
         let s = flora.view().fungus_at(starved).expect("planted");
-        (s.wood, s.reserve)
+        (s.wood, s.reserve, s.foliage)
     };
 
     run(&mut flora, &mut world, 50);
@@ -255,10 +255,12 @@ fn a_glowcap_on_a_log_earns_and_one_on_a_bare_face_earns_nothing() {
         0.0,
         "the bare face has no log"
     );
+    // It may move its own reserve into wood or caps; it can't come out ahead.
     assert!(
-        s.wood <= w0,
-        "the starved fungus grew on nothing: {} against {w0}",
-        s.wood
+        s.wood + s.foliage + s.reserve <= w0 + p0 + q0,
+        "the starved fungus grew on nothing: {} against {}",
+        s.wood + s.foliage + s.reserve,
+        w0 + p0 + q0
     );
     assert!(
         s.reserve < q0,

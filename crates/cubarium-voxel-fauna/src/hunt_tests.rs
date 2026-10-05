@@ -157,7 +157,8 @@ fn a_tremor_on_one_side_turns_the_hunter_toward_it() {
 #[test]
 fn a_prey_outside_the_size_window_is_not_chosen() {
     let young = StartingStores { body: 0.6, reserve: 0.6 };
-    for (prey_stores, inside) in [(StartingStores { body: 0.3, reserve: 1.0 }, true), (StartingStores::FULL, false)] {
+    // A small juvenile (one strike kills it, so profitability is whole) and a full adult.
+    for (prey_stores, inside) in [(StartingStores { body: 0.2, reserve: 1.0 }, true), (StartingStores::FULL, false)] {
         let hunt = HuntConfig { patrol: true, attack_explore: 1.0, ..HuntConfig::default() };
         let world = clock_off(43);
         let mut flora = Flora::new(FloraConfig::default());
@@ -169,6 +170,10 @@ fn a_prey_outside_the_size_window_is_not_chosen() {
         let (pb, hb) = (animal(&fauna, prey).body, animal(&fauna, lj).body);
         let window = hunter(&fauna).prey_max_ratio * hb;
         assert_eq!(pb <= window, inside, "the fixture: prey {pb} against window {window}");
+        if inside {
+            let armour = fauna.config.founder(Founder::Browser).armour;
+            assert_eq!(crate::profitability(&hunter(&fauna), hb, pb, armour), 1.0, "the fixture: one strike kills it");
+        }
         let mut turns = Vec::new();
         for _ in 0..8 {
             fauna.step_with(&world, &mut flora, 1);
@@ -309,6 +314,21 @@ fn encounters_move_the_search_image_and_preference_falls_with_scarcity() {
     m.meet(&cfg, t, &[false; Founder::COUNT], dt_s);
     let ratio = m.image[s] / before;
     assert!((ratio - (-1.0f64).exp()).abs() < 1e-6, "decays by e over the memory: {ratio}");
+}
+
+/// Profitability follows the wound formula on the config's own table: a prey one strike
+/// kills is worth a whole attack, one that takes several hits proportionally less, and
+/// armour lowers it.
+#[test]
+fn a_prey_that_takes_several_hits_is_worth_less() {
+    let c = FaunaConfig::default();
+    let h = c.founder(LJ).hunter.expect("a hunter");
+    let body = c.founder(LJ).core.body_max;
+    let one_hit = body * h.strike_power; // a prey this size takes exactly one hit
+    assert_eq!(crate::profitability(&h, body, 0.5 * one_hit, 0.0), 1.0);
+    let three = crate::profitability(&h, body, 3.0 * one_hit, 0.0);
+    assert!((three - 1.0 / 3.0).abs() < 1e-12, "three hits: a third ({three})");
+    assert!(crate::profitability(&h, body, 3.0 * one_hit, 0.5) < three, "armour lowers it");
 }
 
 // ------------------------------------------------------------------ breeding

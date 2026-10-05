@@ -43,9 +43,12 @@ use crate::Fauna;
 //     nest_radius_m, nest_crowd_max, nest_retry_s}`, `ReproductionState::{native,
 //     retry_ticks}`, `FaunaConfig::lineage_body_ceiling`, `TeacherConfig::{
 //     forage_stay_forward, forage_turn_back_samples}`, the readout ledger lines.
-// 40: the lanternjaw's patrol (D2) — `FaunaConfig::hunt`, `Animal::hunt`, the patrol's
-//     ledger lines.
-pub const SCHEMA: u32 = 40;
+// 40: the capgnawer package — `EggSite::Fungus`, `Reproduction::{clutch_hold_max_s,
+//     egg_fungus_radius_m}`, `ReproductionState::clutch_wait_ticks`,
+//     `CueConfig::fungal_half_life_s`.
+// 41: the lanternjaw's patrol (D2) — `FaunaConfig::hunt`, `Animal::hunt`, the patrol's
+//     ledger lines, the lanternjaw's clutch from surplus and smaller reserve cap.
+pub const SCHEMA: u32 = 41;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

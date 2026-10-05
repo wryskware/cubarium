@@ -809,9 +809,27 @@ struct Daughter {
     origin: Site,
 }
 
+/// The factor on a donor's [`SpeciesConfig::propagule_rate`] from its caps:
+/// `1 − s + s · min(P / (alpha · W), 1)`, `s` its [`SpeciesConfig::propagule_cap_share`].
+/// 1 for a species whose share is 0, and for a stand with no foliage capacity to read.
+pub(crate) fn propagule_fullness_factor(sc: &SpeciesConfig, stand: &Stand) -> f64 {
+    let s = sc.propagule_cap_share.clamp(0.0, 1.0);
+    if !(s > 0.0) {
+        return 1.0;
+    }
+    let full = sc.alpha * stand.wood;
+    let fullness = if full > 0.0 && full.is_finite() {
+        (stand.foliage / full).clamp(0.0, 1.0)
+    } else {
+        return 1.0;
+    };
+    1.0 - s + s * fullness
+}
+
 /// §4.8: the donor's saving rule, and the two ways a package leaves.
 ///
-/// Every tick, a stand over `donor_min` asks for `propagule_rate · dt`, gross, funded out
+/// Every tick, a stand over `donor_min` asks for `propagule_rate · dt` (times its caps'
+/// [`propagule_fullness_factor`] where spores come from the caps), gross, funded out
 /// of its reserve above `donor_reserve_floor`; what it pays is respired for construction
 /// (`c_g`) and the rest saved in [`Stand::parcel`]. When the parcel holds one
 /// whole package it leaves:
@@ -860,7 +878,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
 
         // ---- what the rate asks for, and what the reserve can fund.
         if donor.wood >= sc.donor_min {
-            let ask = (sc.propagule_rate * dt).max(0.0);
+            let ask = (sc.propagule_rate * dt * propagule_fullness_factor(sc, &donor)).max(0.0);
             ledger.propagule_requested[slot] += ask / build;
             let floor = sc.donor_reserve_floor * sc.reserve_cap * donor.wood;
             let take = (donor.reserve - floor)

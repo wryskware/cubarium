@@ -160,6 +160,10 @@ fn species_rows() -> Vec<Row> {
             .search(1.0, 30.0),
         r("reproduction.nest_retry_s", "s", nonneg, "a refused layer (nest site, body ceiling) waits this long before trying again")
             .search(5.0, 600.0).log(),
+        r("reproduction.clutch_hold_max_s", "s", nonneg, "clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once)")
+            .search(0.0, 7200.0),
+        r("reproduction.egg_fungus_radius_m", "m", nonneg, "fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face)")
+            .search(0.0, 2.0),
     ]
 }
 
@@ -387,6 +391,8 @@ fn knob_rows() -> Vec<Row> {
     rows.extend([
         c("emit_reference", "organic units", pos, "detritus stock at which a source emits at full strength; the taste reference").grade("C"),
         c("half_life_s", "s", pos, "cue half-life").search(0.5, 60.0).log().grade("C"),
+        c("fungal_half_life_s", "s", pos, "the fungal field's half-life (the capgnawer's Chem(fungal)): a longer scent reaches farther groves")
+            .search(2.0, 1200.0).log(),
         c("diffuse_fraction", "fraction per update", fraction, "convex nearest-neighbour diffusion mix").search(0.05, 0.9).grade("C"),
         c("threshold", "cue units", nonneg, "cue values below this are dropped after an update").grade("N"),
         c("pool_bulk_density", "organic units/m^3", pos, "bulk density a ground pool's physical height is computed with")

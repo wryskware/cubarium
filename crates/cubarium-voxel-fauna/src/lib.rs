@@ -91,7 +91,7 @@ pub use manifest::{
     Transfer, Tunings, gru32_parameter_count,
 };
 pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PredationConfig, TeacherConfig};
-pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, attack_preference, FRUITLESS_SLOTS};
+pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, attack_preference, profitability, FRUITLESS_SLOTS};
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
@@ -1264,6 +1264,12 @@ pub struct ReproductionState {
     /// lay again ([`Reproduction::nest_retry_s`]).
     #[serde(default)]
     pub retry_ticks: u64,
+    /// Ticks a body whose hold is met has waited for a **full clutch** since its last
+    /// laying ([`Reproduction::clutch_hold_max_s`]): it lays at once when its reserve pays
+    /// for [`Reproduction::clutch_max`] eggs, and lays what it can when this reaches the
+    /// hold's maximum.
+    #[serde(default)]
+    pub clutch_wait_ticks: u64,
 }
 
 /// An offspring package the parent has already paid for and cannot spend.
@@ -1406,6 +1412,20 @@ pub struct Reproduction {
     /// waits before it tries to lay again; its surplus keeps standing.
     #[serde(default = "default_nest_retry_s")]
     pub nest_retry_s: f64,
+    /// **A full clutch first** (the capgnawer package, 2026-10-05), seconds: with a clutch
+    /// from surplus ([`Reproduction::clutch_max`] above 0), a body whose hold is met waits
+    /// up to this long for its reserve to pay for `clutch_max` eggs and lays them the tick
+    /// it does; at the end of the wait it lays what the reserve pays for. So a fed body lays
+    /// a full clutch and a hungry one a small one, and the clutch follows food rather than
+    /// the moment one egg became affordable. 0 lays at once (the clutch is whatever one
+    /// affordable egg's hold left).
+    #[serde(default)]
+    pub clutch_hold_max_s: f64,
+    /// **Fungal egg sites** ([`crate::EggSite::Fungus`]): an egg goes on a face within this
+    /// many metres (around the ring and across, one row up or down) of a fungus holding
+    /// cap tissue, so recruitment sits where the food is. 0: the fungus's own face only.
+    #[serde(default)]
+    pub egg_fungus_radius_m: f64,
 }
 
 fn default_surplus_share() -> f64 {
@@ -1531,6 +1551,8 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        clutch_hold_max_s: 0.0,
+        egg_fungus_radius_m: 0.0,
     };
 
     /// The littershredder's egg placeholders.
@@ -1565,6 +1587,8 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        clutch_hold_max_s: 0.0,
+        egg_fungus_radius_m: 0.0,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13), revised with its metabolism in the
@@ -1592,6 +1616,8 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        clutch_hold_max_s: 0.0,
+        egg_fungus_radius_m: 0.0,
     };
 
     /// What the **smallest** offspring package costs the parent's reserve, the price
@@ -1621,6 +1647,16 @@ impl Reproduction {
             return 0;
         }
         (paid.min(f64::from(self.clutch_max))) as u32
+    }
+
+    /// Ticks a body waits for a full clutch ([`Reproduction::clutch_hold_max_s`]); 0 lays
+    /// at once.
+    pub fn clutch_hold_max_ticks(&self) -> u64 {
+        if self.clutch_hold_max_s > 0.0 {
+            cubarium_voxel::ticks_at_least_one(self.clutch_hold_max_s)
+        } else {
+            0
+        }
     }
 
     /// Ticks a refused laying waits ([`Reproduction::nest_retry_s`]).

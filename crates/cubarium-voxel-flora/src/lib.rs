@@ -991,6 +991,15 @@ pub struct SpeciesConfig {
     /// *asks* for; it creates no income, and on a stand that is already reserve-limited it
     /// changes nothing at all.
     pub propagule_rate: f64,
+    /// **Spores come from the caps** (the capgnawer package, 2026-10-05): the share of
+    /// [`SpeciesConfig::propagule_rate`] that follows the stand's **fullness** — its
+    /// foliage (a fungus's cap tissue) over the full foliage its wood carries,
+    /// `min(P / (alpha · W), 1)`. A donor asks `propagule_rate · (1 − s + s · fullness)`,
+    /// so at 1 a stand grazed to half its caps saves spores at half the rate and a capless
+    /// one at none: the fruiting body is the reproductive organ, and a grazer that eats
+    /// caps eats recruitment. 0 (the base, every plant) leaves the rate alone, fraction.
+    #[serde(default)]
+    pub propagule_cap_share: f64,
     /// `w_frac, p_frac, q_frac`: how a landed propagule splits into wood, starter foliage
     /// and starter reserve. Sums to one.
     pub propagule_split: [f64; 3],
@@ -1698,6 +1707,7 @@ impl SpeciesConfig {
             donor_min: 0.3,
             donor_reserve_floor: 0.5,
             propagule_rate: 0.0002,
+            propagule_cap_share: 0.0,
             propagule_split: [0.4, 0.4, 0.2],
             energy_density: 2.0,
             // Eight hours, e-folding at the lifetime (the field docs): the middle of the
@@ -2485,9 +2495,19 @@ impl SpeciesConfig {
             wood_max: 0.1,
             alive_min: 0.01,
             donor_min: 0.05,
-            foliage_rate: 0.004,
+            // Cap regrowth (2026-10-05, the capgnawer package): a fruiting body takes about
+            // a world day to come back, not minutes. The earlier 0.004 (the presets'
+            // 0.00656) regrew a grazed cap in about 260 s, so one glowcap fed about a
+            // hundred capgnawers and grazing never reached the caps. On `patch` (8 seeds,
+            // 4 h) the presets' 0.00024 let capgnawers crop the caps to 8 % full and cut
+            // spore output 3×; the stands fell 5–12 %, space-bound either way. This is
+            // the same 1/27.
+            foliage_rate: 0.00015,
             wood_rate: 0.002,
             propagule_rate: 0.0005,
+            // The fruiting body is the spore source (the capgnawer package, 2026-10-05):
+            // spore saving follows the caps standing, so grazed caps recruit less.
+            propagule_cap_share: 1.0,
             crown_height_m: [0.125, 0.25],
             crown_radius_m: [0.0625, 0.0625],
             // Anatomy document §3: the fruiting body on the face. `foliage` is cap

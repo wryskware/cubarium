@@ -43,7 +43,8 @@ use crate::Flora;
 // 29: turf-establish — the canopy gate and runner support: `Stand::support`,
 //     `SpeciesConfig::{establish_light_margin, runner_support_s, runner_support_share}`, the
 //     ledger's canopy and support lines.
-pub const SCHEMA: u32 = 29;
+// 30: the capgnawer package — `SpeciesConfig::propagule_cap_share` (spores from caps).
+pub const SCHEMA: u32 = 30;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

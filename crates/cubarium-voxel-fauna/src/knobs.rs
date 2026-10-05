@@ -219,6 +219,13 @@ pub struct CueConfig {
     pub emit_reference: f64,
     /// Cue half-life, seconds.
     pub half_life_s: f64,
+    /// **The fungal field's own half-life** (the capgnawer package, 2026-10-05), seconds:
+    /// the capgnawer's `Chem(fungal)` with the same transport but a longer-lived scent, so
+    /// a grove is smelled metres off rather than only from the next face (the field
+    /// reaches about `sqrt(0.29 · this)` faces before it falls by `e`, with the shipped
+    /// diffusion). The detritus and film fields keep [`CueConfig::half_life_s`].
+    #[serde(default = "default_fungal_half_life_s")]
+    pub fungal_half_life_s: f64,
     /// The convex nearest-neighbour mix of one diffusion step, a fraction.
     pub diffuse_fraction: f64,
     /// Cue values below this are dropped after an update (cue units).
@@ -234,12 +241,21 @@ impl Default for CueConfig {
         CueConfig {
             emit_reference: 0.05,
             half_life_s: 2.0,
+            fungal_half_life_s: default_fungal_half_life_s(),
             diffuse_fraction: 0.4,
             threshold: 1e-5,
             pool_bulk_density: 80.0,
         }
     }
 }
+
+fn default_fungal_half_life_s() -> f64 {
+    FUNGAL_HALF_LIFE_S
+}
+
+/// The code default of [`CueConfig::fungal_half_life_s`]: the shared field's 2 s, so a
+/// world that does not ask for the long scent is unchanged.
+pub const FUNGAL_HALF_LIFE_S: f64 = 2.0;
 
 /// The heuristic ("teacher") controllers' reflexes: how the shredder, the grazer and the
 /// lanternjaw's ambush behave when a policy is not driving them. These are what the live

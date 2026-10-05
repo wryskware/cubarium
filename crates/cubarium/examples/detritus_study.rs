@@ -28,7 +28,9 @@
 //! (bodies growing through `birth_body`) and its mean age; recruitment (hatched) per adult
 //! per world day; and the **local crowding** — the mean count of the lineage's own bodies
 //! within its nest radius (1 m if it has none) of each adult. A `stocks,` line carries
-//! litter, film, glowcap stands and their cap tissue, and ms/tick. At the end, a `sum,`
+//! litter, film, glowcap stands (dark and lit) and their cap tissue and mean fullness, the
+//! glowcap spores landed so far, the photosynthetic stands' edible foliage and it plus the
+//! litter, and ms/tick. At the end, a `sum,`
 //! line per lineage over the whole run.
 
 use std::path::Path;
@@ -335,6 +337,27 @@ fn sample(sim: &Sim, params: &Params, arm: &str, minute: u64, a: &FaunaLedger, b
     let film: f64 = fv.film_sites().map(|(_, f)| f).sum();
     let glow: Vec<_> = fv.stands.iter().filter(|s| s.species == Species::Glowcap).collect();
     let caps: f64 = glow.iter().map(|s| s.foliage).sum();
+    // The capgnawer package's readouts: glowcap on dark terrain (its own darkness above
+    // zero) against lit, the mean cap fullness P / (alpha W), the spores landed so far, and
+    // the photosynthetic stands' edible foliage with and without the litter.
+    let gsc = fv.config.species(Species::Glowcap);
+    let view = sim.world().view();
+    let dark = glow
+        .iter()
+        .filter(|s| gsc.darkness(view.sky_visibility(i64::from(s.site.x), s.site.y, s.site.z)) > 0.0)
+        .count();
+    let fullness = if glow.is_empty() {
+        f64::NAN
+    } else {
+        glow.iter().map(|s| (s.foliage / (gsc.alpha * s.wood).max(1e-300)).min(1.0)).sum::<f64>() / glow.len() as f64
+    };
+    let spores = fv.ledger.seeds_landed[Species::Glowcap.index()];
+    let edible: f64 = fv
+        .stands
+        .iter()
+        .filter(|s| fv.config.species(s.species).trophic == cubarium_voxel_flora::Trophic::Photo)
+        .map(|s| fv.layers(s).map(|l| l.edible()).sum::<f64>())
+        .sum();
     let others = Founder::ALL
         .iter()
         .filter(|f| !DETRITIVORES.contains(f))
@@ -342,8 +365,10 @@ fn sample(sim: &Sim, params: &Params, arm: &str, minute: u64, a: &FaunaLedger, b
         .collect::<Vec<_>>()
         .join(" ");
     println!(
-        "stocks,{arm},{minute},litter={litter:.3},film={film:.4},glowcap_stands={},cap_tissue={caps:.4},bodies={},ms_tick={ms:.3},{others}",
+        "stocks,{arm},{minute},litter={litter:.3},film={film:.4},glowcap_stands={},cap_tissue={caps:.4},glowcap_dark={dark},glowcap_lit={},cap_fullness={fullness:.3},glowcap_spores_landed={spores},edible={edible:.3},edible_plus_litter={:.3},bodies={},ms_tick={ms:.3},{others}",
         glow.len(),
+        glow.len() - dark,
+        edible + litter,
         v.animals.len()
     );
 }

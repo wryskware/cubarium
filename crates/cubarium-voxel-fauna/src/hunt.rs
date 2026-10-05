@@ -16,8 +16,9 @@
 //!    seconds to the **search image** ([`HuntMemory::image`]), which decays with
 //!    [`HuntConfig::search_memory_s`].
 //! 2. **Attack preference.** Whether it takes on a prey it meets is drawn once per
-//!    [`HuntConfig::attack_decision_s`] per prey, at [`attack_preference`] of that
-//!    lineage's encounter memory: the exploration floor for a prey it has not met lately,
+//!    [`HuntConfig::attack_decision_s`] per prey, at its [`profitability`] (the share of a
+//!    kill one strike makes) times [`attack_preference`] of that lineage's encounter
+//!    memory: the exploration floor for a prey it has not met lately,
 //!    rising toward 1 as it meets it often. A prey that turns scarce is met less, so it is
 //!    attacked less readily — the falling per-prey risk at low density Astra asked for —
 //!    and the image follows what it meets, not only what it caught.
@@ -138,6 +139,19 @@ pub fn attack_preference(cfg: &HuntConfig, encounter_s: f64) -> f64 {
     let m = if encounter_s.is_finite() { encounter_s.max(0.0) } else { 0.0 };
     let half = cfg.attack_half_s.max(1e-9);
     explore + (1.0 - explore) * m / (m + half)
+}
+
+/// **Profitability**: the share of a kill one strike makes on a prey of `prey_body` with
+/// `armour`, `min(1, power × (S_pred / S_prey) × (1 − armour))` — the wound formula
+/// (predation §2.4). A prey it kills in one strike is worth 1; an adult grazer that takes
+/// three hits about a third. It scales the attack preference, so the small prey are its
+/// living and the big ones a chance (proposal §3.2: adult grazers "are not its living").
+pub fn profitability(h: &crate::Hunter, hunter_body: f64, prey_body: f64, armour: f64) -> f64 {
+    if !(prey_body > 0.0) {
+        return 1.0;
+    }
+    let hit = h.strike_power * (hunter_body / prey_body) * (1.0 - armour);
+    if hit.is_finite() { hit.clamp(0.0, 1.0) } else { 1.0 }
 }
 
 /// A uniform draw in `[0, 1)` from three keys and a domain (SplitMix64).
@@ -418,7 +432,8 @@ pub(crate) fn steer(
         }
         let Some(pf) = o.founder else { continue };
         met[pf.index()] = true;
-        let accept = draw(DOMAIN_ATTACK, a.id, o.id, tick / window) < attack_preference(&cfg, a.hunt.image[pf.index()]);
+        let worth = profitability(&h, a.body, o.body, fauna.config.founder(pf).armour);
+        let accept = draw(DOMAIN_ATTACK, a.id, o.id, tick / window) < worth * attack_preference(&cfg, a.hunt.image[pf.index()]);
         if !accept {
             continue;
         }
