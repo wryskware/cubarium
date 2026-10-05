@@ -225,7 +225,7 @@ fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
     let weight: Vec<f64> = lineages.iter().map(|f| attack_preference(&cfg, a.hunt.image[f.index()])).collect();
     // Squares keyed by their absolute index; each holds the cue per lineage.
     let mut squares: rustc_hash::FxHashMap<(i64, i64), Vec<f64>> = rustc_hash::FxHashMap::default();
-    let mut add = |x: f64, z: f64, k: usize, cue: f64, squares: &mut rustc_hash::FxHashMap<(i64, i64), Vec<f64>>| {
+    let add = |x: f64, z: f64, k: usize, cue: f64, squares: &mut rustc_hash::FxHashMap<(i64, i64), Vec<f64>>| {
         if !(cue > 0.0) {
             return;
         }
