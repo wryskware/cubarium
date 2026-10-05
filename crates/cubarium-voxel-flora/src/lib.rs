@@ -1884,8 +1884,9 @@ impl SpeciesConfig {
     /// where these replace them; the crown, profile and colours are unchanged (the look is
     /// Wrysk's). The presets carry the same relative changes (`alpha` 1.285 → 4,
     /// `foliage_rate` × 3, `senescence` 0.00156 → 0.0026, the bank × 2).
-    /// - **Productive.** `wood_max` 0.3 (× 5); `alpha` was 6.2 here and is 1.5 since the
-    ///   spread package (below): 1.93× velvetpad's edible foliage per mature stand.
+    /// - **Productive.** `wood_max` 0.3 (× 5); `alpha` was 6.2 here, 1.5 in the spread
+    ///   package (below) and 3.15 since its alpha sweep: a grazed mature stand carries about
+    ///   the original (alpha 4) velvetpad's edible foliage, about 1.9× today's.
     ///   `foliage_rate` 0.06 (× 3) and `graze_refuge` 0.4 (basal buds) regrow a cropped
     ///   sward fast. `senescence` 0.00167 (× 1.67 the base): heavy thatch.
     /// - **Drought-tolerant.** `wilt_water` 0 and `full_water` 0.3, `rooting_depth` 2: it
@@ -1930,11 +1931,12 @@ impl SpeciesConfig {
             // - comes up through velvetpad at the succession study's pick, 0.03 a check;
             dispersal: Dispersal::Wald,
             overtop_per_check: 0.03,
-            // - wind: a WALD kernel with a mean of 1.5 m (12 voxels at 0.125 m, the middle
-            //   of Astra's 6/12/24 arms) and a shape of 0.5 m, of the order of a grass
-            //   head's release height: most seed lands within a few decimetres and the tail
-            //   crosses the patch gaps (CV √3 at this mean);
-            wald_mean_m: 1.5,
+            // - wind: a WALD kernel with a mean of 3.0 m (24 voxels at 0.125 m, the long
+            //   end of Astra's 6/12/24 arms: the spread rerun on `patch`, 8 seeds × 2 h,
+            //   2026-10-04, put the most of the S1 cohort under turf at 24) and a shape of
+            //   0.5 m, of the order of a grass head's release height: most seed lands within
+            //   a few decimetres and the tail crosses the patch gaps (CV √6 at this mean);
+            wald_mean_m: 3.0,
             wald_shape_m: 0.5,
             // - runners: a sward spreads by stolons and rhizomes, so 0.4 of the packages
             //   (was 0.3) root up to two columns out (25 cm at 0.125 m, a stolon's
@@ -1969,10 +1971,13 @@ impl SpeciesConfig {
             maintenance: 0.002,
             // Production (2026-10-04, Wrysk: "grass should have more foliage than moss"):
             // a mature stand carries `(1 − graze_refuge) · alpha · wood_max` above its
-            // floor, 0.6 · 1.5 · 0.3 = 0.27 against velvetpad's 0.7 · 1.0 · 0.2 = 0.14 —
-            // 1.93×, in the 1.5–2× the brief asks (the presets: 3.0 against 2.0, the same
-            // ratio). Was 6.2 (presets 4.0, 2.57×).
-            alpha: 1.5,
+            // floor, 0.6 · 3.15 · 0.3 = 0.57 against velvetpad's 0.7 · 1.0 · 0.2 = 0.14 on
+            // paper (the presets: 6.3 against 2.0, the same ratio). Grazed and young, the
+            // alpha sweep on `patch` (8 seeds, 2026-10-04) measured a mature stand at 0.92×
+            // the original velvetpad (preset alpha 4) and 1.7× today's, with the world's
+            // edible + litter at 1.07× the original plants; 5.4 and 6.3 gave the same stand,
+            // 6.3 the more food. Was 1.8 (presets 3.6), 1.5 (3.0), before that 6.2 (4.0).
+            alpha: 3.15,
             senescence: 0.00167,
             foliage_rate: 0.06,
             wood_rate: 0.01,
