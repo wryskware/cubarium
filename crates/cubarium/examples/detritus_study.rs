@@ -19,10 +19,12 @@
 //!
 //! **Readouts**, every `every` minutes, one `det,` line per detritivore lineage over the
 //! window just ended: bodies, adults (free, at `birth_body`), juveniles, the minimum of both
-//! so far, mean reserve fullness and body; intake (assimilated) and `g` (the net specific
+//! so far, mean reserve fullness, the adults' mean brood (D1b: the share of the reserve cap
+//! earmarked for a clutch) and body; intake (assimilated) and `g` (the net specific
 //! growth, (assimilated − upkeep − motor) per body-day); the **awake share** (awake over
 //! alive ticks), the **dark-awake share** (awake ticks owed to a dark face by day), access
-//! (eating over wanting ticks), `B`; stay-on-food samples; clutches, eggs laid, hatched and
+//! (eating over wanting ticks), the **sated share** (awake ticks not wanting food: the gut
+//! full), `B`; stay-on-food samples; clutches, eggs laid, hatched and
 //! lost, the mean clutch; nest and ceiling refusals; **replacement** (in-world-born bodies
 //! laying their first clutch) and their mean hatch-to-first-clutch minutes; maturation
 //! (bodies growing through `birth_body`) and its mean age; recruitment (hatched) per adult
@@ -263,12 +265,13 @@ fn window_line(a: &FaunaLedger, b: &FaunaLedger, f: Founder, params: &Params, ad
     let ratio = |x: f64, y: f64| if y > 0.0 { x / y } else { f64::NAN };
     let mins = |ticks: u64, n: u64| if n > 0 { ticks as f64 / n as f64 / hz / 60.0 } else { f64::NAN };
     format!(
-        "body_days={body_days:.3},intake={assim:.5},g={:.4},B={:.3},awake={:.3},dark_awake={:.3},access={:.3},still={},clutches={clutches},laid={laid},hatched={hatched},lost={lost},clutch_mean={:.2},nest_refusals={},ceiling_refusals={},replacement={first},first_clutch_min={:.1},matured={matured},maturation_min={:.1},recruits_per_adult_day={:.3}",
+        "body_days={body_days:.3},intake={assim:.5},g={:.4},B={:.3},awake={:.3},dark_awake={:.3},access={:.3},sated={:.3},still={},clutches={clutches},laid={laid},hatched={hatched},lost={lost},clutch_mean={:.2},nest_refusals={},ceiling_refusals={},replacement={first},first_clutch_min={:.1},matured={matured},maturation_min={:.1},recruits_per_adult_day={:.3}",
         ratio(assim - upkeep - motor, body_days),
         ratio(assim, upkeep + motor),
         ratio(awake as f64, alive as f64),
         ratio(dark as f64, awake as f64),
         ratio(eating as f64, wanting as f64),
+        ratio(awake.saturating_sub(wanting) as f64, awake as f64),
         d(&a.feed_still_ticks_by_founder, &b.feed_still_ticks_by_founder),
         ratio(laid as f64, clutches as f64),
         d(&a.nest_refusals_by_founder, &b.nest_refusals_by_founder),
@@ -321,9 +324,15 @@ fn sample(sim: &Sim, params: &Params, arm: &str, minute: u64, a: &FaunaLedger, b
             f64::NAN
         };
         let body = if n > 0 { mine.iter().map(|x| x.body).sum::<f64>() / n as f64 } else { f64::NAN };
+        // The brood (D1b): the mean share of the adults' reserve cap earmarked for a clutch.
+        let brood = if adults.is_empty() {
+            f64::NAN
+        } else {
+            adults.iter().map(|x| x.reproduction.brood_held(x.reserve) / p.core.reserve_of(x.body).max(1e-300)).sum::<f64>() / adults.len() as f64
+        };
         let w = &win[f.index()];
         println!(
-            "det,{arm},{minute},{},n={n},adults={},juveniles={},min_n={},min_adults={},fullness={fullness:.3},body={body:.4},crowd={crowd:.2},{}",
+            "det,{arm},{minute},{},n={n},adults={},juveniles={},min_n={},min_adults={},fullness={fullness:.3},brood={brood:.3},body={body:.4},crowd={crowd:.2},{}",
             f.name(),
             adults.len(),
             n - adults.len(),

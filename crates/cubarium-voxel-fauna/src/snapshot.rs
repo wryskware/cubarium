@@ -46,7 +46,14 @@ use crate::Fauna;
 // 40: the capgnawer package — `EggSite::Fungus`, `Reproduction::{clutch_hold_max_s,
 //     egg_fungus_radius_m}`, `ReproductionState::clutch_wait_ticks`,
 //     `CueConfig::fungal_half_life_s`.
-pub const SCHEMA: u32 = 40;
+// 41: generation time (D1b) — `Gut::mass_exponent`, `Reproduction::brood_share`,
+//     `ReproductionState::brood`.
+// 42: the lanternjaw's patrol (D2) — `FaunaConfig::hunt`, `Animal::hunt`, the patrol's
+//     ledger lines, the lanternjaw's clutch from surplus and smaller reserve cap.
+// 43: the lanternjaw's switching (D2b) — `HuntConfig::{share_switching, switch_exponent,
+//     attack_prior_s, strike_chosen_only}`, the declined-contact and unchosen-strike ledger
+//     lines.
+pub const SCHEMA: u32 = 43;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -387,6 +394,7 @@ mod tests {
             eating: false,
             emergency: false,
             bout: None,
+            hunt: crate::HuntMemory::default(),
         }
     }
 

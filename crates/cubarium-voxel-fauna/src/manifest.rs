@@ -988,9 +988,10 @@ impl Manifest {
             drown_height_fraction: a.drown,
             drown_after_s: a.drown_after,
             body_reference: 0.035,
-            // `energy_density · (body_max + reserve_cap · body_max)`, the other two's rule.
-            adult_energy_reference: 0.14,
-            adult_reserve_reference: 0.035,
+            // `energy_density · (body_max + reserve_cap · body_max)`, the other two's rule,
+            // at the detritus web's reserve cap of 0.6.
+            adult_energy_reference: 0.112,
+            adult_reserve_reference: 0.021,
             structural_reference: 0.035,
             cruise_m_per_s: a.cruise,
             yaw_cap_rad_per_s: a.yaw,

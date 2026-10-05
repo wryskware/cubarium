@@ -26,6 +26,7 @@ mod body;
 mod controller;
 mod encounter;
 mod knobs;
+mod hunt;
 mod manifest;
 mod pose;
 mod predation;
@@ -69,7 +70,7 @@ pub use body::{
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
-    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, PackHunter, Response, Scripted, heuristic, resolve_actions,
+    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, heuristic, resolve_actions,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
@@ -89,7 +90,8 @@ pub use manifest::{
     Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
     Transfer, Tunings, gru32_parameter_count,
 };
-pub use knobs::{CueConfig, FoundingConfig, LifeConfig, PredationConfig, TeacherConfig};
+pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PredationConfig, TeacherConfig};
+pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, attack_preference, encounter_share, profitability, FRUITLESS_SLOTS};
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
@@ -881,6 +883,11 @@ pub struct Animal {
     /// The feeding bout in progress: from the eating latch going on to its full event.
     #[serde(default)]
     pub bout: Option<Bout>,
+    /// **The patrol's memory** (the detritus web D2, the lanternjaw's heuristic only): the
+    /// patch it is walking to or waiting on, the fruitless patches it avoids, and its
+    /// search image, the encounter memory per prey lineage. Default for every other body.
+    #[serde(default)]
+    pub hunt: HuntMemory,
 }
 
 /// **The stomach** (repair 2 item 10): one raw-food pool per [`Food`] class, each in all
@@ -1259,10 +1266,25 @@ pub struct ReproductionState {
     pub retry_ticks: u64,
     /// Ticks a body whose hold is met has waited for a **full clutch** since its last
     /// laying ([`Reproduction::clutch_hold_max_s`]): it lays at once when its reserve pays
-    /// for [`Reproduction::clutch_max`] eggs, and lays what it can when this reaches the
-    /// hold's maximum.
+    /// for its full clutch ([`Reproduction::full_clutch`] of its reserve cap), and lays what
+    /// it can when this reaches the hold's maximum.
     #[serde(default)]
     pub clutch_wait_ticks: u64,
+    /// **The brood**, organic units: the part of the reserve a mature body has earmarked
+    /// for its next clutch ([`Reproduction::brood_share`]). A label inside the reserve, not
+    /// a pool of its own: growth draws only on the reserve above it, hunger does not count
+    /// it, a laying pays from it first, and wherever it is read it is at most the reserve
+    /// ([`ReproductionState::brood_held`]).
+    #[serde(default)]
+    pub brood: f64,
+}
+
+impl ReproductionState {
+    /// The brood the reserve actually holds: [`ReproductionState::brood`], at most
+    /// `reserve` and never negative.
+    pub fn brood_held(&self, reserve: f64) -> f64 {
+        self.brood.min(reserve).max(0.0)
+    }
 }
 
 /// An offspring package the parent has already paid for and cannot spend.
@@ -1407,11 +1429,14 @@ pub struct Reproduction {
     pub nest_retry_s: f64,
     /// **A full clutch first** (the capgnawer package, 2026-10-05), seconds: with a clutch
     /// from surplus ([`Reproduction::clutch_max`] above 0), a body whose hold is met waits
-    /// up to this long for its reserve to pay for `clutch_max` eggs and lays them the tick
+    /// up to this long for its reserve to pay for its **full clutch** and lays it the tick
     /// it does; at the end of the wait it lays what the reserve pays for. So a fed body lays
     /// a full clutch and a hungry one a small one, and the clutch follows food rather than
     /// the moment one egg became affordable. 0 lays at once (the clutch is whatever one
-    /// affordable egg's hold left).
+    /// affordable egg's hold left). The full clutch is `clutch_max` eggs or what the body's
+    /// own reserve cap can pay for, the fewer ([`Reproduction::full_clutch`], D1b): a small
+    /// layer whose cap holds one egg does not wait out the hold for three it can never
+    /// carry.
     #[serde(default)]
     pub clutch_hold_max_s: f64,
     /// **Fungal egg sites** ([`crate::EggSite::Fungus`]): an egg goes on a face within this
@@ -1419,6 +1444,17 @@ pub struct Reproduction {
     /// cap tissue, so recruitment sits where the food is. 0: the fungus's own face only.
     #[serde(default)]
     pub egg_fungus_radius_m: f64,
+    /// **The brood** (package D1b, the κ-rule of dynamic energy budgets): the share of a
+    /// **mature** egg-layer's net income — assimilation less the respiration its reserve pays
+    /// — earmarked for its next clutch, `1 − κ`. A body at or past `birth_body` puts this
+    /// share into its brood ([`ReproductionState::brood`]) until the brood holds
+    /// [`Reproduction::brood_target`], and builds structure only out of the reserve above
+    /// the brood; the rest of its income grows it. So a growing adult saves for eggs
+    /// instead of building every surplus into structure (which otherwise drains the reserve
+    /// to a few per cent of its cap and puts off the first clutch until `body_max`). The
+    /// brood also does not sate: hunger counts only the reserve above it. 0 turns it off.
+    #[serde(default)]
+    pub brood_share: f64,
 }
 
 fn default_surplus_share() -> f64 {
@@ -1546,6 +1582,7 @@ impl Reproduction {
         nest_retry_s: NEST_RETRY_S,
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
+        brood_share: 0.0,
     };
 
     /// The littershredder's egg placeholders.
@@ -1582,17 +1619,20 @@ impl Reproduction {
         nest_retry_s: NEST_RETRY_S,
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
+        brood_share: 0.0,
     };
 
-    /// The lanternjaw's **dormant egg bank** (§2.13): a clutch of 3 buried eggs laid
-    /// after a sustained surplus, each `egg_organic` 0.005 — a `body_min` hatchling
-    /// (0.0034) and a small reserve (0.0016), "each egg's organic matter plus a small
-    /// reserve". The floor 0.0125 puts the surplus at 0.0275, 0.79 of a full reserve: a
-    /// lanternjaw lays after a real meal, not on an ordinary one. Hold and interval are
-    /// the other egg-layer's.
+    /// The lanternjaw's **dormant egg bank** (§2.13), revised with its metabolism in the
+    /// detritus web D2: each egg `egg_organic` 0.005 — a `body_min` hatchling (0.0034) and a
+    /// small reserve (0.0016) — buried as its own clutch, the clutch **from surplus**
+    /// (eligible on one affordable egg, up to `clutch_max` 3 at laying, the D1 mechanism),
+    /// over a floor of 0.005, one egg. At the shipped mass (×30, adult 1.05, reserve cap
+    /// 0.6 → 0.63): the floor 0.15 is two days of the adult's 0.07 daily need; one egg needs
+    /// a reserve of 0.30, the whole clutch 0.60, which a full adult (0.63) holds and lays,
+    /// keeping 0.18 above the floor. Hold and interval are the other egg-layers'.
     pub const DORMANT_EGGS_PLACEHOLDER: Reproduction = Reproduction {
         mode: BirthMode::Eggs,
-        surplus_floor: 0.0125,
+        surplus_floor: 0.005,
         surplus_hold_s: 900.0,
         gestation_s: 0.0,
         gestation_loss_fraction: 0.25,
@@ -1603,12 +1643,13 @@ impl Reproduction {
         dormant: true,
         surplus_share: SURPLUS_SHARE,
         litter_min: 0.0,
-        clutch_max: 0,
+        clutch_max: 3,
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
+        brood_share: 0.0,
     };
 
     /// What the **smallest** offspring package costs the parent's reserve, the price
@@ -1638,6 +1679,33 @@ impl Reproduction {
             return 0;
         }
         (paid.min(f64::from(self.clutch_max))) as u32
+    }
+
+    /// **The full clutch a reserve of `cap` can pay for**: the fixed clutch if `cap` holds it
+    /// and its floor (else 0), or with a clutch from surplus [`Reproduction::clutch_for`]
+    /// of `cap` (at most `clutch_max`). With `cap` the body's reserve cap, the most this
+    /// body could ever lay at once: what a full-clutch wait waits for and what its brood
+    /// saves for.
+    pub fn full_clutch(&self, cap: f64) -> u32 {
+        if self.clutch_max == 0 {
+            let fits = f64::from(self.clutch_size) * self.egg_organic + self.surplus_floor <= cap;
+            return if fits { self.clutch_size } else { 0 };
+        }
+        self.clutch_for(cap)
+    }
+
+    /// **What the brood saves for** at structure `body`: the full clutch its reserve cap
+    /// can pay for ([`Reproduction::full_clutch`]) plus the floor, organic units; 0 with no
+    /// brood share, for a live-bearer, or when the cap pays for no egg.
+    pub fn brood_target(&self, sc: &SpeciesConfig, body: f64) -> f64 {
+        if !(self.brood_share > 0.0) || self.mode != BirthMode::Eggs {
+            return 0.0;
+        }
+        let n = self.full_clutch(sc.reserve_of(body));
+        if n == 0 {
+            return 0.0;
+        }
+        f64::from(n) * self.egg_organic + self.surplus_floor
     }
 
     /// Ticks a body waits for a full clutch ([`Reproduction::clutch_hold_max_s`]); 0 lays
@@ -1934,6 +2002,10 @@ pub struct FaunaConfig {
     /// (crowding, predation, food) failed. 0 turns the guard off.
     #[serde(default = "default_lineage_body_ceiling")]
     pub lineage_body_ceiling: u32,
+    /// **The lanternjaw's patrol** (the detritus web D2, [`HuntConfig`]): its heuristic's
+    /// patch-to-patch search, tremor sense and prey switching.
+    #[serde(default)]
+    pub hunt: HuntConfig,
 }
 
 fn default_lineage_body_ceiling() -> u32 {
@@ -1971,6 +2043,7 @@ impl Default for FaunaConfig {
             teachers: TeacherConfig::default(),
             founding: FoundingConfig::default(),
             lineage_body_ceiling: LINEAGE_BODY_CEILING,
+            hunt: HuntConfig::default(),
         }
     }
 }
@@ -2506,6 +2579,38 @@ pub struct FaunaLedger {
     pub strikes_by_founder: [u64; Founder::COUNT],
     pub hits_by_founder: [u64; Founder::COUNT],
     pub dodges_by_founder: [u64; Founder::COUNT],
+    /// **The patrol's readouts** (the detritus web D2; counters only, no rule reads them).
+    /// Strikes begun, by the **prey's** lineage (any striker).
+    #[serde(default)]
+    pub strikes_on_by_founder: [u64; Founder::COUNT],
+    /// Seconds of contact a patrolling hunter had with size-eligible prey of each lineage
+    /// (seen or felt): the locally available prey its kills are read against.
+    #[serde(default)]
+    pub hunt_encounter_s_by_prey: [f64; Founder::COUNT],
+    /// Controller samples a patroller spent waiting still on a patch, walking to one, and
+    /// engaged with a prey it saw or felt.
+    #[serde(default)]
+    pub hunt_wait_samples: u64,
+    #[serde(default)]
+    pub hunt_travel_samples: u64,
+    #[serde(default)]
+    pub hunt_engaged_samples: u64,
+    /// Patches left fruitless (a wait with nothing, or a walk given up), and patches
+    /// chosen at random (exploration) or by the search image.
+    #[serde(default)]
+    pub hunt_fruitless: u64,
+    #[serde(default)]
+    pub hunt_explored: u64,
+    #[serde(default)]
+    pub hunt_chosen: u64,
+    /// (D2b) Seconds of contact a patroller had with prey of each lineage that its attack
+    /// choice declined (met, seen or felt, and passed over), and strikes begun by a
+    /// patroller on a prey its choice did not accept (only with
+    /// [`HuntConfig::strike_chosen_only`] off: the opportunistic strike).
+    #[serde(default)]
+    pub hunt_declined_s_by_prey: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub strikes_unchosen_by_prey: [u64; Founder::COUNT],
     /// Wound units healed, by the healed body's lineage (§2.4).
     pub healed_by_founder: [f64; Founder::COUNT],
     /// Carrion taken by each lineage's mouths, gross organic matter: who ate the carcasses.
@@ -3837,6 +3942,7 @@ impl Fauna {
             eating: false,
             emergency: false,
             bout: None,
+            hunt: crate::HuntMemory::default(),
         };
         let mut animal = animal;
         // A founder arrives with its eating latch off and a stomach at `s0 · K` of its own

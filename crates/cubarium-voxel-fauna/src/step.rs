@@ -356,11 +356,21 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
     if !(want > 0.0) {
         return (0.0, 0.0);
     }
+    let brood_share = if fauna.animals[i].reproduction.brood > 0.0 {
+        body::effective_config(&fauna.config, &fauna.animals[i]).reproduction.brood_share
+    } else {
+        0.0
+    };
     let a = &mut fauna.animals[i];
     let (out, from_body) = withdraw(a, want);
     let paid = out.organic;
     if !(paid > 0.0) {
         return (0.0, 0.0);
+    }
+    // The brood pays its share of what the reserve respired (D1b): the κ-rule splits net
+    // income, so the soma's share of upkeep is not charged to the eggs.
+    if brood_share > 0.0 {
+        a.reproduction.brood = (a.reproduction.brood - brood_share * (paid - from_body)).max(0.0);
     }
     // The mineral that organic matter held is shed to the gut, so a body's mineral stays
     // in proportion to its tissue instead of banking for life; the energy leaves as heat.
@@ -787,7 +797,8 @@ fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, period_s: f64, effort: 
     if !a.eating || !(stock > 0.0) {
         return 0.0;
     }
-    let want = phys.gut.bite_per_body_s * a.body * period_s * effort;
+    // A small body bites faster per unit of itself (the gut's mass exponent, D1b).
+    let want = phys.gut.bite_per_body_s * phys.gut.throughput_factor(a.body, phys.core.body_max) * a.body * period_s * effort;
     if !(want > 0.0) {
         return 0.0;
     }
@@ -820,6 +831,8 @@ fn digest(fauna: &mut Fauna) {
         let phys = *fauna.config.founder(f);
         let sc = phys.core;
         let room = (sc.reserve_of(a.body) - a.reserve).max(0.0);
+        // A small body digests faster per unit of itself (the gut's mass exponent, D1b).
+        let speed = phys.gut.throughput_factor(a.body, sc.body_max);
         let mut raw = [0.0f64; Food::COUNT];
         let mut passing = [0.0f64; Food::COUNT];
         let mut yields = 0.0;
@@ -828,7 +841,7 @@ fn digest(fauna: &mut Fauna) {
             if !(p.organic > 0.0) {
                 continue;
             }
-            let tau = phys.gut.digestion_s[food.index()];
+            let tau = phys.gut.digestion_s[food.index()] / speed;
             let d = if tau > 0.0 { (p.organic * DT / tau).min(p.organic) } else { p.organic };
             let funded = if sc.n_tissue > 0.0 {
                 p.mineral / (sc.n_tissue * p.organic)
@@ -947,8 +960,11 @@ fn grow(fauna: &mut Fauna) {
     for i in 0..fauna.animals.len() {
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let a = &mut fauna.animals[i];
+        // The brood is at most the reserve; structure is built only above it (D1b).
+        a.reproduction.brood = a.reproduction.brood_held(a.reserve);
+        let free = a.reserve - a.reproduction.brood;
         let room = (sc.body_max - a.body).max(0.0);
-        if !(room > 0.0) || !(a.reserve > 0.0) {
+        if !(room > 0.0) || !(free > 0.0) {
             continue;
         }
         let cap = sc.reserve_of(a.body);
@@ -962,7 +978,7 @@ fn grow(fauna: &mut Fauna) {
         let before = a.body;
         a.body += build_from(
             &mut a.reserve,
-            (sc.growth_max_per_s * DT * fullness).min(room),
+            (sc.growth_max_per_s * DT * fullness).min(room).min(free),
             1.0,
         );
         // The measured maturation: the tick it grows through its breeding size.
@@ -983,7 +999,10 @@ pub(crate) fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
     if !(cap > 0.0) {
         return 0.0;
     }
-    (1.0 - a.reserve / cap).clamp(0.0, 1.0)
+    // The brood does not sate (D1b): a body saving for eggs is as hungry as the reserve
+    // above its brood says.
+    let fed = a.reserve - a.reproduction.brood_held(a.reserve);
+    (1.0 - fed / cap).clamp(0.0, 1.0)
 }
 
 /// One due body's read side of the controller stage: its manifest, what its observation
@@ -1225,6 +1244,16 @@ fn controllers(
                 actions = out;
                 lure = 0.0;
                 lift = 0.0;
+            }
+        }
+        // The detritus web D2: the lanternjaw's patrol (its heuristic only, while the
+        // world's `hunt.patrol` is on). The carcass yield below still wins.
+        if driven && fauna.controllers.hunt_patrol(id) && !fauna.controllers.at_carcass(id) {
+            if let Some((go, lit)) =
+                crate::hunt::steer(fauna, i, view, &fv, predation_occupancy.as_ref())
+            {
+                actions = go;
+                lure = lit;
             }
         }
         // R3: the lanternjaw's carcass yield (its heuristic only), and the chorister's
@@ -1615,6 +1644,16 @@ fn founder_act(
             });
             a.state = State::Resting;
             fauna.ledger.strikes_by_founder[founder.index()] += 1;
+            if let Ok(j) = fauna.animals.binary_search_by_key(&prey, |p| p.id) {
+                if let Some(pf) = fauna.animals[j].founder {
+                    fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
+                    // D2b readout: a patroller's strike its choice did not accept.
+                    let choosy = fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(fauna.animals[i].id);
+                    if choosy && !crate::hunt::accepts(&fauna.config, &fauna.animals[i], &fauna.animals[j], fauna.tick) {
+                        fauna.ledger.strikes_unchosen_by_prey[pf.index()] += 1;
+                    }
+                }
+            }
             // R3: a pack member calls as it strikes.
             crate::pack::call(fauna, i);
             return;
@@ -1933,7 +1972,17 @@ fn meets_capsule(
     }
     let s0 = crate::surface_m(striker.site.y, v) + striker.wall_offset_m();
     let band = (s0, s0 + h.jaw_band_height_fraction * geometry.height_m);
-    let p0 = crate::surface_m(prey.site.y, v) + prey.wall_offset_m();
+    // A body off the ground (perched, flying, climbing, gliding) has its base at its
+    // pose's height; a walker's is its support face's top.
+    let p0 = if matches!(
+        prey.mobility.mode,
+        crate::MobilityMode::Perched | crate::MobilityMode::Fly | crate::MobilityMode::Climb | crate::MobilityMode::Glide
+    ) && prey.pose.y_m.is_finite()
+    {
+        prey.pose.y_m
+    } else {
+        crate::surface_m(prey.site.y, v) + prey.wall_offset_m()
+    };
     let body = (p0, p0 + pg.height_m);
     body.0 < band.1 && band.0 < body.1
 }
@@ -1967,12 +2016,15 @@ fn prey_in_capsule(
     );
     // The pack seam (R3): a pack member's window is its nearby adult packmates' body.
     let window = crate::pack::window_body(fauna, i, ring);
+    // D2b: a patroller strikes only a prey its attack choice accepts this window.
+    let choosy = fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(a.id);
     let mut best: Option<(f64, u64)> = None;
     for o in &fauna.animals {
         if o.id == a.id
             || o.mobility.climb.is_some()
             || !crate::predation::is_prey_in_window(&fauna.config, a, o, window)
             || !meets_capsule(&fauna.config, view, a, geometry, h, jaw, tip, o)
+            || (choosy && fauna.config.hunt.strike_chosen_only && !crate::hunt::accepts(&fauna.config, a, o, fauna.tick))
         {
             continue;
         }
@@ -2642,6 +2694,15 @@ fn assimilate(
     let mut budget = Budget::new(assimilated, funded);
     let placed = budget.store((sc.reserve_of(a.body) - a.reserve).max(0.0));
     a.reserve += placed;
+    // The brood (D1b): a mature body earmarks its share of the income for its next clutch,
+    // up to what that clutch costs.
+    let rule = sc.reproduction;
+    if rule.brood_share > 0.0 && a.body >= sc.birth_body {
+        let target = rule.brood_target(sc, a.body);
+        if a.reproduction.brood < target {
+            a.reproduction.brood = (a.reproduction.brood + rule.brood_share * placed).min(target);
+        }
+    }
     let respired = unfunded + budget.close();
 
     // Energy: the density of what was eaten, so nothing is created for any food.
@@ -3034,6 +3095,7 @@ fn newborn(
         eating: false,
         emergency: false,
         bout: None,
+        hunt: crate::HuntMemory::default(),
     }
 }
 
@@ -3085,7 +3147,9 @@ fn lay(
     if rule.clutch_max > 0 {
         let wait = rule.clutch_hold_max_ticks();
         let a = &mut fauna.animals[i];
-        if wait > 0 && rule.clutch_for(a.reserve) < rule.clutch_max && a.reproduction.clutch_wait_ticks < wait {
+        // Full: what this body's own reserve cap can pay for, at most `clutch_max` (D1b).
+        let full = rule.full_clutch(sc.reserve_of(a.body));
+        if wait > 0 && rule.clutch_for(a.reserve) < full && a.reproduction.clutch_wait_ticks < wait {
             a.reproduction.clutch_wait_ticks += 1;
             return;
         }
@@ -3156,6 +3220,8 @@ fn lay(
         mineral,
         energy,
     } = take_from_reserve(a, cost);
+    // The clutch is paid out of the brood first (D1b).
+    a.reproduction.brood = (a.reproduction.brood - paid).max(0.0).min(a.reserve);
     a.reproduction.given += paid;
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
@@ -3495,7 +3561,10 @@ fn dormant_eggs(
                 nearest_adult = Some(nearest_adult.map_or(dist, |n: f64| n.min(dist)));
             }
             let prey = phys.hunter.is_some_and(|h| h.hunts(f));
+            // Footfall is feet on the ground: a flyer aloft or a glider in the air makes none.
+            let on_foot = !matches!(a.mobility.mode, crate::MobilityMode::Fly | crate::MobilityMode::Glide);
             if prey
+                && on_foot
                 && dist <= pc.footfall_radius_m
                 && crate::tremor_of(a, dist, pc.tremor_near_m) >= pc.footfall_tremor_min
             {
@@ -3746,6 +3815,9 @@ mod circadian_tests;
 #[path = "detritivore_tests.rs"]
 mod detritivore_tests;
 #[cfg(test)]
+#[path = "generation_tests.rs"]
+mod generation_tests;
+#[cfg(test)]
 #[path = "dung_tests.rs"]
 mod dung_tests;
 #[cfg(test)]
@@ -3772,3 +3844,6 @@ mod night_survival_tests;
 #[cfg(test)]
 #[path = "gut_tests.rs"]
 mod gut_tests;
+#[cfg(test)]
+#[path = "hunt_tests.rs"]
+mod hunt_tests;

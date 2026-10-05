@@ -1,0 +1,10 @@
+# Lanternjaw D2b arm: D2 as built (2026-10-05, 848419bd): attack preference on absolute
+# contact over the exploration floor 0.15, a day-long search image, and any size-eligible
+# prey in the strike capsule struck. Branches from saves founded under
+# `../patch-hunters.toml` (hunter_study found); D2b is that file itself.
+base = "../patch-hunters.toml"
+
+[fauna.hunt]
+share_switching = false
+strike_chosen_only = false
+search_memory_s = 7200.0

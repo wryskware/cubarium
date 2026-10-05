@@ -131,7 +131,10 @@ const DAILY_SEEDPORTER: f64 = 0.08;
 const DAILY_FRONDGRAZER: f64 = 0.06;
 const DAILY_LOFTSTRIDER: f64 = 0.04;
 const DAILY_CHORISTER: f64 = 0.08;
-const DAILY_LANTERNJAW: f64 = 0.04;
+// The detritus web D2 (Wrysk 2026-10-05: "a little more active"): an active small
+// predator needs more than the P1 ambusher's 0.04, between the shredder band and the
+// grazer (the proposal's 0.06-0.08).
+const DAILY_LANTERNJAW: f64 = 0.07;
 const DAILY_SHREDDER: f64 = 0.03;
 const DAILY_CAPGNAWER: f64 = 0.03;
 const DAILY_RIPPLE_SNAIL: f64 = 0.02;
@@ -834,11 +837,12 @@ impl Hunter {
     pub const LANTERNJAW: Hunter = Hunter {
         // Shredder, grazer and (roster R1) the capgnawer; the size window decides. The
         // loftstrider (4) is on no list until the chorister.
-        // The ripple-snail (5, roster R2b) is on no hunter's list.
-        // The bellwing (6, F1) is on no hunter's list.
+        // The ripple-snail (5) and the bellwing (6) since the detritus web D2 (Wrysk
+        // 2026-10-05: "lanternjaws can eat snails"; a bellwing "if they catch one on the
+        // ground or in reach"): the bellwing only at rest ([`crate::is_prey_of`]).
         // The seedporter (7, F3) is on it, but only while grounded ([`crate::is_prey_of`]).
         // The chorister (8, roster R3) is on no lanternjaw's list.
-        prey: [true, true, false, true, false, false, false, true, false],
+        prey: [true, true, false, true, false, true, true, true, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
@@ -890,10 +894,24 @@ pub struct Gut {
     /// before it wants food again. 0.1.
     #[serde(default = "default_refill_gap")]
     pub refill_gap: f64,
+    /// **The gut's mass exponent** `e` (package D1b): throughput scales with body as small
+    /// animals' does. The stomach stays `k · body`, but a body of `body` digests in
+    /// `τ · (body / body_max)^(1 − e)` and bites `b · (body / body_max)^(e − 1)` per unit
+    /// body ([`Gut::throughput_factor`]), so its intake at a full stomach goes as
+    /// `body^e` and its intake per unit body falls with size (Kleiber's `e` = 0.75; gut
+    /// capacity isometric, retention time growing as `body^0.25`). The adult's numbers are
+    /// unchanged; a hatchling digests faster per unit of its body. 1: every size the
+    /// adult's per-mass gut.
+    #[serde(default = "default_mass_exponent")]
+    pub mass_exponent: f64,
 }
 
 fn default_refill_gap() -> f64 {
     REFILL_GAP
+}
+
+fn default_mass_exponent() -> f64 {
+    1.0
 }
 
 impl Gut {
@@ -907,7 +925,19 @@ impl Gut {
             s0: APPETITE_FLOOR,
             full_tolerance: FULL_TOLERANCE,
             refill_gap: REFILL_GAP,
+            mass_exponent: 1.0,
         }
+    }
+
+    /// **The throughput factor** of a body of `body` against its lineage's `body_max`:
+    /// `(body / body_max)^(e − 1)` ([`Gut::mass_exponent`]), what its digestion rate and
+    /// bite per unit body are multiplied by. 1 at `body_max`, for `e` = 1, and for a
+    /// degenerate body.
+    pub fn throughput_factor(&self, body: f64, body_max: f64) -> f64 {
+        if self.mass_exponent == 1.0 || !(body > 0.0) || !(body_max > 0.0) {
+            return 1.0;
+        }
+        (body / body_max).powf(self.mass_exponent - 1.0)
     }
 
     /// `K`, raw organic matter, for a body of `body`.
@@ -1155,8 +1185,11 @@ impl FounderPhysiology {
                     birth_body: 0.021,
                     // Unread by an egg-layer; one egg, so the validator's floor holds.
                     birth_cost: 0.005,
-                    // §2.6: an adult grazer carcass fills it.
-                    reserve_cap: 1.0,
+                    // The detritus web D2: small frequent meals, not one grazer (P1's 1.0):
+                    // 0.6 of the body holds about eight and a half days of its need, and
+                    // still pays its whole clutch above the floor
+                    // ([`Reproduction::DORMANT_EGGS_PLACEHOLDER`]).
+                    reserve_cap: 0.6,
                     drown_depth_m: 0.2,
                     energy_density: 2.0,
                     reproduction: Reproduction::DORMANT_EGGS_PLACEHOLDER,
@@ -1467,6 +1500,9 @@ impl FounderPhysiology {
                 // 0.005 at its 0.05), then × r with the other stocks.
                 core.reproduction.surplus_floor *= lj.core.body_max / 0.05;
                 core.birth_cost = 2.0 * core.body_min;
+                // The P1 lanternjaw's reserve cap, which the chorister was built on: the
+                // detritus web's smaller lanternjaw cap is the lanternjaw's alone.
+                core.reserve_cap = 1.0;
                 core.scale_mass(CHORISTER_VOLUME_RATIO);
                 core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
                 FounderPhysiology {
@@ -1482,9 +1518,10 @@ impl FounderPhysiology {
                     active: crate::Activity::Diurnal,
                     // The lanternjaw's strike table, no lure, its own list (§2.14): the
                     // frondgrazer, the loftstrider (only a pack's window takes an adult),
-                    // the lanternjaw, and a grounded seedporter.
+                    // the lanternjaw, a grounded seedporter, and (the detritus web D2) a
+                    // bellwing at rest in reach.
                     hunter: Some(Hunter {
-                        prey: [false, true, true, false, true, false, false, true, false],
+                        prey: [false, true, true, false, true, false, true, true, false],
                         lure_power: 0.0,
                         ..Hunter::LANTERNJAW
                     }),

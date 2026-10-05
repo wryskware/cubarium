@@ -286,12 +286,12 @@ fn the_r2b_physiology_table_scales_the_shredders() {
     // Founding.
     assert_eq!((snail.founding, snail.founding_site), (Founding::Bodies, FoundingSite::AtFood));
 
-    // Prey: on no hunter's list.
+    // Prey: the lanternjaw's alone since the detritus web D2 ("lanternjaws can eat snails").
     assert!(snail.hunter.is_none());
-    assert!(!Hunter::LANTERNJAW.hunts(SNAIL));
+    assert!(Hunter::LANTERNJAW.hunts(SNAIL));
     for f in Founder::ALL {
         if let Some(h) = FounderPhysiology::frozen(f).hunter {
-            assert!(!h.hunts(SNAIL), "{f:?} does not hunt the snail");
+            assert_eq!(h.hunts(SNAIL), f == Founder::Lanternjaw, "{f:?} and the snail");
         }
     }
 

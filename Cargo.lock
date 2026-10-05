@@ -714,6 +714,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cubarium-webmodel"
+version = "0.1.0"
+dependencies = [
+ "cubarium-voxel-fauna",
+ "cubarium-voxel-flora",
+ "cubarium-voxel-sim",
+ "serde",
+]
+
+[[package]]
 name = "cube-proto"
 version = "0.1.0"
 dependencies = [

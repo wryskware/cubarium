@@ -1,0 +1,18 @@
+# Generation-time arm (D1b) "rate": the branch plus a faster gut for the two gut-limited
+# detritivores (the littershredder and the capgnawer; the film-limited snail is left
+# alone). The arithmetic: the young-shredder probe (young_budget) puts hatch -> first
+# clutch at about 290 min with the structure alone, the gut ceiling setting both
+# maturation and the brood's fill, and both scale as 1 / throughput; 2 world days less
+# the hold (240 - 7 min) needs about 1.25x the throughput: digestion time 120 -> 96 s,
+# the bite 2k / tau with it. Founded and run under this file from minute 0.
+base = "../patch.toml"
+
+[fauna.founders.littershredder]
+gut.digestion_s.litter = 96.0
+gut.digestion_s.carrion = 96.0
+gut.bite_per_body_s = 0.00041666666666666666
+
+[fauna.founders.capgnawer]
+gut.digestion_s.cap_tissue = 96.0
+gut.digestion_s.litter = 96.0
+gut.bite_per_body_s = 0.00041666666666666666

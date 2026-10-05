@@ -1,0 +1,13 @@
+# Generation-time arm (D1b) "brood": the brood and a full clutch first for all three
+# detritivores; the adult's per-mass gut at every size (mass exponent 1, as on main).
+# Founded and run under this file from minute 0.
+base = "../patch.toml"
+
+[fauna.founders.littershredder]
+gut.mass_exponent = 1.0
+
+[fauna.founders.capgnawer]
+gut.mass_exponent = 1.0
+
+[fauna.founders."ripple-snail"]
+gut.mass_exponent = 1.0

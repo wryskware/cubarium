@@ -103,6 +103,15 @@ pub(crate) fn is_prey_in_window(
     if config.founder(pf).glider.is_some() && prey.mobility.mode != crate::MobilityMode::Ground {
         return false;
     }
+    // A flyer (the bellwing, the detritus web D2) is prey only at rest — perched or on the
+    // ground, never in flight or dropping; whether it is in reach is the strike capsule's
+    // geometry, against its base where it rests.
+    if config.founder(pf).flight.is_some()
+        && (prey.mobility.falling
+            || !matches!(prey.mobility.mode, crate::MobilityMode::Perched | crate::MobilityMode::Ground))
+    {
+        return false;
+    }
     h.hunts(pf) && prey.body <= h.prey_max_ratio * window_body
 }
 

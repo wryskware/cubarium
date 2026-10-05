@@ -1,0 +1,19 @@
+# Lanternjaw D2 arm: main, the 2026-10-05 lanternjaw (the P1 crown-seeking ambush, prey
+# list without the snail and the bellwing, daily need 0.04, reserve cap 1.0, a fixed clutch
+# of three over the curiosity gate's floor). Branches from saves founded under
+# `../patch-hunters.toml` (hunter_study found); the other arm is that file itself.
+base = "../patch-hunters.toml"
+
+[fauna.hunt]
+patrol = false
+
+[fauna.founders.lanternjaw]
+hunter.prey = [true, true, false, true, false, false, false, true, false]
+core.maintenance_per_s = 5.555555555555556e-6
+motor_respiration_per_s = 5.555555555555556e-6
+core.reserve_cap = 1.0
+core.reproduction.surplus_floor = 0.2876163048484828
+core.reproduction.clutch_max = 0
+
+[fauna.founders.chorister]
+hunter.prey = [false, true, true, false, true, false, false, true, false]
