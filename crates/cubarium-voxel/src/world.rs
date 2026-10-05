@@ -153,6 +153,8 @@ pub struct VoxelView<'a> {
     /// The world's wet set — every void cell holding free water — when it is trusted
     /// (not between a load and the first step). Read through [`VoxelView::wet_cells`].
     wet: Option<&'a crate::sparse::CellSet>,
+    /// The world's sky memo; `None` for a terrain-only view, which computes every time.
+    sky_memo: Option<&'a SkyMemo>,
 }
 
 impl<'a> VoxelView<'a> {
@@ -176,6 +178,7 @@ impl<'a> VoxelView<'a> {
             weather: crate::weather::WeatherView::CLEAR_NOON,
             solid: &[],
             wet: None,
+            sky_memo: None,
         }
     }
 
@@ -606,6 +609,26 @@ impl<'a> VoxelView<'a> {
             // nothing to march through either: it is open sky.
             return if z < c.depth { 1.0 } else { 0.0 };
         }
+        // The world's memo, for a column named on the ring (an unwrapped `x` marches from
+        // another origin, so it is computed as asked).
+        if let Some(memo) = self.sky_memo
+            && (0..i64::from(c.width)).contains(&x)
+            && let Some(slot) = memo.slot(self.terrain_version, c.cells(), c.index(x, y, z))
+        {
+            use std::sync::atomic::Ordering;
+            let held = slot.load(Ordering::Relaxed);
+            if held != SKY_EMPTY {
+                return f64::from_bits(held);
+            }
+            let value = self.sky_visibility_direct(x, y, z);
+            slot.store(value.to_bits(), Ordering::Relaxed);
+            return value;
+        }
+        self.sky_visibility_direct(x, y, z)
+    }
+
+    /// [`VoxelView::sky_visibility`] computed: the hemisphere of rays.
+    fn sky_visibility_direct(&self, x: i64, y: u32, z: u32) -> f64 {
         let origin = (x as f64 + 0.5, (y + 1) as f64, z as f64 + 0.5);
         let mut total = 0.0;
         let mut open = 0.0;
@@ -825,6 +848,81 @@ pub struct World {
     /// snapshot can carry the coarse mode into a live run.
     #[serde(skip, default = "one_tick")]
     pub(crate) water_every: u32,
+    /// **A cache, not state:** every cell's [`VoxelView::sky_visibility`] once computed,
+    /// for the terrain version it was computed on ([`SkyMemo`]).
+    #[serde(skip)]
+    pub(crate) sky_memo: SkyMemo,
+}
+
+/// The value of an empty [`SkyMemo`] slot: no visibility (a fraction of weights in
+/// `0..=1`) has these bits.
+const SKY_EMPTY: u64 = u64::MAX;
+
+/// **A cache, not state**: each cell's terrain sky visibility, computed the first time a
+/// reader asks for it and read from then on, until the terrain moves (SPEED-MATURE). The
+/// hemisphere of rays is a function of `material` alone, so a slot holds exactly what the
+/// direct call returns; a `terrain_version` the slots were not filled at empties them all
+/// (once, under a lock) before any is read. Shared by every reader of the world through
+/// its views — the plants' light and gates, the animals' `Light` receptor, the vines —
+/// lock-free: a slot is one atomic word, and two readers racing to fill it store the same
+/// value. Allocated on first use; a clone or a decoded world starts empty.
+pub(crate) struct SkyMemo {
+    version: std::sync::atomic::AtomicU64,
+    slots: std::sync::OnceLock<Box<[std::sync::atomic::AtomicU64]>>,
+    reset: std::sync::Mutex<()>,
+}
+
+impl Default for SkyMemo {
+    fn default() -> Self {
+        SkyMemo {
+            version: std::sync::atomic::AtomicU64::new(u64::MAX),
+            slots: std::sync::OnceLock::new(),
+            reset: std::sync::Mutex::new(()),
+        }
+    }
+}
+
+impl Clone for SkyMemo {
+    fn clone(&self) -> Self {
+        SkyMemo::default()
+    }
+}
+
+/// A cache compares equal whatever it holds: two worlds are the same world without it.
+impl PartialEq for SkyMemo {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for SkyMemo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SkyMemo")
+    }
+}
+
+impl SkyMemo {
+    /// Cell `i`'s slot for terrain `version` in a world of `cells`, emptied first if the
+    /// slots were filled at another version.
+    fn slot(&self, version: u64, cells: usize, i: usize) -> Option<&std::sync::atomic::AtomicU64> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let slots = self
+            .slots
+            .get_or_init(|| (0..cells).map(|_| AtomicU64::new(SKY_EMPTY)).collect());
+        if slots.len() != cells || i >= cells {
+            return None;
+        }
+        if self.version.load(Ordering::Acquire) != version {
+            let _held = self.reset.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if self.version.load(Ordering::Acquire) != version {
+                for s in slots.iter() {
+                    s.store(SKY_EMPTY, Ordering::Relaxed);
+                }
+                self.version.store(version, Ordering::Release);
+            }
+        }
+        Some(&slots[i])
+    }
 }
 
 fn one_tick() -> u32 {
@@ -1059,6 +1157,7 @@ impl World {
             drainable: crate::sparse::CellSet::default(),
             void_runs: VoidRuns::default(),
             solid: SolidColumns::default(),
+            sky_memo: SkyMemo::default(),
             config,
         };
         let report = crate::generate::landform(&mut world);
@@ -1124,6 +1223,7 @@ impl World {
             drainable: crate::sparse::CellSet::default(),
             void_runs: VoidRuns::default(),
             solid: SolidColumns::default(),
+            sky_memo: SkyMemo::default(),
             material,
             config,
         };
@@ -1213,6 +1313,7 @@ impl World {
             weather: crate::weather::view(self),
             solid: &self.solid.bits,
             wet: (!self.wet.needs_rebuild(self.free.len())).then_some(&self.wet),
+            sky_memo: Some(&self.sky_memo),
         }
     }
 

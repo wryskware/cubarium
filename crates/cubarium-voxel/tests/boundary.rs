@@ -354,6 +354,36 @@ fn sky_visibility_under_a_partial_roof_is_between_open_and_roofed() {
     );
 }
 
+/// **The sky memo reads what the rays read** (SPEED-MATURE): a world's views remember each
+/// cell's sky visibility, and a terrain edit forgets it. Every cell is read twice before
+/// and twice after a roof goes on, each against a clone (which starts with nothing
+/// remembered, so computes it).
+#[test]
+fn the_sky_memo_reads_what_the_rays_read_across_a_terrain_edit() {
+    let mut w = plain_slab(16, 6, 7);
+    let every = |w: &World| {
+        let c = w.config().clone();
+        let fresh = w.clone();
+        for _ in 0..2 {
+            for z in 0..c.depth {
+                for y in 0..c.height {
+                    for x in 0..i64::from(c.width) {
+                        assert_eq!(
+                            w.view().sky_visibility(x, y, z).to_bits(),
+                            fresh.view().sky_visibility(x, y, z).to_bits(),
+                            "({x}, {y}, {z})"
+                        );
+                    }
+                }
+            }
+        }
+    };
+    every(&w);
+    roof_over(&mut w, 4..12, 2);
+    every(&w);
+    assert_eq!(w.view().sky_visibility(8, 0, 3), 0.0, "the memo forgot the open sky");
+}
+
 // ============================================================ the noise seed
 //
 // The instrument of the decisive experiment. The round-2 brief asked for identical
