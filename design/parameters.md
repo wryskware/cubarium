@@ -562,7 +562,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.springturf.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
-| `flora.springturf.alpha` | 1.5 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.springturf.alpha` | 1.8 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
 | `flora.springturf.wood_max` | 0.3 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.springturf.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.springturf.maintenance` | 0.002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
@@ -625,7 +625,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.runner_reach` | 2 | voxels (not rescaled) | [0, inf) | 1–3 | - | placeholder | columns sideways a runner daughter may root from its parent |
 | `flora.springturf.runners_overtop` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | a runner may root on a ground cover overtop_covers allows, displacing it |
 | `flora.springturf.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
-| `flora.springturf.wald_mean_m` | 1.5 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
+| `flora.springturf.wald_mean_m` | 3.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.springturf.wald_shape_m` | 0.5 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
 | `flora.springturf.burr_pickup` | 0.1 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.springturf.burr_retention_mean_m` | 3.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |

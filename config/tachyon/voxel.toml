@@ -203,7 +203,7 @@ senescence = 0.0015582388047764115
 wood_rate = 0.0016396050372662204
 
 [flora.springturf]
-alpha = 3.0
+alpha = 3.6
 cure_after_s = 1097.825
 cure_max_s = 13173.904
 assimilation = 0.013116840298129763
