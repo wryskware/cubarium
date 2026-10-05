@@ -1344,7 +1344,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1202 rows)
+**`fauna.*`** (1204 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -2532,9 +2532,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.hunt.patrol_explore` | 0.2 | fraction | [0, 1] | 0–0.6 | - | placeholder | share of patch choices made uniformly among the open patches |
 | `fauna.hunt.sight_m` | 2.0 | m | [0, inf) | 0.5–3 | - | placeholder | how far it sees a prey body ahead of it and not hidden |
 | `fauna.hunt.tremor_turn` | 0.003 | tremor units | [0, inf) | 0.0001–0.05 log | - | placeholder | the faintest prey tremor (left + right, size-eligible prey) it turns toward |
-| `fauna.hunt.search_memory_s` | 7200.0 | s | (0, inf) | 600–28800 log | - | placeholder | e-fold time of the search image's encounter memory |
-| `fauna.hunt.attack_half_s` | 60.0 | s of contact | (0, inf) | 5–600 log | - | placeholder | encounter memory at which the attack preference is halfway to 1 |
-| `fauna.hunt.attack_explore` | 0.15 | fraction | [0, 1] | 0–0.6 | - | placeholder | the attack preference for a prey it has not met lately |
+| `fauna.hunt.search_memory_s` | 600.0 | s | (0, inf) | 120–7200 log | - | placeholder | e-fold time of the search image's encounter memory |
+| `fauna.hunt.switch_exponent` | 2.0 | exponent | (0, inf) | 1–4 | - | placeholder | share switching: the attack preference is the relative encounter share to this power |
+| `fauna.hunt.attack_prior_s` | 15.0 | s of contact | [0, inf) | 1–120 log | - | placeholder | share switching: contact credited to every listed lineage before the shares are taken |
+| `fauna.hunt.attack_half_s` | 60.0 | s of contact | (0, inf) | 5–600 log | - | placeholder | D2's rule: encounter memory at which the attack preference is halfway to 1 |
+| `fauna.hunt.attack_explore` | 0.15 | fraction | [0, 1] | 0–0.6 | - | placeholder | D2's rule: the attack preference for a prey it has not met lately |
 | `fauna.hunt.attack_decision_s` | 20.0 | s | [0, inf) | 2–120 log | - | placeholder | one attack decision on one prey stands this long |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |

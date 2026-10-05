@@ -15,13 +15,16 @@
 //!    split left and right. Each lineage met is an **encounter**: it adds the sample's
 //!    seconds to the **search image** ([`HuntMemory::image`]), which decays with
 //!    [`HuntConfig::search_memory_s`].
-//! 2. **Attack preference.** Whether it takes on a prey it meets is drawn once per
-//!    [`HuntConfig::attack_decision_s`] per prey, at its [`profitability`] (the share of a
-//!    kill one strike makes) times [`attack_preference`] of that lineage's encounter
-//!    memory: the exploration floor for a prey it has not met lately,
-//!    rising toward 1 as it meets it often. A prey that turns scarce is met less, so it is
-//!    attacked less readily — the falling per-prey risk at low density Astra asked for —
-//!    and the image follows what it meets, not only what it caught.
+//! 2. **Attack preference** (D2b: switching on encounter share). Whether it takes on a
+//!    prey it meets is drawn once per [`HuntConfig::attack_decision_s`] per prey ([`accepts`]),
+//!    at its [`profitability`] (the share of a kill one strike makes) times
+//!    [`attack_preference`]: the lineage's **share** of its recent eligible encounters
+//!    relative to the most-met lineage's, raised to [`HuntConfig::switch_exponent`]. A
+//!    lineage that turns rare among the prey it meets is passed over even when met — the
+//!    falling per-prey risk at low density Astra asked for — and the image follows what it
+//!    meets, not what it caught, so a lineage that recovers is taken up again as it is met.
+//!    With [`HuntConfig::strike_chosen_only`] its strike capsule asks the same draw, so a
+//!    passed-over prey standing in reach is not struck either.
 //! 3. **Engage.** The nearest accepted prey it sees: face it, creep at the teachers'
 //!    stalk (it stays a still shape) until it is in reach, feed held — the body turns that
 //!    into a strike when the strike capsule holds prey. Failing that, the louder side of
@@ -135,8 +138,21 @@ impl HuntMemory {
 /// expectation [`HuntConfig::attack_prior_s`], over the same summed across every lineage on
 /// the hunter's list, `(m_k + m₀) / Σ_j (m_j + m₀)`. 0 for a lineage not on its list.
 pub fn encounter_share(cfg: &HuntConfig, h: &crate::Hunter, image: &[f64; Founder::COUNT], prey: Founder) -> f64 {
-    let _ = (cfg, h, image, prey);
-    0.0 // D2b stub: written before the mechanism
+    if !h.hunts(prey) {
+        return 0.0;
+    }
+    let prior = if cfg.attack_prior_s.is_finite() { cfg.attack_prior_s.max(0.0) } else { 0.0 };
+    let weight = |f: Founder| {
+        let m = image[f.index()];
+        (if m.is_finite() { m.max(0.0) } else { 0.0 }) + prior
+    };
+    let listed = Founder::ALL.iter().copied().filter(|&f| h.hunts(f));
+    let total: f64 = listed.clone().map(weight).sum();
+    if total > 0.0 {
+        weight(prey) / total
+    } else {
+        1.0 / listed.count().max(1) as f64
+    }
 }
 
 /// **The attack preference** for `prey` given the search image `image`, in `[0, 1]`.
@@ -151,8 +167,23 @@ pub fn encounter_share(cfg: &HuntConfig, h: &crate::Hunter, image: &[f64; Founde
 /// `m`, from the floor [`HuntConfig::attack_explore`] toward 1, halfway at
 /// [`HuntConfig::attack_half_s`].
 pub fn attack_preference(cfg: &HuntConfig, h: &crate::Hunter, image: &[f64; Founder::COUNT], prey: Founder) -> f64 {
-    let _ = (cfg, h, image, prey);
-    1.0 // D2b stub: written before the mechanism
+    if !cfg.share_switching {
+        let explore = cfg.attack_explore.clamp(0.0, 1.0);
+        let m = image[prey.index()];
+        let m = if m.is_finite() { m.max(0.0) } else { 0.0 };
+        let half = cfg.attack_half_s.max(1e-9);
+        return explore + (1.0 - explore) * m / (m + half);
+    }
+    let share = encounter_share(cfg, h, image, prey);
+    let top = Founder::ALL
+        .iter()
+        .map(|&f| encounter_share(cfg, h, image, f))
+        .fold(0.0f64, f64::max);
+    if !(top > 0.0) {
+        return 0.0;
+    }
+    let gamma = if cfg.switch_exponent.is_finite() { cfg.switch_exponent.max(0.0) } else { 1.0 };
+    (share / top).clamp(0.0, 1.0).powf(gamma)
 }
 
 /// **The attack chance** of hunter `a` on prey `o` this decision window:

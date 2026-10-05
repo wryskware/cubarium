@@ -1661,8 +1661,15 @@ fn founder_act(
             });
             a.state = State::Resting;
             fauna.ledger.strikes_by_founder[founder.index()] += 1;
-            if let Some(pf) = fauna.animals.binary_search_by_key(&prey, |p| p.id).ok().and_then(|j| fauna.animals[j].founder) {
-                fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
+            if let Ok(j) = fauna.animals.binary_search_by_key(&prey, |p| p.id) {
+                if let Some(pf) = fauna.animals[j].founder {
+                    fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
+                    // D2b readout: a patroller's strike its choice did not accept.
+                    let choosy = fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(fauna.animals[i].id);
+                    if choosy && !crate::hunt::accepts(&fauna.config, &fauna.animals[i], &fauna.animals[j], fauna.tick) {
+                        fauna.ledger.strikes_unchosen_by_prey[pf.index()] += 1;
+                    }
+                }
             }
             // R3: a pack member calls as it strikes.
             crate::pack::call(fauna, i);
@@ -2026,12 +2033,15 @@ fn prey_in_capsule(
     );
     // The pack seam (R3): a pack member's window is its nearby adult packmates' body.
     let window = crate::pack::window_body(fauna, i, ring);
+    // D2b: a patroller strikes only a prey its attack choice accepts this window.
+    let choosy = fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(a.id);
     let mut best: Option<(f64, u64)> = None;
     for o in &fauna.animals {
         if o.id == a.id
             || o.mobility.climb.is_some()
             || !crate::predation::is_prey_in_window(&fauna.config, a, o, window)
             || !meets_capsule(&fauna.config, view, a, geometry, h, jaw, tip, o)
+            || (choosy && fauna.config.hunt.strike_chosen_only && !crate::hunt::accepts(&fauna.config, a, o, fauna.tick))
         {
             continue;
         }

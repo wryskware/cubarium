@@ -3,7 +3,7 @@
 //! patrolling lanternjaw live on the booming small prey, and does it spare the rare ones?
 //!
 //! ```text
-//! hunter_study found seed=N save=DIR [minutes=120] [lanternjaws=3] [config=FILE] [set=P=V ...] [threads=T]
+//! hunter_study found seed=N save=DIR [minutes=120] [lanternjaws=3|1,3] [config=FILE] [set=P=V ...] [threads=T]
 //! hunter_study run   load=DIR/mM arm=NAME hours=H [every=10] [config=FILE] [set=...] [run=DIR ...]
 //! ```
 //!
@@ -11,7 +11,8 @@
 //!   the lanternjaw's egg bank) from founding to `minutes`, then `lanternjaws` adults
 //!   introduced on prey ground (`--introduce lanternjaw:N`'s control,
 //!   `cubarium_voxel_sim::habitat::introduce_lanternjaws`), saved (`DIR/mM`): the shared
-//!   start every arm branches from.
+//!   start every arm branches from. A list (`lanternjaws=1,3`) saves `DIR/mM_ljN` for each
+//!   count, nested: the 3-hunter save holds the 1-hunter save's hunter and two more.
 //! - `run`: branch a save under the resolved config — both layers' configs replaced by the
 //!   arm's and the heuristics reinstalled — and run `hours`, staged with `run=DIR`.
 //!
@@ -23,7 +24,8 @@
 //!   riders attached, dropped off, freed, clutches, first clutches (replacement).
 //! - `prey,` per prey lineage on its list: bodies now, mean over the window, the minimum
 //!   living and recruitable (adults) so far, kills by lanternjaws, strikes begun on it,
-//!   contact seconds (locally available, size-eligible prey met), and the **per-prey
+//!   contact seconds (locally available, size-eligible prey met), the contact seconds its
+//!   attack choice declined and strikes on a prey the choice did not accept (D2b), and the **per-prey
 //!   mortality**: kills per mean body per hour.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
 //! - At the end, `sum,` lines over the whole run.
@@ -104,7 +106,9 @@ fn found(args: &[String]) {
     let params = resolve(args);
     let seed: u64 = arg(args, "seed=").map_or(1, |s| s.parse().unwrap());
     let minutes: u64 = arg(args, "minutes=").map_or(120, |m| m.parse().unwrap());
-    let lanternjaws: usize = arg(args, "lanternjaws=").map_or(3, |m| m.parse().unwrap());
+    // `lanternjaws=1,3`: one save per count, nested (the later count adds to the earlier's).
+    let mut lanternjaws: Vec<usize> = arg(args, "lanternjaws=").map_or(vec![3], |m| m.split(',').map(|n| n.parse().unwrap()).collect());
+    lanternjaws.sort_unstable();
     let dir = Path::new(arg(args, "save=").expect("save=DIR"));
     let wc = params.world.clone();
     let founded = cubarium::voxel::found(
@@ -130,16 +134,24 @@ fn found(args: &[String]) {
             return;
         }
     }
-    if lanternjaws > 0 {
-        match sim.with_layers_mut(|w, fl, fa| cubarium_voxel_sim::habitat::introduce_lanternjaws(w, fl, fa, lanternjaws)) {
-            Ok(ids) => eprintln!("introduced {} lanternjaws at minute {minutes}", ids.len()),
-            Err(e) => eprintln!("no lanternjaws introduced: {e}"),
+    let single = lanternjaws.len() == 1;
+    let mut have = 0usize;
+    for n in lanternjaws {
+        let more = n.saturating_sub(have);
+        if more > 0 {
+            match sim.with_layers_mut(|w, fl, fa| cubarium_voxel_sim::habitat::introduce_lanternjaws(w, fl, fa, more)) {
+                Ok(ids) => {
+                    have += ids.len();
+                    eprintln!("introduced {} lanternjaws at minute {minutes} ({have} in all)", ids.len());
+                }
+                Err(e) => eprintln!("no lanternjaws introduced: {e}"),
+            }
         }
+        let at = if single { dir.join(format!("m{minutes}")) } else { dir.join(format!("m{minutes}_lj{n}")) };
+        let (w, fl, fa) = sim.layers();
+        cubarium_voxel_sim::saved::save(&at, w, fl, fa, minutes).unwrap_or_else(|e| panic!("save: {e}"));
+        println!("saved,{seed},{},{}", at.display(), counts(sim.fauna()));
     }
-    let at = dir.join(format!("m{minutes}"));
-    let (w, fl, fa) = sim.layers();
-    cubarium_voxel_sim::saved::save(&at, w, fl, fa, minutes).unwrap_or_else(|e| panic!("save: {e}"));
-    println!("saved,{seed},{},{}", at.display(), counts(sim.fauna()));
 }
 
 /// `probe load=DIR`: every lanternjaw's state in a save, one line each.
@@ -305,10 +317,12 @@ fn prey_line(a: &FaunaLedger, b: &FaunaLedger, f: Founder, body_ticks: u64, tick
     let kills = b.departed_founder(f, Departure::Killed { by: LJ }) - a.departed_founder(f, Departure::Killed { by: LJ });
     let strikes = b.strikes_on_by_founder[i] - a.strikes_on_by_founder[i];
     let contact = b.hunt_encounter_s_by_prey[i] - a.hunt_encounter_s_by_prey[i];
+    let declined = b.hunt_declined_s_by_prey[i] - a.hunt_declined_s_by_prey[i];
+    let unchosen = b.strikes_unchosen_by_prey[i] - a.strikes_unchosen_by_prey[i];
     let mean_n = if ticks > 0 { body_ticks as f64 / ticks as f64 } else { f64::NAN };
     let hours = ticks as f64 / f64::from(TICK_HZ) / 3600.0;
     let mortality = if mean_n > 0.0 && hours > 0.0 { kills as f64 / mean_n / hours } else { f64::NAN };
-    format!("mean_n={mean_n:.2},kills={kills},strikes_on={strikes},contact_s={contact:.0},mortality_per_h={mortality:.4}")
+    format!("mean_n={mean_n:.2},kills={kills},strikes_on={strikes},unchosen={unchosen},contact_s={contact:.0},declined_s={declined:.0},mortality_per_h={mortality:.4}")
 }
 
 #[allow(clippy::too_many_arguments)]
