@@ -167,8 +167,11 @@ fn main() {
         let ls: Vec<f64> = faces.iter().step_by(stride).map(|f| face_light(vc, f.face.dir, sky(f.face))).collect();
         let light = ls.iter().sum::<f64>() / ls.len().max(1) as f64;
         let dark = ls.iter().filter(|&&l| l < pay).count() as f64 / ls.len().max(1) as f64;
-        // The drink's ask at full moisture against what the root got last tick.
-        let ask = vc.transpiration_m3_per_s * leaf * cubarium_voxel::DT;
+        // The drink's ask at full moisture against what the root got last plant step.
+        let ask = vc.transpiration_m3_per_s
+            * leaf
+            * cubarium_voxel::DT
+            * f64::from(flora.config().step_every.max(1));
         eprintln!(
             "vine {} lineage {} root ({},{},{}) {:?} root_face {:?} faces {} light {:.2} below_pay {:.2} leaf {:.1} drank/ask {:.3} water {:.3} reserve {:.4} dormant {}",
             v.id,
