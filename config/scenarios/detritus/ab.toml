@@ -1,0 +1,25 @@
+# Detritus web D1 arm: A+B, stay on food and dark-active, on the old breeding rule (no clutch from surplus, no nest brake).
+# Branches from the patch saves founded under `baseline.toml` (detritus_study found).
+base = "../patch.toml"
+
+[fauna.founders.littershredder]
+core.birth_body = 0.375
+core.body_min = 0.09375
+core.reproduction.egg_organic = 0.12
+core.reproduction.surplus_floor = 0.025121007560289194
+core.reproduction.clutch_max = 0
+core.reproduction.nest_radius_m = 0.0
+[fauna.founders.capgnawer]
+core.birth_body = 0.6384
+core.body_min = 0.1596
+core.reproduction.egg_organic = 0.20428799999999997
+core.reproduction.surplus_floor = 0.03192
+core.reproduction.clutch_max = 0
+core.reproduction.nest_radius_m = 0.0
+[fauna.founders."ripple-snail"]
+core.birth_body = 0.1455552
+core.body_min = 0.0363888
+core.reproduction.egg_organic = 0.046577664
+core.reproduction.surplus_floor = 0.0072777599999999994
+core.reproduction.clutch_max = 0
+core.reproduction.nest_radius_m = 0.0

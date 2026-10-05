@@ -600,6 +600,10 @@ pub struct BlindForager {
     wander: Wander,
     /// Samples left in the current escape.
     escape: u32,
+    /// Whether the mouth tasted food on the last sample (stay on food), and the samples
+    /// left of the turn back after leaving an exhausted patch.
+    on_food: bool,
+    turn_back: u32,
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     chem: crate::manifest::Module,
@@ -634,6 +638,8 @@ impl BlindForager {
             turn_bias: 1.0,
             wander: Wander::default(),
             escape: 0,
+            on_food: false,
+            turn_back: 0,
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
             chem,
@@ -693,9 +699,35 @@ impl Controller for BlindForager {
         };
         if let Some((forward, turn)) = escape(&cfg, &mut self.escape, o[7] < cfg.motor_refused, away) {
             self.wander.interrupt(&cfg);
+            self.on_food = false;
             return Response::Bounded(Actions {
                 forward,
                 turn,
+                feed,
+            });
+        }
+        // **Stay on food** (the detritus web, §3.1A): tasting food, it holds still and
+        // feeds; the face under its mouth falling below the gate is an exhausted patch,
+        // and it walks on with a short turn back toward where the food was.
+        if feed > 0.5 {
+            self.on_food = true;
+            self.turn_back = 0;
+            self.wander.interrupt(&cfg);
+            return Response::Bounded(Actions {
+                forward: cfg.forage_stay_forward.clamp(0.0, 1.0),
+                turn: 0.0,
+                feed,
+            });
+        }
+        if std::mem::take(&mut self.on_food) {
+            self.turn_back = cfg.forage_turn_back_samples;
+        }
+        if self.turn_back > 0 && !front_blocked {
+            self.turn_back -= 1;
+            self.wander.interrupt(&cfg);
+            return Response::Bounded(Actions {
+                forward,
+                turn: self.turn_bias * cfg.blind_turn,
                 feed,
             });
         }
@@ -742,6 +774,8 @@ impl Controller for BlindForager {
         self.turn_bias = 1.0;
         self.wander = Wander::default();
         self.escape = 0;
+        self.on_food = false;
+        self.turn_back = 0;
     }
 
     fn flees(&self) -> bool {

@@ -564,12 +564,25 @@ pub enum Activity {
     /// Awake in the twilight of either end of the day: daylight strictly inside
     /// [`LifeConfig::twilight_lo`]..[`LifeConfig::twilight_hi`].
     Crepuscular,
+    /// **Dark-active** (the detritus web, 2026-10-05, §3.1B): awake while its **own face**
+    /// is dark — the face's terrain sky visibility × daylight below
+    /// [`LifeConfig::day_line`] — so at night, and by day under an overhang, in a cave or a
+    /// hall. Photonegative rather than clock-bound, like a woodlouse. In open sky it is
+    /// the nocturnal rhythm; read without a face ([`Activity::awake`]) it is too.
+    DarkActive,
 }
 
 impl Activity {
     /// Whether this rhythm is awake at `daylight` (0 night, 1 full day), the day's lines
     /// being `life`'s. With the clock off (`clock_on` false) every rhythm is awake.
     pub fn awake(self, clock_on: bool, daylight: f64, life: &LifeConfig) -> bool {
+        self.awake_under(clock_on, daylight, 1.0, life)
+    }
+
+    /// [`Activity::awake`] on a face whose terrain sky visibility is `sky` (0 closed, 1
+    /// open): only [`Activity::DarkActive`] reads it, as the light at the face,
+    /// `sky × daylight`.
+    pub fn awake_under(self, clock_on: bool, daylight: f64, sky: f64, life: &LifeConfig) -> bool {
         if !clock_on {
             return true;
         }
@@ -578,7 +591,13 @@ impl Activity {
             Activity::Diurnal => daylight > life.day_line,
             Activity::Nocturnal => daylight < life.day_line,
             Activity::Crepuscular => daylight > life.twilight_lo && daylight < life.twilight_hi,
+            Activity::DarkActive => sky.clamp(0.0, 1.0) * daylight < life.day_line,
         }
+    }
+
+    /// Whether this rhythm reads the light at its face ([`Activity::awake_under`]'s `sky`).
+    pub fn reads_face_light(self) -> bool {
+        self == Activity::DarkActive
     }
 }
 
@@ -1230,6 +1249,14 @@ pub struct ReproductionState {
     /// lost (`design/handoffs/cotrain-stage0-2026-10-01.md` §1).
     #[serde(default)]
     pub given: f64,
+    /// **Born in the world** (from a clutch, a gestation or the egg bank), not introduced
+    /// or founded: the bodies whose first clutch counts as replacement.
+    #[serde(default)]
+    pub native: bool,
+    /// Ticks before a body refused a nest site, or held by the body ceiling, tries to
+    /// lay again ([`Reproduction::nest_retry_s`]).
+    #[serde(default)]
+    pub retry_ticks: u64,
 }
 
 /// An offspring package the parent has already paid for and cannot spend.
@@ -1347,11 +1374,44 @@ pub struct Reproduction {
     /// its face to exceed this, organic units: 0, "any litter at all".
     #[serde(default)]
     pub litter_min: f64,
+    /// **The clutch from surplus** (the detritus web, §3.1C with Astra's correction): the
+    /// most eggs one clutch can hold, count. **0 keeps the fixed clutch** of
+    /// [`Reproduction::clutch_size`]. Above 0, an egg-layer is eligible on **one affordable
+    /// egg** (`egg_organic + surplus_floor`), and at laying its clutch is what the reserve
+    /// above the floor pays for, `floor((reserve − surplus_floor) / egg_organic)`, at most
+    /// this ([`Reproduction::clutch_for`]); a clutch of none is not laid. Fecundity then
+    /// follows condition and, through the reserve cap, body size.
+    #[serde(default)]
+    pub clutch_max: u32,
+    /// **Nest sites** (§3.1D, a crowding brake on recruitment): the radius, metres, around
+    /// the laying face within which an egg-layer counts its own lineage — living bodies of
+    /// any age and the eggs still waiting to hatch. 0 turns the brake off.
+    #[serde(default)]
+    pub nest_radius_m: f64,
+    /// The most of its own lineage (bodies and unhatched eggs, itself not counted) a body
+    /// may lay among within [`Reproduction::nest_radius_m`], count: more refuses the
+    /// clutch, which costs nothing, and the body tries again after
+    /// [`Reproduction::nest_retry_s`]. Hatchlings stay counted while they grow up near the
+    /// site, so the brake holds through recruitment, not just through incubation.
+    #[serde(default)]
+    pub nest_crowd_max: u32,
+    /// Seconds a body refused a nest site (or held by the body ceiling compute guard)
+    /// waits before it tries to lay again; its surplus keeps standing.
+    #[serde(default = "default_nest_retry_s")]
+    pub nest_retry_s: f64,
 }
 
 fn default_surplus_share() -> f64 {
     SURPLUS_SHARE
 }
+
+fn default_nest_retry_s() -> f64 {
+    NEST_RETRY_S
+}
+
+/// The shipped [`Reproduction::nest_retry_s`]: a minute, long beside a step and short
+/// beside the hold.
+pub const NEST_RETRY_S: f64 = 60.0;
 
 /// The shipped [`Reproduction::surplus_share`].
 pub const SURPLUS_SHARE: f64 = 0.8;
@@ -1460,6 +1520,10 @@ impl Reproduction {
         dormant: false,
         surplus_share: SURPLUS_SHARE,
         litter_min: 0.0,
+        clutch_max: 0,
+        nest_radius_m: 0.0,
+        nest_crowd_max: 0,
+        nest_retry_s: NEST_RETRY_S,
     };
 
     /// The littershredder's egg placeholders.
@@ -1490,6 +1554,10 @@ impl Reproduction {
         dormant: false,
         surplus_share: SURPLUS_SHARE,
         litter_min: 0.0,
+        clutch_max: 0,
+        nest_radius_m: 0.0,
+        nest_crowd_max: 0,
+        nest_retry_s: NEST_RETRY_S,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13): a clutch of 3 buried eggs laid
@@ -1511,15 +1579,44 @@ impl Reproduction {
         dormant: true,
         surplus_share: SURPLUS_SHARE,
         litter_min: 0.0,
+        clutch_max: 0,
+        nest_radius_m: 0.0,
+        nest_crowd_max: 0,
+        nest_retry_s: NEST_RETRY_S,
     };
 
-    /// What one offspring package costs the parent's reserve: a gestation's `birth_cost`
-    /// or a whole clutch.
+    /// What the **smallest** offspring package costs the parent's reserve, the price
+    /// eligibility asks for: a gestation's `birth_cost`, a fixed clutch, or — with a clutch
+    /// from surplus ([`Reproduction::clutch_max`] above 0) — one egg.
     pub fn package_cost(&self, sc: &SpeciesConfig) -> f64 {
         match self.mode {
             BirthMode::Gestation => sc.birth_cost,
+            BirthMode::Eggs if self.clutch_max > 0 => self.egg_organic,
             BirthMode::Eggs => f64::from(self.clutch_size) * self.egg_organic,
         }
+    }
+
+    /// **The eggs a clutch holds** for a parent with `reserve`: the fixed
+    /// [`Reproduction::clutch_size`], or with a clutch from surplus the eggs the reserve
+    /// above the floor pays for, `floor((reserve − surplus_floor) / egg_organic)`, between
+    /// 0 (not one affordable) and [`Reproduction::clutch_max`].
+    pub fn clutch_for(&self, reserve: f64) -> u32 {
+        if self.clutch_max == 0 {
+            return self.clutch_size;
+        }
+        if !(self.egg_organic > 0.0) || !(reserve.is_finite()) {
+            return 0;
+        }
+        let paid = ((reserve - self.surplus_floor) / self.egg_organic).floor();
+        if !(paid >= 1.0) {
+            return 0;
+        }
+        (paid.min(f64::from(self.clutch_max))) as u32
+    }
+
+    /// Ticks a refused laying waits ([`Reproduction::nest_retry_s`]).
+    pub fn retry_ticks(&self) -> u64 {
+        cubarium_voxel::ticks_at_least_one(self.nest_retry_s)
     }
 
     /// The reserve a body has to hold to be in surplus: the package plus the floor.
@@ -1792,7 +1889,24 @@ pub struct FaunaConfig {
     pub teachers: TeacherConfig,
     /// How a fresh world is founded ([`FoundingConfig`]).
     pub founding: FoundingConfig,
+    /// **The body ceiling, a compute guard and not ecology** (the detritus web, §3.5;
+    /// Wrysk 2026-10-05): living bodies one lineage may hold, count. At it, a body that
+    /// would lay or conceive does not, the refusal is booked
+    /// ([`FaunaLedger::ceiling_refusals_by_founder`]) and logged on stderr, and it tries
+    /// again after its lineage's [`Reproduction::nest_retry_s`]. Set far above any
+    /// population the ecology should hold: every activation means the ecological brakes
+    /// (crowding, predation, food) failed. 0 turns the guard off.
+    #[serde(default = "default_lineage_body_ceiling")]
+    pub lineage_body_ceiling: u32,
 }
+
+fn default_lineage_body_ceiling() -> u32 {
+    LINEAGE_BODY_CEILING
+}
+
+/// The shipped [`FaunaConfig::lineage_body_ceiling`]: ten times the largest lineage the
+/// desk terrarium has carried (the bellwing's ~250, 2026-10-05).
+pub const LINEAGE_BODY_CEILING: u32 = 2500;
 
 /// **The shipped org-unit mass scale** (Wrysk, 2026-09-29; audit
 /// `design/7_Research/ecology-parameter-audit-2026-09-28.md` §1.4): both lineages are
@@ -1820,6 +1934,7 @@ impl Default for FaunaConfig {
             cue: CueConfig::default(),
             teachers: TeacherConfig::default(),
             founding: FoundingConfig::default(),
+            lineage_body_ceiling: LINEAGE_BODY_CEILING,
         }
     }
 }
@@ -2514,6 +2629,38 @@ pub struct FaunaLedger {
     /// denominator).
     #[serde(default)]
     pub awake_ticks_by_founder: [u64; Founder::COUNT],
+    /// **The detritus web's readouts** (2026-10-05; counters only, no rule reads them).
+    /// Ticks a free founder body was alive, asleep or awake: the awake share's denominator.
+    #[serde(default)]
+    pub alive_ticks_by_founder: [u64; Founder::COUNT],
+    /// Awake ticks a dark-active body owed to the dark at its face: the daylight was at or
+    /// above the day line, so a nocturnal body would have slept.
+    #[serde(default)]
+    pub dark_awake_ticks_by_founder: [u64; Founder::COUNT],
+    /// Controller samples in which a body driven by its heuristic held still to feed (feed
+    /// on, forward at most the teachers' `forage_stay_forward`): the stay-on-food reflex.
+    #[serde(default)]
+    pub feed_still_ticks_by_founder: [u64; Founder::COUNT],
+    /// Clutches laid, by lineage (eggs over clutches is the mean clutch).
+    #[serde(default)]
+    pub clutches_by_founder: [u64; Founder::COUNT],
+    /// **Replacement**: bodies born in the world that laid their first clutch (or bore
+    /// their first young), and the ages they did it at, summed, ticks — the hatch to
+    /// first clutch time.
+    #[serde(default)]
+    pub first_clutches_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub first_clutch_age_ticks_by_founder: [u64; Founder::COUNT],
+    /// Layings the nest-site brake refused ([`Reproduction::nest_crowd_max`]), events.
+    #[serde(default)]
+    pub nest_refusals_by_founder: [u64; Founder::COUNT],
+    /// Layings or conceptions the body ceiling compute guard refused
+    /// ([`FaunaConfig::lineage_body_ceiling`]), events. Any is a failure of the brakes.
+    #[serde(default)]
+    pub ceiling_refusals_by_founder: [u64; Founder::COUNT],
+    /// Eggs lost before hatching (face gone, flooded), by lineage.
+    #[serde(default)]
+    pub eggs_lost_by_founder: [u64; Founder::COUNT],
 }
 
 impl FaunaLedger {
@@ -2890,6 +3037,11 @@ pub struct Fauna {
     /// The next pack's id: ids are never reused.
     #[serde(default)]
     next_pack: u64,
+    /// The terrain sky visibility of the faces dark-active bodies stand on
+    /// ([`Activity::DarkActive`]), keyed by face, and the `terrain_version` it was read
+    /// against: pure terrain geometry, so derived and not saved.
+    #[serde(skip)]
+    face_sky: (Option<u64>, FxHashMap<(i64, u32, u32), f64>),
 }
 
 /// The most gut-seed void events [`Fauna`] keeps undrained.
@@ -3029,7 +3181,19 @@ impl Fauna {
             pack_paths: FxHashMap::default(),
             packs: Vec::new(),
             next_pack: 0,
+            face_sky: (None, FxHashMap::default()),
         })
+    }
+
+    /// The terrain sky visibility of face `(x, y, z)` ([`VoxelView::sky_visibility`]),
+    /// cached per face until the terrain moves.
+    pub(crate) fn face_sky(&mut self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> f64 {
+        let version = view.terrain_version;
+        if self.face_sky.0 != Some(version) {
+            self.face_sky.0 = Some(version);
+            self.face_sky.1.clear();
+        }
+        *self.face_sky.1.entry((x, y, z)).or_insert_with(|| view.sky_visibility(x, y, z))
     }
 
     /// The gut-seed voids since the last call (F3), oldest first.

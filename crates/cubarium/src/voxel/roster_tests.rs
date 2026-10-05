@@ -198,7 +198,10 @@ fn shallows() -> World {
 #[test]
 fn a_film_site_emits_a_floor_mark_whose_strength_follows_its_stock() {
     let world = shallows();
-    let mut flora = Flora::new(FloraConfig::default());
+    // No grazing refuge: this case grazes a face bare.
+    let mut fc = FloraConfig::default();
+    fc.film_graze_refuge = 0.0;
+    let mut flora = Flora::new(fc);
     assert!(flora.seed_film(&world) > 0, "film on the shallows");
     let (full, half, bare, dry) = (
         Site { x: 2, y: 2, z: 1 },

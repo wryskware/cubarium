@@ -39,10 +39,11 @@ use crate::Flora;
 // 26: a seedling's reflush answers to its seed's leaf — `SpeciesConfig::seedling_below`.
 // 27: a face holds one plant and one fungus (`FaceLayer`) — `Flora::stands` sorted by
 //     `(site, place)`, `Ground::sprouting_fungus`.
-// 28: turf-establish — the canopy gate and runner support: `Stand::support`,
+// 28: the detritus web — `FloraConfig::film_graze_refuge`.
+// 29: turf-establish — the canopy gate and runner support: `Stand::support`,
 //     `SpeciesConfig::{establish_light_margin, runner_support_s, runner_support_share}`, the
 //     ledger's canopy and support lines.
-pub const SCHEMA: u32 = 28;
+pub const SCHEMA: u32 = 29;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

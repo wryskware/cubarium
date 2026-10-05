@@ -1,0 +1,5 @@
+# Detritus web D1 arm: A+B+C+D, the shipped preset: stay on food, dark-active, earlier breeding with surplus clutches, and the nest-site brake.
+# Branches from the patch saves founded under `baseline.toml` (detritus_study found).
+base = "../patch.toml"
+
+# Nothing to override: the preset is the arm.
