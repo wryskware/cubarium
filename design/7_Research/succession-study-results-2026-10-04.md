@@ -332,3 +332,59 @@ on ground that later becomes wet, which is the opposite of Wrysk's too-damp requ
    are read on the save's own config?
 6. **Branch defaults versus arm G.** The branch defaults carry G with overtop rate 0. Which of
    these is the merge candidate?
+
+## Spread rerun on the fast maps (2026-10-04 evening)
+
+The first spread batch was void: its loads froze every animal (fixed ea139c8c). This rerun
+used `succession_study` at 7995a723, staged (`run=`, 30-min segments, a 10-min liveness
+check with `expect=` the arm's counter). **Stage A** ran on `patch`: seeds 1, 3, 5, 6, 8, 9,
+12 and 14 (terrain seed 3 is refused and founds as 4), founded under `main` to minute 120,
+then each arm for 2 h. The table gives the median [min–max] over the 8 seeds at minute 240.
+`pick` is every mechanism on, at wind mean 3.0 m and preset alpha 3.6. `off` is the same
+file as `main`, so it was not run.
+
+| arm | turf/pad edible per mature stand | edible+litter / preG | S1 under turf, h3 → h4 | burr deliveries (germinated, all seeds) |
+|---|---|---|---|---|
+| preG | 0.15 [0.07–0.30] | 1.00 | 0.00 → 0.00 | 0 |
+| main | 1.26 [0.94–1.92] | 0.74 [0.64–1.20] | 0.00 → 0.00 | 0 |
+| ot | 1.16 [0.88–1.73] | 0.71 [0.65–0.91] | 0.04 → 0.06 [0.00–0.31] | 0 |
+| wind6 | 1.31 [1.11–1.55] | 0.74 [0.65–1.29] | 0.06 → 0.14 [0.02–0.38] | 0 |
+| wind12 | 1.31 [1.19–1.56] | 0.75 [0.65–1.35] | 0.10 → 0.23 [0.15–0.41] | 0 |
+| wind24 | 1.40 [1.13–1.56] | 0.76 [0.66–1.38] | 0.14 → 0.28 [0.19–0.42] | 0 |
+| runners | 1.06 [0.72–1.63] | 0.72 [0.65–0.90] | 0.06 → 0.08 [0.00–0.36] | 0 |
+| burrs | 1.14 [0.86–1.68] | 0.74 [0.64–0.91] | 0.04 → 0.06 [0.00–0.32] | 19 [1–86] (33) |
+| all_a26 | 0.83 [0.64–0.95] | 0.85 [0.72–1.22] | 0.13 → 0.31 [0.20–0.61] | 2 [0–15] (9) |
+| all_a30 (main defaults) | 0.98 [0.82–1.10] | 0.87 [0.76–1.31] | 0.13 → 0.29 [0.18–0.60] | 28 [0–59] (19) |
+| all_a36 | 1.17 [1.08–1.35] | 0.90 [0.76–1.54] | 0.15 → 0.34 [0.21–0.54] | 42 [2–120] (42) |
+| **pick** | 1.24 [1.04–1.31] | 0.89 [0.76–1.59] | 0.19 → 0.38 [0.26–0.60] | 47 [3–219] (69) |
+
+- **Wind reach 24** (3.0 m) gave the largest S1 share of the three reaches at no cost in food.
+  **Alpha 3.6** was best of the three alphas on all three readouts. Both are now the defaults
+  on branch `spread-pick`. No arm reached the brief's targets of 1.5–2× per stand and
+  1.0–1.15× edible+litter. With every mechanism on, velvetpad fills about 500 of the about 720
+  vacant waterlogged faces, against 4 or 5 without it. Those young pads dilute the per-stand
+  mean.
+- Fauna B is within noise of preG for every lineage, on every arm (medians 0.86–1.29), except
+  the seedporter: 0.67–0.80 on the all-on arms, 2–3 of 7 seeds at ≥ 0.8.
+- **Liveness:**
+  - Seed 1 failed every arm at the first check: its seedporter was 0 m walked with one body
+    "Walking". It was rerun with `still=seedporter`.
+  - Nine all-on and burr runs failed on `burrs_picked` within the first 10 min, on seeds 1, 5,
+    6 and 8, where turf–animal contact is rare. They were rerun with the runner and overtop
+    counters, or on a 30-min check. Burrs then fired on most of those seeds (0–120 a run).
+- Coverage maps (S1 sites at minutes 120 and 240, every arm and seed) are in the session
+  scratchpad, `spread/maps2/`.
+
+**Stage B** ran on `terrarium` from the saved minute-60 starts, 2 h. The starts for seeds 2
+and 3 are the same world (seed 2 is refused and founds as 3), so there are two distinct
+worlds. Results at minute 180 (s1; s2 = s3):
+
+| arm | edible+litter / preG | turf/pad per stand | Veilhound kills (carcasses) | fauna B / preG, median over seeds |
+|---|---|---|---|---|
+| preG | 1.00 | 0.11; 0.13 | 4; 3 (5; 3) | 1.00 |
+| main | 1.28; 1.10 | 1.37; 1.59 | 6; 6 (7; 6) | bellwing 0.66, capgnawer 1.20, Veilhound 1.11, frondgrazer 1.12, littershredder 1.22, loftstrider 1.34, ripple-snail 0.95, seedporter 1.45 |
+| pick | pending | pending | pending | pending |
+
+On the terrarium starts, the first pick check (minutes 60–90) saw no runner or overtop events
+on any seed. Those minutes are the night of the 2 h day clock, when no turf seed or runner
+moves in any arm. The rerun checks to minute 130.
