@@ -53,6 +53,17 @@
 //!    species' `clonal_share`) or one seed, landed by the species' [`crate::Dispersal`]
 //!    mode into the arrival bin whose window covers this tick.
 //!
+//! The grazing defences relax after step 5 and before step 5b: nothing earlier reads
+//! them.
+//!
+//! **The step in parts** (`PlantStep`): steps 1–3 and the vines' drink wants are the
+//! **prep**, which writes the layer; steps 4 and 5's reads and plan are the **reads**,
+//! which read the layer through `&Flora` and write only the step (it carries the sky cache
+//! and the drink scratch meanwhile); the drink's withdrawal and credits **close** it; the
+//! rest is the **finish**. The overlapped schedule runs the reads beside the animals'
+//! read side, so on a plant tick the animals sense the stands as the previous step left
+//! them, less what this step's prep removed.
+//!
 //! Dropped from v1 by the brief: fruit (3c), downhill transport of litter (3f) and
 //! nutrient diffusion (3g).
 //!
@@ -147,29 +158,36 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize, clocked
     // A plan an overlapped tick left unsettled is applied first, so the ledger still
     // closes if a host switches schedules between ticks.
     settle_drink(flora, world);
-    if let Some(span) = advance(flora, clocked) {
+    if let Some(span) = advance(flora, clocked, world.tick()) {
         run(flora, Target::Now(world), threads, span);
     }
 }
 
 /// [`step`] against a read copy: the drink is planned and held for [`settle_drink`].
 pub(crate) fn step_planned(flora: &mut Flora, world: &World, threads: usize, clocked: bool) {
-    if let Some(span) = advance(flora, clocked) {
+    if let Some(span) = advance(flora, clocked, world.tick()) {
         run(flora, Target::Planned(world), threads, span);
     }
 }
 
 /// **The plant clock** ([`FloraConfig::step_every`]). Every world tick moves the
 /// counter and clears the tick's observations (receipts and deaths describe one tick);
-/// on the tick that completes a plant step it returns how many ticks that step covers.
-/// Unclocked, every tick is a plant step of one tick.
+/// on a plant step's tick it returns how many ticks that step covers. Unclocked, every
+/// tick is a plant step of one tick.
+///
+/// Clocked, the step falls on the world ticks `world_tick` that are multiples of
+/// `step_every`: the phase the coarse water keeps ([`cubarium_voxel::World::water_due`]),
+/// so with `water_every = step_every` the plant step and the coarse lateral water fall on
+/// the same tick and a schedule can run the two long phases side by side. `world_tick` is
+/// the world's clock as the caller's water read it. The step still covers every tick
+/// since the last one, so its `dt` is exact whatever the phase it started from.
 ///
 /// The counter moves **first**, so that `flora.tick` is the tick this step produces: the
 /// one whose state the caller will read when the step returns. Everything dated inside a
 /// step — an arrival bin's start, a bin's age, the germination lottery's seed — then uses
 /// one clock reading, and a bin's age at the end of the tick it landed in is zero rather
 /// than minus one.
-fn advance(flora: &mut Flora, clocked: bool) -> Option<u64> {
+fn advance(flora: &mut Flora, clocked: bool, world_tick: u64) -> Option<u64> {
     flora.tick += 1;
     // This tick's delivery receipts start empty: they are **observation and not state**,
     // they describe only the tick that is about to run, and a caller that never reads them
@@ -177,10 +195,15 @@ fn advance(flora: &mut Flora, clocked: bool) -> Option<u64> {
     flora.deliveries.clear();
     flora.death_log.clear();
     flora.since_step = flora.since_step.saturating_add(1);
-    if clocked && flora.since_step < flora.config.step_every.max(1) {
+    if clocked && !plant_tick(world_tick, flora.config.step_every) {
         return None;
     }
     Some(u64::from(std::mem::take(&mut flora.since_step)))
+}
+
+/// Whether world tick `world_tick` is a plant step's on a clock of `step_every`.
+pub(crate) fn plant_tick(world_tick: u64, step_every: u32) -> bool {
+    world_tick.is_multiple_of(u64::from(step_every.max(1)))
 }
 
 /// The seconds a plant step of `span` world ticks covers.
@@ -223,11 +246,53 @@ impl Target<'_> {
     }
 }
 
+/// One plant step in its parts, on one thread's call: [`prep`], the reads
+/// ([`PlantStep::read`]), the drink's close ([`drink_close`]) and the rest
+/// ([`finish_step`]). A schedule that overlaps the reads with the animals' calls the parts
+/// itself (`Flora::begin_planned_clocked` and its siblings).
 fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize, span: u64) {
+    cubarium_voxel::voxel_phase!(FloraStep, {
+        let mut step = prep(flora, target.world(), threads, span);
+        step.read(flora, target.world(), threads);
+        drink_close(flora, &mut step, &mut target, threads);
+        finish_step(flora, target.world(), step, threads);
+    });
+}
+
+/// **A plant step between its parts.** [`prep`] makes it; [`PlantStep::read`] fills its
+/// light and the drink's plan reading the layer through `&Flora` only — the layer's sky
+/// cache and drink scratch travel in here meanwhile, so nothing the reads write is the
+/// layer's — and [`drink_close`] hands both back and books the drink; [`finish_step`]
+/// consumes it. Not state: it lives inside one tick.
+pub struct PlantStep {
+    span: u64,
+    climate: Climate,
+    /// The stocks decomposition may draw on: what each site held as the step began.
+    pre: Vec<Pre>,
+    film_steps: u64,
+    film_sites: Vec<Site>,
+    /// The layer's sky cache, out of it from [`prep`] to [`drink_close`].
+    sky: Vec<(Site, f64)>,
+    /// The layer's drink scratch, likewise.
+    scratch: DrinkScratch,
+    /// Per stand, from the reads.
+    light: Vec<f64>,
+    film_open: Vec<f64>,
+    /// Per stand, from the drink's close.
+    moisture: Vec<Drink>,
+}
+
+impl std::fmt::Debug for PlantStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlantStep").field("span", &self.span).finish_non_exhaustive()
+    }
+}
+
+/// **The plant step's first part**, everything that removes a stand or touches what the
+/// reads read: the decomposition snapshot, terrain pruning, the sky cache's version,
+/// the cover's prep, drowning, and the vines' drink wants. Writes the layer.
+fn prep(flora: &mut Flora, world: &World, threads: usize, span: u64) -> PlantStep {
     let dt = span_dt(span);
-    // The induced grazing defence relaxes at each species' half-life
-    // (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`, B).
-    decay_defences(flora, dt);
     // The stocks decomposition is allowed to draw on: what each site held when the tick
     // started, taken before anything at all moves. Litter, dead wood and carrion deposited
     // by this tick's drownings, senescence and deaths are eligible from the next tick, per
@@ -244,58 +309,152 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize, span: u64) {
             carrion: g.carrion,
         })
         .collect();
+    cubarium_voxel::voxel_phase!(Prune, { prune_unsupported(flora, world) });
+    cubarium_voxel::voxel_phase!(SkyCache, { refresh_sky_cache(flora, world) });
+    cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
+    cubarium_voxel::voxel_phase!(Drown, { drown(flora, world, threads) });
 
-    cubarium_voxel::voxel_phase!(FloraStep, {
-        let world = target.world();
-        cubarium_voxel::voxel_phase!(Prune, { prune_unsupported(flora, world) });
-        cubarium_voxel::voxel_phase!(SkyCache, { refresh_sky_cache(flora, world) });
-        cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
-        cubarium_voxel::voxel_phase!(Drown, { drown(flora, world, threads) });
-
-        let climate = Climate {
-            dt,
-            ..Climate::of(world, flora.config.upkeep_q10)
-        };
-        // On a film tick the light phase also reads the sky and canopy over every site
-        // holding glassfilm (`film.rs`).
-        let film_steps = crate::film::film_steps(flora.tick, span);
-        let film_tick = film_steps > 0;
-        let film_sites = if film_tick {
-            crate::film::receivers(flora)
-        } else {
-            Vec::new()
-        };
-        let (light, film_open) = cubarium_voxel::voxel_phase!(Light, {
-            light_per_stand(flora, world, &film_sites, threads)
-        });
-        let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads, dt) });
-        let world = target.world();
-        let substrate =
-            cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads, dt) });
-        cubarium_voxel::voxel_phase!(Grow, {
-            grow(flora, world, &light, climate, &moisture, &substrate, threads)
-        });
-        cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world, climate, span) });
-        cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre, dt) });
-        if film_tick {
-            let open: Vec<(Site, f64)> = film_sites.into_iter().zip(film_open).collect();
-            // Timed with decomposition: the profile has no phase of its own for it.
-            cubarium_voxel::voxel_phase!(Decompose, {
-                crate::film::step(flora, world, &open, climate.daylight, film_steps)
-            });
-        }
-        cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world, span) });
-        cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world, dt) });
-        // Growth, dieback, deaths, falls and germinations have all happened: the cached
-        // crowns follow the stands they now describe.
-        cubarium_voxel::voxel_phase!(Crowns, { flora.refresh_crowns(Some(world)) });
-        #[cfg(feature = "profile")]
-        {
-            use cubarium_voxel::profile::{Count, add};
-            add(Count::Stands, flora.stands.len() as u64);
-            add(Count::GroundSites, flora.ground.len() as u64);
-        }
+    let climate = Climate {
+        dt,
+        ..Climate::of(world, flora.config.upkeep_q10)
+    };
+    // On a film tick the light phase also reads the sky and canopy over every site
+    // holding glassfilm (`film.rs`).
+    let film_steps = crate::film::film_steps(flora.tick, span);
+    let film_sites = if film_steps > 0 {
+        crate::film::receivers(flora)
+    } else {
+        Vec::new()
+    };
+    // The vines' wants, here and not in the reads: reading their root boxes also writes
+    // each vine's moisture, which the animals may read beside the reads.
+    let mut scratch = std::mem::take(&mut flora.drink.0);
+    debug_assert!(!scratch.pending, "a planned drink was never settled");
+    cubarium_voxel::voxel_phase!(Drink, {
+        let view = world.view();
+        let DrinkScratch {
+            vine_box,
+            vine_drinkable,
+            vine_wants,
+            ..
+        } = &mut scratch;
+        crate::cover::drink_wants(flora, &view, vine_box, vine_drinkable, vine_wants, dt);
     });
+    PlantStep {
+        span,
+        climate,
+        pre,
+        film_steps,
+        film_sites,
+        sky: std::mem::take(&mut flora.sky),
+        scratch,
+        light: Vec::new(),
+        film_open: Vec::new(),
+        moisture: Vec::new(),
+    }
+}
+
+impl PlantStep {
+    /// **The plant step's reads**: light, then the drink's per-stand reads, per-voxel
+    /// totals and per-voxel bounds (the plan). Reads the layer through `&Flora` and writes
+    /// only this step: the sky cache it carries and the drink scratch.
+    pub(crate) fn read(&mut self, flora: &Flora, world: &World, threads: usize) {
+        let (light, film_open) = cubarium_voxel::voxel_phase!(Light, {
+            light_per_stand(
+                &flora.config,
+                &flora.stands,
+                &mut self.sky,
+                world,
+                &self.film_sites,
+                threads,
+            )
+        });
+        self.light = light;
+        self.film_open = film_open;
+        cubarium_voxel::voxel_phase!(Drink, {
+            drink_reads(flora, &self.sky, world, threads, &mut self.scratch, self.climate.dt)
+        });
+    }
+}
+
+/// **The drink's close**: the sky cache and the scratch back in the layer, and the drink
+/// taken (the chained tick: from the live world now) or held as the plan (the overlapped
+/// tick), each stand's and vine's share credited.
+fn drink_close(flora: &mut Flora, step: &mut PlantStep, target: &mut Target<'_>, threads: usize) {
+    flora.sky = std::mem::take(&mut step.sky);
+    let mut scratch = std::mem::take(&mut step.scratch);
+    step.moisture = cubarium_voxel::voxel_phase!(Drink, {
+        drink_settle(flora, target, threads, &mut scratch)
+    });
+    flora.drink.0 = scratch;
+}
+
+/// **The plant step's last part**: defences relax, then feed, growth, the cover's growth,
+/// decomposition and the film, the seed bank, propagation and the crowns.
+fn finish_step(flora: &mut Flora, world: &World, step: PlantStep, threads: usize) {
+    let PlantStep {
+        span,
+        climate,
+        pre,
+        film_steps,
+        film_sites,
+        light,
+        film_open,
+        moisture,
+        ..
+    } = step;
+    let dt = climate.dt;
+    // The induced grazing defence relaxes at each species' half-life
+    // (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`, B). Nothing in the step
+    // before this reads it; the animals' reads beside the plant reads see it as the last
+    // step left it.
+    decay_defences(flora, dt);
+    let substrate =
+        cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads, dt) });
+    cubarium_voxel::voxel_phase!(Grow, {
+        grow(flora, world, &light, climate, &moisture, &substrate, threads)
+    });
+    cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world, climate, span) });
+    cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre, dt) });
+    if film_steps > 0 {
+        let open: Vec<(Site, f64)> = film_sites.into_iter().zip(film_open).collect();
+        // Timed with decomposition: the profile has no phase of its own for it.
+        cubarium_voxel::voxel_phase!(Decompose, {
+            crate::film::step(flora, world, &open, climate.daylight, film_steps)
+        });
+    }
+    cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world, span) });
+    cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world, dt) });
+    // Growth, dieback, deaths, falls and germinations have all happened: the cached
+    // crowns follow the stands they now describe.
+    cubarium_voxel::voxel_phase!(Crowns, { flora.refresh_crowns(Some(world)) });
+    #[cfg(feature = "profile")]
+    {
+        use cubarium_voxel::profile::{Count, add};
+        add(Count::Stands, flora.stands.len() as u64);
+        add(Count::GroundSites, flora.ground.len() as u64);
+    }
+}
+
+/// [`step_planned`] on the plant clock in its parts, for a schedule that runs the reads
+/// beside the animals' own: the clock and [`prep`], `None` on a tick that is not a plant
+/// step.
+pub(crate) fn begin_planned(flora: &mut Flora, world: &World, threads: usize) -> Option<PlantStep> {
+    let span = advance(flora, true, world.tick())?;
+    Some(cubarium_voxel::voxel_phase!(FloraStep, { prep(flora, world, threads, span) }))
+}
+
+/// The planned drink's close for [`begin_planned`]'s step: the plan is then held in the
+/// layer for `take_plan`.
+pub(crate) fn plan_drink(flora: &mut Flora, step: &mut PlantStep, world: &World, threads: usize) {
+    cubarium_voxel::voxel_phase!(FloraStep, {
+        drink_close(flora, step, &mut Target::Planned(world), threads)
+    });
+}
+
+/// The rest of [`begin_planned`]'s step.
+pub(crate) fn finish_planned(flora: &mut Flora, step: PlantStep, world: &World, threads: usize) {
+    cubarium_voxel::voxel_phase!(FloraStep, { finish_step(flora, world, step, threads) });
 }
 
 /// The fewest stands a worker is handed: under this a split costs more than it saves.
@@ -640,17 +799,13 @@ pub(crate) fn insert_sorted(stands: &mut Vec<Stand>, mut born: Vec<Stand>) {
 /// stock is the whole of `P`, its weight is one, and its area is the crown's. The
 /// authored porosity is the only new factor (`tests/layers.rs`).
 fn light_per_stand(
-    flora: &mut Flora,
+    config: &FloraConfig,
+    stands: &[Stand],
+    sky: &mut Vec<(Site, f64)>,
     world: &World,
     film: &[Site],
     threads: usize,
 ) -> (Vec<f64>, Vec<f64>) {
-    let Flora {
-        config,
-        stands,
-        sky,
-        ..
-    } = flora;
     let view = world.view();
     let voxel_m = view.config.voxel_m;
     // Every stand's foliage layers, flat: stand `j`'s are `layers[span[j].0..span[j].1]`.
@@ -1082,24 +1237,6 @@ pub(crate) struct Drink {
     pub(crate) available: f64,
 }
 
-/// Collect every stand's demand per voxel, then withdraw once per voxel and split what
-/// the core accepted proportional to demand.
-///
-/// The demands are summed per voxel into a dense per-cell scratch rather than sorted by
-/// voxel: generated stand by stand, each voxel's total adds its demands in ascending stand
-/// order — the order the sort handed them over in — and the withdrawals walk the touched
-/// voxels in ascending index order, as before, so every total, every withdrawal and every
-/// ledger sum is the sorted sweep's to the bit. Only the order a stand's own shares are
-/// added into its observational `taken_m3` differs (`the_scratch_drink_is_the_sorted_sweep`).
-fn drink(flora: &mut Flora, target: &mut Target<'_>, threads: usize, dt: f64) -> Vec<Drink> {
-    // Out of the layer for the call, so the phase can hold the layer and its scratch at
-    // once; `take` leaves empty vectors behind and allocates nothing.
-    let mut scratch = std::mem::take(&mut flora.drink.0);
-    let out = drink_with(flora, target, threads, &mut scratch, dt);
-    flora.drink.0 = scratch;
-    out
-}
-
 /// [`Flora::drink`]'s slot: the scratch, kept between ticks so a tick does not allocate
 /// and zero a world-sized array (it was a thread-local; the overlapped tick runs the plant
 /// step on whichever pool worker the executor picks, and one copy per worker is one
@@ -1310,6 +1447,7 @@ pub(crate) fn read_root_box(
 /// demand shared over its box into `chunk.bands`.
 fn drink_read(
     flora: &Flora,
+    sky: &[(Site, f64)],
     view: &VoxelView<'_>,
     range: std::ops::Range<usize>,
     chunk: &mut DrinkChunk,
@@ -1346,8 +1484,8 @@ fn drink_read(
         // light pass has filled for every stand.
         if sc.dark_sky_max > 0.0 {
             let site = stand.site;
-            let sky = match flora.sky.binary_search_by_key(&site, |e| e.0) {
-                Ok(k) => flora.sky[k].1,
+            let sky = match sky.binary_search_by_key(&site, |e| e.0) {
+                Ok(k) => sky[k].1,
                 Err(_) => view.sky_visibility(site.x as i64, site.y, site.z),
             };
             d.darkness = sc.darkness(sky);
@@ -1401,39 +1539,39 @@ pub(crate) fn share_over_box(
     }
 }
 
-fn drink_with(
-    flora: &mut Flora,
-    target: &mut Target<'_>,
+/// **The drink's reads**: every stand's demand per voxel (with the vines' from the step's
+/// prep), and each voxel's bound. [`drink_settle`] then withdraws once per voxel (or holds
+/// the plan) and splits what the core accepted proportional to demand.
+///
+/// The demands are summed per voxel into a dense per-cell scratch rather than sorted by
+/// voxel: generated stand by stand, each voxel's total adds its demands in ascending stand
+/// order — the order the sort handed them over in — and the withdrawals walk the touched
+/// voxels in ascending index order, as before, so every total, every withdrawal and every
+/// ledger sum is the sorted sweep's to the bit. Only the order a stand's own shares are
+/// added into its observational `taken_m3` differs (`the_scratch_drink_is_the_sorted_sweep`).
+fn drink_reads(
+    flora: &Flora,
+    sky: &[(Site, f64)],
+    world: &World,
     threads: usize,
     scratch: &mut DrinkScratch,
     dt: f64,
-) -> Vec<Drink> {
+) {
     debug_assert!(!scratch.pending, "a planned drink was never settled");
-    scratch.fit(target.world().config().cells());
+    scratch.fit(world.config().cells());
     let DrinkScratch {
         cell,
         touched,
         chunks,
         used,
         vine_wants,
-        vine_box,
-        vine_drinkable,
-        pending,
-        stand_ids,
-        vine_ids,
-        short: _,
-        receipts: _,
-        batch,
-        gave,
+        ..
     } = scratch;
     let n = flora.stands.len();
-    {
-        let view = target.world().view();
-        let flora = &*flora;
-        for_chunks(n, threads, chunks, DrinkChunk::default, |range, chunk| {
-            drink_read(flora, &view, range, chunk, dt)
-        });
-    }
+    let view = world.view();
+    for_chunks(n, threads, chunks, DrinkChunk::default, |range, chunk| {
+        drink_read(flora, sky, &view, range, chunk, dt)
+    });
     *used = chunk_count(n, threads);
     // Each voxel's total, summed in ascending stand order: the chunks are in stand order,
     // and every want on a voxel is in that voxel's band. Band by band, over threads.
@@ -1450,38 +1588,55 @@ fn drink_with(
             }
         });
     }
-    {
-        let view = target.world().view();
-        crate::cover::drink_wants(flora, &view, vine_box, vine_drinkable, vine_wants, dt);
-    }
+    // The vines' wants, read in the step's prep.
     for &(v, _, share) in vine_wants.iter() {
         let v = v as usize;
         touched[v / 64] |= 1 << (v % 64);
         cell[v][0] += share;
     }
 
-    // One bounded withdrawal per voxel, in ascending voxel order — or, against a read
-    // copy, the same bound planned and held for the settle: a read of the copy per voxel,
-    // band by band over threads.
-    // Each voxel's bound first, band by band over threads, off the pre-withdrawal read:
-    // never below the wilting point, however many stands asked. Against a read copy that
-    // bound is the plan; against the live world it is then withdrawn in one batch, the
-    // voxel's first and only withdrawal this step, in ascending voxel order.
-    {
-        let view = target.world().view();
-        for_bands(cell, touched, threads, |b, cell, touched| {
-            let base = b * DRINK_BAND;
-            for (word_at, word) in touched.iter().enumerate() {
-                let mut bits = *word;
-                while bits != 0 {
-                    let local = word_at * 64 + bits.trailing_zeros() as usize;
-                    bits &= bits - 1;
-                    let volume = cell[local][0].min(drinkable_m3(&view, base + local));
-                    cell[local][1] = volume.max(0.0);
-                }
+    // Each voxel's bound, band by band over threads, off the pre-withdrawal read: never
+    // below the wilting point, however many stands asked. Against a read copy that bound
+    // is the plan; against the live world it is then withdrawn in one batch
+    // ([`drink_settle`]), the voxel's first and only withdrawal this step, in ascending
+    // voxel order.
+    for_bands(cell, touched, threads, |b, cell, touched| {
+        let base = b * DRINK_BAND;
+        for (word_at, word) in touched.iter().enumerate() {
+            let mut bits = *word;
+            while bits != 0 {
+                let local = word_at * 64 + bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                let volume = cell[local][0].min(drinkable_m3(&view, base + local));
+                cell[local][1] = volume.max(0.0);
             }
-        });
-    }
+        }
+    });
+}
+
+/// The drink after [`drink_reads`]: withdrawn from the live world at once (the chained
+/// tick) or held as the plan (the overlapped tick), and what each voxel gave split among
+/// its demanders proportional to demand. Returns every stand's [`Drink`], in stand order.
+fn drink_settle(
+    flora: &mut Flora,
+    target: &mut Target<'_>,
+    threads: usize,
+    scratch: &mut DrinkScratch,
+) -> Vec<Drink> {
+    let DrinkScratch {
+        cell,
+        touched,
+        chunks,
+        used,
+        vine_wants,
+        pending,
+        stand_ids,
+        vine_ids,
+        batch,
+        gave,
+        ..
+    } = scratch;
+    let n = flora.stands.len();
     if let Target::Now(world) = target {
         batch.clear();
         for (word_at, word) in touched.iter().enumerate() {
@@ -1533,6 +1688,29 @@ fn drink_with(
             vine_ids.extend(crate::cover::vine_ids(flora));
         }
     }
+    out
+}
+
+/// The whole drink in one call, as the step's parts run it: the vines' wants, the reads
+/// and the settle. The unit tests' handle on the phase.
+#[cfg(test)]
+fn drink(flora: &mut Flora, target: &mut Target<'_>, threads: usize, dt: f64) -> Vec<Drink> {
+    let mut scratch = std::mem::take(&mut flora.drink.0);
+    {
+        let view = target.world().view();
+        let DrinkScratch {
+            vine_box,
+            vine_drinkable,
+            vine_wants,
+            ..
+        } = &mut scratch;
+        crate::cover::drink_wants(flora, &view, vine_box, vine_drinkable, vine_wants, dt);
+    }
+    let sky = std::mem::take(&mut flora.sky);
+    drink_reads(flora, &sky, target.world(), threads, &mut scratch, dt);
+    flora.sky = sky;
+    let out = drink_settle(flora, target, threads, &mut scratch);
+    flora.drink.0 = scratch;
     out
 }
 
@@ -4107,7 +4285,7 @@ mod tests {
             let mut reference = flora.clone();
             let full = light_full_sweep(&mut reference, &world);
             for threads in [1, 4] {
-                let bucketed = light_per_stand(&mut flora.clone(), &world, &[], threads).0;
+                let bucketed = light_per_stand(&flora.config, &flora.stands, &mut flora.sky.clone(), &world, &[], threads).0;
                 assert_eq!(bucketed, full, "{width}x{depth}, {threads} threads");
             }
             assert!(

@@ -286,9 +286,10 @@ fn overlap_off_is_the_chained_tick() {
     let mut sim = Sim::new(world, flora, fauna, config(1, false), None);
     assert!(!sim.config().overlap);
     for _ in 0..30 {
-        w.step_with(1);
+        cubarium_voxel::water::step(&mut w, 1);
         fl.step_clocked(&mut w, 1);
         fa.step(&w, &mut fl);
+        w.advance_tick();
         sim.step();
     }
     let (sw, sf, sa) = sim.layers();
@@ -428,4 +429,209 @@ fn the_display_runs_live_water_and_an_experiment_runs_its_preset() {
     let (world, flora, fauna) = rained_on();
     let sim = Sim::new(world, flora, fauna, SimConfig::default(), None);
     assert_eq!(sim.world().water_every(), 1);
+}
+
+// ------------------------------------------------- the plant tick (overlap package)
+//
+// `design/7_Research/tick-stage-dependencies-2026-10-04.md`, proposals 1 and 2: the plant
+// step keeps the coarse water's phase, and on its tick the plants' reads run beside the
+// animals'. Nothing here pins a tuned number: the clock is read off the config, the
+// observation is compared with a twin's, and the ledgers with themselves.
+
+/// A soil slab `width × depth` carpeted in springturf at `share` of its largest wood.
+fn carpet(width: u32, depth: u32, share: f64) -> (World, Flora) {
+    let world = slab(width, depth, 0.6);
+    let mut flora = Flora::new(FloraConfig::default());
+    let wood = share * flora.config().species(Species::Springturf).wood_max;
+    for z in 0..depth {
+        for x in 0..i64::from(width) {
+            assert!(flora.apply(&world, FloraCommand::Seed { x, z, species: Species::Springturf, wood }));
+        }
+    }
+    (world, flora)
+}
+
+/// A plant step happened in the tick between `before` and `after`: every living stand
+/// pays its upkeep in a plant step, and nothing between steps respires.
+fn plant_stepped(before: &Flora, after: &Flora) -> bool {
+    after.view().ledger.respired_out != before.view().ledger.respired_out
+}
+
+/// **Plants step every `step_every` ticks on the water's phase, whatever `water_every`
+/// is**: on exactly the world ticks that are multiples of `step_every` — the ticks a
+/// `water_every` of `step_every` runs the coarse water on — chained and overlapped.
+#[test]
+fn plants_step_every_step_every_ticks_on_the_water_phase_whatever_water_every_is() {
+    let n = FloraConfig::default().step_every.max(1);
+    for water_every in [1, 2, n, n + 1] {
+        for overlap in [false, true] {
+            let (world, flora) = carpet(8, 4, 0.5);
+            let fauna = Fauna::new(FaunaConfig::default());
+            let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 2, overlap, water_every }, None);
+            let mut steps = 0;
+            for _ in 0..3 * u64::from(n) + 2 {
+                let t = sim.world().tick();
+                let water_due = sim.world().water_due();
+                let before = sim.flora().clone();
+                sim.step();
+                let stepped = plant_stepped(&before, sim.flora());
+                assert_eq!(
+                    stepped,
+                    t % u64::from(n) == 0,
+                    "water_every {water_every}, overlap {overlap}: world tick {t} on a clock of {n}"
+                );
+                if stepped {
+                    steps += 1;
+                    if water_every == n {
+                        assert!(water_due, "water_every {water_every}: the plant tick {t} is the coarse water's");
+                    }
+                }
+            }
+            assert!(steps >= 3, "water_every {water_every}, overlap {overlap}: {steps} plant steps");
+        }
+    }
+}
+
+/// **The overlapped plant tick conserves every ledger.** A springturf carpet grazed by
+/// browsers on their own heuristics, the coarse water on the plant clock's phase, four
+/// threads, the settled litter field: three hundred ticks, the plants' reads beside the
+/// animals' on every plant tick. The world's water, both layers' organic matter, mineral
+/// and energy close, the plants' drink is the world's transpiration, and what one layer
+/// booked handing to the other is what the other booked receiving.
+#[test]
+fn the_overlapped_plant_tick_conserves_every_ledger() {
+    let (world, flora) = carpet(16, 8, 0.5);
+    // The guts void every few ticks, so dung lands on the plants' ground on plant ticks too.
+    let mut fc = FaunaConfig::default();
+    fc.life.gut_void_s = 10.0 * cubarium_voxel::DT;
+    let mut fauna = Fauna::new(fc);
+    cubarium_voxel_sim::habitat::install_heuristics(&mut fauna);
+    let teachers = fauna.config().teachers;
+    for (x, z) in [(3, 2), (8, 5), (12, 1), (13, 6)] {
+        assert!(fauna.apply(
+            &world,
+            FaunaCommand::IntroduceFounder { x, z, founder: Founder::Browser, stores: StartingStores::HUNGRY, heading_rad: 0.0 },
+        ));
+        let id = fauna.view().ledger.births - 1;
+        assert!(fauna.set_controller(id, cubarium_voxel_fauna::heuristic(Founder::Browser, teachers)));
+    }
+    let n = flora.config().step_every;
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig { threads: 4, overlap: true, water_every: n });
+    for t in 0..300u64 {
+        sim.step();
+        let r = water_residual(sim.world());
+        assert!(r <= 1e-9, "tick {t}: water residual {r:.3e}");
+    }
+    let (w, fl, fa) = sim.layers();
+    let (fv, av) = (fl.view(), fa.view());
+    for (name, got, want) in [
+        ("flora organic", fv.organic(), fv.ledger.expected_organic()),
+        ("flora mineral", fv.mineral(), fv.ledger.expected_mineral()),
+        ("flora energy", fv.energy(), fv.ledger.expected_energy()),
+        ("fauna organic", av.organic(), av.ledger.expected_organic()),
+        ("fauna mineral", av.mineral(), av.ledger.expected_mineral()),
+        ("fauna energy", av.energy(), av.ledger.expected_energy()),
+    ] {
+        assert!((got - want).abs() <= 1e-9 * got.abs().max(1.0), "{name}: {got} against {want}");
+    }
+    assert!(fv.ledger.transpired_m3 > 0.0, "nothing drank");
+    assert!(
+        rel(fv.ledger.transpired_m3, w.view().ledger.transpiration_out) <= 1e-12,
+        "plants drank {}, the world booked {}",
+        fv.ledger.transpired_m3,
+        w.view().ledger.transpiration_out
+    );
+    assert!(av.ledger.eaten_organic_in > 0.0, "nothing ate");
+    assert!(av.ledger.deposited_organic_out > 0.0, "nothing was voided");
+    for (name, plants, animals) in [
+        ("eaten", fv.ledger.consumed_organic_out, av.ledger.eaten_organic_in),
+        ("deposited", fv.ledger.deposited_organic_in, av.ledger.deposited_organic_out),
+    ] {
+        assert!(
+            (plants - animals).abs() <= 1e-9 * plants.abs().max(1.0),
+            "{name}: the plants booked {plants}, the animals {animals}"
+        );
+    }
+}
+
+/// **On a plant tick the animals sense the plants as the last plant step left them.** A
+/// soil slab carpeted in young springturf and one browser standing on it, its controller
+/// a recorder that holds still. Every tick runs twice from the same layers: as built, and
+/// as a twin whose plant clock never comes round. On a tick where the plants step and the
+/// browser is sampled, its observation is the twin's, to the bit: the plants' light,
+/// drink and growth ran beside the controller stage and changed nothing it read. The
+/// browser is introduced after a few ticks of plants alone, so its sampling phase meets
+/// the plant clock's.
+#[test]
+fn on_a_plant_tick_the_animals_sense_the_plants_the_last_step_left() {
+    use cubarium_voxel_fauna::{Actions, Controller, Response};
+    use std::sync::{Arc, Mutex};
+
+    /// Records the packet it is handed and holds still.
+    struct Recorder(Arc<Mutex<Vec<Vec<f64>>>>);
+    impl Controller for Recorder {
+        fn drive(&mut self, observation: &[f64]) -> Response {
+            self.0.lock().expect("the sink").push(observation.to_vec());
+            Response::Bounded(Actions::REST)
+        }
+        fn reset(&mut self) {}
+    }
+
+    let cfg = SimConfig { threads: 4, overlap: true, water_every: 1 };
+    // One tick of `(world, flora, fauna)` with the plant clock at `every`: what the browser
+    // was handed, whether the plants stepped, and the layers after.
+    let tick = |world: &World, flora: &Flora, fauna: &Fauna, id: u64, every: u32| {
+        let mut flora = flora.clone();
+        let mut fc = flora.config().clone();
+        fc.step_every = every;
+        flora.replace_config(fc).expect("a clock");
+        let sink = Arc::new(Mutex::new(Vec::new()));
+        let mut sim = Sim::new(world.clone(), flora.clone(), fauna.clone(), cfg, None);
+        assert!(sim.fauna_mut().set_controller(id, Box::new(Recorder(Arc::clone(&sink)))));
+        sim.step();
+        let stepped = plant_stepped(&flora, sim.flora());
+        let seen = sink.lock().expect("the sink").pop();
+        let (w, fl, fa) = sim.layers();
+        (seen, stepped, (w.clone(), fl.clone(), fa.clone()))
+    };
+
+    let mut checked = 0;
+    for lead in 0..8u64 {
+        let (world, flora) = carpet(10, 6, 0.1);
+        let every = flora.config().step_every;
+        let mut sim = Sim::new(world, flora, Fauna::new(FaunaConfig::default()), cfg, None);
+        for _ in 0..lead {
+            sim.step();
+        }
+        let (world, flora, _) = sim.layers();
+        let (mut world, mut flora) = (world.clone(), flora.clone());
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        assert!(fauna.apply(
+            &world,
+            FaunaCommand::IntroduceFounder {
+                x: 5,
+                z: 3,
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
+            },
+        ));
+        let id = fauna.view().ledger.births - 1;
+        for _ in 0..3 * u64::from(every) {
+            let (seen, stepped, next) = tick(&world, &flora, &fauna, id, every);
+            if stepped && let Some(seen) = seen {
+                let (twin_seen, twin_stepped, _) = tick(&world, &flora, &fauna, id, u32::MAX);
+                assert!(!twin_stepped, "the twin's clock never comes round");
+                assert_eq!(
+                    Some(seen),
+                    twin_seen,
+                    "lead {lead}, world tick {}: the browser read the plants after their step",
+                    world.tick()
+                );
+                checked += 1;
+            }
+            (world, flora, fauna) = next;
+        }
+    }
+    assert!(checked > 0, "no plant tick met a sampled browser");
 }

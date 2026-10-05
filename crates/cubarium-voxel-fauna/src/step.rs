@@ -137,6 +137,29 @@ fn tick_inner(
     mut senses: Option<&mut crate::Senses>,
     threads: usize,
 ) {
+    cubarium_voxel::voxel_phase!(FaunaStep, {
+        let start = begin(fauna, world, flora);
+        read(fauna, world, flora, senses.as_deref_mut(), &start, threads);
+        finish(fauna, world, flora, start);
+    });
+}
+
+/// What one animal tick carries from its start ([`begin`]) through its read side
+/// ([`read`]) to its writes ([`finish`]): the tick it produces and what it read of the
+/// world's clock and weather when it began.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TickStart {
+    tick: u64,
+    seed: u64,
+    dusk: bool,
+    sky: Sky,
+}
+
+/// **The animal tick's first part**: the clock, the terrain, and maintenance — circadian
+/// state, upkeep, the gut and its voiding (dung and gut seeds onto the plant layer's
+/// ground), eggs, growth and the packs. Writes the animals and, through the voiding, the
+/// plant layer's `ground`.
+pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> TickStart {
     // The tick counter moves first, so `fauna.tick` is the tick this step produces — the
     // flora layer's own rule, and the tick the keyed streams are keyed by.
     fauna.tick += 1;
@@ -160,75 +183,96 @@ fn tick_inner(
         daylight,
     };
 
-    cubarium_voxel::voxel_phase!(FaunaStep, {
-        cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
-        cubarium_voxel::voxel_phase!(FaunaMaintenance, {
-            // WX4: who is asleep this tick is settled before anything is paid, so the
-            // upkeep, the controller stage and the act all read the same answer.
-            circadian(fauna, &view, clock_on, daylight);
-            maintenance(fauna);
-            drain_riders(fauna);
-            // The minimal gut: the stomach digests into the room upkeep and the rider's
-            // take just made.
-            digest(fauna);
-            heal(fauna);
-            egg_upkeep(fauna);
-            grow(fauna);
-            drop_off_grown(fauna);
-            void_guts(fauna, flora);
-            glider::void_gut_seeds(fauna, flora);
-            // R3: calls, pups' independence, succession and provisioning.
-            crate::pack::upkeep(fauna, &view);
-        });
-        // Maintenance and age settle first. A due field update then reads the litter as
-        // it stands after the previous tick's feeding, before this tick's controllers.
-        cubarium_voxel::voxel_phase!(FaunaField, {
+    cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
+    cubarium_voxel::voxel_phase!(FaunaMaintenance, {
+        // WX4: who is asleep this tick is settled before anything is paid, so the
+        // upkeep, the controller stage and the act all read the same answer.
+        circadian(fauna, &view, clock_on, daylight);
+        maintenance(fauna);
+        drain_riders(fauna);
+        // The minimal gut: the stomach digests into the room upkeep and the rider's
+        // take just made.
+        digest(fauna);
+        heal(fauna);
+        egg_upkeep(fauna);
+        grow(fauna);
+        drop_off_grown(fauna);
+        void_guts(fauna, flora);
+        glider::void_gut_seeds(fauna, flora);
+        // R3: calls, pups' independence, succession and provisioning.
+        crate::pack::upkeep(fauna, &view);
+    });
+    TickStart { tick, seed, dusk, sky }
+}
+
+/// **The animal tick's read side**: the litter field's due update and the controller
+/// stage. Reads the plant layer only (`&Flora`), so a schedule may run it beside a
+/// plant step's own reads (light and the planned drink), which write nothing it reads.
+/// Writes the animals' held actions and the senses.
+pub(crate) fn read(
+    fauna: &mut Fauna,
+    world: &World,
+    flora: &Flora,
+    mut senses: Option<&mut crate::Senses>,
+    start: &TickStart,
+    threads: usize,
+) {
+    let view = world.view();
+    // Maintenance and age settle first. A due field update then reads the litter as
+    // it stands after the previous tick's feeding, before this tick's controllers.
+    cubarium_voxel::voxel_phase!(FaunaField, {
         if let Some(s) = senses.as_deref_mut() {
-            if tick % crate::UPDATE_TICKS == 0 {
+            if start.tick % crate::UPDATE_TICKS == 0 {
                 let fv = flora.view();
                 s.update(&view, &fv);
             }
         }
-        });
-        cubarium_voxel::voxel_phase!(FaunaSense, {
-            // The controller stage: sample due founders and hold their actions, before
-            // anything moves or eats this tick, from the same pre-action state every
-            // controller of the tick reads.
-            controllers(fauna, &view, flora, senses, &sky, threads);
-        });
-        cubarium_voxel::voxel_phase!(FaunaAct, {
-            // Strike outcomes are events: the act only reads other bodies, and the hits
-            // are applied here, serially, in the order the strikers acted.
-            let mut hits: Vec<Hit> = Vec::new();
-            // The balance measures: a free founder awake with its eating latch on wants
-            // food this tick (a counter only).
-            for a in fauna.animals.iter() {
-                if let Some(f) = a.founder
-                    && a.state != State::Asleep
-                    && a.attached.is_none()
-                {
-                    fauna.ledger.awake_ticks_by_founder[f.index()] += 1;
-                    if a.eating {
-                        fauna.ledger.wanting_ticks_by_founder[f.index()] += 1;
-                    }
+    });
+    cubarium_voxel::voxel_phase!(FaunaSense, {
+        // The controller stage: sample due founders and hold their actions, before
+        // anything moves or eats this tick, from the same pre-action state every
+        // controller of the tick reads.
+        controllers(fauna, &view, flora, senses, &start.sky, threads);
+    });
+}
+
+/// **The animal tick's writes**: the act (motion, feeding through the plant layer's
+/// `take_*`, strikes), births, deaths and the burr pass.
+pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start: TickStart) {
+    let TickStart { tick, seed, dusk, sky } = start;
+    let view = world.view();
+    cubarium_voxel::voxel_phase!(FaunaAct, {
+        // Strike outcomes are events: the act only reads other bodies, and the hits
+        // are applied here, serially, in the order the strikers acted.
+        let mut hits: Vec<Hit> = Vec::new();
+        // The balance measures: a free founder awake with its eating latch on wants
+        // food this tick (a counter only).
+        for a in fauna.animals.iter() {
+            if let Some(f) = a.founder
+                && a.state != State::Asleep
+                && a.attached.is_none()
+            {
+                fauna.ledger.awake_ticks_by_founder[f.index()] += 1;
+                if a.eating {
+                    fauna.ledger.wanting_ticks_by_founder[f.index()] += 1;
                 }
             }
-            act(fauna, &view, flora, seed, tick, &sky, &mut hits);
-            for hit in hits {
-                apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
-            }
-        });
-        cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora, dusk) });
-        cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
-        // Burrs ride the bodies as they now stand: a seed latches on a step onto a donor's
-        // face, falls off as its carrier walks, and drops where a body died.
-        cubarium_voxel::voxel_phase!(FaunaBurrs, { burrs(fauna, world, flora) });
-        #[cfg(feature = "profile")]
-        cubarium_voxel::profile::add(
-            cubarium_voxel::profile::Count::Animals,
-            fauna.animals.len() as u64,
-        );
+        }
+        act(fauna, &view, flora, seed, tick, &sky, &mut hits);
+        for hit in hits {
+            apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
+        }
     });
+    cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora, dusk) });
+    cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
+    // Burrs ride the bodies as they now stand: a seed latches on a step onto a donor's
+    // face, falls off as its carrier walks, and drops where a body died.
+    cubarium_voxel::voxel_phase!(FaunaBurrs, { burrs(fauna, world, flora) });
+    #[cfg(feature = "profile")]
+    cubarium_voxel::profile::add(
+        cubarium_voxel::profile::Count::Animals,
+        fauna.animals.len() as u64,
+    );
 }
 
 /// **Whether a body is on the ground** for the burr pass: walking on its support face, or

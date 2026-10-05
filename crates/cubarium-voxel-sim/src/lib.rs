@@ -28,8 +28,18 @@
 //! `design/handoffs/voxel-phase-overlap-2026-09-24.md`) cuts exactly one link: the plants
 //! and animals read the [`LaggedWorld`], the world as it stood when the tick began, so
 //! `Water(t) ‖ (Flora(t) → Fauna(t))` run side by side on the multi-threaded executor and
-//! the plants' drink is applied at a barrier after both. Within each leg the order is the
-//! chained tick's. Speed otherwise comes from splitting the work *inside* a phase:
+//! the plants' drink is applied at a barrier after both.
+//!
+//! Inside the bio leg the plant tick overlaps too
+//! (`design/7_Research/tick-stage-dependencies-2026-10-04.md`, proposals 1 and 2): the
+//! plant step falls on the coarse water's tick ([`cubarium_voxel_flora::FloraConfig::step_every`]
+//! keeps the water's phase), and on it the plants' reads (light, the planned drink) run
+//! beside the animals' (the litter field, the controller stage), neither writing what the
+//! other reads; the drink's withdrawal then runs beside the rest of the plant step and the
+//! animals' writes. So on a plant tick the animals **sense the plants as the previous
+//! plant step left them** — less what this step's terrain pruning and drowning removed —
+//! as on every other tick, and eat what this step grew. Speed otherwise comes from
+//! splitting the work *inside* a phase:
 //!
 //! | phase | parallel? | why |
 //! | --- | --- | --- |
@@ -134,6 +144,14 @@ pub struct Lend(pub cubarium_voxel::WaterLend);
 /// to the layer at the barrier ([`cubarium_voxel_flora::DrinkPlan`]).
 #[derive(Resource, Default)]
 pub struct PendingDrink(pub Option<cubarium_voxel_flora::DrinkPlan>);
+
+/// The overlapped tick's bio leg between its systems: the plant step (on a plant tick)
+/// and the animal tick between their parts. Empty between ticks.
+#[derive(Resource, Default)]
+struct BioStage {
+    plant: Option<cubarium_voxel_flora::PlantStep>,
+    animal: Option<cubarium_voxel_fauna::FaunaTick>,
+}
 
 /// The plant layer, with its own sorted stand and ground stores.
 #[derive(Resource)]
@@ -311,9 +329,11 @@ pub enum TickPhase {
     /// Prescribed rain and evaporation, then the substep loop, then drainage, the water
     /// table, the spring and the outlet: [`cubarium_voxel::water`]'s own order.
     Water,
-    /// [`Flora::step`].
+    /// [`Flora::step`]. On the overlapped tick: the plant step's and the animal tick's
+    /// starts and their reads, side by side — not the whole plant step.
     Flora,
-    /// [`Fauna::step`].
+    /// [`Fauna::step`]. On the overlapped tick: the rest of the plant step, then the
+    /// animals' writes.
     Fauna,
     /// The overlapped tick's barrier, after both legs: the plants' planned drink applied
     /// to the live world. Empty on the chained tick.
@@ -330,7 +350,11 @@ pub enum TickPhase {
 pub struct Tick;
 
 /// The label of the **overlapped** live tick ([`SimConfig::overlap`]): `Begin` (and the
-/// read copy), then `Water` beside `Flora → Fauna`, then `Settle`, `Advance` and `Sample`.
+/// read copy), then `Water` beside the bio leg, then `Settle`, `Advance` and `Sample`.
+/// The bio leg: [`TickPhase::Flora`] is the plants' and animals' starts, then their
+/// reads side by side; [`TickPhase::Fauna`] is the rest of the plant step, then the
+/// animals' writes. The planned drink is withdrawn once both the water and the reads are
+/// done, beside [`TickPhase::Fauna`].
 /// [`Sim::step`] runs it instead of [`Tick`] while overlap is on.
 #[derive(ScheduleLabel, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct OverlapTick;
@@ -496,8 +520,8 @@ impl Sim {
         );
         overlap.add_systems((sys_begin, sys_read_copy).chain().in_set(TickPhase::Begin));
         overlap.add_systems(sys_water_leg.in_set(TickPhase::Water));
-        overlap.add_systems(sys_flora_lagged.in_set(TickPhase::Flora));
-        overlap.add_systems(sys_fauna_lagged.in_set(TickPhase::Fauna));
+        overlap.add_systems((sys_bio_begin, sys_bio_reads).chain().in_set(TickPhase::Flora));
+        overlap.add_systems(sys_bio_finish.in_set(TickPhase::Fauna));
         overlap.add_systems(
             sys_withdraw
                 .after(TickPhase::Water)
@@ -633,10 +657,11 @@ impl Sim {
 
     /// One coupled tick: the whole [`Tick`] schedule.
     ///
-    /// Equivalent to the three-call sequence `world.step(); flora.step_clocked(&mut world, threads);
-    /// fauna.step(&world, &mut flora);` — which is still what
-    /// [`cubarium_voxel::World::step`] and the layers' own `step` do, and still what the
-    /// core fixtures drive — with the water leg unrolled into its phases.
+    /// Equivalent to the sequence `water::step(&mut world, threads);
+    /// flora.step_clocked(&mut world, threads); fauna.step(&world, &mut flora);
+    /// world.advance_tick();` — the layers' own `step`s, which the core fixtures drive —
+    /// with the water leg unrolled into its phases. The world's clock moves last, so the
+    /// plant clock reads the tick the water read ([`cubarium_voxel_flora::FloraConfig::step_every`]).
     ///
     /// **What did not parallelise, and what blocks it.** Stated here because a reader of
     /// the bench table needs it:
@@ -667,6 +692,7 @@ impl Sim {
                     self.ecs.insert_resource(LaggedWorld(copy));
                     self.ecs.init_resource::<PendingDrink>();
                     self.ecs.init_resource::<Lend>();
+                    self.ecs.init_resource::<BioStage>();
                 }
                 self.ecs.run_schedule(OverlapTick)
             }
@@ -1058,32 +1084,90 @@ fn sys_water_leg(
     });
 }
 
-/// The plant leg against the read copy: the drink planned, not applied, and handed out
-/// for the live world to take.
-fn sys_flora_lagged(
-    lagged: Res<LaggedWorld>,
-    mut flora: ResMut<FloraLayer>,
-    mut pending: ResMut<PendingDrink>,
-    config: Res<SimConfig>,
-) {
-    flora.0.step_planned_clocked(&lagged.0, config.overlap_split().1);
-    pending.0 = flora.0.take_drink_plan();
-}
-
-/// [`sys_fauna`] against the read copy. The animal layer only ever reads the world.
-fn sys_fauna_lagged(
+/// The bio leg's starts, against the read copy: the plant clock and, on a plant tick,
+/// the plant step's prep (pruning, drowning, the cover's prep); then the animals' clock,
+/// terrain and maintenance, whose voiding writes the plants' ground.
+fn sys_bio_begin(
     lagged: Res<LaggedWorld>,
     mut flora: ResMut<FloraLayer>,
     mut fauna: ResMut<FaunaLayer>,
+    mut stage: ResMut<BioStage>,
+    config: Res<SimConfig>,
+) {
+    let threads = config.overlap_split().1;
+    let world = &lagged.0;
+    stage.plant = flora.0.begin_planned_clocked(world, threads);
+    stage.animal = Some(fauna.0.begin_tick(world, &mut flora.0));
+}
+
+/// The bio leg's reads. On a plant tick the plants' (light, the drink's plan) and the
+/// animals' (the litter field, the controller stage) run side by side: both read the
+/// plant layer through `&Flora`, the plants write only their [`PlantStep`] and the animals
+/// only themselves and the senses. Then the drink is planned and handed out for the
+/// live world to take beside the rest of the leg.
+///
+/// [`PlantStep`]: cubarium_voxel_flora::PlantStep
+fn sys_bio_reads(
+    lagged: Res<LaggedWorld>,
+    mut flora: ResMut<FloraLayer>,
+    mut fauna: ResMut<FaunaLayer>,
+    mut stage: ResMut<BioStage>,
+    mut pending: ResMut<PendingDrink>,
     config: Res<SimConfig>,
     mut senses: Option<ResMut<SenseField>>,
 ) {
     let threads = config.overlap_split().1;
-    match senses.as_deref_mut() {
-        Some(s) => fauna
-            .0
-            .step_with_senses(&lagged.0, &mut flora.0, threads, &mut s.0),
-        None => fauna.0.step_with(&lagged.0, &mut flora.0, threads),
+    let world = &lagged.0;
+    let BioStage { plant, animal } = &mut *stage;
+    let animal = animal.as_ref().expect("the bio leg's start ran this tick");
+    let senses = senses.as_deref_mut().map(|s| &mut s.0);
+    let fauna = &mut fauna.0;
+    match plant.as_mut() {
+        None => fauna.read_tick(animal, world, &flora.0, senses, threads),
+        Some(step) => {
+            let fl = &flora.0;
+            side_by_side(
+                threads,
+                || fl.read_planned(step, world, threads),
+                || fauna.read_tick(animal, world, fl, senses, threads),
+            );
+            flora.0.plan_drink(step, world, threads);
+        }
+    }
+    pending.0 = flora.0.take_drink_plan();
+}
+
+/// The rest of the bio leg: the plant step's feed, growth, decomposition, seeds and
+/// crowns, then the animals' act, births, deaths and burrs — which eat what this step
+/// grew.
+fn sys_bio_finish(
+    lagged: Res<LaggedWorld>,
+    mut flora: ResMut<FloraLayer>,
+    mut fauna: ResMut<FaunaLayer>,
+    mut stage: ResMut<BioStage>,
+    config: Res<SimConfig>,
+) {
+    let threads = config.overlap_split().1;
+    let world = &lagged.0;
+    if let Some(step) = stage.plant.take() {
+        flora.0.finish_planned(step, world, threads);
+    }
+    let animal = stage.animal.take().expect("the bio leg's start ran this tick");
+    fauna.0.finish_tick(animal, world, &mut flora.0);
+}
+
+/// `a` and `b` at once on the compute pool with more than one thread, else one after the
+/// other. Each splits its own work over the same pool.
+fn side_by_side(threads: usize, a: impl FnOnce() + Send, b: impl FnOnce() + Send) {
+    if threads > 1 {
+        let pool = ComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(threads).build());
+        pool.scope(|scope| {
+            scope.spawn(async move { a() });
+            scope.spawn(async move { b() });
+        });
+    } else {
+        a();
+        b();
     }
 }
 
