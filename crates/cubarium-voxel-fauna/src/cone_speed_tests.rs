@@ -929,11 +929,20 @@ fn assert_live_is_fresh(
     fauna: &Fauna,
     threads: usize,
 ) {
+    // The body flavours a stage lays turn over from stage to stage, as the due bodies do.
+    let laid = match live.rebuilds + live.patches {
+        k if k % 3 == 1 => (true, false),
+        k if k % 3 == 2 => (false, true),
+        _ => (true, true),
+    };
     let (v, fv, av) = (world.view(), flora.view(), fauna.view());
-    live.refresh(&v, &fv, &av, threads);
+    live.refresh(&v, &fv, &av, threads, laid);
     let mut observers: Vec<u64> = av.animals.iter().map(|a| a.id).collect();
     observers.push(u64::MAX);
     for (flavour, volume) in [(senses::Flavour::Flat, false), (senses::Flavour::Volume, true)] {
+        if !(if volume { laid.1 } else { laid.0 }) {
+            continue;
+        }
         let want = senses::build_occupancy_as(&v, &fv, &av, true, None, volume);
         assert_same_cells(&v, &live.view(&v, flavour), &want, &observers);
         // And whole rays from every skyline eye, a body's own and a stranger's.
@@ -989,6 +998,13 @@ fn the_live_grid_patched_reads_as_a_fresh_build() {
         fauna.animals[1].pose.x += 1.3 * V;
         fauna.animals[3].pose.z += 0.6 * V;
         assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        // One of the two sharing a cell leaves it, then joins another body.
+        let last = fauna.animals.len() - 1;
+        fauna.animals[last].pose.x += 2.0 * V;
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        fauna.animals[last].pose = fauna.animals[1].pose;
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
+        assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
         // A stand seeded, another cleared.
         let gone = flora.view().stands[5].site;
         let free = (0..W)
@@ -1009,6 +1025,10 @@ fn the_live_grid_patched_reads_as_a_fresh_build() {
         }
         assert!(live.patches > 3, "seed {seed}: the patch path never ran ({live:?})");
         assert!(live.relaid > 0, "seed {seed}: no patch re-laid a column ({live:?})");
+        assert!(
+            live.in_place > 0 && live.in_place < live.patches,
+            "seed {seed}: both stand comparisons ran ({live:?})"
+        );
         eprintln!("seed {seed}: {live:?}");
     }
 }

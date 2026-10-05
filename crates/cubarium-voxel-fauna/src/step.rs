@@ -1111,8 +1111,9 @@ fn controllers(
             .iter()
             .any(|&i| fauna.animals[i].founder.is_some_and(|f| f.manifest().cone_range_m > 0.0));
     let mut live = std::mem::take(&mut fauna.grid_scratch);
-    if predators || (observers && held.is_none()) {
-        live.refresh(view, &fv, &fauna.view(), threads);
+    let flat = observers && held.is_none();
+    if predators || flat {
+        live.refresh(view, &fv, &fauna.view(), threads, (flat, predators));
     }
     let predation_occupancy =
         predators.then(|| crate::senses::Occ::Live(live.view(view, crate::senses::Flavour::Volume)));

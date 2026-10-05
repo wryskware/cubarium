@@ -83,12 +83,120 @@ struct Slab {
     to: i64,
 }
 
+impl Slab {
+    /// The same slab, to the bit.
+    fn same(&self, o: &Slab) -> bool {
+        (self.id, self.ax, self.az, self.span, self.from, self.to) == (o.id, o.ax, o.az, o.span, o.from, o.to)
+            && (self.x_m.to_bits(), self.z_m.to_bits(), self.r2.to_bits()) == (o.x_m.to_bits(), o.z_m.to_bits(), o.r2.to_bits())
+    }
+
+    /// Every column `(x wrapped, z)` the slab fills, as [`Band::lay_bodies`] walks them.
+    fn for_each_column(&self, c: &cubarium_voxel::Config, mut f: impl FnMut(i64, i64)) {
+        let v = c.voxel_m;
+        for dz in -self.span..=self.span {
+            let z = self.az + dz;
+            if z < 0 || z >= i64::from(c.depth) {
+                continue;
+            }
+            for dx in -self.span..=self.span {
+                let x = self.ax + dx;
+                if dx != 0 || dz != 0 {
+                    let cx = (x as f64 + 0.5) * v - self.x_m;
+                    let cz = (z as f64 + 0.5) * v - self.z_m;
+                    if cx * cx + cz * cz > self.r2 {
+                        continue;
+                    }
+                }
+                f(x.rem_euclid(i64::from(c.width)), z);
+            }
+        }
+    }
+
+    /// The slab's cells in column `(x, z)`.
+    fn column_cells(&self, c: &cubarium_voxel::Config, (x, z): (i64, i64), mut f: impl FnMut(usize)) {
+        for layer in self.from.max(1)..self.to.min(i64::from(c.height)) {
+            f(c.index(x, layer as u32, z as u32));
+        }
+    }
+}
+
+/// One flavour's bodies as laid: a slab per body, and how many fill each cell, so a stage
+/// re-lays only the bodies that moved.
 #[derive(Clone, Debug, Default)]
 struct Bodies {
-    /// Every cell a body bit was set in, to clear at the next stage.
-    cells: Vec<u32>,
+    /// Per cell, how many of these bodies fill it; empty until the first lay.
+    count: Vec<u8>,
     /// Sorted by id (the animals are).
     slabs: Vec<Slab>,
+    /// Scratch: the stage's slabs.
+    next: Vec<Slab>,
+}
+
+impl Bodies {
+    /// Forget every body, for a grid laid from zero.
+    fn reset(&mut self) {
+        self.count.fill(0);
+        self.slabs.clear();
+    }
+
+    /// Add or take away one slab's bodies, cell by cell, and set each cell's bits from its
+    /// count.
+    fn apply(&mut self, cells: &mut [u8], c: &cubarium_voxel::Config, slab: &Slab, add: bool, bits: (u8, u8)) {
+        let mut columns = Vec::new();
+        slab.for_each_column(c, |x, z| columns.push((x, z)));
+        for col in columns {
+            self.apply_column(cells, c, slab, col, add, bits);
+        }
+    }
+
+    /// A body moved from slab `o` to slab `n`: when both span the same layers, only the
+    /// columns one fills and the other does not change; else all of both.
+    fn shift(&mut self, cells: &mut [u8], c: &cubarium_voxel::Config, o: &Slab, n: &Slab, bits: (u8, u8)) {
+        if (o.from, o.to) != (n.from, n.to) {
+            self.apply(cells, c, o, false, bits);
+            self.apply(cells, c, n, true, bits);
+            return;
+        }
+        let (mut was, mut now) = (Vec::new(), Vec::new());
+        o.for_each_column(c, |x, z| was.push((x, z)));
+        n.for_each_column(c, |x, z| now.push((x, z)));
+        was.sort_unstable();
+        now.sort_unstable();
+        for &col in &was {
+            if now.binary_search(&col).is_err() {
+                self.apply_column(cells, c, o, col, false, bits);
+            }
+        }
+        for &col in &now {
+            if was.binary_search(&col).is_err() {
+                self.apply_column(cells, c, n, col, true, bits);
+            }
+        }
+    }
+
+    fn apply_column(
+        &mut self,
+        cells: &mut [u8],
+        c: &cubarium_voxel::Config,
+        slab: &Slab,
+        col: (i64, i64),
+        add: bool,
+        (body, multi): (u8, u8),
+    ) {
+        let count = &mut self.count;
+        slab.column_cells(c, col, |cell| {
+            let n = &mut count[cell];
+            *n = if add { n.saturating_add(1) } else { n.saturating_sub(1) };
+            let b = &mut cells[cell];
+            *b &= !(body | multi);
+            if *n >= 1 {
+                *b |= body;
+            }
+            if *n >= 2 {
+                *b |= multi;
+            }
+        });
+    }
 }
 
 /// Per column `z * width + x`, the ground pools' cell runs `(from, to, top)` in ground order.
@@ -96,32 +204,38 @@ struct Bodies {
 struct PoolIndex {
     col_start: Vec<u32>,
     runs: Vec<(u32, u32, f64)>,
+    /// Per ground entry, its run's slot in `runs`, or `u32::MAX` for none.
+    slot: Vec<u32>,
+}
+
+/// The cells `from..to` a ground entry's pool reaches and its top, as [`Band::lay_pools`]
+/// walks them; `None` for no pool or none of its cells.
+fn pool_run(c: &cubarium_voxel::Config, g: &Ground, density: f64) -> Option<(u32, u32, f64)> {
+    let top = pool_top_m(g, c.voxel_m, density)?;
+    if g.site.z >= c.depth || g.site.x >= c.width {
+        return None;
+    }
+    let from = g.site.y + 1;
+    let mut to = from;
+    while to < c.height && f64::from(to) * c.voxel_m < top {
+        to += 1;
+    }
+    (to > from).then_some((from, to, top))
 }
 
 impl PoolIndex {
     fn build(view: &VoxelView<'_>, ground: &[Ground], density: f64) -> PoolIndex {
         let c = view.config;
         let (width, plane) = (c.width as usize, c.width as usize * c.depth as usize);
-        let mut runs: Vec<(usize, (u32, u32, f64))> = Vec::new();
-        for g in ground {
-            let Some(top) = pool_top_m(g, c.voxel_m, density) else {
-                continue;
-            };
-            if g.site.z >= c.depth || g.site.x >= c.width {
-                continue;
-            }
-            let from = g.site.y + 1;
-            let mut to = from;
-            while to < c.height && f64::from(to) * c.voxel_m < top {
-                to += 1;
-            }
-            if to > from {
-                runs.push((g.site.z as usize * width + g.site.x as usize, (from, to, top)));
+        let mut runs: Vec<(usize, usize, (u32, u32, f64))> = Vec::new();
+        for (gi, g) in ground.iter().enumerate() {
+            if let Some(run) = pool_run(c, g, density) {
+                runs.push((g.site.z as usize * width + g.site.x as usize, gi, run));
             }
         }
         // A counting sort by column keeps ground order within a column.
         let mut col_start = vec![0u32; plane + 1];
-        for &(col, _) in &runs {
+        for &(col, _, _) in &runs {
             col_start[col + 1] += 1;
         }
         for k in 0..plane {
@@ -129,11 +243,13 @@ impl PoolIndex {
         }
         let mut fill = col_start.clone();
         let mut out = vec![(0, 0, 0.0); runs.len()];
-        for (col, run) in runs {
+        let mut slot = vec![u32::MAX; ground.len()];
+        for (col, gi, run) in runs {
             out[fill[col] as usize] = run;
+            slot[gi] = fill[col];
             fill[col] += 1;
         }
-        PoolIndex { col_start, runs: out }
+        PoolIndex { col_start, runs: out, slot }
     }
 
     #[inline]
@@ -171,6 +287,8 @@ pub(crate) struct LiveGrid {
     pub(crate) patches: u64,
     /// Columns re-laid by patches so far.
     pub(crate) relaid: u64,
+    /// Patches whose stands were compared in place.
+    pub(crate) in_place: u64,
 }
 
 impl Clone for LiveGrid {
@@ -183,10 +301,11 @@ impl std::fmt::Debug for LiveGrid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "LiveGrid({} stands, {} rebuilds, {} patches, {} columns re-laid)",
+            "LiveGrid({} stands, {} rebuilds, {} patches ({} in place), {} columns re-laid)",
             self.stands.len(),
             self.rebuilds,
             self.patches,
+            self.in_place,
             self.relaid
         )
     }
@@ -196,6 +315,8 @@ impl std::fmt::Debug for LiveGrid {
 const REBUILD_SHARE: usize = 4;
 /// The fewest stands one job reads discs for.
 const STANDS_PER_JOB: usize = 512;
+/// The fewest ground entries one job compares.
+const GROUND_PER_JOB: usize = 4096;
 
 /// One stand's discs and the record of it, read through the view's own stand (so its
 /// cached crown is used).
@@ -291,13 +412,16 @@ fn diff_chunk(fv: &FloraView<'_>, new: Range<usize>, old: &[Laid], old_discs: &[
 }
 
 impl LiveGrid {
-    /// Bring the grid up to the world, the plant layer and the bodies as they stand.
+    /// Bring the grid up to the world, the plant layer and the bodies as they stand, with
+    /// the body flavours a stage will read (`flat`, `volume`) laid and the others cleared:
+    /// a [`LiveView`] of a flavour not laid by the last refresh reads no bodies.
     pub(crate) fn refresh(
         &mut self,
         view: &VoxelView<'_>,
         fv: &FloraView<'_>,
         fauna: &crate::FaunaView<'_>,
         threads: usize,
+        (flat, volume): (bool, bool),
     ) {
         let c = view.config;
         let density = fauna.config.cue.pool_bulk_density;
@@ -321,8 +445,13 @@ impl LiveGrid {
         }
         #[cfg(feature = "profile")]
         tm.next(cubarium_voxel::profile::Phase::FaunaWindowLay);
-        self.lay_bodies(view, fauna, Flavour::Flat);
-        self.lay_bodies(view, fauna, Flavour::Volume);
+        for (flavour, wanted) in [(Flavour::Flat, flat), (Flavour::Volume, volume)] {
+            if wanted {
+                self.lay_bodies(view, fauna, flavour);
+            } else {
+                self.clear_bodies(view.config, flavour);
+            }
+        }
     }
 
     /// What the stage reads, in one flavour.
@@ -364,8 +493,8 @@ impl LiveGrid {
         }
         self.ground = ground_keys(fv);
         self.pools = PoolIndex::build(view, fv.ground, density);
-        self.flat.cells.clear();
-        self.volume.cells.clear();
+        self.flat.reset();
+        self.volume.reset();
         self.mask.clear();
         self.mask.resize(plane, false);
         // Lay in interleaved bands of cell layers, as the stage's grids always were.
@@ -417,36 +546,15 @@ impl LiveGrid {
         let c = view.config;
         let (width, depth) = (i64::from(c.width), i64::from(c.depth));
         let plane = c.width as usize * c.depth as usize;
-        // The stands, compared chunk by chunk across the pool: each chunk of the new stands
-        // against the old records whose keys fall in its range.
-        let ranges = crate::par::ranges(fv.stands.len(), threads, STANDS_PER_JOB * 4);
-        let starts: Vec<usize> = ranges
-            .iter()
-            .map(|r| {
-                if r.start == 0 {
-                    return 0;
-                }
-                let s = &fv.stands[r.start];
-                let key = (s.site, fv.config.face_layer(s.species));
-                self.stands.partition_point(|l| l.key < key)
-            })
-            .chain(std::iter::once(self.stands.len()))
-            .collect();
-        let parts = {
-            let (old, old_discs) = (&self.stands, &self.discs);
-            let jobs: Vec<crate::par::Job<'_, DiffPart>> = ranges
-                .into_iter()
-                .enumerate()
-                .map(|(j, r)| -> crate::par::Job<'_, DiffPart> {
-                    let mine = &old[starts[j]..starts[j + 1]];
-                    Box::new(move || diff_chunk(fv, r, mine, old_discs))
-                })
-                .collect();
-            if fv.stands.is_empty() {
-                vec![DiffPart { laid: Vec::new(), discs: Vec::new(), boxes: old.iter().map(|l| (i64::from(l.key.0.x), i64::from(l.key.0.z), l.span)).collect() }]
-            } else {
-                crate::par::run(threads, jobs)
+        // The stands: in place when the list kept its shape (the usual stage: bites and a
+        // plant step's growth), else re-recorded whole. Either way the records are the
+        // new ones from here, and a `false` below rebuilds them all again.
+        let boxes = match self.diff_in_place(fv, threads) {
+            Some(boxes) => {
+                self.in_place += 1;
+                boxes
             }
+            None => self.diff_general(fv, threads),
         };
         // The dirty columns.
         self.mask.resize(plane, false);
@@ -457,13 +565,11 @@ impl LiveGrid {
                 dirty.push(col);
             }
         };
-        for part in &parts {
-            for &(x, z, span) in &part.boxes {
-                let (x0, xn) = if 2 * span + 1 >= width { (0, width) } else { (x - span, 2 * span + 1) };
-                for zz in (z - span).max(0)..=(z + span).min(depth - 1) {
-                    for xx in x0..x0 + xn {
-                        mark(&mut self.mask, zz as usize * width as usize + xx.rem_euclid(width) as usize, &mut dirty);
-                    }
+        for &(x, z, span) in &boxes {
+            let (x0, xn) = if 2 * span + 1 >= width { (0, width) } else { (x - span, 2 * span + 1) };
+            for zz in (z - span).max(0)..=(z + span).min(depth - 1) {
+                for xx in x0..x0 + xn {
+                    mark(&mut self.mask, zz as usize * width as usize + xx.rem_euclid(width) as usize, &mut dirty);
                 }
             }
         }
@@ -491,16 +597,10 @@ impl LiveGrid {
         }
         near.sort_unstable();
         near.dedup();
-        // The records are now the new ones.
-        self.stands.clear();
-        let mut discs = Vec::with_capacity(self.discs.len());
-        std::mem::swap(&mut discs, &mut self.discs);
-        for part in parts {
-            self.append(part);
-        }
-        // Ground: the pools' runs, and the columns whose runs moved.
-        let ground = ground_keys(fv);
-        if ground != self.ground {
+        // Ground: the pools' tops in place while no pool's cells moved, else the runs
+        // re-indexed and the columns whose runs moved re-laid.
+        if !self.ground_in_place(view, fv, density, threads) {
+            let ground = ground_keys(fv);
             let pools = PoolIndex::build(view, fv.ground, density);
             for col in 0..plane {
                 if !self.mask[col] && !pools.same_cells(&self.pools, col) {
@@ -547,26 +647,205 @@ impl LiveGrid {
             }
         }
         clear_mask(&mut self.mask, &dirty);
-        drop(discs);
         true
     }
 
-    /// Clear one flavour's bodies and lay them again, as [`Band::lay_bodies`] lays them
-    /// over a whole grid.
-    fn lay_bodies(&mut self, view: &VoxelView<'_>, fauna: &crate::FaunaView<'_>, flavour: Flavour) {
+    /// The stands compared in place, when the list kept its length and every position
+    /// its stand (site, face layer, species): each stand whose wood or stocks moved is
+    /// read again, and its record and discs overwritten where they lie. The boxes whose
+    /// columns moved, or `None` — nothing touched — when the list changed shape or a
+    /// stand's disc count did.
+    fn diff_in_place(&mut self, fv: &FloraView<'_>, threads: usize) -> Option<Vec<(i64, i64, i64)>> {
+        let n = fv.stands.len();
+        if n != self.stands.len() || n == 0 {
+            return None;
+        }
+        type Changed = Option<Vec<(usize, Laid, Vec<LayerDisc>)>>;
+        let parts: Vec<Changed> = {
+            let old = &self.stands;
+            let jobs: Vec<crate::par::Job<'_, Changed>> = crate::par::ranges(n, threads, STANDS_PER_JOB * 4)
+                .into_iter()
+                .map(|r| -> crate::par::Job<'_, Changed> {
+                    Box::new(move || {
+                        let mut changed = Vec::new();
+                        let mut buf = Vec::new();
+                        for si in r {
+                            let (stand, was) = (&fv.stands[si], &old[si]);
+                            if was.key != (stand.site, fv.config.face_layer(stand.species)) || was.species != stand.species {
+                                return None;
+                            }
+                            if was.wood == stand.wood.to_bits() && was.stock == stand.layer_stock.map(f64::to_bits) {
+                                continue;
+                            }
+                            let mut discs = Vec::new();
+                            let laid = read_stand(fv, si, &mut buf, &mut discs);
+                            if discs.len() != was.discs.len() {
+                                return None;
+                            }
+                            changed.push((si, laid, discs));
+                        }
+                        Some(changed)
+                    })
+                })
+                .collect();
+            crate::par::run(threads, jobs)
+        };
+        // Nothing is written until every chunk said yes: a record must always describe
+        // what the grid holds.
+        if parts.iter().any(Option::is_none) {
+            return None;
+        }
+        let box_of = |l: &Laid| (i64::from(l.key.0.x), i64::from(l.key.0.z), l.span);
+        let mut boxes = Vec::new();
+        for (si, mut laid, discs) in parts.into_iter().flatten().flatten() {
+            let was = &self.stands[si];
+            let slot = was.discs.start as usize..was.discs.end as usize;
+            if !same_discs(&self.discs[slot.clone()], &discs) {
+                boxes.push(box_of(was));
+                boxes.push(box_of(&laid));
+            }
+            self.discs[slot].copy_from_slice(&discs);
+            laid.discs = was.discs.clone();
+            self.stands[si] = laid;
+        }
+        Some(boxes)
+    }
+
+    /// The stands re-recorded whole against the old records, chunk by chunk across the
+    /// pool (each chunk of the new stands against the old records whose keys fall in its
+    /// range); the boxes whose columns moved.
+    fn diff_general(&mut self, fv: &FloraView<'_>, threads: usize) -> Vec<(i64, i64, i64)> {
+        let box_of = |l: &Laid| (i64::from(l.key.0.x), i64::from(l.key.0.z), l.span);
+        if fv.stands.is_empty() {
+            let boxes = self.stands.iter().map(box_of).collect();
+            self.stands.clear();
+            self.discs.clear();
+            return boxes;
+        }
+        let ranges = crate::par::ranges(fv.stands.len(), threads, STANDS_PER_JOB * 4);
+        let starts: Vec<usize> = ranges
+            .iter()
+            .map(|r| {
+                if r.start == 0 {
+                    return 0;
+                }
+                let s = &fv.stands[r.start];
+                let key = (s.site, fv.config.face_layer(s.species));
+                self.stands.partition_point(|l| l.key < key)
+            })
+            .chain(std::iter::once(self.stands.len()))
+            .collect();
+        let parts = {
+            let (old, old_discs) = (&self.stands, &self.discs);
+            let jobs: Vec<crate::par::Job<'_, DiffPart>> = ranges
+                .into_iter()
+                .enumerate()
+                .map(|(j, r)| -> crate::par::Job<'_, DiffPart> {
+                    let mine = &old[starts[j]..starts[j + 1]];
+                    Box::new(move || diff_chunk(fv, r, mine, old_discs))
+                })
+                .collect();
+            crate::par::run(threads, jobs)
+        };
+        self.stands.clear();
+        self.discs.clear();
+        let mut boxes = Vec::new();
+        for mut part in parts {
+            boxes.append(&mut part.boxes);
+            self.append(part);
+        }
+        boxes
+    }
+
+    /// The ground compared in place: `true` when it kept its sites and no pool's cells
+    /// moved, its tops then updated where they lie; `false`, nothing touched, otherwise.
+    /// Compared in chunks across the pool: the ground is long and its entries wide.
+    fn ground_in_place(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>, density: f64, threads: usize) -> bool {
+        let n = fv.ground.len();
+        if n != self.ground.len() || self.pools.slot.len() != n {
+            return false;
+        }
         let c = view.config;
-        let v = c.voxel_m;
-        let (body, multi) = flavour.bits();
+        /// `(entry, its organic bits, its pool's new top)`, or `None` for a moved shape.
+        type Moves = Option<Vec<(usize, u64, Option<f64>)>>;
+        let parts: Vec<Moves> = {
+            let (keys, slots, runs) = (&self.ground, &self.pools.slot, &self.pools.runs);
+            let jobs: Vec<crate::par::Job<'_, Moves>> = crate::par::ranges(n, threads, GROUND_PER_JOB)
+                .into_iter()
+                .map(|r| -> crate::par::Job<'_, Moves> {
+                    Box::new(move || {
+                        let mut moves = Vec::new();
+                        for gi in r {
+                            let (key, g) = (&keys[gi], &fv.ground[gi]);
+                            if key.0 != g.site {
+                                return None;
+                            }
+                            let organic = (g.litter + g.carrion + g.dead_wood).to_bits();
+                            if key.1 == organic {
+                                continue;
+                            }
+                            let slot = slots[gi];
+                            match (slot != u32::MAX, pool_run(c, g, density)) {
+                                (false, None) => moves.push((gi, organic, None)),
+                                (true, Some(run)) => {
+                                    let was = &runs[slot as usize];
+                                    if (was.0, was.1) != (run.0, run.1) {
+                                        return None;
+                                    }
+                                    moves.push((gi, organic, Some(run.2)));
+                                }
+                                _ => return None,
+                            }
+                        }
+                        Some(moves)
+                    })
+                })
+                .collect();
+            crate::par::run(threads, jobs)
+        };
+        if parts.iter().any(Option::is_none) {
+            return false;
+        }
+        for (gi, organic, top) in parts.into_iter().flatten().flatten() {
+            self.ground[gi].1 = organic;
+            if let Some(top) = top {
+                self.pools.runs[self.pools.slot[gi] as usize].2 = top;
+            }
+        }
+        true
+    }
+
+    /// Clear one flavour's bodies.
+    fn clear_bodies(&mut self, c: &cubarium_voxel::Config, flavour: Flavour) {
+        let bits = flavour.bits();
         let bodies = match flavour {
             Flavour::Flat => &mut self.flat,
             Flavour::Volume => &mut self.volume,
         };
-        let cells = &mut self.cells;
-        for &cell in &bodies.cells {
-            cells[cell as usize] &= !(body | multi);
+        let slabs = std::mem::take(&mut bodies.slabs);
+        for slab in &slabs {
+            bodies.apply(&mut self.cells, c, slab, false, bits);
         }
-        bodies.cells.clear();
-        bodies.slabs.clear();
+    }
+
+    /// Bring one flavour's bodies up to the animals, as [`Band::lay_bodies`] lays them
+    /// over a whole grid: a body whose slab is the one laid stays, and only the others
+    /// are taken away and laid again.
+    fn lay_bodies(&mut self, view: &VoxelView<'_>, fauna: &crate::FaunaView<'_>, flavour: Flavour) {
+        let c = view.config;
+        let v = c.voxel_m;
+        let bits = flavour.bits();
+        let bodies = match flavour {
+            Flavour::Flat => &mut self.flat,
+            Flavour::Volume => &mut self.volume,
+        };
+        if bodies.count.len() != self.cells.len() {
+            // The grid was laid from zero at a new size: nothing of these bodies is in it.
+            bodies.count = vec![0; self.cells.len()];
+            bodies.slabs.clear();
+        }
+        let mut next = std::mem::take(&mut bodies.next);
+        next.clear();
         let height = i64::from(c.height);
         for a in fauna.animals {
             let Some((ax, az)) = a.pose.column(v, c.depth) else {
@@ -585,46 +864,46 @@ impl LiveGrid {
             if !(from..to).any(|y| y > 0 && y < height) {
                 continue;
             }
-            let span = (radius / v).ceil() as i64;
-            bodies.slabs.push(Slab {
+            next.push(Slab {
                 id: a.id,
                 ax,
                 az: i64::from(az),
                 x_m: a.pose.x,
                 z_m: a.pose.z,
                 r2: radius * radius,
-                span,
+                span: (radius / v).ceil() as i64,
                 from,
                 to,
             });
-            for dz in -span..=span {
-                let z = i64::from(az) + dz;
-                if z < 0 || z >= i64::from(c.depth) {
-                    continue;
-                }
-                for dx in -span..=span {
-                    let x = ax + dx;
-                    if dx != 0 || dz != 0 {
-                        let cx = (x as f64 + 0.5) * v - a.pose.x;
-                        let cz = (z as f64 + 0.5) * v - a.pose.z;
-                        if cx * cx + cz * cz > radius * radius {
-                            continue;
-                        }
+        }
+        // The animals are sorted by id; keep the walk and the lookup sound regardless.
+        if !next.is_sorted_by_key(|s| s.id) {
+            next.sort_by_key(|s| s.id);
+        }
+        let old = std::mem::take(&mut bodies.slabs);
+        let (mut i, mut j) = (0, 0);
+        while i < old.len() || j < next.len() {
+            match (old.get(i), next.get(j)) {
+                (Some(o), Some(n)) if o.id == n.id => {
+                    if !o.same(n) {
+                        bodies.shift(&mut self.cells, c, o, n, bits);
                     }
-                    let wx = x.rem_euclid(i64::from(c.width));
-                    for layer in from.max(1)..to.min(height) {
-                        let cell = c.index(wx, layer as u32, z as u32);
-                        let b = &mut cells[cell];
-                        *b |= if *b & body != 0 { multi } else { body };
-                        bodies.cells.push(cell as u32);
-                    }
+                    i += 1;
+                    j += 1;
                 }
+                (Some(o), n) if n.is_none_or(|n| o.id < n.id) => {
+                    bodies.apply(&mut self.cells, c, o, false, bits);
+                    i += 1;
+                }
+                (_, Some(n)) => {
+                    bodies.apply(&mut self.cells, c, n, true, bits);
+                    j += 1;
+                }
+                (_, None) => unreachable!("the walk ends when both lists do"),
             }
         }
-        // The animals are sorted by id; keep the lookup sound regardless.
-        if !bodies.slabs.is_sorted_by_key(|s| s.id) {
-            bodies.slabs.sort_by_key(|s| s.id);
-        }
+        bodies.slabs = next;
+        bodies.next = old;
     }
 }
 
