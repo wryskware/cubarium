@@ -259,12 +259,6 @@ impl PoolIndex {
             _ => &[],
         }
     }
-
-    /// Whether column `col` lays the same cells in both indexes.
-    fn same_cells(&self, other: &PoolIndex, col: usize) -> bool {
-        let (a, b) = (self.column(col), other.column(col));
-        a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.0 == q.0 && p.1 == q.1)
-    }
 }
 
 /// The live stage's occupancy grid, kept on the fauna between stages. Session state, like
@@ -584,28 +578,68 @@ impl LiveGrid {
             return false;
         }
         // Who reaches the dirty columns, ascending: the plant layer's reach index.
-        let mut near: Vec<u32> = Vec::new();
+        // Marked in a bit per stand and read back in order: a growing plant step dirties
+        // thousands of columns, each listing the same few dozen stands.
+        let mut marks = vec![0u64; fv.stands.len().div_ceil(64)];
         for &col in &dirty {
             let (x, z) = ((col % width as usize) as i64, (col / width as usize) as u32);
             match fv.stands_near(x, z, c.width, c.depth) {
-                Some(s) => near.extend_from_slice(s),
+                Some(s) => {
+                    for &si in s {
+                        marks[si as usize / 64] |= 1 << (si % 64);
+                    }
+                }
                 None => {
                     clear_mask(&mut self.mask, &dirty);
                     return false;
                 }
             }
         }
-        near.sort_unstable();
-        near.dedup();
+        let mut near: Vec<u32> = Vec::new();
+        for (w, &word) in marks.iter().enumerate() {
+            let mut bits = word;
+            while bits != 0 {
+                near.push((w * 64) as u32 + bits.trailing_zeros());
+                bits &= bits - 1;
+            }
+        }
         // Ground: the pools' tops in place while no pool's cells moved, else the runs
         // re-indexed and the columns whose runs moved re-laid.
         if !self.ground_in_place(view, fv, density, threads) {
             let ground = ground_keys(fv);
             let pools = PoolIndex::build(view, fv.ground, density);
-            for col in 0..plane {
-                if !self.mask[col] && !pools.same_cells(&self.pools, col) {
-                    self.mask[col] = true;
-                    dirty.push(col);
+            // The columns whose runs moved: the old and new entries walked side by side
+            // (both site-sorted), an entry's column marked where its run's cells differ,
+            // it came or it went.
+            let cells_of = |p: &PoolIndex, k: usize| {
+                let slot = p.slot[k];
+                (slot != u32::MAX).then(|| {
+                    let r = p.runs[slot as usize];
+                    (r.0, r.1)
+                })
+            };
+            let col_of = |site: Site| site.z as usize * c.width as usize + site.x as usize;
+            let (mut i, mut j) = (0, 0);
+            while i < self.ground.len() || j < ground.len() {
+                let (moved, site) = match (self.ground.get(i), ground.get(j)) {
+                    (Some(o), Some(n)) if o.0 == n.0 => {
+                        let moved = cells_of(&self.pools, i) != cells_of(&pools, j);
+                        i += 1;
+                        j += 1;
+                        (moved, n.0)
+                    }
+                    (Some(o), n) if n.is_none_or(|n| o.0 < n.0) => {
+                        i += 1;
+                        (cells_of(&self.pools, i - 1).is_some(), o.0)
+                    }
+                    (_, Some(n)) => {
+                        j += 1;
+                        (cells_of(&pools, j - 1).is_some(), n.0)
+                    }
+                    (_, None) => unreachable!("the walk ends when both lists do"),
+                };
+                if moved && site.x < c.width && site.z < c.depth {
+                    mark(&mut self.mask, col_of(site), &mut dirty);
                 }
             }
             self.pools = pools;
