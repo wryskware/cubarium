@@ -1,0 +1,12 @@
+[package]
+name = "cubarium-webmodel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The whole food web as stocks and flows: a fast mean-field model of the voxel ecology, read from the sim's own config (design/webmodel/README.md)."
+
+[dependencies]
+cubarium-voxel-flora.workspace = true
+cubarium-voxel-fauna.workspace = true
+cubarium-voxel-sim.workspace = true
+serde = { version = "1", features = ["derive"] }
