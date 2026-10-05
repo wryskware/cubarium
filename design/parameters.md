@@ -1344,7 +1344,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1187 rows)
+**`fauna.*`** (1206 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1376,6 +1376,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.frondgrazer.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.frondgrazer.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.frondgrazer.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.littershredder.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -1404,6 +1405,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.littershredder.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.littershredder.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.littershredder.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1436,6 +1438,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.littershredder.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.littershredder.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.littershredder.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
@@ -1522,6 +1525,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.frondgrazer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.frondgrazer.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.frondgrazer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.000008333333333333334 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1554,6 +1558,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.frondgrazer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.frondgrazer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.frondgrazer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.burr_coat` | 0.6 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
@@ -1640,6 +1645,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.lanternjaw.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.lanternjaw.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.000005555555555555556 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1672,6 +1678,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.lanternjaw.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.lanternjaw.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.lanternjaw.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
@@ -1758,6 +1765,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.capgnawer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.capgnawer.core.reproduction.egg_fungus_radius_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.capgnawer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.capgnawer.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.capgnawer.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.capgnawer.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1790,6 +1798,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.capgnawer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.capgnawer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.capgnawer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.capgnawer.burr_coat` | 0.8 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
@@ -1876,6 +1885,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.loftstrider.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.loftstrider.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.loftstrider.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.loftstrider.motor_respiration_per_s` | 0.000005555555555555556 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.loftstrider.step_up_m` | 1.15 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.loftstrider.step_down_m` | 1.15 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1908,6 +1918,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.loftstrider.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.loftstrider.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.loftstrider.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.loftstrider.burr_coat` | 0.4 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
@@ -1994,6 +2005,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.ripple-snail.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.ripple-snail.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.ripple-snail.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.ripple-snail.motor_respiration_per_s` | 0.000002777777777777778 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.ripple-snail.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.ripple-snail.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2026,6 +2038,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.ripple-snail.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.ripple-snail.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.ripple-snail.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.ripple-snail.burr_coat` | 0.1 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
@@ -2112,6 +2125,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.bellwing.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.bellwing.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.bellwing.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.bellwing.motor_respiration_per_s` | 0.000020833333333333333 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.bellwing.step_up_m` | 0.0 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.bellwing.step_down_m` | 0.0 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2144,6 +2158,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.bellwing.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.bellwing.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.bellwing.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.bellwing.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
@@ -2230,6 +2245,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.seedporter.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.seedporter.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.seedporter.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.seedporter.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2262,6 +2278,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.seedporter.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.seedporter.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.seedporter.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.seedporter.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
@@ -2348,6 +2365,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
 | `fauna.founders.chorister.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.chorister.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
+| `fauna.founders.chorister.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.chorister.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2380,6 +2398,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.chorister.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.chorister.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
+| `fauna.founders.chorister.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.chorister.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |

@@ -164,6 +164,8 @@ fn species_rows() -> Vec<Row> {
             .search(0.0, 7200.0),
         r("reproduction.egg_fungus_radius_m", "m", nonneg, "fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face)")
             .search(0.0, 2.0),
+        r("reproduction.brood_share", "fraction of net income", Range::fraction(), "the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off)")
+            .search(0.0, 1.0),
     ]
 }
 
@@ -226,6 +228,8 @@ fn founder_rows() -> Vec<Row> {
             .prov("decision"),
         r("gut.refill_gap", "fraction of K", fraction, "s_start is capped at full_tolerance - this, so appetite never overlaps the full event")
             .search(0.0, 0.5).prov("decision"),
+        r("gut.mass_exponent", "exponent", Range::closed(0.0, 1.0).open_lo(), "e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size")
+            .search(0.5, 1.0),
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
         r("burr_coat", "factor", fraction, "how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance"),
         r("agility", "fraction", fraction, "the dodge's species factor"),

@@ -80,6 +80,13 @@ core.reproduction.surplus_floor = 0.0229824
 core.reproduction.clutch_max = 3
 core.reproduction.nest_radius_m = 1.0
 core.reproduction.nest_crowd_max = 8
+# Generation time (D1b, 2026-10-05): the gut's throughput scales with body as small
+# animals' does (intake at a full stomach ~ body^0.75, Kleiber: a hatchling digests faster
+# per unit of itself), and a mature body earmarks 0.8 of its net income for its next full
+# clutch (the brood) and grows on the rest, so it lays at laying size instead of first
+# growing to body_max. Plausible, untuned.
+gut.mass_exponent = 0.75
+core.reproduction.brood_share = 0.8
 # The capgnawer package (2026-10-05, proposal §3.1E): numbers that follow the fungus.
 # Eggs go within half a metre of a glowcap holding caps; a ready layer waits up to a
 # quarter of a world day for a reserve that pays for its full clutch, then lays what it
@@ -129,6 +136,16 @@ core.reproduction.surplus_floor = 0.00523999
 core.reproduction.clutch_max = 3
 core.reproduction.nest_radius_m = 1.0
 core.reproduction.nest_crowd_max = 8
+# Generation time (D1b, 2026-10-05): the gut's throughput scales with body as small
+# animals' does (intake at a full stomach ~ body^0.75, Kleiber: a hatchling digests faster
+# per unit of itself), and a mature body earmarks 0.8 of its net income for its next full
+# clutch (the brood) and grows on the rest, so it lays at laying size instead of first
+# growing to body_max. Plausible, untuned.
+gut.mass_exponent = 0.75
+core.reproduction.brood_share = 0.8
+# A full clutch first, as the capgnawer: wait up to a quarter world day for the clutch
+# its reserve cap can hold.
+core.reproduction.clutch_hold_max_s = 1800.0
 
 [fauna.founders.bellwing]
 founding_count = 4
@@ -328,6 +345,16 @@ core.reproduction.egg_organic = 0.054
 core.reproduction.clutch_max = 3
 core.reproduction.nest_radius_m = 1.0
 core.reproduction.nest_crowd_max = 8
+# Generation time (D1b, 2026-10-05): the gut's throughput scales with body as small
+# animals' does (intake at a full stomach ~ body^0.75, Kleiber: a hatchling digests faster
+# per unit of itself), and a mature body earmarks 0.8 of its net income for its next full
+# clutch (the brood) and grows on the rest, so it lays at laying size instead of first
+# growing to body_max. Plausible, untuned.
+gut.mass_exponent = 0.75
+core.reproduction.brood_share = 0.8
+# A full clutch first, as the capgnawer: wait up to a quarter world day for the clutch
+# its reserve cap can hold.
+core.reproduction.clutch_hold_max_s = 1800.0
 
 [fauna.founders.frondgrazer]
 core.growth_max_per_s = 0.0003080440982147086

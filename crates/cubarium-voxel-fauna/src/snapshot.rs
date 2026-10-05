@@ -46,7 +46,9 @@ use crate::Fauna;
 // 40: the capgnawer package — `EggSite::Fungus`, `Reproduction::{clutch_hold_max_s,
 //     egg_fungus_radius_m}`, `ReproductionState::clutch_wait_ticks`,
 //     `CueConfig::fungal_half_life_s`.
-pub const SCHEMA: u32 = 40;
+// 41: generation time (D1b) — `Gut::mass_exponent`, `Reproduction::brood_share`,
+//     `ReproductionState::brood`.
+pub const SCHEMA: u32 = 41;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
