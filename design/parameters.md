@@ -876,7 +876,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.wood_max` | 0.1 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.glowcap.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.glowcap.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.glowcap.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.glowcap.senescence` | 0.0000375 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.glowcap.foliage_rate` | 0.00015 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.glowcap.wood_rate` | 0.002 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.glowcap.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |

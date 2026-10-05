@@ -2495,14 +2495,19 @@ impl SpeciesConfig {
             wood_max: 0.1,
             alive_min: 0.01,
             donor_min: 0.05,
-            // Cap regrowth (2026-10-05, the capgnawer package): a fruiting body takes about
-            // a world day to come back, not minutes. The earlier 0.004 (the presets'
-            // 0.00656) regrew a grazed cap in about 260 s, so one glowcap fed about a
-            // hundred capgnawers and grazing never reached the caps. On `patch` (8 seeds,
-            // 4 h) the presets' 0.00024 let capgnawers crop the caps to 8 % full and cut
-            // spore output 3×; the stands fell 5–12 %, space-bound either way. This is
-            // the same 1/27.
+            // Cap turnover (2026-10-05, the capgnawer package): a fruiting body takes about
+            // a world day to come back and lasts about as long, not minutes. The earlier
+            // 0.004 (the presets' 0.00656) regrew a grazed cap in about 260 s, so one
+            // glowcap fed about a hundred capgnawers and grazing never reached the caps.
+            // Regrowth and `senescence` are slowed together, by the same 1/27: ungrazed caps
+            // stand where `foliage_rate · W = senescence · P` puts them, as before. Slowing
+            // the regrowth alone (c65800b9) left caps at about 7 % of capacity, below the
+            // graze refuge, and capgnawers found nothing to eat (24 h terrarium check-in).
+            // On `patch` (8 seeds, founded under each config): edible caps 0.15 with
+            // regrowth alone, 164 with the old rates, 145 and still filling at minute 240
+            // with both slowed, grazed by capgnawers from minute 180.
             foliage_rate: 0.00015,
+            senescence: 0.0000375,
             wood_rate: 0.002,
             propagule_rate: 0.0005,
             // The fruiting body is the spore source (the capgnawer package, 2026-10-05):
