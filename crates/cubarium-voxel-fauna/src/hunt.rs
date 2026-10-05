@@ -401,7 +401,7 @@ fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
 fn sees(
     fauna: &Fauna,
     view: &VoxelView<'_>,
-    occupancy: Option<&crate::senses::ConeOccupancy>,
+    occupancy: Option<crate::senses::Occ<'_>>,
     a: &crate::Animal,
     o: &crate::Animal,
     (dx, dz): (f64, f64),
@@ -432,7 +432,7 @@ fn sees(
     }
     let dir = (ex / dist, ey / dist, ez / dist);
     matches!(
-        crate::senses::ray_first_hit(view, occupancy, a.id, origin, dir, dist + og.width_m),
+        crate::senses::ray_first_hit(view, &occupancy, a.id, origin, dir, dist + og.width_m),
         Some((hit, crate::senses::Fine::Body)) if hit >= dist - og.width_m - v
     )
 }
@@ -444,7 +444,7 @@ pub(crate) fn steer(
     i: usize,
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
-    occupancy: Option<&crate::senses::ConeOccupancy>,
+    occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Option<(Actions, f64)> {
     let cfg = fauna.config.hunt;
     if !cfg.patrol {
