@@ -164,20 +164,75 @@ pub struct SimConfig {
     /// plants then animals, so two runs can be compared. The static and frozen-water
     /// schedules ignore it.
     pub overlap: bool,
+    /// **Coarse water, per mode** ([`cubarium_voxel::World::set_water_every`]): the lateral
+    /// and groundwater phases on one tick in this many, at that many ticks' worth. A
+    /// fidelity setting, chosen by the mode and never by one global default:
+    /// - the display (`Default`, the ambient host): `1`, the live water, unless its
+    ///   config asks otherwise;
+    /// - training, search and experiment runs ([`SimConfig::experiment`]):
+    ///   [`EXPERIMENT_WATER_EVERY`], or what the run line's `water_every=` says.
+    ///
+    /// [`Sim::new`] applies it to the world when it is above `1`; `1` leaves the world's
+    /// own setting alone.
+    pub water_every: u32,
+}
+
+/// The coarse water a training, search or experiment run takes unless its run line says
+/// otherwise (Wrysk, 2026-10-04: water fidelity does not matter there). The display runs
+/// the live water.
+pub const EXPERIMENT_WATER_EVERY: u32 = 4;
+
+static WATER_EVERY_OVERRIDE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Pin [`SimConfig::experiment`]'s coarse water for this process (`water_every=` on a
+/// study's run line). `0` clears it.
+pub fn set_water_every_override(every: u32) {
+    WATER_EVERY_OVERRIDE.store(every, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A study tool's run-line execution settings: `threads=T` pins the worker count and
+/// `water_every=K` the coarse water, for every [`SimConfig::experiment`] the tool builds.
+/// Says on stderr which water the run takes, so the run line names it.
+pub fn experiment_args(args: &[String]) {
+    let find = |key: &str| args.iter().find_map(|a| a.strip_prefix(key));
+    if let Some(n) = find("threads=").and_then(|s| s.parse().ok()) {
+        cubarium_voxel::set_thread_override(n);
+    }
+    if let Some(k) = find("water_every=").and_then(|s| s.parse::<u32>().ok()) {
+        set_water_every_override(k.max(1));
+    }
+    let every = SimConfig::experiment().water_every;
+    eprintln!(
+        "water_every={every}{}",
+        if find("water_every=").is_some() { " (run line)" } else { " (experiment preset)" }
+    );
 }
 
 impl Default for SimConfig {
+    /// The display's execution: every core (or the pinned count), overlap on, live water.
     fn default() -> SimConfig {
         SimConfig {
             threads: cubarium_voxel::thread_override().unwrap_or_else(|| {
                 std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
             }),
             overlap: true,
+            water_every: 1,
         }
     }
 }
 
 impl SimConfig {
+    /// A training, search or experiment run's execution: [`SimConfig::default`] with the
+    /// experiment's coarse water ([`EXPERIMENT_WATER_EVERY`], or the run line's
+    /// `water_every=` through [`experiment_args`]).
+    pub fn experiment() -> SimConfig {
+        let pinned = WATER_EVERY_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
+        SimConfig {
+            water_every: if pinned > 0 { pinned } else { EXPERIMENT_WATER_EVERY },
+            ..SimConfig::default()
+        }
+    }
+
     /// `threads` workers for every phase, with the default [`SimConfig::overlap`].
     pub fn with_threads(threads: usize) -> SimConfig {
         SimConfig {
@@ -355,6 +410,10 @@ impl Sim {
             water::prepare_pool(config.overlap_split().0);
         }
 
+        let mut world = world;
+        if config.water_every > 1 {
+            world.set_water_every(config.water_every);
+        }
         let mut ecs = World::new();
         ecs.insert_resource(VoxelWorld(world));
         ecs.insert_resource(FloraLayer(flora));
@@ -572,7 +631,7 @@ impl Sim {
 
     /// One coupled tick: the whole [`Tick`] schedule.
     ///
-    /// Equivalent to the three-call sequence `world.step(); flora.step(&mut world);
+    /// Equivalent to the three-call sequence `world.step(); flora.step_clocked(&mut world, threads);
     /// fauna.step(&world, &mut flora);` — which is still what
     /// [`cubarium_voxel::World::step`] and the layers' own `step` do, and still what the
     /// core fixtures drive — with the water leg unrolled into its phases.
@@ -895,7 +954,8 @@ fn sys_outlet(mut w: ResMut<VoxelWorld>) {
 }
 
 fn sys_flora(mut w: ResMut<VoxelWorld>, mut flora: ResMut<FloraLayer>, config: Res<SimConfig>) {
-    flora.0.step_with(&mut w.0, config.threads);
+    // On the plant clock (`FloraConfig::step_every`): most ticks only move its counter.
+    flora.0.step_clocked(&mut w.0, config.threads);
 }
 
 /// The **live** fauna leg. With a [`SenseField`] in the world — the seeded habitat's
@@ -1004,7 +1064,7 @@ fn sys_flora_lagged(
     mut pending: ResMut<PendingDrink>,
     config: Res<SimConfig>,
 ) {
-    flora.0.step_planned(&lagged.0, config.overlap_split().1);
+    flora.0.step_planned_clocked(&lagged.0, config.overlap_split().1);
     pending.0 = flora.0.take_drink_plan();
 }
 

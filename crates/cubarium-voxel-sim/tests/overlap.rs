@@ -14,7 +14,7 @@ use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Site, Sp
 use cubarium_voxel_sim::{Sim, SimConfig, TickPhase, VoxelWorld};
 
 fn config(threads: usize, overlap: bool) -> SimConfig {
-    SimConfig { threads, overlap }
+    SimConfig { threads, overlap, water_every: 1 }
 }
 
 fn rel(a: f64, b: f64) -> f64 {
@@ -220,7 +220,8 @@ fn drain_hook(mut w: ResMut<VoxelWorld>, mut d: ResMut<Drain>) {
 fn a_drink_from_a_cell_emptied_this_tick_gets_what_is_left() {
     for threads in [1usize, 2] {
         let world = slab(8, 1, 0.6);
-        let mut flora = Flora::new(FloraConfig::default());
+        // A plant step every tick: the subject is one tick's drink, not the plant clock.
+        let mut flora = Flora::new(FloraConfig { step_every: 1, ..FloraConfig::default() });
         let wood = 0.5 * flora.config().species(Species::Springturf).wood_max;
         assert!(flora.apply(
             &world,
@@ -286,7 +287,7 @@ fn overlap_off_is_the_chained_tick() {
     assert!(!sim.config().overlap);
     for _ in 0..30 {
         w.step_with(1);
-        fl.step(&mut w);
+        fl.step_clocked(&mut w, 1);
         fa.step(&w, &mut fl);
         sim.step();
     }
@@ -388,4 +389,43 @@ fn an_animal_sees_the_water_of_the_tick_before() {
             assert_eq!(alive, 0, "{name}: the chained tick reads this tick's water");
         }
     }
+}
+
+/// **The coarse clocks conserve water.** A rained-on world with plants and grazers, the
+/// lateral water once every `water_every` ticks and the plants once every `step_every`,
+/// chained and overlapped: the world's water closes, and every drop the plants drank is
+/// the world's transpiration.
+#[test]
+fn coarse_water_and_the_plant_clock_conserve_water_chained_and_overlapped() {
+    for overlap in [false, true] {
+        let (world, mut flora, fauna) = rained_on();
+        let mut fc = flora.config().clone();
+        fc.step_every = 5;
+        flora.replace_config(fc).unwrap();
+        let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 2, overlap, water_every: 4 }, None);
+        assert_eq!(sim.world().water_every(), 4, "Sim::new applies the coarse water");
+        for _ in 0..203 {
+            sim.step();
+        }
+        assert!(water_residual(sim.world()) <= 1e-12, "overlap {overlap}: residual {}", water_residual(sim.world()));
+        let (w, f, _) = sim.layers();
+        assert!(f.view().ledger.transpired_m3 > 0.0, "overlap {overlap}: nothing drank");
+        assert!(
+            rel(f.view().ledger.transpired_m3, w.view().ledger.transpiration_out) <= 1e-12,
+            "overlap {overlap}: plants drank {}, the world booked {}",
+            f.view().ledger.transpired_m3,
+            w.view().ledger.transpiration_out
+        );
+    }
+}
+
+/// The modes' water: the display's `Default` leaves the world's own; an experiment takes a
+/// coarse one, whatever number the preset holds.
+#[test]
+fn the_display_runs_live_water_and_an_experiment_runs_its_preset() {
+    assert_eq!(SimConfig::default().water_every, 1);
+    assert_eq!(SimConfig::experiment().water_every, cubarium_voxel_sim::EXPERIMENT_WATER_EVERY);
+    let (world, flora, fauna) = rained_on();
+    let sim = Sim::new(world, flora, fauna, SimConfig::default(), None);
+    assert_eq!(sim.world().water_every(), 1);
 }

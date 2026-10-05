@@ -84,10 +84,12 @@ pub enum Phase {
     Settle,
     /// The plant layer's crown cache and reach index, refreshed at the end of its step.
     Crowns,
+    FaunaField,
+    FaunaBurrs,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 45] = [
+    pub const ALL: [Phase; 47] = [
         Phase::WorldStep,
         Phase::Begin,
         Phase::Rain,
@@ -133,6 +135,8 @@ impl Phase {
         Phase::ReadCopy,
         Phase::Settle,
         Phase::Crowns,
+        Phase::FaunaField,
+        Phase::FaunaBurrs,
     ];
     pub const COUNT: usize = Phase::ALL.len();
 
@@ -199,6 +203,8 @@ impl Phase {
             Phase::ReadCopy => "  water copy-back from the read copy (part of the water leg)",
             Phase::Settle => "drink withdrawal (overlapped tick, beside the animal step)",
             Phase::Crowns => "  crown cache refresh",
+            Phase::FaunaField => "  sense field update",
+            Phase::FaunaBurrs => "  burrs",
         }
     }
 }

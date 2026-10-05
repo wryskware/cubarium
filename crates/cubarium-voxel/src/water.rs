@@ -2379,6 +2379,28 @@ pub fn apply(world: &mut World, command: Command) -> f64 {
     }
 }
 
+/// **Many [`Command::WithdrawPore`]s in one call** ([`World::withdraw_pores`]): each
+/// `(cell, volume)` in order, exactly as `apply` takes one — refused whole when the
+/// volume is malformed or the cell is outside the world, capped by the pore water in the
+/// cell, booked as `transpiration_out` and handed to the closed budget's atmosphere —
+/// with what each cell gave pushed onto `gave` (positive, one per entry). The same
+/// arithmetic in the same order as the per-cell calls, without a command per cell.
+pub(crate) fn withdraw_pores(w: &mut World, cells: &[(usize, f64)], gave: &mut Vec<f64>) {
+    gave.clear();
+    gave.reserve(cells.len());
+    let n = w.config.cells();
+    for &(i, volume_m3) in cells {
+        if !volume_m3.is_finite() || volume_m3 < 0.0 || i >= n {
+            gave.push(0.0);
+            continue;
+        }
+        let got = take_pore(w, i, volume_m3);
+        w.ledger.transpiration_out += got;
+        release(w, got);
+        gave.push(got);
+    }
+}
+
 /// Spread one pulse over the sky-exposed cells, sharing it evenly and handing what a
 /// full cell refuses back to the others.
 fn rain_pulse(w: &mut World, volume_m3: f64) -> f64 {

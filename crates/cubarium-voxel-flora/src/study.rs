@@ -42,6 +42,7 @@ impl ClimateSample {
             night: self.night,
             to_dawn_s: self.to_dawn_s,
             draw_key: 0,
+            dt: crate::DT,
         }
     }
 }

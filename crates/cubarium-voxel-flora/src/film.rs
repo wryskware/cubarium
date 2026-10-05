@@ -40,9 +40,10 @@ use crate::{Flora, FloraConfig, Site, take_pool};
 /// Flora ticks per film step: one simulated second. A scheduling numeric, not ecology.
 pub(crate) const FILM_EVERY: u64 = TICK_HZ as u64;
 
-/// Whether the tick `tick` steps the film.
-pub(crate) fn is_film_tick(tick: u64) -> bool {
-    tick.is_multiple_of(FILM_EVERY)
+/// How many film steps fall in the plant step ending on `tick` and covering `span`
+/// ticks: the whole seconds crossed, one per tick that is a multiple of [`FILM_EVERY`].
+pub(crate) fn film_steps(tick: u64, span: u64) -> u64 {
+    tick / FILM_EVERY - tick.saturating_sub(span) / FILM_EVERY
 }
 
 /// The standing water over support face `(x, y, z)`, if the face is wet-eligible: above 0,
@@ -77,9 +78,9 @@ pub(crate) fn receivers(flora: &Flora) -> Vec<Site> {
 
 /// One film step. `open` is each [`receivers`] site's sky × canopy transmission, in the
 /// same (site) order; `daylight` the day's share of light the plants use.
-pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], daylight: f64) {
+pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], daylight: f64, steps: u64) {
     let view = world.view();
-    let dt = FILM_EVERY as f64 * DT;
+    let dt = (steps * FILM_EVERY) as f64 * DT;
     let Flora {
         config: c,
         ground,

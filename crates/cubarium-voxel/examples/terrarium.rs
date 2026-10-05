@@ -7,7 +7,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let name = args.next().unwrap_or_else(|| "terrarium-small".into());
     let t = Terrarium::preset(&name).expect("terrarium or terrarium-small");
-    let (width, height, depth) = if name == "terrarium" { (256, 128, 48) } else { (160, 72, 24) };
+    let (width, height, depth) = match std::env::var("DIMS").ok() { Some(d) => { let v: Vec<u32> = d.split('x').map(|x| x.parse().unwrap()).collect(); (v[0], v[1], v[2]) } None => if name == "terrarium" { (256, 128, 48) } else { (160, 72, 24) } };
     let seeds: Vec<u64> = args.map(|s| s.parse().expect("a seed")).collect();
     for seed in if seeds.is_empty() { vec![1, 2, 3] } else { seeds } {
         let config = Config {

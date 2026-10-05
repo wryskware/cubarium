@@ -328,16 +328,28 @@ pub(crate) fn schedule(flora: &mut Flora, site: Site) {
 ///
 /// Germination first, as before (`tests/life_cycle.rs`'s expiry boundary): a bin past its
 /// `seed_max_age_s` at a check gets that check's lottery before it goes to litter.
-pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
-    ensure_wheel(flora);
+///
+/// A plant step of `span` ticks ([`FloraConfig::step_every`]) runs the checks of every
+/// tick inside it, each on its own tick, so every banked site is still checked once per
+/// period; the shower's end is read once per step.
+pub(crate) fn seed_bank(flora: &mut Flora, world: &World, span: u64) {
+    let last = flora.tick;
     let view = world.view();
     let raining = view.is_raining();
     let flush = flora.was_raining && !raining;
     flora.was_raining = raining;
+    for t in last.saturating_sub(span) + 1..=last {
+        seed_bank_at(flora, world, t, flush && t == last);
+    }
+}
+
+/// [`seed_bank`]'s checks due on tick `tick`, and every bank's lottery on `flush`.
+fn seed_bank_at(flora: &mut Flora, world: &World, tick: u64, flush: bool) {
+    ensure_wheel(flora);
+    let view = world.view();
 
     let Flora {
         config,
-        tick,
         stands,
         ground,
         ledger,
@@ -348,7 +360,6 @@ pub(crate) fn seed_bank(flora: &mut Flora, world: &World) {
         ..
     } = flora;
     let mut attempts = attempts.as_deref_mut();
-    let tick = *tick;
     let world_seed = view.config.seed;
     let period = check_period(config);
     let slot = (tick % period) as usize;
@@ -779,7 +790,7 @@ struct Daughter {
 ///
 /// A mode that finds no site at all this tick (a void column under a wind seed) leaves
 /// the package in the parcel for the next tick.
-pub(crate) fn propagate(flora: &mut Flora, world: &World) {
+pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
     ensure_wheel(flora);
     let Flora {
         config,
@@ -813,7 +824,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World) {
 
         // ---- what the rate asks for, and what the reserve can fund.
         if donor.wood >= sc.donor_min {
-            let ask = (sc.propagule_rate * DT).max(0.0);
+            let ask = (sc.propagule_rate * dt).max(0.0);
             ledger.propagule_requested[slot] += ask / build;
             let floor = sc.donor_reserve_floor * sc.reserve_cap * donor.wood;
             let take = (donor.reserve - floor)

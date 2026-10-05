@@ -344,6 +344,9 @@ fn rows() -> Vec<Row> {
         r("flora.litter_energy_cap", "energy per org-unit", nonneg, "retained energy cap per unit of litter").grade("C"),
         r("flora.initial_mineral", "mineral per site", nonneg, "mineral a site is provisioned with").evolve().log().grade("D"),
         r("flora.seed_check_s", "s", nonneg, "how often a banked site is tested").grade("N").prov("numerics"),
+        r("flora.step_every", "ticks", Range::at_least(1.0), "the plant clock: one plant step per this many world ticks")
+            .grade("N")
+            .prov("numerics"),
         r("flora.upkeep_q10", "x per 10 C", positive, "Q10 of plant upkeep around the climate's mean").search(1.0, 4.0),
         r("flora.wind_tries", "tries", Range::at_least(1.0), "a wind seed's draws before the donor keeps its package")
             .search(1.0, 16.0),

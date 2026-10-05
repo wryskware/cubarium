@@ -70,6 +70,8 @@ const NO_OBSERVER: u64 = u64::MAX;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     // `threads=N`: this run's share of the machine. The gate runs many of these side by
     // side; without it each takes every core (`cubarium_voxel::set_thread_override`).
     if let Some(n) = args
@@ -169,7 +171,7 @@ fn main() {
     } else {
         install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
     }
-    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
 
     print_headers();
     let seeded_browser_faces: Vec<(u32, u32, u32)> = sim
