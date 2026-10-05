@@ -1,0 +1,11 @@
+# Scenario map `patch-hunters`: `patch` with the lanternjaw's dormant egg bank founded on it
+# (the detritus web D2, 2026-10-05), for questions about the lanternjaw on the small prey
+# (shredders, capgnawers, ripple-snails, resting bellwings). `patch` itself is unchanged.
+# The bank is the lanternjaw's decided entry (predation §2.9); adults come from it or from
+# the introduction control (`--introduce lanternjaw:N`, `hunter_study found lanternjaws=N`).
+#
+#   hunter_study found config=config/scenarios/patch-hunters.toml seed=N save=DIR
+base = "patch.toml"
+
+[fauna.founders.lanternjaw]
+founding_count = 3
