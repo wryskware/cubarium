@@ -1260,6 +1260,16 @@ fn controllers(
                 lift = 0.0;
             }
         }
+        // The detritus web D2: the lanternjaw's patrol (its heuristic only, while the
+        // world's `hunt.patrol` is on). The carcass yield below still wins.
+        if driven && fauna.controllers.hunt_patrol(id) && !fauna.controllers.at_carcass(id) {
+            if let Some((go, lit)) =
+                crate::hunt::steer(fauna, i, view, &fv, predation_occupancy.as_ref())
+            {
+                actions = go;
+                lure = lit;
+            }
+        }
         // R3: the lanternjaw's carcass yield (its heuristic only), and the chorister's
         // scripted pack tactic.
         if driven && hunters_here {
@@ -3070,6 +3080,7 @@ fn newborn(
         eating: false,
         emergency: false,
         bout: None,
+        hunt: crate::HuntMemory::default(),
     }
 }
 
@@ -3757,3 +3768,6 @@ mod night_survival_tests;
 #[cfg(test)]
 #[path = "gut_tests.rs"]
 mod gut_tests;
+#[cfg(test)]
+#[path = "hunt_tests.rs"]
+mod hunt_tests;

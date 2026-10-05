@@ -26,6 +26,7 @@ mod body;
 mod controller;
 mod encounter;
 mod knobs;
+mod hunt;
 mod manifest;
 mod pose;
 mod predation;
@@ -69,7 +70,7 @@ pub use body::{
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
-    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, PackHunter, Response, Scripted, heuristic, resolve_actions,
+    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, heuristic, resolve_actions,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
@@ -89,7 +90,8 @@ pub use manifest::{
     Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
     Transfer, Tunings, gru32_parameter_count,
 };
-pub use knobs::{CueConfig, FoundingConfig, LifeConfig, PredationConfig, TeacherConfig};
+pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PredationConfig, TeacherConfig};
+pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, attack_preference, FRUITLESS_SLOTS};
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
@@ -881,6 +883,11 @@ pub struct Animal {
     /// The feeding bout in progress: from the eating latch going on to its full event.
     #[serde(default)]
     pub bout: Option<Bout>,
+    /// **The patrol's memory** (the detritus web D2, the lanternjaw's heuristic only): the
+    /// patch it is walking to or waiting on, the fruitless patches it avoids, and its
+    /// search image, the encounter memory per prey lineage. Default for every other body.
+    #[serde(default)]
+    pub hunt: HuntMemory,
 }
 
 /// **The stomach** (repair 2 item 10): one raw-food pool per [`Food`] class, each in all
@@ -1898,6 +1905,10 @@ pub struct FaunaConfig {
     /// (crowding, predation, food) failed. 0 turns the guard off.
     #[serde(default = "default_lineage_body_ceiling")]
     pub lineage_body_ceiling: u32,
+    /// **The lanternjaw's patrol** (the detritus web D2, [`HuntConfig`]): its heuristic's
+    /// patch-to-patch search, tremor sense and prey switching.
+    #[serde(default)]
+    pub hunt: HuntConfig,
 }
 
 fn default_lineage_body_ceiling() -> u32 {
@@ -1935,6 +1946,7 @@ impl Default for FaunaConfig {
             teachers: TeacherConfig::default(),
             founding: FoundingConfig::default(),
             lineage_body_ceiling: LINEAGE_BODY_CEILING,
+            hunt: HuntConfig::default(),
         }
     }
 }
@@ -2470,6 +2482,30 @@ pub struct FaunaLedger {
     pub strikes_by_founder: [u64; Founder::COUNT],
     pub hits_by_founder: [u64; Founder::COUNT],
     pub dodges_by_founder: [u64; Founder::COUNT],
+    /// **The patrol's readouts** (the detritus web D2; counters only, no rule reads them).
+    /// Strikes begun, by the **prey's** lineage (any striker).
+    #[serde(default)]
+    pub strikes_on_by_founder: [u64; Founder::COUNT],
+    /// Seconds of contact a patrolling hunter had with size-eligible prey of each lineage
+    /// (seen or felt): the locally available prey its kills are read against.
+    #[serde(default)]
+    pub hunt_encounter_s_by_prey: [f64; Founder::COUNT],
+    /// Controller samples a patroller spent waiting still on a patch, walking to one, and
+    /// engaged with a prey it saw or felt.
+    #[serde(default)]
+    pub hunt_wait_samples: u64,
+    #[serde(default)]
+    pub hunt_travel_samples: u64,
+    #[serde(default)]
+    pub hunt_engaged_samples: u64,
+    /// Patches left fruitless (a wait with nothing, or a walk given up), and patches
+    /// chosen at random (exploration) or by the search image.
+    #[serde(default)]
+    pub hunt_fruitless: u64,
+    #[serde(default)]
+    pub hunt_explored: u64,
+    #[serde(default)]
+    pub hunt_chosen: u64,
     /// Wound units healed, by the healed body's lineage (§2.4).
     pub healed_by_founder: [f64; Founder::COUNT],
     /// Carrion taken by each lineage's mouths, gross organic matter: who ate the carcasses.
@@ -3801,6 +3837,7 @@ impl Fauna {
             eating: false,
             emergency: false,
             bout: None,
+            hunt: crate::HuntMemory::default(),
         };
         let mut animal = animal;
         // A founder arrives with its eating latch off and a stomach at `s0 · K` of its own

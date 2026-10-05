@@ -43,7 +43,9 @@ use crate::Fauna;
 //     nest_radius_m, nest_crowd_max, nest_retry_s}`, `ReproductionState::{native,
 //     retry_ticks}`, `FaunaConfig::lineage_body_ceiling`, `TeacherConfig::{
 //     forage_stay_forward, forage_turn_back_samples}`, the readout ledger lines.
-pub const SCHEMA: u32 = 39;
+// 40: the lanternjaw's patrol (D2) — `FaunaConfig::hunt`, `Animal::hunt`, the patrol's
+//     ledger lines.
+pub const SCHEMA: u32 = 40;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -384,6 +386,7 @@ mod tests {
             eating: false,
             emergency: false,
             bout: None,
+            hunt: crate::HuntMemory::default(),
         }
     }
 

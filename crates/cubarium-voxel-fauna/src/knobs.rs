@@ -481,3 +481,87 @@ impl Default for FoundingConfig {
         }
     }
 }
+
+/// **The lanternjaw's patrol** (the detritus web D2,
+/// `design/lanternjaw-detritus-web-proposal-2026-10-05.md` §3.2 with Astra's corrections in
+/// `design/7_Research/astra-detritus-web-review-2026-10-05.md`): a mobile sit-and-wait
+/// hunter of small ground prey. It walks between patches its prey's food marks, waits
+/// still on each with the lure lit, leaves a fruitless one and remembers it, turns to prey
+/// tremor, and attacks the prey it meets often more readily than the prey it meets rarely.
+/// Every number is a plausible starting value, untuned ([`crate::hunt`]).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HuntConfig {
+    /// The patrol on. Off, the lanternjaw's heuristic is the P1 crown-seeking ambush
+    /// ([`crate::LanternjawAmbush`]) unchanged: the baseline arm.
+    pub patrol: bool,
+    /// How far around itself a patroller reads its prey's food (litter, film, caps, crowns,
+    /// blooms) to choose the next patch, metres. It stands for the reach of the cue fields
+    /// it follows; a world query, not a sense in its manifest. 6 m, ten seconds' walk.
+    pub cue_scan_m: f64,
+    /// Food cells are pooled into square patches this wide, metres: about one prey's
+    /// feeding spot plus a strike's reach. 1 m.
+    pub patch_m: f64,
+    /// The nearest a next patch may be, metres: beyond its own tremor range, so a new patch
+    /// is new ground. 1.5 m.
+    pub patch_min_hop_m: f64,
+    /// It has arrived on a patch within this of its centre, metres. 0.4 m.
+    pub patch_arrive_m: f64,
+    /// How long it waits still on a patch before leaving it as fruitless, seconds (the
+    /// proposal's 20–30 s, against the ambush's minute). 25 s.
+    pub patch_wait_s: f64,
+    /// A walk to a patch is given up after this long, and the patch is remembered as
+    /// fruitless (it could not get there), seconds. 60 s.
+    pub patrol_give_up_s: f64,
+    /// How long a fruitless patch is avoided, seconds: a quarter of a world day. 1,800 s.
+    pub fruitless_memory_s: f64,
+    /// A patch whose centre is within this of a remembered fruitless one is that one,
+    /// metres. 1 m.
+    pub fruitless_radius_m: f64,
+    /// The share of patch choices made uniformly among the open patches instead of by its
+    /// search image (exploration: a food cue marks habitat, not prey). 0.2.
+    pub patrol_explore: f64,
+    /// How far it sees a prey body, metres, ahead of it and not hidden (the interim cone's
+    /// 2 m range). 2 m.
+    pub sight_m: f64,
+    /// **The tremor sense** (predation §2.2, two channels): the faintest prey tremor,
+    /// `left + right` over size-eligible prey within the tremor radius, that turns it toward
+    /// the louder side, in the tremor's own units. 0.003: a walking ripple-snail at the
+    /// tremor radius.
+    pub tremor_turn: f64,
+    /// **The search image's memory**: the e-fold time of its encounter memory per prey
+    /// lineage, seconds (the proposal's one world day). 7,200 s.
+    pub search_memory_s: f64,
+    /// The encounter memory, in seconds of contact, at which its attack preference for a
+    /// lineage is halfway between `attack_explore` and 1. 60 s: a minute of contact within
+    /// the last day.
+    pub attack_half_s: f64,
+    /// The attack preference for a prey it has not met lately: the floor, its exploration
+    /// of novel or rare prey. 0.15.
+    pub attack_explore: f64,
+    /// One attack decision on one prey stands this long, seconds, so a prey it declined is
+    /// not re-drawn every sample. 20 s.
+    pub attack_decision_s: f64,
+}
+
+impl Default for HuntConfig {
+    fn default() -> HuntConfig {
+        HuntConfig {
+            patrol: true,
+            cue_scan_m: 6.0,
+            patch_m: 1.0,
+            patch_min_hop_m: 1.5,
+            patch_arrive_m: 0.4,
+            patch_wait_s: 25.0,
+            patrol_give_up_s: 60.0,
+            fruitless_memory_s: 1800.0,
+            fruitless_radius_m: 1.0,
+            patrol_explore: 0.2,
+            sight_m: 2.0,
+            tremor_turn: 0.003,
+            search_memory_s: 7200.0,
+            attack_half_s: 60.0,
+            attack_explore: 0.15,
+            attack_decision_s: 20.0,
+        }
+    }
+}

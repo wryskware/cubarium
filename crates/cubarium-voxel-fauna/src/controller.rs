@@ -122,6 +122,15 @@ pub trait Controller: Send + Sync {
         false
     }
 
+    /// Whether the tick applies the **lanternjaw's patrol** (the detritus web D2,
+    /// `crate::hunt`) to this controller's body: the lanternjaw's heuristic says yes, and
+    /// nothing else does. The patrol reads the world (its prey's food, the bodies it sees
+    /// and the tremor it feels) and overrides the held actions as the pack tactic does,
+    /// while the world's [`crate::HuntConfig::patrol`] is on.
+    fn hunt_patrol(&self) -> bool {
+        false
+    }
+
     /// Whether this controller's body **rests when fed** (the minimal gut's repair 3 item
     /// 8): the bellwing's hover-sip teacher answers yes, and the tick's controller stage
     /// then perches and rests the body while its eating latch is off — the satiety the
@@ -271,6 +280,14 @@ impl FounderControllers {
             .binary_search_by_key(&id, |e| e.0)
             .ok()
             .is_some_and(|at| self.entries[at].1.pack_tactic())
+    }
+
+    /// Whether a body's controller opts into the patrol ([`Controller::hunt_patrol`]).
+    pub fn hunt_patrol(&self, id: u64) -> bool {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .is_some_and(|at| self.entries[at].1.hunt_patrol())
     }
 
     /// Whether a body's controller rests when fed ([`Controller::rests_when_fed`]).
@@ -561,7 +578,9 @@ pub fn heuristic(founder: Founder, teachers: TeacherConfig) -> Box<dyn Controlle
         Founder::Browser => Box::new(BrowserForager::with_config(teachers)),
         // The ambush teacher (predation §2.12): it has no trained centre, so this drives
         // every lanternjaw, hatched or introduced.
-        Founder::Lanternjaw => Box::new(LanternjawAmbush::with_config(teachers)),
+        // The detritus web D2: the patrol over it (`crate::hunt`), while the world's
+        // `hunt.patrol` is on.
+        Founder::Lanternjaw => Box::new(LanternjawPatrol::with_config(teachers)),
         // Roster R1: the shredder's forager on the capgnawer's own `Chem(fungal)`, and the
         // browser's forager on the loftstrider's banded cone and high mouth.
         Founder::Capgnawer => Box::new(BlindForager::for_founder(Founder::Capgnawer, teachers)),
@@ -1414,6 +1433,49 @@ impl Controller for LanternjawAmbush {
 
     fn at_carcass(&self) -> bool {
         self.eating
+    }
+}
+
+/// **The lanternjaw's heuristic** (the detritus web D2): the P1 ambush
+/// ([`LanternjawAmbush`]) under the step's **patrol** ([`Controller::hunt_patrol`],
+/// `crate::hunt`), which reads the world and overrides it — patch to patch along its prey's
+/// food, a short still wait with the lure lit, a fruitless patch left and remembered, a
+/// turn to prey tremor, and attacks by its search image. The ambush's own answer stands
+/// where the patrol stands back: eating carrion at its mouth, and the whole behaviour when
+/// the world's [`crate::HuntConfig::patrol`] is off (the baseline arm).
+#[derive(Clone, Debug)]
+pub struct LanternjawPatrol {
+    ambush: LanternjawAmbush,
+}
+
+impl LanternjawPatrol {
+    /// The lanternjaw's heuristic on `cfg` (a world's [`crate::FaunaConfig::teachers`]).
+    pub fn with_config(cfg: TeacherConfig) -> LanternjawPatrol {
+        LanternjawPatrol {
+            ambush: LanternjawAmbush::with_config(cfg),
+        }
+    }
+}
+
+impl Controller for LanternjawPatrol {
+    fn drive(&mut self, o: &[f64]) -> Response {
+        self.ambush.drive(o)
+    }
+
+    fn reset(&mut self) {
+        self.ambush.reset();
+    }
+
+    fn lure(&self) -> f64 {
+        self.ambush.lure()
+    }
+
+    fn at_carcass(&self) -> bool {
+        self.ambush.at_carcass()
+    }
+
+    fn hunt_patrol(&self) -> bool {
+        true
     }
 }
 
