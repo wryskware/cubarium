@@ -1661,6 +1661,9 @@ fn founder_act(
             });
             a.state = State::Resting;
             fauna.ledger.strikes_by_founder[founder.index()] += 1;
+            if let Some(pf) = fauna.animals.binary_search_by_key(&prey, |p| p.id).ok().and_then(|j| fauna.animals[j].founder) {
+                fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
+            }
             // R3: a pack member calls as it strikes.
             crate::pack::call(fauna, i);
             return;
@@ -1979,7 +1982,17 @@ fn meets_capsule(
     }
     let s0 = crate::surface_m(striker.site.y, v) + striker.wall_offset_m();
     let band = (s0, s0 + h.jaw_band_height_fraction * geometry.height_m);
-    let p0 = crate::surface_m(prey.site.y, v) + prey.wall_offset_m();
+    // A body off the ground (perched, flying, climbing, gliding) has its base at its
+    // pose's height; a walker's is its support face's top.
+    let p0 = if matches!(
+        prey.mobility.mode,
+        crate::MobilityMode::Perched | crate::MobilityMode::Fly | crate::MobilityMode::Climb | crate::MobilityMode::Glide
+    ) && prey.pose.y_m.is_finite()
+    {
+        prey.pose.y_m
+    } else {
+        crate::surface_m(prey.site.y, v) + prey.wall_offset_m()
+    };
     let body = (p0, p0 + pg.height_m);
     body.0 < band.1 && band.0 < body.1
 }
@@ -3494,7 +3507,10 @@ fn dormant_eggs(
                 nearest_adult = Some(nearest_adult.map_or(dist, |n: f64| n.min(dist)));
             }
             let prey = phys.hunter.is_some_and(|h| h.hunts(f));
+            // Footfall is feet on the ground: a flyer aloft or a glider in the air makes none.
+            let on_foot = !matches!(a.mobility.mode, crate::MobilityMode::Fly | crate::MobilityMode::Glide);
             if prey
+                && on_foot
                 && dist <= pc.footfall_radius_m
                 && crate::tremor_of(a, dist, pc.tremor_near_m) >= pc.footfall_tremor_min
             {

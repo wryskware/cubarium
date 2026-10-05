@@ -112,8 +112,8 @@ fn a_fruitless_wait_leaves_the_patch_and_skips_a_remembered_one() {
 
 // ------------------------------------------------------------------ tremor
 
-/// A walking shredder behind the hunter on its left (out of sight) turns it left; on its
-/// right, right. Its contact moves the search image.
+/// A shredder walking away behind the hunter on its left (out of sight) turns it left; on
+/// its right, right. Its contact moves the search image.
 #[test]
 fn a_tremor_on_one_side_turns_the_hunter_toward_it() {
     for (prey_z, toward_left) in [(2.5, true), (0.5, false)] {
@@ -122,8 +122,13 @@ fn a_tremor_on_one_side_turns_the_hunter_toward_it() {
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(patrol_config(hunt));
         let prey = introduce(&mut fauna, &world, Founder::Blind, StartingStores::FULL);
-        place(&mut fauna, prey, 5.4, prey_z, EAST);
+        // Walking away behind it, so it stays out of sight.
+        place(&mut fauna, prey, 5.6, prey_z, WEST);
         drive(&mut fauna, prey, 1.0, false);
+        // Walking before the hunter arrives, so its first sample feels it.
+        for _ in 0..6 {
+            fauna.step_with(&world, &mut flora, 1);
+        }
         // Facing +x, the left is +z.
         let lj = patroller(&mut fauna, &world, 6.0, 1.5, EAST, HUNTING);
         let mut turns = Vec::new();

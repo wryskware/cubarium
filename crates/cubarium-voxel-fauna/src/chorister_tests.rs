@@ -218,10 +218,9 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
             "{what}: {got}, not the lanternjaw's {base} x {r}"
         );
     }
-    assert_eq!(
-        ch.core.reserve_cap, lj.core.reserve_cap,
-        "a fraction of body, not scaled"
-    );
+    // A fraction of body, not scaled by the volume ratio (the detritus web D2 set the
+    // lanternjaw's own apart from it).
+    assert!(ch.core.reserve_cap > 0.0 && ch.core.reserve_cap <= 1.0, "a fraction of body, not scaled");
     assert_eq!(
         ch.core.reproduction.mode,
         BirthMode::Gestation,
@@ -249,7 +248,11 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
     for f in Founder::ALL {
         let want = matches!(
             f,
-            Founder::Browser | Founder::Loftstrider | Founder::Lanternjaw | Founder::Seedporter
+            Founder::Browser
+                | Founder::Loftstrider
+                | Founder::Lanternjaw
+                | Founder::Seedporter
+                | Founder::Bellwing
         );
         assert_eq!(
             h.hunts(f),

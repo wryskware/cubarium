@@ -349,7 +349,8 @@ fn the_bellwing_table_is_a_diurnal_nectar_flyer() {
         bw.founding_count
     );
     assert!(bw.hunter.is_none());
-    assert!(!Hunter::LANTERNJAW.hunts(BW), "on no hunter's list yet");
+    // The detritus web D2: on the lanternjaw's list, taken only at rest (hunt_tests).
+    assert!(Hunter::LANTERNJAW.hunts(BW), "on the lanternjaw's list since D2");
 
     let f = bw.flight.expect("the bellwing flies");
     assert!(f.span_m > 0.0 && f.band_max_m > 0.0 && f.takeoff_s > 0.0);

@@ -1567,15 +1567,17 @@ impl Reproduction {
         nest_retry_s: NEST_RETRY_S,
     };
 
-    /// The lanternjaw's **dormant egg bank** (§2.13): a clutch of 3 buried eggs laid
-    /// after a sustained surplus, each `egg_organic` 0.005 — a `body_min` hatchling
-    /// (0.0034) and a small reserve (0.0016), "each egg's organic matter plus a small
-    /// reserve". The floor 0.0125 puts the surplus at 0.0275, 0.79 of a full reserve: a
-    /// lanternjaw lays after a real meal, not on an ordinary one. Hold and interval are
-    /// the other egg-layer's.
+    /// The lanternjaw's **dormant egg bank** (§2.13), revised with its metabolism in the
+    /// detritus web D2: each egg `egg_organic` 0.005 — a `body_min` hatchling (0.0034) and a
+    /// small reserve (0.0016) — buried as its own clutch, the clutch **from surplus**
+    /// (eligible on one affordable egg, up to `clutch_max` 3 at laying, the D1 mechanism),
+    /// over a floor of 0.005, one egg. At the shipped mass (×30, adult 1.05, reserve cap
+    /// 0.6 → 0.63): the floor 0.15 is two days of the adult's 0.07 daily need; one egg needs
+    /// a reserve of 0.30, the whole clutch 0.60, which a full adult (0.63) holds and lays,
+    /// keeping 0.18 above the floor. Hold and interval are the other egg-layers'.
     pub const DORMANT_EGGS_PLACEHOLDER: Reproduction = Reproduction {
         mode: BirthMode::Eggs,
-        surplus_floor: 0.0125,
+        surplus_floor: 0.005,
         surplus_hold_s: 900.0,
         gestation_s: 0.0,
         gestation_loss_fraction: 0.25,
@@ -1586,7 +1588,7 @@ impl Reproduction {
         dormant: true,
         surplus_share: SURPLUS_SHARE,
         litter_min: 0.0,
-        clutch_max: 0,
+        clutch_max: 3,
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
