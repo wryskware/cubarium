@@ -207,6 +207,8 @@ fn species_rows() -> Vec<Row> {
             .search(1.0, 3.0),
         r("runners_overtop", "switch (true / false)", finite, "a runner may root on a ground cover overtop_covers allows, displacing it")
             .optional().grade("N").prov("decision"),
+        r("yields_to_plants", "switch (true / false)", finite, "a photosynthetic seed or runner whose own gates pass takes this species' face as if bare")
+            .optional().grade("N").prov("decision"),
         r("dispersal", "mode (Drop, Wind, Spores, Water, Wald)", finite, "how the species' seeds travel")
             .optional().grade("N").prov("decision"),
         r("wald_mean_m", "m", nonneg, "Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob")

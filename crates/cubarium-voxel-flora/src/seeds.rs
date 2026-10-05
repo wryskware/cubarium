@@ -93,6 +93,16 @@ pub(crate) fn may_overtop(config: &FloraConfig, seedling: Species, cover: Specie
         && (sc.overtop_covers.is_empty() || sc.overtop_covers.contains(&cover))
 }
 
+/// Whether a face `occupant` holds is **bare** to `taker`'s seed or runner (glowcap yield,
+/// 2026-10-05): the occupant [`SpeciesConfig::yields_to_plants`] and the taker is a
+/// [`crate::Trophic::Photo`] plant. The taker still needs its own gates to pass there,
+/// which is what keeps the occupant on dark ground; no overtop draw, no `overtop_covers`.
+pub(crate) fn gives_way(config: &FloraConfig, taker: Species, occupant: Species) -> bool {
+    taker != occupant
+        && config.species(occupant).yields_to_plants
+        && config.species(taker).trophic == crate::Trophic::Photo
+}
+
 /// One site's record in an [`AttemptTrace`]: counts over the seed-bank checks at which
 /// the traced species held at least one whole seed there (and the arms it lost).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -456,6 +466,11 @@ fn seed_bank_at(flora: &mut Flora, world: &World, tick: u64, flush: bool) {
 /// guarded once more by the occupant the check read. Then the cover dies an *overtopped*
 /// death — the ordinary §4.7 death, its wood to dead wood and the rest to litter, counted
 /// under its pair in [`FloraLedger::overtop_pairs`] — and the seedling takes the site.
+/// **A site held by a stand that [`gives_way`]** (the glowcap,
+/// [`SpeciesConfig::yields_to_plants`]) is bare to the plants: their banks enter its lottery
+/// on their gates alone, with no overtop draw, and the winner replaces the occupant the
+/// same way, booked as overtopped. Its own kind's banks, and any other saprotroph's, stay
+/// shut out.
 /// Any other stand holds its site against every seed and clears the site's arm.
 #[allow(clippy::too_many_arguments)]
 fn germinate(
@@ -483,13 +498,17 @@ fn germinate(
         // and a site that has gained such a stand clears its arm.
         let cover = match stands.binary_search_by_key(&site, |s| s.site) {
             Err(_) => None,
-            Ok(si) if config.species(stands[si].species).ground_cover => Some(stands[si].species),
+            Ok(si)
+                if config.species(stands[si].species).ground_cover
+                    || config.species(stands[si].species).yields_to_plants =>
+            {
+                Some(stands[si].species)
+            }
             Ok(_) => {
                 ground[gi].sprouting = None;
                 continue;
             }
         };
-        let under_cover = cover.is_some();
         let mut counts = [0u64; Species::COUNT];
         for c in &ground[gi].seeds {
             counts[c.species.index()] += seeds_in(c, package_of(config.species(c.species)));
@@ -504,7 +523,7 @@ fn germinate(
             if mine {
                 rec.bank_checks += 1;
             }
-            if n == 0 || cover.is_some_and(|c| !may_overtop(config, species, c)) {
+            if n == 0 || cover.is_some_and(|c| !may_overtop(config, species, c) && !gives_way(config, species, c)) {
                 rec.cover_forbidden += u32::from(mine);
                 continue;
             }
@@ -527,11 +546,13 @@ fn germinate(
             candidates.push((species, lottery_weight(n, sc)));
         }
         let site_index = view.config.index(site.x as i64, site.y, site.z) as u64;
+        // A face whose occupant gives way to this winner is a gap to it.
+        let bare_to = |sp: Species| cover.is_none_or(|c| gives_way(config, sp, c));
         // Under a cover the lottery's winner must also win its per-check draw to arm (or,
         // without arming, to sprout): coming up through a mat is harder than a gap.
         let drawn = || {
             lottery(world_seed, site_index, tick, &candidates).filter(|&sp| {
-                !under_cover
+                bare_to(sp)
                     || overtops(
                         world_seed,
                         site_index,
@@ -557,7 +578,7 @@ fn germinate(
             if drew && candidates.iter().any(|&(s, _)| s == t) {
                 if lottery(world_seed, site_index, tick, &candidates) != Some(t) {
                     rec.lottery_lost += 1;
-                } else if under_cover && !overtops(world_seed, site_index, tick, config.species(t).overtop_per_check) {
+                } else if !bare_to(t) && !overtops(world_seed, site_index, tick, config.species(t).overtop_per_check) {
                     rec.draw_failed += 1;
                 } else if config.sprout_after_arming {
                     rec.arms += 1;
@@ -597,7 +618,9 @@ fn germinate(
         let held = stands.binary_search_by_key(&site, |s| s.site);
         let same = match (held, cover) {
             (Err(_), None) => true,
-            (Ok(si), Some(c)) => stands[si].species == c && may_overtop(config, species, c),
+            (Ok(si), Some(c)) => {
+                stands[si].species == c && (may_overtop(config, species, c) || gives_way(config, species, c))
+            }
             _ => false,
         };
         if !same {
@@ -983,13 +1006,15 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
 /// Whether a runner of `species` may root on a face `cover` holds: the species roots
 /// through covers ([`SpeciesConfig::runners_overtop`]), `cover` is a ground cover, and the
 /// species' [`SpeciesConfig::overtop_covers`] names it (empty: any ground cover). Moss
-/// never takes grass this way unless velvetpad's own list says so.
+/// never takes grass this way unless velvetpad's own list says so. Or the occupant
+/// [`gives_way`] to the species (the glowcap to a plant), whatever the switch and the list.
 pub(crate) fn runner_may_take(config: &FloraConfig, species: Species, cover: Species) -> bool {
     let sc = config.species(species);
-    sc.runners_overtop
-        && cover != species
-        && config.species(cover).ground_cover
-        && (sc.overtop_covers.is_empty() || sc.overtop_covers.contains(&cover))
+    gives_way(config, species, cover)
+        || (sc.runners_overtop
+            && cover != species
+            && config.species(cover).ground_cover
+            && (sc.overtop_covers.is_empty() || sc.overtop_covers.contains(&cover)))
 }
 
 /// The face a runner roots on: one of the neighbouring columns' support faces within

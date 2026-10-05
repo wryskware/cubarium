@@ -723,6 +723,9 @@ fn plants(args: &[String]) {
                 });
             }
             sample(&sim, &arm, minute, &co, &s1, &refuge, &w, &wet_vacant, &saved, &windows[0]);
+            if with_fauna {
+                fw.minute_line(&sim, &arm, minute);
+            }
             eprintln!("minute {minute} ({:.0} s wall)", t0.elapsed().as_secs_f64());
         }
         if MAP_MINUTES.contains(&minute)
@@ -900,6 +903,31 @@ fn sample(
         if pmean > 0.0 { tmean / pmean } else { f64::NAN },
         fv.burrs.len(),
         parts.join(" ")
+    );
+    // Glowcap yield (2026-10-05): glowcap stands on dark terrain (the glowcap's own
+    // darkness above zero) against lit ones, which live on the litter and dead wood; the lit
+    // ones on drained ground; and the glowcap faces plants took since the load, by seed and
+    // by runner.
+    let gsc = config.species(Species::Glowcap);
+    let view = sim.world().view();
+    let drained: HashSet<Site> = co.drained.iter().copied().collect();
+    let (mut dark, mut lit, mut lit_drained, mut dark_drained) = (0usize, 0usize, 0usize, 0usize);
+    for st in fv.stands.iter().filter(|s| s.species == Species::Glowcap) {
+        let sky = view.sky_visibility(i64::from(st.site.x), st.site.y, st.site.z);
+        let on_drained = drained.contains(&st.site);
+        if gsc.darkness(sky) > 0.0 {
+            dark += 1;
+            dark_drained += usize::from(on_drained);
+        } else {
+            lit += 1;
+            lit_drained += usize::from(on_drained);
+        }
+    }
+    let g = Species::Glowcap.index();
+    let taken: u64 = (0..Species::COUNT).map(|j| l.overtop_pairs[g][j] - start.ledger.overtop_pairs[g][j]).sum();
+    println!(
+        "glowcap,{arm},{minute},dark={dark},lit={lit},dark_drained={dark_drained},lit_drained={lit_drained},taken_by_plants={taken},taken_by_runner={}",
+        l.runner_displaced[g] - start.ledger.runner_displaced[g]
     );
 }
 
@@ -1194,6 +1222,32 @@ impl FaunaWatch {
             println!("stocks,mid,{},{}", tick / u64::from(TICK_HZ) / 60, stocks(sim));
             println!("bodies,mid,{},{}", tick / u64::from(TICK_HZ) / 60, bodies(sim, params));
         }
+    }
+
+    /// One line per sample for the capgnawer (glowcap yield, 2026-10-05): animals now,
+    /// births, `B` over the run so far, and its bites by food since the load.
+    fn minute_line(&self, sim: &Sim, arm: &str, minute: u64) {
+        let v = sim.fauna().view();
+        let l = v.ledger;
+        let f = Founder::Capgnawer;
+        let i = f.index();
+        let hzf = f64::from(TICK_HZ);
+        let n = v.animals.iter().filter(|a| a.founder == Some(f)).count();
+        let born: u64 = self.born.iter().map(|b| b[i]).sum();
+        let at: u64 = self.adult_ticks.iter().map(|b| b[i]).sum();
+        let books = balance::Books::of(l, f).since(&self.books0[i]);
+        let days = balance::days(self.ticks as f64 / hzf, v.config);
+        let ctx = balance::context(v.animals, v.config, f, balance::days(at as f64 / hzf, v.config), days);
+        let m = balance::measures(&books, &ctx);
+        let bites = |food: Food| l.bites_by_founder_food[i][food.index()] - self.l0.bites_by_founder_food[i][food.index()];
+        println!(
+            "capgnawer,{arm},{minute},n={n},born={born},B={:.3},assim={:.6},spend={:.6},bites_cap={},bites_litter={}",
+            m.energy_balance,
+            books.assimilated,
+            books.spend(),
+            bites(Food::CapTissue),
+            bites(Food::Litter),
+        );
     }
 
     fn report(&self, sim: &Sim, params: &Params, arm: &str) {
