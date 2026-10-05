@@ -467,9 +467,12 @@ fn knob_rows() -> Vec<Row> {
         hk("patrol_explore", "fraction", fraction, "share of patch choices made uniformly among the open patches").search(0.0, 0.6),
         hk("sight_m", "m", nonneg, "how far it sees a prey body ahead of it and not hidden").search(0.5, 3.0),
         hk("tremor_turn", "tremor units", nonneg, "the faintest prey tremor (left + right, size-eligible prey) it turns toward").search(1e-4, 0.05).log(),
-        hk("search_memory_s", "s", pos, "e-fold time of the search image's encounter memory").search(600.0, 28800.0).log(),
-        hk("attack_half_s", "s of contact", pos, "encounter memory at which the attack preference is halfway to 1").search(5.0, 600.0).log(),
-        hk("attack_explore", "fraction", fraction, "the attack preference for a prey it has not met lately").search(0.0, 0.6),
+        hk("search_memory_s", "s", pos, "e-fold time of the search image's encounter memory").search(120.0, 7200.0).log(),
+        // `share_switching` and `strike_chosen_only` (true / false) are switches: no rows.
+        hk("switch_exponent", "exponent", pos, "share switching: the attack preference is the relative encounter share to this power").search(1.0, 4.0),
+        hk("attack_prior_s", "s of contact", nonneg, "share switching: contact credited to every listed lineage before the shares are taken").search(1.0, 120.0).log(),
+        hk("attack_half_s", "s of contact", pos, "D2's rule: encounter memory at which the attack preference is halfway to 1").search(5.0, 600.0).log(),
+        hk("attack_explore", "fraction", fraction, "D2's rule: the attack preference for a prey it has not met lately").search(0.0, 0.6),
         hk("attack_decision_s", "s", nonneg, "one attack decision on one prey stands this long").search(2.0, 120.0).log(),
     ]);
 

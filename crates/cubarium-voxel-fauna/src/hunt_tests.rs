@@ -13,8 +13,10 @@
 //! - The size window conditions the choice: a prey outside it is not chosen.
 //! - The diet: a grounded or perched bellwing in reach is struck by the lanternjaw and by
 //!   the Veilhound, a flying one is not; a ripple-snail in reach is struck.
-//! - Switching: encounters move the search image, and the attack preference falls as the
-//!   eligible prey get scarce.
+//! - Switching (D2b): encounters move the search image, which forgets on its timescale; a
+//!   lineage whose share of recent encounters falls loses attack preference faster than
+//!   its share; a rare prey is accepted less often per encounter than a common one, and a
+//!   rare prey in the strike capsule is not struck while the hunter goes for a common one.
 //! - Breeding: a well-fed adult can afford a clutch under its package, a hungry one cannot,
 //!   and the clutch follows the reserve.
 //! - Ledgers conserve through each world case.
@@ -24,7 +26,7 @@ use std::sync::atomic::Ordering;
 use super::predation_fixture::*;
 use crate::{
     Activity, Command, Fauna, FaunaConfig, Founder, HuntConfig, HuntMemory, HuntMode,
-    MobilityMode, Pose, StartingStores, attack_preference,
+    MobilityMode, Pose, StartingStores, accepts, attack_preference, encounter_share,
 };
 use cubarium_voxel::World;
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraConfig, Site};
@@ -153,7 +155,7 @@ fn a_carcass_holds_the_patroller_and_a_smear_does_not() {
 #[test]
 fn a_tremor_on_one_side_turns_the_hunter_toward_it() {
     for (prey_z, toward_left) in [(2.5, true), (0.5, false)] {
-        let hunt = HuntConfig { patrol: true, attack_explore: 1.0, ..HuntConfig::default() };
+        let hunt = HuntConfig { patrol: true, attack_explore: 1.0, attack_prior_s: 1e9, ..HuntConfig::default() };
         let world = clock_off(42);
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(patrol_config(hunt));
@@ -195,7 +197,7 @@ fn a_prey_outside_the_size_window_is_not_chosen() {
     let young = StartingStores { body: 0.6, reserve: 0.6 };
     // A small juvenile (one strike kills it, so profitability is whole) and a full adult.
     for (prey_stores, inside) in [(StartingStores { body: 0.2, reserve: 1.0 }, true), (StartingStores::FULL, false)] {
-        let hunt = HuntConfig { patrol: true, attack_explore: 1.0, ..HuntConfig::default() };
+        let hunt = HuntConfig { patrol: true, attack_explore: 1.0, attack_prior_s: 1e9, ..HuntConfig::default() };
         let world = clock_off(43);
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(patrol_config(hunt));
@@ -308,48 +310,162 @@ fn a_ripple_snail_in_reach_is_struck() {
 
 // ------------------------------------------------------------------ switching
 
-/// The search image is moved by encounters: contact with a lineage raises its memory and
-/// its attack preference, and leaves the others'; with no contact it decays over the
-/// memory's e-fold time. The preference is bounded by the exploration floor and 1, rises
-/// with contact, and a scarce prey (met a tenth as often over the same time) gets a lower
-/// preference than a common one.
+/// The search image is moved by encounters and forgets on its configured timescale:
+/// contact with a lineage raises its memory and leaves the others'; with no contact it
+/// decays by e over [`HuntConfig::search_memory_s`], whatever that is set to.
 #[test]
-fn encounters_move_the_search_image_and_preference_falls_with_scarcity() {
-    let cfg = HuntConfig::default();
-    let dt_s = 0.25;
-    let samples = 400u64;
-    let ticks_per_sample = (dt_s / crate::DT).round() as u64;
-    let run = |every: u64| -> HuntMemory {
+fn encounters_move_the_search_image_and_it_forgets_on_its_timescale() {
+    for memory_s in [300.0, 2000.0] {
+        let cfg = HuntConfig { search_memory_s: memory_s, ..HuntConfig::default() };
+        let dt_s = 0.25;
+        let ticks_per_sample = (dt_s / crate::DT).round() as u64;
         let mut m = HuntMemory::default();
         let mut met = [false; Founder::COUNT];
-        for k in 1..=samples {
-            met[Founder::Blind.index()] = k % every == 0;
+        met[Founder::Blind.index()] = true;
+        for k in 1..=40u64 {
             m.meet(&cfg, k * ticks_per_sample, &met, dt_s);
         }
-        m
-    };
-    let common = run(1);
-    let scarce = run(10);
-    let (s, cap) = (Founder::Blind.index(), Founder::Capgnawer.index());
-    assert!(common.image[s] > 0.0 && scarce.image[s] > 0.0, "contact is remembered");
-    assert_eq!(common.image[cap], 0.0, "a lineage never met is not");
-    assert!(scarce.image[s] < common.image[s]);
-    let (p_common, p_scarce) = (attack_preference(&cfg, common.image[s]), attack_preference(&cfg, scarce.image[s]));
-    assert!(p_scarce < p_common, "the scarce prey is attacked less readily: {p_scarce} vs {p_common}");
-    assert_eq!(attack_preference(&cfg, 0.0), cfg.attack_explore, "an unmet prey gets the exploration floor");
-    let mut last = 0.0;
-    for k in 0..50 {
-        let p = attack_preference(&cfg, f64::from(k) * 10.0);
-        assert!((cfg.attack_explore..=1.0).contains(&p) && p >= last, "bounded and rising: {p}");
-        last = p;
+        let (s, cap) = (Founder::Blind.index(), Founder::Capgnawer.index());
+        assert!(m.image[s] > 0.0, "contact is remembered");
+        assert_eq!(m.image[cap], 0.0, "a lineage never met is not");
+        for (fold, want) in [(0.5, (-0.5f64).exp()), (1.0, (-1.0f64).exp()), (3.0, (-3.0f64).exp())] {
+            let mut later = m;
+            let t = m.image_tick + (fold * memory_s / crate::DT).round() as u64;
+            later.meet(&cfg, t, &[false; Founder::COUNT], dt_s);
+            let ratio = later.image[s] / m.image[s];
+            assert!((ratio - want).abs() < 1e-6, "memory {memory_s} s: after {fold} e-folds it keeps {ratio}, not {want}");
+        }
     }
-    // A memory's e-fold time with no contact.
-    let mut m = common;
-    let before = m.image[s];
-    let t = m.image_tick + (cfg.search_memory_s / crate::DT).round() as u64;
-    m.meet(&cfg, t, &[false; Founder::COUNT], dt_s);
-    let ratio = m.image[s] / before;
-    assert!((ratio - (-1.0f64).exp()).abs() < 1e-6, "decays by e over the memory: {ratio}");
+}
+
+/// The share-switching table: switching on, the given exponent and prior.
+fn switching(exponent: f64, prior_s: f64) -> HuntConfig {
+    HuntConfig { share_switching: true, switch_exponent: exponent, attack_prior_s: prior_s, ..HuntConfig::default() }
+}
+
+/// **Switching on encounter share**: a lineage whose share of the recent eligible
+/// encounters falls, while another stays common, loses attack preference faster than its
+/// share (for any exponent above 1); the preference stays in `[0, 1]`, the most-met
+/// lineage's is the highest, and with the prior faded a lineage never met goes toward 0
+/// (no floor). With nothing met lately every listed lineage is attacked alike.
+#[test]
+fn a_lineage_whose_share_falls_loses_preference_faster_than_its_share() {
+    let h = FaunaConfig::default().founder(LJ).hunter.expect("a hunter");
+    let (shred, graze) = (Founder::Blind, Founder::Browser);
+    assert!(h.hunts(shred) && h.hunts(graze), "the fixture: both on its list");
+    for (exponent, prior) in [(1.5, 0.0), (2.0, 10.0), (3.0, 30.0)] {
+        let cfg = switching(exponent, prior);
+        let mut image = [0.0; Founder::COUNT];
+        image[graze.index()] = 200.0;
+        let mut last: Option<(f64, f64)> = None;
+        for m in [200.0, 120.0, 60.0, 20.0, 5.0, 0.5] {
+            image[shred.index()] = m;
+            let share = encounter_share(&cfg, &h, &image, shred);
+            let p = attack_preference(&cfg, &h, &image, shred);
+            assert!((0.0..=1.0).contains(&p), "bounded: {p}");
+            assert!(p <= attack_preference(&cfg, &h, &image, graze) + 1e-12, "the most-met lineage is preferred most");
+            let total: f64 = Founder::ALL.iter().map(|&f| encounter_share(&cfg, &h, &image, f)).sum();
+            assert!((total - 1.0).abs() < 1e-9, "the shares over its list sum to 1: {total}");
+            if let Some((s0, p0)) = last {
+                assert!(share < s0, "the fixture: its share falls");
+                assert!(p / p0 < share / s0, "γ {exponent}: preference {p0} → {p} falls faster than share {s0} → {share}");
+            }
+            last = Some((share, p));
+        }
+        // No floor: the prior fades as the common lineage's memory grows.
+        image[shred.index()] = 0.0;
+        image[graze.index()] = 1e6;
+        assert!(attack_preference(&cfg, &h, &image, shred) < 1e-6, "a lineage unmet beside a dominant one goes toward 0");
+        // Nothing met: every lineage on its list alike, and at the top.
+        let none = [0.0; Founder::COUNT];
+        for f in Founder::ALL.iter().copied().filter(|&f| h.hunts(f)) {
+            assert_eq!(attack_preference(&cfg, &h, &none, f), 1.0, "nothing met lately: {} at 1", f.name());
+        }
+    }
+}
+
+/// **A rare prey met alongside a common one is attacked less often per encounter** than
+/// when it was common: the same prey bodies, the same decision windows, the hunter's image
+/// in two states — the capgnawer common (grazers rare), then rare (grazers common). The
+/// acceptance rate over many encounters falls with its share.
+#[test]
+fn a_rare_prey_is_accepted_less_often_per_encounter_than_a_common_one() {
+    let world = clock_off(46);
+    let mut fauna = Fauna::new(patrol_config(switching(2.0, 5.0)));
+    let lj = introduce(&mut fauna, &world, LJ, HUNTING);
+    let gnawer = introduce(&mut fauna, &world, Founder::Capgnawer, StartingStores::FULL);
+    let (cap, graze) = (Founder::Capgnawer.index(), Founder::Browser.index());
+    let rate = |cap_s: f64, graze_s: f64| -> f64 {
+        let mut a = animal(&fauna, lj);
+        a.hunt.image = [0.0; Founder::COUNT];
+        a.hunt.image[cap] = cap_s;
+        a.hunt.image[graze] = graze_s;
+        let mut o = animal(&fauna, gnawer);
+        let window = cubarium_voxel::ticks_at_least_one(fauna.config.hunt.attack_decision_s) as u64;
+        let mut yes = 0u32;
+        let n = 4000u32;
+        for k in 0..n {
+            o.id = 1000 + u64::from(k % 40); // forty prey bodies of the lineage
+            if accepts(&fauna.config, &a, &o, u64::from(k / 40) * window) {
+                yes += 1;
+            }
+        }
+        f64::from(yes) / f64::from(n)
+    };
+    let common = rate(200.0, 20.0);
+    let even = rate(100.0, 100.0);
+    let rare = rate(20.0, 200.0);
+    assert!(common > 0.0, "the fixture: a common one is attacked");
+    assert!(rare < even && even <= common, "per-encounter acceptance falls with its share: common {common}, even {even}, rare {rare}");
+    assert!(rare < 0.5 * common, "and a rare one is passed over: {rare} against {common}");
+}
+
+/// A rare prey in the strike capsule is not struck while the hunter goes for a common one
+/// it sees beyond it ([`HuntConfig::strike_chosen_only`]); the same prey when common is.
+/// With the switch off, the rare one standing in reach is struck anyway (D2's
+/// opportunistic strike), so the case tests the capsule, not the fixture.
+#[test]
+fn a_rare_prey_in_reach_is_not_struck_while_the_hunter_goes_for_a_common_one() {
+    let (cap, shred) = (Founder::Capgnawer, Founder::Blind);
+    // (capgnawer common?, strike_chosen_only) → strikes on the capgnawer, engaged samples
+    let case = |cap_common: bool, chosen_only: bool| -> (u64, u64) {
+        let hunt = HuntConfig { strike_chosen_only: chosen_only, ..switching(2.0, 0.0) };
+        let world = clock_off(47);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(patrol_config(hunt));
+        let gnawer = introduce(&mut fauna, &world, cap, StartingStores::FULL);
+        place(&mut fauna, gnawer, STRIKER_X + IN_CAPSULE_M, LANE_Z, WEST);
+        drive(&mut fauna, gnawer, 0.0, false);
+        let shredder = introduce(&mut fauna, &world, shred, StartingStores::FULL);
+        place(&mut fauna, shredder, STRIKER_X + 1.5, LANE_Z + 0.5, WEST);
+        drive(&mut fauna, shredder, 0.0, false);
+        let lj = patroller(&mut fauna, &world, STRIKER_X, LANE_Z, EAST, HUNTING);
+        let tick = fauna.tick;
+        let a = animal_mut(&mut fauna, lj);
+        a.hunt.image = [0.0; Founder::COUNT];
+        let (common, rare) = if cap_common { (cap, shred) } else { (shred, cap) };
+        a.hunt.image[common.index()] = 1e6;
+        a.hunt.image[rare.index()] = 0.0;
+        a.hunt.image_tick = tick;
+        a.eating = true; // hungry from the first sample
+        let (h, body) = (hunter(&fauna), animal(&fauna, lj).body);
+        for (id, f) in [(gnawer, cap), (shredder, shred)] {
+            let armour = fauna.config.founder(f).armour;
+            assert_eq!(crate::profitability(&h, body, animal(&fauna, id).body, armour), 1.0, "the fixture: one strike kills a {}", f.name());
+        }
+        for _ in 0..60 {
+            fauna.step_with(&world, &mut flora, 1);
+        }
+        assert_closes(&fauna, "after the capsule case");
+        (fauna.ledger.strikes_on_by_founder[cap.index()], fauna.ledger.hunt_engaged_samples)
+    };
+    let (struck, _) = case(true, true);
+    assert!(struck > 0, "a common capgnawer in reach is struck");
+    let (struck, engaged) = case(false, true);
+    assert!(engaged > 0, "the fixture: it is engaged on the shredder, feed held");
+    assert_eq!(struck, 0, "a rare capgnawer in reach is passed over");
+    let (struck, _) = case(false, false);
+    assert!(struck > 0, "with the switch off, the rare one in reach is struck anyway");
 }
 
 /// Profitability follows the wound formula on the config's own table: a prey one strike

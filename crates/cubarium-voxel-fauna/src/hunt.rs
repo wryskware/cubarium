@@ -131,14 +131,50 @@ impl HuntMemory {
     }
 }
 
-/// **The attack preference** for a prey lineage met for `encounter_s` seconds of contact
-/// lately: `explore + (1 − explore) · m / (m + half)`, from the exploration floor at no
-/// contact toward 1, halfway at [`HuntConfig::attack_half_s`].
-pub fn attack_preference(cfg: &HuntConfig, encounter_s: f64) -> f64 {
-    let explore = cfg.attack_explore.clamp(0.0, 1.0);
-    let m = if encounter_s.is_finite() { encounter_s.max(0.0) } else { 0.0 };
-    let half = cfg.attack_half_s.max(1e-9);
-    explore + (1.0 - explore) * m / (m + half)
+/// **The encounter share** of `prey` (share switching): its recent contact plus the naive
+/// expectation [`HuntConfig::attack_prior_s`], over the same summed across every lineage on
+/// the hunter's list, `(m_k + m₀) / Σ_j (m_j + m₀)`. 0 for a lineage not on its list.
+pub fn encounter_share(cfg: &HuntConfig, h: &crate::Hunter, image: &[f64; Founder::COUNT], prey: Founder) -> f64 {
+    let _ = (cfg, h, image, prey);
+    0.0 // D2b stub: written before the mechanism
+}
+
+/// **The attack preference** for `prey` given the search image `image`, in `[0, 1]`.
+///
+/// Share switching on (D2b): `(s_k / max_j s_j)^γ` with `s` the [`encounter_share`]s over
+/// the hunter's list and `γ` [`HuntConfig::switch_exponent`]. The lineage it meets most is
+/// attacked at its full profitability; one met half as often, at `2^−γ` of it; a lineage
+/// whose share falls loses preference faster than its share for `γ > 1`. With nothing met
+/// lately (all at the prior, or no prior and no contact) every listed lineage is at 1.
+///
+/// Off (D2): `explore + (1 − explore) · m / (m + half)` on the lineage's absolute contact
+/// `m`, from the floor [`HuntConfig::attack_explore`] toward 1, halfway at
+/// [`HuntConfig::attack_half_s`].
+pub fn attack_preference(cfg: &HuntConfig, h: &crate::Hunter, image: &[f64; Founder::COUNT], prey: Founder) -> f64 {
+    let _ = (cfg, h, image, prey);
+    1.0 // D2b stub: written before the mechanism
+}
+
+/// **The attack chance** of hunter `a` on prey `o` this decision window:
+/// [`profitability`] × [`attack_preference`] from `a`'s search image. 0 for a body that is
+/// not a hunter or not a founder.
+pub fn attack_chance(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::Animal) -> f64 {
+    let (Some(hf), Some(pf)) = (a.founder, o.founder) else {
+        return 0.0;
+    };
+    let Some(h) = config.founder(hf).hunter else {
+        return 0.0;
+    };
+    profitability(&h, a.body, o.body, config.founder(pf).armour) * attack_preference(&config.hunt, &h, &a.hunt.image, pf)
+}
+
+/// **Whether hunter `a` takes on prey `o`** at `tick`: one draw per pair per
+/// [`HuntConfig::attack_decision_s`] window against [`attack_chance`]. The patrol's choice
+/// and, with [`HuntConfig::strike_chosen_only`], its strike capsule both ask this, so they
+/// agree within a window.
+pub fn accepts(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::Animal, tick: u64) -> bool {
+    let window = u64::try_from(cubarium_voxel::ticks_at_least_one(config.hunt.attack_decision_s)).unwrap_or(u64::MAX).max(1);
+    draw(DOMAIN_ATTACK, a.id, o.id, tick / window) < attack_chance(config, a, o)
 }
 
 /// **Profitability**: the share of a kill one strike makes on a prey of `prey_body` with
@@ -222,7 +258,7 @@ fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
     let scan = cfg.cue_scan_m.max(0.0);
     // Which foods mark which prey lineage's habitat.
     let lineages: Vec<Founder> = Founder::ALL.iter().copied().filter(|&f| h.hunts(f)).collect();
-    let weight: Vec<f64> = lineages.iter().map(|f| attack_preference(&cfg, a.hunt.image[f.index()])).collect();
+    let weight: Vec<f64> = lineages.iter().map(|&f| attack_preference(&cfg, h, &a.hunt.image, f)).collect();
     // Squares keyed by their absolute index; each holds the cue per lineage.
     let mut squares: rustc_hash::FxHashMap<(i64, i64), Vec<f64>> = rustc_hash::FxHashMap::default();
     let add = |x: f64, z: f64, k: usize, cue: f64, squares: &mut rustc_hash::FxHashMap<(i64, i64), Vec<f64>>| {
@@ -411,8 +447,8 @@ pub(crate) fn steer(
     let pc = fauna.config.predation;
     let (fx, fz) = a.pose.forward();
     let (rx, rz) = (fz, -fx);
-    let window = u64::try_from(cubarium_voxel::ticks_at_least_one(cfg.attack_decision_s)).unwrap_or(u64::MAX).max(1);
     let mut met = [false; Founder::COUNT];
+    let mut declined = [false; Founder::COUNT];
     let mut target: Option<(f64, f64, f64)> = None;
     let mut tremor = [0.0f64; 2];
     let reach = cfg.sight_m.max(pc.tremor_radius_m);
@@ -432,9 +468,8 @@ pub(crate) fn steer(
         }
         let Some(pf) = o.founder else { continue };
         met[pf.index()] = true;
-        let worth = profitability(&h, a.body, o.body, fauna.config.founder(pf).armour);
-        let accept = draw(DOMAIN_ATTACK, a.id, o.id, tick / window) < worth * attack_preference(&cfg, a.hunt.image[pf.index()]);
-        if !accept {
+        if !accepts(&fauna.config, &a, o, tick) {
+            declined[pf.index()] = true;
             continue;
         }
         if seen && target.is_none_or(|t| d < t.0) {
@@ -456,6 +491,9 @@ pub(crate) fn steer(
     for (k, &m) in met.iter().enumerate() {
         if m {
             fauna.ledger.hunt_encounter_s_by_prey[k] += cadence_s;
+        }
+        if declined[k] {
+            fauna.ledger.hunt_declined_s_by_prey[k] += cadence_s;
         }
     }
 

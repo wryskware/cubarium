@@ -545,18 +545,44 @@ pub struct HuntConfig {
     /// tremor radius.
     pub tremor_turn: f64,
     /// **The search image's memory**: the e-fold time of its encounter memory per prey
-    /// lineage, seconds (the proposal's one world day). 7,200 s.
+    /// lineage, seconds. Shorter than a prey's crash, so the image follows a collapse within
+    /// the night it happens: a night on the 120-minute day is about 40 minutes, and the small
+    /// prey crashed on `patch-hunters` within one (2026-10-05). 600 s, a quarter of a night.
+    /// (D2 had the proposal's one world day, 7,200 s.)
     pub search_memory_s: f64,
-    /// The encounter memory, in seconds of contact, at which its attack preference for a
-    /// lineage is halfway between `attack_explore` and 1. 60 s: a minute of contact within
-    /// the last day.
+    /// **Switching on encounter share** (the detritus web D2b). On, the attack preference
+    /// for a lineage is its share of the recent eligible encounters relative to the most
+    /// met lineage's, raised to [`HuntConfig::switch_exponent`] ([`crate::attack_preference`]):
+    /// a lineage that turns rare among the prey it meets is passed over even when met. Off,
+    /// D2's rule on absolute contact over the exploration floor (`attack_half_s`,
+    /// `attack_explore`): the comparison arm.
+    pub share_switching: bool,
+    /// **The switching exponent** `γ` (share switching): the preference is the relative
+    /// encounter share to this power. Above 1 the preference falls faster than the share (a
+    /// type III response in the prey's relative abundance, Murdoch's switching); 1 is
+    /// proportional, no switching. 2.
+    pub switch_exponent: f64,
+    /// **The naive hunter's expectation** (share switching): seconds of contact credited to
+    /// every lineage on its list before the shares are taken. With little met lately every
+    /// lineage stays near an equal share, so a hunter in a lean spell takes whatever it
+    /// meets (its exploration); once one lineage dominates its recent encounters, this fades
+    /// and a rare lineage's preference goes toward 0 — no floor. 15 s.
+    pub attack_prior_s: f64,
+    /// (D2's rule, share switching off.) The encounter memory, in seconds of contact, at
+    /// which its attack preference for a lineage is halfway between `attack_explore` and 1.
+    /// 60 s.
     pub attack_half_s: f64,
-    /// The attack preference for a prey it has not met lately: the floor, its exploration
-    /// of novel or rare prey. 0.15.
+    /// (D2's rule, share switching off.) The attack preference for a prey it has not met
+    /// lately: the floor. 0.15.
     pub attack_explore: f64,
     /// One attack decision on one prey stands this long, seconds, so a prey it declined is
     /// not re-drawn every sample. 20 s.
     pub attack_decision_s: f64,
+    /// **Strike only what it chose** (D2b). On, a patroller's strike capsule takes only a
+    /// prey its attack choice accepts this decision window (the same draw the patrol makes),
+    /// so a prey it passes over is not struck because it stood in reach while the hunter
+    /// went for another. Off, any size-eligible prey in the capsule, as D2 did.
+    pub strike_chosen_only: bool,
 }
 
 impl Default for HuntConfig {
@@ -574,10 +600,14 @@ impl Default for HuntConfig {
             patrol_explore: 0.2,
             sight_m: 2.0,
             tremor_turn: 0.003,
-            search_memory_s: 7200.0,
+            search_memory_s: 600.0,
+            share_switching: true,
+            switch_exponent: 2.0,
+            attack_prior_s: 15.0,
             attack_half_s: 60.0,
             attack_explore: 0.15,
             attack_decision_s: 20.0,
+            strike_chosen_only: true,
         }
     }
 }

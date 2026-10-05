@@ -91,7 +91,7 @@ pub use manifest::{
     Transfer, Tunings, gru32_parameter_count,
 };
 pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PredationConfig, TeacherConfig};
-pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, attack_preference, profitability, FRUITLESS_SLOTS};
+pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, attack_preference, encounter_share, profitability, FRUITLESS_SLOTS};
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
@@ -2544,6 +2544,14 @@ pub struct FaunaLedger {
     pub hunt_explored: u64,
     #[serde(default)]
     pub hunt_chosen: u64,
+    /// (D2b) Seconds of contact a patroller had with prey of each lineage that its attack
+    /// choice declined (met, seen or felt, and passed over), and strikes begun by a
+    /// patroller on a prey its choice did not accept (only with
+    /// [`HuntConfig::strike_chosen_only`] off: the opportunistic strike).
+    #[serde(default)]
+    pub hunt_declined_s_by_prey: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub strikes_unchosen_by_prey: [u64; Founder::COUNT],
     /// Wound units healed, by the healed body's lineage (§2.4).
     pub healed_by_founder: [f64; Founder::COUNT],
     /// Carrion taken by each lineage's mouths, gross organic matter: who ate the carcasses.
