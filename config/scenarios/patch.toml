@@ -35,3 +35,10 @@ founding_count = 0
 
 [fauna.founders.chorister]
 founding_count = 0
+
+# Capgnawers on every seed (the detritus web D1, 2026-10-05): placed "at food" they need a
+# component with two stocked glowcaps at founding, which only 1-2 of 8 patch seeds have.
+# They also eat litter, so here they are founded on litter beds like the shredder and
+# find the caps by their fungal cue.
+[fauna.founders.capgnawer]
+founding_site = "litter_bed"

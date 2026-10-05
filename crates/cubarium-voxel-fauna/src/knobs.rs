@@ -335,6 +335,25 @@ pub struct TeacherConfig {
     /// below; searching it never climbs toward it; taking off under it, it goes out level.
     #[serde(default = "bw_roost_ceiling")]
     pub bellwing_roost_ceiling: f64,
+    /// **Stay on food** (the detritus web, §3.1A): the blind forager's forward effort
+    /// while its mouth tastes food over [`TeacherConfig::feed_gate`]. 0 stops and feeds
+    /// until the face under its mouth falls below the gate (an exhausted patch), then
+    /// walks on; 1 is the old forager, which crossed a pile at full walk. A refused motor's
+    /// escape and the prey flee rule still come first.
+    #[serde(default = "stay_forward")]
+    pub forage_stay_forward: f64,
+    /// Samples the blind forager turns, the way its remembered preference says, right
+    /// after it leaves an exhausted patch (area-restricted search: stay near where food
+    /// was), count. 0 walks straight on.
+    #[serde(default = "turn_back_samples")]
+    pub forage_turn_back_samples: u32,
+}
+
+fn stay_forward() -> f64 {
+    0.0
+}
+fn turn_back_samples() -> u32 {
+    2
 }
 
 fn bw_altitude() -> f64 {
@@ -399,6 +418,8 @@ impl Default for TeacherConfig {
             bellwing_gaze_turn: bw_gaze(),
             bellwing_wander_forward: bw_wander_forward(),
             bellwing_roost_ceiling: bw_roost_ceiling(),
+            forage_stay_forward: stay_forward(),
+            forage_turn_back_samples: turn_back_samples(),
         }
     }
 }

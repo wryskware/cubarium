@@ -519,7 +519,10 @@ fn spread_moves_film_to_an_empty_eligible_neighbour_and_conserves_it() {
 #[test]
 fn take_film_takes_pro_rata() {
     let world = strip(&[1; 4]);
-    let mut flora = Flora::in_world(&world, config());
+    // No grazing refuge here: this case is the pool rule, emptied to the last unit.
+    let mut c = config();
+    c.film_graze_refuge = 0.0;
+    let mut flora = Flora::in_world(&world, c);
     let site = face(2);
     put_film(&mut flora, site, 0.01);
     let l0 = flora.view().ledger.clone();

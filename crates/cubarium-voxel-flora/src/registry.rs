@@ -374,6 +374,8 @@ fn rows() -> Vec<Row> {
         r("flora.film_extinction_per_m", "/m", nonneg, "glassfilm: light extinction per metre of water"),
         r("flora.film_growth_per_s", "/s", nonneg, "glassfilm: logistic growth rate at full light"),
         r("flora.film_capacity_per_m2", "org-units per m2", nonneg, "glassfilm: carrying capacity per square metre"),
+        r("flora.film_graze_refuge", "fraction of capacity", Range::fraction(), "glassfilm: share of a site's capacity a grazer cannot reach (the refuge it regrows from)")
+            .search(0.0, 0.5),
         r("flora.film_maintenance_per_s", "/s", nonneg, "glassfilm: upkeep, respired"),
         r("flora.film_spread_per_s", "/s", nonneg, "glassfilm: fragments a neighbour sends per unit of its film"),
         r("flora.film_dry_death_per_s", "/s", nonneg, "glassfilm: loss on a dry or too-deep site, to litter"),

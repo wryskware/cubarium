@@ -249,6 +249,11 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
         // food this tick (a counter only).
         for a in fauna.animals.iter() {
             if let Some(f) = a.founder
+                && a.attached.is_none()
+            {
+                fauna.ledger.alive_ticks_by_founder[f.index()] += 1;
+            }
+            if let Some(f) = a.founder
                 && a.state != State::Asleep
                 && a.attached.is_none()
             {
@@ -586,6 +591,21 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
             continue;
         };
         let phys = *fauna.config.founder(founder);
+        // A dark-active body reads the light at its own face (§3.1B): the face's
+        // terrain sky, cached per face.
+        let sky = if clock_on && phys.active.reads_face_light() {
+            let a = &fauna.animals[i];
+            match a.pose.column(v, view.config.depth) {
+                Some((cx, cz)) => {
+                    let wx = cx.rem_euclid(i64::from(view.config.width));
+                    let y = a.sense_layer(v);
+                    fauna.face_sky(view, wx, y, cz)
+                }
+                None => 1.0,
+            }
+        } else {
+            1.0
+        };
         let a = &fauna.animals[i];
         let hungry = hunger(a, &phys.core);
         let emergency = if a.emergency {
@@ -593,7 +613,8 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
         } else {
             hungry >= phys.wake_hunger
         };
-        let on_phase = phys.active.awake(clock_on, daylight, &life);
+        let on_phase = phys.active.awake_under(clock_on, daylight, sky, &life);
+        let dark_awake = on_phase && clock_on && phys.active.reads_face_light() && daylight >= life.day_line;
         let free = a.alert_ticks == 0
             && a.mobility.climb.is_none()
             && a.mobility.mode != crate::MobilityMode::Fly
@@ -650,6 +671,9 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
         }
         if was_asleep != (a.state == State::Asleep) {
             fauna.ledger.sleep_flips_by_founder[founder.index()] += 1;
+        }
+        if dark_awake && a.state != State::Asleep {
+            fauna.ledger.dark_awake_ticks_by_founder[founder.index()] += 1;
         }
         // The eating latch goes on (rule 7: on-phase, or in an emergency; awake; not
         // riding a host).
@@ -1255,6 +1279,10 @@ fn controllers(
                 actions = tactic;
                 lure = 0.0;
             }
+        }
+        // The stay-on-food readout: a heuristic body holding still to feed.
+        if driven && fauna.controllers.flees(id) && actions.feed > 0.5 && actions.forward <= fauna.config.teachers.forage_stay_forward {
+            fauna.ledger.feed_still_ticks_by_founder[founder.index()] += 1;
         }
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;
@@ -2769,6 +2797,7 @@ fn advance_eligibility(
     rule: &crate::Reproduction,
 ) {
     let a = &mut fauna.animals[i];
+    a.reproduction.retry_ticks = a.reproduction.retry_ticks.saturating_sub(1);
     if a.reproduction.refractory_ticks > 0 {
         a.reproduction.refractory_ticks -= 1;
         a.reproduction.surplus_ticks = 0;
@@ -2799,7 +2828,10 @@ fn gestate(
 ) {
     let a = &fauna.animals[i];
     if a.reproduction.escrow.is_none() {
-        if !rule.hold_met(&a.reproduction) {
+        if !rule.hold_met(&a.reproduction) || a.reproduction.retry_ticks > 0 {
+            return;
+        }
+        if at_body_ceiling(fauna, i, rule) {
             return;
         }
         // R3: a pack lineage's litter — only its pack's breeder conceives, no sooner than
@@ -2866,6 +2898,7 @@ fn gestate(
         .escrow
         .take()
         .expect("an open escrow");
+    book_first_young(fauna, i);
     let a = &mut fauna.animals[i];
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
@@ -2999,7 +3032,10 @@ fn newborn(
         pose,
         founder,
         founder_state: crate::FounderState::default(),
-        reproduction: crate::ReproductionState::default(),
+        reproduction: crate::ReproductionState {
+            native: true,
+            ..crate::ReproductionState::default()
+        },
         body: body_min,
         reserve: parcel.organic - body_min,
         mineral: parcel.mineral,
@@ -3075,7 +3111,7 @@ fn lay(
     rule: &crate::Reproduction,
 ) {
     let seed = view.config.seed;
-    if !rule.hold_met(&fauna.animals[i].reproduction) {
+    if !rule.hold_met(&fauna.animals[i].reproduction) || fauna.animals[i].reproduction.retry_ticks > 0 {
         return;
     }
     // Not on a wall: a clutch goes on the litter the body is standing in.
@@ -3115,11 +3151,29 @@ fn lay(
             return;
         }
     }
-    let cost = rule.package_cost(sc);
-    let a = &mut fauna.animals[i];
-    if !(cost > 0.0) || a.reserve < cost {
+    // The clutch the reserve pays for: the fixed clutch, or with a clutch from surplus
+    // the eggs above the floor (§3.1C). None affordable is not a laying, and costs nothing.
+    let eggs = rule.clutch_for(fauna.animals[i].reserve);
+    let cost = if rule.clutch_max > 0 {
+        f64::from(eggs) * rule.egg_organic
+    } else {
+        rule.package_cost(sc)
+    };
+    if eggs == 0 || !(cost > 0.0) || fauna.animals[i].reserve < cost {
         return;
     }
+    // The compute guard, then the nest site: either refuses a clutch that would have
+    // been paid for, at no cost, and the body tries again later.
+    if at_body_ceiling(fauna, i, rule) {
+        return;
+    }
+    if !rule.dormant && nest_crowded(fauna, i, view, rule) {
+        fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
+        fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
+        return;
+    }
+    book_first_young(fauna, i);
+    let a = &mut fauna.animals[i];
     let Taken {
         organic: paid,
         mineral,
@@ -3133,7 +3187,7 @@ fn lay(
     if rule.dormant {
         // One clutch per egg, each with its own dormancy; the last egg takes the
         // remainder so the three currencies add back up to what was paid.
-        let n = rule.clutch_size.max(1);
+        let n = eggs.max(1);
         let (mut left_o, mut left_m, mut left_e) = (cost, mineral, energy);
         for k in 0..n {
             let last = k + 1 == n;
@@ -3162,7 +3216,7 @@ fn lay(
     } else {
         fauna.clutches.push(crate::Clutch {
             site,
-            count: rule.clutch_size,
+            count: eggs,
             organic: cost,
             mineral,
             energy,
@@ -3170,11 +3224,81 @@ fn lay(
             lineage,
             dormancy: None,
         });
-        fauna.ledger.eggs_laid += u64::from(rule.clutch_size);
+        fauna.ledger.eggs_laid += u64::from(eggs);
     }
     fauna.ledger.clutches_laid += 1;
-    fauna.ledger.eggs_laid_by_founder[lineage.index()] += u64::from(rule.clutch_size);
+    fauna.ledger.clutches_by_founder[lineage.index()] += 1;
+    fauna.ledger.eggs_laid_by_founder[lineage.index()] += u64::from(eggs);
     fauna.ledger.reproduction_by_founder[lineage.index()] += cost;
+}
+
+/// **Replacement** (the detritus web's readout): a body born in the world laying its first
+/// clutch or bearing its first young is booked with its age then. Call before the
+/// package is booked as given.
+fn book_first_young(fauna: &mut Fauna, i: usize) {
+    let a = &fauna.animals[i];
+    let Some(f) = a.founder else { return };
+    if a.reproduction.native && !(a.reproduction.given > 0.0) {
+        fauna.ledger.first_clutches_by_founder[f.index()] += 1;
+        fauna.ledger.first_clutch_age_ticks_by_founder[f.index()] += a.age_ticks;
+    }
+}
+
+/// **The body ceiling** ([`crate::FaunaConfig::lineage_body_ceiling`]), a compute guard and
+/// not ecology: true when body `i`'s lineage already holds the ceiling's living bodies, in
+/// which case the refusal is booked and logged, and the body waits
+/// [`crate::Reproduction::nest_retry_s`] before it tries again.
+fn at_body_ceiling(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) -> bool {
+    let ceiling = fauna.config.lineage_body_ceiling;
+    let Some(f) = fauna.animals[i].founder else {
+        return false;
+    };
+    if ceiling == 0 {
+        return false;
+    }
+    let living = fauna.animals.iter().filter(|a| a.founder == Some(f)).count();
+    if living < ceiling as usize {
+        return false;
+    }
+    fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
+    fauna.ledger.ceiling_refusals_by_founder[f.index()] += 1;
+    eprintln!(
+        "fauna compute guard: {} holds {living} bodies, at its ceiling of {ceiling}; a breeding was refused at tick {} (the ecological brakes failed)",
+        f.name(),
+        fauna.tick,
+    );
+    true
+}
+
+/// **The nest-site brake** (§3.1D): whether more of body `i`'s own lineage than
+/// [`crate::Reproduction::nest_crowd_max`] — living bodies of any age, itself not counted,
+/// and eggs waiting to hatch — stand within [`crate::Reproduction::nest_radius_m`] of it.
+/// Off (false) at a radius of 0.
+fn nest_crowded(fauna: &Fauna, i: usize, view: &VoxelView<'_>, rule: &crate::Reproduction) -> bool {
+    let r = rule.nest_radius_m;
+    if !(r > 0.0) {
+        return false;
+    }
+    let me = &fauna.animals[i];
+    let Some(f) = me.founder else { return false };
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let near = |x: f64, z: f64| {
+        let (dx, dz) = crate::pose::wrapped_delta(me.pose.x, me.pose.z, x, z, ring);
+        dx * dx + dz * dz <= r * r
+    };
+    let mut n: u64 = fauna
+        .animals
+        .iter()
+        .filter(|a| a.id != me.id && a.founder == Some(f) && near(a.pose.x, a.pose.z))
+        .count() as u64;
+    for c in fauna.clutches.iter().filter(|c| c.lineage == f && c.dormancy.is_none()) {
+        let (x, z) = ((f64::from(c.site.x) + 0.5) * v, (f64::from(c.site.z) + 0.5) * v);
+        if near(x, z) {
+            n += u64::from(c.count);
+        }
+    }
+    n > u64::from(rule.nest_crowd_max)
 }
 
 /// A clutch whose face the terrain took away, or that standing water has covered deeper
@@ -3199,6 +3323,7 @@ fn clutch_fate(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     fauna.clutches.retain(|_| keep.next().unwrap_or(true));
     for c in lost {
         fauna.ledger.eggs_lost += u64::from(c.count);
+        fauna.ledger.eggs_lost_by_founder[c.lineage.index()] += u64::from(c.count);
         fauna.book_deposit(
             flora,
             c.site,
@@ -3601,6 +3726,9 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
 #[cfg(test)]
 #[path = "circadian_tests.rs"]
 mod circadian_tests;
+#[cfg(test)]
+#[path = "detritivore_tests.rs"]
+mod detritivore_tests;
 #[cfg(test)]
 #[path = "dung_tests.rs"]
 mod dung_tests;

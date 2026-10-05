@@ -152,6 +152,14 @@ fn species_rows() -> Vec<Row> {
         r("reproduction.litter_min", "organic units", nonneg, "litter an egg-layer's face must hold (more than this) for it to lay")
             .search(0.0, 0.2),
         r("reproduction.incubation_s", "s", nonneg, "a clutch incubates this long").search(60.0, 6000.0).log().grade("B"),
+        r("reproduction.clutch_max", "eggs", nonneg, "clutch from surplus: most eggs a clutch holds, sized at laying from the reserve above the floor (0: the fixed clutch_size)")
+            .search(0.0, 8.0),
+        r("reproduction.nest_radius_m", "m", nonneg, "nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off)")
+            .search(0.25, 3.0),
+        r("reproduction.nest_crowd_max", "bodies and eggs", nonneg, "nest-site brake: more of its own lineage than this within the radius refuses a clutch")
+            .search(1.0, 30.0),
+        r("reproduction.nest_retry_s", "s", nonneg, "a refused layer (nest site, body ceiling) waits this long before trying again")
+            .search(5.0, 600.0).log(),
     ]
 }
 
@@ -300,6 +308,8 @@ fn rows() -> Vec<Row> {
             .search(0.01, 0.5).log().grade("N").prov("derived"),
         r("fauna.parasite_detach_body_fraction", "fraction of lineage body_max", Range::closed(0.0, 1.0).open_lo(), "a rider drops off at this size")
             .search(0.15, 0.5).grade("N"),
+        r("fauna.lineage_body_ceiling", "bodies", Range::nonneg(), "COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off)")
+            .grade("N").prov("decision"),
     ]);
     rows
 }
@@ -427,6 +437,10 @@ fn knob_rows() -> Vec<Row> {
         t("bellwing_gaze_turn", "effort", fraction, "turn effort toward the sector with the most bloom").search(0.2, 1.0),
         t("bellwing_wander_forward", "effort", fraction, "forward effort of the bellwing's no-signal wander").search(0.2, 1.0),
         t("bellwing_roost_ceiling", "fraction of band", fraction, "going to rest, cover closer than this overhead is an underside to rise into").search(0.1, 0.8),
+        t("forage_stay_forward", "effort", fraction, "the blind forager's forward effort while it tastes food (0 stays on food, 1 walks across it)")
+            .search(0.0, 1.0).prov("decision"),
+        t("forage_turn_back_samples", "samples", count, "samples the blind forager turns after leaving an exhausted patch (area-restricted search)")
+            .search(0.0, 8.0),
     ]);
 
     // `fauna.founding.*`: the seeder's founders.
