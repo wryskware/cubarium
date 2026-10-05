@@ -132,12 +132,20 @@ fn save(dir: &Path, sim: &Sim, minute: u64) {
     eprintln!("saved {} at minute {minute}", dir.display());
 }
 
-/// A save, **untouched**: its own plant config is still the layer's.
+/// A save, **untouched**: its own plant config is still the layer's. Its founder bodies
+/// get the founding's heuristics back (controllers are not saved).
 fn load_raw(dir: &Path) -> (World, Flora, Fauna, u64) {
     let read = |n: &str| std::fs::read(dir.join(n)).unwrap_or_else(|e| panic!("{}/{n}: {e}", dir.display()));
     let world = World::load(&read("world.bin")).expect("world");
     let flora = cubarium_voxel_flora::snapshot::decode(&read("flora.bin")).expect("flora");
-    let fauna = Fauna::load(&read("fauna.bin")).expect("fauna");
+    let mut fauna = Fauna::load(&read("fauna.bin")).expect("fauna");
+    // Controllers are session state and the snapshot skips them: without this every
+    // loaded body rests where it stands (no steps, no bites, no burrs). `found` runs the
+    // seeder's heuristics, so those go back; a policy-driven save has no driver here.
+    for f in Founder::ALL {
+        assert!(!fauna.policy_driven(f), "{}: {} founders were policy-driven; this study runs heuristics", dir.display(), f.name());
+    }
+    cubarium_voxel_sim::habitat::reinstall_heuristics(&mut fauna);
     let minute: u64 = String::from_utf8(read("minute")).unwrap().trim().parse().unwrap();
     (world, flora, fauna, minute)
 }
@@ -1545,5 +1553,44 @@ fn fate(args: &[String]) {
             v[Species::COUNT],
             n as u64 - v[TURF.index()] - v[PAD.index()] - v[Species::COUNT]
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A loaded save's animals are driven.** Controllers are session state and the
+    /// snapshot skips them, so a layer read back from bytes has bodies with nothing
+    /// driving them: every one rests where it stands, never steps onto a new face, and
+    /// so never meets a burr donor or a bite. The study's loader puts the founding's
+    /// heuristics back on every standing founder body (and on births, through the
+    /// lineage recipes).
+    #[test]
+    fn a_loaded_save_drives_every_founder_body() {
+        let mut world = cubarium_voxel_sim::scene::authored(cubarium_voxel::Config {
+            width: 64,
+            height: 24,
+            depth: 6,
+            ..cubarium_voxel::Config::default()
+        });
+        let mut flora = Flora::new(Default::default());
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
+        cubarium_voxel_sim::habitat::seed(&mut world, &mut flora, &mut fauna);
+        let dir = std::env::temp_dir().join(format!("succession-study-load-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("world.bin"), world.save()).unwrap();
+        std::fs::write(dir.join("flora.bin"), cubarium_voxel_flora::snapshot::encode(&flora)).unwrap();
+        std::fs::write(dir.join("fauna.bin"), fauna.save()).unwrap();
+        std::fs::write(dir.join("minute"), "0").unwrap();
+        let (_, _, mut loaded, _) = load_raw(&dir);
+        std::fs::remove_dir_all(&dir).ok();
+        let bodies: Vec<(u64, Founder)> =
+            loaded.view().animals.iter().filter_map(|a| a.founder.map(|f| (a.id, f))).collect();
+        assert!(!bodies.is_empty(), "the seeded habitat has founder bodies");
+        for (id, founder) in &bodies {
+            assert!(loaded.has_founder_factory(*founder), "{founder:?} births are driven");
+            assert!(loaded.take_controller(*id).is_some(), "body {id} ({founder:?}) is driven");
+        }
     }
 }
