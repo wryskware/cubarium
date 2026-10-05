@@ -1885,8 +1885,8 @@ impl SpeciesConfig {
     /// Wrysk's). The presets carry the same relative changes (`alpha` 1.285 → 4,
     /// `foliage_rate` × 3, `senescence` 0.00156 → 0.0026, the bank × 2).
     /// - **Productive.** `wood_max` 0.3 (× 5); `alpha` was 6.2 here, 1.5 in the spread
-    ///   package (below) and 1.8 since its rerun: 2.3× velvetpad's edible foliage per
-    ///   mature stand on paper, about 1.2× measured under grazing.
+    ///   package (below) and 3.15 since its alpha sweep: a grazed mature stand carries about
+    ///   the original (alpha 4) velvetpad's edible foliage, about 1.9× today's.
     ///   `foliage_rate` 0.06 (× 3) and `graze_refuge` 0.4 (basal buds) regrow a cropped
     ///   sward fast. `senescence` 0.00167 (× 1.67 the base): heavy thatch.
     /// - **Drought-tolerant.** `wilt_water` 0 and `full_water` 0.3, `rooting_depth` 2: it
@@ -1971,12 +1971,13 @@ impl SpeciesConfig {
             maintenance: 0.002,
             // Production (2026-10-04, Wrysk: "grass should have more foliage than moss"):
             // a mature stand carries `(1 − graze_refuge) · alpha · wood_max` above its
-            // floor, 0.6 · 1.8 · 0.3 = 0.32 against velvetpad's 0.7 · 1.0 · 0.2 = 0.14 —
-            // 2.3× on paper (the presets: 3.6 against 2.0, the same ratio). Grazed and
-            // young, the spread rerun measured about 1.2× per mature stand at 3.6, and
-            // 1.0× at 3.0, so the paper ratio sits above the 1.5–2× the brief asks. Was
-            // 1.5 (presets 3.0), before that 6.2 (presets 4.0).
-            alpha: 1.8,
+            // floor, 0.6 · 3.15 · 0.3 = 0.57 against velvetpad's 0.7 · 1.0 · 0.2 = 0.14 on
+            // paper (the presets: 6.3 against 2.0, the same ratio). Grazed and young, the
+            // alpha sweep on `patch` (8 seeds, 2026-10-04) measured a mature stand at 0.92×
+            // the original velvetpad (preset alpha 4) and 1.7× today's, with the world's
+            // edible + litter at 1.07× the original plants; 5.4 and 6.3 gave the same stand,
+            // 6.3 the more food. Was 1.8 (presets 3.6), 1.5 (3.0), before that 6.2 (4.0).
+            alpha: 3.15,
             senescence: 0.00167,
             foliage_rate: 0.06,
             wood_rate: 0.01,

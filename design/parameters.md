@@ -562,7 +562,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.springturf.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
-| `flora.springturf.alpha` | 1.8 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
+| `flora.springturf.alpha` | 3.15 | foliage per unit wood | [0, inf) | 0.05–3 log | D | placeholder | foliage cap P_cap = alpha * W |
 | `flora.springturf.wood_max` | 0.3 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.springturf.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.springturf.maintenance` | 0.002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
