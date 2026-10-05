@@ -56,6 +56,8 @@ mod overtop_covers_tests;
 mod carrion_tests;
 #[cfg(test)]
 mod spread_tests;
+#[cfg(test)]
+mod shared_face_tests;
 mod film;
 #[cfg(test)]
 mod film_tests;
