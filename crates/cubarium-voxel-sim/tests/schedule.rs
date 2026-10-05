@@ -199,13 +199,16 @@ fn read(world: &World, flora: &Flora, fauna: &Fauna) -> Reading {
 
 /// The three-call sequence, which is still what the core fixtures drive, with the water
 /// on one thread like the schedule it is compared with: `World::step` splits the water
-/// phases across its default pool, whose sums land in a different order.
+/// phases across its default pool, whose sums land in a different order. The world's
+/// clock moves after the animals, as the schedule's `Advance` does: the plant clock keeps
+/// the water's phase by reading it.
 fn three_calls(ticks: u64) -> Reading {
     let (mut world, mut flora, mut fauna) = conditioned();
     for _ in 0..ticks {
-        world.step_with(1);
+        cubarium_voxel::water::step(&mut world, 1);
         flora.step_clocked(&mut world, 1);
         fauna.step(&world, &mut flora);
+        world.advance_tick();
     }
     read(&world, &flora, &fauna)
 }

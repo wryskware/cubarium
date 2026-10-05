@@ -2787,6 +2787,12 @@ impl StartingStores {
     }
 }
 
+/// An animal tick between its parts ([`Fauna::begin_tick`] → [`Fauna::read_tick`] →
+/// [`Fauna::finish_tick`]): the tick it produces and the clock and weather it began
+/// with. Not state: it lives for one tick.
+#[derive(Debug)]
+pub struct FaunaTick(step::TickStart);
+
 /// The animal layer. Owns its animals; borrows the world and the plant layer per call.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Fauna {
@@ -3307,6 +3313,38 @@ impl Fauna {
         senses: &mut Senses,
     ) {
         step::step_with_senses(self, world, flora, senses, threads);
+    }
+
+    /// **One tick in three parts**, for a schedule that runs the read side beside the
+    /// plant layer's own reads: [`Fauna::begin_tick`], [`Fauna::read_tick`],
+    /// [`Fauna::finish_tick`], in that order and nothing of this layer's in between, are
+    /// [`Fauna::step_with_senses`] (or [`Fauna::step_with`] with no senses).
+    ///
+    /// The first part: the clock, the terrain and maintenance. Its voiding (dung, gut
+    /// seeds) writes the plant layer's ground.
+    pub fn begin_tick(&mut self, world: &World, flora: &mut Flora) -> FaunaTick {
+        cubarium_voxel::voxel_phase!(FaunaStep, { FaunaTick(step::begin(self, world, flora)) })
+    }
+
+    /// The read side: the litter field's due update and the controller stage. Reads the
+    /// plant layer and writes nothing of it.
+    pub fn read_tick(
+        &mut self,
+        tick: &FaunaTick,
+        world: &World,
+        flora: &Flora,
+        senses: Option<&mut Senses>,
+        threads: usize,
+    ) {
+        cubarium_voxel::voxel_phase!(FaunaStep, {
+            step::read(self, world, flora, senses, &tick.0, threads)
+        });
+    }
+
+    /// The writes: the act (feeding through the plant layer's `take_*`), births, deaths
+    /// and the burr pass.
+    pub fn finish_tick(&mut self, tick: FaunaTick, world: &World, flora: &mut Flora) {
+        cubarium_voxel::voxel_phase!(FaunaStep, { step::finish(self, world, flora, tick.0) });
     }
 
     /// Apply a command now, between ticks, the way the plant layer's are applied. Returns

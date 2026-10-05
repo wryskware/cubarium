@@ -93,7 +93,7 @@ pub use step::{adult_light_cover, establishment_gates_with_sky};
 /// Where a falling stand's wood lands, for a diagnostic.
 pub use step::fall_line;
 /// The overlapped tick's planned drink, between the plant step and the barrier.
-pub use step::DrinkPlan;
+pub use step::{DrinkPlan, PlantStep};
 /// What one cell of ground offers a root: the scale `μ` and the establishment
 /// water gate read.
 pub use step::available_water;
@@ -2752,6 +2752,12 @@ pub struct FloraConfig {
     /// film's second) still fires once per its own period, on the tick it falls on inside
     /// the step. `1` is the per-tick layer. Animals still graze, deposit and carry burrs
     /// every tick, between plant steps. A scheduling numeric, not ecology.
+    ///
+    /// The steps fall on the world ticks that are multiples of `step_every`, the phase the
+    /// coarse water keeps (`World::water_due`): with the experiments' `water_every` equal
+    /// to it, the plant step lands on the coarse water's tick and the overlapped schedule
+    /// runs the two long phases side by side. **4**, the experiments' `water_every`
+    /// (2026-10-04; it was 5): one plant step per 0.2 s.
     pub step_every: u32,
     /// **Whether a passing bank waits one check before it sprouts**: `true`,
     /// the shipped rule — the check that finds the gates passing draws the lottery and
@@ -2877,7 +2883,7 @@ impl Default for FloraConfig {
             seed_check_s: 30.0,
             // Plants live on minute-to-hour clocks: a step every quarter second is
             // invisible on the display and a fifth of the per-tick cost.
-            step_every: 5,
+            step_every: 4,
             sprout_after_arming: true,
             upkeep_q10: 2.0,
             wind_tries: 4,
@@ -4838,6 +4844,42 @@ impl Flora {
     /// nothing, and [`Flora::take_drink_plan`] then returns `None`.
     pub fn step_planned_clocked(&mut self, world: &World, threads: usize) {
         step::step_planned(self, world, threads, true);
+    }
+
+    /// **[`Flora::step_planned_clocked`] in parts**, for a schedule that runs the plant
+    /// step's reads beside the animals' (`design/7_Research/tick-stage-dependencies-2026-10-04.md`,
+    /// proposal 2): `begin_planned_clocked`, then [`Flora::read_planned`] (through `&self`,
+    /// so the animals' read side may hold the layer too), then [`Flora::plan_drink`] —
+    /// after which [`Flora::take_drink_plan`] holds the plan — then
+    /// [`Flora::finish_planned`]. Nothing else of this layer's may run between them except
+    /// the animals' writes before the reads (their maintenance's voiding) and reads beside
+    /// them; the parts in order are `step_planned_clocked`.
+    ///
+    /// This part: the clock, then the step's prep (terrain pruning, the cover's prep,
+    /// drowning, the vines' drink wants). `None` on a tick that is not a plant step, which
+    /// then only moved the clock.
+    pub fn begin_planned_clocked(&mut self, world: &World, threads: usize) -> Option<PlantStep> {
+        step::begin_planned(self, world, threads)
+    }
+
+    /// The plant step's reads: light and the drink's plan. Writes only `step`, which holds
+    /// the layer's sky cache and drink scratch until [`Flora::plan_drink`]. Reads `stands`,
+    /// the config and the world; a caller may read the layer beside it.
+    pub fn read_planned(&self, step: &mut PlantStep, world: &World, threads: usize) {
+        cubarium_voxel::voxel_phase!(FloraStep, { step.read(self, world, threads) });
+    }
+
+    /// The drink planned off the read: each stand's and vine's share credited, the sky
+    /// cache and scratch back in the layer, and the plan held for
+    /// [`Flora::take_drink_plan`].
+    pub fn plan_drink(&mut self, step: &mut PlantStep, world: &World, threads: usize) {
+        step::plan_drink(self, step, world, threads);
+    }
+
+    /// The rest of the step: defences relax, feed, growth, the cover, decomposition and
+    /// the film, the seed bank, propagation and the crowns.
+    pub fn finish_planned(&mut self, step: PlantStep, world: &World, threads: usize) {
+        step::finish_planned(self, step, world, threads);
     }
 
     /// **The overlapped tick's plant step** (`design/handoffs/voxel-phase-overlap-2026-09-24.md`):
