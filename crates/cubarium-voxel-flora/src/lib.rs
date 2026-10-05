@@ -53,8 +53,6 @@ mod seed_marks_tests;
 #[cfg(test)]
 mod overtop_covers_tests;
 #[cfg(test)]
-mod glowcap_yield_tests;
-#[cfg(test)]
 mod carrion_tests;
 #[cfg(test)]
 mod spread_tests;
@@ -1193,19 +1191,6 @@ pub struct SpeciesConfig {
     /// ([`FloraLedger::overtopped`], [`FloraLedger::runner_displaced`]). `false` at the
     /// base: runners take free faces only. Not a number, so its registry row is a switch.
     pub runners_overtop: bool,
-    /// **Gives way to plants** (glowcap yield, 2026-10-05): a stand of this species does not
-    /// hold its face against a photosynthetic plant. A [`Trophic::Photo`] seed or runner
-    /// whose **own establishment gates pass** on the face takes it as if it were bare — the
-    /// gap lottery among the plant banks there, no `overtop_per_check` draw and no
-    /// `overtop_covers` list — and this stand dies the ordinary death, its wood to dead
-    /// wood and the rest to litter, booked as overtopped by a seed
-    /// ([`DeathCause::Overtopped`]) or displaced by a runner ([`DeathCause::Displaced`]).
-    /// Where the plant's gates fail — dark ground under its light gate, a waterlogged or
-    /// dry face — nothing takes it and the stand holds. It never lets this species take a
-    /// plant's face. `true` for the glowcap, a fungus that feeds on the litter under the
-    /// plants rather than on the face itself; `false` at the base. Not a number, so its
-    /// registry row is a switch.
-    pub yields_to_plants: bool,
     /// **The WALD wind kernel's mean distance**, metres ([`Dispersal::Wald`]). The
     /// inverse-Gaussian `μ`, which in the mechanistic WALD model (Katul et al. 2005) is
     /// `H · U / F` — release height times wind speed over the seed's terminal velocity —
@@ -1664,7 +1649,6 @@ impl SpeciesConfig {
             // A runner roots on the next column over (the eight neighbours).
             runner_reach: 1,
             runners_overtop: false,
-            yields_to_plants: false,
             // No WALD kernel, no burrs, no curing: springturf's preset says why it has them.
             wald_mean_m: 0.0,
             wald_shape_m: 0.0,
@@ -2340,9 +2324,6 @@ impl SpeciesConfig {
             dark_spore_bias: 4.0,
             dark_founder_share: 0.5,
             trophic: Trophic::Saprotroph,
-            // Glowcap yield (2026-10-05): on lit litter a plant that can establish takes the
-            // face; in the dark, where no plant passes its light gate, the glowcap holds.
-            yields_to_plants: true,
             substrate_uptake_per_s: 0.02,
             substrate_yield: 0.4,
             establish_substrate_min: 0.02,

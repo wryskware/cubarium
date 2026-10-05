@@ -37,8 +37,7 @@ use crate::Flora;
 //     `Flora::{burrs, burr_marks}`, the ledger's runner, death-cause, burr and cure lines.
 // 25: the plant clock — `FloraConfig::step_every`, `Flora::since_step`.
 // 26: a seedling's reflush answers to its seed's leaf — `SpeciesConfig::seedling_below`.
-// 27: glowcap yield — `SpeciesConfig::yields_to_plants`.
-pub const SCHEMA: u32 = 27;
+pub const SCHEMA: u32 = 26;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
