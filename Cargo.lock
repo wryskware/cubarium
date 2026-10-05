@@ -717,10 +717,12 @@ dependencies = [
 name = "cubarium-webmodel"
 version = "0.1.0"
 dependencies = [
+ "cubarium-voxel",
  "cubarium-voxel-fauna",
  "cubarium-voxel-flora",
  "cubarium-voxel-sim",
  "serde",
+ "toml",
 ]
 
 [[package]]
