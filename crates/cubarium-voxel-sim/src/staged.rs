@@ -318,6 +318,28 @@ impl Window {
         1.0 - asleep as f64 / seen.max(1) as f64
     }
 
+    /// The share of a lineage's sampled body-seconds spent asleep or resting.
+    fn idle_share(&self, f: Founder) -> f64 {
+        let s = &self.states[f.index()];
+        let seen: u64 = s.values().sum();
+        let idle: u64 = ["Asleep", "Resting"].iter().map(|k| s.get(*k).copied().unwrap_or(0)).sum();
+        idle as f64 / seen.max(1) as f64
+    }
+
+    /// Idle by choice: asleep or resting for all but [`AWAKE_SHARE_MIN`] of the window
+    /// (a pack lying up at its den by day) with every body of the lineage still driven. A
+    /// body with no controller is never idle: it is the frozen-world failure.
+    fn idle_by_choice(&self, f: Founder, fauna: &cubarium_voxel_fauna::Fauna) -> Option<f64> {
+        let idle = self.idle_share(f);
+        let driven = fauna
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(f))
+            .all(|a| fauna.has_controller(a.id));
+        (idle > 1.0 - AWAKE_SHARE_MIN && driven).then_some(idle)
+    }
+
     /// The full check over the window, as one verdict per item; `Err` lists the failures.
     fn verdict(&self, sim: &Sim, cfg: &StageConfig) -> Result<String, String> {
         let mut fail = Vec::new();
@@ -348,6 +370,10 @@ impl Window {
                 notes.push(format!("{} asleep ({:.0}% awake)", f.name(), 100.0 * awake_share));
                 continue;
             }
+            if let Some(idle) = self.idle_by_choice(f, fauna) {
+                notes.push(format!("{} idle ({:.0}% asleep or resting), driven", f.name(), 100.0 * idle));
+                continue;
+            }
             let need = n.min(2);
             let path = self.path_m[f.index()];
             let ate: u64 = Food::ALL.iter().map(|food| now[f.index()][food.index()] - self.bites[f.index()][food.index()]).sum();
@@ -376,7 +402,11 @@ impl Window {
         let mut grazers = Vec::new();
         let mut grazed = 0u64;
         for f in Founder::ALL {
-            if bodies[f.index()] == 0 || !phys(f).eats_stands() || self.awake_share(f) < AWAKE_SHARE_MIN {
+            if bodies[f.index()] == 0
+                || !phys(f).eats_stands()
+                || self.awake_share(f) < AWAKE_SHARE_MIN
+                || self.idle_by_choice(f, fauna).is_some()
+            {
                 continue;
             }
             let b: u64 = stand_foods.iter().map(|food| now[f.index()][food.index()] - self.bites[f.index()][food.index()]).sum();
