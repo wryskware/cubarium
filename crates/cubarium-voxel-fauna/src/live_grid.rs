@@ -169,6 +169,8 @@ pub(crate) struct LiveGrid {
     /// Statistics for a diagnostic: full rebuilds and patched stages so far.
     pub(crate) rebuilds: u64,
     pub(crate) patches: u64,
+    /// Columns re-laid by patches so far.
+    pub(crate) relaid: u64,
 }
 
 impl Clone for LiveGrid {
@@ -179,7 +181,14 @@ impl Clone for LiveGrid {
 
 impl std::fmt::Debug for LiveGrid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LiveGrid({} stands, {} rebuilds, {} patches)", self.stands.len(), self.rebuilds, self.patches)
+        write!(
+            f,
+            "LiveGrid({} stands, {} rebuilds, {} patches, {} columns re-laid)",
+            self.stands.len(),
+            self.rebuilds,
+            self.patches,
+            self.relaid
+        )
     }
 }
 
@@ -505,6 +514,7 @@ impl LiveGrid {
         if dirty.is_empty() {
             return true;
         }
+        self.relaid += dirty.len() as u64;
         // Re-lay the stand classes over the stand-dirty columns, then every dirty column's
         // pools.
         let height = c.height as usize;

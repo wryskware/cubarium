@@ -1008,6 +1008,8 @@ fn the_live_grid_patched_reads_as_a_fresh_build() {
             assert_live_is_fresh(&mut live, &world, &flora, &fauna, threads);
         }
         assert!(live.patches > 3, "seed {seed}: the patch path never ran ({live:?})");
+        assert!(live.relaid > 0, "seed {seed}: no patch re-laid a column ({live:?})");
+        eprintln!("seed {seed}: {live:?}");
     }
 }
 
