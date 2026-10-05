@@ -92,6 +92,8 @@ fn resolve(args: &[String]) -> Params {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     if let Some(n) = arg(&args, "threads=").and_then(|s| s.parse().ok()) {
         cubarium_voxel::set_thread_override(n);
     }
@@ -593,7 +595,7 @@ fn run(args: &[String]) {
             before.senescence,
             after.senescence
         );
-        (Sim::ambient(world, flora, fauna, SimConfig::default()), minute)
+        (Sim::ambient(world, flora, fauna, SimConfig::experiment()), minute)
     } else {
         let seed: u64 = arg(args, "seed=").map_or(1, |s| s.parse().unwrap());
         let world_cfg = params.world.clone();
@@ -610,7 +612,7 @@ fn run(args: &[String]) {
             if founded.accepted { "accepted" } else { "NOT accepted" },
             founded.seeded.stands
         );
-        (Sim::ambient(founded.world, founded.flora, founded.fauna, SimConfig::default()), 0)
+        (Sim::ambient(founded.world, founded.flora, founded.fauna, SimConfig::experiment()), 0)
     };
     let save = arg(args, "save=");
     let save_min: Vec<u64> = arg(args, "save_min=").map_or(Vec::new(), |m| m.split(',').map(|v| v.parse().unwrap()).collect());

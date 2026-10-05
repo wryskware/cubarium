@@ -7,5 +7,4 @@
 # Staged runs and scenario maps: WORKING_POLICY.md, "Staged runs and scenario maps".
 base = "../desktop/terrarium.toml"
 
-# Experiment runs use the coarse water step (Wrysk, 2026-10-04); the display host stays at 1.
-water_every = 4
+# Study tools take the coarse water themselves (`SimConfig::experiment`, water_every 4).

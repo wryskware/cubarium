@@ -364,7 +364,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (928 rows)
+**`flora.*`** (929 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1270,6 +1270,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.litter_energy_cap` | 2.0 | energy per org-unit | [0, inf) |  | C | placeholder | retained energy cap per unit of litter |
 | `flora.initial_mineral` | 1.0 | mineral per site | [0, inf) | yes | D | placeholder | mineral a site is provisioned with |
 | `flora.seed_check_s` | 30.0 | s | [0, inf) |  | N | numerics | how often a banked site is tested |
+| `flora.step_every` | 5 | ticks | [1, inf) |  | N | numerics | the plant clock: one plant step per this many world ticks |
 | `flora.upkeep_q10` | 2.0 | x per 10 C | (0, inf) | 1–4 | - | placeholder | Q10 of plant upkeep around the climate's mean |
 | `flora.wind_tries` | 4 | tries | [1, inf) | 1–16 | - | placeholder | a wind seed's draws before the donor keeps its package |
 | `flora.burr_cap` | 6 | seeds per animal | [0, inf) | 1–20 | - | placeholder | burrs: the most seeds one animal's coat carries at once |

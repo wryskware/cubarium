@@ -58,7 +58,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
-use cubarium_voxel::{Config as WorldConfig, DT, Material, VoxelView, World};
+use cubarium_voxel::{Config as WorldConfig, Material, VoxelView, World};
 
 use cubarium_voxel::organism::{Budget, build_from};
 
@@ -1241,6 +1241,7 @@ pub(crate) fn drink_wants(
     box_: &mut Vec<usize>,
     drinkable: &mut Vec<f64>,
     wants: &mut Vec<(u32, u32, f64)>,
+    dt: f64,
 ) {
     wants.clear();
     let Flora { config, cover, .. } = flora;
@@ -1260,7 +1261,7 @@ pub(crate) fn drink_wants(
         let avail = if band > 0.0 { water / band } else { 0.0 };
         let mu = step::ramp(avail, vc.wilt_water, vc.full_water);
         let a = &mut cover.rt.aux[vi];
-        let demand = (vc.transpiration_m3_per_s * a.leaf * mu * DT).max(0.0);
+        let demand = (vc.transpiration_m3_per_s * a.leaf * mu * dt).max(0.0);
         a.mu = mu;
         a.demand = demand;
         a.drank = 0.0;
@@ -1300,8 +1301,9 @@ pub(crate) fn drink_done(flora: &mut Flora) {
 
 /// After the stands grow: dormancy, the economy, the per-face pass, contests, starvation,
 /// spread and sisters.
-pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
+pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate, span: u64) {
     let tick = flora.tick;
+    let dt = climate.dt;
     let view = world.view();
     let Flora {
         config,
@@ -1325,12 +1327,12 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
         let a = cover.rt.aux[vi];
         let v = &mut cover.vines[vi];
         if v.water < vc.dry_water {
-            v.dry_s += DT;
+            v.dry_s += dt;
         } else {
             v.dry_s = 0.0;
         }
         if v.water > vc.wet_water {
-            v.wet_s += DT;
+            v.wet_s += dt;
         } else {
             v.wet_s = 0.0;
         }
@@ -1351,7 +1353,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
         let income = if v.dormant {
             0.0
         } else {
-            step::photosynthesis(vc.assimilation, a.light_leaf, climate.daylight, a.mu, water)
+            step::photosynthesis(vc.assimilation, a.light_leaf, climate.daylight, a.mu, water, dt)
         };
         ledger.fixed_in += income;
         ledger.light_in += e * income;
@@ -1362,7 +1364,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
         let upkeep = (vc.leaf_upkeep * a.leaf + vc.wood_upkeep * f64::from(a.faces))
             * climate.upkeep
             * climate.night
-            * DT;
+            * dt;
         let mut budget = Budget::new(income, f64::INFINITY);
         let short = budget.upkeep(&mut v.reserve, upkeep).unpaid;
         v.reserve += budget.store(f64::INFINITY);
@@ -1411,8 +1413,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
     let flowering = vc.spur_cycle_s().is_finite();
     let (nectar_amount, fruit_amount) = (vc.nectar_per_flower(), vc.fruit_per_bunch());
     let wheel = cubarium_voxel::ticks_at_least_one(vc.contest_check_s);
-    let wheel_slot = tick % wheel;
-    let fall = DT / vc.leaf_fall_s;
+    let fall = dt / vc.leaf_fall_s;
     let mut litter: Vec<(Site, f64)> = Vec::new();
     let world_seed = c.seed;
     {
@@ -1467,7 +1468,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
                 }
             } else if open && f.leafiness < 1.0 && vc.regrow_rate > 0.0 && v.reserve > 0.0 {
                 // Leaf out of the reserve at par: a vine's leaf has no construction cost.
-                let want = (vc.regrow_rate * DT).min(1.0 - f.leafiness) * vc.leaf_mass;
+                let want = (vc.regrow_rate * dt).min(1.0 - f.leafiness) * vc.leaf_mass;
                 f.leafiness += build_from(&mut v.reserve, want, 1.0) / vc.leaf_mass;
                 if 1.0 - f.leafiness < 1e-12 {
                     f.leafiness = 1.0;
@@ -1489,9 +1490,9 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
                         let mut rng =
                             Rng::keyed(DOMAIN_SPUR, ka ^ world_seed.rotate_left(17), kb ^ tick, kc);
                         let u = 1.0 - rng.unit();
-                        f.spur_timer_s = DT + (-u.ln() * rest_mean).max(0.0);
+                        f.spur_timer_s = dt + (-u.ln() * rest_mean).max(0.0);
                     } else {
-                        f.spur_timer_s -= DT;
+                        f.spur_timer_s -= dt;
                         if f.spur_timer_s <= EPS {
                             f.spur_timer_s = 0.0;
                             // Without the reserve this start is skipped and a new rest is
@@ -1510,13 +1511,13 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
                         f.spur = SpurPhase::Bare;
                         f.spur_timer_s = 0.0;
                     } else {
-                        f.spur_timer_s -= DT;
+                        f.spur_timer_s -= dt;
                         if f.spur_timer_s <= EPS {
                             let n = nectar_amount.min(v.reserve).max(0.0);
                             v.reserve -= n;
                             f.nectar = n;
                             f.spur = SpurPhase::Flower;
-                            f.spur_timer_s = vc.flower_s;
+                            f.spur_timer_s += vc.flower_s;
                         }
                     }
                 }
@@ -1527,7 +1528,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
                         f.spur = SpurPhase::Bare;
                         f.spur_timer_s = 0.0;
                     } else {
-                        f.spur_timer_s -= DT;
+                        f.spur_timer_s -= dt;
                         if f.spur_timer_s <= EPS {
                             // What the visitors left is taken back; the beads are paid.
                             v.reserve += f.nectar;
@@ -1536,13 +1537,13 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
                             v.reserve -= b;
                             f.fruit = b;
                             f.spur = SpurPhase::Fruit;
-                            f.spur_timer_s = vc.fruit_s;
+                            f.spur_timer_s += vc.fruit_s;
                         }
                     }
                 }
                 SpurPhase::Fruit => {
                     // Beads already set stay through a dormancy until eaten or spent.
-                    f.spur_timer_s -= DT;
+                    f.spur_timer_s -= dt;
                     if f.spur_timer_s <= EPS {
                         let b = f.fruit;
                         f.fruit = 0.0;
@@ -1550,11 +1551,11 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
                             drop_at(rt, s, &view, face, root, &mut litter, b);
                         }
                         f.spur = SpurPhase::Spent;
-                        f.spur_timer_s = vc.spent_s;
+                        f.spur_timer_s += vc.spent_s;
                     }
                 }
                 SpurPhase::Spent => {
-                    f.spur_timer_s -= DT;
+                    f.spur_timer_s -= dt;
                     if f.spur_timer_s <= EPS {
                         f.spur = SpurPhase::Bare;
                         f.spur_timer_s = 0.0;
@@ -1566,7 +1567,8 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
             // the contest wheel is due.
             if f.leafiness < thr
                 && !f.rooted
-                && (before >= thr || f.face.hash() % wheel == wheel_slot)
+                && (before >= thr
+                    || step::due_in_window(wheel - f.face.hash() % wheel, tick, span, wheel))
             {
                 contest_queue.push(f.face);
             }
@@ -1601,10 +1603,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate) {
         .vines
         .iter()
         .filter(|v| {
-            !v.dormant
-                && step::mix(v.id)
-                    .wrapping_add(tick)
-                    .is_multiple_of(spread_period)
+            !v.dormant && step::due_in_window(step::mix(v.id), tick, span, spread_period)
         })
         .map(|v| v.id)
         .collect();

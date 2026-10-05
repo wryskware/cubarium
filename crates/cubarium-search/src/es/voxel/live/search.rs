@@ -370,7 +370,8 @@ pub struct EvalSpec {
 
 impl EvalSpec {
     /// `horizon_ticks` of `world` in windows of `window_ticks`, founded as the live world
-    /// is (the egg bank included), the default band, live water, no projection.
+    /// is (the egg bank included), the default band, the experiment's coarse water, no
+    /// projection.
     pub fn new(world: cubarium_voxel::Config, horizon_ticks: u64, window_ticks: u64) -> EvalSpec {
         EvalSpec {
             world,
@@ -379,7 +380,7 @@ impl EvalSpec {
             founders: cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
             horizon_ticks,
             window_ticks,
-            water_every: 1,
+            water_every: cubarium_voxel_sim::EXPERIMENT_WATER_EVERY,
             abort_animals: 240,
             stop_on_loss: true,
             band: BandSpec::default(),
@@ -745,7 +746,7 @@ impl EvalRun {
                     world,
                     flora,
                     fauna,
-                    cubarium_voxel_sim::SimConfig { threads: 1, overlap: false },
+                    cubarium_voxel_sim::SimConfig { threads: 1, overlap: false, water_every: 1 },
                 );
                 super::install_centres(sim.fauna_mut(), drivers);
                 let pop = window::population(&sim);

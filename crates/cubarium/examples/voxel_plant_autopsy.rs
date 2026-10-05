@@ -14,7 +14,7 @@
 //! the census (`design/7_Research/voxel-census-2026-09-20.md`) says is worth having: run A
 //! (legacy grazers) and run B (live founders) collapse to the same minute, so if this
 //! plant-only run reproduces those minutes the cause is not consumption. The coupled form
-//! is `Sim::new(world, flora, fauna, SimConfig::default(), None)`; it is not used here
+//! is `Sim::new(world, flora, fauna, SimConfig::experiment(), None)`; it is not used here
 //! because a grazed stand would confound the income arithmetic below.
 //!
 //! Output:
@@ -166,6 +166,8 @@ impl Causes {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     // `threads=N`: this run's share of the machine. The gate runs many of these side by
     // side; without it each takes every core (`cubarium_voxel::set_thread_override`).
     if let Some(n) = args
@@ -430,7 +432,7 @@ fn run(
         install_default_founders(&mut fauna).expect("the built-in centres validate");
         let mut senses = Senses::with_cue(fauna.config().cue);
         senses.settle(&world.view(), &flora.view());
-        let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+        let mut sim = Sim::new(world, flora, fauna, SimConfig::experiment(), Some(senses));
         if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
             sim.world_mut()
                 .apply(WorldCommand::SetOutlet { open: true });

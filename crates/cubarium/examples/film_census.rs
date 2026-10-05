@@ -39,6 +39,8 @@ fn bin(d: f64) -> usize {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     let path = args.get(1).map_or("config/desktop/terrarium.toml", String::as_str);
     let minutes: u64 = args.get(2).map_or(60, |a| a.parse().expect("MINUTES"));
     let seed: u64 = args.get(3).map_or(1, |a| a.parse().expect("SEED"));
@@ -70,7 +72,7 @@ fn main() {
         founded.world.config().evaporation_m_per_s,
         founded.world.config().closed_water_budget,
     );
-    let mut sim = Sim::ambient(founded.world, founded.flora, founded.fauna, SimConfig::default());
+    let mut sim = Sim::ambient(founded.world, founded.flora, founded.fauna, SimConfig::experiment());
     sim.set_overlap(false);
     let hz = u64::from(cubarium_voxel::TICK_HZ);
     let mut last_mode = sim.world().view().weather.mode;

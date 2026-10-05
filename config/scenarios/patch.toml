@@ -10,7 +10,6 @@
 #   voxel_census 1 config=config/scenarios/patch.toml seed=N heuristic run=DIR
 base = "../desktop/terrarium.toml"
 
-water_every = 4
 
 [world]
 width = 160

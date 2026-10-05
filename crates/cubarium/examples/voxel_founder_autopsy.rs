@@ -171,6 +171,8 @@ struct Seen {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     // `threads=N`: this run's share of the machine. The gate runs many of these side by
     // side; without it each takes every core (`cubarium_voxel::set_thread_override`).
     if let Some(n) = args
@@ -364,7 +366,7 @@ fn main() {
 
     let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    let mut sim = Sim::new(world, flora, fauna, SimConfig::experiment(), Some(senses));
     // `overlap=0`: the chained tick instead of the overlapped one, for a before/after.
     if args.iter().any(|a| a == "overlap=0") {
         sim.set_overlap(false);

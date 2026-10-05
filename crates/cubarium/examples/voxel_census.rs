@@ -114,14 +114,9 @@ fn main() {
     let raw: Vec<String> = std::env::args().collect();
     // `resume=DIR` continues a staged run from its latest checkpoint
     // (`cubarium_voxel_sim::staged`).
-    let mut args = staged::resume_args(&raw, FOUNDING_ONLY).unwrap_or_else(|e| panic!("{e}"));
-    // A map's own `water_every` (`config/scenarios/*.toml`), unless one is given.
-    if !args.iter().any(|a| a.starts_with("water_every="))
-        && let Some(p) = args.iter().find_map(|a| a.strip_prefix("config="))
-        && let Some(n) = cubarium::voxel::config_water_every(std::path::Path::new(p)).unwrap_or_else(|e| panic!("{e:#}"))
-    {
-        args.push(format!("water_every={n}"));
-    }
+    let args = staged::resume_args(&raw, FOUNDING_ONLY).unwrap_or_else(|e| panic!("{e}"));
+    // Training, search and experiment runs take the coarse water (`water_every=`).
+    cubarium_voxel_sim::experiment_args(&args);
     let stage = staged::StageConfig::from_args(&args).unwrap_or_else(|e| panic!("{e}"));
     let stage = stage.map(|cfg| (cfg, args.clone()));
     // `threads=N`: this run's share of the machine. The gate runs many of these side by
@@ -321,7 +316,7 @@ fn main() {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
         introduce_into(&world, &flora, &mut fauna);
-        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
         run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
         return;
     }
@@ -419,7 +414,7 @@ fn main() {
             install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
         }
         introduce_into(&world, &flora, &mut fauna);
-        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
         run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
         return;
     }
@@ -483,7 +478,7 @@ fn main() {
     // same way before the first tick.
     let mut senses = Senses::with_cue(fauna.config().cue);
     senses.settle(&world.view(), &flora.view());
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
+    let mut sim = Sim::new(world, flora, fauna, SimConfig::experiment(), Some(senses));
 
     run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
 }
@@ -770,7 +765,7 @@ fn load_run(
     } else {
         install_founders_with(&mut fauna, policies).expect("the founder centres validate");
     }
-    let sim = Sim::ambient(world, flora, fauna, SimConfig::default());
+    let sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     (sim, minute)
 }
 

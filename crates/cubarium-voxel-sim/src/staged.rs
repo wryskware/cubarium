@@ -17,10 +17,8 @@
 //! - `still=lineage,..`: lineages exempt from the movement check (an ambusher that may
 //!   sit a whole check out).
 //! - `residual_tol=X` (1e-6): the largest relative ledger residual accepted.
-//! - `water_every=N` (**4**): the coarse water step every staged run uses (Wrysk,
-//!   2026-10-04: experiments, training and searches run `water_every = 4`; only the
-//!   display host stays at 1). A decoded world comes back at 1, so the runner sets it
-//!   again on every start ([`cubarium_voxel::World::set_water_every`]).
+//! - The water step is the tool's [`crate::SimConfig::experiment`] (`water_every=` on
+//!   the run line, 4 by default); the status line reports the world's.
 //! - `resume=DIR`: continue `DIR` from its latest checkpoint with its own arguments
 //!   ([`resume_args`]). Branching from any checkpoint is `load=DIR/ckpt/mNNNNNN`.
 //!
@@ -122,7 +120,6 @@ pub struct StageConfig {
     pub expect: Vec<String>,
     pub still: Vec<Founder>,
     pub residual_tol: f64,
-    pub water_every: u32,
     /// Ticks in one of the run's minutes: [`TICKS_PER_MIN`]; a test shortens it so a
     /// staged run fits in a few hundred ticks. Not an argument.
     pub ticks_per_min: u64,
@@ -159,11 +156,10 @@ impl StageConfig {
             expect: list("expect="),
             still,
             residual_tol: arg(args, "residual_tol=").map_or(Ok(1e-6), |v| v.parse().map_err(|e| format!("residual_tol={v}: {e}")))?,
-            water_every: num("water_every=", 4)? as u32,
             ticks_per_min: TICKS_PER_MIN,
         };
-        if cfg.segment_min == 0 || cfg.check_min == 0 || cfg.keep == 0 || cfg.water_every == 0 {
-            return Err("segment_min=, check_min=, keep= and water_every= must be positive".into());
+        if cfg.segment_min == 0 || cfg.check_min == 0 || cfg.keep == 0 {
+            return Err("segment_min=, check_min= and keep= must be positive".into());
         }
         Ok(Some(cfg))
     }
@@ -473,6 +469,7 @@ pub struct Runner {
     wall: Instant,
     minute_wall: Instant,
     ms_per_tick: f64,
+    water_every: u32,
 }
 
 impl Runner {
@@ -481,8 +478,6 @@ impl Runner {
     /// unless the directory already records one (a resumed run keeps its own). Runs the
     /// load check; `Err` (with `FAILED` written) when it fails.
     pub fn start(cfg: StageConfig, args: &[String], sim: &mut Sim, minute: u64, end_minute: u64) -> Result<Runner, String> {
-        let every = cfg.water_every.max(1);
-        sim.with_layers_mut(|w, _, _| w.set_water_every(every));
         let sim: &Sim = sim;
         std::fs::create_dir_all(cfg.dir.join("ckpt")).map_err(|e| format!("{}: {e}", cfg.dir.display()))?;
         for f in ["DONE", "PAUSED", "FAILED"] {
@@ -512,6 +507,7 @@ impl Runner {
             wall: Instant::now(),
             minute_wall: Instant::now(),
             ms_per_tick: 0.0,
+            water_every: sim.world().water_every(),
             cfg,
         };
         match runner.instant_check(sim) {
@@ -630,7 +626,7 @@ impl Runner {
             self.end_minute,
             sim_s / wall_s,
             self.ms_per_tick,
-            self.cfg.water_every,
+            self.water_every,
             self.last_check.replace('\n', " ")
         );
         let tmp = self.cfg.dir.join("status.tmp");

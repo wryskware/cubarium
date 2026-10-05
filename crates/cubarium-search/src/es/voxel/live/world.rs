@@ -111,6 +111,8 @@ pub fn found_world_from(
         SimConfig {
             threads: 1,
             overlap: false,
+            // The spec sets the coarse water on the world itself.
+            water_every: 1,
         },
     );
     let info = FoundInfo {

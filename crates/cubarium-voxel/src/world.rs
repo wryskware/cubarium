@@ -1365,6 +1365,16 @@ impl World {
         crate::water::apply(self, command)
     }
 
+    /// **A batch of root-water withdrawals**: for each `(flat cell index, volume)`, in the
+    /// order given, exactly what `apply(Command::WithdrawPore { .. })` does for that cell —
+    /// the cap at the cell's pore water, `transpiration_out`, the closed budget's
+    /// atmosphere, the cell's damp and drainable marks — with what each cell gave
+    /// (positive) pushed onto `gave`, one per entry. A plant layer's drink, which touches
+    /// tens of thousands of cells a step, without a command per cell.
+    pub fn withdraw_pores(&mut self, cells: &[(usize, f64)], gave: &mut Vec<f64>) {
+        crate::water::withdraw_pores(self, cells, gave);
+    }
+
     /// Rebuild the water active sets from the arrays, which is the only thing that can
     /// re-establish them after a snapshot, generation, or any other direct write. One
     /// full scan; the step calls it when a set says it is stale.
