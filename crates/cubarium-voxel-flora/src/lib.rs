@@ -2707,6 +2707,14 @@ pub struct FloraConfig {
     /// Rounded to whole ticks, at least one; a fixture that wants the old every-tick bank
     /// sets it to `DT` ([`FloraConfig::drop_seeds_checked_each_tick`]).
     pub seed_check_s: f64,
+    /// **The plant clock**, in world ticks: the plant layer steps once every
+    /// `step_every` ticks, one step of `step_every · DT` seconds, at the same per-second
+    /// rates — every flux is a rate times the step, every decay `exp(−r·dt)`, and every
+    /// staggered check (the seed bank's wheel, the vines' contest and spread wheels, the
+    /// film's second) still fires once per its own period, on the tick it falls on inside
+    /// the step. `1` is the per-tick layer. Animals still graze, deposit and carry burrs
+    /// every tick, between plant steps. A scheduling numeric, not ecology.
+    pub step_every: u32,
     /// **Whether a passing bank waits one check before it sprouts**: `true`,
     /// the shipped rule — the check that finds the gates passing draws the lottery and
     /// **arms** the site ([`Ground::sprouting`], what the D5 seed mark reads as "about to
@@ -2829,6 +2837,9 @@ impl Default for FloraConfig {
             initial_mineral: 1.0,
             provision: Provision::Lazy,
             seed_check_s: 30.0,
+            // Plants live on minute-to-hour clocks: a step every quarter second is
+            // invisible on the display and a fifth of the per-tick cost.
+            step_every: 5,
             sprout_after_arming: true,
             upkeep_q10: 2.0,
             wind_tries: 4,
@@ -4551,6 +4562,10 @@ pub struct Flora {
     /// the start of every tick, never saved.
     #[serde(skip)]
     pub(crate) death_log: Vec<DeathRecord>,
+    /// World ticks since the last plant step ([`FloraConfig::step_every`]): the next step
+    /// covers them all, so its `dt` is exact across a load or a changed `step_every`.
+    #[serde(default)]
+    pub(crate) since_step: u32,
 }
 
 impl Flora {
@@ -4647,6 +4662,7 @@ impl Flora {
             burrs: Vec::new(),
             burr_marks: Vec::new(),
             death_log: Vec::new(),
+            since_step: 0,
         }
     }
 
@@ -4750,18 +4766,35 @@ impl Flora {
         &self.death_log
     }
 
-    /// Advance one tick against the world's current state. Call after `World::step`.
-    /// Withdraws root water through `Command::WithdrawPore`; that is the only way this
-    /// layer changes the world. The order within the tick is `step`'s module doc.
+    /// Advance one tick against the world's current state, as **one plant step of that
+    /// tick** whatever [`FloraConfig::step_every`] says (a fixture's clock). Call after
+    /// `World::step`. Withdraws root water through `Command::WithdrawPore`; that is the
+    /// only way this layer changes the world. The order within the tick is `step`'s
+    /// module doc. A world's schedule calls [`Flora::step_clocked`].
     pub fn step(&mut self, world: &mut World) {
-        step::step(self, world, 1);
+        step::step(self, world, 1, false);
     }
 
     /// [`Flora::step`] with the per-stand reads of light and water split over up to
     /// `threads` workers of the `bevy_tasks` compute pool (with the `parallel` feature).
     /// The chunks are folded back in stand order, so every number is the serial step's.
     pub fn step_with(&mut self, world: &mut World, threads: usize) {
-        step::step(self, world, threads);
+        step::step(self, world, threads, false);
+    }
+
+    /// **One world tick on the plant clock** ([`FloraConfig::step_every`]): the tick
+    /// counter moves and the tick's receipts and death log clear every tick, and every
+    /// `step_every`-th tick runs one plant step covering every tick since the last
+    /// (`step_every · DT` seconds). Between plant steps the layer's stocks only change
+    /// through what animals take and deposit. What the simulation's schedule calls.
+    pub fn step_clocked(&mut self, world: &mut World, threads: usize) {
+        step::step(self, world, threads, true);
+    }
+
+    /// [`Flora::step_planned`] on the plant clock: a tick that is not a plant step plans
+    /// nothing, and [`Flora::take_drink_plan`] then returns `None`.
+    pub fn step_planned_clocked(&mut self, world: &World, threads: usize) {
+        step::step_planned(self, world, threads, true);
     }
 
     /// **The overlapped tick's plant step** (`design/handoffs/voxel-phase-overlap-2026-09-24.md`):
@@ -4775,7 +4808,7 @@ impl Flora {
     ///
     /// `transpired_m3` is booked at the settle, voxel by voxel, as the world books it.
     pub fn step_planned(&mut self, world: &World, threads: usize) {
-        step::step_planned(self, world, threads);
+        step::step_planned(self, world, threads, false);
     }
 
     /// Apply the drink [`Flora::step_planned`] planned to the live `world`: one

@@ -204,7 +204,7 @@ fn three_calls(ticks: u64) -> Reading {
     let (mut world, mut flora, mut fauna) = conditioned();
     for _ in 0..ticks {
         world.step_with(1);
-        flora.step(&mut world);
+        flora.step_clocked(&mut world, 1);
         fauna.step(&world, &mut flora);
     }
     read(&world, &flora, &fauna)
@@ -213,7 +213,7 @@ fn three_calls(ticks: u64) -> Reading {
 /// The schedule, at a thread count, chained or overlapped.
 fn schedule(ticks: u64, threads: usize, overlap: bool) -> Reading {
     let (world, flora, fauna) = conditioned();
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads, overlap }, None);
+    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads, overlap, water_every: 1 }, None);
     for _ in 0..ticks {
         sim.step();
     }
@@ -323,7 +323,7 @@ fn a_thread_count_changed_mid_run_still_conserves() {
     let one = schedule(200, 1, false);
     conserves("1 thread throughout", &one);
     let (world, flora, fauna) = conditioned();
-    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 1, overlap: false }, None);
+    let mut sim = Sim::new(world, flora, fauna, SimConfig { threads: 1, overlap: false, water_every: 1 }, None);
     for (k, (threads, pool)) in [(1, None), (4, None), (16, Some(16)), (2, Some(16)), (1, None)]
         .into_iter()
         .enumerate()

@@ -35,7 +35,8 @@ use crate::Flora;
 //     burr_pickup, burr_retention_mean_m, burr_retention_shape, cure_*, cured_srgb}`,
 //     `Dispersal::Wald`, `FloraConfig::burr_cap`, `Stand::{cured, dry_s}`,
 //     `Flora::{burrs, burr_marks}`, the ledger's runner, death-cause, burr and cure lines.
-pub const SCHEMA: u32 = 24;
+// 25: the plant clock — `FloraConfig::step_every`, `Flora::since_step`.
+pub const SCHEMA: u32 = 25;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -115,7 +115,9 @@
 //! Every clamp is a `min` against the stock it reads, so nothing here can go negative.
 
 use cubarium_voxel::organism::{Budget, settle_mineral, tissue_funded};
-use cubarium_voxel::{Command as WorldCommand, DT, Material, Materials, VoxelView, World};
+use cubarium_voxel::{DT, Material, Materials, VoxelView, World};
+#[cfg(test)]
+use cubarium_voxel::Command as WorldCommand;
 
 use crate::{DeathCause, DeathRecord, Flora, FloraConfig, FloraLedger, Ground, Site, SpeciesConfig, Stand, Taken, Trophic};
 
@@ -139,16 +141,69 @@ pub(crate) const DOMAIN_BURR_HOLD: u64 = 14;
 
 pub(crate) use cubarium_voxel::{KeyedRng as Rng, mix};
 
-pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize) {
+/// One world tick of the plant layer. `clocked`: on the plant clock
+/// ([`FloraConfig::step_every`]), else a plant step of this one tick.
+pub(crate) fn step(flora: &mut Flora, world: &mut World, threads: usize, clocked: bool) {
     // A plan an overlapped tick left unsettled is applied first, so the ledger still
     // closes if a host switches schedules between ticks.
     settle_drink(flora, world);
-    run(flora, Target::Now(world), threads);
+    if let Some(span) = advance(flora, clocked) {
+        run(flora, Target::Now(world), threads, span);
+    }
 }
 
 /// [`step`] against a read copy: the drink is planned and held for [`settle_drink`].
-pub(crate) fn step_planned(flora: &mut Flora, world: &World, threads: usize) {
-    run(flora, Target::Planned(world), threads);
+pub(crate) fn step_planned(flora: &mut Flora, world: &World, threads: usize, clocked: bool) {
+    if let Some(span) = advance(flora, clocked) {
+        run(flora, Target::Planned(world), threads, span);
+    }
+}
+
+/// **The plant clock** ([`FloraConfig::step_every`]). Every world tick moves the
+/// counter and clears the tick's observations (receipts and deaths describe one tick);
+/// on the tick that completes a plant step it returns how many ticks that step covers.
+/// Unclocked, every tick is a plant step of one tick.
+///
+/// The counter moves **first**, so that `flora.tick` is the tick this step produces: the
+/// one whose state the caller will read when the step returns. Everything dated inside a
+/// step — an arrival bin's start, a bin's age, the germination lottery's seed — then uses
+/// one clock reading, and a bin's age at the end of the tick it landed in is zero rather
+/// than minus one.
+fn advance(flora: &mut Flora, clocked: bool) -> Option<u64> {
+    flora.tick += 1;
+    // This tick's delivery receipts start empty: they are **observation and not state**,
+    // they describe only the tick that is about to run, and a caller that never reads them
+    // must not accumulate them (Astra R10.3, `DeliveryReceipt`).
+    flora.deliveries.clear();
+    flora.death_log.clear();
+    flora.since_step = flora.since_step.saturating_add(1);
+    if clocked && flora.since_step < flora.config.step_every.max(1) {
+        return None;
+    }
+    Some(u64::from(std::mem::take(&mut flora.since_step)))
+}
+
+/// The seconds a plant step of `span` world ticks covers.
+pub(crate) fn span_dt(span: u64) -> f64 {
+    span as f64 * DT
+}
+
+/// Whether a periodic event falls inside the step's window of world ticks
+/// `(tick − span, tick]`: some tick `t` there with `(key + t) mod period == 0`
+/// (wrapping, as the per-tick checks always read it). The per-tick test is `span = 1`.
+pub(crate) fn due_in_window(key: u64, tick: u64, span: u64, period: u64) -> bool {
+    let period = period.max(1);
+    (0..span.min(tick + 1)).any(|j| key.wrapping_add(tick - j).is_multiple_of(period))
+}
+
+/// `1 − exp(−rate · dt)`: the share a first-order decay at `rate` per second takes in
+/// `dt` seconds, whatever the step.
+pub(crate) fn decay_share(rate: f64, dt: f64) -> f64 {
+    if rate <= 0.0 || dt <= 0.0 {
+        0.0
+    } else {
+        -(-rate * dt).exp_m1()
+    }
 }
 
 /// The world a tick runs against: the live one, which the drink withdraws from as it goes
@@ -168,21 +223,11 @@ impl Target<'_> {
     }
 }
 
-fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
-    // The tick counter moves **first**, so that `flora.tick` is the tick this step
-    // produces: the one whose state the caller will read when the step returns. Everything
-    // dated inside a tick — an arrival bin's start, a bin's age, the germination lottery's
-    // seed — then uses one clock reading, and a bin's age at the end of the tick it landed
-    // in is zero rather than minus one.
-    flora.tick += 1;
+fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize, span: u64) {
+    let dt = span_dt(span);
     // The induced grazing defence relaxes at each species' half-life
     // (`design/handoffs/voxel-lifespan-defence-2026-09-25.md`, B).
-    decay_defences(flora);
-    // This tick's delivery receipts start empty: they are **observation and not state**, they
-    // describe only the tick that is about to run, and a caller that never reads them must not
-    // accumulate them (Astra R10.3, `DeliveryReceipt`).
-    flora.deliveries.clear();
-    flora.death_log.clear();
+    decay_defences(flora, dt);
     // The stocks decomposition is allowed to draw on: what each site held when the tick
     // started, taken before anything at all moves. Litter, dead wood and carrion deposited
     // by this tick's drownings, senescence and deaths are eligible from the next tick, per
@@ -207,10 +252,14 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         cubarium_voxel::voxel_phase!(Cover, { crate::cover::prep(flora, world) });
         cubarium_voxel::voxel_phase!(Drown, { drown(flora, world, threads) });
 
-        let climate = Climate::of(world, flora.config.upkeep_q10);
+        let climate = Climate {
+            dt,
+            ..Climate::of(world, flora.config.upkeep_q10)
+        };
         // On a film tick the light phase also reads the sky and canopy over every site
         // holding glassfilm (`film.rs`).
-        let film_tick = crate::film::is_film_tick(flora.tick);
+        let film_steps = crate::film::film_steps(flora.tick, span);
+        let film_tick = film_steps > 0;
         let film_sites = if film_tick {
             crate::film::receivers(flora)
         } else {
@@ -219,24 +268,24 @@ fn run(flora: &mut Flora, mut target: Target<'_>, threads: usize) {
         let (light, film_open) = cubarium_voxel::voxel_phase!(Light, {
             light_per_stand(flora, world, &film_sites, threads)
         });
-        let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads) });
+        let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, &mut target, threads, dt) });
         let world = target.world();
         let substrate =
-            cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads) });
+            cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture, threads, dt) });
         cubarium_voxel::voxel_phase!(Grow, {
             grow(flora, world, &light, climate, &moisture, &substrate, threads)
         });
-        cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world, climate) });
-        cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
+        cubarium_voxel::voxel_phase!(Cover, { crate::cover::grow(flora, world, climate, span) });
+        cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre, dt) });
         if film_tick {
             let open: Vec<(Site, f64)> = film_sites.into_iter().zip(film_open).collect();
             // Timed with decomposition: the profile has no phase of its own for it.
             cubarium_voxel::voxel_phase!(Decompose, {
-                crate::film::step(flora, world, &open, climate.daylight)
+                crate::film::step(flora, world, &open, climate.daylight, film_steps)
             });
         }
-        cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world) });
-        cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world) });
+        cubarium_voxel::voxel_phase!(SeedBank, { crate::seeds::seed_bank(flora, world, span) });
+        cubarium_voxel::voxel_phase!(Propagate, { crate::seeds::propagate(flora, world, dt) });
         // Growth, dieback, deaths, falls and germinations have all happened: the cached
         // crowns follow the stands they now describe.
         cubarium_voxel::voxel_phase!(Crowns, { flora.refresh_crowns(Some(world)) });
@@ -1042,11 +1091,11 @@ pub(crate) struct Drink {
 /// voxels in ascending index order, as before, so every total, every withdrawal and every
 /// ledger sum is the sorted sweep's to the bit. Only the order a stand's own shares are
 /// added into its observational `taken_m3` differs (`the_scratch_drink_is_the_sorted_sweep`).
-fn drink(flora: &mut Flora, target: &mut Target<'_>, threads: usize) -> Vec<Drink> {
+fn drink(flora: &mut Flora, target: &mut Target<'_>, threads: usize, dt: f64) -> Vec<Drink> {
     // Out of the layer for the call, so the phase can hold the layer and its scratch at
     // once; `take` leaves empty vectors behind and allocates nothing.
     let mut scratch = std::mem::take(&mut flora.drink.0);
-    let out = drink_with(flora, target, threads, &mut scratch);
+    let out = drink_with(flora, target, threads, &mut scratch, dt);
     flora.drink.0 = scratch;
     out
 }
@@ -1099,6 +1148,9 @@ pub(crate) struct DrinkScratch {
     short: Vec<(u32, f64)>,
     /// The settle's receipts, one per withdrawn voxel, ascending.
     receipts: Vec<f64>,
+    /// The batched withdrawal's `(voxel, volume)` list, ascending, and what each gave.
+    batch: Vec<(usize, f64)>,
+    gave: Vec<f64>,
 }
 
 /// Cells per **band** of the drink's per-cell scratch: the wants are filed by band as they
@@ -1261,6 +1313,7 @@ fn drink_read(
     view: &VoxelView<'_>,
     range: std::ops::Range<usize>,
     chunk: &mut DrinkChunk,
+    dt: f64,
 ) {
     let DrinkChunk {
         out,
@@ -1317,7 +1370,7 @@ fn drink_read(
             saturated as f64 / box_.len() as f64
         };
         out.push(d);
-        let demand = (sc.transpiration_m3_per_s * stand.foliage * d.moisture * DT).max(0.0);
+        let demand = (sc.transpiration_m3_per_s * stand.foliage * d.moisture * dt).max(0.0);
         share_over_box(demand, box_, drinkable, |v, share| {
             bands[v / DRINK_BAND].push((v as u32, i as u32, share));
         });
@@ -1353,6 +1406,7 @@ fn drink_with(
     target: &mut Target<'_>,
     threads: usize,
     scratch: &mut DrinkScratch,
+    dt: f64,
 ) -> Vec<Drink> {
     debug_assert!(!scratch.pending, "a planned drink was never settled");
     scratch.fit(target.world().config().cells());
@@ -1369,13 +1423,15 @@ fn drink_with(
         vine_ids,
         short: _,
         receipts: _,
+        batch,
+        gave,
     } = scratch;
     let n = flora.stands.len();
     {
         let view = target.world().view();
         let flora = &*flora;
         for_chunks(n, threads, chunks, DrinkChunk::default, |range, chunk| {
-            drink_read(flora, &view, range, chunk)
+            drink_read(flora, &view, range, chunk, dt)
         });
     }
     *used = chunk_count(n, threads);
@@ -1396,7 +1452,7 @@ fn drink_with(
     }
     {
         let view = target.world().view();
-        crate::cover::drink_wants(flora, &view, vine_box, vine_drinkable, vine_wants);
+        crate::cover::drink_wants(flora, &view, vine_box, vine_drinkable, vine_wants, dt);
     }
     for &(v, _, share) in vine_wants.iter() {
         let v = v as usize;
@@ -1407,48 +1463,41 @@ fn drink_with(
     // One bounded withdrawal per voxel, in ascending voxel order — or, against a read
     // copy, the same bound planned and held for the settle: a read of the copy per voxel,
     // band by band over threads.
-    match target {
-        Target::Now(world) => {
+    // Each voxel's bound first, band by band over threads, off the pre-withdrawal read:
+    // never below the wilting point, however many stands asked. Against a read copy that
+    // bound is the plan; against the live world it is then withdrawn in one batch, the
+    // voxel's first and only withdrawal this step, in ascending voxel order.
+    {
+        let view = target.world().view();
+        for_bands(cell, touched, threads, |b, cell, touched| {
+            let base = b * DRINK_BAND;
             for (word_at, word) in touched.iter().enumerate() {
                 let mut bits = *word;
                 while bits != 0 {
-                    let voxel = word_at * 64 + bits.trailing_zeros() as usize;
+                    let local = word_at * 64 + bits.trailing_zeros() as usize;
                     bits &= bits - 1;
-                    // Never below the wilting point, however many stands asked: the
-                    // voxel's first and only withdrawal this tick, so the reading is still
-                    // the pre-withdrawal one.
-                    let volume = cell[voxel][0].min(drinkable_m3(&world.view(), voxel));
-                    // One bounded operation for the whole voxel, whatever asked for it.
-                    let got = if volume > 0.0 {
-                        let (x, y, z) = world.config().coords(voxel);
-                        -world.apply(WorldCommand::WithdrawPore {
-                            x: x as i64,
-                            y,
-                            z,
-                            volume_m3: volume,
-                        })
-                    } else {
-                        0.0
-                    };
-                    flora.ledger.transpired_m3 += got;
-                    cell[voxel][1] = got;
+                    let volume = cell[local][0].min(drinkable_m3(&view, base + local));
+                    cell[local][1] = volume.max(0.0);
+                }
+            }
+        });
+    }
+    if let Target::Now(world) = target {
+        batch.clear();
+        for (word_at, word) in touched.iter().enumerate() {
+            let mut bits = *word;
+            while bits != 0 {
+                let voxel = word_at * 64 + bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                if cell[voxel][1] > 0.0 {
+                    batch.push((voxel, cell[voxel][1]));
                 }
             }
         }
-        Target::Planned(world) => {
-            let view = world.view();
-            for_bands(cell, touched, threads, |b, cell, touched| {
-                let base = b * DRINK_BAND;
-                for (word_at, word) in touched.iter().enumerate() {
-                    let mut bits = *word;
-                    while bits != 0 {
-                        let local = word_at * 64 + bits.trailing_zeros() as usize;
-                        bits &= bits - 1;
-                        let volume = cell[local][0].min(drinkable_m3(&view, base + local));
-                        cell[local][1] = volume.max(0.0);
-                    }
-                }
-            });
+        world.withdraw_pores(batch, gave);
+        for (&(voxel, _), &got) in batch.iter().zip(gave.iter()) {
+            flora.ledger.transpired_m3 += got;
+            cell[voxel][1] = got;
         }
     }
     {
@@ -1541,37 +1590,37 @@ impl DrinkPlan {
             touched,
             receipts,
             short,
+            batch,
+            gave,
             ..
         } = &mut self.0;
         receipts.clear();
         short.clear();
-        for (word_at, word) in touched.iter().enumerate() {
-            let mut bits = *word;
-            while bits != 0 {
-                let voxel = word_at * 64 + bits.trailing_zeros() as usize;
-                bits &= bits - 1;
-                let planned = cell[voxel][1];
-                if !(planned > 0.0) {
-                    continue;
+        // Every planned voxel's bound against the live world now, then one batched
+        // withdrawal in ascending voxel order.
+        batch.clear();
+        {
+            let view = world.view();
+            for (word_at, word) in touched.iter().enumerate() {
+                let mut bits = *word;
+                while bits != 0 {
+                    let voxel = word_at * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    let planned = cell[voxel][1];
+                    if !(planned > 0.0) {
+                        continue;
+                    }
+                    batch.push((voxel, planned.min(drinkable_m3(&view, voxel)).max(0.0)));
                 }
-                let volume = planned.min(drinkable_m3(&world.view(), voxel));
-                let got = if volume > 0.0 {
-                    let (x, y, z) = world.config().coords(voxel);
-                    -world.apply(WorldCommand::WithdrawPore {
-                        x: x as i64,
-                        y,
-                        z,
-                        volume_m3: volume,
-                    })
-                } else {
-                    0.0
-                };
-                receipts.push(got);
-                // Short only where the water left less than the plan: a receipt a
-                // rounding below its request is the chained tick's receipt too.
-                if volume < planned {
-                    short.push((voxel as u32, got));
-                }
+            }
+        }
+        world.withdraw_pores(batch, gave);
+        for (&(voxel, volume), &got) in batch.iter().zip(gave.iter()) {
+            receipts.push(got);
+            // Short only where the water left less than the plan: a receipt a rounding
+            // below its request is the chained tick's receipt too.
+            if volume < cell[voxel][1] {
+                short.push((voxel as u32, got));
             }
         }
     }
@@ -1946,7 +1995,7 @@ pub(crate) fn substrate_in_box(
 /// to a stand, both inside this layer, so the only ledger term it touches is the
 /// per-species diagnostic [`FloraLedger::substrate_uptake`]; the organic matter the fungus
 /// does **not** keep is respired in [`grow`], where every other respiration is.
-fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize) -> Vec<Substrate> {
+fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize, dt: f64) -> Vec<Substrate> {
     let mut out = vec![Substrate::default(); flora.stands.len()];
     let view = world.view();
     let index = GroundIndex::build(&flora.ground, view.config.width, view.config.depth);
@@ -1976,7 +2025,7 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize) -> Ve
                         continue;
                     }
                     let want =
-                        (sc.substrate_uptake_per_s * stand.wood * drink[si].moisture * DT).max(0.0);
+                        (sc.substrate_uptake_per_s * stand.wood * drink[si].moisture * dt).max(0.0);
                     if !(want > 0.0) {
                         continue;
                     }
@@ -2289,6 +2338,9 @@ pub(crate) struct Climate {
     /// The world's seed mixed with its tick: the key of this tick's keyed draws that have
     /// no place of their own to key by (a lanternberry's rest between crops).
     pub(crate) draw_key: u64,
+    /// The seconds this plant step covers ([`FloraConfig::step_every`] ticks): every rate
+    /// below is per second and is applied over it.
+    pub(crate) dt: f64,
 }
 
 impl Climate {
@@ -2303,6 +2355,7 @@ impl Climate {
             night: world.plant_night_scale(),
             to_dawn_s: world.life_to_dawn_s(),
             draw_key: mix(world.config().seed ^ mix(world.tick())),
+            dt: DT,
         }
     }
 }
@@ -2548,8 +2601,9 @@ pub(crate) fn photosynthesis(
     daylight: f64,
     moisture: f64,
     limit: f64,
+    dt: f64,
 ) -> f64 {
-    (assimilation * lit_foliage * daylight * moisture * limit * DT).max(0.0)
+    (assimilation * lit_foliage * daylight * moisture * limit * dt).max(0.0)
 }
 
 /// **Saprotrophy**, a fungus's income function: the dead wood and litter [`feed`] already
@@ -2600,6 +2654,7 @@ pub(crate) fn grow_stand_cause(
         night,
         to_dawn_s,
         draw_key,
+        dt,
     } = climate;
     let species = stand.species;
     let sc = config.species(species);
@@ -2620,10 +2675,11 @@ pub(crate) fn grow_stand_cause(
     let saturated = drink.saturated;
     let target = aeration_target(saturated, sc);
     let was = stand.aeration_stress;
+    // Exponential closure, so the step size does not change where it ends up.
     let stress = if target > was {
-        (was + sc.stress_rate_per_s * DT * (target - was)).clamp(0.0, 1.0)
+        (was + decay_share(sc.stress_rate_per_s, dt) * (target - was)).clamp(0.0, 1.0)
     } else if target < was {
-        (was - sc.relax_rate_per_s * DT * (was - target)).clamp(0.0, 1.0)
+        (was - decay_share(sc.relax_rate_per_s, dt) * (was - target)).clamp(0.0, 1.0)
     } else {
         was
     };
@@ -2641,13 +2697,13 @@ pub(crate) fn grow_stand_cause(
                 stand.dry_s = 0.0;
                 book.woke = true;
             } else {
-                return dormant(config, stand, g, upkeep * night, book);
+                return dormant(config, stand, g, upkeep * night, book, dt);
             }
         } else if drink.available < sc.cure_water {
-            stand.dry_s += DT;
+            stand.dry_s += dt;
             if stand.dry_s >= sc.cure_after_s {
                 cure(config, stand, g, book);
-                return dormant(config, stand, g, upkeep * night, book);
+                return dormant(config, stand, g, upkeep * night, book, dt);
             }
         } else {
             stand.dry_s = 0.0;
@@ -2670,9 +2726,9 @@ pub(crate) fn grow_stand_cause(
         Trophic::Photo => night,
         Trophic::Saprotroph => 1.0,
     };
-    let m = sc.maintenance * upkeep * night * w0 * DT;
-    let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * DT);
-    let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * DT);
+    let m = sc.maintenance * upkeep * night * w0 * dt;
+    let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * dt);
+    let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * dt);
     let d_q = (q_max - q0).max(0.0);
     let (a, arrived_mineral) = match sc.trophic {
         Trophic::Photo => {
@@ -2690,8 +2746,9 @@ pub(crate) fn grow_stand_cause(
                 daylight,
                 mu,
                 (1.0 - stress) * monod,
+                dt,
             )
-            .min(sc.nutrient_draw_max * n0 * DT)
+            .min(sc.nutrient_draw_max * n0 * dt)
             .min(tissue_funded(n0, sc.n_tissue))
             .max(0.0)
             .min(m + (1.0 + sc.build) * (d_p + d_w) + d_q);
@@ -2706,7 +2763,7 @@ pub(crate) fn grow_stand_cause(
             // stand can spend this tick — what it cannot spend never arrives. It brings its
             // own mineral at `n_tissue` and its energy at `e_v`, booked as an input.
             let spend = m + (1.0 + sc.build) * (d_p + d_w) + d_q;
-            let seep = (sc.dark_uptake_per_s * w0 * drink.darkness * mu * DT)
+            let seep = (sc.dark_uptake_per_s * w0 * drink.darkness * mu * dt)
                 .max(0.0)
                 .min((spend - a).max(0.0));
             if seep > 0.0 {
@@ -2739,14 +2796,14 @@ pub(crate) fn grow_stand_cause(
     // **The night budget** (`design/ecology-timescales-2026-10-02.md` 1b): while the sun is
     // down on the ecological clock, a photosynthetic stand spends its reserve on the
     // reflush, then nectar, then fruit, out of one allowance this tick,
-    // `max(0, Q − maintenance to dawn − floor) / max(to dawn, night_min_s) · DT`, `Q` the
+    // `max(0, Q − maintenance to dawn − floor) / max(to dawn, night_min_s) · dt`, `Q` the
     // reserve after this tick's maintenance. The maintenance to dawn is this tick's rate
     // carried to dawn, so a stand spending its allowance every tick meets dawn at its
     // floor. By day, and always with the clock off, `None`: today's rules.
     let mut night_left = match (sc.trophic, to_dawn_s) {
         (Trophic::Photo, Some(t)) => {
-            let hold = m / DT * t + sc.night_floor * q_max;
-            Some((stand.reserve - hold).max(0.0) / t.max(sc.night_min_s) * DT)
+            let hold = m / dt * t + sc.night_floor * q_max;
+            Some((stand.reserve - hold).max(0.0) / t.max(sc.night_min_s) * dt)
         }
         _ => None,
     };
@@ -2808,7 +2865,7 @@ pub(crate) fn grow_stand_cause(
     if sc.nectar_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
         let room = (sc.nectar_cap - stand.nectar).max(0.0);
         let rate = if night_left.is_some() { sc.nectar_per_s * sc.night_bloom_scale } else { sc.nectar_per_s };
-        let make = (rate * DT).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
+        let make = (rate * dt).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
         if make > 0.0 {
             stand.reserve -= make;
             stand.nectar += make;
@@ -2830,12 +2887,12 @@ pub(crate) fn grow_stand_cause(
     // so the bushes of a grove fruit out of step. A crop eaten out refills at once.
     let resting = stand.fruit_rest_s > 0.0;
     if resting {
-        stand.fruit_rest_s = (stand.fruit_rest_s - DT).max(0.0);
+        stand.fruit_rest_s = (stand.fruit_rest_s - dt).max(0.0);
     }
     if !resting && sc.fruit_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
         let room = (sc.fruit_cap - stand.fruit).max(0.0);
         let rate = if night_left.is_some() { sc.fruit_per_s * sc.night_bloom_scale } else { sc.fruit_per_s };
-        let make = (rate * DT).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
+        let make = (rate * dt).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
         if make > 0.0 {
             stand.reserve -= make;
             stand.fruit += make;
@@ -2847,7 +2904,7 @@ pub(crate) fn grow_stand_cause(
     }
     let mut fell = (0.0, 0.0);
     if stand.fruit > 0.0 {
-        stand.fruit_age_s += DT;
+        stand.fruit_age_s += dt;
         if stand.fruit_age_s >= sc.fruit_drop_s {
             let o = std::mem::replace(&mut stand.fruit, 0.0);
             let m = (sc.fruit_mineral_fraction.max(0.0) * o).min(stand.mineral.max(0.0));
@@ -2872,7 +2929,7 @@ pub(crate) fn grow_stand_cause(
     g.mineral += settled.released - settled.drawn;
 
     // ---- 4.5 senescence
-    let shed = (sc.senescence * night * stand.foliage * DT).min(stand.foliage);
+    let shed = (sc.senescence * night * stand.foliage * dt).min(stand.foliage);
     book.shed = shed;
     let organic_before = stand.material();
     stand.foliage -= shed;
@@ -2946,10 +3003,17 @@ fn cure(config: &FloraConfig, stand: &mut Stand, g: &mut Ground, book: &mut Book
 /// temperature and night factors) paid from its reserve; maintenance it cannot pay
 /// diebacks its wood as usual. Its dormancy clock runs, and past `cure_max_s` the drought
 /// kills it.
-fn dormant(config: &FloraConfig, stand: &mut Stand, g: &mut Ground, scale: f64, book: &mut Booked) -> Option<DeathCause> {
+fn dormant(
+    config: &FloraConfig,
+    stand: &mut Stand,
+    g: &mut Ground,
+    scale: f64,
+    book: &mut Booked,
+    dt: f64,
+) -> Option<DeathCause> {
     let sc = config.species(stand.species);
     let e_v = sc.energy_density;
-    let m = (sc.maintenance * scale * sc.cure_upkeep * stand.wood * DT).max(0.0);
+    let m = (sc.maintenance * scale * sc.cure_upkeep * stand.wood * dt).max(0.0);
     let mut budget = Budget::new(0.0, 0.0);
     let unpaid = budget.upkeep(&mut stand.reserve, m).unpaid;
     let respired = budget.close();
@@ -2963,7 +3027,7 @@ fn dormant(config: &FloraConfig, stand: &mut Stand, g: &mut Ground, scale: f64, 
     g.dead_wood_mineral += die_back_mineral;
     g.dead_wood_energy += e_v * die_back;
     stand.resync_layers(sc);
-    stand.dry_s += DT;
+    stand.dry_s += dt;
     if stand.wood < sc.alive_min {
         Some(DeathCause::Starved)
     } else if sc.cure_max_s > 0.0 && stand.dry_s >= sc.cure_max_s {
@@ -3235,10 +3299,10 @@ pub(crate) fn decompose_only(flora: &mut Flora) {
             carrion: g.carrion,
         })
         .collect();
-    decompose(flora, &pre);
+    decompose(flora, &pre, DT);
 }
 
-fn decompose(flora: &mut Flora, pre: &[Pre]) {
+fn decompose(flora: &mut Flora, pre: &[Pre], dt: f64) {
     let Flora {
         config,
         ground,
@@ -3262,6 +3326,7 @@ fn decompose(flora: &mut Flora, pre: &[Pre]) {
             &mut g.litter_energy,
             &mut g.mineral,
             config.decomposition,
+            dt,
             litter0,
             ledger,
         );
@@ -3271,6 +3336,7 @@ fn decompose(flora: &mut Flora, pre: &[Pre]) {
             &mut g.dead_wood_energy,
             &mut g.mineral,
             config.wood_decomposition,
+            dt,
             wood0,
             ledger,
         );
@@ -3282,6 +3348,7 @@ fn decompose(flora: &mut Flora, pre: &[Pre]) {
             &mut g.carrion_energy,
             &mut g.mineral,
             config.carrion_decomposition,
+            dt,
             carrion0,
             ledger,
         );
@@ -3308,10 +3375,11 @@ fn decompose_pool(
     energy: &mut f64,
     pool: &mut f64,
     rate: f64,
+    dt: f64,
     stock0: f64,
     ledger: &mut FloraLedger,
 ) {
-    let dec = (rate * DT * stock0).min(*organic).max(0.0);
+    let dec = (rate * dt * stock0).min(*organic).max(0.0);
     if !(dec > 0.0) || !(*organic > 0.0) {
         return;
     }
@@ -3811,7 +3879,7 @@ mod tests {
             };
             2
         ];
-        let out = feed(&mut flora, &world, &moisture, 1);
+        let out = feed(&mut flora, &world, &moisture, 1, DT);
 
         assert_eq!(out.len(), 2);
         // A quarter and three quarters, in every currency.
@@ -4122,7 +4190,7 @@ mod tests {
             let (mut ref_flora, mut ref_world) = (flora.clone(), world.clone());
             // Twice, so the second call runs on the scratch the first one left behind.
             for round in 0..2 {
-                let got = drink(&mut flora, &mut Target::Now(&mut world), threads);
+                let got = drink(&mut flora, &mut Target::Now(&mut world), threads, DT);
                 let want = drink_sorted_sweep(&mut ref_flora, &mut ref_world);
                 assert_eq!(got.len(), want.len());
                 assert!(want.iter().any(|d| d.taken_m3 > 0.0), "stands drank");
@@ -4168,8 +4236,8 @@ mod tests {
                 "enough stands to split"
             );
             let (mut one, mut split) = (flora.clone(), flora.clone());
-            let a = drink(&mut one, &mut Target::Planned(&world), 1);
-            let b = drink(&mut split, &mut Target::Planned(&world), threads);
+            let a = drink(&mut one, &mut Target::Planned(&world), 1, DT);
+            let b = drink(&mut split, &mut Target::Planned(&world), threads, DT);
             assert!(a.iter().any(|d| d.taken_m3 > 0.0), "stands drank");
             for (x, y) in a.iter().zip(&b) {
                 assert_eq!(
@@ -4263,8 +4331,8 @@ mod tests {
                 })
                 .collect();
             let (mut one, mut split) = (flora.clone(), flora.clone());
-            let a = feed(&mut one, &world, &moisture, 1);
-            let b = feed(&mut split, &world, &moisture, 4);
+            let a = feed(&mut one, &world, &moisture, 1, DT);
+            let b = feed(&mut split, &world, &moisture, 4, DT);
             assert!(a.iter().any(|s| s.taken.organic > 0.0), "fungi fed");
             for (x, y) in a.iter().zip(&b) {
                 assert_eq!(
@@ -4321,7 +4389,7 @@ mod tests {
                     available: 1.0,
                 })
                 .collect();
-            let substrate = feed(&mut flora, &world, &drink, 1);
+            let substrate = feed(&mut flora, &world, &drink, 1, DT);
             let (mut one, mut split) = (flora.clone(), flora.clone());
             let climate = Climate {
                 daylight: 1.0,
@@ -4329,6 +4397,7 @@ mod tests {
                 night: 1.0,
                 to_dawn_s: None,
                 draw_key: 0,
+                dt: DT,
             };
             grow(&mut one, &world, &light, climate, &drink, &substrate, 1);
             grow(&mut split, &world, &light, climate, &drink, &substrate, threads);
@@ -4514,14 +4583,65 @@ mod tests {
 }
 
 /// One tick of every stand's defence relaxing toward zero at its species' half-life.
-fn decay_defences(flora: &mut Flora) {
+fn decay_defences(flora: &mut Flora, dt: f64) {
     for stand in flora.stands.iter_mut().filter(|s| s.defence > 0.0) {
         let half = flora.config.species(stand.species).defence_half_life_s;
         if half > 0.0 {
-            stand.defence *= 0.5f64.powf(DT / half);
+            stand.defence *= 0.5f64.powf(dt / half);
             if stand.defence < 1e-12 {
                 stand.defence = 0.0;
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+
+    /// A per-second decay converted for a step of `n` ticks is the per-tick one applied
+    /// `n` times: the expected survivors after any span are the same at any step size.
+    #[test]
+    fn a_decay_share_over_n_ticks_is_the_per_tick_share_compounded() {
+        for rate in [1e-6, 1e-3, 0.05, 2.0] {
+            for n in [1u64, 2, 5, 20] {
+                let coarse = 1.0 - decay_share(rate, span_dt(n));
+                let fine = (1.0 - decay_share(rate, span_dt(1))).powi(n as i32);
+                assert!((coarse - fine).abs() <= 1e-12 * fine.max(1e-300), "rate {rate}, n {n}: {coarse} vs {fine}");
+            }
+        }
+        assert_eq!(decay_share(0.0, 1.0), 0.0);
+        assert_eq!(decay_share(1.0, 0.0), 0.0);
+    }
+
+    /// Over a run, a periodic check is due in exactly as many coarse windows as there are
+    /// ticks it falls on (for windows no longer than its period), and the film's steps
+    /// add up to the seconds crossed.
+    #[test]
+    fn periodic_checks_fire_once_per_period_on_any_window() {
+        let ticks = 3_000u64;
+        for period in [1u64, 3, 7, 20, 600] {
+            // Keys whose sum with the tick does not wrap within the run (a wrap breaks the
+            // period for the per-tick check too, once in 2^64 ticks).
+            for key in [0u64, 1, 5, 0x5EED_1234_5678_9ABC] {
+                let per_tick = (1..=ticks).filter(|&t| due_in_window(key, t, 1, period)).count();
+                for span in [1u64, 2, 5, 7] {
+                    if span > period {
+                        continue;
+                    }
+                    let windows = (1..=ticks / span)
+                        .filter(|&k| due_in_window(key, k * span, span, period))
+                        .count();
+                    let last = ticks / span * span;
+                    let per_tick_to_last = (1..=last).filter(|&t| due_in_window(key, t, 1, period)).count();
+                    assert_eq!(windows, per_tick_to_last, "period {period} key {key} span {span}");
+                }
+                assert!(per_tick >= (ticks / period) as usize);
+            }
+        }
+        for span in [1u64, 3, 5, 20, 45] {
+            let total: u64 = (1..=600 / span).map(|k| crate::film::film_steps(k * span, span)).sum();
+            assert_eq!(total, (600 / span * span) / crate::film::FILM_EVERY, "span {span}");
         }
     }
 }

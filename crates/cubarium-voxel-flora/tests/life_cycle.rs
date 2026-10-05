@@ -2357,15 +2357,12 @@ fn aeration_stress_relaxes_toward_the_level_its_saturated_fraction_asks_for() {
         }
     ));
     run(&mut flora, &mut world, 100);
-    let rise = 1.0 - (1.0 - sc.stress_rate_per_s * DT).powi(100);
+    // Exponential closure: the share left of the gap is `exp(−rate · t)` whatever the step.
+    let rise = 1.0 - (-sc.stress_rate_per_s * 100.0 * DT).exp();
     let s = flora.view().stand_at(here).unwrap().aeration_stress;
     assert!(
         (s - rise).abs() < 1e-9,
         "after 100 ticks the stress is {s}, not {rise}"
-    );
-    assert!(
-        (rise - 0.634).abs() < 1e-3,
-        "one time constant of the placeholder rate is {rise}"
     );
     run(&mut flora, &mut world, 1900);
     let s = flora.view().stand_at(here).unwrap().aeration_stress;
@@ -2388,7 +2385,7 @@ fn aeration_stress_relaxes_toward_the_level_its_saturated_fraction_asks_for() {
     }
     let before = flora.view().stand_at(here).unwrap().aeration_stress;
     run(&mut flora, &mut world, 2000);
-    let want = before * (1.0 - sc.relax_rate_per_s * DT).powi(2000);
+    let want = before * (-sc.relax_rate_per_s * 2000.0 * DT).exp();
     let s = flora.view().stand_at(here).unwrap().aeration_stress;
     assert!(
         (s - want).abs() < 1e-9,
