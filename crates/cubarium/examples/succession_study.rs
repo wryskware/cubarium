@@ -27,6 +27,9 @@
 //!   by cause and disappearances on the tracked sites, delivery receipts, burr deliveries,
 //!   the attempt classes with the failed gates split, and with animals present the fauna
 //!   balance per lineage with the Veilhound's kills, carcasses, bites and assimilation.
+//!   Each sample also prints a `juv` line (turf-establish): springturf that starved
+//!   without ever being seen at donor size, and turf births, per 10 minutes since the last
+//!   sample, with the share of the births that came up within two columns of a mature turf.
 //! - `fauna`: branch a save, introduce the code-default founding table through the
 //!   seeder's own fauna placement, and run with the heuristics (the earlier study's arm).
 //!
@@ -514,6 +517,74 @@ struct Watch {
     cured_max: usize,
 }
 
+/// **Young springturf** (turf-establish, 2026-10-05): starvation of turf that was never
+/// seen at donor size, and births, with the share that came up next to mature turf.
+#[derive(Default)]
+struct Juv {
+    /// Turf ids seen at donor size at a minute check.
+    been_mature: HashSet<u64>,
+    /// Turf ids alive at the last minute check.
+    known: HashSet<u64>,
+    /// Since the last sample: young turf starved (death-log events), turf births seen at
+    /// the minute checks, and of those the ones with a mature turf within two columns.
+    starved: u64,
+    births: u64,
+    births_near_mature: u64,
+    since: u64,
+}
+
+impl Juv {
+    fn tick(&mut self, flora: &Flora) {
+        for d in flora.death_log() {
+            if d.species == TURF && d.cause == DeathCause::Starved && !self.been_mature.contains(&d.id) {
+                self.starved += 1;
+            }
+        }
+    }
+
+    /// The minute check: who is at donor size, who is new, and whether a mature turf
+    /// stands within two columns of a newcomer (`x` wrapped).
+    fn minute(&mut self, flora: &Flora, width: u32) {
+        let fv = flora.view();
+        let min = fv.config.species(TURF).donor_min;
+        let mut mature_cols: HashSet<(u32, u32)> = HashSet::new();
+        let mut now: HashSet<u64> = HashSet::new();
+        for s in fv.stands.iter().filter(|s| s.species == TURF) {
+            now.insert(s.id);
+            if s.wood >= min {
+                self.been_mature.insert(s.id);
+                mature_cols.insert((s.site.x, s.site.z));
+            }
+        }
+        for s in fv.stands.iter().filter(|s| s.species == TURF && !self.known.contains(&s.id)) {
+            self.births += 1;
+            let near = (-2i64..=2).any(|dx| {
+                (-2i64..=2).any(|dz| {
+                    let x = (i64::from(s.site.x) + dx).rem_euclid(i64::from(width)) as u32;
+                    let z = i64::from(s.site.z) + dz;
+                    z >= 0 && (dx, dz) != (0, 0) && mature_cols.contains(&(x, z as u32))
+                })
+            });
+            self.births_near_mature += u64::from(near);
+        }
+        self.known = now;
+    }
+
+    fn line(&mut self, arm: &str, minute: u64) {
+        let span = (minute - self.since).max(1) as f64;
+        println!(
+            "juv,{arm},{minute},starved_per10={:.1},births_per10={:.1},near_mature_share={:.3}",
+            10.0 * self.starved as f64 / span,
+            10.0 * self.births as f64 / span,
+            self.births_near_mature as f64 / (self.births.max(1)) as f64
+        );
+        self.starved = 0;
+        self.births = 0;
+        self.births_near_mature = 0;
+        self.since = minute;
+    }
+}
+
 fn plants(args: &[String]) {
     let hours: f64 = arg(args, "hours=").map_or(4.0, |h| h.parse().unwrap());
     let every: u64 = arg(args, "every=").map_or(30, |m| m.parse().unwrap());
@@ -604,6 +675,13 @@ fn plants(args: &[String]) {
     let total = (end - minute0) * per_min;
     let mut fw = FaunaWatch::new(&sim, total / 2);
     let width = f64::from(sim.world().config().width);
+    let mut juv = Juv {
+        since: minute0,
+        ..Juv::default()
+    };
+    juv.minute(sim.flora(), sim.world().config().width);
+    juv.births = 0;
+    juv.births_near_mature = 0;
     let t0 = std::time::Instant::now();
     sample(&sim, &arm, minute0, &co, &s1, &refuge, &w, &wet_vacant, &saved, &windows[0]);
     if let Some(f) = map.as_mut() {
@@ -623,6 +701,7 @@ fn plants(args: &[String]) {
             }
             // The tick's deaths and receipts.
             let flora = sim.flora();
+            juv.tick(flora);
             for d in flora.death_log() {
                 let Some(t) = w.track.get_mut(&d.site) else {
                     continue;
@@ -662,6 +741,7 @@ fn plants(args: &[String]) {
                 }
             }
         }
+        juv.minute(sim.flora(), sim.world().config().width);
         // The minute check: births, disappearances, tenure, burr establishment.
         {
             let fv = sim.flora().view();
@@ -723,6 +803,7 @@ fn plants(args: &[String]) {
                 });
             }
             sample(&sim, &arm, minute, &co, &s1, &refuge, &w, &wet_vacant, &saved, &windows[0]);
+            juv.line(&arm, minute);
             if with_fauna {
                 fw.minute_line(&sim, &arm, minute);
             }
