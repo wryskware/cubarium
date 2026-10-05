@@ -1,0 +1,13 @@
+# Detritus web D1 arm: A+B+C with the brake removed: the shipped preset with the nest-site brake off.
+# Branches from the patch saves founded under `baseline.toml` (detritus_study found).
+base = "../patch.toml"
+
+[fauna.founders.littershredder]
+core.reproduction.nest_radius_m = 0.0
+
+[fauna.founders.capgnawer]
+core.reproduction.nest_radius_m = 0.0
+
+[fauna.founders."ripple-snail"]
+core.reproduction.nest_radius_m = 0.0
+

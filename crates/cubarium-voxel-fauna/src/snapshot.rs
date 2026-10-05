@@ -39,7 +39,11 @@ use crate::Fauna;
 //     `LifeConfig::ecological_day_s`; per-day upkeep and the new lifespans.
 // 37: springturf spread — `FounderPhysiology::burr_coat`.
 // 38: scenario maps — `FoundingConfig::reference_land_m2` in the saved config.
-pub const SCHEMA: u32 = 38;
+// 39: the detritus web — `Activity::DarkActive`, `Reproduction::{clutch_max,
+//     nest_radius_m, nest_crowd_max, nest_retry_s}`, `ReproductionState::{native,
+//     retry_ticks}`, `FaunaConfig::lineage_body_ceiling`, `TeacherConfig::{
+//     forage_stay_forward, forage_turn_back_samples}`, the readout ledger lines.
+pub const SCHEMA: u32 = 39;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

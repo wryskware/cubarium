@@ -2911,6 +2911,12 @@ pub struct FloraConfig {
     /// Glassfilm: what [`Flora::seed_film`] puts on every eligible site, organic matter
     /// per square metre.
     pub film_seed_per_m2: f64,
+    /// **The film's grazing refuge** (the detritus web, Astra §3.1F): the share of a
+    /// site's film capacity a grazer cannot take — film in crevices and pores a rasping
+    /// mouth does not reach — so grazing leaves every site a seed stock to regrow from
+    /// (its growth is proportional to the film standing). 0 lets a grazer strip a site.
+    #[serde(default = "default_film_graze_refuge")]
+    pub film_graze_refuge: f64,
     /// Glassfilm: mineral per unit of film tissue, drawn from the site's pool as it grows
     /// (springturf's `n_tissue` by default).
     pub film_n_tissue: f64,
@@ -2972,6 +2978,7 @@ impl Default for FloraConfig {
             // hours, and spread is a fraction of growth.
             film_growth_per_s: 0.0015,
             film_capacity_per_m2: 0.4,
+            film_graze_refuge: default_film_graze_refuge(),
             film_maintenance_per_s: 0.0001,
             film_spread_per_s: 0.0002,
             film_dry_death_per_s: 0.005,
@@ -5592,7 +5599,14 @@ impl Flora {
     /// [`Flora::take_litter`]'s rule on the film pool, booked as consumed.
     pub fn take_film(&mut self, site: Site, want: f64) -> Option<Taken> {
         let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
+        // The refuge ([`FloraConfig::film_graze_refuge`]) is out of a mouth's reach.
+        let refuge = self.config.film_graze_refuge.clamp(0.0, 1.0)
+            * self.config.film_capacity_per_m2
+            * self.config.voxel_m
+            * self.config.voxel_m;
         let g = &mut self.ground[i];
+        // A bad `want` stays bad (refused below); a good one stops at the refuge.
+        let want = if want.is_finite() { want.min(g.film - refuge) } else { want };
         let taken = take_pool(&mut g.film, &mut g.film_mineral, &mut g.film_energy, want)?;
         self.ledger.film_consumed += taken.organic;
         Some(self.book_consumed(taken))
@@ -5737,6 +5751,14 @@ impl Flora {
 /// most, with the mineral and the energy that were in it at the stock's **current
 /// density**, which is `decompose`'s own rule. `None` when nothing can be taken, so the
 /// caller books nothing.
+fn default_film_graze_refuge() -> f64 {
+    FILM_GRAZE_REFUGE
+}
+
+/// The shipped [`FloraConfig::film_graze_refuge`]: a tenth of a site's capacity, plausible
+/// and untuned.
+pub const FILM_GRAZE_REFUGE: f64 = 0.1;
+
 fn take_pool(organic: &mut f64, mineral: &mut f64, energy: &mut f64, want: f64) -> Option<Taken> {
     if !(want > 0.0) || !want.is_finite() || !(*organic > 0.0) {
         return None;
