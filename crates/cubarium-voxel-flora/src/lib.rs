@@ -4013,6 +4013,11 @@ impl<'a> FloraView<'a> {
         self.layer_iter_of(stand).collect()
     }
 
+    /// [`FloraView::profile_layers`] appended to `out`, without a vector per stand.
+    pub fn profile_layers_into(&self, stand: &Stand, out: &mut Vec<StandLayer>) {
+        out.extend(self.layer_iter_of(stand));
+    }
+
     pub fn stand_at(&self, site: Site) -> Option<&'a Stand> {
         self.stands
             .binary_search_by_key(&site, |s| s.site)

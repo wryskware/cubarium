@@ -3109,22 +3109,44 @@ fn resistance_of(manifest: &Manifest, class: &str) -> f64 {
 /// zero with validity 0. Taste remains contact-local, while `Light` and the `Cone` are
 /// pure geometry. `cone_occupancy` is prepared once for all observations in a controller
 /// stage so each browser does not rescan the world.
+#[cfg(test)]
 pub(crate) fn observation(
     fauna: &Fauna,
     i: usize,
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     manifest: &Manifest,
-    mut senses: Option<&mut crate::Senses>,
+    senses: Option<&mut crate::Senses>,
     cone_occupancy: Option<&crate::senses::ConeOccupancy>,
 ) -> Vec<f64> {
+    let (obs, writes) = observation_read(fauna, i, view, fv, manifest, senses.as_deref(), cone_occupancy);
+    if let Some(s) = senses {
+        writes.apply(s, view);
+    }
+    obs
+}
+
+/// [`observation`] reading only: the senses handle's writes (the body's chem-trend store,
+/// a light-memo miss) come back beside the vector for the caller to apply. A body's
+/// observation reads nothing another body's observation writes, so a stage's
+/// observations can be built side by side and their writes applied afterwards.
+pub(crate) fn observation_read(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    manifest: &Manifest,
+    senses: Option<&crate::Senses>,
+    cone_occupancy: Option<&crate::senses::ConeOccupancy>,
+) -> (Vec<f64>, crate::senses::SenseWrites) {
+    let mut writes = crate::senses::SenseWrites::default();
     let a = &fauna.animals[i];
     let founder = a
         .founder
         .expect("an observation is built for a founder body");
     let phys = fauna.config.founder(founder);
     if let Some(flight) = phys.flight {
-        return flyer_observation(fauna, i, view, fv, manifest, cone_occupancy, &flight);
+        return (flyer_observation(fauna, i, view, fv, manifest, cone_occupancy, &flight), writes);
     }
     // The body this animal actually has right now: the anchors below are fractions of
     // it, so a growing founder's eye, mouth and receptors rise with it (decisions §1).
@@ -3225,7 +3247,7 @@ pub(crate) fn observation(
         .or_else(|| module_opt(manifest, "Chem(fungal)").map(|m| (m, ChemField::Fungal)))
         .or_else(|| module_opt(manifest, "Chem(film)").map(|m| (m, ChemField::Film)));
     if let Some((cm, field)) = chem {
-        if let Some(senses) = senses.as_deref_mut() {
+        if let Some(senses) = senses {
             let sampled = match field {
                 ChemField::Detritus => senses.sample_cue(view, &a.pose, standing_y),
                 ChemField::Fungal => senses.sample_fungal(view, &a.pose, standing_y),
@@ -3235,7 +3257,9 @@ pub(crate) fn observation(
                 let sat = manifest.tunings.chem_saturation;
                 let q = cue / (cue + sat);
                 obs[cm.offset] = clamp01(q);
-                obs[cm.offset + 1] = senses.advance_chem_trend(a.id, q, manifest);
+                let (trend, smoothed) = senses.peek_chem_trend(a.id, q, manifest);
+                obs[cm.offset + 1] = trend;
+                writes.chem = Some((a.id, smoothed));
                 obs[cm.offset + 2] = 1.0;
             }
         }
@@ -3248,10 +3272,16 @@ pub(crate) fn observation(
             let wx = cx.rem_euclid(i64::from(view.config.width));
             if view.is_support(wx, standing_y, cz) {
                 // A static episode's senses memo the reading per face (frozen terrain).
-                let sky = senses
-                    .as_deref_mut()
-                    .and_then(|s| s.held_sky(view, wx, standing_y, cz))
-                    .unwrap_or_else(|| view.sky_visibility(wx, standing_y, cz));
+                let sky = match senses.and_then(|s| s.peek_sky(view, wx, standing_y, cz)) {
+                    Some(Some(held)) => held,
+                    // Held but not computed yet: compute it, and remember it afterwards.
+                    Some(None) => {
+                        let v = view.sky_visibility(wx, standing_y, cz);
+                        writes.sky = Some((wx, standing_y, cz, v));
+                        v
+                    }
+                    None => view.sky_visibility(wx, standing_y, cz),
+                };
                 obs[lm.offset] = clamp01(sky);
                 obs[lm.offset + 1] = 1.0;
             }
@@ -3280,7 +3310,7 @@ pub(crate) fn observation(
         obs[base + 18] = f64::from(cone.valid);
     }
 
-    obs
+    (obs, writes)
 }
 
 /// **A flyer's observation** (F1, predation-and-flight §3.6; [`Manifest::bellwing`]'s
@@ -3376,6 +3406,7 @@ fn flyer_observation(
         let origin = crate::flight::eye(a, &body);
         let range = manifest.cone_range_m;
         let rays = (manifest.ray_yaw_offsets_deg.len() * manifest.ray_pitch_offsets_deg.len()) as f64;
+        let blooms = crate::flight::Blooms::of(fv);
         for (si, &centre) in manifest.sector_centres_deg.iter().enumerate().take(3) {
             let (mut clear, mut hit, mut hit_prox) = (0u32, 0u32, 0.0f64);
             let mut count = [0u32; 3];
@@ -3383,7 +3414,7 @@ fn flyer_observation(
             for &oyaw in manifest.ray_yaw_offsets_deg {
                 for &opitch in manifest.ray_pitch_offsets_deg {
                     let dir = crate::senses::ray_direction(a.pose.heading_rad, centre, oyaw, opitch);
-                    match crate::flight::fan_first_hit(view, fv, occupancy, a.id, origin, dir, range) {
+                    match crate::flight::fan_first_hit(view, fv, &blooms, occupancy, a.id, origin, dir, range) {
                         None => clear += 1,
                         Some((d, h)) => {
                             let p = (1.0 - d / range).clamp(0.0, 1.0);

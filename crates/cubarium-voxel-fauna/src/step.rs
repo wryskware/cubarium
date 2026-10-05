@@ -113,8 +113,8 @@ pub(crate) struct Sky {
 use cubarium_voxel::organism::{Budget, build_from, settle_mineral, tissue_funded};
 use cubarium_voxel::pro_rata;
 
-pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
-    tick_inner(fauna, world, flora, None);
+pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora, threads: usize) {
+    tick_inner(fauna, world, flora, None, threads);
 }
 
 /// The static arena's tick: [`step`] with the per-arena [`Senses`] handle. The camera-free
@@ -125,8 +125,9 @@ pub(crate) fn step_with_senses(
     world: &World,
     flora: &mut Flora,
     senses: &mut crate::Senses,
+    threads: usize,
 ) {
-    tick_inner(fauna, world, flora, Some(senses));
+    tick_inner(fauna, world, flora, Some(senses), threads);
 }
 
 fn tick_inner(
@@ -134,6 +135,7 @@ fn tick_inner(
     world: &World,
     flora: &mut Flora,
     mut senses: Option<&mut crate::Senses>,
+    threads: usize,
 ) {
     // The tick counter moves first, so `fauna.tick` is the tick this step produces — the
     // flora layer's own rule, and the tick the keyed streams are keyed by.
@@ -192,7 +194,7 @@ fn tick_inner(
             // The controller stage: sample due founders and hold their actions, before
             // anything moves or eats this tick, from the same pre-action state every
             // controller of the tick reads.
-            controllers(fauna, &view, flora, senses, &sky);
+            controllers(fauna, &view, flora, senses, &sky, threads);
         });
         cubarium_voxel::voxel_phase!(FaunaAct, {
             // Strike outcomes are events: the act only reads other bodies, and the hits
@@ -916,6 +918,23 @@ pub(crate) fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
     (1.0 - a.reserve / cap).clamp(0.0, 1.0)
 }
 
+/// One due body's read side of the controller stage: its manifest, what its observation
+/// would have written into the senses, and its controller's resolved answer (`driven`
+/// false — rest — without a controller or with a non-finite observation).
+struct Sensed {
+    manifest: crate::manifest::Manifest,
+    writes: crate::senses::SenseWrites,
+    actions: Actions,
+    lure: f64,
+    lift: f64,
+    driven: bool,
+}
+
+/// The fewest due bodies one observation job takes.
+const BODIES_PER_JOB: usize = 2;
+/// Observation jobs per worker thread.
+const JOBS_PER_WORKER: usize = 4;
+
 /// Step 3: the **controller stage** — sample every founder whose controller period is
 /// due, consume its prior-interval feedback into the observation, and hold the resolved
 /// actions until the next sampling.
@@ -925,13 +944,21 @@ pub(crate) fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
 /// the live schedule, the static arena, an ES episode harness — reaches it through
 /// [`Fauna::step`]. A post-tick sampler is not this stage. Every controller of the tick
 /// reads the same pre-action state.
+///
+/// **Read side, then write side.** The read side — the occupancy windows, every due body's
+/// observation and its controller's answer — reads only and runs on the compute pool
+/// with `threads`; the write side — the senses' writes, the reflexes, the held actions —
+/// runs after it, serially, in body order.
 fn controllers(
     fauna: &mut Fauna,
     view: &VoxelView<'_>,
     flora: &Flora,
     mut senses: Option<&mut crate::Senses>,
     sky: &Sky,
+    threads: usize,
 ) {
+    #[cfg(feature = "profile")]
+    let mut timer = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaWindows);
     let due: Vec<usize> = fauna
         .animals
         .iter()
@@ -953,6 +980,25 @@ fn controllers(
     if due.is_empty() {
         return;
     }
+    // "Initial intake/loss/motion feedback is zero" (the plan's manifest rules).
+    // The ticks before a body's *first* sampling are not an interval it acted in:
+    // it held nothing, so there is nothing to report back about an action, and the
+    // upkeep it paid while standing there is not feedback. Clear the accumulator
+    // before the first observation is built.
+    //
+    // This was invisible until P2-C. A founder used to arrive with a full reserve,
+    // so those ticks' maintenance came out of the reserve, `structural_loss` was
+    // never incremented, and channel 3 read zero by accident. A hungry founder pays
+    // upkeep out of its structure from tick one (P2-T finding 3).
+    //
+    // A body's feedback is read only by its own observation, so every due body's is
+    // cleared here, before any observation.
+    for &i in &due {
+        let founder = fauna.animals[i].founder.expect("a due founder");
+        if fauna.animals[i].age_ticks == fauna.config.manifest(founder).cadence_ticks() {
+            fauna.animals[i].founder_state.feedback = IntervalFeedback::default();
+        }
+    }
     let fv = flora.view();
     // The cone occupancy is built once per stage, and only over the columns the due
     // browsers' rays can reach: a ray reads exactly what it would against
@@ -969,28 +1015,6 @@ fn controllers(
         .map(|&i| fauna.animals[i].pose.x)
         .collect();
     let mut held = senses.as_deref_mut().and_then(|s| s.take_cone());
-    let windowed;
-    let cone_occupancy = if observers.is_empty() {
-        None
-    } else if let Some(held) = held.as_mut() {
-        Some(held.refresh(view, &fv, &fauna.view()))
-    } else {
-        // The widest cone among the due sighted lineages (a flyer's fan reaches 4 m).
-        let range = due
-            .iter()
-            .filter_map(|&i| fauna.animals[i].founder)
-            .filter(|f| v2_cone[f.index()])
-            .map(|f| f.manifest().cone_range_m)
-            .fold(Founder::Browser.manifest().cone_range_m, f64::max);
-        windowed = crate::senses::cone_occupancy_window(
-            view,
-            &fv,
-            &fauna.view(),
-            observers.iter().copied(),
-            range,
-        );
-        Some(&windowed)
-    };
     // The **predation** occupancy (bodies with volume, predation §2.2) is built only while
     // a hunter is in the world: the lanternjaw's own sight and a heuristic prey's look for
     // a threat, out to `flee_sight_m`. It becomes the cone's at contract v3 (P2).
@@ -1006,64 +1030,120 @@ fn controllers(
     } else {
         Vec::new()
     };
-    let predation_occupancy = (!predators.is_empty()).then(|| {
-        crate::senses::predation_occupancy_window(
-            view,
-            &fv,
-            &fauna.view(),
-            predators.iter().copied(),
-            Founder::Browser.manifest().cone_range_m.max(fauna.config.predation.flee_sight_m),
-        )
+    // Both windowed grids are built together, side by side on the compute pool.
+    let mut asks = Vec::new();
+    let cone_ask = (!observers.is_empty() && held.is_none()).then(|| {
+        // The widest cone among the due sighted lineages (a flyer's fan reaches 4 m).
+        let range = due
+            .iter()
+            .filter_map(|&i| fauna.animals[i].founder)
+            .filter(|f| v2_cone[f.index()])
+            .map(|f| f.manifest().cone_range_m)
+            .fold(Founder::Browser.manifest().cone_range_m, f64::max);
+        asks.push(crate::senses::OccupancyAsk {
+            window: crate::senses::window_columns(view, observers.iter().copied(), range),
+            volume: false,
+        });
+        asks.len() - 1
     });
-    for i in due {
+    let predation_ask = (!predators.is_empty()).then(|| {
+        asks.push(crate::senses::OccupancyAsk {
+            window: crate::senses::window_columns(
+                view,
+                predators.iter().copied(),
+                Founder::Browser.manifest().cone_range_m.max(fauna.config.predation.flee_sight_m),
+            ),
+            volume: true,
+        });
+        asks.len() - 1
+    });
+    let mut scratch = std::mem::take(&mut fauna.grid_scratch);
+    let mut built =
+        crate::senses::build_occupancies(view, &fv, &fauna.view(), &asks, threads, &mut scratch);
+    let predation_occupancy = predation_ask.map(|k| std::mem::take(&mut built[k]));
+    let windowed = cone_ask.map(|k| std::mem::take(&mut built[k]));
+    let cone_occupancy = if observers.is_empty() {
+        None
+    } else if let Some(held) = held.as_mut() {
+        Some(&*held.refresh(view, &fv, &fauna.view()))
+    } else {
+        windowed.as_ref()
+    };
+
+    // **Read side**: every due body's observation and its controller's answer, side by
+    // side on the compute pool. An observation reads the world, the plants, the bodies
+    // and the senses as they stand before this stage writes anything; a controller reads
+    // its observation and its own memory. Nothing here writes shared state: the senses'
+    // writes come back as [`crate::senses::SenseWrites`], and the held actions are written
+    // below, serially, in body order.
+    #[cfg(feature = "profile")]
+    timer.next(cubarium_voxel::profile::Phase::FaunaObserve);
+    if let Some(s) = senses.as_deref_mut() {
+        s.index_light(view);
+    }
+    let ids: Vec<u64> = due.iter().map(|&i| fauna.animals[i].id).collect();
+    let mut table = std::mem::take(&mut fauna.controllers);
+    let sensed: Vec<Sensed> = {
+        let mut slots = table.slots_mut(&ids);
+        let fauna: &Fauna = fauna;
+        let senses = senses.as_deref();
+        let fv = &fv;
+        let read = |i: usize, slot: &mut Option<&mut Box<dyn crate::Controller>>| -> Sensed {
+            let founder = fauna.animals[i].founder.expect("a due founder");
+            let manifest = fauna.config.manifest(founder);
+            let occupancy = if v2_cone[founder.index()] {
+                cone_occupancy
+            } else {
+                predation_occupancy.as_ref()
+            };
+            let (obs, writes) =
+                body::observation_read(fauna, i, view, fv, &manifest, senses, occupancy);
+            // Reject rather than train through: an observation with a non-finite channel
+            // holds rest instead of reaching the controller at all.
+            let (actions, lure, lift, driven) = match slot.as_deref_mut() {
+                Some(c) if obs.iter().all(|v| v.is_finite()) => {
+                    let response = c.drive(&obs);
+                    (crate::controller::resolve_actions(response, &manifest), c.lure(), c.lift(), true)
+                }
+                _ => (Actions::REST, 0.0, 0.0, false),
+            };
+            Sensed { manifest, writes, actions, lure, lift, driven }
+        };
+        // Several jobs per worker: one body's observation can cost many another's (a
+        // flyer's fan), and the pool evens that out as workers come free.
+        let ranges = crate::par::ranges(due.len(), threads * JOBS_PER_WORKER, BODIES_PER_JOB);
+        if ranges.len() <= 1 {
+            due.iter().zip(slots.iter_mut()).map(|(&i, slot)| read(i, slot)).collect()
+        } else {
+            let read = &read;
+            let mut jobs: Vec<crate::par::Job<'_, Vec<Sensed>>> = Vec::new();
+            let mut rest: &mut [Option<&mut Box<dyn crate::Controller>>] = &mut slots;
+            for r in ranges {
+                let (mine, tail) = std::mem::take(&mut rest).split_at_mut(r.len());
+                rest = tail;
+                let bodies = &due[r];
+                jobs.push(Box::new(move || {
+                    bodies.iter().zip(mine.iter_mut()).map(|(&i, slot)| read(i, slot)).collect()
+                }));
+            }
+            crate::par::run(threads, jobs).into_iter().flatten().collect()
+        }
+    };
+    fauna.controllers = table;
+    if let Some(s) = senses.as_deref_mut() {
+        for got in &sensed {
+            got.writes.apply(s, view);
+        }
+    }
+
+    // **Write side**, serially in body order: the reflexes and the held actions.
+    #[cfg(feature = "profile")]
+    timer.next(cubarium_voxel::profile::Phase::FaunaReflex);
+    for (k, &i) in due.iter().enumerate() {
         let id = fauna.animals[i].id;
         let founder = fauna.animals[i].founder.expect("a due founder");
-        let manifest = fauna.config.manifest(founder);
-        // "Initial intake/loss/motion feedback is zero" (the plan's manifest rules).
-        // The ticks before a body's *first* sampling are not an interval it acted in:
-        // it held nothing, so there is nothing to report back about an action, and the
-        // upkeep it paid while standing there is not feedback. Clear the accumulator
-        // before the first observation is built.
-        //
-        // This was invisible until P2-C. A founder used to arrive with a full reserve,
-        // so those ticks' maintenance came out of the reserve, `structural_loss` was
-        // never incremented, and channel 3 read zero by accident. A hungry founder pays
-        // upkeep out of its structure from tick one (P2-T finding 3).
-        if fauna.animals[i].age_ticks == manifest.cadence_ticks() {
-            fauna.animals[i].founder_state.feedback = IntervalFeedback::default();
-        }
-        let occupancy = if v2_cone[founder.index()] {
-            cone_occupancy
-        } else {
-            predation_occupancy.as_ref()
-        };
-        let obs = body::observation(
-            fauna,
-            i,
-            view,
-            &fv,
-            &manifest,
-            senses.as_deref_mut(),
-            occupancy,
-        );
-        // Reject rather than train through: an observation with a non-finite channel
-        // holds rest instead of reaching the controller at all.
-        let (mut actions, mut lure, mut lift, driven) = if obs.iter().all(|v| v.is_finite()) {
-            let response = fauna.controllers.drive(id, &obs);
-            let driven = response.is_some();
-            let lure = if driven { fauna.controllers.lure(id) } else { 0.0 };
-            let lift = if driven { fauna.controllers.lift(id) } else { 0.0 };
-            (
-                response.map_or(Actions::REST, |r| {
-                    crate::controller::resolve_actions(r, &manifest)
-                }),
-                lure,
-                lift,
-                driven,
-            )
-        } else {
-            (Actions::REST, 0.0, 0.0, false)
-        };
+        let Sensed { ref manifest, actions, lure, lift, driven, .. } = sensed[k];
+        let (mut actions, mut lure, mut lift) = (actions, lure, lift);
         // The prey heuristics' flee rule (predation §2.7): a body driven by its own
         // heuristic — not a saved policy, whose behaviour changes only through the world
         // — turns away from a seen threat within 3 m, or from tremor, and resumes after.
@@ -1146,6 +1226,10 @@ fn controllers(
     if let Some(s) = senses {
         s.return_cone(held);
     }
+    for occ in predation_occupancy.into_iter().chain(windowed) {
+        scratch.give(occ);
+    }
+    fauna.grid_scratch = scratch;
 }
 
 /// **The flee rule** of the prey heuristics (predation §2.7), `None` when there is
