@@ -407,7 +407,8 @@ pub struct CoveredFace {
     pub rooted: bool,
     pub spur: SpurPhase,
     /// Seconds left in the current spur phase, or, bare, of its random rest before the next
-    /// start (0 until one is drawn).
+    /// start (at most 0 until one is drawn: below 0, the spent phase's overshoot, which
+    /// the rest drawn next is shortened by).
     pub spur_timer_s: f64,
     /// Organic matter in the flower. Positive only in [`SpurPhase::Flower`].
     pub nectar: f64,
@@ -1478,30 +1479,37 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate, spa
             // Spurs.
             match f.spur {
                 SpurPhase::Bare => {
-                    // A bare spur's timer is its rest; 0 means none drawn yet. Dormancy
-                    // clears it, so a vine waking draws fresh rests face by face.
+                    // A bare spur's timer is its rest; at or below 0 none is drawn yet,
+                    // and below 0 it is the time the spent phase already ran past its
+                    // end. Dormancy clears it, so a vine waking draws fresh rests face by
+                    // face.
                     if v.dormant || !flowering {
                         f.spur_timer_s = 0.0;
-                    } else if f.spur_timer_s <= 0.0 {
-                        // Exponential, keyed by the face and the tick: memoryless, so the
-                        // starts of a colony are scattered in time and place from the
-                        // first, and no event lines them up.
-                        let (ka, kb, kc) = f.face.key();
-                        let mut rng =
-                            Rng::keyed(DOMAIN_SPUR, ka ^ world_seed.rotate_left(17), kb ^ tick, kc);
-                        let u = 1.0 - rng.unit();
-                        f.spur_timer_s = dt + (-u.ln() * rest_mean).max(0.0);
                     } else {
+                        if f.spur_timer_s <= 0.0 {
+                            // Exponential, keyed by the face and the tick: memoryless, so
+                            // the starts of a colony are scattered in time and place from
+                            // the first, and no event lines them up. The rest runs from
+                            // where the spent phase ended, so the overshoot is carried and
+                            // this step is the rest's first: a cycle is its phases and its
+                            // rest on any plant clock (`tests/plant_clock_rates.rs`).
+                            let (ka, kb, kc) = f.face.key();
+                            let mut rng =
+                                Rng::keyed(DOMAIN_SPUR, ka ^ world_seed.rotate_left(17), kb ^ tick, kc);
+                            let u = 1.0 - rng.unit();
+                            f.spur_timer_s += (-u.ln() * rest_mean).max(0.0);
+                        }
                         f.spur_timer_s -= dt;
                         if f.spur_timer_s <= EPS {
-                            f.spur_timer_s = 0.0;
                             // Without the reserve this start is skipped and a new rest is
                             // drawn next tick: a short vine never queues its spurs up to
                             // open together once it can pay.
                             let per_face = v.reserve / f64::from(a.faces.max(1));
                             if per_face >= vc.spur_reserve_min {
                                 f.spur = SpurPhase::Bud;
-                                f.spur_timer_s = vc.bud_s;
+                                f.spur_timer_s += vc.bud_s;
+                            } else {
+                                f.spur_timer_s = 0.0;
                             }
                         }
                     }
@@ -1557,8 +1565,10 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate, spa
                 SpurPhase::Spent => {
                     f.spur_timer_s -= dt;
                     if f.spur_timer_s <= EPS {
+                        // The overshoot, kept for the rest drawn next (never above 0, so
+                        // the bare spur does draw one).
                         f.spur = SpurPhase::Bare;
-                        f.spur_timer_s = 0.0;
+                        f.spur_timer_s = f.spur_timer_s.min(0.0);
                     }
                 }
             }
