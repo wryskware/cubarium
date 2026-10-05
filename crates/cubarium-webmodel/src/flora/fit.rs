@@ -31,8 +31,9 @@ pub fn cai(config: &FloraConfig, zones: &Zones, faces: &[Face]) -> Vec<f64> {
     sum.iter().zip(&zones.zones).map(|(s, z)| s / z.area.max(1.0)).collect()
 }
 
-/// **Light extinction** per species and stage: ordinary least squares of `−ln(L / sky)` on
-/// the zone's crown area index, `−ln(L/sky) = a + k · CAI`, `L` each stand's last-tick
+/// **Light** per species and stage: ordinary least squares of a stand's relative light
+/// `L / sky` on the zone's crown area index, `L/sky = a − k · CAI` (fitted on the light
+/// itself, not its log, so the mean light is kept), `L` each stand's last-tick
 /// light (`Stand::light`, its response inverted) and `sky` its face's terrain sky. The
 /// intercept `a` is the shade a stand's own neighbourhood casts at no zone-wide canopy
 /// (seeds fall near their parents, so stands stand in clumps); `k` is the canopy's.
@@ -52,8 +53,8 @@ pub fn light(config: &FloraConfig, zones: &Zones, snaps: &[Vec<Face>]) -> [[[Fit
                 return None;
             }
             let d = self.n * self.xx - self.x * self.x;
-            let k = if d > 1e-12 { ((self.n * self.xy - self.x * self.y) / d).max(0.0) } else { 0.0 };
-            let a = ((self.y - k * self.x) / self.n).max(0.0);
+            let k = if d > 1e-12 { (-(self.n * self.xy - self.x * self.y) / d).max(0.0) } else { 0.0 };
+            let a = ((self.y + k * self.x) / self.n).clamp(0.0, 1.0);
             Some((a, k))
         }
     }
@@ -70,7 +71,7 @@ pub fn light(config: &FloraConfig, zones: &Zones, snaps: &[Vec<Face>]) -> [[[Fit
             }
             let h = sc.light_half;
             let raw = if 1.0 + h - r.light > 1e-9 { h * r.light / (1.0 + h - r.light) } else { f.sky };
-            let y = -(raw / f.sky).clamp(1e-3, 1.0).ln();
+            let y = (raw / f.sky).clamp(0.0, 1.0);
             let x = c[zones.of_face[&(f.x, f.y, f.z)]];
             let j = usize::from(r.wood >= sc.donor_min);
             let a = &mut acc[sp.index()][j];

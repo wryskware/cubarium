@@ -59,7 +59,17 @@ pub struct Reading {
     pub stress_target: f64,
     /// Share of faces whose water and terrain-light gates pass.
     pub gate: f64,
+    /// The same readings on the faces this species **holds** (its stands sit where their
+    /// own gates passed, a microhabitat a zone mean dilutes): `μ`, aeration target and
+    /// available water, means over its stands in the zone; the zone's own when it holds
+    /// fewer than [`HELD_MIN`] there.
+    pub mu_held: f64,
+    pub stress_held: f64,
+    pub available_held: f64,
 }
+
+/// The fewest stands whose faces stand for a species' own reading in a zone.
+pub const HELD_MIN: f64 = 5.0;
 
 /// One zone.
 #[derive(Clone, Debug)]
@@ -88,6 +98,9 @@ impl Zone {
                 o.saturated += r.saturated / n;
                 o.stress_target += r.stress_target / n;
                 o.gate += r.gate / n;
+                o.mu_held += r.mu_held / n;
+                o.stress_held += r.stress_held / n;
+                o.available_held += r.available_held / n;
             }
         }
         out
@@ -161,6 +174,7 @@ pub fn build(config: &FloraConfig, snapshots: &[Vec<Face>]) -> Zones {
             zone.fungal_space += 1.0;
         }
     }
+    let mut held_n: Vec<Vec<[f64; Species::COUNT]>> = vec![vec![[0.0; Species::COUNT]; n]; zones.len()];
     for (si, snap) in snapshots.iter().enumerate() {
         for f in snap {
             let z = zi[&keys[&(f.x, f.y, f.z)]];
@@ -174,6 +188,12 @@ pub fn build(config: &FloraConfig, snapshots: &[Vec<Face>]) -> Zones {
                 r.saturated += f.saturated[k];
                 r.stress_target += aeration_target(f.saturated[k], sc);
                 r.gate += f64::from(u8::from(f.water_ok[k] && f.light_ok[k]));
+                if f.plant.is_some_and(|(p, _)| p == *sp) {
+                    r.mu_held += sc.moisture_at(a);
+                    r.stress_held += aeration_target(f.saturated[k], sc);
+                    r.available_held += a;
+                    held_n[z][si][sp.index()] += 1.0;
+                }
             }
             // The glowcap reads its own box through its gates; the census keeps its pass,
             // and its moisture through the cave damp is at least `dark_damp · darkness`.
@@ -182,20 +202,35 @@ pub fn build(config: &FloraConfig, snapshots: &[Vec<Face>]) -> Zones {
             r.mu += gsc.moisture_at(a);
             r.available += a;
             r.gate += f64::from(u8::from(f.glow_ok));
+            if f.fungus.is_some() {
+                r.mu_held += gsc.moisture_at(a);
+                r.available_held += a;
+                held_n[z][si][glow_index()] += 1.0;
+            }
         }
     }
-    for zone in &mut zones {
+    for (zi, zone) in zones.iter_mut().enumerate() {
         let a = zone.area.max(1.0);
         zone.sky /= a;
         zone.darkness /= a;
         zone.fungal_space /= a;
-        for w in &mut zone.weather {
-            for r in w.iter_mut() {
+        for (si, w) in zone.weather.iter_mut().enumerate() {
+            for (k, r) in w.iter_mut().enumerate() {
                 r.mu /= a;
                 r.available /= a;
                 r.saturated /= a;
                 r.stress_target /= a;
                 r.gate /= a;
+                let h = held_n[zi][si][k];
+                if h >= HELD_MIN {
+                    r.mu_held /= h;
+                    r.stress_held /= h;
+                    r.available_held /= h;
+                } else {
+                    r.mu_held = r.mu;
+                    r.stress_held = r.stress_target;
+                    r.available_held = r.available;
+                }
             }
         }
     }

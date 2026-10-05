@@ -86,9 +86,9 @@ pub struct Params {
     /// newborn pays its upkeep only on faces rich enough (the canopy gate), so it takes
     /// the richer faces first.
     pub sigma: [f64; NS + 1],
-    /// **Fitted (spatial)**: Beer–Lambert extinction of each species' light, `[juvenile,
-    /// adult]`, against the zone's crown area index (adult crowns over area): a stand's
-    /// open light is `sky · exp(−k · CAI)` ([`super::fit::light`]).
+    /// **Fitted (spatial)**: each species' relative light `[a, k]` per stage `[juvenile,
+    /// adult]` against the zone's crown area index (adult crowns over area): a stand's
+    /// light is `sky · max(a − k · CAI, 0.02)` ([`super::fit::light`]).
     pub light_k: [[[f64; 2]; 2]; NS],
 }
 
@@ -104,7 +104,7 @@ impl Default for Params {
             juvenile_browse: [0.0; NS],
             // Census means of m250/m370 and m1570, seeds 5 and 6 (`flora.md`, fitted rates).
             sigma: [0.15, 0.08, 0.38, 0.27, 0.42, 0.0, 0.35, 0.23, 0.1, 0.15],
-            light_k: [[[0.0; 2]; 2]; NS],
+            light_k: [[[1.0, 0.0]; 2]; NS],
         }
     }
 }
@@ -552,7 +552,7 @@ impl Model {
             let readings: Vec<Reading> = (0..NS).map(|s| self.reading(zi, s)).collect();
             // ---- the fungi's feed (step.rs:2183): one bounded draw on the zone's pools.
             let gsc = config.species(Species::Glowcap);
-            let mu_g = readings[GLOW].mu;
+            let mu_g = readings[GLOW].mu_held;
             let demand: f64 = self.z[zi].cohorts[GLOW].iter().map(|c| c.n * gsc.substrate_uptake_per_s * c.st.wood * mu_g * dt).sum();
             let held = self.z[zi].litter + self.z[zi].dead_wood;
             let taken = demand.min(held).max(0.0);
@@ -574,12 +574,11 @@ impl Model {
                 let r = readings[s];
                 let photo = sc.trophic == Trophic::Photo;
                 // The `μ` and aeration levels the zone's faces read, as one stand's inputs.
-                let available = if photo {
-                    if r.mu < 1.0 { sc.wilt_water + r.mu * (sc.full_water - sc.wilt_water) } else { r.available.max(sc.full_water) }
-                } else {
-                    if r.mu < 1.0 { gsc.wilt_water + r.mu * (gsc.full_water - gsc.wilt_water) } else { r.available.max(gsc.full_water) }
-                };
-                let saturated = sc.establish_saturated_max + r.stress_target * (1.0 - sc.establish_saturated_max);
+                // The readings on the faces the species holds, as one stand's inputs: the
+                // available water whose ramp is their mean `μ`, the saturated fraction whose
+                // target is their mean target.
+                let available = if r.mu_held < 1.0 { sc.wilt_water + r.mu_held * (sc.full_water - sc.wilt_water) } else { r.available_held.max(sc.full_water) };
+                let saturated = sc.establish_saturated_max + r.stress_held * (1.0 - sc.establish_saturated_max);
                 let mineral = if photo {
                     if counts[s] > 0.0 { self.z[zi].pool[s] / counts[s] } else { config.initial_mineral }
                 } else {
@@ -595,7 +594,7 @@ impl Model {
                     }
                     let stage = usize::from(c.st.wood >= sc.donor_min);
                     let [la, lk] = self.p.light_k[s][stage];
-                    let l_raw = zone.sky * (-la - lk * cover).exp();
+                    let l_raw = zone.sky * (la - lk * cover).max(0.02);
                     let site = stand::Site {
                         light_eff: light_response(sc, l_raw),
                         available,
@@ -688,7 +687,7 @@ impl Model {
                     // of each rich enough for the daughter (`seeds.rs:1078`).
                     let mut targets: Vec<(usize, bool, f64, f64)> = Vec::new();
                     for (l, share) in [(false, 1.0)] {
-                        let l_eff = light_response(sc, zone.sky * (-self.p.light_k[s][0][0] - self.p.light_k[s][0][1] * cover).exp());
+                        let l_eff = light_response(sc, zone.sky * (self.p.light_k[s][0][0] - self.p.light_k[s][0][1] * cover).max(0.02));
                         let ns = n_star(sc, l_eff, r.mu);
                         for o in (0..=NS).filter(|&o| o == VACANT || (o != GLOW && runner_may_take(&config, sp, Species::ALL[o]))) {
                             let cnt = if o == VACANT { vacant } else { counts[o] };
@@ -828,7 +827,7 @@ impl Model {
                         return f64::INFINITY;
                     }
                     let sc = config.species(Species::ALL[s]);
-                    n_star(sc, light_response(sc, zone_sky * (-self.p.light_k[s][0][0] - self.p.light_k[s][0][1] * cover).exp()), readings[s].mu)
+                    n_star(sc, light_response(sc, zone_sky * (self.p.light_k[s][0][0] - self.p.light_k[s][0][1] * cover).max(0.02)), readings[s].mu)
                 })
                 .collect();
             // Vacant faces: armed and sprouted within two checks; the lottery by weight.

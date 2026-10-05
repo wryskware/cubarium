@@ -124,6 +124,24 @@ fn run(a: &[String]) {
     let minutes: f64 = kv(a, "minutes=").map_or(1200.0, |x| x.parse().unwrap());
     let every: f64 = kv(a, "every=").map_or(30.0, |x| x.parse().unwrap());
     let mut m = model::Model::new(fc.clone(), DayModel::of(&p.world, fc.upkeep_q10), zs, kern, rb, &snaps[0], minute0, mp);
+    // The animals' take, clamped to the run's logged flux windows (`flux,ARM,A-B,...,
+    // foliage_taken=X,litter_taken=Y`): spread evenly over each window, the foliage over
+    // the species by their edible stock (the log has no per-species split).
+    let clamp: Vec<(f64, f64, f64, f64)> = kv(a, "log=")
+        .map(|f| {
+            std::fs::read_to_string(f)
+                .unwrap()
+                .lines()
+                .filter(|l| l.starts_with("flux,"))
+                .filter_map(|l| {
+                    let p: Vec<&str> = l.split(',').collect();
+                    let (a, b) = p[2].split_once('-')?;
+                    let get = |k: &str| p.iter().find_map(|x| x.split(" |").next()?.strip_prefix(k)).and_then(|v| v.parse::<f64>().ok());
+                    Some((a.parse().ok()?, b.parse().ok()?, get("foliage_taken=")?, get("litter_taken=")?))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let t = std::time::Instant::now();
     let end = minute0 + minutes;
     let mut next = minute0;
@@ -134,6 +152,19 @@ fn run(a: &[String]) {
         }
         if m.minute() >= end - 1e-9 {
             break;
+        }
+        if let Some(&(a0, b0, fol, lit)) = clamp.iter().find(|w| m.minute() >= w.0 && m.minute() < w.1) {
+            let per = m.p.dt / ((b0 - a0) * 60.0);
+            let sup = if m.cohorts() > 0 && (m.minute() as u64) % 10 == 0 { Some(m.supply()) } else { None };
+            if let Some(sup) = sup {
+                let tot: f64 = sup.foliage.iter().enumerate().filter(|(k, _)| *k != Species::Glowcap.index()).map(|(_, v)| v).sum();
+                for k in 0..Species::COUNT {
+                    m.take.foliage[k] = if k == Species::Glowcap.index() || tot <= 0.0 { 0.0 } else { fol * per * sup.foliage[k] / tot };
+                }
+            }
+            m.take.litter = lit * per;
+        } else {
+            m.take = Default::default();
         }
         m.step();
     }

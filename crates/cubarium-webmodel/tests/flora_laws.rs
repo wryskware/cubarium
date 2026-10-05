@@ -122,7 +122,7 @@ fn one_zone(fc: &FloraConfig, n: usize, sky: f64, n0: f64, occupants: &[(Species
             i += 1;
         }
     }
-    let r = Reading { mu: 1.0, available: 1.0, saturated: 0.0, stress_target: 0.0, gate: 1.0 };
+    let r = Reading { mu: 1.0, available: 1.0, saturated: 0.0, stress_target: 0.0, gate: 1.0, mu_held: 1.0, stress_held: 0.0, available_held: 1.0 };
     let zone = Zone {
         key: Key { soil: true, under_roof: false, band: 4, wet: false },
         area: n as f64,
