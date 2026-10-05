@@ -40,8 +40,11 @@ use crate::Flora;
 // 27: a face holds one plant and one fungus (`FaceLayer`) — `Flora::stands` sorted by
 //     `(site, place)`, `Ground::sprouting_fungus`.
 // 28: the detritus web — `FloraConfig::film_graze_refuge`.
-// 29: the capgnawer package — `SpeciesConfig::propagule_cap_share` (spores from caps).
-pub const SCHEMA: u32 = 29;
+// 29: turf-establish — the canopy gate and runner support: `Stand::support`,
+//     `SpeciesConfig::{establish_light_margin, runner_support_s, runner_support_share}`, the
+//     ledger's canopy and support lines.
+// 30: the capgnawer package — `SpeciesConfig::propagule_cap_share` (spores from caps).
+pub const SCHEMA: u32 = 30;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

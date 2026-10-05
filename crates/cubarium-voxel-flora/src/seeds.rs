@@ -37,7 +37,7 @@ use cubarium_voxel::{DT, VoxelView, World};
 
 use crate::step::{
     DOMAIN_ATTRITION, DOMAIN_BURR, DOMAIN_BURR_HOLD, DOMAIN_CLONAL, DOMAIN_DISPERSAL, DOMAIN_GERMINATION,
-    DOMAIN_OVERTOP, DOMAIN_RUNNER, DOMAIN_SPORES, DOMAIN_WATER, DOMAIN_WIND, Rng, add_litter_cap, die, establishes,
+    DOMAIN_OVERTOP, DOMAIN_RUNNER, DOMAIN_SPORES, DOMAIN_WATER, DOMAIN_WIND, Establish, Rng, add_litter_cap, die, establishes,
     establishment_gates_with_sky, mix, provisioned_slot, pull_mineral, standing_water_beside, substrate_pools_in_box,
 };
 use crate::{
@@ -115,6 +115,9 @@ pub struct Attempts {
     pub gate_saturation: u32,
     pub gate_flooding: u32,
     pub gate_other: u32,
+    /// ... at which every gate passed but the canopy gate
+    /// ([`SpeciesConfig::establish_light_margin`]): not counted in the five above.
+    pub gate_canopy: u32,
     /// A draw was held with it among the candidates and another species won it.
     pub lottery_lost: u32,
     /// It won the lottery under a cover and lost the overtopping draw.
@@ -517,7 +520,16 @@ fn germinate(
                 rec.cover_forbidden += u32::from(mine);
                 continue;
             }
-            if !establishes(view, sky, ground, site, sc, daylight) {
+            let verdict = establishes(view, sky, ground, stands, config, site, species, daylight);
+            if verdict == Establish::Canopy {
+                // Every other gate passed; the light through the taller foliage cannot pay
+                // the newborn's upkeep. The seeds stay banked for a gap.
+                ledger.canopy_refused[species.index()] += 1;
+                rec.gate_fail += u32::from(mine);
+                rec.gate_canopy += u32::from(mine);
+                continue;
+            }
+            if verdict != Establish::Yes {
                 rec.gate_fail += u32::from(mine);
                 if mine {
                     let (dead_wood, litter) = substrate_pools_in_box(view, ground, site, sc);
@@ -674,10 +686,21 @@ fn newborn(
     organic: f64,
     mineral: f64,
 ) -> Stand {
-    let sc = config.species(species);
-    let (wood, foliage, reserve) = newborn_stocks(sc, organic);
     let id = ledger.births;
     ledger.births += 1;
+    built(config, id, site, species, organic, mineral)
+}
+
+/// The stand one **minimum package** of `species` would build on `site` — the newborn the
+/// canopy gate asks about ([`crate::step::canopy_pays`]) — with no id and no mineral.
+pub(crate) fn newborn_stand(config: &FloraConfig, site: Site, species: Species) -> Stand {
+    built(config, u64::MAX, site, species, package_of(config.species(species)), 0.0)
+}
+
+/// A stand built out of `organic` units of material on `site`, its foliage binned.
+fn built(config: &FloraConfig, id: u64, site: Site, species: Species, organic: f64, mineral: f64) -> Stand {
+    let sc = config.species(species);
+    let (wood, foliage, reserve) = newborn_stocks(sc, organic);
     let mut born = Stand {
         id,
         site,
@@ -701,6 +724,7 @@ fn newborn(
         fruit_rest_s: 0.0,
         cured: false,
         dry_s: 0.0,
+        support: None,
     };
     // A newborn's foliage goes into its seedling profile bottom-up, like any other tissue.
     born.bin_foliage(sc, config.voxel_m);
@@ -882,26 +906,38 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
         let home = donor.site;
         let home_index = view.config.index(home.x as i64, home.y, home.z) as u64;
 
-        // ---- a runner, when the draw says so and a neighbour will take it.
+        // ---- a runner, when the draw says so and a neighbour will take it. A runner
+        // that finds no face keeps its matter: the package stays in the parcel for the
+        // next tick's draw (turf-establish). Only a species whose every package is a
+        // runner sends it as a seed instead, so its parcel never strands.
         if sc.clonal_share > 0.0
             && Rng::keyed(DOMAIN_CLONAL, world_seed, home_index, tick).unit() < sc.clonal_share
-            && let Some(site) = runner_target(
-                &view, config, sky, ground, stands, &daughters, home, donor.species, world_seed, tick, daylight,
-            )
         {
-            let before = stands[si].material();
-            stands[si].parcel -= package;
-            let mineral = pull_mineral(&mut stands[si], before, package);
-            ledger.propagule_landed[slot] += package;
-            daughters.push(Daughter {
-                site,
-                species: donor.species,
-                organic: package,
-                mineral,
-                donor: donor.id,
-                origin: home,
-            });
-            continue;
+            let mut refused = 0u64;
+            let target = runner_target(
+                &view, config, sky, ground, stands, &daughters, home, donor.species, world_seed, tick, daylight,
+                &mut refused,
+            );
+            ledger.runner_canopy_refused[slot] += refused;
+            if let Some(site) = target {
+                let before = stands[si].material();
+                stands[si].parcel -= package;
+                let mineral = pull_mineral(&mut stands[si], before, package);
+                ledger.propagule_landed[slot] += package;
+                daughters.push(Daughter {
+                    site,
+                    species: donor.species,
+                    organic: package,
+                    mineral,
+                    donor: donor.id,
+                    origin: home,
+                });
+                continue;
+            }
+            if sc.clonal_share < 1.0 {
+                ledger.runner_kept[slot] += 1;
+                continue;
+            }
         }
 
         // ---- one seed.
@@ -992,9 +1028,18 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
             ledger.seeds_landed[slot] += 1;
             continue;
         }
-        born.push(newborn(
-            config, ledger, d.site, d.species, d.organic, d.mineral,
-        ));
+        let mut b = newborn(config, ledger, d.site, d.species, d.organic, d.mineral);
+        // The parent feeds its daughter until it pays its own upkeep
+        // ([`SpeciesConfig::runner_support_s`], `step::support_runners`).
+        let dsc = config.species(d.species);
+        if dsc.trophic == crate::Trophic::Photo && dsc.runner_support_s > 0.0 {
+            b.support = Some(crate::Support {
+                parent: d.donor,
+                parent_site: d.origin,
+                left_s: dsc.runner_support_s,
+            });
+        }
+        born.push(b);
         ledger.establishments += 1;
         ledger.clonal_births[slot] += 1;
         deliveries.push(DeliveryReceipt {
@@ -1042,6 +1087,7 @@ fn runner_target(
     world_seed: u64,
     tick: u64,
     daylight: f64,
+    canopy_refused: &mut u64,
 ) -> Option<Site> {
     let sc = config.species(species);
     let c = view.config;
@@ -1069,9 +1115,18 @@ fn runner_target(
                 || free.contains(&site)
                 || held.is_some_and(|cover| !runner_may_take(config, species, cover))
                 || claimed.iter().any(|d| d.site == site && config.face_layer(d.species) == place)
-                || !establishes(view, sky, ground, site, sc, daylight)
             {
                 continue;
+            }
+            // The face's gates, then the canopy gate: a runner is not sent where the light
+            // through the taller foliage (its parent's included) cannot pay its upkeep.
+            match establishes(view, sky, ground, stands, config, site, species, daylight) {
+                Establish::Yes => {}
+                Establish::Canopy => {
+                    *canopy_refused += 1;
+                    continue;
+                }
+                Establish::Gates => continue,
             }
             free.push(site);
         }

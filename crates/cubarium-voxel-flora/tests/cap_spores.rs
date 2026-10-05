@@ -107,12 +107,16 @@ fn a_grazed_glowcap_saves_spores_in_proportion_to_its_caps() {
 
 /// **Regrowing caps costs the mycelium.** A young glowcap on a small log, whose income
 /// cannot pay for caps and wood at once: grazed every tick, it builds cap tissue out of the
-/// income first and lays on less wood than the same stand left alone.
+/// income first and lays on less wood than the same stand left alone. The fixture sets the
+/// cap regrowth rate to the wood rate's ten times, so that a few seconds of cap building
+/// competes with the wood for the income whatever the shipped regrowth rate is.
 #[test]
 fn regrowing_grazed_caps_slows_the_mycelium() {
     let grow = |grazed: bool| -> f64 {
         let mut world = strip(4);
-        let mut flora = Flora::new(FloraConfig::default());
+        let mut config = FloraConfig::default();
+        config.glowcap.foliage_rate = 10.0 * config.glowcap.wood_rate;
+        let mut flora = Flora::new(config);
         let sc = flora.config().species(Species::Glowcap).clone();
         let site = glowcap_on_log(&mut flora, &world, 1, 0.3 * sc.wood_max, 0.05);
         let w0 = fungus(&flora, site).wood;

@@ -1917,6 +1917,7 @@ mod tests {
                     fruit_rest_s: 0.0,
                     cured: false,
                     dry_s: 0.0,
+                    support: None,
                 };
                 // A hand-built stand bins its own foliage, as every stand the model
                 // makes does.
@@ -2070,6 +2071,7 @@ mod tests {
                     fruit_rest_s: 0.0,
                     cured: false,
                     dry_s: 0.0,
+                    support: None,
                 };
                 stand.bin_layers(flora.config());
                 let parts = parts_of(flora.view(), &stand, 0);
@@ -2143,6 +2145,7 @@ mod tests {
                     fruit_rest_s: 0.0,
                     cured: false,
                     dry_s: 0.0,
+                    support: None,
             };
             stand.bin_layers(flora.config());
             // **Distinct cells**, not parts: since the layers package two layers of one
@@ -2333,6 +2336,7 @@ mod tests {
                     fruit_rest_s: 0.0,
                     cured: false,
                     dry_s: 0.0,
+                    support: None,
             };
             stand.bin_layers(flora.config());
             let parts = parts_of(flora.view(), &stand, 0);

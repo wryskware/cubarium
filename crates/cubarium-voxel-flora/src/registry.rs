@@ -209,6 +209,13 @@ fn species_rows() -> Vec<Row> {
             .search(1.0, 3.0),
         r("runners_overtop", "switch (true / false)", finite, "a runner may root on a ground cover overtop_covers allows, displacing it")
             .optional().grade("N").prov("decision"),
+        r("establish_light_margin", "multiple of upkeep (0 = no gate)", nonneg,
+            "canopy gate: a seed or runner comes up only where its newborn's income under the light through taller foliage is this multiple of its upkeep")
+            .search(0.0, 2.0).grade("N").prov("decision"),
+        r("runner_support_s", "s", nonneg, "how long a parent feeds its runner daughter's shortfall (0 = none)")
+            .search(0.0, 7200.0).grade("N").prov("decision"),
+        r("runner_support_share", "fraction of the shortfall", fraction, "share of a supported runner daughter's shortfall its parent pays")
+            .search(0.0, 1.0).grade("N").prov("decision"),
         r("dispersal", "mode (Drop, Wind, Spores, Water, Wald)", finite, "how the species' seeds travel")
             .optional().grade("N").prov("decision"),
         r("wald_mean_m", "m", nonneg, "Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob")
