@@ -497,3 +497,122 @@ impl Default for FoundingConfig {
         }
     }
 }
+
+/// **The lanternjaw's patrol** (the detritus web D2,
+/// `design/lanternjaw-detritus-web-proposal-2026-10-05.md` §3.2 with Astra's corrections in
+/// `design/7_Research/astra-detritus-web-review-2026-10-05.md`): a mobile sit-and-wait
+/// hunter of small ground prey. It walks between patches its prey's food marks, waits
+/// still on each with the lure lit, leaves a fruitless one and remembers it, turns to prey
+/// tremor, and attacks the prey it meets often more readily than the prey it meets rarely.
+/// Every number is a plausible starting value, untuned ([`crate::hunt`]).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HuntConfig {
+    /// The patrol on. Off, the lanternjaw's heuristic is the P1 crown-seeking ambush
+    /// ([`crate::LanternjawAmbush`]) unchanged: the baseline arm.
+    pub patrol: bool,
+    /// How far around itself a patroller reads its prey's food (litter, film, caps, crowns,
+    /// blooms) to choose the next patch, metres. It stands for the reach of the cue fields
+    /// it follows; a world query, not a sense in its manifest. 6 m, ten seconds' walk.
+    pub cue_scan_m: f64,
+    /// Food cells are pooled into square patches this wide, metres: about one prey's
+    /// feeding spot plus a strike's reach. 1 m.
+    pub patch_m: f64,
+    /// The nearest a next patch may be, metres: beyond its own tremor range, so a new patch
+    /// is new ground. 1.5 m.
+    pub patch_min_hop_m: f64,
+    /// It has arrived on a patch within this of its centre, metres. 0.4 m.
+    pub patch_arrive_m: f64,
+    /// How long it waits still on a patch before leaving it as fruitless, seconds (the
+    /// proposal's 20–30 s, against the ambush's minute). 25 s.
+    pub patch_wait_s: f64,
+    /// A walk to a patch is given up after this long, and the patch is remembered as
+    /// fruitless (it could not get there), seconds. 60 s.
+    pub patrol_give_up_s: f64,
+    /// How long a fruitless patch is avoided, seconds: a quarter of a world day. 1,800 s.
+    pub fruitless_memory_s: f64,
+    /// A patch whose centre is within this of a remembered fruitless one is that one,
+    /// metres. 1 m.
+    pub fruitless_radius_m: f64,
+    /// The share of patch choices made uniformly among the open patches instead of by its
+    /// search image (exploration: a food cue marks habitat, not prey). 0.2.
+    pub patrol_explore: f64,
+    /// How far it sees a prey body, metres, ahead of it and not hidden (the interim cone's
+    /// 2 m range). 2 m.
+    pub sight_m: f64,
+    /// **The tremor sense** (predation §2.2, two channels): the faintest prey tremor,
+    /// `left + right` over size-eligible prey within the tremor radius, that turns it toward
+    /// the louder side, in the tremor's own units. 0.003: a walking ripple-snail at the
+    /// tremor radius.
+    pub tremor_turn: f64,
+    /// **The search image's memory**: the e-fold time of its encounter memory per prey
+    /// lineage, seconds. Shorter than a prey's crash, so the image follows a collapse within
+    /// the night it happens: a night on the 120-minute day is about 40 minutes, and the small
+    /// prey crashed on `patch-hunters` within one (2026-10-05). 600 s, a quarter of a night.
+    /// (D2 had the proposal's one world day, 7,200 s.)
+    pub search_memory_s: f64,
+    /// **Switching on encounter share** (the detritus web D2b). On, the attack preference
+    /// for a lineage is its share of the recent eligible encounters relative to the most
+    /// met lineage's, raised to [`HuntConfig::switch_exponent`] ([`crate::attack_preference`]):
+    /// a lineage that turns rare among the prey it meets is passed over even when met. Off,
+    /// D2's rule on absolute contact over the exploration floor (`attack_half_s`,
+    /// `attack_explore`). Off by default (2026-10-05, Wrysk: a generalist hunter is
+    /// opportunistic, not loyal to a species; the 2 h arms showed no measurable refuge from
+    /// switching): with `attack_explore` 1 it takes whatever profitable prey it meets.
+    pub share_switching: bool,
+    /// **The switching exponent** `γ` (share switching): the preference is the relative
+    /// encounter share to this power. Above 1 the preference falls faster than the share (a
+    /// type III response in the prey's relative abundance, Murdoch's switching); 1 is
+    /// proportional, no switching. 2.
+    pub switch_exponent: f64,
+    /// **The naive hunter's expectation** (share switching): seconds of contact credited to
+    /// every lineage on its list before the shares are taken. With little met lately every
+    /// lineage stays near an equal share, so a hunter in a lean spell takes whatever it
+    /// meets (its exploration); once one lineage dominates its recent encounters, this fades
+    /// and a rare lineage's preference goes toward 0 — no floor. 15 s.
+    pub attack_prior_s: f64,
+    /// (D2's rule, share switching off.) The encounter memory, in seconds of contact, at
+    /// which its attack preference for a lineage is halfway between `attack_explore` and 1.
+    /// 60 s.
+    pub attack_half_s: f64,
+    /// (D2's rule, share switching off.) The attack preference for a prey it has not met
+    /// lately: the floor. 1, opportunistic: every listed prey at full preference, so the
+    /// attack chance is its [`crate::profitability`] alone and the search image changes
+    /// nothing. (D2 had 0.15.)
+    pub attack_explore: f64,
+    /// One attack decision on one prey stands this long, seconds, so a prey it declined is
+    /// not re-drawn every sample. 20 s.
+    pub attack_decision_s: f64,
+    /// **Strike only what it chose** (D2b). On, a patroller's strike capsule takes only a
+    /// prey its attack choice accepts this decision window (the same draw the patrol makes),
+    /// so a prey it passes over is not struck because it stood in reach while the hunter
+    /// went for another. Off (the default, opportunistic), any size-eligible prey in the
+    /// capsule, as D2 did.
+    pub strike_chosen_only: bool,
+}
+
+impl Default for HuntConfig {
+    fn default() -> HuntConfig {
+        HuntConfig {
+            patrol: true,
+            cue_scan_m: 6.0,
+            patch_m: 1.0,
+            patch_min_hop_m: 1.5,
+            patch_arrive_m: 0.4,
+            patch_wait_s: 25.0,
+            patrol_give_up_s: 60.0,
+            fruitless_memory_s: 1800.0,
+            fruitless_radius_m: 1.0,
+            patrol_explore: 0.2,
+            sight_m: 2.0,
+            tremor_turn: 0.003,
+            search_memory_s: 600.0,
+            share_switching: false,
+            switch_exponent: 2.0,
+            attack_prior_s: 15.0,
+            attack_half_s: 60.0,
+            attack_explore: 1.0,
+            attack_decision_s: 20.0,
+            strike_chosen_only: false,
+        }
+    }
+}

@@ -364,7 +364,10 @@ yield_by_food.fruit = 0.3364781725258478
 [fauna.founders.lanternjaw]
 core.growth_max_per_s = 0.00010069939815158275
 core.reproduction.birth_interval_s = 1097.8253659193513
-core.reproduction.surplus_floor = 0.2876163048484828
+# The detritus web D2: the floor revised with the lanternjaw's metabolism and clutch (two
+# days of its need, 0.15; the curiosity gate's 0.2876 with three eggs needed a reserve of
+# 0.74 against a cap of 0.63). See `Reproduction::DORMANT_EGGS_PLACEHOLDER`.
+core.reproduction.surplus_floor = 0.15
 core.reproduction.surplus_hold_s = 548.9126829596756
 yield_by_food.litter = 0.46905315573017675
 yield_by_food.cap_tissue = 0.46905315573017675

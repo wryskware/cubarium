@@ -48,7 +48,12 @@ use crate::Fauna;
 //     `CueConfig::fungal_half_life_s`.
 // 41: generation time (D1b) — `Gut::mass_exponent`, `Reproduction::brood_share`,
 //     `ReproductionState::brood`.
-pub const SCHEMA: u32 = 41;
+// 42: the lanternjaw's patrol (D2) — `FaunaConfig::hunt`, `Animal::hunt`, the patrol's
+//     ledger lines, the lanternjaw's clutch from surplus and smaller reserve cap.
+// 43: the lanternjaw's switching (D2b) — `HuntConfig::{share_switching, switch_exponent,
+//     attack_prior_s, strike_chosen_only}`, the declined-contact and unchosen-strike ledger
+//     lines.
+pub const SCHEMA: u32 = 43;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -389,6 +394,7 @@ mod tests {
             eating: false,
             emergency: false,
             bout: None,
+            hunt: crate::HuntMemory::default(),
         }
     }
 

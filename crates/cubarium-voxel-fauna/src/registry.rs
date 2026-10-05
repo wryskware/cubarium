@@ -453,6 +453,33 @@ fn knob_rows() -> Vec<Row> {
             .search(0.0, 8.0),
     ]);
 
+    // `fauna.hunt.*`: the lanternjaw's patrol (the detritus web D2), every one a plausible
+    // starting value, untuned.
+    let hk = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.hunt.{path}"), unit, range, what)
+    };
+    rows.extend([
+        // `patrol` (true / false) is a switch, not a number: no row.
+        hk("cue_scan_m", "m", nonneg, "how far around itself a patroller reads its prey's food to choose the next patch").search(2.0, 12.0),
+        hk("patch_m", "m", pos, "food cells are pooled into square patches this wide").search(0.5, 3.0),
+        hk("patch_min_hop_m", "m", nonneg, "the nearest a next patch may be").search(0.5, 4.0),
+        hk("patch_arrive_m", "m", nonneg, "it has arrived on a patch within this of its centre").search(0.2, 1.0),
+        hk("patch_wait_s", "s", nonneg, "how long it waits still on a patch before leaving it as fruitless").search(5.0, 120.0).log(),
+        hk("patrol_give_up_s", "s", nonneg, "a walk to a patch is given up after this, and the patch remembered as fruitless").search(15.0, 300.0).log(),
+        hk("fruitless_memory_s", "s", nonneg, "how long a fruitless patch is avoided").search(120.0, 14400.0).log(),
+        hk("fruitless_radius_m", "m", nonneg, "a patch this near a remembered fruitless one is that one").search(0.3, 3.0),
+        hk("patrol_explore", "fraction", fraction, "share of patch choices made uniformly among the open patches").search(0.0, 0.6),
+        hk("sight_m", "m", nonneg, "how far it sees a prey body ahead of it and not hidden").search(0.5, 3.0),
+        hk("tremor_turn", "tremor units", nonneg, "the faintest prey tremor (left + right, size-eligible prey) it turns toward").search(1e-4, 0.05).log(),
+        hk("search_memory_s", "s", pos, "e-fold time of the search image's encounter memory").search(120.0, 7200.0).log(),
+        // `share_switching` and `strike_chosen_only` (true / false) are switches: no rows.
+        hk("switch_exponent", "exponent", pos, "share switching: the attack preference is the relative encounter share to this power").search(1.0, 4.0),
+        hk("attack_prior_s", "s of contact", nonneg, "share switching: contact credited to every listed lineage before the shares are taken").search(1.0, 120.0).log(),
+        hk("attack_half_s", "s of contact", pos, "D2's rule: encounter memory at which the attack preference is halfway to 1").search(5.0, 600.0).log(),
+        hk("attack_explore", "fraction", fraction, "D2's rule: the attack preference for a prey it has not met lately (1: opportunistic)").search(0.0, 1.0),
+        hk("attack_decision_s", "s", nonneg, "one attack decision on one prey stands this long").search(2.0, 120.0).log(),
+    ]);
+
     // `fauna.founding.*`: the seeder's founders.
     let f = |path: &str, unit: &'static str, range: Range, what: &'static str| {
         r(&format!("fauna.founding.{path}"), unit, range, what)
