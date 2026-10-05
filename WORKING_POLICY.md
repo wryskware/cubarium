@@ -191,3 +191,20 @@ number as a tunable knob:
   (`cubarium_voxel::registry`, the tables built by R1). The coverage test fails on a field
   with no row. Regenerate `design/parameters.md` with
   `cargo run -p cubarium-voxel-sim --example params -- --write design/parameters.md`.
+
+## Balance through roles — Wrysk, 2026-10-05
+
+"the whole purpose is to have other organisms that fill a niche which balances the ecology. like too
+many nutrients locked in a mushroom infestation? something should be thiving that eats them because
+theyre so abundant. this idea should go for everything. ... numbers arent always enough. we need to
+think about behaviours that fix the problems as well, or whether the ecosystem is missing roles."
+
+- **An imbalance is first a question about roles.** When a stock grows or shrinks without check
+  (litter, a fungus, a booming prey, a retreating plant), ask three things:
+  - what in a real ecosystem would thrive on that abundance and pull it back;
+  - whether that role exists here;
+  - if it does, why it isn't answering: it breeds too slowly, can't find the food, has the wrong
+    diet, or lacks a behaviour such as switching to abundant prey or breeding faster when fed.
+- **Rate tuning comes last.** Fix the behaviour, or add the role.
+- **Reports and briefs:** every ecological report names the stocks that are growing or shrinking
+  without check, and the role that should answer each. Every ecology brief restates this rule.
