@@ -59,6 +59,8 @@ mod spread_tests;
 #[cfg(test)]
 mod shared_face_tests;
 #[cfg(test)]
+mod contest_tests;
+#[cfg(test)]
 mod canopy_establish_tests;
 mod film;
 #[cfg(test)]
@@ -416,6 +418,12 @@ pub struct Stand {
     /// daughter pays its own upkeep, the time runs out, or the parent is gone.
     #[serde(default)]
     pub support: Option<Support>,
+    /// **Its place on its face** ([`FaceLayer`]): the face's top plant, its fungus, or the
+    /// plant beneath the top one ([`FaceLayer::Under`]: a woody recruit in a ground cover,
+    /// or the cover under a crown that rose above it). Set at birth and moved only by the
+    /// face's own settling (`step::settle_places`); [`FloraView::stands`] is sorted by
+    /// `(site, place)`.
+    pub place: FaceLayer,
 }
 
 /// A runner daughter's tie to the parent that feeds it ([`Stand::support`]): the parent's
@@ -681,14 +689,15 @@ impl Ground {
     /// The arm of `place`'s lottery ([`Ground::sprouting`], [`Ground::sprouting_fungus`]).
     pub fn arm(&self, place: FaceLayer) -> Option<Species> {
         match place {
-            FaceLayer::Plant => self.sprouting,
+            // A recruit comes up through the plant's lottery: its arm is the plant's.
+            FaceLayer::Plant | FaceLayer::Under => self.sprouting,
             FaceLayer::Fungus => self.sprouting_fungus,
         }
     }
 
     pub(crate) fn arm_mut(&mut self, place: FaceLayer) -> &mut Option<Species> {
         match place {
-            FaceLayer::Plant => &mut self.sprouting,
+            FaceLayer::Plant | FaceLayer::Under => &mut self.sprouting,
             FaceLayer::Fungus => &mut self.sprouting_fungus,
         }
     }
@@ -797,15 +806,32 @@ pub enum Trophic {
 /// rosette, so without this it would shade it), and a fungus earns nothing from light.
 ///
 /// [`FloraView::stands`] is sorted by `(site, place)`, the plant first.
+///
+/// **A face may hold two plants** (package CONTEST, Wrysk 2026-10-05: woody plants win by
+/// shading the grass, not by killing it at sprouting). A woody seed (a species that is not
+/// a ground cover) that wins its draw on a ground cover's face comes up **beside** it, in
+/// [`FaceLayer::Under`]: a stand with its own budget, shaded by the cover's foliage above
+/// it by the light law. The **taller** of a face's two plants holds [`FaceLayer::Plant`]
+/// and the other `Under` (`step::settle_places`, by crown height): a recruit whose crown
+/// rises above the sward becomes the face's canopy and the cover stays on beneath it,
+/// shaded by the crown, dying only when its own budget fails; where the top plant dies the
+/// one beneath holds the face. A face's two plants shade each other by the light law; a
+/// face holding two takes no third seed or runner. The fungus is unchanged by any of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum FaceLayer {
-    /// The face's photosynthetic stand: what [`FloraView::stand_at`] answers.
+    /// The face's photosynthetic stand — its **top** plant when it holds two: what
+    /// [`FloraView::stand_at`] answers.
     Plant,
     /// The face's saprotroph: what [`FloraView::fungus_at`] answers.
     Fungus,
+    /// The face's second plant, beneath the top one: what [`FloraView::understorey_at`]
+    /// answers. Held only while the face's `Plant` place is held.
+    Under,
 }
 
 impl FaceLayer {
+    /// The places a seed lottery runs for: a plant seed's (which also seats a recruit in
+    /// [`FaceLayer::Under`]) and a spore's.
     pub const ALL: [FaceLayer; 2] = [FaceLayer::Plant, FaceLayer::Fungus];
 
     /// The place a stand of this trophic mode takes.
@@ -816,7 +842,7 @@ impl FaceLayer {
         }
     }
 
-    /// `0` for the plant, `1` for the fungus: an array slot.
+    /// `0` for the plant, `1` for the fungus, `2` beneath the plant: an array slot.
     pub fn index(self) -> usize {
         self as usize
     }
@@ -3251,7 +3277,7 @@ impl FloraConfig {
     /// `stand`'s sort key in [`FloraView::stands`]: its site, then its place.
     #[inline]
     pub(crate) fn stand_key(&self, stand: &Stand) -> (Site, FaceLayer) {
-        (stand.site, self.face_layer(stand.species))
+        (stand.site, stand.place)
     }
 
     /// The same table, mutably: a harness or a fixture that has a [`Species`] in hand and
@@ -3519,6 +3545,19 @@ pub struct FloraLedger {
     /// in `deaths`, once, under what killed it. A diagnostic in no `expected_*` total.
     #[serde(default)]
     pub deaths_by_cause: [[u64; Species::COUNT]; DeathCause::COUNT],
+    /// **The contest** ([`FaceLayer::Under`]), diagnostics in no `expected_*` total:
+    /// - `recruits`: woody seeds that came up beside a ground cover, per species;
+    /// - `escapes`: stands that rose from beneath to the face's top place by crown height
+    ///   (a recruit above its sward), per species;
+    /// - `under_deaths` (`[cause][species]`): deaths of stands holding the place beneath —
+    ///   a recruit dying in its cover, a cover starving under a crown — each also in
+    ///   `deaths_by_cause`.
+    #[serde(default)]
+    pub recruits: [u64; Species::COUNT],
+    #[serde(default)]
+    pub escapes: [u64; Species::COUNT],
+    #[serde(default)]
+    pub under_deaths: [[u64; Species::COUNT]; DeathCause::COUNT],
     /// **Burrs**, per seed species, cumulative counts and organic matter — diagnostics in
     /// no `expected_*` total, since the carried seed is still this layer's material
     /// ([`Flora::burrs`]):
@@ -4294,6 +4333,12 @@ impl<'a> FloraView<'a> {
         self.stand_in(site, FaceLayer::Fungus)
     }
 
+    /// The **plant beneath** the top one on `site` ([`FaceLayer::Under`]): a woody recruit
+    /// in its cover, or the cover under a crown.
+    pub fn understorey_at(&self, site: Site) -> Option<&'a Stand> {
+        self.stand_in(site, FaceLayer::Under)
+    }
+
     /// The stand holding `layer` on `site`.
     pub fn stand_in(&self, site: Site, layer: FaceLayer) -> Option<&'a Stand> {
         find_stand(self.config, self.stands, site, layer)
@@ -4301,7 +4346,8 @@ impl<'a> FloraView<'a> {
             .map(|i| &self.stands[i])
     }
 
-    /// Every stand on `site` — none, one or two — the plant first.
+    /// Every stand on `site` — none to three — in place order: the plant, the fungus, the
+    /// plant beneath.
     pub fn stands_on(&self, site: Site) -> &'a [Stand] {
         &self.stands[on_site(self.stands, site)]
     }
@@ -4588,6 +4634,16 @@ pub enum Command {
     /// item 2). Refused if `site` is not a support face, already holds a stand, or `wood`
     /// is below the species' `alive_min`.
     SeedOnFace {
+        site: Site,
+        species: Species,
+        wood: f64,
+    },
+    /// Plant a founder **beneath the plant already on** `site` ([`FaceLayer::Under`]): a
+    /// woody recruit in a sward, or a cover under a crown — for fixtures and captures of a
+    /// face's two plants. The face then settles by crown height (the taller holds the top
+    /// place). Refused if `site` is not a support face, holds no plant or already two, the
+    /// species is not photosynthetic, or `wood` is below its `alive_min`.
+    SeedBeneath {
         site: Site,
         species: Species,
         wood: f64,
@@ -5218,6 +5274,23 @@ impl Flora {
                 }
                 self.seed_founder(site, species, wood)
             }
+            Command::SeedBeneath { site, species, wood } => {
+                let c = view.config;
+                if site.x >= c.width
+                    || site.z >= c.depth
+                    || site.y + 1 >= c.height
+                    || !view.is_support(i64::from(site.x), site.y, site.z)
+                    || self.config.face_layer(species) != FaceLayer::Plant
+                    || find_stand(&self.config, &self.stands, site, FaceLayer::Plant).is_err()
+                {
+                    return false;
+                }
+                if !self.seed_founder_in(site, species, wood, FaceLayer::Under) {
+                    return false;
+                }
+                step::settle_places(&self.config, &mut self.stands, &mut self.ledger);
+                true
+            }
             Command::Clear { x, z } => {
                 let Some(site) = highest_support(&view, x, z) else {
                     return false;
@@ -5270,12 +5343,18 @@ impl Flora {
     /// Plant a founder stand on `site`, a support face the caller has resolved: the one
     /// body [`Command::Seed`] and [`Command::SeedOnFace`] share.
     fn seed_founder(&mut self, site: Site, species: Species, wood: f64) -> bool {
+        // Only its own place: a glowcap founder goes under a plant, a plant over a glowcap.
+        let place = self.config.face_layer(species);
+        self.seed_founder_in(site, species, wood, place)
+    }
+
+    /// [`Flora::seed_founder`] in a named place.
+    fn seed_founder_in(&mut self, site: Site, species: Species, wood: f64, place: FaceLayer) -> bool {
         let sc = self.config.species(species);
         if !(wood.is_finite() && wood >= sc.alive_min) {
             return false;
         }
-        // Only its own place: a glowcap founder goes under a plant, a plant over a glowcap.
-        let Err(at) = find_stand(&self.config, &self.stands, site, self.config.face_layer(species)) else {
+        let Err(at) = find_stand(&self.config, &self.stands, site, place) else {
             return false;
         };
         let mut stand = Stand {
@@ -5302,6 +5381,7 @@ impl Flora {
             cured: false,
             dry_s: 0.0,
             support: None,
+            place,
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);

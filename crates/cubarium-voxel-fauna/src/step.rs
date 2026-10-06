@@ -2608,12 +2608,12 @@ fn founder_feed(
     // species was actually eaten.
     // The place on the face is the food's: cap tissue off the fungus, foliage off the plant.
     let plant = match meal {
-        body::Meal::Stand { root, food } => flora.view().stand_in(root, food.face_layer()).map(|s| s.species),
+        body::Meal::Stand { root, place, .. } => flora.view().stand_in(root, place).map(|s| s.species),
         body::Meal::Pool { .. } => None,
     };
     let taken = match meal {
-        body::Meal::Stand { root, food } => flora
-            .take_foliage_of(root, food.face_layer(), bite, &layers)
+        body::Meal::Stand { root, place, .. } => flora
+            .take_foliage_of(root, place, bite, &layers)
             .map(|t| t.taken),
         body::Meal::Pool { site, food } => match food {
             Food::Litter => flora.take_litter(site, bite),

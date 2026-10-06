@@ -134,3 +134,71 @@ fn a_foliage_bite_on_a_shared_face_takes_the_plant() {
     assert!(after[0] < before[0], "the rosette was cropped");
     assert_eq!(after[1], before[1], "the cap is untouched");
 }
+
+/// **A woody recruit in its sward is food** (CONTEST, 2026-10-05): a seedling that came up
+/// beside a springturf holds its own place on the face (`FaceLayer::Under` while it is the
+/// shorter). With the turf cropped to its grazing floor, a browser feeding there bites the
+/// recruit — the bite names the recruit's place — and the turf is not touched again.
+#[test]
+fn a_browser_bites_a_recruit_beside_its_turf() {
+    use cubarium_voxel_flora::FaceLayer;
+    // The flat world's soil at field capacity: the water first, then the soil around it.
+    let mut world = World::empty(VoxelConfig {
+        width: 8,
+        height: 8,
+        depth: 6,
+        voxel_m: 0.25,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
+        ..VoxelConfig::default()
+    });
+    let pore = cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil);
+    let cap = world.config().materials.pore_capacity(Material::Soil) * world.config().voxel_volume();
+    for z in 0..6 {
+        for x in 0..8 {
+            for y in 1..=2 {
+                world.apply(WorldCommand::AddWater { x, y, z, volume_m3: pore * cap });
+                world.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Soil });
+            }
+        }
+    }
+    let mut c = FloraConfig::default().drop_seeds_checked_each_tick();
+    for sc in [&mut c.bloomcrown, &mut c.springturf] {
+        sc.seed_attrition_per_s = 0.0;
+        sc.propagule_rate = 0.0;
+    }
+    c.bloomcrown.overtop_per_check = 1.0;
+    c.bloomcrown.establish_light_min = 0.0;
+    c.bloomcrown.establish_light_margin = 0.0;
+    let mut flora = Flora::new(c);
+    let wood = flora.config().species(Plant::Springturf).wood_max;
+    assert!(flora.apply(&world, FloraCommand::SeedOnFace { site: FACE, species: Plant::Springturf, wood }));
+    let sc = flora.config().species(Plant::Bloomcrown).clone();
+    let organic = sc.alive_min / sc.propagule_split[0] * f64::from(sc.seed_mass.max(1));
+    assert!(flora.deposit_seeds(FACE, Plant::Bloomcrown, organic, sc.n_tissue * organic, sc.energy_density * organic));
+    for _ in 0..4 {
+        flora.step(&mut world);
+    }
+    let stand = |f: &Flora, sp: Plant| f.view().stands.iter().find(|s| s.site == FACE && s.species == sp).copied();
+    let recruit = stand(&flora, Plant::Bloomcrown).expect("fixture: the recruit came up beside the turf");
+    let turf = stand(&flora, Plant::Springturf).expect("the turf stays");
+    assert_ne!(recruit.place, turf.place, "two plants, two places");
+    // Crop the turf to its grazing floor: no food left in it.
+    let every = 0..=i64::from(world.config().height);
+    flora.take_foliage_of(FACE, turf.place, 1e9, &every);
+    let turf = stand(&flora, Plant::Springturf).unwrap();
+    assert!(flora.view().stands_on(FACE).iter().all(|s| s.place != FaceLayer::Fungus));
+    let organic_before = flora.view().organic();
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    feeding(&mut fauna, &world, Founder::Browser);
+    for _ in 0..5 {
+        fauna.step(&world, &mut flora);
+    }
+    let l = &fauna.view().ledger;
+    assert!(l.bites_by_plant[Plant::Bloomcrown.index()] >= 1, "booked to the recruit: {:?}", l.bites_by_plant);
+    assert!(stand(&flora, Plant::Bloomcrown).unwrap().foliage < recruit.foliage, "the recruit was cropped");
+    assert_eq!(stand(&flora, Plant::Springturf).unwrap().foliage, turf.foliage, "the bare turf untouched");
+    ledgers_close(&fauna, &flora, organic_before);
+}

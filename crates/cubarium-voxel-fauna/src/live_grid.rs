@@ -326,7 +326,7 @@ fn read_stand(fv: &FloraView<'_>, si: usize, buf: &mut Vec<cubarium_voxel_flora:
         discs.push(d);
     }
     Laid {
-        key: (stand.site, fv.config.face_layer(stand.species)),
+        key: (stand.site, stand.place),
         species: stand.species,
         wood: stand.wood.to_bits(),
         stock: stand.layer_stock.map(f64::to_bits),
@@ -363,7 +363,7 @@ fn diff_chunk(fv: &FloraView<'_>, new: Range<usize>, old: &[Laid], old_discs: &[
     let box_of = |l: &Laid| (i64::from(l.key.0.x), i64::from(l.key.0.z), l.span);
     for si in new {
         let stand = &fv.stands[si];
-        let key = (stand.site, fv.config.face_layer(stand.species));
+        let key = (stand.site, stand.place);
         while k < old.len() && old[k].key < key {
             part.boxes.push(box_of(&old[k]));
             k += 1;
@@ -705,7 +705,7 @@ impl LiveGrid {
                         let mut buf = Vec::new();
                         for si in r {
                             let (stand, was) = (&fv.stands[si], &old[si]);
-                            if was.key != (stand.site, fv.config.face_layer(stand.species)) || was.species != stand.species {
+                            if was.key != (stand.site, stand.place) || was.species != stand.species {
                                 return None;
                             }
                             if was.wood == stand.wood.to_bits() && was.stock == stand.layer_stock.map(f64::to_bits) {
@@ -764,7 +764,7 @@ impl LiveGrid {
                     return 0;
                 }
                 let s = &fv.stands[r.start];
-                let key = (s.site, fv.config.face_layer(s.species));
+                let key = (s.site, s.place);
                 self.stands.partition_point(|l| l.key < key)
             })
             .chain(std::iter::once(self.stands.len()))

@@ -44,7 +44,9 @@ use crate::Flora;
 //     `SpeciesConfig::{establish_light_margin, runner_support_s, runner_support_share}`, the
 //     ledger's canopy and support lines.
 // 30: the capgnawer package — `SpeciesConfig::propagule_cap_share` (spores from caps).
-pub const SCHEMA: u32 = 30;
+// 31: CONTEST — `Stand::place` (a face's two plants, `FaceLayer::Under`) and the
+//     ledger's `recruits`, `escapes`, `under_deaths`.
+pub const SCHEMA: u32 = 31;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

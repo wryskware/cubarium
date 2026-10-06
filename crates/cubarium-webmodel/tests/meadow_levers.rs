@@ -397,13 +397,14 @@ fn thin_soil_shuts_woody_recruitment() {
 // f. The contest
 // ===================================================================================
 
-/// **A recruit through turf leaves the turf standing until it escapes.** A zone wholly turf
-/// with lanternberry seed: with the contest on, one daytime step brings recruits into the
-/// turf and overtops none; a contested cohort put past the escape size overtops exactly its
-/// number of turf stands at the next step and joins the lanternberry stands; a contested
-/// cohort that starves leaves the turf as it was.
+/// **A recruit through turf leaves the turf standing, and its escape too** (CONTEST,
+/// 2026-10-05). A zone wholly turf with lanternberry seed: with the contest on, one daytime
+/// step brings recruits into the turf and overtops none; a contested cohort put past the
+/// escape size joins the lanternberry stands at the next step and exactly its number of
+/// turf stands go on beneath it as understorey, none overtopped; a contested cohort that
+/// starves leaves the turf as it was.
 #[test]
-fn a_contested_recruit_overtops_only_when_it_escapes() {
+fn a_contested_recruit_escapes_and_the_turf_stays_beneath() {
     let (p, fc) = resolved();
     let dm = DayModel::of(&p.world, fc.upkeep_q10);
     let lsc = fc.species(LB);
@@ -425,8 +426,11 @@ fn a_contested_recruit_overtops_only_when_it_escapes() {
     m.z[0].contest[LB.index()].push(juveniles(&fc, 7.0, 0.6 * lsc.donor_min, t));
     let turf0 = m.z[0].count(TURF.index());
     m.step();
-    assert!(close(m.c.escaped[LB.index()], 7.0, 1e-12) && close(m.c.overtopped[TURF.index()], 7.0, 1e-12));
+    assert!(close(m.c.escaped[LB.index()], 7.0, 1e-12) && m.c.overtopped[TURF.index()] == 0.0);
     assert!(close(m.z[0].count(TURF.index()), turf0 - 7.0, 1e-9) && close(woody_n(&m, 0.0, f64::INFINITY), 7.0, 1e-12));
+    assert!(close(m.c.under_in[TURF.index()], 7.0, 1e-12), "the turf went under the crowns");
+    let under = m.z[0].understorey(LB.index()) + m.c.starved_under[TURF.index()];
+    assert!(close(under, 7.0, 1e-9), "beneath them, or starved there: {under}");
     // Death in the turf: a starving recruit at night.
     let mut m = build(&fc, &p, &f2, local_kernels(1), minute_at(&dm, 0.0), frozen(mw), 0.8);
     let t = m.t_s;

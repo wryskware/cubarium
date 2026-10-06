@@ -725,6 +725,7 @@ fn drown(flora: &mut Flora, world: &World, threads: usize) {
         die(config, &view, &stands[i], ground, ledger, DeathCause::Drowned, death_log);
     }
     remove_at(stands, &doomed);
+    settle_places(config, stands, ledger);
 }
 
 /// Remove the stands at `doomed` — ascending, distinct indices — in one pass, keeping the
@@ -753,7 +754,7 @@ pub(crate) fn remove_at(stands: &mut Vec<Stand>, doomed: &[usize]) {
 pub(crate) fn insert_sorted(config: &FloraConfig, stands: &mut Vec<Stand>, mut born: Vec<Stand>) {
     if born.len() <= 1 {
         for s in born {
-            let at = crate::find_stand(config, stands, s.site, config.face_layer(s.species))
+            let at = crate::find_stand(config, stands, s.site, s.place)
                 .expect_err("a birth in a free place");
             stands.insert(at, s);
         }
@@ -773,6 +774,56 @@ pub(crate) fn insert_sorted(config: &FloraConfig, stands: &mut Vec<Stand>, mut b
     }
     out.extend(born);
     *stands = out;
+}
+
+/// Whether two stands **on one face** shade each other: both plants ([`crate::FaceLayer`]).
+/// A face's plant and its fungus never do.
+#[inline]
+pub(crate) fn same_face_shades(a: &Stand, b: &Stand) -> bool {
+    a.place != crate::FaceLayer::Fungus && b.place != crate::FaceLayer::Fungus
+}
+
+/// **Each face's plants in their places** (CONTEST, [`crate::FaceLayer::Under`]): the taller
+/// of a face's two plants by crown height holds [`crate::FaceLayer::Plant`] and the other
+/// the place beneath (a tie keeps them as they are); a plant beneath with no plant above it
+/// — the top one died — holds the face. A rise from beneath by height is booked in
+/// [`FloraLedger::escapes`]. `stands` stays sorted by `(site, place)`.
+pub(crate) fn settle_places(config: &FloraConfig, stands: &mut [Stand], ledger: &mut FloraLedger) {
+    use crate::FaceLayer;
+    let n = stands.len();
+    let mut moved = false;
+    let mut i = 0;
+    while i < n {
+        let site = stands[i].site;
+        let mut j = i + 1;
+        while j < n && stands[j].site == site {
+            j += 1;
+        }
+        // In `(site, place)` order the place beneath is the run's last.
+        if j - i >= 1 && stands[j - 1].place == FaceLayer::Under {
+            let u = j - 1;
+            match (i..u).find(|&k| stands[k].place == FaceLayer::Plant) {
+                None => {
+                    stands[u].place = FaceLayer::Plant;
+                    moved = true;
+                }
+                Some(p) => {
+                    let height = |s: &Stand| config.species(s.species).crown_height_m_at(s.wood);
+                    if height(&stands[u]) > height(&stands[p]) {
+                        stands[u].place = FaceLayer::Plant;
+                        stands[p].place = FaceLayer::Under;
+                        ledger.escapes[stands[u].species.index()] += 1;
+                        moved = true;
+                    }
+                }
+            }
+        }
+        i = j;
+    }
+    if moved {
+        // Nearly sorted: only the runs that moved are out of order.
+        stands.sort_by_key(|s| (s.site, s.place));
+    }
 }
 
 // -------------------------------------------------------------------- 4. light
@@ -896,8 +947,11 @@ fn light_per_stand(
                     continue;
                 }
                 // A face's plant and its fungus never shade each other (`FaceLayer`): the
-                // cap grows under the plant's leaves, and earns nothing from light.
-                if stands[c.j as usize].site == stand.site {
+                // cap grows under the plant's leaves, and earns nothing from light. A face's
+                // two plants do, by the same law as any other pair (CONTEST).
+                if stands[c.j as usize].site == stand.site
+                    && !same_face_shades(&stands[c.j as usize], stand)
+                {
                     continue;
                 }
                 let sx = wrapped_delta(c.x, layer.x, width);
@@ -2659,9 +2713,8 @@ fn support_runners(flora: &mut Flora, light: &[f64], moisture: &[Drink], climate
         let d = stands[i];
         let sc = config.species(d.species);
         let slot = d.species.index();
-        let parent = crate::find_stand(config, stands, tie.parent_site, config.face_layer(d.species))
-            .ok()
-            .filter(|&j| stands[j].id == tie.parent && j != i);
+        // The parent by identity on its face: it may hold either plant place there.
+        let parent = crate::on_site(stands, tie.parent_site).find(|&j| stands[j].id == tie.parent && j != i);
         let Some(j) = parent else {
             stands[i].support = None;
             ledger.runner_support_ended[slot] += 1;
@@ -2889,6 +2942,8 @@ fn grow(
         die(config, &view, &stands[si], ground, ledger, cause, death_log);
     }
     remove_at(stands, &dead);
+    // Growth moved the crowns and deaths emptied places: each face's plants by height.
+    settle_places(config, stands, ledger);
 }
 
 /// One stand's ledger lines from [`grow_stand`], in the order it booked them, so that
@@ -3527,6 +3582,9 @@ pub(crate) fn die(
     );
     ledger.deaths += 1;
     ledger.deaths_by_cause[cause.index()][stand.species.index()] += 1;
+    if stand.place == crate::FaceLayer::Under {
+        ledger.under_deaths[cause.index()][stand.species.index()] += 1;
+    }
     log.push(DeathRecord {
         id: stand.id,
         site: stand.site,
@@ -3972,12 +4030,19 @@ pub(crate) fn canopy_light(
     } else {
         (-reach..=reach).map(|dx| (x0 + dx).rem_euclid(w) as u32).collect()
     };
+    // A newcomer that will share its face — a woody seed coming up beside a ground cover —
+    // stands in that face's plant's shade; one that replaces it (a cover over a cover, a
+    // runner rooting through one) or lands on a bare face does not read the stand it
+    // replaces (CONTEST).
+    let shares_face = !config.species(receiver.species).ground_cover;
     let mut theirs: Vec<Shade> = Vec::with_capacity(4);
     for x in xs {
         let a = stands.partition_point(|s| s.site.x < x);
         let b = a + stands[a..].partition_point(|s| s.site.x <= x);
         for s in &stands[a..b] {
-            if s.site == receiver.site || (i64::from(s.site.z) - z0).abs() > reach {
+            if (s.site == receiver.site && !(shares_face && same_face_shades(s, receiver)))
+                || (i64::from(s.site.z) - z0).abs() > reach
+            {
                 continue;
             }
             let sc = config.species(s.species);
@@ -4653,7 +4718,7 @@ mod tests {
                 }
                 let mut here = open;
                 for (j, other) in crowns.iter().enumerate() {
-                    if j == i || stands[j].site == stand.site {
+                    if j == i || (stands[j].site == stand.site && !super::same_face_shades(&stands[j], stand)) {
                         continue;
                     }
                     let (top, radius) = envelope[j];

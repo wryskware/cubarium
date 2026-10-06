@@ -137,6 +137,7 @@ pub fn start_stand(config: &FloraConfig, species: Species, start: Start) -> Stan
         cured: false,
         dry_s: 0.0,
         support: None,
+        place: config.face_layer(species),
     };
     s.bin_foliage(sc, config.voxel_m);
     s

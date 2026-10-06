@@ -2615,11 +2615,13 @@ pub(crate) enum Meal {
     /// A withdrawal from `site`'s [`crate::Food::Litter`] or [`crate::Food::Carrion`]
     /// pool.
     Pool { site: Site, food: crate::Food },
-    /// A foliage withdrawal from the stand rooted at `root`, bounded to the mouth's own
-    /// layer range. Its food class is the stand's own, by its species' income rule
-    /// ([`crate::Food::of_stand`]): a saprotroph's cap tissue, a plant's foliage — not
-    /// whose mouth took it.
-    Stand { root: Site, food: crate::Food },
+    /// A foliage withdrawal from the stand rooted at `root` in `place` on its face, bounded
+    /// to the mouth's own layer range. Its food class is the stand's own, by its species'
+    /// income rule ([`crate::Food::of_stand`]): a saprotroph's cap tissue, a plant's
+    /// foliage — not whose mouth took it. The place is the stand's own: a face may hold a
+    /// plant, a fungus and a plant beneath the first (a woody recruit in its sward,
+    /// `FaceLayer::Under`), and the bite takes the one the mouth chose.
+    Stand { root: Site, place: cubarium_voxel_flora::FaceLayer, food: crate::Food },
 }
 
 impl Meal {
@@ -2661,7 +2663,7 @@ pub(crate) fn mouth_meal(
                 .map(|(site, stock)| (Meal::Pool { site, food }, stock, stock))
         } else {
             mouth_foliage_offer(fv, view, cols, standing_y, body, crate::Diet::only(food))
-                .map(|(root, stock, offer)| (Meal::Stand { root, food }, stock, offer))
+                .map(|(root, place, stock, offer)| (Meal::Stand { root, place, food }, stock, offer))
         };
         if let Some((meal, stock, offer)) = found
             && stock > 0.0
@@ -2741,7 +2743,7 @@ pub(crate) fn mouth_foliage_stand(
     body: &Body,
     diet: crate::Diet,
 ) -> Option<(Site, f64)> {
-    mouth_foliage_offer(fv, view, cols, standing_y, body, diet).map(|(s, stock, _)| (s, stock))
+    mouth_foliage_offer(fv, view, cols, standing_y, body, diet).map(|(s, _, stock, _)| (s, stock))
 }
 
 /// [`mouth_foliage_stand`]'s rule with the **offer** it chose by: among the stands the
@@ -2756,9 +2758,9 @@ pub(crate) fn mouth_foliage_offer(
     standing_y: u32,
     body: &Body,
     diet: crate::Diet,
-) -> Option<(Site, f64, f64)> {
+) -> Option<(Site, cubarium_voxel_flora::FaceLayer, f64, f64)> {
     let layers = mouth_crown_layers(standing_y, body, view.config.voxel_m);
-    let mut best: Option<(Site, f64, f64)> = None;
+    let mut best: Option<(Site, cubarium_voxel_flora::FaceLayer, f64, f64)> = None;
     let mut consider = |stand: &cubarium_voxel_flora::Stand| {
         if !(stand.foliage > 0.0 && diet.accepts(fv.config.species(stand.species).trophic)) {
             return;
@@ -2770,10 +2772,10 @@ pub(crate) fn mouth_foliage_offer(
         let offer = (1.0 - stand.defence.clamp(0.0, 1.0)) * reachable;
         let better = match best {
             None => true,
-            Some((site, _, o)) => offer > o || (offer == o && stand.site < site),
+            Some((site, place, _, o)) => offer > o || (offer == o && (stand.site, stand.place) < (site, place)),
         };
         if better {
-            best = Some((stand.site, reachable, offer));
+            best = Some((stand.site, stand.place, reachable, offer));
         }
     };
     // The best offer wins, ties to the smallest site: a total order, so visiting only

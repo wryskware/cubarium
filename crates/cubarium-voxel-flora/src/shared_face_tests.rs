@@ -196,17 +196,18 @@ fn a_founder_shares_a_face_across_places_and_not_within_one() {
 }
 
 /// **Overtopping is plant against plant.** A face holding a velvetpad and a glowcap; a
-/// seed of a photosynthetic species that passes its gates there and may overtop the pad
-/// (its draw set to one, any cover) comes up through the pad: the pad dies a booked
-/// overtopped death and the glowcap is the same stand after.
+/// seed of another ground cover that passes its gates there and may overtop the pad (its
+/// draw set to one, any cover) comes up through the pad: the pad dies a booked overtopped
+/// death and the glowcap is the same stand after. (A woody seed comes up beside the pad
+/// instead: `contest_tests`.)
 #[test]
 fn overtopping_takes_the_plant_and_never_the_fungus() {
     let mut c = quiet();
     assert!(c.species(PAD).ground_cover, "the fixture's cover is a ground cover");
     let sp = photo_passing(&c)
         .into_iter()
-        .find(|&s| s != PAD)
-        .expect("a photosynthetic species other than the pad passes on the lit slab");
+        .find(|&s| s != PAD && c.species(s).ground_cover)
+        .expect("a ground cover other than the pad passes on the lit slab");
     c.species_mut(sp).overtop_per_check = 1.0;
     c.species_mut(sp).overtop_covers = Vec::new();
     let mut world = slab(3);

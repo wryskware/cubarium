@@ -80,12 +80,21 @@ pub struct ZoneState {
     /// Meadow lever f: woody recruits standing in the turf (per species), not yet above it.
     /// They hold no face of their own: the turf keeps its faces until they escape.
     pub contest: Vec<Vec<Cohort>>,
+    /// Meadow lever f (CONTEST, 2026-10-05): turf standing on as **understorey** on the faces
+    /// a recruit of species `s` escaped on (indexed by the canopy's species). The face is
+    /// the canopy's: these stands hold none of their own, read the canopy faces' mineral and
+    /// the light through the canopy's crown, and die only when their own budget fails.
+    pub under: Vec<Vec<Cohort>>,
 }
 
 impl ZoneState {
     /// Contested recruits of species `s` in the zone.
     pub fn contested(&self, s: usize) -> f64 {
         self.contest[s].iter().map(|c| c.n).sum()
+    }
+    /// Turf standing as understorey under species `s`'s canopy in the zone.
+    pub fn understorey(&self, s: usize) -> f64 {
+        self.under[s].iter().map(|c| c.n).sum()
     }
     pub fn count(&self, s: usize) -> f64 {
         self.cohorts[s].iter().map(|c| c.n).sum()
@@ -224,6 +233,12 @@ pub struct Counters {
     pub contested: [f64; NS],
     pub escaped: [f64; NS],
     pub contest_died: [f64; NS],
+    /// Lever f's understorey, per cover species: stands that went under an escaped canopy,
+    /// that starved (or dried) there, and that were left holding the face when the canopy
+    /// over them died.
+    pub under_in: [f64; NS],
+    pub starved_under: [f64; NS],
+    pub under_freed: [f64; NS],
     /// `[cover][newcomer]`.
     pub pairs: [[f64; NS]; NS],
     pub seeds_landed: [f64; NS],
@@ -466,6 +481,7 @@ impl Model {
                 transmit: 1.0,
                 foliage: [0.0; NS],
                 contest: vec![Vec::new(); NS],
+                under: vec![Vec::new(); NS],
             })
             .collect();
         let t0 = start_minute * 60.0;
@@ -928,6 +944,28 @@ impl Model {
                     }
                 }
                 zs.contest[s] = out;
+                // The understorey under species `s`'s canopy: the turf's own bins.
+                let tsc = config.species(Species::Springturf);
+                let (tlo, thi) = (tsc.alive_min.max(1e-6).ln(), tsc.wood_max.max(tsc.alive_min * 1.0001).ln());
+                let mut out: Vec<Cohort> = Vec::new();
+                let mut keys: Vec<(i64, u8, bool)> = Vec::new();
+                for c in zs.under[s].drain(..) {
+                    if c.n <= 1e-9 {
+                        continue;
+                    }
+                    let b = (((c.st.wood.max(1e-9).ln() - tlo) / (thi - tlo)) * BINS).floor().clamp(0.0, BINS) as i64;
+                    let cap = tsc.alpha * c.st.wood;
+                    let fill = if cap > 0.0 { c.st.foliage / cap } else { 1.0 };
+                    let key = (b, [0.1, 0.4].iter().filter(|&&e| fill >= e).count() as u8, c.st.cured);
+                    match keys.iter().position(|k| *k == key) {
+                        Some(i) => merge(&mut out[i], &c),
+                        None => {
+                            keys.push(key);
+                            out.push(c);
+                        }
+                    }
+                }
+                zs.under[s] = out;
             }
         }
     }
@@ -1029,6 +1067,173 @@ impl Model {
         if n > 0.0 { self.z[zi].pool[t] / n } else { self.config.initial_mineral }
     }
 
+    /// **Meadow lever f**: the light share a recruit standing in zone `zi`'s turf gets
+    /// through it. `contest_tau < 0`: the sim's shade law (`step::shade_layers_into`) on the
+    /// turf's mat at the zone's mean turf stand, `exp(−shade_k (1 − porosity) P / area)`
+    /// ([`crown_of`]); otherwise the scenario's `exp(−contest_tau · fill)`.
+    pub fn contest_shade(&self, zi: usize) -> f64 {
+        let mw = &self.p.meadow;
+        if mw.contest_tau >= 0.0 {
+            return (-mw.contest_tau * self.turf_fill(zi)).exp();
+        }
+        let t = Species::Springturf.index();
+        let (n, w, p) = self.z[zi].cohorts[t].iter().fold((0.0, 0.0, 0.0), |(n, w, p), c| (n + c.n, w + c.n * c.st.wood, p + c.n * c.st.foliage));
+        if !(n > 0.0) {
+            return 1.0;
+        }
+        crown_of(&self.config, Species::Springturf, w / n, p / n).1
+    }
+
+    /// **Meadow lever f**: the wood at which a recruit of `sc` stands above the sward.
+    /// `contest_escape < 0`: the sim's rule, its crown height past the turf's — the end of
+    /// its capped seedling stage (`w0 · wood_max`), where its crown leaves the seedling cap;
+    /// otherwise `contest_escape · donor_min`.
+    pub fn escape_wood(&self, sc: &cubarium_voxel_flora::SpeciesConfig) -> f64 {
+        let e = self.p.meadow.contest_escape;
+        if e < 0.0 {
+            sc.capped_seedling().map_or(sc.alive_min, |(w0, _)| w0 * sc.wood_max)
+        } else {
+            e * sc.donor_min
+        }
+    }
+
+    /// The light share under species `s`'s escaped crowns in zone `zi`: the `n`-weighted
+    /// mean of each cohort's crown transmission ([`crown_of`], the sim's shade law over its
+    /// foliage layers), over its stands past the escape wood. 1 with none.
+    fn canopy_transmit(&self, zi: usize, s: usize) -> f64 {
+        let sp = Species::ALL[s];
+        let sc = self.config.species(sp);
+        let ew = self.escape_wood(sc);
+        let (mut n, mut t) = (0.0, 0.0);
+        for c in self.z[zi].cohorts[s].iter().filter(|c| c.st.wood >= ew) {
+            n += c.n;
+            t += c.n * crown_of(&self.config, sp, c.st.wood, c.st.foliage).1;
+        }
+        if n > 0.0 { t / n } else { 1.0 }
+    }
+
+    /// **Meadow lever f**: `n` turf stands of zone `zi` go under species `s`'s canopy, which
+    /// has just come up on their faces: their states move to [`ZoneState::under`] and their
+    /// faces' share of the turf pool to `s`'s. Returns the mineral carried.
+    fn move_under(&mut self, zi: usize, s: usize, n: f64) -> f64 {
+        let t = Species::Springturf.index();
+        let count = self.z[zi].count(t);
+        if count <= 0.0 || n <= 0.0 {
+            return 0.0;
+        }
+        let f = (n / count).min(1.0);
+        let zs = &mut self.z[zi];
+        let mut moved: Vec<Cohort> = Vec::new();
+        for c in zs.cohorts[t].iter_mut() {
+            let mut d = *c;
+            d.n = c.n * f;
+            c.n -= d.n;
+            if d.n > 1e-12 {
+                moved.push(d);
+            }
+        }
+        zs.cohorts[t].retain(|c| c.n > 1e-12);
+        let carried = zs.pool[t] * f;
+        zs.pool[t] -= carried;
+        zs.under[s].extend(moved);
+        self.c.under_in[t] += n.min(count);
+        carried
+    }
+
+    /// **Meadow lever f**, one step of the turf standing under species `s`'s canopy in zone
+    /// `zi`: the stand law at the turf's own faces' light through `s`'s crown
+    /// ([`Model::canopy_transmit`]), the turf's water, the canopy faces' mineral (its
+    /// tissue's mineral drawn from and returned to `s`'s pool: they share the faces). A stand
+    /// whose budget fails dies there (`starved_under`); the face stays the canopy's. Then the
+    /// faces whose canopy is gone: understorey beyond `s`'s stand count holds them again, its
+    /// faces' mineral from the vacant pool. Returns the propagule packages it sent.
+    fn under_step(&mut self, zi: usize, s: usize, r: Reading, clock: Clock) -> f64 {
+        if self.z[zi].under[s].is_empty() {
+            return 0.0;
+        }
+        let config = self.config.clone();
+        let t = Species::Springturf.index();
+        let tsc = config.species(Species::Springturf);
+        let trans = self.canopy_transmit(zi, s);
+        let cnt_s = self.z[zi].count(s);
+        let mineral = if cnt_s > 0.0 { self.z[zi].pool[s] / cnt_s } else { config.initial_mineral };
+        let darkness = self.zones.zones[zi].darkness;
+        let lights: Vec<f64> = self.z[zi].under[s].iter().map(|c| self.light_of(zi, t, c) * trans).collect();
+        let available = if r.mu_held < 1.0 { tsc.wilt_water + r.mu_held * (tsc.full_water - tsc.wilt_water) } else { r.available_held.max(tsc.full_water) };
+        let saturated = tsc.establish_saturated_max + r.stress_held * (1.0 - tsc.establish_saturated_max);
+        let nt = tsc.n_tissue;
+        let pk = package_of(tsc);
+        let (mut d_material, mut add_litter, mut add_wood, mut packages) = (0.0, 0.0, 0.0, 0.0);
+        let mut dead: Vec<usize> = Vec::new();
+        for (ci, c) in self.z[zi].under[s].iter_mut().enumerate() {
+            let available = if self.p.water_rank { r.available_held * c.site.w_rel } else { available };
+            let site = stand::Site {
+                light_eff: light_response(tsc, lights[ci]),
+                available,
+                saturated,
+                mineral,
+                darkness,
+                substrate_taken: 0.0,
+                substrate_gross: 0.0,
+            };
+            let before = c.st.material();
+            let (fl, death) = stand::grow(tsc, &mut c.st, site, clock);
+            let (sent, resp) = if death.is_none() { stand::fund(tsc, &mut c.st, self.p.dt) } else { (0, 0.0) };
+            self.c.respired += c.n * (fl.respired + resp);
+            self.c.seep += c.n * fl.seep;
+            packages += c.n * f64::from(sent);
+            d_material += c.n * (c.st.material() - before + f64::from(sent) * pk);
+            add_litter += c.n * fl.litter;
+            add_wood += c.n * fl.dead_wood;
+            self.c.built[t] += c.n * fl.built;
+            self.c.prod_z[zi][3] += c.n * fl.built;
+            self.c.shed[t] += c.n * fl.litter;
+            self.c.fixed += c.n * fl.income;
+            if death.is_some() {
+                dead.push(ci);
+            }
+        }
+        let zs = &mut self.z[zi];
+        zs.litter += add_litter;
+        zs.dead_wood += add_wood;
+        self.c.prod_z[zi][0] += add_litter;
+        self.c.prod_z[zi][1] += add_wood;
+        zs.pool[s] -= nt * d_material;
+        for &ci in dead.iter().rev() {
+            let c = zs.under[s].remove(ci);
+            self.c.starved_under[t] += c.n;
+            self.c.by_zone[zi][1][t] += c.n;
+            zs.dead_wood += c.n * c.st.wood;
+            zs.litter += c.n * (c.st.material() - c.st.wood);
+            self.c.prod_z[zi][0] += c.n * (c.st.material() - c.st.wood);
+            self.c.prod_z[zi][1] += c.n * c.st.wood;
+            zs.pool[s] += nt * c.n * c.st.material();
+        }
+        // The canopy died over some: the understorey beyond the canopy's count holds its
+        // faces again (their mineral, which the canopy's death left to the vacant pool).
+        let excess = zs.understorey(s) - zs.count(s);
+        if excess > 1e-9 {
+            let f = (excess / zs.understorey(s)).min(1.0);
+            let mut back: Vec<Cohort> = Vec::new();
+            for c in zs.under[s].iter_mut() {
+                let mut d = *c;
+                d.n = c.n * f;
+                c.n -= d.n;
+                back.push(d);
+            }
+            zs.under[s].retain(|c| c.n > 1e-12);
+            let a = self.zones.zones[zi].area;
+            let held: f64 = (0..NS).filter(|&k| k != GLOW).map(|k| zs.count(k)).sum();
+            let vacant = (a - held).max(excess);
+            let m = zs.pool[VACANT] * (excess / vacant).min(1.0);
+            zs.pool[VACANT] -= m;
+            zs.pool[t] += m;
+            zs.cohorts[t].extend(back);
+            self.c.under_freed[t] += excess;
+        }
+        packages
+    }
+
     /// **Meadow lever f**: `n` recruits of `s` come up into the turf of zone `zi` from
     /// packages of `organic`, on faces of mineral `cm` (their `n_rel` is it over the turf's
     /// mean). No face changes hands.
@@ -1064,9 +1269,10 @@ impl Model {
         let t = Species::Springturf.index();
         let dt = self.p.dt;
         let mw = &self.p.meadow;
-        let shade = (-mw.contest_tau * self.turf_fill(zi)).exp();
+        let _ = mw;
+        let shade = self.contest_shade(zi);
         let tm = self.turf_mineral(zi);
-        let escape_w = mw.contest_escape * sc.donor_min;
+        let escape_w = self.escape_wood(sc);
         let darkness = self.zones.zones[zi].darkness;
         let lights: Vec<f64> = self.z[zi].contest[s].iter().map(|c| self.light_of(zi, s, c) * shade).collect();
         let nt = sc.n_tissue;
@@ -1153,9 +1359,10 @@ impl Model {
             let from_turf = n.min(self.z[zi].count(t));
             let mut carried = 0.0;
             if from_turf > 0.0 {
-                carried += self.remove_stands(zi, t, from_turf, None);
-                self.c.overtopped[t] += from_turf;
-                self.c.pairs[t][s] += from_turf;
+                // CONTEST (2026-10-05): the turf is not overtopped. It stays on as the
+                // face's understorey, under the crown that now holds the face, and dies
+                // only when its own budget fails ([`Model::under_step`]).
+                carried += self.move_under(zi, s, from_turf);
             }
             let rest = n - from_turf;
             if rest > 0.0 && vacant_left > 0.0 {
@@ -1355,6 +1562,8 @@ impl Model {
                 // Lever f: the recruits in the turf (cropped as the juveniles are).
                 let h = mw.crop_per_graze * graze[zi] / zone.area.max(1.0);
                 self.contest_step(zi, s, readings[s], clock, if mw.sward_draw > 0.0 { draw } else { 1.0 }, h);
+                // Its understorey: the turf on the faces its recruits escaped on.
+                packages[turf] += self.under_step(zi, s, readings[turf], clock);
             }
             // ---- runners and seeds (seeds.rs:847).
             let a = zone.area.max(1.0);
@@ -1599,8 +1808,20 @@ impl Model {
                     if c == turf && self.p.meadow.woody[s] {
                         lam /= 1.0 + self.p.meadow.sward_germ * thatch;
                     }
-                    let contest = c == turf && self.p.meadow.woody[s] && self.p.meadow.contest_escape > 0.0;
+                    let contest = c == turf && self.p.meadow.woody[s] && self.p.meadow.contest_escape != 0.0;
                     let faces = if contest { (counts[c] - in_turf).max(0.0) } else { counts[c] };
+                    // CONTEST: the canopy gate reads the newborn under the turf's shade on its
+                    // own face (the sim's light law now shades a face's two plants), at the
+                    // zone's light for it and the turf faces' mineral.
+                    let lam = if contest && self.p.meadow.contest_tau < 0.0 {
+                        let sc = config.species(Species::ALL[s]);
+                        let nb = StandState::newborn(sc, package_of(sc));
+                        let raw = zone_sky * (self.p.light_k[s][0][0] - self.p.light_k[s][0][1] * cover).max(0.02) * self.contest_shade(zi);
+                        let be = break_even(sc, nb.wood, nb.foliage, light_response(sc, raw), readings[s].mu, monod(sc, cm));
+                        if be >= sc.establish_light_margin { lam } else { 0.0 }
+                    } else {
+                        lam
+                    };
                     let k = (faces * share * (1.0 - (-lam * dt).exp())).min(self.z[zi].bank[s]);
                     if k <= 0.0 {
                         continue;
@@ -2058,7 +2279,7 @@ impl Model {
                 if k == GLOW {
                     continue;
                 }
-                inv += zs.cohorts[k].iter().chain(zs.contest[k].iter()).map(|c| c.n * sc.n_tissue * c.st.material()).sum::<f64>();
+                inv += zs.cohorts[k].iter().chain(zs.contest[k].iter()).chain(zs.under[k].iter()).map(|c| c.n * sc.n_tissue * c.st.material()).sum::<f64>();
                 bank += sc.n_tissue * package_of(sc) * zs.bank[k];
             }
         }
@@ -2073,7 +2294,7 @@ impl Model {
             o += zs.litter + zs.dead_wood;
             for k in 0..NS {
                 let sc = self.config.species(Species::ALL[k]);
-                o += zs.cohorts[k].iter().chain(zs.contest[k].iter()).map(|c| c.n * c.st.material()).sum::<f64>();
+                o += zs.cohorts[k].iter().chain(zs.contest[k].iter()).chain(zs.under[k].iter()).map(|c| c.n * c.st.material()).sum::<f64>();
                 o += package_of(sc) * zs.bank[k];
             }
         }
