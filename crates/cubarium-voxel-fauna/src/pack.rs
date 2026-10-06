@@ -810,18 +810,32 @@ fn nearest_member(fauna: &Fauna, own: u64, me: u64, x: f64, z: f64, ring: f64) -
 }
 
 /// **The choice score** (PACK-TUNE) of body `o`, known as `k`, to the member at `i` with `n`
-/// members at hand: prospect × body^`select_body_exp` / (1 + distance / `select_judge_m`).
-/// With `pack_view` (CHURN's switch) the distance is the pack's (its nearest member taking
-/// part, so every member weighs a pair alike) and the awareness factor is left out; else the
-/// member's own distance and the full prospect.
+/// members at hand: prospect × body^`select_body_exp` / (1 + distance / `select_judge_m`),
+/// the member's own distance.
 #[allow(clippy::too_many_arguments)]
-fn score(fauna: &Fauna, i: usize, o: &Animal, k: &Track, n: u32, t: &Pack, ring: f64, pack_view: bool) -> f64 {
+fn score(fauna: &Fauna, i: usize, o: &Animal, k: &Track, n: u32, t: &Pack, ring: f64) -> f64 {
     let a = &fauna.animals[i];
-    let d = match a.pack.filter(|_| pack_view) {
-        Some(m) => nearest_member(fauna, m.pack, a.id, k.x, k.z, ring),
-        None => distance(a, k.x, k.z, ring),
-    };
-    prospect_of(fauna, i, o, k, n, ring, !pack_view) * o.body.max(0.0).powf(t.select_body_exp) / (1.0 + d / t.select_judge_m.max(1e-9))
+    let d = distance(a, k.x, k.z, ring);
+    prospect(fauna, i, o, k, n, ring) * o.body.max(0.0).powf(t.select_body_exp) / (1.0 + d / t.select_judge_m.max(1e-9))
+}
+
+/// **The switch's worth** (CHURN2) of body `o`, known as `k`, to the pack: prospect ×
+/// body^`select_body_exp`, the prospect with the pack's `n` participants (the same count for
+/// the target and every other prey, so no member weighs a pair differently from another)
+/// and no awareness factor (a hunt alerts its target, and would alert any it turned to). No
+/// distance: which prey is nearest a member does not steal a hunt; distance only gates it.
+#[allow(clippy::too_many_arguments)]
+fn worth(fauna: &Fauna, i: usize, o: &Animal, k: &Track, n: u32, t: &Pack, ring: f64) -> f64 {
+    prospect_of(fauna, i, o, k, n, ring, false) * o.body.max(0.0).powf(t.select_body_exp)
+}
+
+/// CHURN2: how a [`choose`] weighs its candidates. `Choice` is the hunt start's score; a
+/// `Switch` weighs [`worth`] and takes only a prey whose pack distance (its nearest member
+/// taking part) is at most `within_m`.
+#[derive(Clone, Copy)]
+enum Weigh {
+    Choice,
+    Switch { within_m: f64 },
 }
 
 /// A target chosen: its score, id, face and the senses that had it.
@@ -837,8 +851,9 @@ struct Choice {
 /// prey it knows of (its own record and its packmates' in hearing, [`known`]), where last
 /// sensed, takeable there, in its window, outside every other territory, not `exclude`, the
 /// pack's abandoned target or a shunned one, with a prospect of at least
-/// `select_min_prospect` and a score of at least `floor` (`switching`: weighed from the pack,
-/// [`score`]'s `pack_view`, and a low prospect not counted declined): the best it can reach on foot within the chase — on the taker's walking
+/// `select_min_prospect` and a score of at least `floor` (`weigh`: the choice's [`score`], or
+/// a switch's [`worth`] gated by the pack's distance, a low prospect then not counted
+/// declined): the best it can reach on foot within the chase — on the taker's walking
 /// route graph, at most `cruise × chase_give_up_s × route_reach_fraction` away by route
 /// (bellwing-finding item 3, bellwing3 item 1: grazers on a cliff top 3 m over the pack drew
 /// 74 timed-out chases in seed 1). Also the pack's abandoned target's score as it sees it now
@@ -858,8 +873,13 @@ fn choose(
     ring: f64,
     exclude: Option<u64>,
     floor: f64,
-    switching: bool,
+    weigh: Weigh,
 ) -> (Option<Choice>, Option<f64>) {
+    let switching = matches!(weigh, Weigh::Switch { .. });
+    let weigh_of = |fauna: &Fauna, o: &Animal, k: &Track| match weigh {
+        Weigh::Choice => score(fauna, i, o, k, n, t, ring),
+        Weigh::Switch { .. } => worth(fauna, i, o, k, n, t, ring),
+    };
     let a = fauna.animals[i];
     let v = view.config.voxel_m;
     let window = window_body(fauna, i, ring);
@@ -870,7 +890,7 @@ fn choose(
     for k in &sensed {
         let Some(o) = fauna.view().animal(k.id).copied() else { continue };
         if abandoned == Some(o.id) {
-            prev_score = Some(score(fauna, i, &o, k, n, t, ring, switching));
+            prev_score = Some(weigh_of(fauna, &o, k));
         }
         if o.id == a.id || Some(o.id) == exclude || abandoned == Some(o.id) || shuns(fauna, own, o.id) {
             continue;
@@ -878,14 +898,19 @@ fn choose(
         if !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window) || trespass(fauna, own, k.x, k.z, t, v, ring) {
             continue;
         }
-        let pr = prospect(fauna, i, &o, k, n, ring);
+        let pr = if switching { prospect_of(fauna, i, &o, k, n, ring, false) } else { prospect(fauna, i, &o, k, n, ring) };
         if pr < t.select_min_prospect || !(pr > 0.0) {
             if !switching {
                 fauna.ledger.pack_declined += 1;
             }
             continue;
         }
-        let s = score(fauna, i, &o, k, n, t, ring, switching);
+        if let (Weigh::Switch { within_m }, Some(m)) = (weigh, a.pack) {
+            if nearest_member(fauna, m.pack, a.id, k.x, k.z, ring) > within_m {
+                continue;
+            }
+        }
+        let s = weigh_of(fauna, &o, k);
         if s >= floor {
             candidates.push((-s, o.id, k.face(), (k.x, k.z), k.modes));
         }
@@ -1190,23 +1215,30 @@ pub(crate) fn steer(
         }
     }
 
-    // CHURN, the commitment: a hungry member in a chase weighs the other prey it knows of
-    // against the target, each at the pack's distance from it (its nearest member taking
-    // part, so members on either side of a pair weigh it alike) and with no awareness factor
-    // (the hunt alerts its target, and would alert any it turned to); one scoring at least
-    // `switch_margin` times the target takes the hunt (the old one is not shunned). An equal
-    // or slightly better prey never steals it, so two alike are not swapped back and forth.
-    if (a.eating || a.emergency) && !adults.iter().any(|b| spent(fauna, b, &t)) {
+    // CHURN, the commitment; CHURN2, only once stalled: a hungry member in a chase that has
+    // gone `switch_stall_s` without progress (the give-up's progress above: no member closing
+    // in, no work done on the target) weighs the other prey it knows of against the target
+    // by what each is worth and how open it is ([`worth`]: prospect × body, with the pack's
+    // participants for every one and no awareness factor), never by which is nearest a
+    // member; distance only gates a candidate: no farther from the pack (its nearest member
+    // taking part) than the target is. One worth at least `switch_margin` times the target
+    // takes the hunt (the old one is not shunned). A pack closing on or working its target
+    // never switches (MacNulty et al. 2007: wolves test,
+    // then commit and stay on that animal; opportunism belongs to the choice, not to
+    // abandoning one). The commit restarts the progress clock, so a pack switches at most
+    // once per `switch_stall_s`.
+    let stalled = fauna
+        .pack(own)
+        .is_some_and(|p| p.target.is_some() && now.saturating_sub(p.chase_progress_tick) >= cubarium_voxel::ticks_at_least_one(t.switch_stall_s));
+    if stalled && (a.eating || a.emergency) && !adults.iter().any(|b| spent(fauna, b, &t)) {
         if let Some(tid) = fauna.pack(own).and_then(|p| p.target) {
             if let (Some(k), Some(o)) = (knows_of(fauna, i, tid, ring), fauna.view().animal(tid).copied()) {
-                let n = 1 + adults
-                    .iter()
-                    .filter(|b| b.id != a.id && participates(b, own) && distance(&a, b.pose.x, b.pose.z, ring) <= t.pack_radius_m)
-                    .count() as u32;
-                let current = score(fauna, i, &o, &k, n, &t, ring, true);
+                let n = adults.iter().filter(|b| b.id == a.id || participates(b, own)).count().max(1) as u32;
+                let current = worth(fauna, i, &o, &k, n, &t, ring);
                 let floor = t.switch_margin * current;
+                let within_m = nearest_member(fauna, own, a.id, k.x, k.z, ring);
                 if floor.is_finite() {
-                    let (better, _) = choose(fauna, i, view, own, founder, &t, &geometry, &h, manifest.cruise_m_per_s, n, ring, Some(tid), floor, true);
+                    let (better, _) = choose(fauna, i, view, own, founder, &t, &geometry, &h, manifest.cruise_m_per_s, n, ring, Some(tid), floor, Weigh::Switch { within_m });
                     if let Some(c) = better {
                         fauna.ledger.pack_switches += 1;
                         fauna.log_pack_event(crate::PackEvent::ChaseEnd { tick: now, pack: own, why: crate::ChaseEnd::Switched, target: tid, by: a.id });
@@ -1300,7 +1332,7 @@ pub(crate) fn steer(
             // PACK-TUNE, the prey choice: each weighed by its prospect with the members at
             // hand, its meat and its distance; the best first, none under the floor.
             let n = 1 + participating as u32;
-            let (best, prev_score) = choose(fauna, i, view, own, founder, &t, &geometry, &h, manifest.cruise_m_per_s, n, ring, None, 0.0, false);
+            let (best, prev_score) = choose(fauna, i, view, own, founder, &t, &geometry, &h, manifest.cruise_m_per_s, n, ring, None, 0.0, Weigh::Choice);
             if let Some(c) = best {
                 let prev = fauna.pack(own).and_then(|p| p.abandoned);
                 commit(fauna, i, own, c, rec.drawn.is_some(), n, prev, prev_score, ring);

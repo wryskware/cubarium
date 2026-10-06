@@ -90,7 +90,8 @@ use crate::Fauna;
 //     `naive_kills`).
 // 53: CHURN — `Pack::{chase_progress_m, switch_margin}`, `PackRecord::{chase_progress_tick,
 //     chase_best_m, chase_work}`, `ChaseEnd::Switched`, the ledger's `pack_switches`; a
-//     chase's give-up reads time without progress, not a chase clock.
+//     chase's give-up reads time without progress, not a chase clock. CHURN2 (same 53, the
+//     branch unmerged): `Pack::switch_stall_s`; a switch only after that long stalled.
 pub const SCHEMA: u32 = 53;
 
 #[derive(Serialize, Deserialize)]

@@ -3,6 +3,10 @@
 //! only past `Pack::switch_margin` of the current one's score. A child of `step` sharing the
 //! predation fixture.
 //!
+//! **CHURN2**: a switch is weighed only once the chase has stalled (`Pack::switch_stall_s`
+//! without progress), on what the prey is worth and how open it is (prospect × body, the
+//! same members counted for both), not on which is nearest a member.
+//!
 //! Every case sets the config it relies on; no shipped default, ratio or verdict is asserted.
 
 use super::predation_fixture::*;
@@ -150,22 +154,29 @@ fn a_pack_keeps_a_closing_target_past_chase_give_up_s() {
 
 // ------------------------------------------------------------------ the switch
 
-/// The scene for a switch: a pack commits to a still grazer `a` of 0.3 of the adult body,
-/// then a second grazer `b` of `ratio` × its body is put beside it, the same distance from
-/// the pack's line; the score is body only (`select_judge_m` huge). Returns, a second
+/// The scene for a switch: a pack commits to a still grazer `a` of 0.3 of the adult body
+/// (its chase stalled at once: no closing counts, `switch_stall_s` 0.3 s),
+/// then a second grazer `b` of `ratio` × its body is put across the pack's line from it and
+/// a metre nearer the pack (CHURN2: a switch takes only prey no farther from the pack than
+/// the target); the score is body only (`select_judge_m` huge). Returns, a second
 /// later, whether the pack holds `b`, holds `a`, its chases and its switch ends.
 fn switch_case(ratio: f64, margin: f64) -> (bool, bool, u64, usize) {
     let world = world(302);
     let mut flora = Flora::new(FloraConfig::default());
     let mut c = config(1e9);
-    c.founders[CH.index()].pack.as_mut().unwrap().switch_margin = margin;
+    let pk = c.founders[CH.index()].pack.as_mut().unwrap();
+    pk.switch_margin = margin;
+    // CHURN2: a switch needs a stalled chase; here no closing counts as progress and the
+    // stall is short, so the chase is open to a switch well inside the second.
+    pk.chase_progress_m = 100.0;
+    pk.switch_stall_s = 0.3;
     let mut fauna = Fauna::new(c);
     fauna.set_births_enabled(false);
     let _members = pack(&mut fauna, &world);
     let a = grazer(&mut fauna, &world, 7.0, LANE_Z - 0.6, 0.3);
     step_until(&mut fauna, &world, &mut flora, 300, |f| f.ledger.pack_chases > 0).expect("the pack commits");
     assert_eq!(fauna.packs()[0].target, Some(a), "the only prey is the target");
-    let b = grazer(&mut fauna, &world, 7.0, LANE_Z + 0.6, 0.3 * ratio);
+    let b = grazer(&mut fauna, &world, 6.0, LANE_Z + 0.6, 0.3 * ratio);
     let mut events = Vec::new();
     step_s(&mut fauna, &world, &mut flora, 1.0, &mut events);
     let t = fauna.packs()[0].target;
@@ -212,4 +223,65 @@ fn two_equal_targets_do_not_ping_pong() {
     }
     assert!(held, "the pack held {first:?} (now {:?})", fauna.packs()[0].target);
     assert_eq!((fauna.ledger.pack_chases, ends(&events, ChaseEnd::Switched)), (1, 0), "(chases, switches): {events:?}");
+}
+
+// ------------------------------------------------------------------ CHURN2: the stall
+
+/// The scene for the stall rule: a pack commits to a still grazer `a` of 0.3 of the adult
+/// body ahead of it (x = 7 m); then a grazer `b` of `ratio` × that body is put behind the
+/// pack (x = 1 m, so no member passes over it), nearer the pack than `a`. The score
+/// weighs distance (`select_judge_m` 1 m), so `b` also scores past any margin on the
+/// choice's own score; `switch_margin` 1.5, `switch_stall_s` 0.1 s (a stall is weighed at
+/// the first samplings, while `b` is still the nearer), and progress is closing by
+/// `progress_m`. Returns, after `secs`, whether the pack holds `a`, whether it holds `b`,
+/// how far the pack closed on `a` meanwhile, and its switch ends.
+fn stall_case(progress_m: f64, ratio: f64, secs: f64) -> (bool, bool, f64, usize) {
+    let world = world(304);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = config(1.0);
+    let pk = c.founders[CH.index()].pack.as_mut().unwrap();
+    pk.switch_margin = 1.5;
+    pk.switch_stall_s = 0.1;
+    pk.chase_progress_m = progress_m;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let members = pack(&mut fauna, &world);
+    let a = grazer(&mut fauna, &world, 7.0, LANE_Z, 0.3);
+    step_until(&mut fauna, &world, &mut flora, 300, |f| f.ledger.pack_chases > 0).expect("the pack commits");
+    assert_eq!(fauna.packs()[0].target, Some(a), "the only prey is the target");
+    let d0 = nearest(&fauna, &members, a);
+    let b = grazer(&mut fauna, &world, 1.0, LANE_Z, 0.3 * ratio);
+    assert!(nearest(&fauna, &members, b) < d0, "b is nearer the pack than a");
+    let mut events = Vec::new();
+    step_s(&mut fauna, &world, &mut flora, secs, &mut events);
+    let t = fauna.packs()[0].target;
+    (t == Some(a), t == Some(b), d0 - nearest(&fauna, &members, a), ends(&events, ChaseEnd::Switched))
+}
+
+/// **A progressing chase keeps its target**, even with a prey nearer the pack that is worth
+/// four times as much: the pack closes on its grazer (by more than `chase_progress_m` each
+/// sampling), and over a second it holds it with no switch.
+#[test]
+fn a_progressing_chase_keeps_its_target_against_a_far_better_prey() {
+    let (on_a, on_b, closed, switches) = stall_case(0.05, 4.0, 1.0);
+    assert!(closed > 0.05, "the pack closed on its target: {closed} m");
+    assert!(on_a && !on_b && switches == 0, "progressing: on a {on_a}, on b {on_b}, switches {switches}");
+}
+
+/// **A stalled chase takes that prey**: the same scene with a closing step longer than the
+/// plain (no closing counts, so the chase stalls after `switch_stall_s`), and the four-times
+/// prey takes the hunt (one switch).
+#[test]
+fn a_stalled_chase_takes_a_far_better_prey() {
+    let (on_a, on_b, _, switches) = stall_case(100.0, 4.0, 1.0);
+    assert!(on_b && !on_a && switches == 1, "stalled: on a {on_a}, on b {on_b}, switches {switches}");
+}
+
+/// **A nearer but no better prey does not take a stalled chase**: the newcomer has the
+/// target's body (worth the same), and though it is nearer the pack — so the choice's
+/// distance-weighed score puts it past the margin — the stalled pack keeps its target.
+#[test]
+fn a_nearer_but_no_better_prey_does_not_take_a_stalled_chase() {
+    let (on_a, on_b, _, switches) = stall_case(100.0, 1.0, 1.0);
+    assert!(on_a && !on_b && switches == 0, "stalled, b no better: on a {on_a}, on b {on_b}, switches {switches}");
 }
