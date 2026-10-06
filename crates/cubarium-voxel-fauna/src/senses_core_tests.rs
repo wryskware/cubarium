@@ -44,6 +44,7 @@ fn table(sight_m: f64, half_deg: f64, hearing_m: f64, tremor_m: f64) -> SenseTab
         tremor_min: 1e-12,
         smell_min: 0.0,
         scent: None,
+        ..SenseTable::default()
     }
 }
 

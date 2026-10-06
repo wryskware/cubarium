@@ -13,12 +13,15 @@
 //!   scent never crosses solid rock, and the floor under a roof is not the roof.
 //! - **The update**, every [`crate::senses::UPDATE_TICKS`] ticks (0.5 s): each standing body
 //!   lays [`crate::ScentConfig::deposit_per_s`] × its organic matter × 0.5 s on its node;
-//!   each face's carrion [`crate::ScentConfig::carrion_per_s`] × its stock; every node decays
+//!   each face's carrion [`crate::ScentConfig::carrion_per_s`] × its stock; each flower holding
+//!   nectar [`crate::ScentConfig::nectar_per_s`] on the surface under it (S3); every node decays
 //!   with [`crate::ScentConfig::half_life_s`]; then a conservative mix with its neighbours,
 //!   [`crate::ScentConfig::diffuse_fraction`] of the difference shared over
 //!   `max(degree, 4)`; levels under [`crate::ScentConfig::threshold`] are dropped.
 //! - **The receptor** reads its node's level and the gradient to its neighbours, per metre
-//!   in the ring's `x` and `z` ([`ScentReading`]). A body off the ground reads nothing.
+//!   in the ring's `x` and `z` ([`ScentReading`]). A body off the ground reads nothing,
+//!   except a flyer's nectar smell (S3, [`ScentField::read_below`]), read on the surface
+//!   under it.
 //!
 //! **Cost**: the nodes are few (a 0.5 m cell holds 16 columns at 0.125 m), every node is
 //! worked each update, four channels: about `4 × nodes × degree` adds per half second. The
@@ -49,11 +52,15 @@ pub enum ScentChannel {
     Hunter,
     /// Carrion on the ground.
     Carrion,
+    /// **Nectar** (S3): the flowers holding nectar, laid on the surface under each; the
+    /// bellwing's floral smell.
+    Nectar,
 }
 
 impl ScentChannel {
-    pub const COUNT: usize = 4;
-    pub const ALL: [ScentChannel; 4] = [ScentChannel::SmallPrey, ScentChannel::Grazer, ScentChannel::Hunter, ScentChannel::Carrion];
+    pub const COUNT: usize = 5;
+    pub const ALL: [ScentChannel; 5] =
+        [ScentChannel::SmallPrey, ScentChannel::Grazer, ScentChannel::Hunter, ScentChannel::Carrion, ScentChannel::Nectar];
 
     pub fn index(self) -> usize {
         self as usize
@@ -65,6 +72,7 @@ impl ScentChannel {
             ScentChannel::Grazer => "grazer",
             ScentChannel::Hunter => "hunter",
             ScentChannel::Carrion => "carrion",
+            ScentChannel::Nectar => "nectar",
         }
     }
 }
@@ -341,6 +349,15 @@ impl ScentField {
                         }
                     }
                 }
+            } else if ch == ScentChannel::Nectar {
+                if s.nectar_per_s > 0.0 {
+                    for (x, y, z) in flower_faces(view, fv) {
+                        if let Some(n) = graph.node(x, y, z) {
+                            self.emit[n as usize] += s.nectar_per_s * dt;
+                            any = true;
+                        }
+                    }
+                }
             } else if s.deposit_per_s > 0.0 {
                 for a in animals {
                     let laid = a.founder.and_then(|fd| config.founder(fd).senses.scent);
@@ -425,10 +442,37 @@ impl ScentField {
         }
     }
 
+    /// **A flyer's smell** (S3): the reading on the support face under its body's centre
+    /// column (`y_m` its base), every channel; nothing over no support.
+    pub(crate) fn read_below(&self, view: &VoxelView<'_>, x: f64, z: f64, y_m: f64) -> [ScentReading; ScentChannel::COUNT] {
+        let mut out = [ScentReading::default(); ScentChannel::COUNT];
+        if let Some(s) = crate::flight::support_below(view, x, z, y_m) {
+            self.read_face(view, i64::from(s.x), s.y, s.z, &mut out);
+        }
+        out
+    }
+
     /// The level of `ch` on the face `(x, y, z)` (0 off the field).
     pub(crate) fn level(&self, view: &VoxelView<'_>, ch: ScentChannel, x: i64, y: u32, z: u32) -> f64 {
         let mut out = [ScentReading::default(); ScentChannel::COUNT];
         self.read_face(view, x, y, z, &mut out);
         out[ch.index()].level
     }
+}
+
+/// The support faces the flowers holding nectar lay their scent on: a bloomcrown's own site
+/// (its rooting face), and for a latticevine face in flower the surface under the voxel in
+/// front of it.
+pub(crate) fn flower_faces(view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<(i64, u32, u32)> {
+    let v = view.config.voxel_m;
+    let mut out: Vec<(i64, u32, u32)> =
+        fv.stands.iter().filter(|st| st.nectar > 0.0).map(|st| (i64::from(st.site.x), st.site.y, st.site.z)).collect();
+    for f in fv.cover.flowers() {
+        let Some((x, y, z)) = f.face.front(view) else { continue };
+        let (cx, cz) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v);
+        if let Some(s) = crate::flight::support_below(view, cx, cz, (f64::from(y) + 1.0) * v) {
+            out.push((i64::from(s.x), s.y, s.z));
+        }
+    }
+    out
 }

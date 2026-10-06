@@ -289,7 +289,7 @@ const DOMAIN_ESCAPE: u64 = 0xE5CA9;
 
 /// Steer toward a heading: turn in place while it is more than 60° off, else go at
 /// `forward` turning toward it (full turn beyond 45°).
-fn head(heading: f64, want: f64, forward: f64, feed: f64) -> Actions {
+pub(crate) fn head(heading: f64, want: f64, forward: f64, feed: f64) -> Actions {
     use std::f64::consts::{FRAC_PI_3, FRAC_PI_4, PI, TAU};
     let d = (want - heading).rem_euclid(TAU);
     let diff = if d > PI { d - TAU } else { d };

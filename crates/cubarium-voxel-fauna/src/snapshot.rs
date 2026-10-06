@@ -62,7 +62,11 @@ use crate::Fauna;
 //     tremor, smell, live, scent channel), `FaunaConfig::{perception, scent}`, the percept
 //     records (`Fauna::percepts`), `PackRecord::drawn_scent`, `ChaseEnd::Lost`, the funnel
 //     and the perception ledger lines; `pack_*_by_sense` widened to four modalities.
-pub const SCHEMA: u32 = 46;
+// 47: S3 LIGHT AND FLIGHT — `SenseTable::{light_m, light_min, uv, loom_m}` (the bellwing's
+//     and the capgnawer's tables live), `ScentChannel::Nectar` and `ScentConfig::nectar_per_s`,
+//     `FaunaConfig::light`, the percept record's light reading, failed-visit marks and visit,
+//     the lanternjaw `DarkActive`, the light ledger lines.
+pub const SCHEMA: u32 = 47;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

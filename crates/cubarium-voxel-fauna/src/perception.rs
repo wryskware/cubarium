@@ -19,7 +19,10 @@
 //! - **scent**: per channel, the level and gradient where it stands ([`crate::scent`]);
 //! - **tremor**: the footfall felt on its left and right;
 //! - **carcasses**: the usable carcasses within the hunt's carcass scan (a hunter's);
-//! - **light**: empty, for S3 (ambient, looming, the brightest still beacon).
+//! - **light** (S3, [`crate::light`]): the ambient light, the looming shadow, the brightest
+//!   still beacon and the brightest moving one ([`LightReading`]);
+//! - **marks** (S3): the failed-visit memory, places marked "no reward here" until they
+//!   decay, and the beacon being inspected ([`Visit`]).
 //!
 //! # Who fills it
 //!
@@ -67,6 +70,8 @@ pub const MAX_TRACKS: usize = 32;
 pub const MAX_CARCASSES: usize = 8;
 /// The funnel events one record remembers ([`Percept::first`]; a capacity).
 pub const FUNNEL_MEMORY: usize = 32;
+/// The failed-visit marks one body holds at once (a cache size, not ecology).
+pub const MAX_MARKS: usize = 8;
 
 /// What a sensed body is to the observer ([`Track::class`]).
 pub mod class {
@@ -141,14 +146,51 @@ impl Track {
     }
 }
 
-/// S3's light reading: empty in S1.
+/// **The light reading** (S3, [`crate::light`]): what its photoreceptor reads — one
+/// receptor, so a direction and a level, never a shape.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LightReading {
+    /// The light where its eye is: `sky × daylight`.
     pub ambient: f64,
+    /// A shadow falling on it: `1 − d / loom_m` of the nearest moving body within its
+    /// `loom_m` (0 none), and its bearing from the heading (radians, positive right).
     pub looming: f64,
-    /// The brightest still beacon: its bearing (radians) and level.
+    pub loom_bearing: f64,
+    /// The brightest **still** beacon it sees (a clear line, not under a failed-visit mark):
+    /// whether there is one, its kind ([`crate::BeaconKind`] as `u8`), its bearing and level,
+    /// and where it is (ring `x`, `z`, height `y`, metres).
+    pub beacon: bool,
+    pub beacon_kind: u8,
     pub beacon_bearing: f64,
     pub beacon_level: f64,
+    pub beacon_x: f64,
+    pub beacon_z: f64,
+    pub beacon_y: f64,
+    /// The brightest **moving** light it sees (a lure on a body that moved): level (0 none)
+    /// and bearing. A moving light repels.
+    pub repel_level: f64,
+    pub repel_bearing: f64,
+    /// The tick the beacons were last read (they are read at the remote senses' rate).
+    pub tick: u64,
+}
+
+/// **A failed-visit mark** (S3): "no reward here" around `(x, z)` (ring metres) until the
+/// tick; 0 is an empty slot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Mark {
+    pub x: f64,
+    pub z: f64,
+    pub until_tick: u64,
+}
+
+/// **The beacon being inspected** (S3): where, its kind, and the tick the inspection began.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Visit {
+    pub active: bool,
+    pub kind: u8,
+    pub x: f64,
+    pub z: f64,
+    pub since: u64,
 }
 
 /// **A body's percept record** (module note).
@@ -167,6 +209,11 @@ pub struct Percept {
     pub n_carcasses: u8,
     pub carcasses: [(u32, u32, u32); MAX_CARCASSES],
     pub light: LightReading,
+    /// **The failed-visit memory** (S3): places marked "no reward here", each until it
+    /// decays ([`crate::LightConfig::mark_s`]).
+    pub marks: [Mark; MAX_MARKS],
+    /// The beacon it is inspecting.
+    pub visit: Visit,
     /// **The funnel's memory**: `(stage, key, tick)` of the events it counted lately — a
     /// prey sensed or approached (by id), a carcass eaten (by face). An event counts once
     /// per episode: again only after [`crate::PerceptionConfig::give_up_s`] without it.
@@ -203,6 +250,24 @@ impl Percept {
         let k = (0..FUNNEL_MEMORY).min_by_key(|&k| self.recent[k].2).unwrap_or(0);
         self.recent[k] = (stage, key, now.max(1));
         true
+    }
+
+    /// Whether `(x, z)` is under a mark that has not decayed at `now` (within `radius` of
+    /// its centre on a ring `ring` metres round).
+    pub fn marked(&self, x: f64, z: f64, now: u64, radius: f64, ring: f64) -> bool {
+        self.marks.iter().any(|m| {
+            if m.until_tick <= now {
+                return false;
+            }
+            let (dx, dz) = crate::pose::wrapped_delta(m.x, m.z, x, z, ring);
+            dx * dx + dz * dz <= radius * radius
+        })
+    }
+
+    /// Mark `(x, z)` "no reward here" until `until_tick`, over the slot that decays first.
+    pub fn mark(&mut self, x: f64, z: f64, until_tick: u64) {
+        let k = (0..MAX_MARKS).min_by_key(|&k| self.marks[k].until_tick).unwrap_or(0);
+        self.marks[k] = Mark { x, z, until_tick };
     }
 
     fn set_tracks(&mut self, tracks: &[Track]) {
@@ -244,7 +309,7 @@ pub(crate) fn class_of(config: &FaunaConfig, observer: &Animal, o: &Animal) -> O
 
 /// The occupancy the core's ray is marched under: terrain (and the world's edges and free
 /// water) only — no body or stand blocks it.
-struct TerrainOnly;
+pub(crate) struct TerrainOnly;
 
 impl crate::senses::CellOccupancy for TerrainOnly {
     fn any(&self, _cell: usize) -> bool {
@@ -262,7 +327,7 @@ impl crate::senses::CellOccupancy for TerrainOnly {
 }
 
 /// A body's base height, metres: its pose's off the ground, its sensing layer's top on it.
-fn base_m(o: &Animal, v: f64) -> f64 {
+pub(crate) fn base_m(o: &Animal, v: f64) -> f64 {
     if o.mobility.mode != crate::MobilityMode::Ground && o.pose.y_m.is_finite() {
         o.pose.y_m
     } else {
