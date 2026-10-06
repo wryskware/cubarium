@@ -480,12 +480,70 @@ seeds, flags):
   `ew+run` without dry spells as the sweep's zero;
 - rarity at day 150, seeds 5, 6, 1: `rare150-ew+run+dryA`, `rare150-ew+run+crop30+L40+dryA`.
 
-97 runs on eidolon (`~/webmodel-meadow3/batch/run.sh`, source branch `meadow3` in
-`~/webmodel-meadow3/src`, own target), 16 at a time at `nice -n 10`, each under `timeout
-2700`. Outputs `~/webmodel-meadow3/batch/runs/ARM-sSEED.txt`, the log `runs/log`, the table
+97 runs on eidolon (`~/webmodel-meadow3/batch/run.sh`, source branch `meadow3` at
+9c6cd241 in `~/webmodel-meadow3/src`, own target), 16 at a time at `nice -n 10`, about
+8 min a run, each under `timeout 2700`. Outputs `~/webmodel-meadow3/batch/runs/ARM-sSEED.txt`, the log `runs/log`, the table
 `runs/table.txt` (round 2's, plus the sweep grid ordered by dose with a niche-on-s5-and-s6
 column), and the marker **`runs/DONE`**, written on every exit (`runs/FAILED` if the build
 failed).
+
+### 11.4 The meadow-patch readout in the sim
+
+For Wrysk's "at least one continuous meadow patch in the display world": `voxel_census`
+rows (the staged runners' census) end with `drained_faces`, then for meadow (springturf),
+grove (lanternberry) and forest (vaulttree): `*_patch_max` (faces in the largest connected
+patch), `*_patch_share` (that over the drained faces) and `*_patches` (patches of at least
+`meadow_patch_min_faces=N`, default 25, a readout knob on the command line).
+- **Held face:** the species holds the face's top plant place; a stand beneath a cover
+  (`FaceLayer::Under`) holds none.
+- **Connected:** neighbouring columns (`x` wraps round the ring, `z` does not) with heights
+  within one voxel (`patches::STEP_MAX`): a stair is continuous ground, a cliff or a ledge
+  over a cave floor is not.
+- **Drained ground:** the model's drained zones read now: soil faces highest in their
+  column, terrain sky at least velvetpad's gate (the `dim` band and up), springturf's
+  aeration and standing-water gates passing.
+- Code: `crates/cubarium/src/voxel/patches.rs` (pure; tests on hand-built grids:
+  connectivity and gaps, the ring's wrap in `x` only, stairs against cliffs, the `Under`
+  exclusion on a real seeded stand). Smoke: a fresh terrarium, 2 minutes, plants only:
+  8,635 drained faces, largest turf patch 9.
+
+### 11.5 What dryA would mean in the sim
+
+**The sim's weather today** (`crates/cubarium-voxel/src/weather.rs`, terrarium presets
+`[world.day]` cycle 120 min, `[world.climate] preset = "tropical_jungle"`):
+- Rain is a closed cycle: each simulated minute a natural event may start, by per-mode
+  hazards that read RH or the moisture, the afternoon bump, the cooling rate and fronts
+  (0.1 a day). After every event a **dry gap** of 300–900 s (`dry_gap_min_s`,
+  `dry_gap_max_s`) blocks natural starts. At RH ≥ `rh_max` (1.5) a **forced downpour**
+  starts whatever the gap.
+- `weather_speed` "auto" runs the weather about 5× nature on a 2 h day.
+- Nothing in it is periodic beyond the day: no season, no multi-day modulation of the
+  hazards or the gap. DORMANCY's measured dry spells under the turf (patch and dry-hills):
+  median 10 min, longest about 2 h, scattered, not synchronised across the ground.
+
+**dryA** (`dry=10:0.5:0.2:5`): every 10 world days (20 h), for half a day (1 h), the drained
+ground's root water at 0.2 of what it would be, everywhere at once.
+- **No existing knob makes it.** A longer dry gap (`dry_gap_*`) makes *every* interval
+  between events drier, all the time: a drier climate, not a season. The forced downpour at
+  `rh_max` would also cut a long spell short, since evaporation keeps raising RH.
+- **It needs a new weather mode**, a dry season on the climate, e.g.
+  `[world.climate] dry_season_every_days`, `dry_season_len_days`, `dry_season_phase_days`
+  and `dry_season_rain` (the natural hazards' multiplier during it; 0 none), with the
+  forced downpour either held off during the season (`rh_max` raised in it) or kept as
+  the closed cycle's release valve.
+- The sim would set the *rain*, not the root water: whether drained soil reaches 0.2 of its
+  water in 1 h comes from the soil's own drainage and evaporation. The 2 h spells
+  DORMANCY saw say drained soil can dry below the turf's wake water within hours, but
+  the 0.2 level needs a measurement on a short fixture before any model number transfers.
+- The sweep's winner (§11.2's guess: 5:0.25:0.2 or 10:0.5:0.2) converts to: no natural
+  rain for 30 min every 10 h, or for 1 h every 20 h.
+
+**On screen:** for the season's length the meadow on the open drained ground browns
+(cured turf) and the lanternberry seedlings and the thin edge of the groves starve back;
+the turf wakes green after the first rain. Between seasons the groves creep back into the
+meadow's edge. Round 2's cost applies: on s6 the groves fall from 0.77 to about 0.11 of
+drained ground and stonecushion takes the rest, and the summit forest thins (vaulttree
+0.7 → 0.3). Whether the world gets a dry season is Wrysk's call; nothing is implemented.
 
 ## Roles (balance through roles)
 
