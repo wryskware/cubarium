@@ -409,9 +409,15 @@ fn a_remembered_kill_makes_its_patch_preferred() {
 /// eats.
 #[test]
 fn a_veilhound_walks_to_a_carcass_between_hunts_and_eats_it() {
+    assert!(veilhound_meal(true) > 0.0, "with the meal rule a member walks to the carcass and eats");
+    assert_eq!(veilhound_meal(false), 0.0, "with main's rule none does");
+}
+
+/// What the Veilhounds ate in the case, under `meal_first`.
+fn veilhound_meal(meal_first: bool) -> f64 {
     let world = clock_off(16);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(quick_meal_config(patrol(), Founder::Blind));
+    let mut fauna = Fauna::new(quick_meal_config(HuntConfig { meal_first, ..patrol() }, Founder::Blind));
     let den = Site { x: 16, y: SURFACE_Y, z: 6 };
     assert!(fauna.apply(&world, Command::FoundPack { den, founder: Founder::Chorister, stores: HUNTING, heading_rad: EAST }));
     let teachers = fauna.config.teachers;
@@ -425,9 +431,9 @@ fn a_veilhound_walks_to_a_carcass_between_hunts_and_eats_it() {
     carcass_at(&mut flora, a.x - d, a.z, SURFACE_Y, 0.5);
     let carrion0 = carrion_total(&flora);
     let ticks = walk_ticks(&fauna, Founder::Chorister, d);
-    step_until(&mut fauna, &world, &mut flora, ticks, |f| eaten(f, Founder::Chorister) > 0.0)
-        .expect("a member walks to the carcass and eats");
+    step_until(&mut fauna, &world, &mut flora, ticks, |f| eaten(f, Founder::Chorister) > 0.0);
     let ate = eaten(&fauna, Founder::Chorister);
     assert!(((carrion0 - carrion_total(&flora)) - ate).abs() <= 1e-12);
     assert_closes(&fauna, "after the Veilhound's meal");
+    ate
 }

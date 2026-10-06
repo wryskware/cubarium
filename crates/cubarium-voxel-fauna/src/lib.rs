@@ -3184,6 +3184,14 @@ pub struct Fauna {
     /// target changes face. Not saved.
     #[serde(skip)]
     pack_paths: FxHashMap<u64, PackPath>,
+    /// Per hunter id (HUNTER-MEAL): the route field to the face it walks to, as
+    /// `pack_paths`. Not saved.
+    #[serde(skip)]
+    hunt_paths: FxHashMap<u64, PackPath>,
+    /// The faces holding a usable carcass (carrion under a carcass record) and the tick the
+    /// list was read from the plant layer (HUNTER-MEAL's meal step). Not saved.
+    #[serde(skip)]
+    carcass_sites: (Option<u64>, Vec<cubarium_voxel_flora::Site>),
     /// The packs standing in the world (roster R3), by id.
     #[serde(default)]
     packs: Vec<PackRecord>,
@@ -3252,8 +3260,20 @@ impl Fauna {
         view: &VoxelView<'_>,
         founder: Founder,
     ) -> std::sync::Arc<encounter::RouteGraph> {
+        let every = self.config.founder(founder).pack.map_or(0.0, |p| p.route_refresh_s);
+        self.routes(view, founder, every)
+    }
+
+    /// Lineage `founder`'s walking route graph, rebuilt when older than `every` seconds
+    /// (the pack's [`Pack::route_refresh_s`], the patrol's [`HuntConfig::route_refresh_s`]).
+    /// One cache per lineage, whichever asks.
+    pub(crate) fn routes(
+        &mut self,
+        view: &VoxelView<'_>,
+        founder: Founder,
+        every: f64,
+    ) -> std::sync::Arc<encounter::RouteGraph> {
         let phys = *self.config.founder(founder);
-        let every = phys.pack.map_or(0.0, |p| p.route_refresh_s);
         let tick = self.tick;
         if let Some((built, map)) = self.pack_routes.get(&founder.index()) {
             if tick.saturating_sub(*built) < cubarium_voxel::ticks_at_least_one(every) {
@@ -3263,6 +3283,37 @@ impl Fauna {
         let map = std::sync::Arc::new(encounter::RouteGraph::for_founder(view, &phys, self.config.founding.clearance_margin_m));
         self.pack_routes.insert(founder.index(), (tick, map.clone()));
         map
+    }
+
+    /// Hunter `id`'s route field to node `goal` of `graph`, out to `max_steps`: cached
+    /// until the graph is rebuilt or the goal changes (HUNTER-MEAL).
+    pub(crate) fn hunt_path(
+        &mut self,
+        graph: &std::sync::Arc<encounter::RouteGraph>,
+        id: u64,
+        goal: usize,
+        max_steps: u32,
+    ) -> std::sync::Arc<FxHashMap<usize, u32>> {
+        if let Some(p) = self.hunt_paths.get(&id) {
+            if std::sync::Arc::ptr_eq(&p.graph, graph) && p.goal == goal {
+                return p.field.clone();
+            }
+        }
+        let field = std::sync::Arc::new(graph.distances(goal, max_steps));
+        self.hunt_paths.insert(id, PackPath { graph: graph.clone(), goal, field: field.clone() });
+        field
+    }
+
+    /// The faces holding a usable carcass — carrion under the plant layer's carcass record —
+    /// read once a tick (HUNTER-MEAL).
+    pub(crate) fn carcass_sites(&mut self, fv: &cubarium_voxel_flora::FloraView<'_>) -> &[cubarium_voxel_flora::Site] {
+        if self.carcass_sites.0 != Some(self.tick) {
+            let list = &mut self.carcass_sites.1;
+            list.clear();
+            list.extend(fv.ground.iter().filter(|g| g.carcass.is_some() && g.carrion > 0.0).map(|g| g.site));
+            self.carcass_sites.0 = Some(self.tick);
+        }
+        &self.carcass_sites.1
     }
 
     /// Pack `pack`'s route field to face `goal` on lineage `founder`'s graph, out to
@@ -3332,6 +3383,8 @@ impl Fauna {
             pack_routes: FxHashMap::default(),
             open_air: None,
             pack_paths: FxHashMap::default(),
+            hunt_paths: FxHashMap::default(),
+            carcass_sites: (None, Vec::new()),
             packs: Vec::new(),
             next_pack: 0,
             face_sky: (None, FxHashMap::default()),
