@@ -152,8 +152,11 @@ pub struct Params {
     /// bare ground): faces flicker out of eligibility (water, the arming check) faster than
     /// they convert, so the sustained rate is a share of the instantaneous one. From the
     /// `sp` probes e5/e6/l5/l6 (minutes 30–90 after load, the load burst left out) against
-    /// each start's census funnel: lanternberry 0.33 (0.24–0.49 over the four), velvetpad
-    /// 0.30 (0.14–0.63); the pooled 0.31 for the rest (their counts are too small to fit).
+    /// each start's census funnel, a ratio of sums over the four (per-probe spread in
+    /// brackets): lanternberry 0.33 (0.24–0.49, 75 faces), velvetpad 0.30 (0.14–0.63, 53),
+    /// springturf 0.99 (0.2–12, 53; weather-driven), bloomcrown 0.41 (0.1–1.25, 9),
+    /// vaulttree 0.86 (0.56–1.2, 11), stonecushion 0.19 (0.03–0.25, 6), umbrellafrond 0.29
+    /// (0.04–0.16, 5); siphonreed none (0.31, the lanternberry–pad pool).
     pub establish_phi: [f64; NS],
     /// Each cohort reads its own faces' water ([`Site::w_rel`]) rather than the zone's mean.
     pub water_rank: bool,
@@ -178,7 +181,7 @@ impl Default for Params {
             seed_k: [f64::INFINITY; NS],
             seed_k_zone: Vec::new(),
             self_beta: [0.5; NS],
-            establish_phi: [0.31, 0.31, 0.31, 0.31, 0.30, 1.0, 0.31, 0.33, 0.31],
+            establish_phi: [0.41, 0.29, 0.99, 0.19, 0.30, 1.0, 0.86, 0.33, 0.31],
             water_rank: true,
             sample_sigma: 0.1,
         }
@@ -654,6 +657,11 @@ impl Model {
         if b > 0.0 && a > 0.0 { a / b } else { 1.0 }
     }
 
+    /// Whether species `s`'s seeds float to the water's margins ([`Dispersal::Water`]).
+    fn floats(&self, s: usize) -> bool {
+        self.config.species(Species::ALL[s]).dispersal == cubarium_voxel_flora::Dispersal::Water
+    }
+
     /// The seeded share of a zone's open faces for species `s` now.
     fn seeded(&self, zi: usize, s: usize) -> f64 {
         let a = self.zones.zones[zi].area.max(1.0);
@@ -1117,7 +1125,14 @@ impl Model {
                 continue;
             }
             dens[s] = self.p.psi[s] * self.z[zi].bank[s] / a;
-            seed[s] = self.seeded(zi, s);
+            seed[s] = if self.floats(s) {
+                // A water seed lands only on a standing-water margin (`seeds::water_target`,
+                // `seeds.rs:1539`): the bank spreads over the faces whose gates pass.
+                let g = readings[s].gate;
+                if g > 0.0 { g * (1.0 - (-self.z[zi].bank[s] / (a * g)).exp()) } else { 0.0 }
+            } else {
+                self.seeded(zi, s)
+            };
         }
         for (l, share) in [(false, 1.0)] {
             if share <= 0.0 {
@@ -1140,7 +1155,9 @@ impl Model {
                     if seed[s] <= 0.0 {
                         continue;
                     }
-                    let (f, m, site) = self.pass_share(zi, s, VACANT, mean, self.p.sigma[VACANT], SampleKind::Seeded, readings[s].gate, fallback[s]);
+                    // A water seed's faces are the margins: the gate-passing sample.
+                    let (kind, gate_now) = if self.floats(s) { (SampleKind::Open, 1.0) } else { (SampleKind::Seeded, readings[s].gate) };
+                    let (f, m, site) = self.pass_share(zi, s, VACANT, mean, self.p.sigma[VACANT], kind, gate_now, fallback[s]);
                     pres[s] = seed[s] * f;
                     cm[s] = m;
                     sites[s] = site;
