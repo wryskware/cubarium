@@ -56,7 +56,27 @@ use crate::Fauna;
 // 44: HUNTER-MEAL — `HuntConfig::{meal_first, carcass_scan_m, reachable_only,
 //     route_refresh_s, success_memory_s, success_boost}`, `HuntMemory::productive`, the meal
 //     and route ledger lines.
-pub const SCHEMA: u32 = 44;
+// 45: VEILHOUND-SEARCH — `FounderPhysiology::senses` (`SenseTable`), `PackRecord::drawn`,
+//     the senses' ledger lines.
+// 46: SENSES-CORE — `SenseTable`'s new fields (night and still sight, hearing's floor,
+//     tremor, smell, live, scent channel), `FaunaConfig::{perception, scent}`, the percept
+//     records (`Fauna::percepts`), `PackRecord::drawn_scent`, `ChaseEnd::Lost`, the funnel
+//     and the perception ledger lines; `pack_*_by_sense` widened to four modalities.
+// 47: S2 GROUND RESPONSES — `Percept::vigil` (`Vigil`), `Track::heading`, `SenseTable::
+//     {feeding_sight_fraction, kin_tracks}`, `FounderPhysiology::vigilance`, `Pack::{stalk_margin,
+//     commit_m, stalk_freeze}`, `PredationConfig::{awareness_sensed, awareness_unaware,
+//     aware_within_s}`, `HuntConfig::patch_scent_weight`, the `vigil` ledger lines.
+// 48: AMPHIBIOUS SNAIL — `FounderPhysiology::amphibious` (`Amphibious`: the water rule, the
+//     drying clock, the thirst return, retraction and the roam reflex), `Mobility::{dryness,
+//     ashore, retract_ticks, thirsty}`, `Departure::Desiccation`, `Fauna::last_rain_tick`,
+//     the ledger's `amphibious_ticks`, `retracts` and `ashore_assimilated`.
+// 49: HUNKER — `FounderPhysiology::hunker` (`Hunker`), `Animal::hunkered`, `Vigil::{flee_id,
+//     flee_tick, hunkered, hunker_close, pry, opened_until}`, the `vigil` ledger's hunker lines.
+// 50: GAIT — `FounderPhysiology::sprint` (`Sprint`), `FounderState::{sprint_spent, winded}`,
+//     `Glider::glide_speed_fraction` (replaces `glide_body_lengths_per_s`), the ledger's
+//     `sprint_ticks_by_founder` and `winded_by_founder`; the Veilhound's and the seedporter's
+//     cruise and motor defaults.
+pub const SCHEMA: u32 = 50;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -393,6 +413,7 @@ mod tests {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            hunkered: false,
             stomach: crate::Stomach::default(),
             eating: false,
             emergency: false,

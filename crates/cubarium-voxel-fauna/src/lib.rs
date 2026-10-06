@@ -31,6 +31,14 @@ mod manifest;
 mod pose;
 mod predation;
 mod pack;
+pub mod perception;
+pub mod scent;
+pub mod vigil;
+pub use perception::{Percept, Track};
+pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
+mod gait;
+pub use gait::Sprint;
+pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
 mod registry;
@@ -65,7 +73,7 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, StepLimits, birth_readiness,
+    Amphibious, BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
     disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -73,7 +81,7 @@ pub use controller::{
     FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, heuristic, resolve_actions,
 };
 pub use predation::{
-    BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
+    BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodge_chance_with, dodges,
     egg_hatches, hatch_draw, is_prey_of, kind_of, moved_recently, tremor_of,
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
@@ -90,7 +98,7 @@ pub use manifest::{
     Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
     Transfer, Tunings, gru32_parameter_count,
 };
-pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PredationConfig, TeacherConfig};
+pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PerceptionConfig, PredationConfig, ScentConfig, TeacherConfig};
 pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, attack_preference, encounter_share, profitability, FRUITLESS_SLOTS};
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
@@ -630,6 +638,23 @@ pub struct Mobility {
     /// Consecutive ticks under water deeper than its drown depth. It drowns when this
     /// reaches [`FounderPhysiology::drown_ticks`]; any tick not under resets it.
     pub submerged_ticks: u64,
+    /// **The drying clock** of an amphibious body ([`crate::Amphibious`]), 0 hydrated, 1
+    /// full; it dies of [`Departure::Desiccation`] at the lineage's `lethal_fraction`.
+    /// Always 0 for every other body.
+    #[serde(default)]
+    pub dryness: f64,
+    /// Out of water on the last tick (an amphibious body beyond its water margin): it
+    /// does not fall asleep there.
+    #[serde(default)]
+    pub ashore: bool,
+    /// Ticks left of a retraction ([`crate::Amphibious::retract_hold_s`]): stopped and
+    /// closed.
+    #[serde(default)]
+    pub retract_ticks: u32,
+    /// Its drying clock is past the return fraction of the hour (night or rain, or dry
+    /// day): it is held to the water-bound rule and its heuristic heads for water.
+    #[serde(default)]
+    pub thirsty: bool,
 }
 
 /// A body's locomotion mode ([`Mobility::mode`], predation-and-flight §3.1).
@@ -863,6 +888,11 @@ pub struct Animal {
     /// away. `false` for every other body.
     #[serde(default)]
     pub yielding: bool,
+    /// **Hunkered** (HUNKER, [`crate::Hunker`]): clamped down under its shield, neither moving
+    /// nor eating. Its state is [`State::Resting`]; the presenter reads this flag to draw the
+    /// hunker pose (`cubarium::voxel::hunker`). False for every other body.
+    #[serde(default)]
+    pub hunkered: bool,
     /// **The stomach** (the minimal gut, `design/metabolism-meals-2026-10-02.md` repair 2
     /// item 10): raw food eaten and not yet digested, per food class, in all three
     /// currencies. Separate from [`Animal::gut`], which is egesta. Counted in the stored
@@ -1048,6 +1078,17 @@ pub struct PackRecord {
     /// taken again until the pack has taken another.
     #[serde(default)]
     pub abandoned: Option<u64>,
+    /// **The draw** (VEILHOUND-SEARCH, the lineage's [`SenseTable`]): the prey the
+    /// pack's leader is walking to by route — sensed by the pack, on its route component,
+    /// not yet its target. Remade at each of the leader's samples; cleared when the pack
+    /// takes a target.
+    #[serde(default)]
+    pub drawn: Option<u64>,
+    /// **The scent draw** (SENSES-CORE): the leader is walking up its prey's scent, with no
+    /// prey sensed on its component. Set and cleared at each of the leader's samples, as
+    /// [`PackRecord::drawn`] is.
+    #[serde(default)]
+    pub drawn_scent: bool,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -1777,6 +1818,14 @@ pub struct FounderState {
     /// every walker.
     #[serde(default)]
     pub lift: f64,
+    /// **Stamina spent** (GAIT, [`crate::Sprint`]): 0 rested, 1 spent. A sprint spends it at
+    /// `1 / endurance_s` a second at top speed, and time off the sprint rests it at
+    /// `1 / recovery_s`.
+    #[serde(default)]
+    pub sprint_spent: f64,
+    /// Sprinted out: no sprint until rested to the sprint's `resume_fraction`.
+    #[serde(default)]
+    pub winded: bool,
 }
 
 /// What one controller interval actually did, from the body's own ledger events and
@@ -2006,6 +2055,13 @@ pub struct FaunaConfig {
     /// patch-to-patch search, tremor sense and prey switching.
     #[serde(default)]
     pub hunt: HuntConfig,
+    /// **The perception core** (SENSES-CORE, [`PerceptionConfig`]): the pairwise senses'
+    /// cadence, candidates, occlusion, hearing's emission and the pursuit's memory.
+    #[serde(default)]
+    pub perception: PerceptionConfig,
+    /// **The scent field** (SENSES-CORE, [`ScentConfig`]).
+    #[serde(default)]
+    pub scent: ScentConfig,
 }
 
 fn default_lineage_body_ceiling() -> u32 {
@@ -2044,6 +2100,8 @@ impl Default for FaunaConfig {
             founding: FoundingConfig::default(),
             lineage_body_ceiling: LINEAGE_BODY_CEILING,
             hunt: HuntConfig::default(),
+            perception: PerceptionConfig::default(),
+            scent: ScentConfig::default(),
         }
     }
 }
@@ -2144,11 +2202,15 @@ pub enum Departure {
     /// Its wound reached 1 (`design/predation-and-flight-2026-09-28.md` §2.5): a corpse,
     /// with a carcass record, killed by a body of lineage `by`.
     Killed { by: Founder },
+    /// An amphibious body's drying clock reached its lineage's `lethal_fraction`
+    /// ([`crate::Amphibious`], AMPHIBIOUS-SNAIL). A corpse.
+    Desiccation,
 }
 
 impl Departure {
-    pub const ALL: [Departure; 4 + Founder::COUNT] = {
-        let mut all = [Departure::Starved; 4 + Founder::COUNT];
+    pub const ALL: [Departure; 5 + Founder::COUNT] = {
+        let mut all = [Departure::Starved; 5 + Founder::COUNT];
+        all[4 + Founder::COUNT] = Departure::Desiccation;
         all[1] = Departure::Drowned;
         all[2] = Departure::Aged;
         all[3] = Departure::Removed;
@@ -2169,6 +2231,7 @@ impl Departure {
             Departure::Aged => 2,
             Departure::Removed => 3,
             Departure::Killed { by } => 4 + by.index(),
+            Departure::Desiccation => 4 + Founder::COUNT,
         }
     }
 
@@ -2183,6 +2246,7 @@ impl Departure {
             Departure::Drowned => "drowned",
             Departure::Aged => "aged",
             Departure::Removed => "removed",
+            Departure::Desiccation => "desiccated",
             Departure::Killed { by } => {
                 static NAMES: std::sync::OnceLock<[&'static str; Founder::COUNT]> =
                     std::sync::OnceLock::new();
@@ -2574,6 +2638,12 @@ pub struct FaunaLedger {
     pub founder_ticks_by_founder: [u64; Founder::COUNT],
     pub ledges_up_by_founder: [u64; Founder::COUNT],
     pub ledges_down_by_founder: [u64; Founder::COUNT],
+    /// GAIT: ticks spent sprinting (a forward above cruise delivered), and the times a body
+    /// sprinted itself out (winded), by lineage.
+    #[serde(default)]
+    pub sprint_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub winded_by_founder: [u64; Founder::COUNT],
     /// Predation (`design/predation-and-flight-2026-09-28.md` §2.3), by the **striker's**
     /// lineage: strikes begun, and contacts resolved as a hit or a dodge.
     pub strikes_by_founder: [u64; Founder::COUNT],
@@ -2695,6 +2765,48 @@ pub struct FaunaLedger {
     pub pack_chases: u64,
     #[serde(default)]
     pub pack_chase_kills: u64,
+    /// **The pack's senses** (VEILHOUND-SEARCH, SENSES-CORE): chases begun on a prey sensed
+    /// by each of `[sight, hearing, tremor, smell]` ([`crate::perception::MODALITIES`]) — a
+    /// prey seen and heard counts under both, so the entries need not sum to the chases;
+    /// draws begun (the leader set out toward a new prey beyond its reach, or up its prey's
+    /// scent, counted under smell) by the same; chases begun while drawn; controller samples
+    /// of a hungry adult (wanting food or in an emergency) under the pack tactic, and of
+    /// those the samples spent leading a draw and following its leader.
+    #[serde(default)]
+    pub pack_chases_by_sense: [u64; 4],
+    #[serde(default)]
+    pub pack_draws_by_sense: [u64; 4],
+    /// **The hunt funnel** (SENSES-CORE), per `[hunter][prey]` lineage and stage
+    /// ([`crate::perception::FUNNEL_STAGES`]: sensed, approached, struck, killed, eaten):
+    /// a hunter's detections of a prey, its setting out after one (a pack target or a draw,
+    /// a patrol's engage), each strike begun, each kill, and its first bite of a carcass.
+    /// Sensed, approached and eaten count **episodes**: once per hunter and prey (carcass),
+    /// again only after the pursuit's memory without it ([`crate::perception::Percept::first`]).
+    #[serde(default)]
+    pub funnel: [[[u64; 5]; Founder::COUNT]; Founder::COUNT],
+    /// The perception core's cost (SENSES-CORE): remote sensings run, pairs weighed (one
+    /// terrain ray each) and the cells those rays crossed.
+    #[serde(default)]
+    pub percept_sensings: u64,
+    #[serde(default)]
+    pub percept_pairs: u64,
+    #[serde(default)]
+    pub percept_ray_cells: u64,
+    /// Pack targets given up because no member had sensed them within the pursuit's memory
+    /// ([`PerceptionConfig::give_up_s`]).
+    #[serde(default)]
+    pub pack_targets_lost: u64,
+    /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
+    #[serde(default)]
+    pub vigil: VigilLedger,
+    #[serde(default)]
+    pub pack_draw_chases: u64,
+    #[serde(default)]
+    pub pack_hungry_samples: u64,
+    #[serde(default)]
+    pub pack_draw_lead_samples: u64,
+    #[serde(default)]
+    pub pack_draw_follow_samples: u64,
     /// Lanternjaws that left a carcass to a body that hunts them (roster R3, the yield).
     #[serde(default)]
     pub carcass_yields: u64,
@@ -2814,6 +2926,17 @@ pub struct FaunaLedger {
     /// Eggs lost before hatching (face gone, flooded), by lineage.
     #[serde(default)]
     pub eggs_lost_by_founder: [u64; Founder::COUNT],
+    /// **AMPHIBIOUS-SNAIL readouts** (counters only): ticks an amphibious body was alive,
+    /// `[day, night][in water, ashore]` (day: daylight at or above the day line, or the
+    /// clock off), and retractions begun.
+    #[serde(default)]
+    pub amphibious_ticks: [[u64; 2]; 2],
+    #[serde(default)]
+    pub retracts: u64,
+    /// Organic matter an amphibious body assimilated while ashore (its share of
+    /// `assimilated_by_founder`).
+    #[serde(default)]
+    pub ashore_assimilated: f64,
 }
 
 impl FaunaLedger {
@@ -3160,6 +3283,10 @@ pub struct Fauna {
     /// — daylight falling below [`LifeConfig::day_line`] — for the egg bank's trigger
     /// (§2.13). `None` before the first tick.
     last_daylight: Option<f64>,
+    /// The last tick rain fell (SNAIL-FIX: an amphibious body's roam hours run on for
+    /// [`Amphibious::roam_after_rain_s`] after it). `None` before any rain.
+    #[serde(default)]
+    last_rain_tick: Option<u64>,
     /// Gut-seed voids since the last [`Fauna::take_seed_voids`] (F3): a census's events,
     /// not world state, so not saved; bounded at [`SEED_VOID_LOG_MAX`] (the oldest go).
     #[serde(skip)]
@@ -3188,6 +3315,15 @@ pub struct Fauna {
     /// `pack_paths`. Not saved.
     #[serde(skip)]
     hunt_paths: FxHashMap<u64, PackPath>,
+    /// **Each body's percept record** (SENSES-CORE, [`Percept`]), by id: what its heuristics
+    /// read of the other bodies, the scent and the tremor. Saved with the world (it holds the
+    /// last-known positions a pursuit walks to); a dead body's is dropped.
+    #[serde(default)]
+    pub(crate) percepts: FxHashMap<u64, Percept>,
+    /// **The scent field** (SENSES-CORE, [`scent::ScentField`]). Not saved: it refills
+    /// within a few half-lives of a load.
+    #[serde(skip)]
+    pub(crate) scent: scent::ScentField,
     /// The faces holding a usable carcass (carrion under a carcass record) and the tick the
     /// list was read from the plant layer (HUNTER-MEAL's meal step). Not saved.
     #[serde(skip)]
@@ -3213,6 +3349,8 @@ pub const SEED_VOID_LOG_MAX: usize = 65_536;
 pub(crate) struct PackPath {
     graph: std::sync::Arc<encounter::RouteGraph>,
     goal: usize,
+    /// The steps the field reaches out to.
+    steps: u32,
     field: std::sync::Arc<FxHashMap<usize, u32>>,
 }
 
@@ -3241,6 +3379,9 @@ pub enum ChaseEnd {
     Spent,
     /// The target stood in another pack's territory.
     Trespass,
+    /// No member had sensed it within the pursuit's memory (SENSES-CORE,
+    /// [`PerceptionConfig::give_up_s`]).
+    Lost,
 }
 
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
@@ -3295,17 +3436,39 @@ impl Fauna {
         max_steps: u32,
     ) -> std::sync::Arc<FxHashMap<usize, u32>> {
         if let Some(p) = self.hunt_paths.get(&id) {
-            if std::sync::Arc::ptr_eq(&p.graph, graph) && p.goal == goal {
+            if std::sync::Arc::ptr_eq(&p.graph, graph) && p.goal == goal && p.steps >= max_steps {
                 return p.field.clone();
             }
         }
         let field = std::sync::Arc::new(graph.distances(goal, max_steps));
-        self.hunt_paths.insert(id, PackPath { graph: graph.clone(), goal, field: field.clone() });
+        self.hunt_paths.insert(id, PackPath { graph: graph.clone(), goal, steps: max_steps, field: field.clone() });
         field
     }
 
     /// The faces holding a usable carcass — carrion under the plant layer's carcass record —
     /// read once a tick (HUNTER-MEAL).
+    /// Whether the scent field runs: a body of a live lineage ([`SenseTable::live`]) that
+    /// smells is alive.
+    pub(crate) fn scent_wanted(&self) -> bool {
+        // S2: a patrolling hunter's patch choice reads its prey's scent too.
+        let patrol_smells = self.config.hunt.patrol && self.config.hunt.patch_scent_weight > 0.0;
+        self.animals.iter().any(|a| a.founder.is_some_and(|f| {
+            let t = self.config.founder(f).senses;
+            (t.live && t.smell_min > 0.0) || (patrol_smells && self.config.founder(f).hunter.is_some() && self.config.founder(f).pack.is_none())
+        }))
+    }
+
+    /// **A body's percept record** (SENSES-CORE, [`Percept`]): what its heuristics read.
+    pub fn percept(&self, id: u64) -> Option<&Percept> {
+        self.percepts.get(&id)
+    }
+
+    /// The scent level of channel `ch` on the support face `site` (a readout; 0 off the
+    /// field).
+    pub fn scent_level(&self, view: &VoxelView<'_>, ch: ScentChannel, site: Site) -> f64 {
+        self.scent.level(view, ch, i64::from(site.x), site.y, site.z)
+    }
+
     pub(crate) fn carcass_sites(&mut self, fv: &cubarium_voxel_flora::FloraView<'_>) -> &[cubarium_voxel_flora::Site] {
         if self.carcass_sites.0 != Some(self.tick) {
             let list = &mut self.carcass_sites.1;
@@ -3328,12 +3491,12 @@ impl Fauna {
     ) -> (std::sync::Arc<encounter::RouteGraph>, std::sync::Arc<FxHashMap<usize, u32>>) {
         let graph = self.pack_routes(view, founder);
         if let Some(p) = self.pack_paths.get(&pack) {
-            if std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal {
+            if std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal && p.steps >= max_steps {
                 return (graph, p.field.clone());
             }
         }
         let field = std::sync::Arc::new(graph.distances(goal, max_steps));
-        self.pack_paths.insert(pack, PackPath { graph: graph.clone(), goal, field: field.clone() });
+        self.pack_paths.insert(pack, PackPath { graph: graph.clone(), goal, steps: max_steps, field: field.clone() });
         (graph, field)
     }
 
@@ -3378,11 +3541,14 @@ impl Fauna {
             policy_driven: [false; Founder::COUNT],
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
+            last_rain_tick: None,
             seed_voids: Vec::new(),
             pack_events: Vec::new(),
             pack_routes: FxHashMap::default(),
             open_air: None,
             pack_paths: FxHashMap::default(),
+            percepts: FxHashMap::default(),
+            scent: scent::ScentField::default(),
             hunt_paths: FxHashMap::default(),
             carcass_sites: (None, Vec::new()),
             packs: Vec::new(),
@@ -3651,6 +3817,8 @@ impl Fauna {
             feast: None,
             feast_eaten: 0.0,
             abandoned: None,
+            drawn: None,
+            drawn_scent: false,
         });
         Some(id)
     }
@@ -4003,6 +4171,7 @@ impl Fauna {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            hunkered: false,
             stomach: Stomach::default(),
             eating: false,
             emergency: false,

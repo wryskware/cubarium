@@ -368,7 +368,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (984 rows)
+**`flora.*`** (987 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1348,6 +1348,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_growth_per_s` | 0.0015 | /s | [0, inf) |  | - | placeholder | glassfilm: logistic growth rate at full light |
 | `flora.film_capacity_per_m2` | 0.4 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm: carrying capacity per square metre |
 | `flora.film_graze_refuge` | 0.1 | fraction of capacity | [0, 1] | 0–0.5 | - | placeholder | glassfilm: share of a site's capacity a grazer cannot reach (the refuge it regrows from) |
+| `flora.film_land_moisture_min` | 0.9 | pore fill 0..1 | [0, inf) |  | - | placeholder | glassfilm on wet ground: least face pore fill a dry-surfaced face grows film at (above 1: no land film) |
+| `flora.film_land_growth_per_s` | 0.0005 | /s | [0, inf) |  | - | placeholder | glassfilm on wet ground: logistic growth rate at full light |
+| `flora.film_land_capacity_per_m2` | 0.2 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm on wet ground: carrying capacity per square metre |
 | `flora.film_maintenance_per_s` | 0.0001 | /s | [0, inf) |  | - | placeholder | glassfilm: upkeep, respired |
 | `flora.film_spread_per_s` | 0.0002 | /s | [0, inf) |  | - | placeholder | glassfilm: fragments a neighbour sends per unit of its film |
 | `flora.film_dry_death_per_s` | 0.005 | /s | [0, inf) |  | - | placeholder | glassfilm: loss on a dry or too-deep site, to litter |
@@ -1357,7 +1360,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1227 rows)
+**`fauna.*`** (1795 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1438,6 +1441,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.littershredder.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.littershredder.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.littershredder.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.littershredder.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.littershredder.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.littershredder.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.littershredder.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.littershredder.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.littershredder.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.littershredder.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.littershredder.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.littershredder.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.littershredder.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.littershredder.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.littershredder.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.littershredder.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1454,6 +1471,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.littershredder.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.littershredder.senses.sight_night_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.littershredder.senses.sight_still_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.littershredder.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.littershredder.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.littershredder.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.littershredder.senses.tremor_m` | 2.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.littershredder.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.littershredder.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.littershredder.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.littershredder.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.littershredder.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.littershredder.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.littershredder.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.littershredder.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.littershredder.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.littershredder.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.littershredder.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.littershredder.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.littershredder.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.littershredder.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.littershredder.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.littershredder.vigilance.freeze_tremor` | 0.015 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.littershredder.vigilance.withdraw_tremor` | 0.06 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.littershredder.vigilance.freeze_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.littershredder.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.littershredder.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.littershredder.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.littershredder.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.littershredder.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.littershredder.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.littershredder.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.littershredder.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.littershredder.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.littershredder.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.littershredder.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.littershredder.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.littershredder.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.littershredder.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.littershredder.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.littershredder.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.littershredder.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.littershredder.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.littershredder.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.littershredder.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1480,7 +1542,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.littershredder.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.littershredder.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.littershredder.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.littershredder.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.littershredder.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.littershredder.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.littershredder.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -1507,6 +1569,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.littershredder.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.littershredder.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1558,6 +1622,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.frondgrazer.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.frondgrazer.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.frondgrazer.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.frondgrazer.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.frondgrazer.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.frondgrazer.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.frondgrazer.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.frondgrazer.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.frondgrazer.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.frondgrazer.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.frondgrazer.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.frondgrazer.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.frondgrazer.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.frondgrazer.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.frondgrazer.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.frondgrazer.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1574,6 +1652,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.burr_coat` | 0.6 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.frondgrazer.senses.sight_m` | 8.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.frondgrazer.senses.sight_night_m` | 4.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.frondgrazer.senses.sight_still_fraction` | 0.625 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.frondgrazer.senses.sight_half_angle_deg` | 150.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.frondgrazer.senses.hearing_m` | 8.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.frondgrazer.senses.hearing_min` | 0.32666666666666666 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.frondgrazer.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.frondgrazer.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.frondgrazer.senses.smell_min` | 0.42 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.frondgrazer.senses.feeding_sight_fraction` | 0.25 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.frondgrazer.senses.kin_tracks` | 3 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.frondgrazer.vigilance.flee_start_m` | 4.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.frondgrazer.vigilance.flee_stop_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.frondgrazer.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.frondgrazer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.frondgrazer.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.frondgrazer.vigilance.scan_every_s` | 6.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.frondgrazer.vigilance.scan_s` | 1.5 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.frondgrazer.vigilance.orient_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.frondgrazer.vigilance.alarm_emission_factor` | 2.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.frondgrazer.vigilance.alarm_bolt_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.frondgrazer.vigilance.alarm_refractory_s` | 20.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.frondgrazer.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.frondgrazer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.frondgrazer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.frondgrazer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.frondgrazer.hunker.enter_m` | 2.5 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.frondgrazer.hunker.leave_m` | 5.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.frondgrazer.hunker.calm_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.frondgrazer.hunker.hunger_calm_exp` | 1.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.frondgrazer.hunker.min_condition` | 0.1 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.frondgrazer.hunker.shield` | 0.9 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.frondgrazer.hunker.shield_growth_exp` | 2.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.frondgrazer.hunker.wound_opens` | 1.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.frondgrazer.hunker.pry_per_member_s` | 0.016666666666666666 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.frondgrazer.hunker.resist_per_s` | 0.025 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.frondgrazer.hunker.pry_reach_m` | 0.3 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.frondgrazer.hunker.opened_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.frondgrazer.hunker.ring_m` | 1.5 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.frondgrazer.hunker.ring_resist_per_kin` | 0.5 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.frondgrazer.hunker.ring_kin_max` | 3 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.frondgrazer.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.frondgrazer.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.frondgrazer.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.frondgrazer.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1600,7 +1723,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.frondgrazer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.frondgrazer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.frondgrazer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.frondgrazer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.frondgrazer.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.frondgrazer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.frondgrazer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -1627,6 +1750,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.frondgrazer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.frondgrazer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1678,6 +1803,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.lanternjaw.founding_count` | 3 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.lanternjaw.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.lanternjaw.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.lanternjaw.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.lanternjaw.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.lanternjaw.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.lanternjaw.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.lanternjaw.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.lanternjaw.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.lanternjaw.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.lanternjaw.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.lanternjaw.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.lanternjaw.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.lanternjaw.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.lanternjaw.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.lanternjaw.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1694,6 +1833,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.lanternjaw.senses.sight_m` | 4.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.lanternjaw.senses.sight_night_m` | 3.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.lanternjaw.senses.sight_still_fraction` | 0.5 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.lanternjaw.senses.sight_half_angle_deg` | 110.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.lanternjaw.senses.hearing_m` | 3.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.lanternjaw.senses.hearing_min` | 0.09375 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.lanternjaw.senses.tremor_m` | 3.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.lanternjaw.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.lanternjaw.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.lanternjaw.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.lanternjaw.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.lanternjaw.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.lanternjaw.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.lanternjaw.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.lanternjaw.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.lanternjaw.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.lanternjaw.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.lanternjaw.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.lanternjaw.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.lanternjaw.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.lanternjaw.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.lanternjaw.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.lanternjaw.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.lanternjaw.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.lanternjaw.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.lanternjaw.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.lanternjaw.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.lanternjaw.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.lanternjaw.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.lanternjaw.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.lanternjaw.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.lanternjaw.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.lanternjaw.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.lanternjaw.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.lanternjaw.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.lanternjaw.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.lanternjaw.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.lanternjaw.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.lanternjaw.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.lanternjaw.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.lanternjaw.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.lanternjaw.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.lanternjaw.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.lanternjaw.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.lanternjaw.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1720,7 +1904,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.lanternjaw.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.lanternjaw.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.lanternjaw.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.lanternjaw.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.lanternjaw.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.lanternjaw.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.lanternjaw.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -1747,6 +1931,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.lanternjaw.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.lanternjaw.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1798,6 +1984,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.capgnawer.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.capgnawer.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.capgnawer.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.capgnawer.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.capgnawer.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.capgnawer.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.capgnawer.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.capgnawer.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.capgnawer.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.capgnawer.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.capgnawer.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.capgnawer.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.capgnawer.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.capgnawer.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.capgnawer.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.capgnawer.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.capgnawer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1814,6 +2014,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.capgnawer.burr_coat` | 0.8 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.capgnawer.senses.sight_m` | 1.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.capgnawer.senses.sight_night_m` | 0.5 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.capgnawer.senses.sight_still_fraction` | 0.5 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.capgnawer.senses.sight_half_angle_deg` | 120.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.capgnawer.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.capgnawer.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.capgnawer.senses.tremor_m` | 1.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.capgnawer.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.capgnawer.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.capgnawer.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.capgnawer.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.capgnawer.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.capgnawer.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.capgnawer.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.capgnawer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.capgnawer.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.capgnawer.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.capgnawer.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.capgnawer.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.capgnawer.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.capgnawer.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.capgnawer.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.capgnawer.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.capgnawer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.capgnawer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.capgnawer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.capgnawer.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.capgnawer.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.capgnawer.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.capgnawer.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.capgnawer.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.capgnawer.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.capgnawer.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.capgnawer.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.capgnawer.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.capgnawer.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.capgnawer.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.capgnawer.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.capgnawer.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.capgnawer.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.capgnawer.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.capgnawer.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.capgnawer.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.capgnawer.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.capgnawer.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1840,7 +2085,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.capgnawer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.capgnawer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.capgnawer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.capgnawer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.capgnawer.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.capgnawer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.capgnawer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -1867,6 +2112,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.capgnawer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.capgnawer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.capgnawer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1918,6 +2165,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.bite_spill_fraction` | 0.25 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.loftstrider.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.loftstrider.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.loftstrider.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.loftstrider.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.loftstrider.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.loftstrider.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.loftstrider.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.loftstrider.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.loftstrider.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.loftstrider.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.loftstrider.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.loftstrider.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.loftstrider.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.loftstrider.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.loftstrider.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.loftstrider.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.loftstrider.contact_height_fraction` | 0.15 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1934,6 +2195,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.loftstrider.burr_coat` | 0.4 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.loftstrider.senses.sight_m` | 12.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.loftstrider.senses.sight_night_m` | 6.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.loftstrider.senses.sight_still_fraction` | 0.6666666666666666 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.loftstrider.senses.sight_half_angle_deg` | 180.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.loftstrider.senses.hearing_m` | 10.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.loftstrider.senses.hearing_min` | 0.245 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.loftstrider.senses.tremor_m` | 2.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.loftstrider.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.loftstrider.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.loftstrider.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.loftstrider.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.loftstrider.vigilance.flee_start_m` | 6.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.loftstrider.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.loftstrider.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.loftstrider.vigilance.group_min` | 2 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.loftstrider.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.loftstrider.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.loftstrider.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.loftstrider.vigilance.orient_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.loftstrider.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.loftstrider.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.loftstrider.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.loftstrider.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.loftstrider.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.loftstrider.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.loftstrider.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.loftstrider.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.loftstrider.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.loftstrider.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.loftstrider.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.loftstrider.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.loftstrider.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.loftstrider.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.loftstrider.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.loftstrider.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.loftstrider.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.loftstrider.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.loftstrider.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.loftstrider.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.loftstrider.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.loftstrider.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.loftstrider.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.loftstrider.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.loftstrider.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.loftstrider.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1960,7 +2266,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.loftstrider.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.loftstrider.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.loftstrider.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.loftstrider.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.loftstrider.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.loftstrider.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.loftstrider.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -1987,6 +2293,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.loftstrider.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.loftstrider.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2038,6 +2346,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.ripple-snail.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.ripple-snail.water_margin_m` | 0.25 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.ripple-snail.amphibious.dry_ground_s` | 2400.0 | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.ripple-snail.amphibious.wet_ground_s` | 21600.0 | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.ripple-snail.amphibious.rehydrate_per_s` | 0.0033333333333333335 | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.ripple-snail.amphibious.step_moisture_min` | 0.33 | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.ripple-snail.amphibious.return_fraction` | 0.5 | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.ripple-snail.amphibious.day_return_fraction` | 0.1 | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.ripple-snail.amphibious.day_drying_factor` | 3.0 | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.ripple-snail.amphibious.rain_drying_factor` | 0.0 | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.ripple-snail.amphibious.lethal_fraction` | 1.25 | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.ripple-snail.amphibious.water_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.ripple-snail.amphibious.retract_hold_s` | 8.0 | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.ripple-snail.amphibious.retract_armour` | 0.5 | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.ripple-snail.amphibious.roam_search_m` | 1.5 | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.ripple-snail.amphibious.roam_after_rain_s` | 600.0 | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.ripple-snail.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2054,6 +2376,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.ripple-snail.burr_coat` | 0.1 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.ripple-snail.senses.sight_m` | 0.5 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.ripple-snail.senses.sight_night_m` | 0.25 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.ripple-snail.senses.sight_still_fraction` | 0.5 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.ripple-snail.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.ripple-snail.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.ripple-snail.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.ripple-snail.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.ripple-snail.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.ripple-snail.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.ripple-snail.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.ripple-snail.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.ripple-snail.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.ripple-snail.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.ripple-snail.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.ripple-snail.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.ripple-snail.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.ripple-snail.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.ripple-snail.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.ripple-snail.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.ripple-snail.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.ripple-snail.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.ripple-snail.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.ripple-snail.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.ripple-snail.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.ripple-snail.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.ripple-snail.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.ripple-snail.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.ripple-snail.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.ripple-snail.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.ripple-snail.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.ripple-snail.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.ripple-snail.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.ripple-snail.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.ripple-snail.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.ripple-snail.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.ripple-snail.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.ripple-snail.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.ripple-snail.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.ripple-snail.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.ripple-snail.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.ripple-snail.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.ripple-snail.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.ripple-snail.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.ripple-snail.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.ripple-snail.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2080,7 +2447,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.ripple-snail.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.ripple-snail.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.ripple-snail.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.ripple-snail.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.ripple-snail.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.ripple-snail.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.ripple-snail.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2107,6 +2474,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.ripple-snail.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.ripple-snail.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.ripple-snail.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2158,6 +2527,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.bellwing.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.bellwing.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.bellwing.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.bellwing.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.bellwing.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.bellwing.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.bellwing.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.bellwing.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.bellwing.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.bellwing.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.bellwing.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.bellwing.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.bellwing.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.bellwing.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.bellwing.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.bellwing.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.bellwing.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2174,6 +2557,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.bellwing.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.bellwing.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.bellwing.senses.sight_night_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.bellwing.senses.sight_still_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.bellwing.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.bellwing.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.bellwing.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.bellwing.senses.tremor_m` | 0.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.bellwing.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.bellwing.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.bellwing.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.bellwing.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.bellwing.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.bellwing.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.bellwing.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.bellwing.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.bellwing.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.bellwing.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.bellwing.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.bellwing.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.bellwing.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.bellwing.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.bellwing.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.bellwing.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.bellwing.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.bellwing.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.bellwing.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.bellwing.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.bellwing.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.bellwing.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.bellwing.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.bellwing.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.bellwing.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.bellwing.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.bellwing.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.bellwing.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.bellwing.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.bellwing.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.bellwing.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.bellwing.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.bellwing.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.bellwing.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.bellwing.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.bellwing.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.bellwing.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.bellwing.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2200,7 +2628,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flight.egg_air_refresh_s` | 600.0 | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.bellwing.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.bellwing.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.bellwing.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.bellwing.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.bellwing.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.bellwing.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.bellwing.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2227,6 +2655,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.bellwing.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.bellwing.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2264,7 +2694,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.seedporter.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.seedporter.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
-| `fauna.founders.seedporter.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.seedporter.cruise_body_lengths_per_s` | 2.38 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
 | `fauna.founders.seedporter.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
 | `fauna.founders.seedporter.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
 | `fauna.founders.seedporter.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
@@ -2278,6 +2708,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.seedporter.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.seedporter.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.seedporter.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.seedporter.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.seedporter.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.seedporter.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.seedporter.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.seedporter.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.seedporter.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.seedporter.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.seedporter.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.seedporter.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.seedporter.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.seedporter.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.seedporter.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.seedporter.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.seedporter.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2294,6 +2738,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.seedporter.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.seedporter.senses.sight_m` | 16.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.seedporter.senses.sight_night_m` | 3.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.seedporter.senses.sight_still_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.seedporter.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.seedporter.senses.hearing_m` | 8.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.seedporter.senses.hearing_min` | 0.32666666666666666 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.seedporter.senses.tremor_m` | 0.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.seedporter.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.seedporter.senses.smell_min` | 0.9 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.seedporter.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.seedporter.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.seedporter.vigilance.flee_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.seedporter.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.seedporter.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.seedporter.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.seedporter.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.seedporter.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.seedporter.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.seedporter.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.seedporter.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.seedporter.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.seedporter.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.seedporter.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.seedporter.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.seedporter.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.seedporter.vigilance.refuge_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.seedporter.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.seedporter.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.seedporter.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.seedporter.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.seedporter.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.seedporter.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.seedporter.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.seedporter.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.seedporter.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.seedporter.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.seedporter.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.seedporter.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.seedporter.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.seedporter.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.seedporter.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.seedporter.sprint.body_lengths_per_s` | 5.95 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.seedporter.sprint.endurance_s` | 10.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.seedporter.sprint.recovery_s` | 60.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.seedporter.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2320,7 +2809,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.seedporter.glider.glide_body_lengths_per_s` | 3.0 | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.seedporter.glider.glide_speed_fraction` | 2.0 | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.seedporter.glider.glide_cost_factor` | 1.2 | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.seedporter.glider.glide_min_height_m` | 1.0 | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.seedporter.glider.roost_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2347,6 +2836,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.seedporter.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.seedporter.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2384,7 +2875,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.chorister.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.chorister.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
-| `fauna.founders.chorister.cruise_body_lengths_per_s` | 0.6 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.chorister.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
 | `fauna.founders.chorister.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
 | `fauna.founders.chorister.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
 | `fauna.founders.chorister.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
@@ -2398,6 +2889,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.chorister.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.chorister.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.chorister.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.chorister.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.chorister.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.chorister.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.chorister.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.chorister.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.chorister.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.chorister.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.chorister.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.chorister.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.chorister.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.chorister.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.chorister.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.chorister.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.chorister.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2414,6 +2919,51 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.chorister.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.chorister.senses.sight_m` | 16.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.chorister.senses.sight_night_m` | 9.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.chorister.senses.sight_still_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.chorister.senses.sight_half_angle_deg` | 120.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.chorister.senses.hearing_m` | 10.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.chorister.senses.hearing_min` | 0.0037500000000000007 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.chorister.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.chorister.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.chorister.senses.smell_min` | 0.13 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.chorister.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.chorister.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.chorister.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.chorister.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.chorister.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.chorister.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.chorister.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.chorister.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.chorister.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.chorister.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.chorister.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.chorister.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.chorister.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.chorister.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.chorister.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.chorister.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.chorister.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.chorister.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.chorister.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.chorister.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.chorister.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.chorister.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.chorister.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.chorister.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.chorister.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.chorister.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.chorister.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.chorister.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.chorister.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.chorister.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.chorister.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.chorister.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.chorister.sprint.body_lengths_per_s` | 2.5 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.chorister.sprint.endurance_s` | 20.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.chorister.sprint.recovery_s` | 120.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.chorister.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2440,7 +2990,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.chorister.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.chorister.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.chorister.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.chorister.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.chorister.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2467,6 +3017,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.den_search_m` | 8.0 | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.chorister.pack.follow_radius_m` | 3.0 | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.chorister.pack.commit_m` | 2.5 | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.chorister.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.chorister.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2482,6 +3034,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.predation.awareness_resting` | 0.7 | fraction | [0, 1] |  | - | decision | dodge table awareness, awake resting |
 | `fauna.predation.awareness_cropping` | 0.4 | fraction | [0, 1] |  | - | decision | dodge table awareness, cropping and climbing |
 | `fauna.predation.awareness_asleep` | 0.0 | fraction | [0, 1] |  | - | decision | dodge table awareness, asleep |
+| `fauna.predation.awareness_sensed` | 1.0 | fraction | [0, 1] |  | - | placeholder | D5 (S2): a live lineage's prey whose record holds the striker dodges at this awareness |
+| `fauna.predation.awareness_unaware` | 0.0 | fraction | [0, 1] |  | - | placeholder | D5 (S2): ...and one whose record does not, at this |
+| `fauna.predation.aware_within_s` | 1.0 | s | [0, inf) |  | - | placeholder | D5 (S2): ...sensed within this long before contact |
 | `fauna.predation.dodge_rear_aspect` | 0.5 | fraction | [0, 1] | 0.1–1 | - | decision | dodge aspect factor when struck from the rear half |
 | `fauna.predation.dodge_condition_floor` | 0.5 | fraction | [0, 1] | 0.1–1 | - | decision | the dodge's condition factor is the reserve fraction clamped to [this, 1] |
 | `fauna.predation.egg_footfall_min` | 2 | distinct prey | [0, inf) | 1–6 | - | placeholder | lowest footfall threshold a dormant egg draws |
@@ -2574,6 +3129,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.hunt.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | how long a lineage's walking route graph stands before it is rebuilt |
 | `fauna.hunt.success_memory_s` | 1800.0 | s | [0, inf) | 120–14400 log | - | placeholder | how long a kill marks its place productive in the killer's memory |
 | `fauna.hunt.success_boost` | 1.0 | fraction | [0, inf) | 0–4 | - | placeholder | a patch by a remembered kill scores 1 + this times its food cue |
+| `fauna.hunt.patch_scent_weight` | 1.0 | weight | [0, inf) |  | - | placeholder | S2: its prey's scent on a square's food faces is one more patch cue at this weight (0: no scent) |
+| `fauna.perception.remote_hz` | 4.0 | Hz | (0, inf) | 1–20 | - | placeholder | how often a body's remote senses (sight, hearing, the pair's tremor) run, staggered by id |
+| `fauna.perception.max_candidates` | 8 | bodies | [0, inf) | 2–32 | - | placeholder | prey and threats weighed (one terrain ray each) per observer per remote sensing, nearest first |
+| `fauna.perception.bin_m` | 2.0 | m | (0, inf) | 0.5–8 | - | placeholder | the spatial bins bodies are sorted into each tick |
+| `fauna.perception.occlusion` | 0.25 | fraction | [0, 1] | 0–1 | - | placeholder | hearing and tremor through terrain are multiplied by this (sight is stopped) |
+| `fauna.perception.hearing_speed_exp` | 1.0 | exponent | [0, inf) | 0.5–3 | - | placeholder | hearing's emission is speed^this x length^size_exp |
+| `fauna.perception.hearing_size_exp` | 1.0 | exponent | [0, inf) | 0–3 | - | placeholder | the length exponent of hearing's emission |
+| `fauna.perception.hearing_near_m` | 0.5 | m | (0, inf) |  | - | placeholder | received loudness is emission over the distance, read as at least this |
+| `fauna.perception.give_up_s` | 10.0 | s | [0, inf) | 1–60 log | - | placeholder | a body not sensed again within this is given up; a pursuit walks to its last-known point until then |
+| `fauna.scent.cell_m` | 0.5 | m | (0, inf) | 0.25–2 | - | placeholder | the scent field's cell (rounded to whole voxels): the connected surface faces in a cell are one node |
+| `fauna.scent.half_life_s` | 60.0 | s | (0, inf) | 5–1200 log | - | placeholder | scent's half-life |
+| `fauna.scent.diffuse_fraction` | 0.5 | fraction per update | [0, 1] | 0.05–1 | - | placeholder | the share of a node's difference to its neighbours mixed in per 0.5 s update |
+| `fauna.scent.threshold` | 0.000001 | scent units | [0, inf) |  | - | placeholder | levels below this are dropped after an update |
+| `fauna.scent.deposit_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what a standing body lays, by its organic matter |
+| `fauna.scent.carrion_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what carrion lays, by its stock |
+| `fauna.scent.step_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | neighbouring surface faces connect within this height difference, with open air over the lower one |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
 | `fauna.founding.starter_litter_organic` | 0.2 | organic units | [0, inf) | 0.05–1 | - | placeholder | leaf litter laid under each seeded littershredder |

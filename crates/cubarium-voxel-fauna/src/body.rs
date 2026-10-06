@@ -469,6 +469,12 @@ pub struct FounderPhysiology {
     /// have standing water within this distance (0.25 for the ripple-snail). Unread for a
     /// lineage that is not [`FounderPhysiology::aquatic`].
     pub water_margin_m: f64,
+    /// `Some` for an **amphibious** body (AMPHIBIOUS-SNAIL, Wrysk 2026-10-06, the
+    /// ripple-snail): an [`FounderPhysiology::aquatic`] body that also crawls out onto wet
+    /// ground on a drying clock ([`Amphibious`]). `None` keeps the water-bound rule
+    /// (`water_margin_m` only), as for every other lineage.
+    #[serde(default)]
+    pub amphibious: Option<Amphibious>,
     /// **Where an egg-layer's clutch goes** ([`EggSite`]): a face holding litter (the
     /// shredder, the capgnawer) or a face holding film (the ripple-snail). Not a number,
     /// so it has no registry row.
@@ -497,6 +503,23 @@ pub struct FounderPhysiology {
     /// (`placeholder`'s `burr_coat_of`), for Wrysk to judge.
     #[serde(default)]
     pub burr_coat: f64,
+    /// **Its senses** ([`SenseTable`]; SENSES-CORE): sight, hearing, tremor and smell, each
+    /// with its range and floor. Read by [`crate::perception`] for a lineage whose table is
+    /// `live` (the Veilhound in S1); inert for the others until S2 and S3.
+    #[serde(default)]
+    pub senses: SenseTable,
+    /// **Its ground response** (S2, [`crate::Vigilance`]): what its heuristics do with what its
+    /// live table senses. Inert while its table is not live.
+    #[serde(default)]
+    pub vigilance: crate::Vigilance,
+    /// **Its sprint** (GAIT, [`crate::Sprint`]): the gait above cruise its rush or ground
+    /// flight asks for, and the stamina that limits it. None for a lineage that only walks.
+    #[serde(default)]
+    pub sprint: crate::Sprint,
+    /// **Its hunker** (HUNKER, [`crate::Hunker`]): the armoured defence a herd lineage takes
+    /// instead of flight. Off for every lineage but the frondgrazer.
+    #[serde(default)]
+    pub hunker: crate::Hunker,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -565,6 +588,30 @@ pub struct Pack {
     /// An adult that wants a rest walks home to its den first, for at most this long;
     /// after it, it rests where it is, seconds. A placeholder.
     pub home_give_up_s: f64,
+    /// **The stalk** (S2, [`crate::vigil::stalk`]): closing on its prey beyond `commit_m`, a
+    /// member walks no faster than keeps its emission under this fraction of the prey's
+    /// hearing floor; 0 does not stalk. 0.7.
+    #[serde(default = "pack_stalk_margin")]
+    pub stalk_margin: f64,
+    /// ...and rushes within this of it, metres. 2.5.
+    #[serde(default = "pack_commit_m")]
+    pub commit_m: f64,
+    /// ...and stands still while a prey it sees is in a scan pause (a switch, no registry
+    /// row).
+    #[serde(default = "pack_stalk_freeze")]
+    pub stalk_freeze: bool,
+}
+
+fn pack_stalk_margin() -> f64 {
+    Pack::CHORISTER.stalk_margin
+}
+
+fn pack_commit_m() -> f64 {
+    Pack::CHORISTER.commit_m
+}
+
+fn pack_stalk_freeze() -> bool {
+    Pack::CHORISTER.stalk_freeze
 }
 
 fn pack_route_refresh_s() -> f64 {
@@ -598,6 +645,9 @@ impl Pack {
         den_search_m: 8.0,
         follow_radius_m: 3.0,
         home_give_up_s: 600.0,
+        stalk_margin: 0.7,
+        commit_m: 2.5,
+        stalk_freeze: true,
     };
 }
 
@@ -610,8 +660,10 @@ pub struct Glider {
     pub climb_min_stand_m: f64,
     /// Horizontal metres covered per metre of descent in a glide. 2.5.
     pub glide_ratio: f64,
-    /// The glide's speed, body lengths per second. 3.0.
-    pub glide_body_lengths_per_s: f64,
+    /// **The glide's speed, × its ground cruise** (GAIT, Wrysk 2026-10-06: it "can glide
+    /// like 2x their base speed"): a glide covers this × the lineage's cruise
+    /// (`cruise_body_lengths_per_s` × the adult length) a second across. 2.0.
+    pub glide_speed_fraction: f64,
     /// What a second gliding costs, × basal upkeep (the whole, upkeep included). 1.2.
     pub glide_cost_factor: f64,
     /// A glide starts only from at least this height over the landing surface, metres.
@@ -643,11 +695,11 @@ fn fruit_search_m() -> f64 {
 
 impl Glider {
     /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
-    /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 3 BL/s for 1.2 × basal.
+    /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 2 × its cruise for 1.2 × basal.
     pub const SEEDPORTER: Glider = Glider {
         climb_min_stand_m: 1.0,
         glide_ratio: 2.5,
-        glide_body_lengths_per_s: 3.0,
+        glide_speed_fraction: 2.0,
         glide_cost_factor: 1.2,
         glide_min_height_m: 1.0,
         roost_search_m: 4.0,
@@ -674,6 +726,125 @@ pub struct GutSeeds {
     pub seeds_per_fruit_organic: f64,
     /// Seconds from a meal until its seeds are voided at the body's current face.
     pub gut_transit_s: f64,
+}
+
+/// **An amphibious body's table** ([`FounderPhysiology::amphibious`], AMPHIBIOUS-SNAIL,
+/// Wrysk 2026-10-06): out of water it runs a **drying clock**, 0 hydrated to 1 full, and
+/// it may step onto ground wet enough. "In water" is the water-bound rule's own zone:
+/// standing water within [`FounderPhysiology::water_margin_m`] of its face. There the clock
+/// falls at `rehydrate_per_s`; out of it the clock rises at `1 / T(m)` per second, `T`
+/// running linearly from `dry_ground_s` on bone-dry ground (pore fill `m` = 0) to
+/// `wet_ground_s` on saturated ground (`m` = 1), times `day_drying_factor` while the
+/// sun is up and `rain_drying_factor` while it rains. Past 1 it is **desiccated** (it cannot
+/// feed); at `lethal_fraction` it dies ([`crate::Departure::Desiccation`]).
+///
+/// The defaults are a 19 cm apple-snail-sized body (Pomacea maculata reaches 15 cm and
+/// crawls out at night to lay; Lymnaea and land snails tolerate the loss of a third to a
+/// half of their water). Real active snails on dry substrate reach that loss in about
+/// 8 h, and on saturated ground in about 3 days; they refill in about an hour of water.
+/// The world's day is 2 h ([`DAY_S`]), so each real time is taken at the world's day:
+/// 8 h → 40 min, 72 h → 6 h, 1 h → 5 min. Plausible, untuned.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Amphibious {
+    /// The switch: `false` keeps the water-bound rule (no land, no clock), the arm the
+    /// check compares against. Not a number, so it has no registry row.
+    pub on_land: bool,
+    /// Seconds the clock takes to fill on bone-dry ground (pore fill 0), at night, dry
+    /// weather.
+    pub dry_ground_s: f64,
+    /// Seconds the clock takes to fill on saturated ground (pore fill 1, or a film of
+    /// water on the face).
+    pub wet_ground_s: f64,
+    /// Clock fraction recovered per second in water.
+    pub rehydrate_per_s: f64,
+    /// The least ground moisture (the face voxel's pore fill, 0..1; a face under any
+    /// standing water reads 1) a step onto a face out of water needs.
+    pub step_moisture_min: f64,
+    /// Its heuristic heads for water once the clock passes this, at night or in rain.
+    pub return_fraction: f64,
+    /// ... and this by day in dry weather: the activity bias that keeps it near water in
+    /// the sun.
+    pub day_return_fraction: f64,
+    /// The clock runs this many times faster while the sun is up (daylight at or above
+    /// the day line).
+    pub day_drying_factor: f64,
+    /// ... and this many times as fast while rain falls (0: no drying in rain).
+    pub rain_drying_factor: f64,
+    /// It dies of desiccation when the clock reaches this (between 1 and this it is
+    /// desiccated: no feeding, heading for water).
+    pub lethal_fraction: f64,
+    /// How far its return reflex looks for water, metres (a world query, not a sense).
+    pub water_search_m: f64,
+    /// A looming shadow or a threat's tremor makes it **retract** for this long, seconds:
+    /// it stops and closes, eating nothing.
+    pub retract_hold_s: f64,
+    /// While retracted a hit on it is reduced by this, on top of its armour: slower to
+    /// eat, not immune.
+    pub retract_armour: f64,
+    /// **The roam drive** (SNAIL-FIX): at night, in rain and for `roam_after_rain_s` after
+    /// it, an awake body that is not thirsty and not feeding where it stands walks out
+    /// onto wet ground ([`step_moisture_min`](Amphibious::step_moisture_min)) within this
+    /// many metres, toward the land face with the most film in reach ([`crate::Food::Film`],
+    /// the plant layer's land-wet film), or, in water with none in reach, to the nearest
+    /// wet land face. A heuristic world query, as the water reflex is. 0: no roam.
+    #[serde(default = "default_roam_search_m")]
+    pub roam_search_m: f64,
+    /// ... and the roam hours last this long after rain stops, seconds.
+    #[serde(default = "default_roam_after_rain_s")]
+    pub roam_after_rain_s: f64,
+}
+
+fn default_roam_search_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.roam_search_m
+}
+
+fn default_roam_after_rain_s() -> f64 {
+    Amphibious::RIPPLE_SNAIL.roam_after_rain_s
+}
+
+impl Amphibious {
+    /// The ripple-snail's table (see the type's note for the real-snail derivation).
+    pub const RIPPLE_SNAIL: Amphibious = Amphibious {
+        on_land: true,
+        // 8 h real at the 12x world day.
+        dry_ground_s: 2400.0,
+        // 72 h real at the 12x world day.
+        wet_ground_s: 21600.0,
+        // A full refill in ~1 h real: 5 min of world time.
+        rehydrate_per_s: 1.0 / 300.0,
+        // Below about field capacity a big snail's foot dries on the substrate: it keeps to
+        // damp ground (a third of pore capacity), and to water films.
+        step_moisture_min: 0.33,
+        // Real snails turn back well before damage: at half the clock.
+        return_fraction: 0.5,
+        // By day in the open it barely leaves the water.
+        day_return_fraction: 0.1,
+        // Sun and low daytime humidity roughly triple evaporation from a mantle.
+        day_drying_factor: 3.0,
+        // No net loss in rain: snails roam in it.
+        rain_drying_factor: 0.0,
+        // A quarter of the clock past full is the harm window before death.
+        lethal_fraction: 1.25,
+        // Its own short world: a few metres of a pond's margin.
+        water_search_m: 4.0,
+        // A snail stays in its shell some seconds after a shadow passes.
+        retract_hold_s: 8.0,
+        // A closed shell and operculum halve a hit.
+        retract_armour: 0.5,
+        // A night's crawl of a big snail is some metres; it looks over a stride of its
+        // pond's bank at a time.
+        roam_search_m: 1.5,
+        // Snails stay out a couple of real hours after rain: 10 min of world time.
+        roam_after_rain_s: 600.0,
+    };
+
+    /// The clock's rise per second out of water on ground of moisture `m` (0..1), before
+    /// the day and rain factors.
+    pub fn drying_per_s(&self, m: f64) -> f64 {
+        let m = if m.is_finite() { m.clamp(0.0, 1.0) } else { 0.0 };
+        let t = self.dry_ground_s + (self.wet_ground_s - self.dry_ground_s) * m;
+        if t > 0.0 { 1.0 / t } else { f64::INFINITY }
+    }
 }
 
 /// A flyer's table ([`FounderPhysiology::flight`], F1; the bellwing's numbers are
@@ -998,6 +1169,10 @@ impl FounderPhysiology {
     pub fn placeholder(founder: Founder) -> FounderPhysiology {
         let mut p = FounderPhysiology::placeholder_table(founder);
         p.burr_coat = burr_coat_of(founder);
+        p.senses = senses_of(founder);
+        p.vigilance = crate::vigil::vigilance_of(founder);
+        p.sprint = crate::gait::sprint_of(founder);
+        p.hunker = crate::vigil::hunker_of(founder);
         p
     }
 
@@ -1091,11 +1266,16 @@ impl FounderPhysiology {
                 founding_count: 8,
                 aquatic: false,
                 water_margin_m: 0.0,
+                amphibious: None,
                 egg_site: EggSite::Litter,
                 flight: None,
                 glider: None,
                 gut_seeds: None,
                 burr_coat: 0.0,
+                senses: SenseTable::default(),
+                vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1156,11 +1336,16 @@ impl FounderPhysiology {
                 founding_count: 8,
                 aquatic: false,
                 water_margin_m: 0.0,
+                amphibious: None,
                 egg_site: EggSite::Litter,
                 flight: None,
                 glider: None,
                 gut_seeds: None,
                 burr_coat: 0.0,
+                senses: SenseTable::default(),
+                vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1241,11 +1426,16 @@ impl FounderPhysiology {
                 founding_count: 3,
                 aquatic: false,
                 water_margin_m: 0.0,
+                amphibious: None,
                 egg_site: EggSite::Litter,
                 flight: None,
                 glider: None,
                 gut_seeds: None,
                 burr_coat: 0.0,
+                senses: SenseTable::default(),
+                vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -1447,7 +1637,11 @@ impl FounderPhysiology {
                     adult_length_m: 0.5,
                     adult_width_m: 0.25,
                     adult_height_m: 0.2,
-                    cruise_body_lengths_per_s: 1.0,
+                    // GAIT (Wrysk 2026-10-06: "a bit below veilhound when on the ground"):
+                    // 0.85 × the Veilhound's 1.4 m/s cruise, 1.19 m/s on its 0.5 m, ≈ 2.4
+                    // BL/s. It climbs at `climb_speed_fraction` (0.5) of this, slower than it
+                    // walks, and glides at its glider's `glide_speed_fraction` × this.
+                    cruise_body_lengths_per_s: 0.85 * 1.4 / 0.5,
                     // Half its length up or down in a stride; it does not climb terrain
                     // walls (stems and vine faces are its climbing, [`Glider`]).
                     step_up_m: 0.25,
@@ -1507,6 +1701,12 @@ impl FounderPhysiology {
                 core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
                 FounderPhysiology {
                     core,
+                    // GAIT: its own cruise, 1 BL/s (1.4 m/s; the standing pace rule), no
+                    // longer the lanternjaw's 0.6 (0.84 m/s; Wrysk 2026-10-06: "they
+                    // probably should move faster"). Full cruise still costs its basal rate
+                    // (the motor tie): a second at cruise costs what it did, a metre less;
+                    // its rush at 2.5 × cruise costs 2.5 × a second's walking.
+                    cruise_body_lengths_per_s: 1.0,
                     motor_respiration_per_s: core.maintenance_per_s,
                     // Its own height both ways, the lanternjaw's rule.
                     step_up_m: 0.6,
@@ -1559,6 +1759,9 @@ impl FounderPhysiology {
                     // quarter metre of standing water.
                     aquatic: true,
                     water_margin_m: 0.25,
+                    // Amphibious (Wrysk, 2026-10-06): it crawls out onto wet ground at
+                    // night and after rain, on a drying clock, and goes back to water.
+                    amphibious: Some(Amphibious::RIPPLE_SNAIL),
                     // Its clutch goes on film, under water.
                     egg_site: EggSite::Film,
                     // Taste reads film against the film's own capacity per site, derived on
@@ -1738,11 +1941,12 @@ pub(crate) fn resolve_motion(
     )
 }
 
-/// [`resolve_motion`] for a body that may be **water-bound** (roster R2b): with
-/// `water_margin_m` set, a sub-step onto another support face is refused, the way a wall
-/// refuses one, unless that face has standing water within the margin
-/// ([`water_within`]). A body already stranded beyond the margin is not held: it may walk
-/// anywhere, so it can find its way back.
+/// [`resolve_motion`] for a body that may be **water-bound** (roster R2b) or
+/// **amphibious** (AMPHIBIOUS-SNAIL): with a [`WaterRule`] set, a sub-step onto another
+/// support face is refused, the way a wall refuses one, unless the rule admits that face
+/// (standing water within the margin, or for an amphibious body ground wet enough). A
+/// body already stranded on a face the rule refuses is not held: it may walk anywhere, so
+/// it can find its way back.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_motion_in(
     view: &VoxelView<'_>,
@@ -1754,14 +1958,14 @@ pub(crate) fn resolve_motion_in(
     step_limits: StepLimits,
     wall_friction: f64,
     held: Actions,
-    water_margin_m: Option<f64>,
+    water_rule: Option<WaterRule>,
 ) -> Motion {
     // A stranded body is not held to the margin (it would never move again).
-    let water_margin_m = water_margin_m.filter(|&m| {
+    let water_rule = water_rule.filter(|rule| {
         pose.column(view.config.voxel_m, view.config.depth)
             .is_some_and(|(cx, cz)| {
                 let cx = cx.rem_euclid(i64::from(view.config.width));
-                water_within(view, cx, *standing_y, cz, m)
+                rule.admits(view, cx, *standing_y, cz)
             })
     });
     let r = body.footprint_radius();
@@ -1797,7 +2001,7 @@ pub(crate) fn resolve_motion_in(
             wade_depth_m,
             headroom,
             step_limits,
-            water_margin_m,
+            water_rule,
         ) {
             Some(actual) => {
                 moved += actual;
@@ -1833,7 +2037,7 @@ pub(crate) fn resolve_motion_in(
                         wade_depth_m,
                         headroom,
                         step_limits,
-                        water_margin_m,
+                        water_rule,
                     )
                     .is_some()
                     {
@@ -1854,7 +2058,7 @@ pub(crate) fn resolve_motion_in(
                         wade_depth_m,
                         headroom,
                         step_limits,
-                        water_margin_m,
+                        water_rule,
                     )
                     .expect("the bisection's best advance is valid");
                     pose.x = nx;
@@ -1872,7 +2076,7 @@ pub(crate) fn resolve_motion_in(
                     wade_depth_m,
                     headroom,
                     step_limits,
-                    water_margin_m,
+                    water_rule,
                 );
                 break;
             }
@@ -1906,7 +2110,7 @@ fn wall_slide(
     wade_depth_m: f64,
     headroom: u32,
     step_limits: StepLimits,
-    water_margin_m: Option<f64>,
+    water_rule: Option<WaterRule>,
 ) -> f64 {
     if budget <= 1e-12 {
         return 0.0;
@@ -1934,7 +2138,7 @@ fn wall_slide(
                 wade_depth_m,
                 headroom,
                 step_limits,
-                water_margin_m,
+                water_rule,
             )
             else {
                 break;
@@ -1966,7 +2170,7 @@ fn step_advance(
     wade_depth_m: f64,
     headroom: u32,
     step_limits: StepLimits,
-    water_margin_m: Option<f64>,
+    water_rule: Option<WaterRule>,
 ) -> Option<f64> {
     let (nx, nz, actual, ny) = advance_candidate(
         view,
@@ -1979,7 +2183,7 @@ fn step_advance(
         wade_depth_m,
         headroom,
         step_limits,
-        water_margin_m,
+        water_rule,
     )?;
     pose.x = nx;
     pose.z = nz;
@@ -1992,6 +2196,45 @@ fn step_advance(
 /// `margin_m` of this one's, itself included, holding standing water
 /// ([`VoxelView::standing_depth_m`]) over it. Distances are centre to centre between
 /// support faces, in metres; `x` wraps, `z` and `y` stop at the world's ends.
+/// **Where a water-bound or amphibious body may step** ([`resolve_motion_in`]): a face with
+/// standing water within `margin_m` ([`water_within`]), or, for an amphibious body out on
+/// land (`land_moisture_min` set), a face whose [`ground_moisture`] is at least that.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WaterRule {
+    pub margin_m: f64,
+    pub land_moisture_min: Option<f64>,
+}
+
+impl WaterRule {
+    /// The rule of a lineage's physiology: `None` for a body that is not aquatic.
+    pub(crate) fn of(phys: &FounderPhysiology) -> Option<WaterRule> {
+        phys.aquatic.then(|| WaterRule {
+            margin_m: phys.water_margin_m,
+            land_moisture_min: phys.amphibious.filter(|a| a.on_land).map(|a| a.step_moisture_min),
+        })
+    }
+
+    /// Whether the face `(x, y, z)` is one the body may step onto.
+    pub(crate) fn admits(&self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> bool {
+        water_within(view, x, y, z, self.margin_m)
+            || self.land_moisture_min.is_some_and(|m| ground_moisture(view, x, y, z) >= m)
+    }
+}
+
+/// **The ground's moisture at a support face**, 0..1: 1 under any water on the face (a
+/// shower's film included), else the face voxel's pore fill (0 for bedrock and rock with
+/// no pores, and on a view with no water).
+pub(crate) fn ground_moisture(view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> f64 {
+    let c = view.config;
+    if z >= c.depth || y >= c.height || view.pore.is_empty() {
+        return 0.0;
+    }
+    if view.water_depth_m(x, y, z) > 0.0 {
+        return 1.0;
+    }
+    view.pore_at(x, y, z).clamp(0.0, 1.0)
+}
+
 pub(crate) fn water_within(view: &VoxelView<'_>, x: i64, y: u32, z: u32, margin_m: f64) -> bool {
     let c = view.config;
     let v = c.voxel_m;
@@ -2075,7 +2318,7 @@ fn advance_candidate(
     wade_depth_m: f64,
     headroom: u32,
     step_limits: StepLimits,
-    water_margin_m: Option<f64>,
+    water_rule: Option<WaterRule>,
 ) -> Option<(f64, f64, f64, u32)> {
     let c = view.config;
     let v = c.voxel_m;
@@ -2113,11 +2356,11 @@ fn advance_candidate(
     }
     // A water-bound body (roster R2b): another face must have standing water within its
     // margin, or the step is refused as a wall's is.
-    if let Some(margin) = water_margin_m {
+    if let Some(rule) = water_rule {
         let hz = ((pz / v).floor().max(0.0) as u32).min(c.depth.saturating_sub(1));
         let hx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
         let same_face = (hx, hz) == (cx, cz as u32) && ny == standing_y;
-        if !same_face && !water_within(view, cx, ny, cz as u32, margin) {
+        if !same_face && !rule.admits(view, cx, ny, cz as u32) {
             return None;
         }
     }
@@ -4786,6 +5029,243 @@ mod step_rule_tests {
         // A climb of zero is the old receptor exactly: the ledge is a wall again.
         let reading = contact_readings(&ledge.view(), &pose, 2, &body, 0);
         assert_eq!(reading.front, 1.0);
+    }
+}
+
+/// **A lineage's senses** (SENSES-CORE, S1 of the senses pass; VEILHOUND-SEARCH before it):
+/// what the perception core ([`crate::perception`]) senses for it. Every number is a knob
+/// (`fauna.founders.<lineage>.senses.*`), set from the senses review's §1
+/// (`design/7_Research/senses-review-2026-10-06.md`, which keeps Astra's ranges where it
+/// agrees), the same in every preset. 0 turns a range off.
+///
+/// - **Sight**: a body within `sight_m` by day (`sight_night_m` below the day line), at
+///   `sight_still_fraction` of that for a still body, inside `sight_half_angle_deg` of its
+///   heading, on a terrain ray from its eye to the body's middle that terrain does not block.
+///   3D distance.
+/// - **Hearing**: a body within `hearing_m` whose received loudness — its emission
+///   `speed^a × length^b` ([`crate::PerceptionConfig`]'s exponents) over the 3D distance
+///   (at least `hearing_near_m`), times the occlusion factor when terrain blocks the ray —
+///   is at least `hearing_min`. All around.
+/// - **Tremor**: a grounded body within `tremor_m` whose footfall at it (the tremor rule,
+///   `mass × speed / d²`, times the occlusion factor through terrain) is at least
+///   `tremor_min`. All around.
+/// - **Smell**: the scent field ([`crate::scent`]), never a body: it reads a channel's level
+///   and gradient where it stands, and smells a channel at `smell_min` or above.
+///   `scent` is the channel its own body lays.
+///
+/// **`live`** says whether its heuristics read the core's record. Off (every lineage but the
+/// Veilhound in S1), its record is filled by the interim rules its reflexes ran on before the
+/// senses pass ([`crate::perception::refresh`]): these values are inert until the packages
+/// that give it behaviour (S2 ground responses, S3 light and flight) turn it on.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SenseTable {
+    /// The core fills its record (a switch, no registry row).
+    pub live: bool,
+    /// Sight's range by day for a moving body, metres; 0 is blind.
+    pub sight_m: f64,
+    /// Sight's range below the day line, metres.
+    pub sight_night_m: f64,
+    /// A still body is seen within this fraction of the range.
+    pub sight_still_fraction: f64,
+    /// Sight's half-angle from the heading, degrees (180 all around).
+    pub sight_half_angle_deg: f64,
+    /// Hearing's range, metres; 0 is deaf.
+    pub hearing_m: f64,
+    /// The faintest received loudness heard (emission / distance, m/s at the default
+    /// exponents).
+    pub hearing_min: f64,
+    /// Tremor's range, metres; 0 feels none.
+    pub tremor_m: f64,
+    /// The faintest footfall felt, in the tremor's units (organic × m/s / m²).
+    pub tremor_min: f64,
+    /// The faintest scent level smelled, in the field's units; 0 smells nothing.
+    pub smell_min: f64,
+    /// The scent channel its body lays ([`crate::ScentChannel`]); `None` lays none (a switch,
+    /// no registry row).
+    pub scent: Option<crate::ScentChannel>,
+    /// **Head down** (S2): while it crops between scan pauses ([`crate::Vigil::head_down`])
+    /// sight reaches this fraction of its range: the blind window. 1 is no change.
+    pub feeding_sight_fraction: f64,
+    /// At most this many of its own lineage are weighed per remote sensing, nearest first
+    /// (S2: a herd hears its neighbours bolt). 1.
+    pub kin_tracks: u32,
+}
+
+impl Default for SenseTable {
+    /// Senseless: every range off, read by no one.
+    fn default() -> SenseTable {
+        SenseTable {
+            live: false,
+            sight_m: 0.0,
+            sight_night_m: 0.0,
+            sight_still_fraction: 1.0,
+            sight_half_angle_deg: 90.0,
+            hearing_m: 0.0,
+            hearing_min: 0.0,
+            tremor_m: 0.0,
+            tremor_min: 0.0,
+            smell_min: 0.0,
+            scent: None,
+            feeding_sight_fraction: 1.0,
+            kin_tracks: 1,
+        }
+    }
+}
+
+impl SenseTable {
+    /// The longest of its pairwise ranges at this light, metres.
+    pub fn reach_m(&self, day: bool) -> f64 {
+        self.sight_range_m(day).max(self.hearing_m).max(self.tremor_m)
+    }
+
+    /// Sight's range for a moving body at this light, metres.
+    pub fn sight_range_m(&self, day: bool) -> f64 {
+        if day { self.sight_m } else { self.sight_night_m }
+    }
+}
+
+/// **Each lineage's senses** ([`SenseTable`]), from the senses review's §1 and Astra's per-species
+/// values (`design/7_Research/astra-senses-2026-10-06.md`), at the terrarium's scale (a 32 m ring,
+/// 6 m deep, 16 m tall). Hearing thresholds are set from the review's distances for a
+/// representative source at cruise (1 body length a second), emission `speed × length`:
+/// a walking Veilhound emits 1.4 × 1.4 = 1.96. Tremor's floor is the patrol's `tremor_turn`
+/// (a walking ripple-snail at the tremor radius), for every lineage alike. Smell floors are
+/// the levels the scent field holds at the review's distances from a still adult source at
+/// steady state on open ground ([`crate::scent`]'s calibration note).
+///
+/// The Veilhound's table is **live** since S1; S2 turns on the frondgrazer's, the loftstrider's,
+/// the seedporter's and the littershredder's ([`crate::vigil`]); the others are read by no
+/// heuristic yet.
+pub fn senses_of(founder: Founder) -> SenseTable {
+    use crate::ScentChannel::{Grazer, Hunter, SmallPrey};
+    use crate::scent::{SMELL_AT_2_5_M, SMELL_AT_2_M, SMELL_AT_3_5_M, SMELL_AT_6_M};
+    let t = SenseTable::default();
+    match founder {
+        // Eyeless (dossier): substrate tremor ~1 m, 2 m for heavy steps; litter chemistry is
+        // its own detritus field.
+        Founder::Blind => SenseTable { live: true, tremor_m: 2.0, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
+        // Coarse silhouettes at 1 m by day and 0.5 m dim over 240°, motion over shape;
+        // substrate vibration 1–1.5 m; fungal chemistry is its own field.
+        Founder::Capgnawer => SenseTable {
+            sight_m: 1.0,
+            sight_night_m: 0.5,
+            sight_still_fraction: 0.5,
+            sight_half_angle_deg: 120.0,
+            tremor_m: 1.5,
+            tremor_min: 0.003,
+            scent: Some(SmallPrey),
+            ..t
+        },
+        // Shadow and looming at 0.5 m by day, 0.25 m dim over 180°; a large walker felt at
+        // ~1 m; film chemistry is its own field.
+        // Live (AMPHIBIOUS-SNAIL): its retraction reads the record.
+        Founder::RippleSnail => SenseTable {
+            live: true,
+            sight_m: 0.5,
+            sight_night_m: 0.25,
+            sight_still_fraction: 0.5,
+            sight_half_angle_deg: 90.0,
+            tremor_m: 1.0,
+            tremor_min: 0.003,
+            scent: Some(SmallPrey),
+            ..t
+        },
+        // Moving bodies at 8 m by day and 4 m at night, static at 5 and 2 (0.625); 300° from
+        // its eye stalks; a walking Veilhound heard at 6 m, a running one to 8 m; predator
+        // odour at 3–4 m; ~1 m of footfall.
+        // S2: live; head down while cropping it sees a quarter of its range (Astra's "reduced
+        // clarity while cropping"); it weighs its three nearest herd-mates.
+        Founder::Browser => SenseTable {
+            live: true,
+            feeding_sight_fraction: 0.25,
+            kin_tracks: 3,
+            sight_m: 8.0,
+            sight_night_m: 4.0,
+            sight_still_fraction: 0.625,
+            sight_half_angle_deg: 150.0,
+            hearing_m: 8.0,
+            hearing_min: 1.96 / 6.0,
+            tremor_m: 1.0,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_3_5_M,
+            scent: Some(Grazer),
+            ..t
+        },
+        // 360° from the eye ring: moving bodies at 12 m by day, 6 at night, static at 8 and
+        // 4; large-body movement heard at 8 m, louder to 10; ~2 m of ground disturbance;
+        // animal odour at 2–3 m.
+        Founder::Loftstrider => SenseTable {
+            live: true,
+            sight_m: 12.0,
+            sight_night_m: 6.0,
+            sight_still_fraction: 8.0 / 12.0,
+            sight_half_angle_deg: 180.0,
+            hearing_m: 10.0,
+            hearing_min: 1.96 / 8.0,
+            tremor_m: 2.0,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_2_5_M,
+            scent: Some(Grazer),
+            ..t
+        },
+        // D3: no form vision (its light sense is S3's); perch vibration over ~0.5 m; floral
+        // smell is S3's nectar channel.
+        Founder::Bellwing => SenseTable { tremor_m: 0.5, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
+        // The review raises it to the Veilhound's 16 m by day (3 m at night), the best still
+        // recognition in the community, about 180° with a forward binocular centre; predator
+        // movement heard around 6 m; branch movement ~0.5 m; odour ~2 m.
+        Founder::Seedporter => SenseTable {
+            live: true,
+            sight_m: 16.0,
+            sight_night_m: 3.0,
+            sight_still_fraction: 1.0,
+            sight_half_angle_deg: 90.0,
+            hearing_m: 8.0,
+            hearing_min: 1.96 / 6.0,
+            tremor_m: 0.5,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_2_M,
+            scent: Some(Grazer),
+            ..t
+        },
+        // Moving small prey at 4 m by day and 3 at night, still at half; ~220°; local rustling
+        // at 1–2 m (a walking littershredder, 0.375 × 0.375, at 1.5 m) and a Veilhound's
+        // footfalls to 3 m; strong substrate tremor 2–3 m; live-prey odour 2–3 m (carrion
+        // carries farther by its source).
+        Founder::Lanternjaw => SenseTable {
+            sight_m: 4.0,
+            sight_night_m: 3.0,
+            sight_still_fraction: 0.5,
+            sight_half_angle_deg: 110.0,
+            hearing_m: 3.0,
+            hearing_min: 0.375 * 0.375 / 1.5,
+            tremor_m: 3.0,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_2_5_M,
+            scent: Some(Hunter),
+            ..t
+        },
+        // The Veilhound (`chorister`), from wolves and lions at the terrarium's scale, the branch's
+        // values (VEILHOUND-SEARCH) kept: sight 16 m by day over 240° (half the ring: it sees
+        // across the map in the open, terraces still hide what lies below them), a still body as
+        // far as a moving one; 9 m at night (Astra's 8–10; it stays a day hunter, D4); hearing
+        // 10 m, the territory radius, of a frondgrazer moving at 0.05 m/s (the branch's
+        // threshold for its main prey: 0.05 × 0.75 / 10); ~1 m of footfall; smell ~6 m.
+        Founder::Chorister => SenseTable {
+            live: true,
+            sight_m: 16.0,
+            sight_night_m: 9.0,
+            sight_still_fraction: 1.0,
+            sight_half_angle_deg: 120.0,
+            hearing_m: 10.0,
+            hearing_min: 0.05 * 0.75 / 10.0,
+            tremor_m: 1.0,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_6_M,
+            scent: Some(Hunter),
+            ..t
+        },
     }
 }
 

@@ -42,6 +42,7 @@ use crate::present::srgb_linear;
 use super::appearance::{self, GlyphId};
 use super::colours;
 use super::model::{self, ModelCell, ModelLibrary, Tag};
+use super::hunker;
 use super::idle;
 use super::sleep;
 use super::stand::{Cell, Style, wilted};
@@ -72,6 +73,29 @@ pub(super) fn model_cells<'l>(
     let length = config.founder(founder).body_at(animal.body).length_m;
     // The model for the body's mode (F3: the seedporter's poses), else its one model.
     lib.animal_in_mode(founder, animal.mobility.mode)?.select(length)
+}
+
+/// The cells of `animal`'s baked hunker ([`model::hunker_model`]) in the bin of its body's
+/// length (the same bin as its standing model's: the hunker is baked in the founder's
+/// bins), if the library has one.
+pub(super) fn hunker_cells<'l>(
+    lib: &'l ModelLibrary,
+    config: &FaunaConfig,
+    animal: &Animal,
+) -> Option<&'l [ModelCell]> {
+    let founder = animal.founder?;
+    let length = config.founder(founder).body_at(animal.body).length_m;
+    lib.specimen(model::hunker_model(founder)?)?.select(length)
+}
+
+/// What a model body is posed by this rebuild: its sleep, idle and hunker weights (each
+/// with its rate), and its baked hunker while it hunkers.
+#[derive(Clone, Copy, Default)]
+struct Poses<'l> {
+    asleep: Option<(f32, f32)>,
+    idling: Option<(f32, f32)>,
+    hunkering: Option<(f32, f32)>,
+    toward: Option<&'l [ModelCell]>,
 }
 
 /// The unit `(dx, dz)` from a climbing body's column into the face it is on: the wall
@@ -646,7 +670,7 @@ pub struct Animals {
     /// This rebuild's pose entries, index 0 unused (a cell's entry 0 is no pose); and each
     /// entry's index by its bits, so animals in the same pose share one.
     entries: Vec<PoseEntry>,
-    entry_of: FxHashMap<[u32; 10], u8>,
+    entry_of: FxHashMap<[u32; 12], u8>,
     /// Each animal's sleep weight (0 awake to 1 asleep) and whether it was asleep, by id, at
     /// the last rebuild: presentation memory, so a body that falls asleep or wakes takes
     /// [`sleep::BLEND_S`] over it. Every founder in the last rebuild has an entry, so an
@@ -654,6 +678,11 @@ pub struct Animals {
     sleep_blend: FxHashMap<u64, (f32, bool)>,
     /// Each animal's idle memory by id at the last rebuild ([`Idle`]), kept the same way.
     idle_blend: FxHashMap<u64, Idle>,
+    /// Each animal's hunker weight (0 standing to 1 clamped down) and whether it was
+    /// hunkered, by id, at the last rebuild ([`hunker`]), kept the same way; and the seconds
+    /// a hunker takes ([`Animals::set_hunker_s`]).
+    hunker_blend: FxHashMap<u64, (f32, bool)>,
+    hunker_s: f64,
     /// The tick of the last rebuild, which is what the blend's elapsed time is read from.
     last_tick: Option<u64>,
 }
@@ -702,8 +731,15 @@ impl Animals {
             entry_of: FxHashMap::default(),
             sleep_blend: FxHashMap::default(),
             idle_blend: FxHashMap::default(),
+            hunker_blend: FxHashMap::default(),
+            hunker_s: hunker::DEFAULT_S,
             last_tick: None,
         }
+    }
+
+    /// The seconds a hunker takes to go down or come up (`VoxelConfig::hunker_s`).
+    pub fn set_hunker_s(&mut self, seconds: f64) {
+        self.hunker_s = seconds.max(0.0);
     }
 
     /// Every animal's sleep and idle weights at this rebuild, moved on from the last one by
@@ -718,6 +754,7 @@ impl Animals {
         self.last_tick = Some(tick);
         let mut seen: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
         let mut idle: FxHashMap<u64, Idle> = FxHashMap::default();
+        let mut hunkers: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
         let hold = (idle::HOLD_S / DT).round() as u64;
         for a in animals {
             if a.founder.is_none() {
@@ -730,13 +767,24 @@ impl Animals {
                 None => 0.0,
             };
             seen.insert(a.id, (blend, asleep));
+            // HUNKER: down while the body says so (not on a wall, which does not pose).
+            let down = a.hunkered && a.mobility.climb.is_none();
+            let hunkered = match self.hunker_blend.get(&a.id) {
+                Some(&(b, was)) => hunker::advance_blend(b, was, dt, self.hunker_s),
+                None if down => 1.0,
+                None => 0.0,
+            };
+            hunkers.insert(a.id, (hunkered, down));
             // Idle: awake, standing (not walking, feeding or climbing), where it stood at
             // the last rebuild, fully woken, and so for the hold.
             let at = [a.pose.x, a.pose.z, a.pose.heading_rad];
             let last = self.idle_blend.get(&a.id);
+            // A hunkered body is clamped still under its shield: it does not idle.
             let quiet = a.state == State::Resting
                 && a.mobility.climb.is_none()
                 && blend == 0.0
+                && !down
+                && hunkered == 0.0
                 && last.is_some_and(|m| m.at == at);
             let still = if quiet { last.map_or(0, |m| m.still) + dt_ticks } else { 0 };
             idle.insert(
@@ -751,6 +799,25 @@ impl Animals {
         }
         self.sleep_blend = seen;
         self.idle_blend = idle;
+        self.hunker_blend = hunkers;
+    }
+
+    /// One animal's hunker weight at this rebuild and its change per tick from here, or
+    /// `None` for a body standing and staying so (or on a wall, which does not pose).
+    fn hunker_weight(&self, animal: &Animal) -> Option<(f32, f32)> {
+        if animal.mobility.climb.is_some() {
+            return None;
+        }
+        let &(w, down) = self.hunker_blend.get(&animal.id)?;
+        let r = hunker::rate_per_tick(DT, self.hunker_s);
+        let rate = if down && w < 1.0 {
+            r
+        } else if !down && w > 0.0 {
+            -r
+        } else {
+            0.0
+        };
+        (w > 0.0 || rate != 0.0).then_some((w, rate))
     }
 
     /// One animal's idle weight at this rebuild and its change per tick from here, or
@@ -803,6 +870,8 @@ impl Animals {
             e.head.start,
             e.head.ticks,
             e.head.dip,
+            e.hunker,
+            e.hunker_rate,
         ]
         .map(f32::to_bits);
         if let Some(&i) = self.entry_of.get(&key) {
@@ -831,6 +900,8 @@ impl Animals {
                 + cyc(e.idle_phase, b.idle_phase)
                 + 4.0 * (e.head.dip - b.head.dip).abs()
                 + 0.1 * (e.head.start - b.head.start).abs()
+                + (e.hunker - b.hunker).abs()
+                + 20.0 * (e.hunker_rate - b.hunker_rate).abs()
         };
         (1..self.entries.len())
             .min_by(|&i, &j| far(&self.entries[i]).total_cmp(&far(&self.entries[j])))
@@ -847,7 +918,10 @@ impl Animals {
     /// them are its head: its classes ([`sleep::classify`]), one entry for the body and,
     /// while its head moves ([`idle::move_near`], for a founder that moves its head,
     /// [`idle::moves_head`]), one for the head. A body only idling has its legs where they
-    /// stand (its settle is 0), so the classes are the sleep's.
+    /// stand (its settle is 0), so the classes are the sleep's. A hunkering body
+    /// (`hunkering`, its weight and rate) settles as a sleeper does, and with its baked
+    /// hunker (`toward`) takes [`hunker::classify`]'s classes.
+    #[allow(clippy::too_many_arguments)]
     fn pose_body(
         &mut self,
         animal: &Animal,
@@ -856,20 +930,29 @@ impl Animals {
         head: &[bool],
         asleep: Option<(f32, f32)>,
         idling: Option<(f32, f32)>,
+        hunkering: Option<(f32, f32)>,
+        toward: Option<&[ModelCell]>,
     ) -> BodyPose {
         let id = animal.id;
-        let k = sleep::classify(local);
+        let k = match (hunkering, toward) {
+            (Some(_), Some(target)) => hunker::classify(local, target),
+            _ => sleep::classify(local),
+        };
         let (sw, sr) = asleep.unwrap_or((0.0, 0.0));
         let (iw, ir) = idling.unwrap_or((0.0, 0.0));
+        let (hw, hr) = hunkering.unwrap_or((0.0, 0.0));
+        let settles = asleep.is_some() || hunkering.is_some();
         let body = PoseEntry {
             sleep: sw,
             sleep_rate: sr,
-            drop: if asleep.is_some() { k.drop as f32 } else { 0.0 },
+            drop: if settles { k.drop as f32 } else { 0.0 },
             sleep_phase: if asleep.is_some() { sleep::phase(id) } else { 0.0 },
             idle: iw,
             idle_rate: ir,
             idle_phase: if idling.is_some() { idle::phase(id) } else { 0.0 },
             head: HeadMove::NONE,
+            hunker: hw,
+            hunker_rate: hr,
         };
         let entry = self.intern(body);
         let head_move = idling
@@ -882,6 +965,10 @@ impl Animals {
             .iter()
             .zip(head)
             .map(|(class, &is_head)| match (head_entry, is_head) {
+                // A head folding away under a hunker keeps folding while it moves.
+                (Some((e, _)), true) if *class == Some(sleep::Class::Leg1) => {
+                    sleep::Class::Leg1.byte(e)
+                }
                 (Some((e, _)), true) => sleep::Class::Torso.byte(e),
                 _ => class.map_or(0, |c| c.byte(entry)),
             })
@@ -889,7 +976,7 @@ impl Animals {
         BodyPose {
             bytes,
             torso: k.torso,
-            drop: if asleep.is_some() { k.drop } else { 0 },
+            drop: if settles { k.drop } else { 0 },
             entry,
             head: head_entry,
         }
@@ -968,9 +1055,10 @@ impl Animals {
     ) {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
-            let emission = self.emission;
+            let (emission, hunker_s) = (self.emission, self.hunker_s);
             *self = Animals::empty(c.width, c.height, c.depth);
             self.emission = emission;
+            self.hunker_s = hunker_s;
         } else {
             // Only what the last rebuild stamped: the grid is otherwise all empty.
             for i in self.stamped.drain(..) {
@@ -986,6 +1074,7 @@ impl Animals {
         let Some(fauna) = fauna else {
             self.sleep_blend.clear();
             self.idle_blend.clear();
+            self.hunker_blend.clear();
             return;
         };
         self.advance_poses(view.tick, fauna.animals);
@@ -1016,8 +1105,18 @@ impl Animals {
             }
             let weight = self.sleep_weight(animal);
             let idling = self.idle_weight(animal);
+            let hunkering = self.hunker_weight(animal);
             if let Some(cells) = lib.and_then(|lib| model_cells(lib, fauna.config, animal)) {
-                if !self.stamp_model(view, animal, c.voxel_m, cells, weight, idling) {
+                let toward = hunkering
+                    .and(lib)
+                    .and_then(|lib| hunker_cells(lib, fauna.config, animal));
+                let poses = Poses {
+                    asleep: weight,
+                    idling,
+                    hunkering,
+                    toward,
+                };
+                if !self.stamp_model(view, animal, c.voxel_m, cells, poses) {
                     break;
                 }
             } else {
@@ -1030,7 +1129,7 @@ impl Animals {
                 if animal.founder == Some(Founder::Lanternjaw) {
                     self.stamp_lure(view, animal, fauna.config, c.voxel_m);
                 }
-                let posing = weight.is_some() || idling.is_some();
+                let posing = weight.is_some() || idling.is_some() || hunkering.is_some();
                 let local: Option<Vec<sleep::Local>> =
                     posing.then(|| cells.iter().map(|(_, _, l)| *l).collect()).flatten();
                 match local {
@@ -1040,8 +1139,9 @@ impl Animals {
                             .iter()
                             .map(|(_, part, _)| matches!(part, AnimalPart::Head { .. }))
                             .collect();
-                        let pose =
-                            self.pose_body(animal, view.tick, &local, &head, weight, idling);
+                        let pose = self.pose_body(
+                            animal, view.tick, &local, &head, weight, idling, hunkering, None,
+                        );
                         let (mut torso, mut heads) = (Vec::new(), Vec::new());
                         for (((cell, part, l), byte), is_head) in
                             cells.into_iter().zip(&pose.bytes).zip(head)
@@ -1097,17 +1197,22 @@ impl Animals {
         }
     }
 
-    /// Stamp one animal's model cells, posed when `weight` says the body is asleep or
-    /// blending, or `idling` that it idles. False when the styles would alias.
+    /// Stamp one animal's model cells, posed as `poses` says (asleep, idling or hunkering,
+    /// or blending). False when the styles would alias.
     fn stamp_model(
         &mut self,
         view: &VoxelView<'_>,
         animal: &Animal,
         voxel_m: f64,
         cells: &[ModelCell],
-        weight: Option<(f32, f32)>,
-        idling: Option<(f32, f32)>,
+        poses: Poses<'_>,
     ) -> bool {
+        let Poses {
+            asleep: weight,
+            idling,
+            hunkering,
+            toward,
+        } = poses;
         if !(voxel_m > 0.0) || !animal.pose.is_finite() {
             return true;
         }
@@ -1118,7 +1223,9 @@ impl Animals {
         let mut pose = None;
         let mut torso: Vec<Cell> = Vec::new();
         let mut heads: Vec<Cell> = Vec::new();
-        if (weight.is_some() || idling.is_some()) && animal.mobility.climb.is_none() {
+        if (weight.is_some() || idling.is_some() || hunkering.is_some())
+            && animal.mobility.climb.is_none()
+        {
             let local: Vec<sleep::Local> = cells
                 .iter()
                 .map(|m| sleep::Local {
@@ -1130,7 +1237,9 @@ impl Animals {
                 .collect();
             let torso_row = sleep::classify(&local).torso;
             let head = idle::head_of_model(&local, torso_row);
-            let p = self.pose_body(animal, view.tick, &local, &head, weight, idling);
+            let p = self.pose_body(
+                animal, view.tick, &local, &head, weight, idling, hunkering, toward,
+            );
             for ((m, &byte), &is_head) in cells.iter().zip(&p.bytes).zip(&head) {
                 if byte != 0 {
                     class_of.insert(m.offset, byte);
@@ -1485,6 +1594,10 @@ impl Animals {
         self.styles.is_empty()
     }
 }
+
+#[cfg(test)]
+#[path = "hunker_tests.rs"]
+mod hunker_tests;
 
 #[cfg(test)]
 mod tests {

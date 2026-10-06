@@ -216,6 +216,16 @@ pub fn mode_model(founder: Founder, mode: MobilityMode) -> Option<&'static str> 
     }
 }
 
+/// **The baked model a lineage's hunker is drawn toward** (HUNKER, [`super::hunker`]): a
+/// specimen baked in the founder's own size bins, or `None` for a lineage with no hunker
+/// pose (its hunker, if any, is drawn as the sleep's settle).
+pub fn hunker_model(founder: Founder) -> Option<&'static str> {
+    match founder {
+        Founder::Browser => Some("frondgrazer-hunker"),
+        _ => None,
+    }
+}
+
 // --- the library ---------------------------------------------------------------------
 
 /// Every model the presenter can stamp: at most one per species and one per founder.

@@ -205,6 +205,22 @@ fn founder_rows() -> Vec<Row> {
             .prov("decision"),
         r("water_margin_m", "m", nonneg, "an aquatic body's step needs standing water within this of its destination face")
             .prov("decision"),
+        // The amphibious table (`Amphibious`, AMPHIBIOUS-SNAIL): the ripple-snail's only,
+        // optional on the others. `on_land` is a switch: no row.
+        r("amphibious.dry_ground_s", "s", Range::positive(), "out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather").optional().log().prov("decision"),
+        r("amphibious.wet_ground_s", "s", Range::positive(), "... and in this on saturated ground (pore fill 1, or a film of water)").optional().log().prov("decision"),
+        r("amphibious.rehydrate_per_s", "clock fraction/s", nonneg, "the clock falls this fast in water (standing water within water_margin_m)").optional().prov("decision"),
+        r("amphibious.step_moisture_min", "pore fill 0..1", fraction, "the least ground moisture a step onto a face out of water needs").optional().prov("decision"),
+        r("amphibious.return_fraction", "clock fraction", nonneg, "at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks").optional().prov("decision"),
+        r("amphibious.day_return_fraction", "clock fraction", nonneg, "... and past this by day in dry weather (the activity bias)").optional().prov("decision"),
+        r("amphibious.day_drying_factor", "x", nonneg, "the clock runs this many times as fast while the sun is up").optional().prov("decision"),
+        r("amphibious.rain_drying_factor", "x", nonneg, "... and this many times as fast while rain falls (0: no drying in rain)").optional().prov("decision"),
+        r("amphibious.lethal_fraction", "clock fraction", Range::positive(), "it dies of desiccation at this (from 1 up it cannot feed)").optional().prov("decision"),
+        r("amphibious.water_search_m", "m", nonneg, "how far its water reflex looks for standing water (a world query)").optional(),
+        r("amphibious.retract_hold_s", "s", nonneg, "a threat seen or felt makes it stop and close for this (0: it flees instead)").optional().prov("decision"),
+        r("amphibious.retract_armour", "fraction", fraction, "a hit on it while retracted is reduced by this, on top of its armour").optional().prov("decision"),
+        r("amphibious.roam_search_m", "m", nonneg, "at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam)").optional(),
+        r("amphibious.roam_after_rain_s", "s", nonneg, "the roam hours last this long after rain stops").optional(),
         r("contact_height_fraction", "x body height", nonneg, "the contact receptors' height").digest(),
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),
@@ -232,6 +248,55 @@ fn founder_rows() -> Vec<Row> {
             .search(0.5, 1.0),
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
         r("burr_coat", "factor", fraction, "how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance"),
+        // `senses.live` and `senses.scent` are switches: no rows.
+        r("senses.sight_m", "m", nonneg, "sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind)"),
+        r("senses.sight_night_m", "m", nonneg, "sight's range below the day line"),
+        r("senses.sight_still_fraction", "fraction", nonneg, "a still body is seen within this fraction of the range"),
+        r("senses.sight_half_angle_deg", "deg", nonneg, "sight's field half-angle from the heading (180: all around)"),
+        r("senses.hearing_m", "m", nonneg, "hearing's range, all around (0: deaf)"),
+        r("senses.hearing_min", "m/s at the default exponents", nonneg, "the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion"),
+        r("senses.tremor_m", "m", nonneg, "tremor's range for bodies on the ground (0: none)"),
+        r("senses.tremor_min", "organic x m/s / m^2", nonneg, "the faintest footfall felt (mass x speed / d^2, through terrain x occlusion)"),
+        r("senses.smell_min", "scent units", nonneg, "the faintest scent level smelled on the scent field (0: no smell)").log(),
+        r("senses.feeding_sight_fraction", "fraction", nonneg, "S2: head down cropping between scans, sight reaches this fraction of its range (1: no change)"),
+        r("senses.kin_tracks", "bodies", nonneg, "S2: at most this many of its own lineage weighed per remote sensing, nearest first"),
+        // S2's ground response (`Vigilance`); `vigilance.mode` is a switch: no row.
+        r("vigilance.flee_start_m", "m", nonneg, "S2: flight starts with threats (seen moving or near, heard, felt) within this"),
+        r("vigilance.flee_stop_m", "m", nonneg, "S2: flight stops beyond this of the last-known threat..."),
+        r("vigilance.calm_s", "s", nonneg, "S2: ...once no threat has come within the stop distance for this long"),
+        r("vigilance.group_min", "threats", nonneg, "S2: an adult flees only from at least this many threats (a juvenile from one)"),
+        r("vigilance.run_noise", "x emission", nonneg, "S2: its emission while it flees or bolts (a run is loud)"),
+        r("vigilance.scan_every_s", "s", nonneg, "S2: cropping between scan pauses (0: never scans)"),
+        r("vigilance.scan_s", "s", nonneg, "S2: a scan pause"),
+        r("vigilance.orient_s", "s", nonneg, "S2: it faces a newly sensed approaching threat this long (0: never orients)"),
+        r("vigilance.alarm_emission_factor", "x walking emission", nonneg, "S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm)"),
+        r("vigilance.alarm_bolt_s", "s", nonneg, "S2: an alarm bolt lasts this long"),
+        r("vigilance.alarm_refractory_s", "s", nonneg, "S2: after a bolt it hears no alarm this long"),
+        r("vigilance.freeze_tremor", "organic x m/s / m^2", nonneg, "S2: footfall (left + right) that freezes it (0: never)"),
+        r("vigilance.withdraw_tremor", "organic x m/s / m^2", nonneg, "S2: footfall at which it also turns away in place"),
+        r("vigilance.freeze_s", "s", nonneg, "S2: a freeze lasts this long after the last tremor that set it"),
+        r("vigilance.refuge_search_m", "m", nonneg, "S2: an arboreal body in flight runs to a stand it climbs within this"),
+        // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
+        r("hunker.enter_m", "m", nonneg, "HUNKER: it clamps down under its shield at an approaching threat within this"),
+        r("hunker.leave_m", "m", nonneg, "HUNKER: ...and comes out once none has been within this for the calm"),
+        r("hunker.calm_s", "s", nonneg, "HUNKER: the calm at full condition"),
+        r("hunker.hunger_calm_exp", "exponent", nonneg, "HUNKER: calm x condition^this (a hungrier body comes out sooner)"),
+        r("hunker.min_condition", "fraction", fraction, "HUNKER: below this condition it does not hunker"),
+        r("hunker.shield", "fraction", fraction, "HUNKER: chance a strike glances off a grown, unwounded hunkered body"),
+        r("hunker.shield_growth_exp", "exponent", nonneg, "HUNKER: the shield grows as (body / adult body)^this"),
+        r("hunker.wound_opens", "x wound", nonneg, "HUNKER: a wound w takes this x w of the shield away"),
+        r("hunker.pry_per_member_s", "1/s", nonneg, "HUNKER: one hunter in contact pries it open at this (1 opens)"),
+        r("hunker.resist_per_s", "1/s", nonneg, "HUNKER: it resists the prying at this (above one member: one cannot open it)"),
+        r("hunker.pry_reach_m", "m", nonneg, "HUNKER: a hunter is in contact within half their summed lengths plus this"),
+        r("hunker.opened_s", "s", nonneg, "HUNKER: turned over, it is open (no shield, no armour) this long"),
+        r("hunker.ring_m", "m", nonneg, "HUNKER: kin within this is beside it (bunched; hunkered, a ring)"),
+        r("hunker.ring_resist_per_kin", "x resist", nonneg, "HUNKER: each hunkered kin within ring_m adds this x the resistance"),
+        r("hunker.ring_kin_max", "kin", nonneg, "HUNKER: ...counting at most this many"),
+        // GAIT's sprint (`Sprint`).
+        r("sprint.body_lengths_per_s", "BL/s", nonneg, "GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint)"),
+        r("sprint.endurance_s", "s", nonneg, "GAIT: seconds at top speed from rested to spent (0: no sprint)"),
+        r("sprint.recovery_s", "s", nonneg, "GAIT: seconds off the sprint from spent to rested"),
+        r("sprint.resume_fraction", "fraction", fraction, "GAIT: a winded body sprints again once rested to this"),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
@@ -263,7 +328,7 @@ fn founder_rows() -> Vec<Row> {
         // The glider's table (`Glider`, F3): the seedporter's only, optional on the others.
         r("glider.climb_min_stand_m", "m", nonneg, "the shortest stand whose stem it climbs (crown top over the support)").optional().prov("decision"),
         r("glider.glide_ratio", "m across per m down", Range::positive(), "a glide's horizontal metres per metre of descent").optional().prov("decision"),
-        r("glider.glide_body_lengths_per_s", "body lengths/s", Range::positive(), "a glide's speed").optional().prov("decision"),
+        r("glider.glide_speed_fraction", "x ground cruise", Range::positive(), "a glide's speed, a multiple of the lineage's cruise").optional().prov("decision"),
         r("glider.glide_cost_factor", "x basal upkeep", nonneg, "a second gliding, upkeep included").optional().prov("decision"),
         r("glider.glide_min_height_m", "m", nonneg, "a glide starts only from this height over the landing surface").optional().prov("decision"),
         r("glider.roost_search_m", "m", nonneg, "at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this").optional(),
@@ -292,6 +357,8 @@ fn founder_rows() -> Vec<Row> {
         r("pack.den_search_m", "m", nonneg, "the breeder looks for a covered den within this of the founding point").optional().prov("decision"),
         r("pack.follow_radius_m", "m", nonneg, "an idle adult walks back to within this of the breeder").optional(),
         r("pack.home_give_up_s", "s", nonneg, "an adult wanting rest walks home this long, then rests where it is").optional(),
+        r("pack.stalk_margin", "fraction of the prey's hearing floor", nonneg, "S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk)").optional(),
+        r("pack.commit_m", "m", nonneg, "S2: ...and rushes within this of its prey").optional(),
         // The counter-strike seam (`Counter`): unused, `None` for every lineage.
         r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
         r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),
@@ -350,6 +417,9 @@ fn knob_rows() -> Vec<Row> {
         p("awareness_resting", "fraction", fraction, "dodge table awareness, awake resting").prov("decision"),
         p("awareness_cropping", "fraction", fraction, "dodge table awareness, cropping and climbing").prov("decision"),
         p("awareness_asleep", "fraction", fraction, "dodge table awareness, asleep").prov("decision"),
+        p("awareness_sensed", "fraction", fraction, "D5 (S2): a live lineage's prey whose record holds the striker dodges at this awareness"),
+        p("awareness_unaware", "fraction", fraction, "D5 (S2): ...and one whose record does not, at this"),
+        p("aware_within_s", "s", nonneg, "D5 (S2): ...sensed within this long before contact"),
         p("dodge_rear_aspect", "fraction", fraction, "dodge aspect factor when struck from the rear half").search(0.1, 1.0).prov("decision"),
         p("dodge_condition_floor", "fraction", fraction, "the dodge's condition factor is the reserve fraction clamped to [this, 1]").search(0.1, 1.0).prov("decision"),
         p("egg_footfall_min", "distinct prey", nonneg, "lowest footfall threshold a dormant egg draws").search(1.0, 6.0),
@@ -483,6 +553,36 @@ fn knob_rows() -> Vec<Row> {
         hk("route_refresh_s", "s", pos, "how long a lineage's walking route graph stands before it is rebuilt").search(10.0, 600.0).log(),
         hk("success_memory_s", "s", nonneg, "how long a kill marks its place productive in the killer's memory").search(120.0, 14400.0).log(),
         hk("success_boost", "fraction", nonneg, "a patch by a remembered kill scores 1 + this times its food cue").search(0.0, 4.0),
+        hk("patch_scent_weight", "weight", nonneg, "S2: its prey's scent on a square's food faces is one more patch cue at this weight (0: no scent)"),
+    ]);
+
+    // `fauna.perception.*`: the perception core (SENSES-CORE).
+    let pk = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.perception.{path}"), unit, range, what)
+    };
+    rows.extend([
+        pk("remote_hz", "Hz", pos, "how often a body's remote senses (sight, hearing, the pair's tremor) run, staggered by id").search(1.0, 20.0),
+        pk("max_candidates", "bodies", nonneg, "prey and threats weighed (one terrain ray each) per observer per remote sensing, nearest first").search(2.0, 32.0),
+        pk("bin_m", "m", pos, "the spatial bins bodies are sorted into each tick").search(0.5, 8.0),
+        pk("occlusion", "fraction", fraction, "hearing and tremor through terrain are multiplied by this (sight is stopped)").search(0.0, 1.0),
+        pk("hearing_speed_exp", "exponent", nonneg, "hearing's emission is speed^this x length^size_exp").search(0.5, 3.0),
+        pk("hearing_size_exp", "exponent", nonneg, "the length exponent of hearing's emission").search(0.0, 3.0),
+        pk("hearing_near_m", "m", pos, "received loudness is emission over the distance, read as at least this"),
+        pk("give_up_s", "s", nonneg, "a body not sensed again within this is given up; a pursuit walks to its last-known point until then").search(1.0, 60.0).log(),
+    ]);
+
+    // `fauna.scent.*`: the scent field (SENSES-CORE).
+    let sk = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.scent.{path}"), unit, range, what)
+    };
+    rows.extend([
+        sk("cell_m", "m", pos, "the scent field's cell (rounded to whole voxels): the connected surface faces in a cell are one node").search(0.25, 2.0),
+        sk("half_life_s", "s", pos, "scent's half-life").search(5.0, 1200.0).log(),
+        sk("diffuse_fraction", "fraction per update", fraction, "the share of a node's difference to its neighbours mixed in per 0.5 s update").search(0.05, 1.0),
+        sk("threshold", "scent units", nonneg, "levels below this are dropped after an update"),
+        sk("deposit_per_s", "scent units per organic unit per s", nonneg, "what a standing body lays, by its organic matter").search(0.1, 10.0).log(),
+        sk("carrion_per_s", "scent units per organic unit per s", nonneg, "what carrion lays, by its stock").search(0.1, 10.0).log(),
+        sk("step_m", "m", nonneg, "neighbouring surface faces connect within this height difference, with open air over the lower one").search(0.0, 2.0),
     ]);
 
     // `fauna.founding.*`: the seeder's founders.

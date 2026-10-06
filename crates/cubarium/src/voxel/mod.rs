@@ -46,6 +46,7 @@ pub mod animal;
 pub mod appearance;
 pub mod candle;
 pub mod chiplet;
+pub mod hunker;
 pub mod idle;
 pub mod colours;
 pub mod model;
@@ -208,6 +209,10 @@ pub struct VoxelConfig {
     /// switch to while it runs above 1× (and back to [`VoxelConfig::water_every`] at 1×),
     /// with the plant clock and the rest of the speed settings beside it. No mode reads it.
     pub fast_forward_water_every: u32,
+    /// **Seconds a frondgrazer takes to hunker down under its shield, and to come back up**
+    /// (HUNKER, [`hunker`]): the pose moves continuously over this, never in one step.
+    /// Presentation only: the simulation's hunker is unchanged by it.
+    pub hunker_s: f64,
     /// The world to build. Extents follow the core; the ambient display uses 0.125 m
     /// cells so organisms retain their physical size with more cells of visual detail.
     #[serde(deserialize_with = "ambient_world_config")]
@@ -243,6 +248,7 @@ impl Default for VoxelConfig {
             threads: 0,
             water_every: 1,
             fast_forward_water_every: cubarium_voxel_sim::EXPERIMENT_WATER_EVERY,
+            hunker_s: hunker::DEFAULT_S,
             // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
             // TOML generates a staged world, not the ridge. `Config::default()` stays
             // `Landform::Ridge` for fixtures and frozen arenas, and `landform = "ridge"`

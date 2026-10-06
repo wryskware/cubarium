@@ -25,7 +25,7 @@
 //!   face, away from the wall), else climbs: down from a crown top or a vine, on up from
 //!   under a crown. A downpour sends a crown-top perch down under its crown. A lost perch
 //!   (the crown eaten or grown, the face uncovered) is a forced glide.
-//! - **`Glide`**: no thrust; `glide_body_lengths_per_s` × its length a second across,
+//! - **`Glide`**: no thrust; `glide_speed_fraction` × its ground cruise a second across,
 //!   steered by `turn`, falling `1 / glide_ratio` of that; `glide_cost_factor` × basal in
 //!   all (the upkeep included, F1's hover convention). It lands on the first crown top of
 //!   a stand it could climb that it crosses at its centre column (perched), the floor of
@@ -317,12 +317,15 @@ pub(super) fn glider_act(
     if mode == MobilityMode::Ground {
         if asleep {
             fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+            crate::gait::rest(fauna, i, founder);
             return;
         }
         ground_tick(fauna, view, flora, seed, tick, glider, i, hits);
         return;
     }
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+    // GAIT: off its feet it does not sprint, and rests.
+    crate::gait::rest(fauna, i, founder);
     let phys = *fauna.config.founder(founder);
     let manifest = fauna.config.manifest(founder);
     let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
@@ -394,7 +397,8 @@ fn ground_tick(
         }
         let ring = f64::from(view.config.width) * v;
         let (dx, dz) = crate::pose::wrapped_delta(before.x, before.z, a.pose.x, a.pose.z, ring);
-        let asked = held.forward * manifest.cruise_m_per_s * DT;
+        // At most cruise: a sprint the gate refused (winded) is not a blocked walk.
+        let asked = held.forward.min(1.0) * manifest.cruise_m_per_s * DT;
         if (dx * dx + dz * dz).sqrt() < 0.5 * asked {
             if let Some(face) = vine_ahead(view, &fv, &a, s) {
                 let a = &mut fauna.animals[i];
@@ -518,9 +522,10 @@ fn glide_motion(
     (moved.distance_m, end)
 }
 
-/// A glide's per-tick `(distance, fall)` for a body of `body` on `phys`.
-fn glide_pace(glider: &Glider, phys: &crate::FounderPhysiology, body: f64) -> (f64, f64) {
-    let distance = glider.glide_body_lengths_per_s * phys.body_at(body).length_m * DT;
+/// A glide's per-tick `(distance, fall)` for a lineage cruising at `cruise_m_per_s` (GAIT:
+/// `glide_speed_fraction` × the ground cruise, the walk's own reference at every size).
+fn glide_pace(glider: &Glider, cruise_m_per_s: f64) -> (f64, f64) {
+    let distance = glider.glide_speed_fraction * cruise_m_per_s * DT;
     let fall = if glider.glide_ratio > 0.0 {
         distance / glider.glide_ratio
     } else {
@@ -541,7 +546,7 @@ fn glide_end(
 ) -> Option<GlideEnd> {
     let s = shape(phys, body);
     let puddle = phys.drown_depth_m(&phys.body_at(body));
-    let (distance, fall) = glide_pace(glider, phys, body);
+    let (distance, fall) = glide_pace(glider, phys.cruise_body_lengths_per_s * phys.adult_length_m);
     if !(fall > 0.0) {
         return None;
     }
@@ -650,7 +655,7 @@ fn glide_tick(
     let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
     fauna.ledger.respired_flight_out += paid;
     let s = shape(phys, fauna.animals[i].body);
-    let (distance, fall) = glide_pace(&glider, phys, fauna.animals[i].body);
+    let (distance, fall) = glide_pace(&glider, manifest.cruise_m_per_s);
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
     let fv = flora.view();
     let asked = (fauna.animals[i].pose.heading_rad + held.turn * manifest.yaw_cap_rad_per_s * DT)
@@ -1259,7 +1264,9 @@ pub(super) fn walk_toward(a: &Animal, dx: f64, dz: f64, feed: f64) -> Actions {
 /// sense — and walking into it climbs it. `None` leaves its heuristic's actions. No
 /// observation channel carries fruit beyond the cone's 2 m (`design/voxel-senses.md` is
 /// unchanged).
-pub(super) fn fruit_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
+///
+/// **S2**: a glider whose table is live finds fruit by sight instead ([`fruit_by_sight`]).
+pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<Actions> {
     let a = &fauna.animals[i];
     let founder = a.founder?;
     let phys = fauna.config.founder(founder);
@@ -1274,6 +1281,9 @@ pub(super) fn fruit_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &F
     }
     if glider_fruit_in_reach(view, fv, a, phys).is_some() {
         return None;
+    }
+    if phys.senses.live {
+        return fruit_by_sight(fauna, i, view, fv, day);
     }
     let c = view.config;
     let v = c.voxel_m;
@@ -1290,6 +1300,99 @@ pub(super) fn fruit_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &F
     }
     let (_, dx, dz) = best?;
     Some(walk_toward(a, dx, dz, 1.0))
+}
+
+/// **Fruit by sight** (S2, review §1: the seedporter's still-object recognition): the nearest
+/// fruiting stand it can climb that it sees — within its sight range for a still body at this
+/// light, inside its field, the line from its eye to the crown's middle open of terrain — goes
+/// into its record as its food ([`crate::perception::class::FOOD`]); with none in sight, the
+/// one it last saw, for the pursuit's memory while that stand still fruits. It walks to it;
+/// `None` (its heuristic wanders) when it knows of none.
+fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let glider = phys.glider?;
+    let table = phys.senses;
+    let c = view.config;
+    let v = c.voxel_m;
+    let ring = f64::from(c.width) * v;
+    let now = fauna.tick;
+    let range = table.sight_range_m(day) * table.sight_still_fraction.max(0.0);
+    let geometry = crate::body_of(&fauna.config, &a)?;
+    let origin = crate::senses::cone_origin(view, &a.pose, a.sense_layer(v), &geometry);
+    let cos_half = table.sight_half_angle_deg.to_radians().cos() - 1e-12;
+    let (fx, fz) = a.pose.forward();
+    let mut seen: Vec<(f64, u64, Site, (f64, f64, f64))> = Vec::new();
+    if range > 0.0 {
+        for stand in fv.stands.iter().filter(|s| s.fruit > 0.0 && climbable(fv, s, &glider)) {
+            let sx = (f64::from(stand.site.x) + 0.5) * v;
+            let sz = (f64::from(stand.site.z) + 0.5) * v;
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+            let dh = (dx * dx + dz * dz).sqrt();
+            let my = crate::surface_m(stand.site.y, v) + 0.5 * fv.config.species(stand.species).crown_height_m_at(stand.wood);
+            let d3 = (dh * dh + (my - origin.1).powi(2)).sqrt();
+            if d3 > range || (dh > 0.0 && (dx * fx + dz * fz) / dh < cos_half) {
+                continue;
+            }
+            seen.push((d3, stand.id, stand.site, (sx, my, sz)));
+        }
+    }
+    seen.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+    let sighted = seen.into_iter().find(|s| crate::perception::line_clear(view, a.id, origin, s.3));
+    let p = fauna.percepts.entry(a.id).or_default();
+    let food = crate::perception::class::FOOD as usize;
+    let target = match sighted {
+        Some((d, id, site, (sx, _, sz))) => {
+            p.best[food] = crate::Track {
+                known: true,
+                id,
+                class: crate::perception::class::FOOD,
+                modes: crate::perception::SIGHT,
+                x: sx,
+                z: sz,
+                y_m: crate::surface_m(site.y, v),
+                site: (site.x, site.y, site.z),
+                d_m: d,
+                tick: now,
+                ..crate::Track::default()
+            };
+            Some((sx, sz))
+        }
+        None => {
+            let m = p.best[food];
+            let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
+            let fruits = |id: u64| fv.stands.iter().any(|s| s.id == id && s.fruit > 0.0);
+            (m.known && now.saturating_sub(m.tick) <= memory && fruits(m.id)).then_some((m.x, m.z))
+        }
+    };
+    let (tx, tz) = target?;
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+    Some(walk_toward(&a, dx, dz, 1.0))
+}
+
+/// **The arboreal refuge** (S2, [`crate::vigil`]): a grounded glider walks to the nearest stand
+/// it can climb within `search_m` (walking into the stem climbs it); `None` with none.
+pub(super) fn refuge_step(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, search_m: f64) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let glider = fauna.config.founder(a.founder?).glider?;
+    if a.mobility.mode != MobilityMode::Ground {
+        return None;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let mut best: Option<(f64, f64, f64)> = None;
+    for stand in fv.stands.iter().filter(|s| climbable(fv, s, &glider)) {
+        let sx = (f64::from(stand.site.x) + 0.5) * v;
+        let sz = (f64::from(stand.site.z) + 0.5) * v;
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+        let d = (dx * dx + dz * dz).sqrt();
+        if d <= search_m && best.is_none_or(|(b, _, _)| d < b) {
+            best = Some((d, dx, dz));
+        }
+    }
+    let (_, dx, dz) = best?;
+    Some(walk_toward(a, dx, dz, 0.0))
 }
 
 impl Fauna {

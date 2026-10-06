@@ -37,7 +37,9 @@
 //!    patch as fruitless for [`HuntConfig::fruitless_memory_s`], and it chooses the next:
 //!    the food of its prey within [`HuntConfig::cue_scan_m`] pooled into
 //!    [`HuntConfig::patch_m`] squares, each lineage's cue scaled to its best square and
-//!    weighted by its attack preference, the best open square at least
+//!    weighted by its attack preference — and (S2) the scent its prey lay on those food faces
+//!    ([`HuntConfig::patch_scent_weight`], the small-prey channel: a boom's scent draws it) —
+//!    the best open square at least
 //!    [`HuntConfig::patch_min_hop_m`] away — or, a [`HuntConfig::patrol_explore`] share
 //!    of the time, any open square. With no food in reach it walks off in a drawn
 //!    direction.
@@ -350,7 +352,12 @@ pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     let a = fauna.animals[i];
     // Which foods mark which prey lineage's habitat.
     let lineages: Vec<Founder> = Founder::ALL.iter().copied().filter(|&f| h.hunts(f)).collect();
-    let weight: Vec<f64> = lineages.iter().map(|&f| attack_preference(&cfg, h, &a.hunt.image, f)).collect();
+    let mut weight: Vec<f64> = lineages.iter().map(|&f| attack_preference(&cfg, h, &a.hunt.image, f)).collect();
+    // S2: one more cue, the scent its prey lay (its record's channels, review §4 item 3).
+    let followed = a.founder.map(|f| crate::perception::prey_channels(&fauna.config, f)).unwrap_or_default();
+    let smells = cfg.patch_scent_weight > 0.0 && followed.iter().any(|&c| c);
+    weight.push(if smells { cfg.patch_scent_weight } else { 0.0 });
+    let n = weight.len();
     /// One square: the cue per lineage, and its nearest reachable food node `(steps, node)`.
     struct Square {
         cues: Vec<f64>,
@@ -369,7 +376,7 @@ pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
         }
         let reach = route.as_ref().and_then(|r| r.reach(site, v).map(|(j, d)| (d, j)));
         let key = ((x.rem_euclid(ring) / pm).floor() as i64, (z / pm).floor() as i64);
-        let sq = squares.entry(key).or_insert_with(|| Square { cues: vec![0.0; lineages.len()], node: None });
+        let sq = squares.entry(key).or_insert_with(|| Square { cues: vec![0.0; n], node: None });
         for (c, &cue) in sq.cues.iter_mut().zip(cues) {
             *c += cue;
         }
@@ -380,7 +387,7 @@ pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
         }
     };
     let cell_m2 = v * v;
-    let mut cues = vec![0.0; lineages.len()];
+    let mut cues = vec![0.0; n];
     for g in fv.ground.iter() {
         if g.litter <= 0.0 && g.carrion <= 0.0 && g.film <= 0.0 {
             continue;
@@ -389,8 +396,18 @@ pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
             let diet = fauna.config.founder(*f).diet;
             cues[k] = diet.foods().map(|food| ground_cue(fv, fauna, g, food, cell_m2)).sum();
         }
+        cues[n - 1] = if smells {
+            crate::ScentChannel::ALL
+                .iter()
+                .filter(|ch| followed[ch.index()])
+                .map(|&ch| fauna.scent.level(view, ch, i64::from(g.site.x), g.site.y, g.site.z))
+                .sum()
+        } else {
+            0.0
+        };
         add(g.site, &cues, &mut squares);
     }
+    cues[n - 1] = 0.0;
     for st in fv.stands.iter() {
         for (k, f) in lineages.iter().enumerate() {
             let diet = fauna.config.founder(*f).diet;
@@ -633,9 +650,14 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
     }
     let scan = cfg.carcass_scan_m.max(0.0);
     let centre = |s: Site| ((f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v);
+    // SENSES-CORE: the carcasses it knows of are its record's (the carcass scan).
     let sites: Vec<Site> = match only {
         Some(s) => vec![s],
-        None => fauna.carcass_sites(fv).to_vec(),
+        None => {
+            let want = crate::perception::Want { carcasses: true, ..Default::default() };
+            crate::perception::refresh(fauna, i, view, fv, None, want);
+            fauna.percept(a.id).map(|p| p.carcass_sites().collect()).unwrap_or_default()
+        }
     };
     let near: Vec<(Site, f64)> = sites
         .iter()
@@ -711,7 +733,15 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
         Actions { forward: t.escape_creep, turn: side, feed: 0.0 }
     } else {
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, go.0, go.1, ring);
-        head(a.pose.heading_rad, dx.atan2(dz), 1.0, 0.0)
+        // GAIT, the arrival: no faster than covers what is left to the carcass's column (a
+        // voxel at least) in one controller interval, so a fast walker does not overshoot it
+        // and circle (the Veilhound at 1.4 m/s did, on a carcass a step up).
+        let (cx, cz) = centre(site);
+        let (ex, ez) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, cx, cz, ring);
+        let interval_m = fauna.config.manifest(founder).cruise_m_per_s * founder.manifest().cadence_ticks() as f64 * cubarium_voxel::DT;
+        let left = (ex * ex + ez * ez).sqrt().max(v);
+        let forward = if interval_m > 0.0 { (left / interval_m).min(1.0) } else { 1.0 };
+        head(a.pose.heading_rad, dx.atan2(dz), forward, 0.0)
     };
     fauna.animals[i].hunt = m;
     fauna.ledger.hunt_meal_walk_samples += 1;
@@ -757,47 +787,6 @@ pub(crate) fn remember_kill(fauna: &mut Fauna, striker: u64, x: f64, z: f64, rin
         fauna.animals[j].hunt.remember_productive(&cfg, x, z, tick, until, ring);
         fauna.ledger.hunt_productive_kills += 1;
     }
-}
-
-/// Whether the hunter at `a` sees `o`, `(dx, dz)` away: ahead of it (the cone looks
-/// forward) and not hidden, by the flee rule's ray against the predation occupancy.
-fn sees(
-    fauna: &Fauna,
-    view: &VoxelView<'_>,
-    occupancy: Option<crate::senses::Occ<'_>>,
-    a: &crate::Animal,
-    o: &crate::Animal,
-    (dx, dz): (f64, f64),
-) -> bool {
-    let (fx, fz) = a.pose.forward();
-    if dx * fx + dz * fz < 0.0 {
-        return false;
-    }
-    let Some(occupancy) = occupancy else {
-        return true;
-    };
-    let config = &fauna.config;
-    let (Some(geometry), Some(og)) = (crate::body_of(config, a), crate::body_of(config, o)) else {
-        return false;
-    };
-    let v = view.config.voxel_m;
-    let origin = crate::senses::cone_origin(view, &a.pose, a.sense_layer(v), &geometry);
-    let base = if o.mobility.mode != crate::MobilityMode::Ground && o.pose.y_m.is_finite() {
-        o.pose.y_m
-    } else {
-        crate::surface_m(o.sense_layer(v), v)
-    };
-    let ty = base + 0.5 * og.height_m;
-    let (ex, ey, ez) = (dx, ty - origin.1, dz);
-    let dist = (ex * ex + ey * ey + ez * ez).sqrt();
-    if !(dist > 0.0) {
-        return true;
-    }
-    let dir = (ex / dist, ey / dist, ez / dist);
-    matches!(
-        crate::senses::ray_first_hit(view, &occupancy, a.id, origin, dir, dist + og.width_m),
-        Some((hit, crate::senses::Fine::Body)) if hit >= dist - og.width_m - v
-    )
 }
 
 /// The patrol's answer for the due body at `i` — its held actions and its lure — or
@@ -852,28 +841,39 @@ pub(crate) fn steer(
     let mut target: Option<(f64, f64, f64)> = None;
     let mut tremor = [0.0f64; 2];
     let reach = cfg.sight_m.max(pc.tremor_radius_m);
-    for o in &fauna.animals {
-        if o.id == a.id || !crate::is_prey_of(&fauna.config, &a, o) {
+    // SENSES-CORE: the prey in its record — by the patrol's own rule while its lineage's
+    // table is not live ([`crate::perception::refresh`]); a live lineage's core tracks read
+    // through the same reach, sight range and tremor radius.
+    crate::perception::refresh(fauna, i, view, fv, occupancy, crate::perception::Want { prey: true, ..Default::default() });
+    let tracks: Vec<crate::Track> = fauna
+        .percept(a.id)
+        .map(|p| p.tracks().iter().filter(|t| t.class == crate::perception::class::PREY).copied().collect())
+        .unwrap_or_default();
+    let mut target_id: Option<u64> = None;
+    for t in &tracks {
+        let Some(o) = fauna.view().animal(t.id).copied() else { continue };
+        if !crate::is_prey_of(&fauna.config, &a, &o) {
             continue;
         }
-        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
         let d = (dx * dx + dz * dz).sqrt();
         if d > reach {
             continue;
         }
-        let felt = if d <= pc.tremor_radius_m { crate::tremor_of(o, d, pc.tremor_near_m) } else { 0.0 };
-        let seen = d <= cfg.sight_m && sees(fauna, view, occupancy, &a, o, (dx, dz));
+        let felt = if t.modes & crate::perception::TREMOR != 0 && d <= pc.tremor_radius_m { t.felt } else { 0.0 };
+        let seen = t.modes & crate::perception::SIGHT != 0 && d <= cfg.sight_m && dx * fx + dz * fz >= 0.0;
         if !(seen || felt > 0.0) {
             continue;
         }
         let Some(pf) = o.founder else { continue };
         met[pf.index()] = true;
-        if !accepts(&fauna.config, &a, o, tick) {
+        if !accepts(&fauna.config, &a, &o, tick) {
             declined[pf.index()] = true;
             continue;
         }
         if seen && target.is_none_or(|t| d < t.0) {
             target = Some((d, dx, dz));
+            target_id = Some(o.id);
         }
         if felt > 0.0 {
             let side = dx * rx + dz * rz;
@@ -907,6 +907,9 @@ pub(crate) fn steer(
         m.patch = (a.pose.x, a.pose.z);
         m.samples = 0;
         fauna.ledger.hunt_engaged_samples += 1;
+        if let Some(id) = target_id {
+            crate::perception::approach(fauna, a.id, id);
+        }
         return Some((head(a.pose.heading_rad, dx.atan2(dz), forward, 1.0), lit));
     }
     if tremor[0] + tremor[1] >= cfg.tremor_turn && tremor[0] + tremor[1] > 0.0 {

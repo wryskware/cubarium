@@ -107,13 +107,16 @@ fn litter(flora: &mut Flora, site: Site, organic: f64) {
 }
 
 /// A shredder on a litter pile holds still to feed; a walking lanternjaw within its tremor
-/// range and it flees at full walk, not feeding.
+/// range and it flees at full walk, not feeding — its S1 rule, its senses off (S2's freeze
+/// has its own case in `ground_response_tests`).
 #[test]
 fn a_forager_on_food_still_flees_a_walking_hunter() {
     let run = |with_hunter: bool| -> (Fauna, u64) {
         let world = clock_off(31);
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(hunting_config());
+        let mut c = hunting_config();
+        c.founders[SHREDDER.index()].senses.live = false;
+        let mut fauna = Fauna::new(c);
         let s = introduce(&mut fauna, &world, SHREDDER, StartingStores { body: 1.0, reserve: 0.3 });
         place(&mut fauna, s, 4.1, 1.6, EAST);
         let site = animal(&fauna, s).site;

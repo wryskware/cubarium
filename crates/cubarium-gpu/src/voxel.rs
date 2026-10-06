@@ -164,6 +164,9 @@ impl HeadMove {
 ///   `idle_rate` its change per tick, `idle_phase` its breath's offset.
 /// - `head` is a head move under way or due: the head cells of a body in a move take an
 ///   entry of their own with it, the rest of the body one with [`HeadMove::NONE`].
+/// - `hunker` is the hunker weight (a frondgrazer clamped under its shield, HUNKER) at the
+///   staged tick and `hunker_rate` its change per tick: the body settles by `drop` at it,
+///   as at the sleep weight (the larger of the two settles it).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PoseEntry {
     pub sleep: f32,
@@ -174,6 +177,8 @@ pub struct PoseEntry {
     pub idle_rate: f32,
     pub idle_phase: f32,
     pub head: HeadMove,
+    pub hunker: f32,
+    pub hunker_rate: f32,
 }
 
 impl PoseEntry {
@@ -186,6 +191,8 @@ impl PoseEntry {
         idle_rate: 0.0,
         idle_phase: 0.0,
         head: HeadMove::NONE,
+        hunker: 0.0,
+        hunker_rate: 0.0,
     };
 }
 
@@ -228,8 +235,8 @@ pub struct PoseAt {
 
 /// One entry, `ticks` after the staged tick: each weight runs on from the staged one at its
 /// rate (clamped to `0..=1`) and is eased by a smoothstep; the settle is the drop at the
-/// sleep weight; each breath dips at its own weight; a head move goes out and back at the
-/// idle weight.
+/// sleep weight (or the hunker weight, whichever is further down); each breath dips at its
+/// own weight; a head move goes out and back at the idle weight.
 pub fn pose_at(table: &PoseTable, entry: &PoseEntry, ticks: f32) -> PoseAt {
     let ticks = ticks.clamp(0.0, 8.0);
     let smooth = |w: f32, r: f32| {
@@ -238,9 +245,10 @@ pub fn pose_at(table: &PoseTable, entry: &PoseEntry, ticks: f32) -> PoseAt {
     };
     let ws = smooth(entry.sleep, entry.sleep_rate);
     let wi = smooth(entry.idle, entry.idle_rate);
+    let wh = smooth(entry.hunker, entry.hunker_rate);
     let head = entry.head.out(ticks) * wi;
     PoseAt {
-        settle: entry.drop * ws + entry.head.dip * head,
+        settle: entry.drop * ws.max(wh) + entry.head.dip * head,
         breath: ws * table.sleep.dip(entry.sleep_phase, ticks)
             + wi * table.idle.dip(entry.idle_phase, ticks),
     }
