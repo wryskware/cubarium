@@ -1283,7 +1283,7 @@ fn controllers(
         }
         if driven && fauna.controllers.pack_tactic(id) {
             if let Some(tactic) =
-                crate::pack::steer(fauna, i, view, &fv, sky.clock_on, sky.daylight, actions)
+                crate::pack::steer(fauna, i, view, &fv, sky.clock_on, sky.daylight, actions, predation_occupancy)
             {
                 actions = tactic;
                 lure = 0.0;
