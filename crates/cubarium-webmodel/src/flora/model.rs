@@ -221,6 +221,8 @@ pub struct Counters {
     pub taken_mineral: f64,
     pub substrate: f64,
     pub decomposed: f64,
+    /// Of `decomposed`, the carrion pool's share.
+    pub decomposed_carrion: f64,
     pub taken: Take,
     /// Mineral the animals' returns brought back to the site pools (closed loop).
     pub returned_mineral: f64,
@@ -245,6 +247,7 @@ pub struct Counters {
 }
 
 /// The whole half.
+#[derive(Clone)]
 pub struct Model {
     pub config: FloraConfig,
     pub day: DayModel,
@@ -1152,10 +1155,14 @@ impl Model {
         let a = self.zones.zones[zi].area.max(1.0);
         let counts: Vec<f64> = (0..NS).map(|s| if s == GLOW { 0.0 } else { self.z[zi].count(s) }).collect();
         let vacant = (a - counts.iter().sum::<f64>()).max(0.0);
+        // Over the faces held and vacant: the zone's area when it is not over-full, their
+        // count when it is (a zone's stands can outnumber its faces between rebins), so the
+        // shares add to one and no mineral is made.
+        let total = (counts.iter().sum::<f64>() + vacant).max(1.0);
         for s in 0..NS {
-            self.z[zi].pool[s] += m * counts[s] / a;
+            self.z[zi].pool[s] += m * counts[s] / total;
         }
-        self.z[zi].pool[VACANT] += m * vacant / a;
+        self.z[zi].pool[VACANT] += m * vacant / total;
     }
 
     fn germinate(&mut self, zi: usize, readings: &[Reading], day: bool) {
@@ -1323,6 +1330,7 @@ impl Model {
         let dc = self.carrion * (1.0 - (-self.config.carrion_decomposition * dt).exp());
         self.carrion -= dc;
         self.c.decomposed += dc;
+        self.c.decomposed_carrion += dc;
         // Glassfilm (`film.rs`): one logistic stock over its eligible faces.
         self.step_film(dt);
         let ft = take.film.min((self.film - self.config.film_graze_refuge * self.film_capacity).max(0.0)).max(0.0);

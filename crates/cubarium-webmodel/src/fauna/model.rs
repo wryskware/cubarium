@@ -168,6 +168,7 @@ pub struct Census {
 }
 
 /// The model's whole state and its numbers.
+#[derive(Clone)]
 pub struct FaunaModel {
     pub config: FaunaConfig,
     /// The carrion pool's decomposition rate, per second (`flora.carrion_decomposition`): the
@@ -684,7 +685,10 @@ impl FaunaModel {
                             continue;
                         }
                         c.n -= dead;
-                        laid_here += dead * c.b.organic();
+                        // A gestating body's escrow: the loss respired, the rest in the corpse.
+                        let (esc_body, esc_loss) = escrow_split(c, pp.core.reproduction.gestation_loss_fraction);
+                        self.ledger[pf.index()].gestation_loss += dead * esc_loss;
+                        laid_here += dead * (c.b.organic() + esc_body);
                         self.ledger[pf.index()].killed_by[hf.index()] += dead;
                         kills_here += dead;
                     }
@@ -953,8 +957,10 @@ impl FaunaModel {
                 if !(c.n > 0.0) {
                     continue;
                 }
+                let (esc_body, esc_loss) = escrow_split(c, sc.reproduction.gestation_loss_fraction);
                 if c.b.body < sc.body_min {
-                    ret.carrion += c.n * c.b.organic() + c.carcass;
+                    self.ledger[f.index()].gestation_loss += c.n * esc_loss;
+                    ret.carrion += c.n * (c.b.organic() + esc_body) + c.carcass;
                     self.carcass_left += c.carcass;
                     c.carcass = 0.0;
                     self.ledger[f.index()].starved += c.n;
@@ -968,7 +974,8 @@ impl FaunaModel {
                     let died = self.draws.of(c.n, p).min(c.n);
                     if died > 0.0 {
                         let kill_share = c.carcass * died / c.n;
-                        ret.carrion += died * c.b.organic() + kill_share;
+                        self.ledger[f.index()].gestation_loss += died * esc_loss;
+                        ret.carrion += died * (c.b.organic() + esc_body) + kill_share;
                         self.carcass_left += kill_share;
                         c.carcass -= kill_share;
                         self.ledger[f.index()].aged += died;
@@ -1125,6 +1132,15 @@ pub fn cohort_distance(phys: &FounderPhysiology, a: &Cohort, b: &Cohort) -> f64 
 
 /// `b` into `a`, body-weighted: every per-body stock and clock is the bodies' mean, so the
 /// cohort's totals are kept exactly. The latches and the surplus window are the larger's.
+/// **A dying body's open escrow** (`gestate`, `step.rs:2883-3018`: a parent that dies carrying
+/// one loses `gestation_loss_fraction` of it to respiration and gets the rest back, so the rest
+/// is in its corpse): `(back in the body, respired)`, per body.
+fn escrow_split(c: &Cohort, loss_fraction: f64) -> (f64, f64) {
+    let e = c.escrow.map_or(0.0, |e| e.0);
+    let loss = e * loss_fraction.clamp(0.0, 1.0);
+    (e - loss, loss)
+}
+
 fn absorb(a: &mut Cohort, b: &Cohort) {
     let n = a.n + b.n;
     if !(n > 0.0) {
