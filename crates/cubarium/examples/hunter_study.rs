@@ -598,6 +598,16 @@ fn run(args: &[String]) {
     meal_all.add(&meal_win);
     println!("summeal,{arm},{},{}", minute0, meal_line(&l0, &l, &meal_all));
     println!("sumroute,{arm},{},{}", minute0, route_line(&l0, &l));
+    // The hunt funnel per hunter and prey over the run (S2's readout): sensed, approached,
+    // struck, killed, eaten.
+    for h in Founder::ALL {
+        for p in Founder::ALL {
+            let n: Vec<u64> = (0..5).map(|s| l.funnel[h.index()][p.index()][s] - l0.funnel[h.index()][p.index()][s]).collect();
+            if n.iter().any(|&x| x > 0) {
+                println!("funnel,{arm},{},{},{}", h.name(), p.name(), n.iter().map(u64::to_string).collect::<Vec<_>>().join(","));
+            }
+        }
+    }
     vh_all.add(&vh_win);
     println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
     println!("sumvig,{arm},{},{}", minute0, vig_line(&l0, &l));
