@@ -100,3 +100,5 @@ run then tests that prediction, and runs are sized by the event count the questi
 - `design/webmodel/fauna.md`: the animal half, its laws as built, and its open-loop
   validation.
 - `design/webmodel/flora.md`: the producer half, the same.
+- `design/webmodel/meadow.md`: candidate mechanisms for a lasting grass niche, as plant-half
+  levers, with their batch.
