@@ -253,6 +253,21 @@ fn meal_line(a: &FaunaLedger, b: &FaunaLedger, m: &Meal) -> String {
     )
 }
 
+/// The HUNTER-MEAL rule's own counters over a window: meal-step samples walking to and
+/// eating at a carcass, strikes withheld at one, squares passed over as off route, choices
+/// made off the graph, kills remembered productive.
+fn route_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
+    format!(
+        "meal_walk={},meal_eat={},withheld={},unreachable_squares={},off_route={},productive_kills={}",
+        b.hunt_meal_walk_samples - a.hunt_meal_walk_samples,
+        b.hunt_meal_eat_samples - a.hunt_meal_eat_samples,
+        b.hunt_strikes_withheld - a.hunt_strikes_withheld,
+        b.hunt_unreachable_squares - a.hunt_unreachable_squares,
+        b.hunt_off_route - a.hunt_off_route,
+        b.hunt_productive_kills - a.hunt_productive_kills,
+    )
+}
+
 fn run(args: &[String]) {
     let hours: f64 = arg(args, "hours=").map_or(2.0, |h| h.parse().unwrap());
     let every: u64 = arg(args, "every=").map_or(10, |m| m.parse().unwrap());
@@ -339,6 +354,7 @@ fn run(args: &[String]) {
             let l = sim.fauna().view().ledger.clone();
             sample(&sim, &params, &arm, minute, &lw, &l, &win, &mut track, ticks_in_window, ms);
             println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
+            println!("route,{arm},{minute},{}", route_line(&lw, &l));
             meal_all.add(&meal_win);
             meal_win = Meal::default();
             for i in 0..Founder::COUNT {
@@ -357,6 +373,7 @@ fn run(args: &[String]) {
     println!("sum,{arm},{},{}", minute0, lj_line(&l0, &l));
     meal_all.add(&meal_win);
     println!("summeal,{arm},{},{}", minute0, meal_line(&l0, &l, &meal_all));
+    println!("sumroute,{arm},{},{}", minute0, route_line(&l0, &l));
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;
