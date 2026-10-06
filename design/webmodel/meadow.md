@@ -600,7 +600,9 @@ But only `ew+run+crop30+L40+dryA` holds meadow on s6 (0.10). `ew+run+dryA` sits 
   patch", which the sim's patch readout (§11.4) measures.
 
 **Left:**
-1. `rare150-ew+run+d5:1:0.5`, which was not run.
+1. **Done (01:35):** `rare150-ew+run+d5:1:0.5` comes back from rarity to s5 0.18 / 0.34 / 0.06 (0.47, 0.44) and
+   s6 0.09 / 0.34 / 0.14 (0.41, 0.62), close to its common start. On s1 the arm gives 0 / 0.01 / 0:
+   stonecushion ground, as before.
 2. Wrysk's call on a dry season. If yes:
    - the weather mode (§11.5);
    - `establish_water_min` 0.2 and turf runners 0.6 / 3 in the presets;
