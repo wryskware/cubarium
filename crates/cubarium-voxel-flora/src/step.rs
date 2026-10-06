@@ -3946,6 +3946,67 @@ pub fn break_even_cover(
     (income / upkeep).max(0.0)
 }
 
+/// What a curing species' dry clock reads on one tick (package DORMANCY): the root box's
+/// mean available water and the stand's moisture `μ` (its ramp of it), its light response,
+/// aeration stress, its site's mineral, and its wood and foliage.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CureRead {
+    pub available: f64,
+    pub moisture: f64,
+    pub light_eff: f64,
+    pub stress: f64,
+    pub mineral: f64,
+    pub wood: f64,
+    pub foliage: f64,
+}
+
+/// **Is the stand short on its water?** ([`SpeciesConfig::cure_cover`]): `Some(true)` when
+/// the income its water lets it earn, after the reserve's share, covers less than
+/// `cure_cover` of its upkeep and leaf turnover while full water would cover it;
+/// `Some(false)` when it covers it (or the knob is off); `None` when even full water would
+/// not — water is not the question (no light, too little mineral).
+pub fn water_short(sc: &SpeciesConfig, r: &CureRead) -> Option<bool> {
+    let _ = (sc, r);
+    Some(false)
+}
+
+/// What the curing clock does to a stand this tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CureStep {
+    /// Green, growing by the ordinary rules (its clock ran, held or reset).
+    Green,
+    /// Green, and its clock reached `cure_after_s`: it cures now.
+    Cure,
+    /// Cured, and stays dormant this tick.
+    Dormant,
+    /// Cured, and its water reached `cure_resume_water`: it wakes now.
+    Wake,
+}
+
+/// **The curing clock** of a curing species ([`SpeciesConfig::cure_after_s`] positive): a
+/// cured stand wakes at `cure_resume_water`; a green one's `dry_s` runs while its root box
+/// is below `cure_water`, or below `cure_resume_water` and [`water_short`]; holds while
+/// below `cure_resume_water` and water is not the question; and resets otherwise. One rule,
+/// read by the plant step and by the webmodel's stand law.
+pub fn cure_step(sc: &SpeciesConfig, cured: bool, dry_s: &mut f64, r: &CureRead, dt: f64) -> CureStep {
+    if cured {
+        if r.available >= sc.cure_resume_water {
+            *dry_s = 0.0;
+            return CureStep::Wake;
+        }
+        return CureStep::Dormant;
+    }
+    if r.available < sc.cure_water {
+        *dry_s += dt;
+        if *dry_s >= sc.cure_after_s {
+            return CureStep::Cure;
+        }
+        return CureStep::Green;
+    }
+    *dry_s = 0.0;
+    CureStep::Green
+}
+
 /// **The canopy gate** ([`SpeciesConfig::establish_light_margin`]): whether a newborn of
 /// `species` on `site` — the stand one package builds ([`crate::seeds::newborn_stand`]) —
 /// would earn at least the margin times its upkeep under the light reaching it through

@@ -240,6 +240,8 @@ fn species_rows() -> Vec<Row> {
             .search(0.0, 1.0),
         r("cure_max_s", "s (0 = no limit)", nonneg, "curing: dormant this long, the drought kills the stand")
             .search(0.0, 86400.0),
+        r("cure_cover", "cover ratio (0 = off)", nonneg, "curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry")
+            .search(0.0, 2.0),
         r("cured_srgb", "sRGB 0x00RRGGBB (look, 0 = the species' palette)", nonneg, "the plain-voxel colour of a cured stand's crown")
             .optional().grade("N").prov("decision"),
         r("founder_per_m2", "founders per m2 of habitat", nonneg, "founding: stands per square metre of ground the species' own gates pass on")

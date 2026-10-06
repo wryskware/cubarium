@@ -148,9 +148,20 @@ pub fn start_stand(config: &FloraConfig, species: Species, start: Start) -> Stan
 /// leaving as one package. Nothing lands: the probe measures the stand, not its offspring.
 pub fn probe(
     config: &FloraConfig,
+    stand: Stand,
+    climate: &[ClimateSample],
+    held: impl Fn(usize) -> Held,
+) -> Outcome {
+    probe_traced(config, stand, climate, held, |_, _| {})
+}
+
+/// [`probe`], handing `trace` the tick and the stand after each tick's growth and funding.
+pub fn probe_traced(
+    config: &FloraConfig,
     mut stand: Stand,
     climate: &[ClimateSample],
     held: impl Fn(usize) -> Held,
+    mut trace: impl FnMut(usize, &Stand),
 ) -> Outcome {
     let sc = config.species(stand.species);
     let mut out = Outcome {
@@ -212,6 +223,7 @@ pub fn probe(
             out.packages += 1;
         }
         out.min_wood = out.min_wood.min(stand.wood);
+        trace(t, &stand);
     }
     out.wood[1] = stand.wood;
     out.foliage[1] = stand.foliage;
