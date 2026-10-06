@@ -169,7 +169,7 @@ pub(crate) fn rows() -> Vec<Row> {
         p("climate.cc_per_c", "per degC", nonneg, "Clausius-Clapeyron: what the air holds grows by this fraction per degC")
             .search(0.05, 0.09)
             .prov("physical"),
-        p("climate.rh_max", "RH", positive, "relative humidity never passes this: reaching it starts a forced downpour")
+        p("climate.rh_max", "RH", positive, "relative humidity never passes this outside a dry season: reaching it starts a forced downpour")
             .search(1.1, 2.0)
             .grade("D")
             .prov("tuned:WX1"),

@@ -75,7 +75,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.climate.strike_max_s` | 60.0 | s | [0, inf] |  | - | visual | longest lightning interval (visual only) |
 | `world.climate.storm_stream_gain` | 4.0 | x stream flow | [0, inf] |  | C | decision | stream swell at a downpour's peak (0: off) |
 | `world.climate.cc_per_c` | 0.07 | per degC | [0, inf) | 0.05–0.09 | - | physical | Clausius-Clapeyron: what the air holds grows by this fraction per degC |
-| `world.climate.rh_max` | 1.5 | RH | (0, inf) | 1.1–2 | D | tuned:WX1 | relative humidity never passes this: reaching it starts a forced downpour |
+| `world.climate.rh_max` | 1.5 | RH | (0, inf) | 1.1–2 | D | tuned:WX1 | relative humidity never passes this outside a dry season: reaching it starts a forced downpour |
 | `world.climate.evaporation_rh_span` | 0.4 | RH | (0, inf) | 0.2–0.8 | - | design | evaporation scales with max(0, 1 - RH) / this: the configured rate at RH 1 - span |
 | `world.climate.stream_floor_rh` | 0.5 | RH | [0, inf) | 0.3–0.7 | - | tuned:WX1b | the atmosphere-fed stream draws only while the sky stands above this RH |
 | `world.climate.swell_rise_s` | 45.0 | s | (0, inf) | 15–120 log | - | decision (Wrysk) | the stream swell rises toward its target over this while it rains |

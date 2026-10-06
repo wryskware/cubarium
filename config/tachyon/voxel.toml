@@ -58,7 +58,8 @@ preset = "tropical_jungle"
 # it an option"; design/webmodel/meadow.md §11.6): every 5 world days, from day 5, a 1-day
 # season in which natural rain falls at dry_season_rain of its hazards, so drained ground
 # dries to about half its root water, the turf cures brown and woody seedlings starve
-# back. The forced downpour at rh_max still fires. `dry_season = false` turns it off.
+# back. The forced downpour at rh_max waits for the season to end. `dry_season = false`
+# turns it off.
 dry_season = true
 dry_season_every_days = 5.0   # world days (the day clock's, as the plants count)
 dry_season_len_days = 1.0

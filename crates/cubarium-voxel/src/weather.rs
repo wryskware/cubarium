@@ -672,8 +672,10 @@ pub struct Climate {
     /// The clock counts **world days** ([`DayClock::day_s`], the day the plants' clock
     /// counts too), from the world's tick 0: none before `dry_season_phase_days`, then one
     /// of `dry_season_len_days` every `dry_season_every_days`. It is not scaled by the
-    /// weather speed. The forced downpour at `rh_max` still fires inside it: the closed
-    /// cycle's release valve stays (`Climate::in_dry_season`).
+    /// weather speed. The forced downpour at `rh_max` is held off inside it (kept, the closed
+    /// cycle refills to `rh_max` about 45 min after each downpour and forces another, so the
+    /// ground never dries): the water the season keeps aloft falls as forced downpours once
+    /// it ends, the rains' return.
     pub dry_season: bool,
     /// World days from one season's start to the next.
     pub dry_season_every_days: f64,
@@ -715,7 +717,8 @@ pub struct Climate {
     /// The Clausius–Clapeyron slope: what the air holds grows by this fraction per °C
     /// (0.07: 7 % per °C).
     pub cc_per_c: f64,
-    /// Relative humidity never passes this: reaching it starts a forced downpour.
+    /// Relative humidity never passes this outside a dry season: reaching it starts a forced
+    /// downpour (held off inside one, `dry_season`).
     pub rh_max: f64,
     /// Evaporation from open water scales with `max(0, 1 − RH) / evaporation_rh_span`:
     /// the configured rate at RH `1 − span`, none at saturation.
@@ -1366,7 +1369,11 @@ fn events(w: &mut World, c: &Climate, a: f64, f: f64) {
     }
 
     let rh = w.rh();
-    if rh >= c.rh_max && w.weather.mode != RainMode::Downpour {
+    // The dry season holds the forced downpour off: with the valve kept, the closed cycle
+    // refills to `rh_max` about 45 min after each downpour and a season never dries the
+    // ground (DRY-SEASON's fixture). The water the season keeps aloft falls once it ends.
+    let season = c.in_dry_season(&w.config.day, tick);
+    if rh >= c.rh_max && !season && w.weather.mode != RainMode::Downpour {
         if w.weather.event.is_some() {
             end(w, c, tick);
         }
@@ -1374,14 +1381,13 @@ fn events(w: &mut World, c: &Climate, a: f64, f: f64) {
     } else if w.weather.event.is_none() && tick % TICKS_PER_MIN == 0 {
         let k = w.weather.cooling_c_per_h;
         let moist = w.moisture();
-        // The dry season scales the natural hazards (never the forced downpour above).
-        let season = w.config.climate.in_dry_season(&w.config.day, tick);
-        let scale = c.dry_season_rain.max(0.0);
+        // The dry season scales the natural hazards.
+        let scale = c.rain_scale(&w.config.day, tick).max(0.0);
         let p = MODES.map(|mode| {
             let m = c.mode(mode).expect("a rain mode");
             let h = if reads_moisture(mode) { moist } else { rh };
             let mut l = hazard(m, h, a, k, f);
-            if season {
+            if scale != 1.0 {
                 l = if scale > 0.0 { l * scale } else { 0.0 };
             }
             1.0 - (-l / 60.0).exp()

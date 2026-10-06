@@ -806,15 +806,26 @@ fn natural_starts_are_suppressed_inside_the_season_and_not_outside() {
 }
 
 #[test]
-fn the_forced_downpour_still_fires_at_rh_max_inside_the_season() {
+fn the_forced_downpour_is_held_off_inside_the_season_and_fires_once_it_ends() {
+    // Measured on dry-hills (DRY-SEASON fixture): with the release valve kept, the closed
+    // cycle refills to rh_max about 45 min after each downpour and forces another, so a
+    // 2-hour season never dries the ground. Inside a season the valve waits.
     let mut c = seasonal(1.0, 0.5, 0.0, 0.0);
     c.capacity_share = 1.0 / (c.rh_max + 0.1);
     let mut w = sky_world(c, 1.0);
     w.config.day.length_min = 120.0;
     assert!(c.in_dry_season(&w.config.day, w.tick));
     assert!(w.rh() >= c.rh_max);
+    for _ in 0..3 * MIN {
+        w.step();
+    }
+    assert_eq!(w.weather().mode(), RainMode::Clear, "no forced downpour inside the season");
+    assert_eq!(w.weather().counts.forced, 0);
+    // The first tick past the season's end: the stored water falls.
+    w.tick = tick_at(&w.config.day, 0.5);
+    assert!(!w.in_dry_season());
     w.step();
-    assert_eq!(w.weather().mode(), RainMode::Downpour, "the closed cycle's release valve holds");
+    assert_eq!(w.weather().mode(), RainMode::Downpour);
     assert_eq!(w.weather().counts.forced, 1);
 }
 
