@@ -78,7 +78,6 @@ fn expect(fauna: &Fauna, id: u64, kind: BeaconKind) -> f64 {
 /// from it) and that sips at a flower its heuristic found raises its UV expectation; its cyan
 /// expectation does not move.
 #[test]
-#[ignore = "FINDING: a sip credits the class of any active visit however far away; a stale glowcap visit makes a flower sip teach cyan (cyan 0.5 -> 0.75, UV unchanged)"]
 fn a_sip_far_from_a_stale_glowcap_visit_teaches_uv_not_cyan() {
     let world = clock_off(301);
     let flora = Flora::new(FloraConfig::default());
@@ -94,6 +93,49 @@ fn a_sip_far_from_a_stale_glowcap_visit_teaches_uv_not_cyan() {
     let (uv1, cyan1) = (expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap));
     assert!(uv1 > uv0, "the flower sip teaches UV: {uv0} -> {uv1}");
     assert_eq!(cyan1, cyan0, "and leaves cyan alone");
+}
+
+/// **A visit it flew away from closes as failed** (FINDINGS-FIX): a bellwing whose open
+/// glowcap inspection lies farther than `visit_m` + `visit_leave_m` closes it on its next
+/// non-sip sample (counted failed and left, marked, cyan taught toward 0); one just inside
+/// that distance stays open. A later sip then teaches UV and leaves cyan alone.
+#[test]
+fn an_open_visit_it_flew_away_from_closes_as_failed() {
+    let world = clock_off(311);
+    let flora = Flora::new(FloraConfig::default());
+    let mut c = config(0.5);
+    c.light.visit_m = 0.25;
+    c.light.visit_leave_m = 0.5;
+    let mut fauna = Fauna::new(c);
+    let bw = bellwing(&mut fauna, &world, 2.0);
+    let glowcap = BeaconKind::Glowcap.index();
+    let open_at = |fauna: &mut Fauna, x: f64| {
+        let since = fauna.tick;
+        fauna.percepts.entry(bw).or_default().visit = perception::Visit { active: true, kind: glowcap as u8, x, z: LANE_Z, since };
+    };
+    // Just inside visit_m + visit_leave_m: still open.
+    open_at(&mut fauna, 2.0 + 0.25 + 0.5 - 0.05);
+    steer_with(&mut fauna, &world, &flora, bw, WANDER);
+    assert!(fauna.percept(bw).unwrap().visit.active, "within reach of the visit it stays open");
+    assert_eq!(fauna.ledger.left_visits[BW.index()][glowcap], 0);
+    // Beyond it: closed as failed.
+    open_at(&mut fauna, 2.0 + 0.25 + 0.5 + 0.05);
+    let cyan0 = expect(&fauna, bw, BeaconKind::Glowcap);
+    let failed0 = fauna.ledger.failed_visits[BW.index()][glowcap];
+    steer_with(&mut fauna, &world, &flora, bw, WANDER);
+    let p = fauna.percept(bw).copied().unwrap();
+    assert!(!p.visit.active, "the left visit is closed");
+    assert_eq!(fauna.ledger.left_visits[BW.index()][glowcap], 1);
+    assert_eq!(fauna.ledger.failed_visits[BW.index()][glowcap], failed0 + 1);
+    assert!(p.marked(2.0 + 0.8, LANE_Z, fauna.tick, fauna.config.light.mark_radius_m, 1e9), "its place is marked");
+    let cyan1 = expect(&fauna, bw, BeaconKind::Glowcap);
+    assert!(cyan1 < cyan0, "cyan taught toward 0: {cyan0} -> {cyan1}");
+    // The next sip is a flower's.
+    let uv1 = expect(&fauna, bw, BeaconKind::Flower);
+    steer_with(&mut fauna, &world, &flora, bw, SIP);
+    assert!(expect(&fauna, bw, BeaconKind::Flower) > uv1, "the sip teaches UV");
+    let cyan2 = expect(&fauna, bw, BeaconKind::Glowcap);
+    assert!((cyan2 - cyan1).abs() < 1e-6, "and leaves cyan alone (bar the slow relaxation): {cyan1} -> {cyan2}");
 }
 
 /// **A sip at the visited beacon teaches its class** (the control for the case above): the

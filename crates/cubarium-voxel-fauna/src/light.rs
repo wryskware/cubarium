@@ -578,6 +578,30 @@ fn inspect(fauna: &mut Fauna, i: usize, ring: f64) -> Inspection {
     Inspection::Failed
 }
 
+/// The open inspection of body `id`, at `(x, z)`, closed as failed when the body is farther
+/// than `visit_m` + `visit_leave_m` from it (horizontally): marked for `mark_s`, counted in
+/// `failed_visits` and `left_visits`, and its class taught 0.
+fn left_visit(fauna: &mut Fauna, id: u64, x: f64, z: f64, founder: crate::Founder, ring: f64) {
+    let cfg = fauna.config.light;
+    let tick = fauna.tick;
+    let Some(p) = fauna.percepts.get_mut(&id) else { return };
+    if !p.visit.active {
+        return;
+    }
+    let (dx, dz) = crate::pose::wrapped_delta(x, z, p.visit.x, p.visit.z, ring);
+    let r = cfg.visit_m + cfg.visit_leave_m.max(0.0);
+    if dx * dx + dz * dz <= r * r {
+        return;
+    }
+    let (vx, vz, kind) = (p.visit.x, p.visit.z, p.visit.kind);
+    p.mark(vx, vz, tick + cubarium_voxel::ticks_at_least_one(cfg.mark_s));
+    p.visit = Visit::default();
+    let k = usize::from(kind).min(BeaconKind::COUNT - 1);
+    fauna.ledger.failed_visits[founder.index()][k] += 1;
+    fauna.ledger.left_visits[founder.index()][k] += 1;
+    learn(fauna, id, BeaconKind::from_index(kind), 0.0);
+}
+
 /// The inspection of the body `id` ended in a meal (its mouth took food): no mark.
 fn rewarded(fauna: &mut Fauna, id: u64) {
     if let Some(p) = fauna.percepts.get_mut(&id) {
@@ -623,7 +647,13 @@ pub(crate) fn steer_flyer(
         let p = fauna.percepts.entry(a.id).or_default();
         let bout = p.last_sip == 0 || tick.saturating_sub(p.last_sip) > gap;
         p.last_sip = tick;
-        let visited = p.visit.active.then_some(p.visit.kind);
+        // FINDINGS-FIX: the sip credits the inspected beacon only at it (within `visit_m`);
+        // elsewhere it is a flower's, and the far visit closes with the sip, unlearned.
+        let at_visit = {
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, p.visit.x, p.visit.z, ring);
+            dx * dx + dz * dz <= fauna.config.light.visit_m * fauna.config.light.visit_m
+        };
+        let visited = (p.visit.active && at_visit).then_some(p.visit.kind);
         if bout {
             let kind = visited.map_or(BeaconKind::Flower, BeaconKind::from_index);
             if let Some(k) = visited {
@@ -634,6 +664,9 @@ pub(crate) fn steer_flyer(
         rewarded(fauna, a.id);
         return None;
     }
+    // FINDINGS-FIX: an open inspection it has flown away from (beyond `visit_m` +
+    // `visit_leave_m`) is closed as failed: marked, counted, its class taught 0.
+    left_visit(fauna, a.id, a.pose.x, a.pose.z, founder, ring);
     refresh_light(fauna, i, view, fv, daylight);
     let p = *fauna.percepts.get(&a.id)?;
     // 2. A looming shadow repels: away and up.

@@ -600,8 +600,10 @@ fn herd(fauna: &mut Fauna, i: usize, ring: f64, held: Actions) -> Option<Actions
                 v.hunker_close = now;
             }
             if now.saturating_sub(v.hunker_close) >= hk.calm_ticks(cond) {
+                // The turn-over ends with the hunker: a later hunker starts under its shield.
                 v.hunkered = false;
                 v.pry = 0.0;
+                v.opened_until = 0;
             }
         }
         v.fleeing = false;

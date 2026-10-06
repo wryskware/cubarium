@@ -2855,6 +2855,10 @@ pub struct FaunaLedger {
     pub light_budget: [[u64; light::LightMode::COUNT]; Founder::COUNT],
     #[serde(default)]
     pub stalled_visits: [u64; Founder::COUNT],
+    /// FINDINGS-FIX: open inspections closed as failed because the body flew away from them
+    /// (beyond `visit_m` + `visit_leave_m`), by beacon kind; also counted in `failed_visits`.
+    #[serde(default)]
+    pub left_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
     #[serde(default)]
     pub sipped_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
     #[serde(default)]

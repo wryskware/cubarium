@@ -614,6 +614,7 @@ fn knob_rows() -> Vec<Row> {
         lk("lure_height_fraction", "x body height", nonneg, "the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle"),
         lk("visit_m", "m", nonneg, "a body this close (horizontally) to a beacon is inspecting it").search(0.1, 1.0),
         lk("visit_s", "s", nonneg, "an inspection with no meal by then fails").search(0.5, 20.0).log(),
+        lk("visit_leave_m", "m", nonneg, "an open inspection whose body is farther than visit_m + this from its beacon is closed as failed").search(0.1, 2.0),
         lk("mark_s", "s", nonneg, "a failed visit marks the place 'no reward here' for this long").search(10.0, 1800.0).log(),
         lk("mark_radius_m", "m", nonneg, "a mark covers beacons within this of its centre").search(0.1, 2.0),
         lk("lift_per_m", "lift per m", nonneg, "a flyer approaching a beacon climbs or drops toward its height at this lift per metre"),

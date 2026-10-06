@@ -278,7 +278,6 @@ fn a_flyer_touching_the_jaw_band_only_at_an_edge_is_not_takeable() {
 /// test that has not begun cannot go badly). The control arm, the same scene with a pack
 /// radius that covers the target, keeps it.
 #[test]
-#[ignore = "FINDING: break-off counts members within 2*pack_radius_m of the target, so a hunker-lineage target committed from farther is dropped at once"]
 fn a_pack_keeps_a_far_target_it_committed_to_while_it_closes_in() {
     let arm = |pack_radius_m: f64| {
         let world = world(207);

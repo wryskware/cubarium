@@ -942,9 +942,19 @@ pub(crate) fn steer(
                 let out = knows_of(fauna, i, tid, ring).is_some_and(|k| trespass(fauna, own, k.x, k.z, &t, v, ring));
                 // PACK-TUNE, the test: the target as this member knows it, weighed with the
                 // members at hand around it; a prospect under `break_off_below` ends it.
+                // FINDINGS-FIX: a test goes badly only once it has begun (approach, watch,
+                // attack: MacNulty et al. 2007). Until a member is within the strike-test
+                // distance (`2 × pack_radius_m`) of the target, the pack is still closing in
+                // and is weighed as the commit weighed it: the members at hand around this
+                // member (itself and the participants within `pack_radius_m`).
                 let broke = !(late || spent || out || lost)
                     && knows_of(fauna, i, tid, ring).is_some_and(|k| {
-                        let n = at_hand(fauna, own, a.id, k.x, k.z, 2.0 * t.pack_radius_m, ring);
+                        let arrived = at_hand(fauna, own, a.id, k.x, k.z, 2.0 * t.pack_radius_m, ring);
+                        let n = if arrived > 0 {
+                            arrived
+                        } else {
+                            at_hand(fauna, own, a.id, a.pose.x, a.pose.z, t.pack_radius_m, ring)
+                        };
                         prospect(fauna, i, &o, &k, n, ring) < t.break_off_below
                     });
                 keep = !(late || spent || out || lost || broke);
