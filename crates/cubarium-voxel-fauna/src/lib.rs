@@ -37,7 +37,9 @@ pub mod light;
 pub use light::{Beacon, BeaconKind};
 pub mod vigil;
 pub use perception::{Percept, Track};
-pub use vigil::{Vigil, VigilLedger, VigilMode, Vigilance};
+pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
+mod gait;
+pub use gait::Sprint;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
@@ -888,6 +890,11 @@ pub struct Animal {
     /// away. `false` for every other body.
     #[serde(default)]
     pub yielding: bool,
+    /// **Hunkered** (HUNKER, [`crate::Hunker`]): clamped down under its shield, neither moving
+    /// nor eating. Its state is [`State::Resting`]; the presenter reads this flag to draw the
+    /// hunker pose (`cubarium::voxel::hunker`). False for every other body.
+    #[serde(default)]
+    pub hunkered: bool,
     /// **The stomach** (the minimal gut, `design/metabolism-meals-2026-10-02.md` repair 2
     /// item 10): raw food eaten and not yet digested, per food class, in all three
     /// currencies. Separate from [`Animal::gut`], which is egesta. Counted in the stored
@@ -1073,6 +1080,11 @@ pub struct PackRecord {
     /// taken again until the pack has taken another.
     #[serde(default)]
     pub abandoned: Option<u64>,
+    /// **Shunned targets** (PACK-TUNE): bodies the pack dropped alive (broken off, late, lost,
+    /// spent, trespassing), each with the tick until which it is not taken again
+    /// (`Pack::shun_s`); `(0, 0)` is an empty slot. The oldest slot is reused.
+    #[serde(default)]
+    pub shunned: [(u64, u64); 4],
     /// **The draw** (VEILHOUND-SEARCH, the lineage's [`SenseTable`]): the prey the
     /// pack's leader is walking to by route — sensed by the pack, on its route component,
     /// not yet its target. Remade at each of the leader's samples; cleared when the pack
@@ -1813,6 +1825,14 @@ pub struct FounderState {
     /// every walker.
     #[serde(default)]
     pub lift: f64,
+    /// **Stamina spent** (GAIT, [`crate::Sprint`]): 0 rested, 1 spent. A sprint spends it at
+    /// `1 / endurance_s` a second at top speed, and time off the sprint rests it at
+    /// `1 / recovery_s`.
+    #[serde(default)]
+    pub sprint_spent: f64,
+    /// Sprinted out: no sprint until rested to the sprint's `resume_fraction`.
+    #[serde(default)]
+    pub winded: bool,
 }
 
 /// What one controller interval actually did, from the body's own ledger events and
@@ -2630,6 +2650,12 @@ pub struct FaunaLedger {
     pub founder_ticks_by_founder: [u64; Founder::COUNT],
     pub ledges_up_by_founder: [u64; Founder::COUNT],
     pub ledges_down_by_founder: [u64; Founder::COUNT],
+    /// GAIT: ticks spent sprinting (a forward above cruise delivered), and the times a body
+    /// sprinted itself out (winded), by lineage.
+    #[serde(default)]
+    pub sprint_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub winded_by_founder: [u64; Founder::COUNT],
     /// Predation (`design/predation-and-flight-2026-09-28.md` §2.3), by the **striker's**
     /// lineage: strikes begun, and contacts resolved as a hit or a dodge.
     pub strikes_by_founder: [u64; Founder::COUNT],
@@ -2782,6 +2808,13 @@ pub struct FaunaLedger {
     /// ([`PerceptionConfig::give_up_s`]).
     #[serde(default)]
     pub pack_targets_lost: u64,
+    /// **The prey choice's readouts** (PACK-TUNE): pack targets broken off in a chase (their
+    /// prospect under `Pack::break_off_below`), and sensed takeable prey a pack declined at a
+    /// choice for a prospect under `Pack::select_min_prospect` (one count per body per choice).
+    #[serde(default)]
+    pub pack_break_offs: u64,
+    #[serde(default)]
+    pub pack_declined: u64,
     /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
     #[serde(default)]
     pub vigil: VigilLedger,
@@ -3405,6 +3438,8 @@ pub enum ChaseEnd {
     /// No member had sensed it within the pursuit's memory (SENSES-CORE,
     /// [`PerceptionConfig::give_up_s`]).
     Lost,
+    /// Its prospect fell under `Pack::break_off_below` (PACK-TUNE: the test went badly).
+    BrokeOff,
 }
 
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
@@ -3841,6 +3876,7 @@ impl Fauna {
             feast: None,
             feast_eaten: 0.0,
             abandoned: None,
+            shunned: [(0, 0); 4],
             drawn: None,
             drawn_scent: false,
         });
@@ -4195,6 +4231,7 @@ impl Fauna {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            hunkered: false,
             stomach: Stomach::default(),
             eating: false,
             emergency: false,

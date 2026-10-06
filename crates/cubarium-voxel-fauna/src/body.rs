@@ -512,6 +512,14 @@ pub struct FounderPhysiology {
     /// live table senses. Inert while its table is not live.
     #[serde(default)]
     pub vigilance: crate::Vigilance,
+    /// **Its sprint** (GAIT, [`crate::Sprint`]): the gait above cruise its rush or ground
+    /// flight asks for, and the stamina that limits it. None for a lineage that only walks.
+    #[serde(default)]
+    pub sprint: crate::Sprint,
+    /// **Its hunker** (HUNKER, [`crate::Hunker`]): the armoured defence a herd lineage takes
+    /// instead of flight. Off for every lineage but the frondgrazer.
+    #[serde(default)]
+    pub hunker: crate::Hunker,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -592,6 +600,75 @@ pub struct Pack {
     /// row).
     #[serde(default = "pack_stalk_freeze")]
     pub stalk_freeze: bool,
+    /// **The prey choice** (PACK-TUNE, [`crate::pack::prospect`]): a pack weighs each target
+    /// it could take by its prospect — the chance-like share of a hunt on it that ends in a
+    /// kill, from what it can see — times its meat, over its distance, and commits to the best.
+    /// The prospect: 0 for a hunkering lineage's body the members present cannot open (its
+    /// [`crate::Hunker::members_to_open`] with the kin within its ring), else the share of
+    /// their pry left over its resistance; × `select_kin_factor` per kin of its lineage within
+    /// `select_kin_m` (at most `select_kin_max`); × `select_aware_factor` when it is aware of
+    /// a member; × (1 + `select_wound_gain` × its wound); × `select_airborne_factor` in flight
+    /// (in reach). 1 for an isolated, unaware, unarmoured body on the ground.
+    #[serde(default = "pack_select_kin_m")]
+    pub select_kin_m: f64,
+    #[serde(default = "pack_select_kin_factor")]
+    pub select_kin_factor: f64,
+    #[serde(default = "pack_select_kin_max")]
+    pub select_kin_max: u32,
+    #[serde(default = "pack_select_aware_factor")]
+    pub select_aware_factor: f64,
+    #[serde(default = "pack_select_wound_gain")]
+    pub select_wound_gain: f64,
+    #[serde(default = "pack_select_airborne_factor")]
+    pub select_airborne_factor: f64,
+    /// The score is prospect × body^`select_body_exp` / (1 + distance / `select_judge_m`).
+    #[serde(default = "pack_select_body_exp")]
+    pub select_body_exp: f64,
+    #[serde(default = "pack_select_judge_m")]
+    pub select_judge_m: f64,
+    /// It commits only to a prospect of at least this.
+    #[serde(default = "pack_select_min_prospect")]
+    pub select_min_prospect: f64,
+    /// **The test**: in a chase, a target whose prospect falls under this is broken off.
+    #[serde(default = "pack_break_off_below")]
+    pub break_off_below: f64,
+    /// A target dropped alive (broken off, late or lost) is not taken again for this, seconds.
+    #[serde(default = "pack_shun_s")]
+    pub shun_s: f64,
+}
+
+fn pack_select_kin_m() -> f64 {
+    Pack::CHORISTER.select_kin_m
+}
+fn pack_select_kin_factor() -> f64 {
+    Pack::CHORISTER.select_kin_factor
+}
+fn pack_select_kin_max() -> u32 {
+    Pack::CHORISTER.select_kin_max
+}
+fn pack_select_aware_factor() -> f64 {
+    Pack::CHORISTER.select_aware_factor
+}
+fn pack_select_wound_gain() -> f64 {
+    Pack::CHORISTER.select_wound_gain
+}
+fn pack_select_airborne_factor() -> f64 {
+    Pack::CHORISTER.select_airborne_factor
+}
+fn pack_select_body_exp() -> f64 {
+    Pack::CHORISTER.select_body_exp
+}
+fn pack_select_judge_m() -> f64 {
+    Pack::CHORISTER.select_judge_m
+}
+fn pack_select_min_prospect() -> f64 {
+    Pack::CHORISTER.select_min_prospect
+}
+fn pack_break_off_below() -> f64 {
+    Pack::CHORISTER.break_off_below
+}
+fn pack_shun_s() -> f64 {
+    Pack::CHORISTER.shun_s
 }
 
 fn pack_stalk_margin() -> f64 {
@@ -640,6 +717,28 @@ impl Pack {
         stalk_margin: 0.7,
         commit_m: 2.5,
         stalk_freeze: true,
+        // PACK-TUNE's prey choice, placeholders at the terrarium's scale. Wolves and lions
+        // test prey and quit fast on healthy, defended animals; they take the young, the
+        // isolated, the wounded and the unaware far more often than their share (Mech 1970,
+        // *The Wolf*; MacNulty, Mech & Smith 2007, J. Mammal. 88:595, wolf hunting stages:
+        // most encounters end at the approach or the watch; Packer & Ruttan 1988, Am. Nat.
+        // 132:159). Kin within 3 m (about two grazer lengths) each take a fifth off, counting
+        // four; an aware target half; a wound of w adds 2w; a body in flight in reach is a
+        // quarter of one on the ground. Meat counts as the square root of the body (a big
+        // carcass feeds the pack longer, not proportionally better); distance halves the
+        // score at 6 m (the pack radius). Committed at 0.1 and broken off under 0.05; a
+        // target dropped alive is left for 2 min.
+        select_kin_m: 3.0,
+        select_kin_factor: 0.8,
+        select_kin_max: 4,
+        select_aware_factor: 0.5,
+        select_wound_gain: 2.0,
+        select_airborne_factor: 0.25,
+        select_body_exp: 0.5,
+        select_judge_m: 6.0,
+        select_min_prospect: 0.1,
+        break_off_below: 0.05,
+        shun_s: 120.0,
     };
 }
 
@@ -652,8 +751,10 @@ pub struct Glider {
     pub climb_min_stand_m: f64,
     /// Horizontal metres covered per metre of descent in a glide. 2.5.
     pub glide_ratio: f64,
-    /// The glide's speed, body lengths per second. 3.0.
-    pub glide_body_lengths_per_s: f64,
+    /// **The glide's speed, × its ground cruise** (GAIT, Wrysk 2026-10-06: it "can glide
+    /// like 2x their base speed"): a glide covers this × the lineage's cruise
+    /// (`cruise_body_lengths_per_s` × the adult length) a second across. 2.0.
+    pub glide_speed_fraction: f64,
     /// What a second gliding costs, × basal upkeep (the whole, upkeep included). 1.2.
     pub glide_cost_factor: f64,
     /// A glide starts only from at least this height over the landing surface, metres.
@@ -685,11 +786,11 @@ fn fruit_search_m() -> f64 {
 
 impl Glider {
     /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
-    /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 3 BL/s for 1.2 × basal.
+    /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 2 × its cruise for 1.2 × basal.
     pub const SEEDPORTER: Glider = Glider {
         climb_min_stand_m: 1.0,
         glide_ratio: 2.5,
-        glide_body_lengths_per_s: 3.0,
+        glide_speed_fraction: 2.0,
         glide_cost_factor: 1.2,
         glide_min_height_m: 1.0,
         roost_search_m: 4.0,
@@ -1161,6 +1262,8 @@ impl FounderPhysiology {
         p.burr_coat = burr_coat_of(founder);
         p.senses = senses_of(founder);
         p.vigilance = crate::vigil::vigilance_of(founder);
+        p.sprint = crate::gait::sprint_of(founder);
+        p.hunker = crate::vigil::hunker_of(founder);
         p
     }
 
@@ -1262,6 +1365,8 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1330,6 +1435,8 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1421,6 +1528,8 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -1622,7 +1731,11 @@ impl FounderPhysiology {
                     adult_length_m: 0.5,
                     adult_width_m: 0.25,
                     adult_height_m: 0.2,
-                    cruise_body_lengths_per_s: 1.0,
+                    // GAIT (Wrysk 2026-10-06: "a bit below veilhound when on the ground"):
+                    // 0.85 × the Veilhound's 1.4 m/s cruise, 1.19 m/s on its 0.5 m, ≈ 2.4
+                    // BL/s. It climbs at `climb_speed_fraction` (0.5) of this, slower than it
+                    // walks, and glides at its glider's `glide_speed_fraction` × this.
+                    cruise_body_lengths_per_s: 0.85 * 1.4 / 0.5,
                     // Half its length up or down in a stride; it does not climb terrain
                     // walls (stems and vine faces are its climbing, [`Glider`]).
                     step_up_m: 0.25,
@@ -1682,6 +1795,12 @@ impl FounderPhysiology {
                 core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
                 FounderPhysiology {
                     core,
+                    // GAIT: its own cruise, 1 BL/s (1.4 m/s; the standing pace rule), no
+                    // longer the lanternjaw's 0.6 (0.84 m/s; Wrysk 2026-10-06: "they
+                    // probably should move faster"). Full cruise still costs its basal rate
+                    // (the motor tie): a second at cruise costs what it did, a metre less;
+                    // its rush at 2.5 × cruise costs 2.5 × a second's walking.
+                    cruise_body_lengths_per_s: 1.0,
                     motor_respiration_per_s: core.maintenance_per_s,
                     // Its own height both ways, the lanternjaw's rule.
                     step_up_m: 0.6,

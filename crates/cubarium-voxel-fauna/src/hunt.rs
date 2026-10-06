@@ -733,7 +733,15 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
         Actions { forward: t.escape_creep, turn: side, feed: 0.0 }
     } else {
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, go.0, go.1, ring);
-        head(a.pose.heading_rad, dx.atan2(dz), 1.0, 0.0)
+        // GAIT, the arrival: no faster than covers what is left to the carcass's column (a
+        // voxel at least) in one controller interval, so a fast walker does not overshoot it
+        // and circle (the Veilhound at 1.4 m/s did, on a carcass a step up).
+        let (cx, cz) = centre(site);
+        let (ex, ez) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, cx, cz, ring);
+        let interval_m = fauna.config.manifest(founder).cruise_m_per_s * founder.manifest().cadence_ticks() as f64 * cubarium_voxel::DT;
+        let left = (ex * ex + ez * ez).sqrt().max(v);
+        let forward = if interval_m > 0.0 { (left / interval_m).min(1.0) } else { 1.0 };
+        head(a.pose.heading_rad, dx.atan2(dz), forward, 0.0)
     };
     fauna.animals[i].hunt = m;
     fauna.ledger.hunt_meal_walk_samples += 1;

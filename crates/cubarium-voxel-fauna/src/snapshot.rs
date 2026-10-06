@@ -70,15 +70,25 @@ use crate::Fauna;
 //     drying clock, the thirst return, retraction and the roam reflex), `Mobility::{dryness,
 //     ashore, retract_ticks, thirsty}`, `Departure::Desiccation`, `Fauna::last_rain_tick`,
 //     the ledger's `amphibious_ticks`, `retracts` and `ashore_assimilated`.
-// 49: S3 LIGHT AND FLIGHT — `SenseTable::{light_m, light_min, uv, loom_m}` (the bellwing's
-//     and the capgnawer's tables live), `ScentChannel::Nectar` and `ScentConfig::nectar_per_s`,
-//     `FaunaConfig::light`, the percept record's light reading, failed-visit marks and visit,
-//     the lanternjaw `DarkActive`, the light ledger lines.
-// 50: S3b WHICH LIGHT PAYS — `Percept::{expect, expect_tick, last_sip}` (the learned
-//     reward expectation per beacon class), `LightConfig::{learn, uv_innate, cyan_innate,
-//     learn_rate, forget_s, expect_min, loom_tau_s}`, the ledger's `light_budget`,
-//     `stalled_visits`, `sipped_visits` and `naive_kills`.
-pub const SCHEMA: u32 = 50;
+// 49: HUNKER — `FounderPhysiology::hunker` (`Hunker`), `Animal::hunkered`, `Vigil::{flee_id,
+//     flee_tick, hunkered, hunker_close, pry, opened_until}`, the `vigil` ledger's hunker lines.
+// 50: GAIT — `FounderPhysiology::sprint` (`Sprint`), `FounderState::{sprint_spent, winded}`,
+//     `Glider::glide_speed_fraction` (replaces `glide_body_lengths_per_s`), the ledger's
+//     `sprint_ticks_by_founder` and `winded_by_founder`; the Veilhound's and the seedporter's
+//     cruise and motor defaults.
+// 51: PACK-TUNE — `Pack::{select_kin_m, select_kin_factor, select_kin_max,
+//     select_aware_factor, select_wound_gain, select_airborne_factor, select_body_exp,
+//     select_judge_m, select_min_prospect, break_off_below, shun_s}`, `PackRecord::shunned`,
+//     `ChaseEnd::BrokeOff`, the ledger's `pack_break_offs` and `pack_declined`; the hunker's
+//     `pry_per_member_s` default and the resistance's growth with the body.
+// 52: S3 LIGHT AND FLIGHT with S3b WHICH LIGHT PAYS — `SenseTable::{light_m, light_min, uv,
+//     loom_m}` (the bellwing's and the capgnawer's tables live), `ScentChannel::Nectar` and
+//     `ScentConfig::nectar_per_s`, `FaunaConfig::light` (with `learn, uv_innate, cyan_innate,
+//     learn_rate, forget_s, expect_min, loom_tau_s`), the percept record's light reading,
+//     failed-visit marks and visit, `Percept::{expect, expect_tick, last_sip}`, the lanternjaw
+//     `DarkActive`, the light ledger lines (`light_budget`, `stalled_visits`, `sipped_visits`,
+//     `naive_kills`).
+pub const SCHEMA: u32 = 52;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -206,10 +216,13 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
         if !a.pose.is_finite() {
             return Err(format!("animal #{}'s pose is not finite", a.id));
         }
-        if a.founder.is_some() {
+        if let Some(f) = a.founder {
             let held = a.founder_state.held;
-            for (field, value) in [("forward", held.forward), ("feed", held.feed)] {
-                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            // GAIT: a rush or a ground dash holds a forward up to its lineage's sprint.
+            let fp = fauna.config().founder(f);
+            let top = fp.sprint.effort(fp.cruise_body_lengths_per_s).max(1.0);
+            for (field, value, most) in [("forward", held.forward, top), ("feed", held.feed, 1.0)] {
+                if !value.is_finite() || !(0.0..=most).contains(&value) {
                     return Err(format!(
                         "animal #{}'s held {field} is {value}, not a bounded action",
                         a.id
@@ -415,6 +428,7 @@ mod tests {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            hunkered: false,
             stomach: crate::Stomach::default(),
             eating: false,
             emergency: false,

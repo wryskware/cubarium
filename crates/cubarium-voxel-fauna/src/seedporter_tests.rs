@@ -411,7 +411,7 @@ fn the_seedporter_table_scales_the_browsers_and_glides() {
     assert!(sp.flight.is_none(), "it glides, it does not fly");
 
     let g = sp.glider.expect("the seedporter glides");
-    assert!(g.glide_ratio > 0.0 && g.glide_body_lengths_per_s > 0.0);
+    assert!(g.glide_ratio > 0.0 && g.glide_speed_fraction > 0.0);
     for other in Founder::ALL.into_iter().filter(|&o| o != SP) {
         let p = FounderPhysiology::frozen(other);
         assert!(p.glider.is_none() && p.gut_seeds.is_none(), "{other:?} neither glides nor carries seeds");
@@ -484,6 +484,8 @@ fn it_climbs_a_1_m_lanternberry_stem_at_half_walking_pace_and_perches_in_the_cro
     assert!(walk.len() >= 3 && climb.len() >= 10, "it walked ({}) and climbed ({})", walk.len(), climb.len());
     let (w, c) = (median(walk), median(climb));
     assert!(w > 0.0 && c > 0.0, "it went east and up: {w}, {c}");
+    // GAIT (Wrysk 2026-10-06): "climb is slower that walking".
+    assert!(c < w, "it climbs ({c} m/tick) slower than it walks ({w} m/tick)");
     let pace = c / w;
     assert!(
         (pace - p.climb_speed_fraction).abs() <= 0.15 * p.climb_speed_fraction,
@@ -554,7 +556,8 @@ fn a_glide_from_2_m_covers_about_5_m_before_landing_at_1_2_times_basal() {
     let want = 2.0 * g.glide_ratio;
     assert!((across - want).abs() <= 0.5, "a 2 m glide covers about {want} m: {across}");
     let speed = across / (gliding as f64 * DT);
-    let pace = g.glide_body_lengths_per_s * p.adult_length_m;
+    // GAIT: `glide_speed_fraction` × its ground cruise.
+    let pace = g.glide_speed_fraction * fauna.config().manifest(SP).cruise_m_per_s;
     assert!((speed - pace).abs() <= 0.15 * pace, "glide pace {speed} m/s against {pace}");
     let per_tick = median(costs);
     assert!(
@@ -984,4 +987,50 @@ fn a_fruit_bite_lands_in_the_stomach_and_the_gut_seeds() {
     assert!((seeds.organic - share * l.eaten_organic_in).abs() <= 1e-15);
     assert!(pool.mineral > 0.0, "stand fruit carries mineral");
     assert!((flora.view().ledger.consumed_organic_out - consumed - l.eaten_organic_in).abs() <= 1e-15);
+}
+
+/// **A seedporter that has landed does not relaunch without a reason** (PACK-TUNE, the glide
+/// loop: GAIT's s4 run had 49,704 glides). A vine-covered wall whose cover reaches its top.
+/// A seedporter walks in, climbs the face and perches at its top; it is then set hugging
+/// the face, its centre 0.02 m off it and its footprint in the wall's column (the probe's
+/// state on GAIT's s4 save: a glide's fall goes down its centre column and can end there).
+/// Held at full forward it glides off the face, from clear of the wall, once; it comes down
+/// on the floor and walks on, and is not pressed back onto the face to climb it and launch
+/// again (the loop: a glide blocked in place, a fall, the same face, a climb, a glide).
+#[test]
+fn a_seedporter_gliding_off_a_vine_face_lands_once_and_does_not_relaunch() {
+    let (mut world, mut flora, _) = vine_wall_in_fruit();
+    // The rock stops where the cover does (y = 10): the face's top is the wall's top.
+    for z in 0..world.config().depth {
+        for y in 11..=12 {
+            world.apply(WorldCommand::SetMaterial { x: 6, y, z, material: Material::Air });
+        }
+    }
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = on_ground(&mut fauna, &world, SP, 3, 2, HUNGRY_ADULT);
+    hold(&mut fauna, id, 1.0, 0.0);
+    let on_face = |f: &Fauna| {
+        let a = animal(f, id);
+        a.mobility.mode == MobilityMode::Perched && matches!(a.mobility.perch.map(|p| p.anchor), Some(PerchAnchor::Vine(_)))
+    };
+    let n = until(&mut fauna, &world, &mut flora, 2000, on_face);
+    assert!(on_face(&fauna), "fixture: it perches at the face's top ({n} ticks)");
+    let k = fauna.animals.iter().position(|a| a.id == id).expect("the body");
+    fauna.animals[k].pose.x = 6.0 * V - 0.02;
+    hold(&mut fauna, id, 1.0, 0.0);
+    let climbs = fauna.view().ledger.climbs;
+    let mut launches = 0;
+    let mut last = mode(&fauna, id);
+    for _ in 0..600 {
+        fauna.step(&world, &mut flora);
+        let m = mode(&fauna, id);
+        if last == MobilityMode::Perched && m == MobilityMode::Glide {
+            launches += 1;
+        }
+        last = m;
+    }
+    let again = fauna.view().ledger.climbs - climbs;
+    assert!(launches <= 1, "it leaves the face once in 600 ticks, not a loop: {launches} launches, {again} climbs");
+    assert_eq!(again, 0, "it does not climb the face again");
+    assert_eq!(mode(&fauna, id), MobilityMode::Ground, "it came down and walks: {:?}", animal(&fauna, id).mobility);
 }

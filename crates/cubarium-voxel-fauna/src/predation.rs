@@ -105,26 +105,30 @@ pub(crate) fn is_prey_in_window(
     if config.founder(pf).glider.is_some() && prey.mobility.mode != crate::MobilityMode::Ground {
         return false;
     }
-    // A flyer (the bellwing) is prey at rest — perched or on the ground — and, since S3 of
-    // the senses pass, **hovering within reach**: in flight with its body inside the hunter's
-    // jaw band over the hunter's standing surface (the strike capsule's band). One higher up
-    // is not, and one dropping never is. Whether a body in reach is struck is the capsule's
-    // geometry, against its base.
-    if config.founder(pf).flight.is_some() {
-        if prey.mobility.falling {
-            return false;
-        }
-        match prey.mobility.mode {
-            crate::MobilityMode::Perched | crate::MobilityMode::Ground => {}
-            crate::MobilityMode::Fly => {
-                if !hovers_in_reach(config, hunter, &h, prey) {
-                    return false;
-                }
-            }
-            _ => return false,
-        }
+    if !flyer_takeable(config, hunter, &h, pf, prey) {
+        return false;
     }
     h.hunts(pf) && prey.body <= h.prey_max_ratio * window_body
+}
+
+/// A flyer (the bellwing) is prey at rest — perched or on the ground — and, since S3 of
+/// the senses pass, **hovering within reach**: in flight with its body inside the hunter's
+/// jaw band over the hunter's standing surface (the strike capsule's band). One higher up
+/// is not, and one dropping never is. Whether a body in reach is struck is the capsule's
+/// geometry, against its base. True for any prey that does not fly. The pack's prospect
+/// ([`crate::pack`], PACK-TUNE) asks the same, so a pack commits only to a flyer it can take.
+pub(crate) fn flyer_takeable(config: &FaunaConfig, hunter: &Animal, h: &crate::Hunter, pf: crate::Founder, prey: &Animal) -> bool {
+    if config.founder(pf).flight.is_none() {
+        return true;
+    }
+    if prey.mobility.falling {
+        return false;
+    }
+    match prey.mobility.mode {
+        crate::MobilityMode::Perched | crate::MobilityMode::Ground => true,
+        crate::MobilityMode::Fly => hovers_in_reach(config, hunter, h, prey),
+        _ => false,
+    }
 }
 
 /// Whether a flyer's body (its base at `pose.y_m`, its current height tall) meets the

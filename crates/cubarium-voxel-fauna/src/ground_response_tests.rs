@@ -23,12 +23,14 @@ fn world(seed: u64) -> World {
     plain_of_height(DayClock { mode: DayMode::Off, ..DayClock::default() }, seed, 16)
 }
 
-/// Every lineage awake, remote senses every tick.
+/// Every lineage awake, remote senses every tick; the frondgrazer's hunker off (HUNKER), so
+/// these cases read S2's responses.
 fn config() -> FaunaConfig {
     let mut c = hunting_config();
     for f in Founder::ALL {
         c.founders[f.index()].active = Activity::Always;
     }
+    c.founders[GRAZER.index()].hunker.enabled = false;
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
     c
 }
@@ -293,7 +295,7 @@ fn a_stalking_veilhound_under_the_hearing_floor_is_not_heard_and_the_rush_is() {
         if stalks {
             assert!(forward < 1.0, "beyond the commit distance it slows: {forward}");
         } else {
-            assert_eq!(forward, 1.0, "within it, the rush");
+            assert_eq!(forward, crate::gait::sprint_forward(&fauna.config, VH), "within it, the rush: its sprint (GAIT)");
         }
         set_speed(&mut fauna, vh, forward * full);
         sense(&mut fauna, &world);

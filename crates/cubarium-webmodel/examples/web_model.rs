@@ -6,6 +6,9 @@
 //!                                                   the budget sheet over a window (default: day 0-1 and the last day)
 //! web_model scenario [base=terrarium|patch] [seed=5] [days=30] [twins=10] [browse=PER_DAY] [lj=N] [config=FILE] [set=P=V]..
 //!                                                   a knob or lever to N days: trajectory, end sheet, end state, twin risks
+//! web_model season   [seed=5] [days=60] [dry=EVERY_D:LEN_D:WATER[:PHASE_D]] [contest=sim] [print=1] [config=FILE] [set=P=V]..
+//!                                                   the dry season (DRY-SEASON): meadow/grove/forest of drained ground,
+//!                                                   turf cures, the hunters and grazers, grazer intake in and out of seasons
 //! web_model soak     [seeds=5,6,1] [wseed=1]        closed-loop validation on soak v2 (m370 -> m1570)
 //! web_model d2b      [gen=DIR] [lj=DIR]             closed-loop validation on D2b (patch-hunters, 1 vs 3 hunters)
 //! web_model fitheld  [rounds=N] [check]             the held lineages' fits on soak v2 (animal half alone); `check` runs the recorded
@@ -57,8 +60,9 @@ fn main() {
         Some("budget") => budget(&args),
         Some("scenario") => scenario(&args),
         Some("soak") => soak(&args),
+        Some("season") => season(&args),
         Some("d2b") => d2b(&args),
-        _ => eprintln!("usage: web_model refarea | budget | scenario | soak | d2b (see the module doc)"),
+        _ => eprintln!("usage: web_model refarea | budget | scenario | season | soak | d2b (see the module doc)"),
     }
 }
 
@@ -251,6 +255,142 @@ fn patch_world(d: &Path, seed: u32, cfg: &Path, sets: &[String], wseed: u64) -> 
     fauna.t_s = flora.t_s;
     fauna.mineral = fauna.mineral_wanted();
     Web::new(flora, fauna)
+}
+
+/// The meadow levers the plant half's `flora_model run` takes (`design/webmodel/meadow.md`),
+/// for the closed loop: `dry=EVERY_D:LEN_D:WATER[:PHASE_D]` (lever b, world days from the
+/// run's start) and `contest=sim` (the sim's CONTEST rule) or `contest=ESCAPE[:TAU]`.
+fn meadow_levers(w: &mut Web, args: &[String]) {
+    let day_s = w.day_s();
+    let mw = &mut w.flora.p.meadow;
+    if let Some(x) = arg(args, "dry=") {
+        let v: Vec<f64> = x.split(':').map(|y| y.parse().unwrap()).collect();
+        mw.dry_every_s = v[0] * day_s;
+        mw.dry_len_s = v[1] * day_s;
+        mw.dry_water = v[2];
+        mw.dry_phase_s = v.get(3).copied().unwrap_or(0.0) * day_s;
+    }
+    if let Some(x) = arg(args, "contest=") {
+        let v: Vec<f64> = x.split(':').map(|y| if y == "sim" { -1.0 } else { y.parse().unwrap() }).collect();
+        mw.contest_escape = v[0];
+        mw.contest_tau = v.get(1).copied().unwrap_or(if v[0] < 0.0 { -1.0 } else { 0.0 });
+    }
+}
+
+/// Shares of the drained ground (soil zones `dim|mid|bright|open|summit-drained`, as the
+/// meadow table reads them): meadow (springturf), grove (lanternberry), forest (vaulttree),
+/// other plants; and turf on open-drained and vaulttree on summit-drained as shares of
+/// those zones (`openT`, `sumV`).
+fn drained_shares(w: &Web) -> [f64; 6] {
+    let m = &w.flora;
+    let (mut tot, mut sp) = (0.0, [0.0; Species::COUNT]);
+    let (mut open, mut open_t, mut sum, mut sum_v) = (0.0, 0.0, 0.0, 0.0);
+    for (i, z) in m.zones.zones.iter().enumerate() {
+        let name = z.key.name();
+        let drained = ["dim", "mid", "bright", "open", "summit"].iter().any(|b| name == format!("{b}-drained"));
+        if !drained {
+            continue;
+        }
+        tot += z.area;
+        for s in Species::ALL {
+            if s != Species::Glowcap {
+                sp[s.index()] += m.z[i].count(s.index());
+            }
+        }
+        if name == "open-drained" {
+            open += z.area;
+            open_t += m.z[i].count(Species::Springturf.index());
+        }
+        if name == "summit-drained" {
+            sum += z.area;
+            sum_v += m.z[i].count(Species::Vaulttree.index());
+        }
+    }
+    let t = tot.max(1e-9);
+    let (me, gr, fo) = (sp[Species::Springturf.index()], sp[Species::Lanternberry.index()], sp[Species::Vaulttree.index()]);
+    let all: f64 = sp.iter().sum();
+    [me / t, gr / t, fo / t, (all - me - gr - fo) / t, open_t / open.max(1e-9), sum_v / sum.max(1e-9)]
+}
+
+/// Each species' stands as a share of the drained ground.
+fn drained_species(w: &Web) -> [f64; Species::COUNT] {
+    let m = &w.flora;
+    let (mut tot, mut sp) = (0.0, [0.0; Species::COUNT]);
+    for (i, z) in m.zones.zones.iter().enumerate() {
+        let name = z.key.name();
+        if ["dim", "mid", "bright", "open", "summit"].iter().any(|b| name == format!("{b}-drained")) {
+            tot += z.area;
+            for s in Species::ALL {
+                sp[s.index()] += m.z[i].count(s.index());
+            }
+        }
+    }
+    sp.map(|v| v / f64::max(tot, 1e-9))
+}
+
+/// **The dry season, closed loop** (DRY-SEASON): the run's day-by-day line, then the
+/// means. Intake: the frondgrazers' foliage swallowed, and the turf's foliage the animals
+/// got, per world day inside and outside the seasons.
+fn season(args: &[String]) {
+    let t = std::time::Instant::now();
+    let mut w = world_of(args);
+    meadow_levers(&mut w, args);
+    let days: f64 = arg(args, "days=").map_or(60.0, |s| s.parse().unwrap());
+    let print: f64 = arg(args, "print=").map_or(1.0, |s| s.parse().unwrap());
+    let dm = w.day_s() / 60.0;
+    let m0 = w.minute();
+    let fg = *Founder::ALL.iter().find(|f| lineage_name(**f) == "frondgrazer").expect("frondgrazer");
+    let tk = Species::Springturf.index();
+    let names = ["frondgrazer", "veilhound", "lanternjaw"];
+    let lineages: Vec<Founder> = names.iter().map(|n| *Founder::ALL.iter().find(|f| lineage_name(**f) == *n).expect("lineage")).collect();
+    let dry = |w: &Web| (0..w.flora.z.len()).any(|zi| w.flora.dry_zone(zi));
+    let intake = |w: &Web| (w.fauna.ledger[fg.index()].swallowed[Food::Foliage.index()], w.ledger.got.foliage[tk]);
+    // [in season, out of season]: seconds, frondgrazer foliage, turf foliage taken.
+    let mut acc = [[0.0f64; 3]; 2];
+    let mut last = intake(&w);
+    let row = |w: &Web, d: f64| {
+        let sh = drained_shares(w);
+        let st = w.flora.stands();
+        let c = &w.flora.c;
+        let cured: f64 = w.flora.z.iter().map(|z| z.cohorts[tk].iter().filter(|x| x.st.cured).map(|x| x.n).sum::<f64>()).sum();
+        let mut fauna: Vec<String> = lineages.iter().map(|f| format!("{}={:.1}", lineage_name(*f), w.fauna.census(*f).n)).collect();
+        // The rest of the drained ground by species.
+        let o = drained_species(w);
+        fauna.push(format!("rest=[{}]", Species::ALL.iter().filter(|s| ![Species::Springturf, Species::Lanternberry, Species::Vaulttree, Species::Glowcap].contains(s) && o[s.index()] >= 0.005).map(|s| format!("{}:{:.3}", s.name(), o[s.index()])).collect::<Vec<_>>().join(" ")));
+        println!(
+            "season,day={d:.1},dry={},meadow={:.3},grove={:.3},forest={:.3},other={:.3},openT={:.3},sumV={:.3},turf={:.0},cured={:.0},cures={:.0},wakes={:.0},turf_starved={:.0},turf_drought={:.0},{}",
+            u8::from(dry(w)), sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], st[tk].0, cured, c.cures[tk], c.wakes[tk], c.starved[tk], c.drought[tk], fauna.join(",")
+        );
+    };
+    row(&w, 0.0);
+    let mut next = print;
+    while w.minute() < m0 + days * dm - 1e-9 {
+        let was = dry(&w);
+        let t0 = w.flora.t_s;
+        w.step();
+        let now = intake(&w);
+        let a = &mut acc[usize::from(!was)];
+        a[0] += w.flora.t_s - t0;
+        a[1] += now.0 - last.0;
+        a[2] += now.1 - last.1;
+        last = now;
+        let d = (w.minute() - m0) / dm;
+        if d + 1e-9 >= next {
+            row(&w, d);
+            next += print;
+        }
+    }
+    let day_s = w.day_s();
+    for (k, label) in [(0, "in"), (1, "out")] {
+        let a = acc[k];
+        let days = a[0] / day_s;
+        println!(
+            "intake,{label},days={days:.1},frondgrazer_foliage_per_day={:.3},turf_taken_per_day={:.3}",
+            if days > 0.0 { a[1] / days } else { 0.0 },
+            if days > 0.0 { a[2] / days } else { 0.0 }
+        );
+    }
+    eprintln!("season run {:.1} s", t.elapsed().as_secs_f64());
 }
 
 fn census_line(w: &Web) -> String {

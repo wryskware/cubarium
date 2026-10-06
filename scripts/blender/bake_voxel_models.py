@@ -115,6 +115,11 @@ ANIMAL_ROLE = {slot: "accent" for slot in A.ACCENTS}
 SPECIMENS = ["chorister", "ripple-snail", "capgnawer", "seedporter", "bellwing", "loftstrider",
              "seedporter-stand", "seedporter-ground", "seedporter-glide"]
 
+# A founder's other poses on its one rig (`animal_models.FG_POSES`), baked in the founder's
+# own size bins from its source body, under the manifest's `specimens` key, so a young body
+# poses at its own size: pose name -> founder. The frondgrazer's hunker (Wrysk 2026-10-06).
+FOUNDER_POSES = {"frondgrazer-hunker": "frondgrazer"}
+
 # A specimen that is a live founder with young drawn smaller (roster R3): extra bins at
 # these fractions of the adult's size, below the adult bin, so the presenter's nearest-
 # length pick draws a young body small. The chorister's newborn is
@@ -519,6 +524,14 @@ def main():
             manifest["founders"][f["name"]] = file
             manifest["detail"][f["name"]] = {"bytes": size, "bins": meta}
             print(f"{vox} m {f['name']}: {len(meta)} bins, {size} bytes", flush=True)
+        for name, base in FOUNDER_POSES.items():
+            f = next((f for f in src["founders"] if f["name"] == base), None)
+            if (ONLY and name not in ONLY) or f is None or name not in A.REF:
+                continue
+            file, size, meta = bake_animal(dict(f, name=name), vox, out_dir)
+            manifest["specimens"][name] = file
+            manifest["detail"][name] = {"bytes": size, "bins": meta}
+            print(f"{vox} m {name}: {base}'s pose, {len(meta)} bins, {size} bytes", flush=True)
         for name in SPECIMENS:
             if (ONLY and name not in ONLY) or name not in A.REF:
                 continue

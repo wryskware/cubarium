@@ -25,7 +25,7 @@
 //!   face, away from the wall), else climbs: down from a crown top or a vine, on up from
 //!   under a crown. A downpour sends a crown-top perch down under its crown. A lost perch
 //!   (the crown eaten or grown, the face uncovered) is a forced glide.
-//! - **`Glide`**: no thrust; `glide_body_lengths_per_s` × its length a second across,
+//! - **`Glide`**: no thrust; `glide_speed_fraction` × its ground cruise a second across,
 //!   steered by `turn`, falling `1 / glide_ratio` of that; `glide_cost_factor` × basal in
 //!   all (the upkeep included, F1's hover convention). It lands on the first crown top of
 //!   a stand it could climb that it crosses at its centre column (perched), the floor of
@@ -267,6 +267,37 @@ fn away_from(face: VineFace) -> f64 {
     }
 }
 
+/// **Where a glide off a covered face starts** (PACK-TUNE): the body moved straight out from
+/// the face until its footprint clears the wall by [`PRESSED_M`], heading away from it; `None`
+/// when that point is itself blocked (the body stays and climbs down).
+fn off_face(view: &VoxelView<'_>, s: Shape, a: &Animal, face: VineFace) -> Option<crate::Pose> {
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let want = s.r + PRESSED_M;
+    let (mut x, mut z) = (a.pose.x, a.pose.z);
+    match face.dir {
+        FaceDir::NegX => {
+            let wall = face.x as f64 * v;
+            let gap = crate::pose::wrapped_delta(x, 0.0, wall, 0.0, ring).0;
+            x = (x - (want - gap).max(0.0)).rem_euclid(ring);
+        }
+        FaceDir::PosX => {
+            let wall = (face.x + 1) as f64 * v;
+            let gap = -crate::pose::wrapped_delta(x, 0.0, wall, 0.0, ring).0;
+            x = (x + (want - gap).max(0.0)).rem_euclid(ring);
+        }
+        FaceDir::NegZ => z = z.min(face.z as f64 * v - want),
+        _ => z = z.max((face.z + 1) as f64 * v + want),
+    }
+    let from = crate::Pose { x, z, heading_rad: away_from(face), ..a.pose };
+    (!flight::blocked(view, s, x, z, a.pose.y_m)).then_some(from)
+}
+
+/// Whether two covered faces are on the same wall column and side (any height).
+fn same_wall(f: VineFace, g: VineFace) -> bool {
+    f.x == g.x && f.z == g.z && f.dir == g.dir
+}
+
 /// The heading pointing into a wall face.
 fn into_face(face: VineFace) -> f64 {
     (away_from(face) + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
@@ -317,12 +348,15 @@ pub(super) fn glider_act(
     if mode == MobilityMode::Ground {
         if asleep {
             fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+            crate::gait::rest(fauna, i, founder);
             return;
         }
         ground_tick(fauna, view, flora, seed, tick, glider, i, hits);
         return;
     }
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+    // GAIT: off its feet it does not sprint, and rests.
+    crate::gait::rest(fauna, i, founder);
     let phys = *fauna.config.founder(founder);
     let manifest = fauna.config.manifest(founder);
     let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
@@ -394,7 +428,8 @@ fn ground_tick(
         }
         let ring = f64::from(view.config.width) * v;
         let (dx, dz) = crate::pose::wrapped_delta(before.x, before.z, a.pose.x, a.pose.z, ring);
-        let asked = held.forward * manifest.cruise_m_per_s * DT;
+        // At most cruise: a sprint the gate refused (winded) is not a blocked walk.
+        let asked = held.forward.min(1.0) * manifest.cruise_m_per_s * DT;
         if (dx * dx + dz * dz).sqrt() < 0.5 * asked {
             if let Some(face) = vine_ahead(view, &fv, &a, s) {
                 let a = &mut fauna.animals[i];
@@ -518,9 +553,10 @@ fn glide_motion(
     (moved.distance_m, end)
 }
 
-/// A glide's per-tick `(distance, fall)` for a body of `body` on `phys`.
-fn glide_pace(glider: &Glider, phys: &crate::FounderPhysiology, body: f64) -> (f64, f64) {
-    let distance = glider.glide_body_lengths_per_s * phys.body_at(body).length_m * DT;
+/// A glide's per-tick `(distance, fall)` for a lineage cruising at `cruise_m_per_s` (GAIT:
+/// `glide_speed_fraction` × the ground cruise, the walk's own reference at every size).
+fn glide_pace(glider: &Glider, cruise_m_per_s: f64) -> (f64, f64) {
+    let distance = glider.glide_speed_fraction * cruise_m_per_s * DT;
     let fall = if glider.glide_ratio > 0.0 {
         distance / glider.glide_ratio
     } else {
@@ -541,7 +577,7 @@ fn glide_end(
 ) -> Option<GlideEnd> {
     let s = shape(phys, body);
     let puddle = phys.drown_depth_m(&phys.body_at(body));
-    let (distance, fall) = glide_pace(glider, phys, body);
+    let (distance, fall) = glide_pace(glider, phys.cruise_body_lengths_per_s * phys.adult_length_m);
     if !(fall > 0.0) {
         return None;
     }
@@ -650,7 +686,7 @@ fn glide_tick(
     let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
     fauna.ledger.respired_flight_out += paid;
     let s = shape(phys, fauna.animals[i].body);
-    let (distance, fall) = glide_pace(&glider, phys, fauna.animals[i].body);
+    let (distance, fall) = glide_pace(&glider, manifest.cruise_m_per_s);
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
     let fv = flora.view();
     let asked = (fauna.animals[i].pose.heading_rad + held.turn * manifest.yaw_cap_rad_per_s * DT)
@@ -937,12 +973,19 @@ fn perched_tick(
         };
         match perch.anchor {
             PerchAnchor::Vine(face) => {
-                let from = crate::Pose {
-                    heading_rad: away_from(face),
-                    ..a.pose
-                };
-                if high && !glide_ends_deep(view, &flora.view(), &glider, phys, a.body, from) {
-                    fauna.animals[i].pose.heading_rad = away_from(face);
+                // PACK-TUNE, the glide loop: a body on a face hangs with its footprint in the
+                // wall's columns, so a glide begun where it hangs is blocked in place, falls,
+                // is pressed against the same face and climbs it again (49,704 glides in
+                // GAIT's s4). It leaves from a point clear of the wall, as a glide off an
+                // edge does, and only for a glide that does not come back to this face.
+                let fv = flora.view();
+                let from = off_face(view, s, &a, face).filter(|&from| {
+                    !glide_ends_deep(view, &fv, &glider, phys, a.body, from)
+                        && !matches!(glide_end(view, &fv, &glider, phys, a.body, from),
+                            Some(GlideEnd::Vine(f)) if same_wall(f, face))
+                });
+                if high && let Some(from) = from {
+                    fauna.animals[i].pose = from;
                     start_glide(fauna, i, false);
                 } else {
                     if high {
