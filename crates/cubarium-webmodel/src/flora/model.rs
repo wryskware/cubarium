@@ -60,6 +60,13 @@ impl Default for Site {
     }
 }
 
+/// The longest a zone's cohort list (a species' stands, its contested recruits, or the turf
+/// under its canopy) may grow between scheduled rebins before the zone is rebinned at once.
+/// Above every rebin key count (light class × wood bin × cured × vigour × site class:
+/// 2 · 17 · 2 · 3 · 12 = 2,448), so it only ever catches fragmentation: turf moving under a
+/// canopy and back each step splits every cohort of each list into the other.
+pub const COHORT_LIST_MAX: usize = 4096;
+
 /// One zone's state.
 #[derive(Clone, Debug)]
 pub struct ZoneState {
@@ -240,6 +247,8 @@ pub struct Counters {
     pub contested: [f64; NS],
     pub escaped: [f64; NS],
     pub contest_died: [f64; NS],
+    /// Zones rebinned early because a cohort list passed [`COHORT_LIST_MAX`].
+    pub early_rebins: u64,
     /// Lever f's understorey, per cover species: stands that went under an escaped canopy,
     /// that starved (or dried) there, and that were left holding the face when the canopy
     /// over them died.
@@ -929,10 +938,19 @@ impl Model {
     /// between the light classes as the crown cover moved. Vigour is the foliage over its
     /// cap, cut at 0.1 and 0.4: a starving stand is not averaged into a fed one.
     fn rebin(&mut self) {
+        let all = vec![true; self.z.len()];
+        self.rebin_zones(&all);
+    }
+
+    /// [`Model::rebin`] on the zones `pick` marks only.
+    fn rebin_zones(&mut self, pick: &[bool]) {
         const BINS: f64 = 16.0;
         let config = self.config.clone();
-        let bins: Vec<Vec<Vec<u8>>> = (0..self.z.len()).map(|zi| (0..NS).map(|s| self.z[zi].cohorts[s].iter().map(|c| self.site_bin(zi, s, c)).collect()).collect()).collect();
+        let bins: Vec<Vec<Vec<u8>>> = (0..self.z.len()).map(|zi| (0..NS).map(|s| if pick[zi] { self.z[zi].cohorts[s].iter().map(|c| self.site_bin(zi, s, c)).collect() } else { Vec::new() }).collect()).collect();
         for (zi, zs) in self.z.iter_mut().enumerate() {
+            if !pick[zi] {
+                continue;
+            }
             let cover = zs.cover;
             for s in 0..NS {
                 let sc = config.species(Species::ALL[s]);
@@ -1784,6 +1802,14 @@ impl Model {
             self.c.decomposed += dl + dw;
         }
         self.apply_take();
+        // A zone whose cohort lists fragmented faster than the scheduled rebin merges them
+        // now (turf moving under a canopy and back splits every cohort of each list into
+        // the other each step: geometric growth, the MEADOW-2 hang).
+        let over: Vec<bool> = self.z.iter().map(|zs| zs.cohorts.iter().chain(zs.contest.iter()).chain(zs.under.iter()).any(|l| l.len() > COHORT_LIST_MAX)).collect();
+        if over.iter().any(|&o| o) {
+            self.rebin_zones(&over);
+            self.c.early_rebins += over.iter().filter(|&&o| o).count() as u64;
+        }
         self.t_s += dt;
         if self.t_s >= self.next_rebin_s {
             self.canopy();

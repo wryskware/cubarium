@@ -444,3 +444,42 @@ fn a_contested_recruit_escapes_and_the_turf_stays_beneath() {
     assert!(close(m.z[0].count(TURF.index()), turf0, 1e-9) && m.c.overtopped[TURF.index()] == 0.0, "the turf kept its faces");
     let _ = package_of(lsc);
 }
+
+// ===================================================================================
+// The cohort lists stay bounded between rebins (the MEADOW-2 hang, 2026-10-06)
+// ===================================================================================
+
+/// **Turf moving under a canopy and back every step does not multiply the cohort lists.**
+/// Recruits escape through the turf each step (each escape splits every turf cohort into
+/// the understorey) while the canopy's adults die of age (the understorey beyond the
+/// canopy's count splits back into the turf): with no scheduled rebin the two lists fed
+/// each other and grew geometrically (round 2's `crop30+L40` s5 run: 222,640 understorey
+/// cohorts in one zone, 100 % CPU for 4 h). Every list stays within
+/// [`model::COHORT_LIST_MAX`], and the early rebin keeps the stands' count.
+#[test]
+fn turf_moving_under_and_back_keeps_the_cohort_lists_bounded() {
+    let (p, fc) = resolved();
+    let dm = DayModel::of(&p.world, fc.upkeep_q10);
+    let lsc = fc.species(LB);
+    let mut mw = Meadow { contest_escape: 0.5, contest_tau: 1.0, ..Meadow::default() };
+    mw.lifespan_s[LB.index()] = 0.02 * dm.day_s();
+    let mut f = faces(&fc, 0, 400, 0.95, 1.0, &[(TURF, 1.0, 120), (TURF, 0.6, 120), (TURF, 0.3, 120), (LB, 1.0, 40)]);
+    for x in &mut f {
+        x.litter = 0.02;
+    }
+    let mut mp = frozen(mw);
+    mp.rebin_s = 1e12;
+    let mut m = build(&fc, &p, &f, local_kernels(1), minute_at(&dm, 1.0), mp, 0.8);
+    let longest = |m: &Model| m.z[0].cohorts.iter().chain(m.z[0].contest.iter()).chain(m.z[0].under.iter()).map(|l| l.len()).max().unwrap_or(0);
+    let mut most = 0;
+    for _ in 0..60 {
+        let t = m.t_s;
+        m.z[0].contest[LB.index()].push(juveniles(&fc, 3.0, 0.6 * lsc.donor_min, t));
+        m.step();
+        most = most.max(longest(&m));
+        assert!(longest(&m) <= model::COHORT_LIST_MAX, "a cohort list grew to {}", longest(&m));
+    }
+    let t = TURF.index();
+    assert!(m.c.under_in[t] > 0.0 && m.c.under_freed[t] > 0.0, "fixture: turf went under ({}) and came back ({})", m.c.under_in[t], m.c.under_freed[t]);
+    assert!(m.c.early_rebins > 0, "fixture: the lists fragmented past the bound");
+}

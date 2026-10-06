@@ -107,6 +107,14 @@ const CONTEST_SPECIES: [Plant; 4] = [Plant::Springturf, Plant::Velvetpad, Plant:
 /// host draws at random, and an arm has to be re-runnable.
 const PRESET_SEED_BASE: u64 = 1;
 
+/// The rows' patch columns count patches of at least this many faces
+/// (`meadow_patch_min_faces=`): 25, a five-by-five lawn. A readout knob, not a sim one.
+const MEADOW_PATCH_MIN_FACES: usize = 25;
+
+/// The plants whose connected patches the rows carry (MEADOW-3,
+/// [`cubarium::voxel::patches`]): the meadow, the groves and the forest.
+const PATCH_SPECIES: [(Plant, &str); 3] = [(Plant::Springturf, "meadow"), (Plant::Lanternberry, "grove"), (Plant::Vaulttree, "forest")];
+
 /// Arguments that only shape a fresh world: `resume=` leaves them out (the checkpoint
 /// carries the world). A bare word matches exactly; `k=` matches a prefix.
 const FOUNDING_ONLY: &[&str] = &[
@@ -171,6 +179,10 @@ fn main() {
             .expect("pin=B needs more than B physical cores");
     }
     let timing = Timing {
+        patch_min: args
+            .iter()
+            .find_map(|a| a.strip_prefix("meadow_patch_min_faces="))
+            .map_or(MEADOW_PATCH_MIN_FACES, |v| v.parse().expect("meadow_patch_min_faces=N")),
         weather_log: args
             .iter()
             .position(|a| a == "--weather-log")
@@ -498,6 +510,9 @@ struct Timing {
     /// The `ab=` rotation: `None` the chained tick, `Some(split)` the overlapped one
     /// (`Some(None)` at its default split).
     modes: Vec<Option<Option<(usize, usize)>>>,
+    /// `meadow_patch_min_faces=N` (default [`MEADOW_PATCH_MIN_FACES`]): the size a patch
+    /// must reach to count in the rows' `*_patches` columns.
+    patch_min: usize,
 }
 
 /// Step the coupled layers for the asked-for hours, writing one row a simulated minute.
@@ -536,7 +551,7 @@ fn run(
     let save_min = save.map(|s| s.minute.unwrap_or(minute0 + total_ticks / TICKS_PER_MIN));
     print_header();
     if minute0 == 0 {
-        print_row(0, sim, 0.0);
+        print_row(0, sim, 0.0, timing.patch_min);
     }
     let mut tick = minute0 * TICKS_PER_MIN;
     let total_ticks = tick + total_ticks;
@@ -561,7 +576,7 @@ fn run(
         if tick % TICKS_PER_MIN == 0 {
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
             let minute = tick / TICKS_PER_MIN;
-            print_row(minute, sim, ms);
+            print_row(minute, sim, ms, timing.patch_min);
             spells.minute(sim, minute);
             phases.report(minute, sim, ms);
             if let Some(from) = timing.ab_from_min.filter(|from| minute >= *from) {
@@ -1149,13 +1164,20 @@ fn print_header() {
     // Curing (package DORMANCY, 2026-10-05): the turf cured now, and cures and wakes,
     // cumulative.
     header.push_str(",cured_springturf,cures_springturf,wakes_springturf");
+    // Connected patches (MEADOW-3, 2026-10-06): the drained ground's faces now, and per
+    // patch plant the largest patch in faces and as a share of the drained ground, and
+    // the patches of at least `meadow_patch_min_faces`.
+    header.push_str(",drained_faces");
+    for (_, n) in PATCH_SPECIES {
+        header.push_str(&format!(",{n}_patch_max,{n}_patch_share,{n}_patches"));
+    }
     println!("{header}");
 }
 
 /// One CSV row: `sim_min`, then per plant species the stand count, then per animal
 /// species the animal count and mean body, then per lineage its count, mean body, eggs
 /// and gestations, then the ledger counters, then the total litter.
-fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
+fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
     let f = sim.flora().view();
     let a = sim.fauna().view();
 
@@ -1393,6 +1415,18 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
         row.push(f.stands.iter().filter(|st| st.species == Plant::Springturf && st.cured).count().to_string());
         row.push(f.ledger.cures[k].to_string());
         row.push(f.ledger.cure_wakes[k].to_string());
+    }
+    {
+        use cubarium::voxel::patches;
+        let view = sim.world().view();
+        let drained = patches::drained_ground(&view, f.config);
+        row.push(drained.to_string());
+        for (s, _) in PATCH_SPECIES {
+            let p = patches::patches(&patches::held_faces(f.stands, s), view.config.width, patch_min);
+            row.push(p.largest.to_string());
+            row.push(format!("{:.4}", p.largest as f64 / drained.max(1) as f64));
+            row.push(p.at_least.to_string());
+        }
     }
     println!("{}", row.join(","));
 }
