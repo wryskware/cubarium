@@ -34,7 +34,8 @@
 //! `--contest` puts a full-grown springturf on the face of every woody producer at every
 //! size (a face holds two plants, `FaceLayer::Under`, package CONTEST): beneath a crown
 //! that stands above it, over a seedling still under the sward. Placement only, with the
-//! existing models: the look is Wrysk's.
+//! existing models: the look is Wrysk's. The stands stand two rows deeper (z 3, not 1), so
+//! the turf drawn in front of a trunk (package RENDER-UNDER) is inside the world.
 //!
 //! `--rider` puts a parasite lanternjaw hatchling on the first grazer's back (its interim
 //! plain-voxel look, `design/handoffs/voxel-predation-parasite-2026-10-01.md`).
@@ -222,13 +223,16 @@ fn main() -> Result<()> {
     }
 
     let mut flora = Flora::new(flora_cfg.clone());
+    // The stands' row. `--contest` stands them two rows deeper, so the turf drawn in front
+    // of a full-grown vaulttree's trunk (two cells in front of its stem) is in the world.
+    let stand_z = if contest { 3 } else { 1 };
     for (&(species, f, _), &x) in plan.iter().zip(&columns) {
         let wood = flora_cfg.species(species).wood_max * f;
         if !flora.apply(
             &world,
             FloraCommand::Seed {
                 x,
-                z: 1,
+                z: stand_z,
                 species,
                 wood,
             },
@@ -238,7 +242,7 @@ fn main() -> Result<()> {
         // `--shared`: a glowcap on the adult producer's own face.
         if shared && f >= 1.0 && flora_cfg.species(species).trophic == cubarium_voxel_flora::Trophic::Photo {
             let glow = flora_cfg.species(Species::Glowcap).wood_max;
-            if !flora.apply(&world, FloraCommand::Seed { x, z: 1, species: Species::Glowcap, wood: glow }) {
+            if !flora.apply(&world, FloraCommand::Seed { x, z: stand_z, species: Species::Glowcap, wood: glow }) {
                 bail!("could not seed a glowcap under {species:?} at x={x}");
             }
         }
@@ -246,7 +250,7 @@ fn main() -> Result<()> {
         let sc = flora_cfg.species(species);
         if contest && sc.trophic == cubarium_voxel_flora::Trophic::Photo && !sc.ground_cover && sc.overtop_per_check > 0.0 {
             let turf = flora_cfg.species(Species::Springturf).wood_max;
-            let site = cubarium_voxel_flora::Site { x: x as u32, y: 2, z: 1 };
+            let site = cubarium_voxel_flora::Site { x: x as u32, y: 2, z: stand_z };
             if !flora.apply(&world, FloraCommand::SeedBeneath { site, species: Species::Springturf, wood: turf }) {
                 bail!("could not seed a springturf beside {species:?} at x={x}");
             }
