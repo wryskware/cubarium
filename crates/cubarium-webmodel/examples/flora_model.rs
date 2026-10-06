@@ -31,7 +31,7 @@ fn main() {
             "usage: flora_model dump [CONFIG] | census DIR | physio SPECIES L WATER SAT N DAYS newborn|adult | elig DIR.. | hetero DIR SPECIES MINUTES\n  \
              run start=DIR snaps=DIR,.. [log=SOAKLOG] [minutes=1200] [every=30] [weather=frozen] [wseed=N] [config=FILE] [set=P=V].. \
              [browse=PER_DAY] [hold=SPECIES,..] [zocc=1] [prod=1] [rcheck=SPECIES[:seed]] [zfunnel=SPECIES] [zdeaths=SPECIES] [trace=ZONE:SPECIES]\n  \
-             meadow levers (design/webmodel/meadow.md): [take_hold=1] [crop=K] [cropw=SHARE] [dry=EVERY_D:LEN_D:WATER[:PHASE_D]] [drywet=1] \
+             meadow levers (design/webmodel/meadow.md): [take_hold=1] [take_const=FOLIAGE_PER_2H[:LITTER]] [crop=K] [cropw=SHARE] [dry=EVERY_D:LEN_D:WATER[:PHASE_D]] [drywet=1] \
              [thatch=X] [draw=X] [contest=ESCAPE_SHARE[:TAU]] [life=DAYS | life=SPECIES:DAYS,..] [soilmin=SPECIES:N,..] [soilhist=1] [rare=SPECIES:KEEP]"
         ),
     }
@@ -568,15 +568,22 @@ fn run(a: &[String]) {
         }
     }
     // The take past the log (`take_hold=1`): the mean of its last three windows, per 2 h.
-    let held_take: Option<(f64, f64, f64, f64)> = (clamp.len() >= 3).then(|| {
+    // A log with no flux windows (`take_const=FOLIAGE[:LITTER]`, per 2 h): that take
+    // throughout, e.g. from the run's logged grazer count times a per-grazer take.
+    let held_take: Option<(f64, f64, f64, f64)> = if clamp.len() >= 3 {
         let tail = &clamp[clamp.len() - 3..];
         let (mut f, mut l) = (0.0, 0.0);
         for w in tail {
             f += w.2 * 120.0 / (w.1 - w.0);
             l += w.3 * 120.0 / (w.1 - w.0);
         }
-        (0.0, 0.0, f / 3.0, l / 3.0)
-    });
+        Some((0.0, 0.0, f / 3.0, l / 3.0))
+    } else {
+        kv(a, "take_const=").map(|x| {
+            let v: Vec<f64> = x.split(':').map(|y| y.parse().unwrap()).collect();
+            (0.0, 0.0, v[0], v.get(1).copied().unwrap_or(0.0))
+        })
+    };
     let mut was_dry = false;
     let t = std::time::Instant::now();
     let end = minute0 + minutes;
