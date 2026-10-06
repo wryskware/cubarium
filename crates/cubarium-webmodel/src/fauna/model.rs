@@ -56,6 +56,10 @@ pub struct Cohort {
     pub window: SurplusWindow,
     /// An open gestation's escrow, organic units, and how long it has run.
     pub escrow: Option<(f64, f64)>,
+    /// **A hunter's fresh kills**, organic units, all its bodies together: the corpses at
+    /// its mouth, which it alone eats (at a full bite) while it stays, which decay at the
+    /// carrion rate, and which it leaves at `1 / carcass_stay_s` to the carrion pool.
+    pub carcass: f64,
 }
 
 impl Cohort {
@@ -75,6 +79,7 @@ impl Cohort {
             clutch_wait_s: 0.0,
             window: SurplusWindow::default(),
             escrow: None,
+            carcass: 0.0,
         }
     }
 
@@ -175,11 +180,13 @@ pub struct FaunaModel {
     pub dt: f64,
     pub pops: [Vec<Cohort>; Founder::COUNT],
     pub eggs: Vec<EggCohort>,
-    /// **The fresh-kill carcass** a hunter feeds at, organic units: kills go here, the hunters
-    /// eat from it at a full bite, it decays at the carrion rate. The rest of the carrion pool
-    /// is the other half's (Supply / Returns).
-    pub carcass: f64,
+    /// Organic matter the hunters' kills laid at their mouths ([`Cohort::carcass`]), what
+    /// decayed there, and what they left to the carrion pool (returned as carrion).
+    pub carcass_laid: f64,
     pub carcass_decayed: f64,
+    pub carcass_left: f64,
+    /// Organic matter of kills beyond the hunter's reach, returned as carrion at the kill.
+    pub carcass_out: f64,
     pub ledger: [LineageLedger; Founder::COUNT],
     pub draws: Draws,
     /// Lineages the model steps; the others are held as they are.
@@ -191,6 +198,17 @@ pub struct FaunaModel {
     /// fitted on; on a floor this many times larger a hunter meets each prey body this much
     /// less often (mass action over area), and a layer's neighbours are as much sparser.
     pub area_scale: f64,
+    /// **The cohort bound** (numerics, not ecology): a merge pass keeps at most this many
+    /// cohorts per lineage, merging the closest compatible pair until it holds. Every clutch a
+    /// crowded nest refuses splits a cohort in two (the layers and the refused, who retry), so
+    /// without a bound the count grows geometrically with the clutch cycles.
+    pub max_cohorts: usize,
+    /// In the mean field, a cohort with fewer bodies than this is merged into its nearest
+    /// compatible cohort at each pass: the tail of a refusal series (`p^k` of a body) carries
+    /// no weight but costs a full cohort's step.
+    pub min_cohort: f64,
+    /// Seconds between merge passes.
+    pub merge_every_s: f64,
     last_daylight: Option<f64>,
     merge_clock: f64,
 }
@@ -243,13 +261,18 @@ impl FaunaModel {
             dt,
             pops: Default::default(),
             eggs: Vec::new(),
-            carcass: 0.0,
+            carcass_laid: 0.0,
             carcass_decayed: 0.0,
+            carcass_left: 0.0,
+            carcass_out: 0.0,
             ledger: Default::default(),
             draws: Draws::Mean,
             enabled: [true; Founder::COUNT],
             extra_bodies: [0.0; Founder::COUNT],
             area_scale: 1.0,
+            max_cohorts: 48,
+            min_cohort: 0.01,
+            merge_every_s: 60.0,
             last_daylight: None,
             merge_clock: 0.0,
         }
@@ -440,7 +463,7 @@ impl FaunaModel {
                 let mut psi = [0.0f64; Food::COUNT];
                 for &food in &diet {
                     psi[food.index()] = if hunter && food == Food::Carrion {
-                        if self.carcass > 0.0 { 1.0 } else { fit.psi(food, left[food.index()] / area, own) }
+                        if c.carcass > 0.0 { 1.0 } else { fit.psi(food, left[food.index()] / area, own) }
                     } else {
                         fit.psi(food, left[food.index()] / area, own)
                     };
@@ -456,8 +479,8 @@ impl FaunaModel {
                         continue;
                     }
                     let mut bite = want * share;
-                    let from_carcass = hunter && food == Food::Carrion && self.carcass > 0.0;
-                    let avail = if from_carcass { self.carcass } else { left[food.index()] };
+                    let from_carcass = hunter && food == Food::Carrion && c.carcass > 0.0;
+                    let avail = if from_carcass { c.carcass } else { left[food.index()] };
                     bite = bite.min(avail / c.n.max(1e-12));
                     if !(bite > 0.0) {
                         continue;
@@ -465,7 +488,7 @@ impl FaunaModel {
                     let spill = phys.bite_spill_fraction.clamp(0.0, 1.0);
                     let all = bite * c.n;
                     if from_carcass {
-                        self.carcass -= all;
+                        c.carcass = (c.carcass - all).max(0.0);
                     } else {
                         left[food.index()] -= all;
                         book_take(&mut take, food, all, &foliage_share);
@@ -479,24 +502,46 @@ impl FaunaModel {
                 }
             }
         }
-        self.hunt(dt, &awake_of);
+        self.hunt(dt, &awake_of, &mut ret);
 
         // 3. Births, then 4. deaths.
         self.reproduce(dt, dusk, &mut ret);
         self.deaths(dt, &mut ret);
 
-        // The fresh-kill carcass decays at the carrion rate.
-        let decay = self.carcass * (1.0 - (-self.carrion_decomposition * dt).exp());
-        self.carcass -= decay;
-        self.carcass_decayed += decay;
+        // The hunters' fresh kills decay at the carrion rate, and are left to the carrion pool
+        // at `1 / carcass_stay_s`.
+        self.carcasses(dt, &mut ret);
 
         self.t_s += dt;
         self.merge_clock += dt;
-        if self.merge_clock >= 60.0 {
+        if self.merge_clock >= self.merge_every_s {
             self.merge_clock = 0.0;
-            self.merge();
+            self.merge_cohorts();
         }
         (take, ret)
+    }
+
+    /// **The hunters' fresh kills** over `dt`: each cohort's carcass decays at
+    /// `carrion_decomposition` (`flora.carrion_decomposition`, the pool's own rate) and is left
+    /// at `1 / carcass_stay_s` ([`Fits::carcass_stay_s`]: how long a hunter stays at its kill,
+    /// fitted); the two together as one exponential, split in proportion. What is left goes to
+    /// the carrion pool ([`Returns::carrion`]).
+    fn carcasses(&mut self, dt: f64, ret: &mut Returns) {
+        let k = self.carrion_decomposition.max(0.0);
+        let r = if self.fits.carcass_stay_s > 0.0 { 1.0 / self.fits.carcass_stay_s } else { f64::INFINITY };
+        for v in self.pops.iter_mut() {
+            for c in v.iter_mut().filter(|c| c.carcass > 0.0) {
+                let (gone, left_share) = if r.is_infinite() {
+                    (c.carcass, 1.0)
+                } else {
+                    (c.carcass * (1.0 - (-(k + r) * dt).exp()), if k + r > 0.0 { r / (k + r) } else { 0.0 })
+                };
+                c.carcass -= gone;
+                self.carcass_decayed += gone * (1.0 - left_share);
+                self.carcass_left += gone * left_share;
+                ret.carrion += gone * left_share;
+            }
+        }
     }
 
     /// **The parasite riders** (`drain_riders`, `step.rs:456-484`; `drop_off_grown`,
@@ -550,10 +595,11 @@ impl FaunaModel {
     /// lineage on its list, inside its size window, dies at hazard
     /// `kill_rate(prey) · hunters hunting · share²` — the attack chance is the profitability
     /// (`hunt::attack_chance` with the opportunistic preference 1, `hunt.rs:171-202`) and the
-    /// kill per strike the wound share (`apply_hit`, `step.rs:2207-2229`). The corpse goes to
-    /// the carcass; each kill costs `strikes_per_kill` strikes at `strike_cost_s` of awake
+    /// kill per strike the wound share (`apply_hit`, `step.rs:2207-2229`). The share
+    /// `kill_reach` of the corpse goes to the killer cohort's carcass, the rest to the carrion
+    /// pool; each kill costs `strikes_per_kill` strikes at `strike_cost_s` of awake
     /// upkeep (`Hunter::strike_cost_s`).
-    fn hunt(&mut self, dt: f64, awake_of: &[Vec<f64>]) {
+    fn hunt(&mut self, dt: f64, awake_of: &[Vec<f64>], ret: &mut Returns) {
         for hf in Founder::ALL {
             if !self.enabled[hf.index()] {
                 continue;
@@ -579,6 +625,7 @@ impl FaunaModel {
                 }
                 self.ledger[hf.index()].hunting_s += hn * dt;
                 let mut kills_here = 0.0;
+                let mut laid_here = 0.0;
                 for pf in Founder::ALL {
                     if !h.hunts(pf) || !self.enabled[pf.index()] {
                         continue;
@@ -600,11 +647,17 @@ impl FaunaModel {
                             continue;
                         }
                         c.n -= dead;
-                        self.carcass += dead * c.b.organic();
+                        laid_here += dead * c.b.organic();
                         self.ledger[pf.index()].killed_by[hf.index()] += dead;
                         kills_here += dead;
                     }
                 }
+                // The share of the corpse at its mouth is its carcass; the rest is carrion now.
+                let reach = self.fits.kill_reach.clamp(0.0, 1.0);
+                self.pops[hf.index()][k].carcass += reach * laid_here;
+                self.carcass_laid += reach * laid_here;
+                ret.carrion += (1.0 - reach) * laid_here;
+                self.carcass_out += (1.0 - reach) * laid_here;
                 if kills_here > 0.0 {
                     let strikes = kills_here * self.fits.strikes_per_kill;
                     let hc = &mut self.pops[hf.index()][k];
@@ -803,6 +856,8 @@ impl FaunaModel {
                             let mut r = c.clone();
                             r.n = refused;
                             r.retry_s = rule.nest_retry_s;
+                            r.carcass = c.carcass * refused / c.n;
+                            c.carcass -= r.carcass;
                             c.n -= refused;
                             self.ledger[f.index()].nest_refusals += refused;
                             split.push(r);
@@ -826,7 +881,9 @@ impl FaunaModel {
                             l.first_clutch_age_s += c.n * c.age_s;
                         }
                         c.bred = true;
-                        let lost = if rule.dormant { 0.0 } else { self.draws.of(laid, fit.egg_loss) };
+                        // Lost where they lie (flooded, the face gone: `clutch_fate`, which takes
+                        // dormant clutches too), to carrion.
+                        let lost = self.draws.of(laid, fit.egg_loss);
                         if lost > 0.0 {
                             ret.carrion += lost * per_egg;
                             self.ledger[f.index()].eggs_lost += lost;
@@ -860,7 +917,9 @@ impl FaunaModel {
                     continue;
                 }
                 if c.b.body < sc.body_min {
-                    ret.carrion += c.n * c.b.organic();
+                    ret.carrion += c.n * c.b.organic() + c.carcass;
+                    self.carcass_left += c.carcass;
+                    c.carcass = 0.0;
                     self.ledger[f.index()].starved += c.n;
                     c.n = 0.0;
                     continue;
@@ -871,79 +930,65 @@ impl FaunaModel {
                 if p > 0.0 {
                     let died = self.draws.of(c.n, p).min(c.n);
                     if died > 0.0 {
-                        ret.carrion += died * c.b.organic();
+                        let kill_share = c.carcass * died / c.n;
+                        ret.carrion += died * c.b.organic() + kill_share;
+                        self.carcass_left += kill_share;
+                        c.carcass -= kill_share;
                         self.ledger[f.index()].aged += died;
                         c.n -= died;
                     }
                 }
+            }
+            for c in v.iter().filter(|c| !(c.n > 1e-9) && c.carcass > 0.0) {
+                ret.carrion += c.carcass;
+                self.carcass_left += c.carcass;
             }
             v.retain(|c| c.n > 1e-9);
             self.pops[f.index()] = v;
         }
     }
 
-    /// Merge cohorts that have become the same bodies (the refused share of a clutch that
-    /// laid a minute later, siblings), so the count stays bounded.
-    fn merge(&mut self) {
+    /// **The merge pass**: per lineage, cohorts that have become the same bodies (closer than
+    /// [`MERGE_SAME`] in [`cohort_distance`]) merge; in the mean field a cohort under
+    /// `min_cohort` bodies merges into its nearest compatible one; then the closest compatible
+    /// pairs merge until the lineage holds at most `max_cohorts`. Egg cohorts of a lineage laid
+    /// within [`EGG_MERGE_S`] of each other with the same egg merge too. A merge is
+    /// body-weighted, so bodies and organic matter are kept exactly; what it loses is the
+    /// spread between the merged bodies (their timing within a clutch cycle above all).
+    pub fn merge_cohorts(&mut self) {
+        let mean = !self.draws.is_twin();
         for f in Founder::ALL {
-            let sc = self.phys(f).core;
-            let v = &mut self.pops[f.index()];
-            if v.len() < 2 {
-                continue;
-            }
-            let mut out: Vec<Cohort> = Vec::with_capacity(v.len());
-            'next: for c in v.drain(..) {
-                for o in out.iter_mut() {
-                    let cap = sc.reserve_of(o.b.body).max(1e-12);
-                    let same = o.native == c.native
-                        && o.arriving == c.arriving
-                        && o.host == c.host
-                        && o.matured == c.matured
-                        && o.bred == c.bred
-                        && o.escrow.is_none()
-                        && c.escrow.is_none()
-                        && o.b.eating == c.b.eating
-                        && o.b.emergency == c.b.emergency
-                        && (o.age_s - c.age_s).abs() < 300.0
-                        && (o.b.body - c.b.body).abs() <= 0.005 * o.b.body
-                        && (o.b.reserve - c.b.reserve).abs() <= 0.01 * cap
-                        && (o.b.brood - c.b.brood).abs() <= 0.01 * cap
-                        && (o.refractory_s - c.refractory_s).abs() < 60.0
-                        && (o.clutch_wait_s - c.clutch_wait_s).abs() < 60.0
-                        && o.retry_s <= 0.0
-                        && c.retry_s <= 0.0;
-                    if same {
-                        let n = o.n + c.n;
-                        let w = |a: f64, b: f64| (a * o.n + b * c.n) / n;
-                        o.b.body = w(o.b.body, c.b.body);
-                        o.b.reserve = w(o.b.reserve, c.b.reserve);
-                        o.b.brood = w(o.b.brood, c.b.brood).min(o.b.reserve);
-                        for i in 0..Food::COUNT {
-                            o.b.stomach[i] = w(o.b.stomach[i], c.b.stomach[i]);
-                        }
-                        o.age_s = w(o.age_s, c.age_s);
-                        o.refractory_s = w(o.refractory_s, c.refractory_s);
-                        o.clutch_wait_s = w(o.clutch_wait_s, c.clutch_wait_s);
-                        if c.n > o.n {
-                            o.window = c.window;
-                        }
-                        o.n = n;
-                        continue 'next;
-                    }
-                }
-                out.push(c);
-            }
-            *v = out;
+            let phys = *self.phys(f);
+            let v = std::mem::take(&mut self.pops[f.index()]);
+            self.pops[f.index()] = merge_lineage(v, &phys, self.max_cohorts.max(1), if mean { self.min_cohort } else { 0.0 });
         }
+        let eggs = std::mem::take(&mut self.eggs);
+        let mut out: Vec<EggCohort> = Vec::with_capacity(eggs.len());
+        'egg: for e in eggs {
+            for o in out.iter_mut() {
+                if o.lineage == e.lineage
+                    && o.dormant == e.dormant
+                    && (o.organic - e.organic).abs() <= 1e-9 * o.organic.max(1e-12)
+                    && (o.age_s - e.age_s).abs() <= EGG_MERGE_S
+                {
+                    let n = o.n + e.n;
+                    o.age_s = (o.age_s * o.n + e.age_s * e.n) / n;
+                    o.n = n;
+                    continue 'egg;
+                }
+            }
+            out.push(e);
+        }
+        self.eggs = out;
     }
 
     /// Organic matter the animals hold now: bodies, reserves, stomachs, escrows, eggs, the bank,
     /// and the fresh-kill carcass. The conservation ledger's stock.
     pub fn organic_held(&self) -> f64 {
-        let mut s = self.carcass;
+        let mut s = 0.0;
         for f in Founder::ALL {
             for c in &self.pops[f.index()] {
-                s += c.n * (c.b.organic() + c.escrow.map_or(0.0, |e| e.0));
+                s += c.n * (c.b.organic() + c.escrow.map_or(0.0, |e| e.0)) + c.carcass;
             }
         }
         for e in &self.eggs {
@@ -965,4 +1010,134 @@ pub fn poisson_above(mean: f64, k: u32) -> f64 {
         cdf += term;
     }
     (1.0 - cdf).clamp(0.0, 1.0)
+}
+
+/// Two cohorts closer than this in [`cohort_distance`] are the same bodies: about 0.5 % of
+/// body, 0.5 % of the reserve cap, 3 min of age, 1 % of the clutch interval.
+pub const MERGE_SAME: f64 = 0.1;
+
+/// Egg cohorts laid this close in time, with the same egg, merge (seconds).
+pub const EGG_MERGE_S: f64 = 15.0;
+
+/// **How far apart two cohorts are**, in units where 1 is a difference that matters: 5 % of
+/// body (log), 5 % of the reserve cap in reserve and in brood, 20 % of the stomach, 30 min of
+/// age, 10 % of the clutch interval in refractory, a minute of nest retry or clutch wait, and
+/// a latch that differs. Infinite for cohorts that cannot merge: a different host, origin
+/// (native, arriving), booked stage (matured, bred), or an open gestation.
+pub fn cohort_distance(phys: &FounderPhysiology, a: &Cohort, b: &Cohort) -> f64 {
+    if a.host != b.host
+        || a.native != b.native
+        || a.arriving != b.arriving
+        || a.matured != b.matured
+        || a.bred != b.bred
+        || a.escrow.is_some()
+        || b.escrow.is_some()
+    {
+        return f64::INFINITY;
+    }
+    let sc = phys.core;
+    let cap = sc.reserve_of(a.b.body.max(b.b.body)).max(1e-12);
+    let k = phys.gut.capacity(a.b.body.max(b.b.body)).max(1e-12);
+    let interval = sc.reproduction.birth_interval_s.max(60.0);
+    let terms = [
+        (a.b.body.max(1e-12) / b.b.body.max(1e-12)).ln() / 0.05,
+        (a.b.reserve - b.b.reserve) / cap / 0.05,
+        (a.b.brood - b.b.brood) / cap / 0.05,
+        (a.b.stomach_total() - b.b.stomach_total()) / k / 0.2,
+        (a.age_s - b.age_s) / 1800.0,
+        (a.refractory_s - b.refractory_s) / (0.1 * interval),
+        (a.retry_s - b.retry_s) / 60.0,
+        (a.clutch_wait_s - b.clutch_wait_s) / 60.0,
+        (a.carcass / a.n.max(1e-12) - b.carcass / b.n.max(1e-12)) / k / 0.2,
+        if a.b.eating == b.b.eating { 0.0 } else { 1.0 },
+        if a.b.emergency == b.b.emergency { 0.0 } else { 1.0 },
+    ];
+    terms.iter().map(|t| t * t).sum::<f64>().sqrt()
+}
+
+/// `b` into `a`, body-weighted: every per-body stock and clock is the bodies' mean, so the
+/// cohort's totals are kept exactly. The latches and the surplus window are the larger's.
+fn absorb(a: &mut Cohort, b: &Cohort) {
+    let n = a.n + b.n;
+    if !(n > 0.0) {
+        return;
+    }
+    let (wa, wb) = (a.n / n, b.n / n);
+    let w = |x: f64, y: f64| x * wa + y * wb;
+    a.b.body = w(a.b.body, b.b.body);
+    a.b.reserve = w(a.b.reserve, b.b.reserve);
+    a.b.brood = w(a.b.brood, b.b.brood).min(a.b.reserve);
+    for i in 0..Food::COUNT {
+        a.b.stomach[i] = w(a.b.stomach[i], b.b.stomach[i]);
+    }
+    a.age_s = w(a.age_s, b.age_s);
+    a.refractory_s = w(a.refractory_s, b.refractory_s);
+    a.retry_s = w(a.retry_s, b.retry_s);
+    a.clutch_wait_s = w(a.clutch_wait_s, b.clutch_wait_s);
+    a.carcass += b.carcass;
+    if b.n > a.n {
+        a.window = b.window;
+        a.b.eating = b.b.eating;
+        a.b.emergency = b.b.emergency;
+    }
+    a.n = n;
+}
+
+/// One lineage's merge pass ([`FaunaModel::merge_cohorts`]).
+fn merge_lineage(mut v: Vec<Cohort>, phys: &FounderPhysiology, max: usize, min_n: f64) -> Vec<Cohort> {
+    v.retain(|c| c.n > 0.0);
+    if v.len() < 2 {
+        return v;
+    }
+    let n = v.len();
+    let mut alive = vec![true; n];
+    // The distance matrix, upper triangle; rows refreshed as cohorts absorb others.
+    let mut d = vec![f64::INFINITY; n * n];
+    for i in 0..n {
+        for j in i + 1..n {
+            d[i * n + j] = cohort_distance(phys, &v[i], &v[j]);
+        }
+    }
+    let dist = |d: &[f64], i: usize, j: usize| if i < j { d[i * n + j] } else { d[j * n + i] };
+    let mut count = n;
+    // Tiny cohorts with no compatible partner are left as they are.
+    let mut stuck = vec![false; n];
+    loop {
+        // The tiniest cohort under the floor, else the closest pair.
+        let tiny = (0..n).filter(|&i| alive[i] && !stuck[i] && v[i].n < min_n).min_by(|&a, &b| v[a].n.partial_cmp(&v[b].n).unwrap());
+        let pair = if let Some(i) = tiny {
+            let p = (0..n).filter(|&j| j != i && alive[j]).map(|j| (dist(&d, i, j), i, j)).min_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            if p.is_none_or(|p| !p.0.is_finite()) {
+                stuck[i] = true;
+                continue;
+            }
+            p
+        } else {
+            let mut best: Option<(f64, usize, usize)> = None;
+            for i in 0..n {
+                if !alive[i] {
+                    continue;
+                }
+                for j in i + 1..n {
+                    if alive[j] && best.is_none_or(|b| d[i * n + j] < b.0) {
+                        best = Some((d[i * n + j], i, j));
+                    }
+                }
+            }
+            best.filter(|b| b.0.is_finite() && (b.0 < MERGE_SAME || count > max))
+        };
+        let Some((_, a, b)) = pair else { break };
+        let (keep, gone) = if v[a].n >= v[b].n { (a, b) } else { (b, a) };
+        let g = v[gone].clone();
+        absorb(&mut v[keep], &g);
+        alive[gone] = false;
+        count -= 1;
+        for j in 0..n {
+            if j != keep && alive[j] {
+                let x = cohort_distance(phys, &v[keep], &v[j]);
+                if keep < j { d[keep * n + j] = x } else { d[j * n + keep] = x }
+            }
+        }
+    }
+    v.into_iter().zip(alive).filter(|(_, a)| *a).map(|(c, _)| c).collect()
 }
