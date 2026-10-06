@@ -1005,6 +1005,9 @@ bool posedFind(int x, int level, int z, int r, out int gy, out int row) {
         uvec4 c = at(x, sy, z);
         if (!isPosed(c) || glyphOf(c) == 0) { continue; }
         ivec2 sp = posedSpan(c, sy);
+        // A cell cut to nothing is folded away, cap and all (the hunker's neck; a sleeper's
+        // leg is under its torso anyway).
+        if (sp.y <= sp.x) { continue; }
         if (q >= sp.x && q < sp.y) {
             gy = sy;
             row = posedRow(c, sy, sp, q);
@@ -1023,6 +1026,7 @@ bool posedFind(int x, int level, int z, int r, out int gy, out int row) {
 int posedCapRow(uvec4 v, int level, int r) {
     if (glyphOf(v) == 0) { return -1; }
     ivec2 sp = posedSpan(v, level - 1);
+    if (sp.y <= sp.x) { return -1; }
     int q = level * S + r;
     return q >= sp.y && q < sp.y + RISE ? RISE - 1 - (q - sp.y) : -1;
 }

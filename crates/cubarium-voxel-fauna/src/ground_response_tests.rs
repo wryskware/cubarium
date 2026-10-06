@@ -23,12 +23,14 @@ fn world(seed: u64) -> World {
     plain_of_height(DayClock { mode: DayMode::Off, ..DayClock::default() }, seed, 16)
 }
 
-/// Every lineage awake, remote senses every tick.
+/// Every lineage awake, remote senses every tick; the frondgrazer's hunker off (HUNKER), so
+/// these cases read S2's responses.
 fn config() -> FaunaConfig {
     let mut c = hunting_config();
     for f in Founder::ALL {
         c.founders[f.index()].active = Activity::Always;
     }
+    c.founders[GRAZER.index()].hunker.enabled = false;
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
     c
 }

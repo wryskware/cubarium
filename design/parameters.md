@@ -1356,7 +1356,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1624 rows)
+**`fauna.*`** (1759 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1493,6 +1493,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.withdraw_tremor` | 0.06 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.littershredder.vigilance.freeze_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.littershredder.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.littershredder.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.littershredder.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.littershredder.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.littershredder.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.littershredder.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.littershredder.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.littershredder.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.littershredder.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.littershredder.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.littershredder.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.littershredder.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.littershredder.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.littershredder.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.littershredder.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.littershredder.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1655,6 +1670,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.frondgrazer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.frondgrazer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.frondgrazer.hunker.enter_m` | 2.5 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.frondgrazer.hunker.leave_m` | 5.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.frondgrazer.hunker.calm_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.frondgrazer.hunker.hunger_calm_exp` | 1.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.frondgrazer.hunker.min_condition` | 0.1 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.frondgrazer.hunker.shield` | 0.9 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.frondgrazer.hunker.shield_growth_exp` | 2.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.frondgrazer.hunker.wound_opens` | 1.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.frondgrazer.hunker.pry_per_member_s` | 0.016666666666666666 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.frondgrazer.hunker.resist_per_s` | 0.025 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.frondgrazer.hunker.pry_reach_m` | 0.3 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.frondgrazer.hunker.opened_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.frondgrazer.hunker.ring_m` | 1.5 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.frondgrazer.hunker.ring_resist_per_kin` | 0.5 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.frondgrazer.hunker.ring_kin_max` | 3 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1817,6 +1847,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.lanternjaw.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.lanternjaw.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.lanternjaw.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.lanternjaw.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.lanternjaw.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.lanternjaw.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.lanternjaw.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.lanternjaw.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.lanternjaw.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.lanternjaw.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.lanternjaw.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.lanternjaw.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.lanternjaw.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.lanternjaw.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.lanternjaw.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.lanternjaw.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.lanternjaw.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1979,6 +2024,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.capgnawer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.capgnawer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.capgnawer.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.capgnawer.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.capgnawer.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.capgnawer.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.capgnawer.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.capgnawer.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.capgnawer.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.capgnawer.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.capgnawer.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.capgnawer.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.capgnawer.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.capgnawer.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.capgnawer.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.capgnawer.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.capgnawer.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2141,6 +2201,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.loftstrider.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.loftstrider.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.loftstrider.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.loftstrider.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.loftstrider.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.loftstrider.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.loftstrider.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.loftstrider.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.loftstrider.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.loftstrider.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.loftstrider.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.loftstrider.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.loftstrider.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.loftstrider.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.loftstrider.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.loftstrider.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.loftstrider.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2303,6 +2378,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.ripple-snail.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.ripple-snail.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.ripple-snail.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.ripple-snail.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.ripple-snail.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.ripple-snail.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.ripple-snail.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.ripple-snail.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.ripple-snail.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.ripple-snail.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.ripple-snail.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.ripple-snail.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.ripple-snail.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.ripple-snail.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.ripple-snail.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.ripple-snail.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.ripple-snail.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2465,6 +2555,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.bellwing.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.bellwing.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.bellwing.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.bellwing.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.bellwing.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.bellwing.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.bellwing.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.bellwing.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.bellwing.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.bellwing.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.bellwing.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.bellwing.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.bellwing.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.bellwing.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.bellwing.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.bellwing.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.bellwing.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2627,6 +2732,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.seedporter.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.seedporter.vigilance.refuge_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.seedporter.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.seedporter.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.seedporter.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.seedporter.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.seedporter.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.seedporter.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.seedporter.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.seedporter.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.seedporter.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.seedporter.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.seedporter.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.seedporter.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.seedporter.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.seedporter.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.seedporter.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2789,6 +2909,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.chorister.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.chorister.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.chorister.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
+| `fauna.founders.chorister.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
+| `fauna.founders.chorister.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
+| `fauna.founders.chorister.hunker.hunger_calm_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: calm x condition^this (a hungrier body comes out sooner) |
+| `fauna.founders.chorister.hunker.min_condition` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: below this condition it does not hunker |
+| `fauna.founders.chorister.hunker.shield` | 0.0 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
+| `fauna.founders.chorister.hunker.shield_growth_exp` | 0.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
+| `fauna.founders.chorister.hunker.wound_opens` | 0.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
+| `fauna.founders.chorister.hunker.pry_per_member_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.chorister.hunker.resist_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
+| `fauna.founders.chorister.hunker.pry_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
+| `fauna.founders.chorister.hunker.opened_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
+| `fauna.founders.chorister.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
+| `fauna.founders.chorister.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
+| `fauna.founders.chorister.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |

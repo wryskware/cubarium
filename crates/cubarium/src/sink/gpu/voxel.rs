@@ -199,20 +199,22 @@ impl VoxelGpuSink {
             "cubarium — voxel strip (GPU)",
             true,
         )?;
+        let mut packer = Packer {
+            specimens: options.specimens.clone(),
+            ..Packer::new(
+                &params,
+                options.models.clone(),
+                textures.vine_on,
+                species,
+                Emission::of(cfg),
+            )
+        };
+        packer.animals.set_hunker_s(cfg.hunker_s);
         Ok(VoxelGpuSink {
             gpu,
             renderer,
             target,
-            packer: Packer {
-                specimens: options.specimens.clone(),
-                ..Packer::new(
-                    &params,
-                    options.models.clone(),
-                    textures.vine_on,
-                    species,
-                    Emission::of(cfg),
-                )
-            },
+            packer,
             capture: options.capture,
             water_hz: cfg.light.water_hz,
             water_smooth: cfg.light.water_smooth,

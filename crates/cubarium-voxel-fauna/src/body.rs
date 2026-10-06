@@ -512,6 +512,10 @@ pub struct FounderPhysiology {
     /// live table senses. Inert while its table is not live.
     #[serde(default)]
     pub vigilance: crate::Vigilance,
+    /// **Its hunker** (HUNKER, [`crate::Hunker`]): the armoured defence a herd lineage takes
+    /// instead of flight. Off for every lineage but the frondgrazer.
+    #[serde(default)]
+    pub hunker: crate::Hunker,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -1161,6 +1165,7 @@ impl FounderPhysiology {
         p.burr_coat = burr_coat_of(founder);
         p.senses = senses_of(founder);
         p.vigilance = crate::vigil::vigilance_of(founder);
+        p.hunker = crate::vigil::hunker_of(founder);
         p
     }
 
@@ -1262,6 +1267,7 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1330,6 +1336,7 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1418,6 +1425,7 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                hunker: crate::Hunker::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the

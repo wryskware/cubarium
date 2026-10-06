@@ -159,6 +159,8 @@ COATS = {
 # the seedporter's poses wear its coat
 for _pose in ("stand", "ground", "glide"):
     COATS[f"seedporter-{_pose}"] = COATS["seedporter"]
+# and the frondgrazer's hunker wears its own
+COATS["frondgrazer-hunker"] = COATS["frondgrazer"]
 
 CUR = [None]
 
@@ -358,10 +360,23 @@ def chorister():
 # Pick: art/gen/artbook/frondgrazer.png, side view facing left. 0.00139 m/px along the
 # shield, 0.00116 m/px up it (the shield is kept at the founder's 0.375 m height).
 
-def frondgrazer():
+# The hunker pose (Wrysk 2026-10-06, HUNKER: "author the new pose after as well"): the same
+# rig, three changes and nothing else. The shield, rigid with its sensor spots, comes down
+# until its rim (the lower edge, its widest line) is on the ground line all round; the neck
+# folds back into the shield's front so the scoop sits flush with the front opening; the
+# eye stalks fold inward beside the scoop. Readings taken where the pose said nothing
+# (open questions for Wrysk): the whole shield drops by the same amount (shoulders and
+# rump alike), its pale belly below the rim goes under the ground line, and the legs fold
+# flat under the shield, hooves drawn in 3.5 cm under the rim, so they are hidden.
+FG_POSES = {"rest": dict(drop=0.0, tuck=False), "hunker": dict(drop=0.17, tuck=True)}
+
+
+def frondgrazer(pose="rest"):
+    drop, tuck = FG_POSES[pose]["drop"], FG_POSES[pose]["tuck"]
     tops = [(0.42, 0.20), (0.39, 0.26), (0.30, 0.35), (0.19, 0.375), (0.075, 0.345), (0.0, 0.31),
             (-0.09, 0.32), (-0.225, 0.35), (-0.315, 0.32), (-0.39, 0.23), (-0.42, 0.18)]
-    edge = 0.17                              # the shield's lower edge, its widest line
+    tops = [(x, t - drop) for x, t in tops]
+    edge = 0.17 - drop                       # the shield's lower edge, its widest line
     stations = []
     for x, top in tops:
         end = abs(x) > 0.4
@@ -398,17 +413,36 @@ def frondgrazer():
         for dx, z, r in ((0.0, 0.235, 0.011), (0.0, 0.212, 0.006), (-0.012, 0.21, 0.006), (-0.008, 0.193, 0.006)):
             xx = x0 + (dx if x0 > 0 else -dx)
             for sy in (-1, 1):
-                ell((xx, sy * (surface(xx, z) + 0.002), z), (r, 0.004, r * 1.4), c("magenta"))
+                ell((xx, sy * (surface(xx, z - drop) + 0.002), z - drop), (r, 0.004, r * 1.4), c("magenta"))
     # six short stout legs: dark band over two-toed hooves
     for hx, fx in ((0.25, 0.33), (-0.03, -0.03), (-0.31, -0.33)):
         for sy in (-1, 1):
             hip = (hx, sy * 0.12, 0.18)
             knee = ((hx + fx) / 2, sy * 0.15, 0.1)
-            foot = (fx, sy * 0.155, 0.05)
+            fy = 0.155
+            if drop:
+                # folded flat under the lowered shield, the hooves drawn in under its rim
+                fy = 0.12
+                hip, knee = (hx, sy * 0.09, 0.06), ((hx + fx) / 2, sy * 0.11, 0.05)
+            foot = (fx, sy * fy, 0.05)
             tube([hip, knee, foot], 0.048, 0.04, c("a_limb"), seg=12)
-            cyl((fx, sy * 0.155, 0.032), (fx, sy * 0.155, 0.055), 0.042, 0.042, mat=c("a_dark"), seg=12)
+            cyl((fx, sy * fy, 0.032), (fx, sy * fy, 0.055), 0.042, 0.042, mat=c("a_dark"), seg=12)
             for toe in (-1, 1):
-                ell((fx + 0.012, sy * 0.155 + toe * 0.019, 0.02), (0.03, 0.02, 0.022), c("a_foot"))
+                ell((fx + 0.012, sy * fy + toe * 0.019, 0.02), (0.03, 0.02, 0.022), c("a_foot"))
+    if tuck:
+        # the neck folded back into the shield's front: the scoop flush with the front
+        # opening, its trough turned in so only its outer surface shows; the eye stalks
+        # folded inward beside it, the eyes against the scoop's lip
+        tube([(0.27, 0, 0.05), (0.32, 0, 0.06), (0.36, 0, 0.065)], 0.06, 0.045, c("a_limb"), seg=14)
+        ell((0.375, 0, 0.065), (0.03, 0.09, 0.05), c("a_limb"))
+        ell((0.36, 0, 0.065), (0.014, 0.078, 0.04), c("a_head"))
+        for sy in (-1, 1):
+            tube([(0.385, sy * 0.08, 0.09), (0.375, sy * 0.06, 0.1), (0.365, sy * 0.045, 0.104)],
+                 0.008, 0.006, c("a_limb"), seg=6)
+            # the eye folded in, its lens turned against the scoop: drawn without its lens
+            # (an accent claims a cell even where it is hidden, and the lens would show)
+            ell((0.363, sy * 0.042, 0.105), (0.012, 0.012, 0.012), c("a_glow"))
+        return
     # the folded neck, rising out of the shield's front to the transverse cropping scoop
     neck = [(0.29, 0, 0.2), (0.34, 0, 0.24), (0.40, 0, 0.29), (0.45, 0, 0.35), (0.48, 0, 0.385)]
     tube(neck, 0.065, 0.045, c("a_limb"), seg=14)
@@ -421,6 +455,10 @@ def frondgrazer():
              0.008, 0.006, c("a_limb"), seg=6)
         ell((0.507, sy * 0.155, 0.47), (0.018, 0.018, 0.018), c("a_glow"))
         ell((0.515, sy * 0.162, 0.472), (0.012, 0.012, 0.012), c("a_eye"))
+
+
+def frondgrazer_hunker():
+    frondgrazer("hunker")
 
 
 # --- littershredder · long tapered crawler (0.375 x 0.125 x 0.125 m) -----------------------
@@ -1183,6 +1221,8 @@ BELOW_GROUND = {"seedporter-stand"}
 REF = {
     "chorister": (chorister, 1.4, 0.35, 0.6),
     "frondgrazer": (frondgrazer, 0.75, 0.375, 0.375),
+    # the same body hunkered: the reference box of the standing body, so it scales with it
+    "frondgrazer-hunker": (frondgrazer_hunker, 0.75, 0.375, 0.375),
     "littershredder": (littershredder, 0.375, 0.125, 0.125),
     "ripple-snail": (ripple_snail, 0.19, 0.19, 0.125),
     "capgnawer": (capgnawer, 0.25, 0.21, 0.19),
@@ -1215,6 +1255,7 @@ def build(name, x, y, length, width, height):
 
 PICKS = {
     "chorister": "chorister.png", "frondgrazer": "frondgrazer.png",
+    "frondgrazer-hunker": "frondgrazer.png",
     "littershredder": "littershredder.png", "ripple-snail": "ripple-snail-organic.png",
     "capgnawer": "capgnawer-rose-bark.png", "seedporter": "seedporter.png", "bellwing": "bellwing.png",
     "seedporter-stand": "seedporter-stand.png", "seedporter-ground": "seedporter-ground.png",
@@ -1225,7 +1266,7 @@ PICKS = {
 # The pick's view: camera azimuth (degrees from +x, counter-clockwise seen from above; -90
 # looks from -y at the left flank) and elevation.
 VIEWS = {
-    "chorister": (-80.0, 8.0), "frondgrazer": (100.0, 8.0), "littershredder": (115.0, 20.0),
+    "chorister": (-80.0, 8.0), "frondgrazer": (100.0, 8.0), "frondgrazer-hunker": (100.0, 8.0), "littershredder": (115.0, 20.0),
     "ripple-snail": (-60.0, 22.0), "capgnawer": (20.0, 22.0), "seedporter": (0.0, 5.0),
     "seedporter-stand": (0.0, 5.0), "seedporter-ground": (70.0, 12.0), "seedporter-glide": (180.0, 45.0),
     "bellwing": (0.0, 4.0), "lanternjaw": (35.0, 22.0),

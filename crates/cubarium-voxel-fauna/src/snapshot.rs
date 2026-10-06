@@ -70,7 +70,9 @@ use crate::Fauna;
 //     drying clock, the thirst return, retraction and the roam reflex), `Mobility::{dryness,
 //     ashore, retract_ticks, thirsty}`, `Departure::Desiccation`, `Fauna::last_rain_tick`,
 //     the ledger's `amphibious_ticks`, `retracts` and `ashore_assimilated`.
-pub const SCHEMA: u32 = 48;
+// 49: HUNKER — `FounderPhysiology::hunker` (`Hunker`), `Animal::hunkered`, `Vigil::{flee_id,
+//     flee_tick, hunkered, hunker_close, pry, opened_until}`, the `vigil` ledger's hunker lines.
+pub const SCHEMA: u32 = 49;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -407,6 +409,7 @@ mod tests {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            hunkered: false,
             stomach: crate::Stomach::default(),
             eating: false,
             emergency: false,
