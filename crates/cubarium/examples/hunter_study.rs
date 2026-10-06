@@ -862,6 +862,7 @@ fn run(args: &[String]) {
             println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
             println!("route,{arm},{minute},{}", route_line(&lw, &l));
             println!("vh,{arm},{minute},{}", vh_line(&sim, &params, &lw, &l, &vh_win));
+            println!("snail,{arm},{minute},{}", snail_line(&sim, &lw, &l));
             println!("vig,{arm},{minute},{}", vig_line(&lw, &l));
             let g_now = grazers(&sim);
             println!("graz,{arm},{minute},{}", graz_line(&lw, &l, grazers_before, g_now, win[GRAZER.index()].body_ticks));
@@ -906,6 +907,7 @@ fn run(args: &[String]) {
     }
     vh_all.add(&vh_win);
     println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
+    println!("sumsnail,{arm},{},{}", minute0, snail_line(&sim, &l0, &l));
     println!("sumvig,{arm},{},{}", minute0, vig_line(&l0, &l));
     println!("sumgraz,{arm},{},{}", minute0, graz_line(&l0, &l, grazers0, grazers(&sim), track[GRAZER.index()].body_ticks));
     println!("sumage,{arm},{},vh_kills_juvenile={},vh_kills_adult={}", minute0, age_all[0] + age_win[0], age_all[1] + age_win[1]);
@@ -925,6 +927,42 @@ fn run(args: &[String]) {
             prey_line(&l0, &l, f, t.body_ticks, total_ticks),
         );
     }
+}
+
+/// **AMPHIBIOUS-SNAIL** readouts, `a` → `b`: ripple-snails now; their deaths by
+/// desiccation, by lanternjaws and in all; the share of amphibious ticks ashore by day and
+/// by night; intake (assimilated) per snail-hour and the share of it taken ashore; and
+/// retractions begun.
+fn snail_line(sim: &Sim, a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let f = Founder::RippleSnail;
+    let i = f.index();
+    let now = sim.fauna().view().animals.iter().filter(|x| x.founder == Some(f)).count();
+    let dead = |c: Departure| b.departed_founder(f, c) - a.departed_founder(f, c);
+    let all: u64 = Departure::ALL.iter().filter(|c| c.is_death()).map(|&c| dead(c)).sum();
+    let t = |d: usize, w: usize| b.amphibious_ticks[d][w].saturating_sub(a.amphibious_ticks[d][w]) as f64;
+    let share = |d: usize| {
+        let n = t(d, 0) + t(d, 1);
+        if n > 0.0 { t(d, 1) / n } else { f64::NAN }
+    };
+    let alive = b.alive_ticks_by_founder[i].saturating_sub(a.alive_ticks_by_founder[i]) as f64;
+    let hours = alive / f64::from(TICK_HZ) / 3600.0;
+    let intake = b.assimilated_by_founder[i] - a.assimilated_by_founder[i];
+    let ashore = b.ashore_assimilated - a.ashore_assimilated;
+    let ratio = |x: f64, y: f64| if y > 0.0 { x / y } else { f64::NAN };
+    // SNAIL-FIX: the film on land-wet ground now, the faces holding it, and the land-wet
+    // faces (column tops) it could stand on.
+    let (land_film, land_filmed, land_wet) = cubarium_voxel_flora::land_census(sim.flora(), sim.world());
+    let per_wet = if land_wet > 0 { land_film / land_wet as f64 } else { f64::NAN };
+    format!(
+        "n={now},desiccated={},lj_kills={},deaths={all},land_day={:.3},land_night={:.3},snail_h={hours:.2},intake_per_h={:.6},ashore_intake_share={:.3},retracts={},land_film={land_film:.5},land_film_faces={land_filmed},land_wet_faces={land_wet},land_film_per_wet_face={per_wet:.3e}",
+        dead(Departure::Desiccation),
+        dead(Departure::Killed { by: LJ }),
+        share(0),
+        share(1),
+        ratio(intake, hours),
+        ratio(ashore, intake),
+        b.retracts - a.retracts,
+    )
 }
 
 /// The lanternjaw's window measures, `a` → `b`.
