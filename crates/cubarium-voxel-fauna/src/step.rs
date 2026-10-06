@@ -4332,3 +4332,15 @@ mod hunker_tests;
 #[cfg(test)]
 #[path = "gait_tests.rs"]
 mod gait_tests;
+#[cfg(test)]
+#[path = "testpass_vigil_tests.rs"]
+mod testpass_vigil_tests;
+#[cfg(test)]
+#[path = "testpass_pack_tests.rs"]
+mod testpass_pack_tests;
+#[cfg(test)]
+#[path = "testpass_light_tests.rs"]
+mod testpass_light_tests;
+#[cfg(test)]
+#[path = "testpass_snail_tests.rs"]
+mod testpass_snail_tests;
