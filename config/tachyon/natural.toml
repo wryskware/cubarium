@@ -51,5 +51,15 @@ preset = "tropical_jungle"
 # weather_speed = "auto"  # (24 h / day)^0.65: 5x nature on a 2 h day; or a number
 # dry_gap_min_s = 300   # the shortest wait after a rain event before a natural one;
 # dry_gap_max_s = 900   # 0 / 0 turns the gap off
+# The dry season (DRY-SEASON, Wrysk 2026-10-06: "lets add the dry season. or at least make
+# it an option"; design/webmodel/meadow.md §11.6): every 5 world days, from day 5, a 1-day
+# season in which natural rain falls at dry_season_rain of its hazards, so drained ground
+# dries to about half its root water, the turf cures brown and woody seedlings starve
+# back. The forced downpour at rh_max still fires. `dry_season = false` turns it off.
+dry_season = true
+dry_season_every_days = 5.0   # world days (the day clock's, as the plants count)
+dry_season_len_days = 1.0
+dry_season_phase_days = 5.0
+dry_season_rain = 0.0            # the natural hazards' multiplier in the season
 # [world.climate.downpour]
 # rate_r0 = 1.5         # a mode's key, e.g. the rate it rains at in multiples of R0

@@ -4,7 +4,7 @@
 
 Every number of the voxel world's `Config`, the plants' `FloraConfig` and the animals' `FaunaConfig`, one row per path, at the code defaults (`design/ecology-parameter-registry-2026-09-28.md`, package R1). Set them in a config TOML's `[world]` / `[flora]` / `[fauna]` tables or with `--set PATH=VALUE`; a run writes its resolved set as `params.toml` beside its output.
 
-**`world.*`** (355 rows)
+**`world.*`** (359 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -57,6 +57,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.climate.cooling_cap_c_per_h` | 3.0 | degC per sim hour | [0, inf] |  | N | numerics | cap on the cooling rate K |
 | `world.climate.dry_gap_min_s` | 300.0 | s | [0, inf] | 0–1800 | C | decision | shortest wait after an event before a natural start (0/0: off) |
 | `world.climate.dry_gap_max_s` | 900.0 | s | [0, inf] | 0–1800 | C | decision | longest wait after an event before a natural start |
+| `world.climate.dry_season_every_days` | 5.0 | world days | [0, inf) | 3–20 | C | model:meadow §11.6 | one dry season starts every this many world days (0: none) |
+| `world.climate.dry_season_len_days` | 1.0 | world days | [0, inf) | 0.25–2 | C | model:meadow §11.6 | how long a dry season lasts (0: none) |
+| `world.climate.dry_season_phase_days` | 5.0 | world days | [0, inf) |  | - | decision | world days from the founding to the first season |
+| `world.climate.dry_season_rain` | 0.0 | x the natural hazards | [0, inf) | 0–1 | C | measured:DRY-SEASON fixture | the natural rain hazards' multiplier inside a season (0: no natural rain) |
 | `world.climate.fog_form_rh` | 0.9 | RH | [0, inf] |  | - | visual | fog forms at or above (visual only) |
 | `world.climate.fog_clear_rh` | 0.85 | RH | [0, inf] |  | - | visual | fog clears below (visual only) |
 | `world.climate.fog_span_rh` | 0.15 | RH | [0, inf] |  | - | visual | fog density span (visual only) |

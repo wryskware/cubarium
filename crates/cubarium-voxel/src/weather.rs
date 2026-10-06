@@ -664,6 +664,25 @@ pub struct Climate {
     /// of simulated time. `0 / 0` turns the gap off.
     pub dry_gap_min_s: f64,
     pub dry_gap_max_s: f64,
+    /// **The dry season** (package DRY-SEASON, Wrysk 2026-10-06; `design/webmodel/meadow.md`
+    /// §11.5-11.6): a periodic stretch of world days in which the natural rain hazards are
+    /// multiplied by `dry_season_rain`, so drained ground dries down and the turf cures
+    /// while woody seedlings starve back. Off: the weather is exactly the season-less one.
+    ///
+    /// The clock counts **world days** ([`DayClock::day_s`], the day the plants' clock
+    /// counts too), from the world's tick 0: none before `dry_season_phase_days`, then one
+    /// of `dry_season_len_days` every `dry_season_every_days`. It is not scaled by the
+    /// weather speed. The forced downpour at `rh_max` still fires inside it: the closed
+    /// cycle's release valve stays (`Climate::in_dry_season`).
+    pub dry_season: bool,
+    /// World days from one season's start to the next.
+    pub dry_season_every_days: f64,
+    /// World days a season lasts.
+    pub dry_season_len_days: f64,
+    /// World days from the world's founding to the first season's start.
+    pub dry_season_phase_days: f64,
+    /// The natural rain hazards' multiplier inside a season (0: no natural rain).
+    pub dry_season_rain: f64,
     /// Fog forms at or above `fog_form_rh` (with no shower or downpour falling) in the
     /// dawn window — from `fog_dawn_before` of the cycle before sunrise to
     /// `fog_dawn_after` after — or while the air cools faster than
@@ -734,6 +753,7 @@ macro_rules! climate_keys {
         pub struct ClimateSpec {
             pub preset: Option<String>,
             pub weather_speed: Option<WeatherSpeed>,
+            pub dry_season: Option<bool>,
             $(pub $k: Option<f64>,)*
             pub drizzle: Option<RainSpec>,
             pub shower: Option<RainSpec>,
@@ -742,6 +762,7 @@ macro_rules! climate_keys {
         impl ClimateSpec {
             fn apply(&self, to: &mut Climate) {
                 if let Some(v) = self.weather_speed { to.weather_speed = v; }
+                if let Some(v) = self.dry_season { to.dry_season = v; }
                 $(if let Some(v) = self.$k { to.$k = v; })*
                 if let Some(s) = &self.drizzle { s.apply(&mut to.drizzle); }
                 if let Some(s) = &self.shower { s.apply(&mut to.shower); }
@@ -753,6 +774,7 @@ macro_rules! climate_keys {
                 ClimateSpec {
                     preset: Some(c.preset.name().to_string()),
                     weather_speed: Some(c.weather_speed),
+                    dry_season: Some(c.dry_season),
                     $($k: Some(c.$k),)*
                     drizzle: Some(RainSpec::capture(&c.drizzle)),
                     shower: Some(RainSpec::capture(&c.shower)),
@@ -779,6 +801,10 @@ climate_keys!(
     cooling_cap_c_per_h,
     dry_gap_min_s,
     dry_gap_max_s,
+    dry_season_every_days,
+    dry_season_len_days,
+    dry_season_phase_days,
+    dry_season_rain,
     fog_form_rh,
     fog_clear_rh,
     fog_span_rh,
@@ -864,6 +890,13 @@ impl Climate {
             cooling_cap_c_per_h: 3.0,
             dry_gap_min_s: 300.0,
             dry_gap_max_s: 900.0,
+            // The model's winner (meadow.md §11.6, `ew+run+d5:1:0.5`): every 5 world days a
+            // 1-day season from day 5. Off in the preset; the display presets turn it on.
+            dry_season: false,
+            dry_season_every_days: 5.0,
+            dry_season_len_days: 1.0,
+            dry_season_phase_days: 5.0,
+            dry_season_rain: 0.0,
             fog_form_rh: 0.9,
             fog_clear_rh: 0.85,
             fog_span_rh: 0.15,
@@ -953,6 +986,24 @@ impl Climate {
             m.lambda_max_per_h *= k;
         }
         c
+    }
+
+    /// Whether the dry season holds at `tick` on `day`'s clock: the switch on, a period and
+    /// a length above zero, and `tick` at or past the phase and within `len` of a period's
+    /// start. World days count [`DayClock::day_s`] from tick 0.
+    pub fn in_dry_season(&self, day: &DayClock, tick: u64) -> bool {
+        if !self.dry_season || !(self.dry_season_every_days > 0.0) || !(self.dry_season_len_days > 0.0) {
+            return false;
+        }
+        let days = tick as f64 * DT / day.day_s();
+        let since = days - self.dry_season_phase_days;
+        since >= 0.0 && since.rem_euclid(self.dry_season_every_days) < self.dry_season_len_days
+    }
+
+    /// The natural rain hazards' multiplier at `tick`: `dry_season_rain` inside a season,
+    /// 1 outside it (and always, with the switch off).
+    pub fn rain_scale(&self, day: &DayClock, tick: u64) -> f64 {
+        if self.in_dry_season(day, tick) { self.dry_season_rain } else { 1.0 }
     }
 
     /// What the air holds at `t_c`, cubic metres, in a world of `total_m3`:
@@ -1323,10 +1374,16 @@ fn events(w: &mut World, c: &Climate, a: f64, f: f64) {
     } else if w.weather.event.is_none() && tick % TICKS_PER_MIN == 0 {
         let k = w.weather.cooling_c_per_h;
         let moist = w.moisture();
+        // The dry season scales the natural hazards (never the forced downpour above).
+        let season = w.config.climate.in_dry_season(&w.config.day, tick);
+        let scale = c.dry_season_rain.max(0.0);
         let p = MODES.map(|mode| {
             let m = c.mode(mode).expect("a rain mode");
             let h = if reads_moisture(mode) { moist } else { rh };
-            let l = hazard(m, h, a, k, f);
+            let mut l = hazard(m, h, a, k, f);
+            if season {
+                l = if scale > 0.0 { l * scale } else { 0.0 };
+            }
             1.0 - (-l / 60.0).exp()
         });
         let scale = p.iter().sum::<f64>().max(1.0);
@@ -1548,6 +1605,11 @@ impl World {
     /// The weather state: the clock, the temperature, the event running and the counts.
     pub fn weather(&self) -> &Weather {
         &self.weather
+    }
+
+    /// Whether the climate's dry season holds now ([`Climate::in_dry_season`]).
+    pub fn in_dry_season(&self) -> bool {
+        self.config.climate.in_dry_season(&self.config.day, self.tick)
     }
 
     /// Relative humidity: the atmosphere store over what the air holds at its

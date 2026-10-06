@@ -1171,6 +1171,7 @@ fn print_header() {
     for (_, n) in PATCH_SPECIES {
         header.push_str(&format!(",{n}_patch_max,{n}_patch_share,{n}_patches"));
     }
+    header.push_str(",dry_season,drained_root_water");
     println!("{header}");
 }
 
@@ -1419,7 +1420,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
     {
         use cubarium::voxel::patches;
         let view = sim.world().view();
-        let drained = patches::drained_ground(&view, f.config);
+        let (drained, drained_water) = patches::drained_ground_water(&view, f.config);
         row.push(drained.to_string());
         for (s, _) in PATCH_SPECIES {
             let p = patches::patches(&patches::held_faces(f.stands, s), view.config.width, patch_min);
@@ -1427,6 +1428,10 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
             row.push(format!("{:.4}", p.largest as f64 / drained.max(1) as f64));
             row.push(p.at_least.to_string());
         }
+        // The dry season (DRY-SEASON): whether it holds now, and the drained ground's
+        // mean root water on the available-water scale.
+        row.push(u8::from(sim.world().in_dry_season()).to_string());
+        row.push(format!("{drained_water:.4}"));
     }
     println!("{}", row.join(","));
 }

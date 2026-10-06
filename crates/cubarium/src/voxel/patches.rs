@@ -45,10 +45,18 @@ pub fn held_faces(stands: &[Stand], species: Species) -> Vec<Site> {
 
 /// The faces of drained ground now (the module doc).
 pub fn drained_ground(view: &VoxelView<'_>, config: &FloraConfig) -> usize {
+    drained_ground_water(view, config).0
+}
+
+/// The faces of drained ground now, and the mean root-box water the turf reads on them
+/// (available-water scale, [`establishment_gates_with_sky`]'s `mean_water`; 0 with no
+/// drained face). The dry season's readout (DRY-SEASON).
+pub fn drained_ground_water(view: &VoxelView<'_>, config: &FloraConfig) -> (usize, f64) {
     let c = view.config;
     let turf = config.species(Species::Springturf);
     let sky_min = config.species(Species::Velvetpad).establish_light_min;
     let mut n = 0;
+    let mut water = 0.0;
     for z in 0..c.depth {
         for x in 0..c.width {
             let Some(y) = view.supports_in_column(i64::from(x), z).into_iter().max() else { continue };
@@ -60,10 +68,13 @@ pub fn drained_ground(view: &VoxelView<'_>, config: &FloraConfig) -> usize {
                 continue;
             }
             let g = establishment_gates_with_sky(view, Site { x, y, z }, turf, sky, 0.0, 0.0);
-            n += usize::from(g.aeration_ok && g.depth_ok);
+            if g.aeration_ok && g.depth_ok {
+                n += 1;
+                water += g.mean_water.unwrap_or(0.0);
+            }
         }
     }
-    n
+    (n, if n > 0 { water / n as f64 } else { 0.0 })
 }
 
 /// The connected patches of `held` under surface adjacency on a ring `width` columns

@@ -22,6 +22,20 @@ voxel_m = 0.125
 [world.landform]
 preset = "terrarium"
 
+# The climate, in step with config/desktop/terrarium.toml's.
+[world.climate]
+preset = "tropical_jungle"
+# The dry season (DRY-SEASON, Wrysk 2026-10-06: "lets add the dry season. or at least make
+# it an option"; design/webmodel/meadow.md §11.6): every 5 world days, from day 5, a 1-day
+# season in which natural rain falls at dry_season_rain of its hazards, so drained ground
+# dries to about half its root water, the turf cures brown and woody seedlings starve
+# back. The forced downpour at rh_max still fires. `dry_season = false` turns it off.
+dry_season = true
+dry_season_every_days = 5.0   # world days (the day clock's, as the plants count)
+dry_season_len_days = 1.0
+dry_season_phase_days = 5.0
+dry_season_rain = 0.0            # the natural hazards' multiplier in the season
+
 [light]
 # Wrysk, 2026-09-25: the red-dwarf day sky is too bright on this screen. 1 is the look as
 # chosen; lower dims the day sky and its clouds, hues kept. The terrain is not touched.
@@ -226,6 +240,12 @@ senescence = 0.0015582388047764115
 wood_rate = 0.0016396050372662204
 
 [flora.springturf]
+# The meadow's turf knobs (DRY-SEASON, from the model's winner `ew+run+d5:1:0.5`,
+# design/webmodel/meadow.md §11.6): germinates at lower root water, and spreads more by
+# runners, farther.
+establish_water_min = 0.2
+clonal_share = 0.6
+runner_reach = 3
 alpha = 6.3
 cure_after_s = 1097.825
 # Dormancy (DORMANCY, 2026-10-05): a cured stand lives on its stores, its reserve and then its

@@ -702,3 +702,174 @@ fn rain_falls_from_at_least_its_modes_cloud() {
         assert!((cover - floor).abs() < 1e-6, "{mode:?}: {cover}");
     }
 }
+
+// ------------------------------------------------------------------ the dry season
+// Package DRY-SEASON (2026-10-06, design/webmodel/meadow.md §11.5-11.6). Every test reads
+// the knobs it sets; none reads a preset's values.
+
+/// `calm()` with a dry season of the given knobs, on.
+fn seasonal(every: f64, len: f64, phase: f64, rain: f64) -> Climate {
+    let mut c = calm();
+    c.dry_season = true;
+    c.dry_season_every_days = every;
+    c.dry_season_len_days = len;
+    c.dry_season_phase_days = phase;
+    c.dry_season_rain = rain;
+    c
+}
+
+/// The tick `days` world days in, on `clock`.
+fn tick_at(clock: &DayClock, days: f64) -> u64 {
+    (days * clock.day_s() / crate::DT).round() as u64
+}
+
+#[test]
+fn the_season_clock_opens_and_closes_on_its_knobs_phase_included() {
+    let (every, len, phase) = (3.0, 0.5, 2.0);
+    let c = seasonal(every, len, phase, 0.0);
+    for clock in [
+        DayClock::default(),
+        DayClock { length_min: 45.0, ..DayClock::default() },
+        DayClock { mode: DayMode::Off, length_min: 300.0, ..DayClock::default() },
+    ] {
+        let at = |d: f64| c.in_dry_season(&clock, tick_at(&clock, d));
+        // Nothing before the phase, though `phase mod every` would fall in a season.
+        assert!(!at(0.0) && !at(0.25) && !at(phase - 0.01), "{clock:?}: no season before the phase");
+        assert!(!at(phase - every + 0.1), "{clock:?}");
+        // Open at the phase for `len`, then shut until the next period.
+        assert!(at(phase) && at(phase + len * 0.5) && at(phase + len - 0.01), "{clock:?}: open");
+        assert!(!at(phase + len + 0.01) && !at(phase + every - 0.01), "{clock:?}: shut");
+        assert!(at(phase + every) && at(phase + 4.0 * every + len * 0.9), "{clock:?}: every period");
+        assert!(!at(phase + 4.0 * every + len + 0.01), "{clock:?}");
+    }
+    // The switch off: never in season, whatever the other knobs say.
+    let mut off = c;
+    off.dry_season = false;
+    let clock = DayClock::default();
+    assert!((0..200).all(|k| !off.in_dry_season(&clock, tick_at(&clock, k as f64 * 0.1))));
+    // A season of no length or no period is no season.
+    for (e, l) in [(every, 0.0), (0.0, len)] {
+        let mut z = c;
+        z.dry_season_every_days = e;
+        z.dry_season_len_days = l;
+        assert!(!z.in_dry_season(&clock, tick_at(&clock, phase + 0.1 * len)));
+    }
+}
+
+#[test]
+fn the_seasons_rain_scale_is_its_knob_inside_and_one_outside() {
+    let c = seasonal(4.0, 1.0, 1.0, 0.37);
+    let clock = DayClock::default();
+    assert_eq!(c.rain_scale(&clock, tick_at(&clock, 1.5)), 0.37);
+    assert_eq!(c.rain_scale(&clock, tick_at(&clock, 2.5)), 1.0);
+    assert_eq!(c.rain_scale(&clock, tick_at(&clock, 0.5)), 1.0);
+    let mut off = c;
+    off.dry_season = false;
+    assert_eq!(off.rain_scale(&clock, tick_at(&clock, 1.5)), 1.0);
+}
+
+/// A sky world whose shower hazard is all but certain each minute, with the clock off at
+/// a 120-minute day: the season the test asks for.
+fn showery_world(c: Climate) -> World {
+    let mut c = c;
+    c.capacity_share = 1.0 / 1.2;
+    c.shower.lambda_max_per_h = 1e9;
+    c.dry_gap_min_s = 0.0;
+    c.dry_gap_max_s = 0.0;
+    let mut w = sky_world(c, 1.0);
+    w.config.day.length_min = 120.0;
+    w
+}
+
+#[test]
+fn natural_starts_are_suppressed_inside_the_season_and_not_outside() {
+    // Season over the first half of each day from day 0.
+    let c = seasonal(1.0, 0.5, 0.0, 0.0);
+    let mut w = showery_world(c);
+    for _ in 0..3 * MIN {
+        w.step();
+    }
+    assert!(w.in_dry_season(), "the test sits inside the season");
+    assert_eq!(w.weather().counts.showers, 0, "no natural start in the season");
+
+    // The same sky outside the season: it starts at the next minute.
+    let mut w = showery_world(c);
+    w.tick = tick_at(&w.config.day, 0.75);
+    w.step();
+    assert!(!w.in_dry_season());
+    assert_eq!(w.weather().counts.showers, 1, "a natural start outside the season");
+
+    // A season whose rain multiplier is one leaves the hazards alone.
+    let mut w = showery_world(seasonal(1.0, 0.5, 0.0, 1.0));
+    w.step();
+    assert_eq!(w.weather().counts.showers, 1);
+}
+
+#[test]
+fn the_forced_downpour_still_fires_at_rh_max_inside_the_season() {
+    let mut c = seasonal(1.0, 0.5, 0.0, 0.0);
+    c.capacity_share = 1.0 / (c.rh_max + 0.1);
+    let mut w = sky_world(c, 1.0);
+    w.config.day.length_min = 120.0;
+    assert!(c.in_dry_season(&w.config.day, w.tick));
+    assert!(w.rh() >= c.rh_max);
+    w.step();
+    assert_eq!(w.weather().mode(), RainMode::Downpour, "the closed cycle's release valve holds");
+    assert_eq!(w.weather().counts.forced, 1);
+}
+
+#[test]
+fn the_switch_off_reproduces_the_weather_without_a_season() {
+    // Main's weather: the climate with no season knobs touched.
+    let mut plain = calm();
+    plain.shower.lambda_max_per_h = 30.0;
+    plain.drizzle.lambda_max_per_h = 30.0;
+    plain.drift_sd_c = 1.0;
+    plain.fronts_per_day = 5.0;
+    let run = |c: Climate| {
+        let mut w = sky_world(c, 1.0);
+        w.config.climate.capacity_share = 1.0 / 1.1;
+        w.config.day = DayClock { length_min: 20.0, ..DayClock::default() };
+        for _ in 0..400 {
+            w.step();
+        }
+        for _ in 0..8 {
+            for _ in 0..MIN {
+                w.step();
+            }
+        }
+        (w.weather().clone(), w.atmosphere_m3, w.view().stored_m3())
+    };
+    let base = run(plain);
+    // Every season knob at its most drastic, the switch off.
+    let mut off = plain;
+    off.dry_season = false;
+    off.dry_season_every_days = 0.01;
+    off.dry_season_len_days = 0.01;
+    off.dry_season_phase_days = 0.0;
+    off.dry_season_rain = 0.0;
+    assert_eq!(run(off), base, "the switch off is main's weather, exactly");
+    // The same knobs on change it: the test can tell.
+    let mut on = off;
+    on.dry_season = true;
+    assert_ne!(run(on).0.counts, base.0.counts, "the season on suppresses rain");
+}
+
+#[test]
+fn the_season_knobs_flow_from_toml_and_through_a_snapshot() {
+    let c: Config = toml::from_str(
+        "[climate]\npreset = \"tropical_jungle\"\ndry_season = true\ndry_season_every_days = 7.0\n\
+         dry_season_len_days = 0.75\ndry_season_phase_days = 3.5\ndry_season_rain = 0.25\n",
+    )
+    .expect("a climate table");
+    assert!(c.climate.dry_season);
+    assert_eq!(c.climate.dry_season_every_days, 7.0);
+    assert_eq!(c.climate.dry_season_len_days, 0.75);
+    assert_eq!(c.climate.dry_season_phase_days, 3.5);
+    assert_eq!(c.climate.dry_season_rain, 0.25);
+    let off: Config = toml::from_str("[climate]\ndry_season = false\n").expect("one line");
+    assert!(!off.climate.dry_season);
+    let bytes = postcard::to_stdvec(&c).expect("serializes");
+    let back: Config = postcard::from_bytes(&bytes).expect("round trips");
+    assert_eq!(back.climate, c.climate);
+}
