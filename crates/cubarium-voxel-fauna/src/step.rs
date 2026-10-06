@@ -1645,7 +1645,9 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
     let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
     let ring = f64::from(c.width) * v;
     let top = (a.site.y + k.max(0) as u32).min(c.height.saturating_sub(1));
-    let mut best: Option<(f64, f64, f64)> = None;
+    // The faces in reach that pass the cheap tests, nearest first; the first that is a
+    // shore egg face and whose round trip the clock affords is the target.
+    let mut near: Vec<(f64, f64, f64, Site)> = Vec::new();
     for dz in -k..=k {
         let z = hz + dz;
         if z < 0 || z >= i64::from(c.depth) {
@@ -1656,26 +1658,34 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
             let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
                 continue;
             };
-            let s = Site { x: x as u32, y, z: z as u32 };
-            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+            let z = z as u32;
+            if view.standing_depth_m(x, y, z) > 0.0 || body::ground_moisture(view, x, y, z) < am.egg_moisture_min {
+                continue;
+            }
+            let (tx, tz) = ((x as f64 + 0.5) * v, (f64::from(z) + 0.5) * v);
             let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
             let d = (ddx * ddx + ddz * ddz).sqrt();
-            if d > reach || best.is_some_and(|(b, _, _)| d >= b) || !shore_egg_site(view, &am, s) {
-                continue;
+            if d <= reach {
+                near.push((d, ddx, ddz, Site { x: x as u32, y, z }));
             }
-            // The clock's check: the round trip at the target's drying rate.
-            let mut rate = am.drying_per_s(body::ground_moisture(view, x, y, z as u32));
-            if day {
-                rate *= am.day_drying_factor;
-            }
-            if raining {
-                rate *= am.rain_drying_factor;
-            }
-            if !(m.dryness + rate * 2.0 * d / speed < back_at) {
-                continue;
-            }
-            best = Some((d, ddx, ddz));
         }
+    }
+    near.sort_by(|p, q| p.0.total_cmp(&q.0));
+    let mut best: Option<(f64, f64, f64)> = None;
+    for (d, ddx, ddz, s) in near {
+        // The clock's check: the round trip at the target's drying rate.
+        let mut rate = am.drying_per_s(body::ground_moisture(view, i64::from(s.x), s.y, s.z));
+        if day {
+            rate *= am.day_drying_factor;
+        }
+        if raining {
+            rate *= am.rain_drying_factor;
+        }
+        if !(m.dryness + rate * 2.0 * d / speed < back_at) || !shore_egg_site(view, &am, s) {
+            continue;
+        }
+        best = Some((d, ddx, ddz));
+        break;
     }
     let (_, dx, dz) = best?;
     Some(glider::walk_toward(a, dx, dz, 0.0))
