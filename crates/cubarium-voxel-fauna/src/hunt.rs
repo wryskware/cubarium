@@ -85,6 +85,9 @@ pub struct HuntMemory {
     /// Samples of an escape from a refused motor left.
     pub escape: u32,
     pub fruitless: [FruitlessPatch; FRUITLESS_SLOTS],
+    /// **Productive places** (HUNTER-MEAL): where its recent kills were, each until the tick
+    /// it is forgotten ([`HuntConfig::success_memory_s`]).
+    pub productive: [FruitlessPatch; FRUITLESS_SLOTS],
     /// **The search image**: seconds of contact with size-eligible prey per lineage, decayed
     /// with [`HuntConfig::search_memory_s`].
     pub image: [f64; Founder::COUNT],
@@ -127,13 +130,40 @@ impl HuntMemory {
     /// Whether `(x, z)` is within [`HuntConfig::fruitless_radius_m`] of a fruitless patch
     /// still remembered at `tick`.
     pub fn is_fruitless(&self, cfg: &HuntConfig, x: f64, z: f64, tick: u64, ring: f64) -> bool {
-        self.fruitless.iter().any(|p| {
-            p.until_tick > tick && {
-                let (dx, dz) = crate::pose::wrapped_delta(p.x, p.z, x, z, ring);
-                dx * dx + dz * dz <= cfg.fruitless_radius_m * cfg.fruitless_radius_m
-            }
-        })
+        near_any(&self.fruitless, cfg.fruitless_radius_m, x, z, tick, ring)
     }
+
+    /// Remember a kill at `(x, z)` as a productive place until `until_tick`, over the slot
+    /// forgotten soonest, and forget any fruitless patch there.
+    pub fn remember_productive(&mut self, cfg: &HuntConfig, x: f64, z: f64, tick: u64, until_tick: u64, ring: f64) {
+        let slot = self
+            .productive
+            .iter_mut()
+            .min_by_key(|p| p.until_tick)
+            .expect("at least one slot");
+        *slot = FruitlessPatch { x, z, until_tick };
+        for p in &mut self.fruitless {
+            if near_any(std::slice::from_ref(p), cfg.fruitless_radius_m, x, z, tick, ring) {
+                p.until_tick = 0;
+            }
+        }
+    }
+
+    /// Whether `(x, z)` is within [`HuntConfig::fruitless_radius_m`] of a productive place
+    /// still remembered at `tick`.
+    pub fn is_productive(&self, cfg: &HuntConfig, x: f64, z: f64, tick: u64, ring: f64) -> bool {
+        near_any(&self.productive, cfg.fruitless_radius_m, x, z, tick, ring)
+    }
+}
+
+/// Whether `(x, z)` is within `radius` of a place in `places` still remembered at `tick`.
+fn near_any(places: &[FruitlessPatch], radius: f64, x: f64, z: f64, tick: u64, ring: f64) -> bool {
+    places.iter().any(|p| {
+        p.until_tick > tick && {
+            let (dx, dz) = crate::pose::wrapped_delta(p.x, p.z, x, z, ring);
+            dx * dx + dz * dz <= radius * radius
+        }
+    })
 }
 
 /// **The encounter share** of `prey` (share switching): its recent contact plus the naive
@@ -281,7 +311,7 @@ fn stand_cue(fv: &FloraView<'_>, st: &cubarium_voxel_flora::Stand, food: Food) -
 /// **Choose the next patch** for the hunter at `i`: the centre of the best open square
 /// of its prey's food within the scan, or (exploring, or with none) a drawn one. Books the
 /// choice. `None` when nothing is open at all.
-fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, h: &crate::Hunter) -> (f64, f64) {
+pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, h: &crate::Hunter) -> (f64, f64) {
     let cfg = fauna.config.hunt;
     let a = fauna.animals[i];
     let tick = fauna.tick;

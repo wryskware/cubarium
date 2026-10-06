@@ -588,6 +588,37 @@ pub struct HuntConfig {
     /// went for another. Off (the default, opportunistic), any size-eligible prey in the
     /// capsule, as D2 did.
     pub strike_chosen_only: bool,
+    /// **Eat the kill first** (HUNTER-MEAL, Astra's open questions §3). On, a hungry hunter
+    /// (the lanternjaw's patrol, and a Veilhound between its pack's hunts) with a usable
+    /// carcass — carrion under the plant layer's carcass record — that it can walk to within
+    /// [`HuntConfig::carcass_scan_m`] goes to it and eats until its stomach is full or the
+    /// carcass is gone, taking no new prey on the way; and a hunter whose mouth is over a
+    /// usable carcass eats it instead of striking a prey in its capsule. Off, main's rule:
+    /// a carcass is eaten only where the mouth already tastes it, and a strike wins over it.
+    pub meal_first: bool,
+    /// How far a hungry hunter looks for a usable carcass to eat (its own kill's or any
+    /// other's), metres, from its centre to the carcass's face. 3 m: a lunge and a turn
+    /// past the 2 m it sees.
+    pub carcass_scan_m: f64,
+    /// **Reachable destinations only** (HUNTER-MEAL). On, the patrol's next patch and a
+    /// carcass to eat are chosen only among places on the hunter's walking route graph
+    /// (the Veilhound's chase graph: faces its adult disc stands clear on, joined within
+    /// its mutual step where the disc passes, walls for a climber) within the route steps
+    /// it walks before [`HuntConfig::patrol_give_up_s`]; and it walks there along the graph
+    /// where the straight line is not walkable. Off, main's rule: squares by horizontal
+    /// distance, walked straight at.
+    pub reachable_only: bool,
+    /// How long a lineage's walking route graph stands before it is rebuilt (terrain and
+    /// water change slowly), seconds. 60 s, the Veilhound's.
+    pub route_refresh_s: f64,
+    /// **Kills raise a place's appeal** (HUNTER-MEAL): a kill marks its place productive in
+    /// the killer's memory for this long, seconds, and the patrol's choice favours it (and
+    /// no longer holds it fruitless). 1,800 s, the fruitless memory's.
+    pub success_memory_s: f64,
+    /// A patch within [`HuntConfig::fruitless_radius_m`] of a remembered productive place
+    /// scores `1 + success_boost` times its food cue. 1: twice as appealing. Exploration
+    /// ([`HuntConfig::patrol_explore`]) still draws uniformly among the open patches.
+    pub success_boost: f64,
 }
 
 impl Default for HuntConfig {
@@ -613,6 +644,12 @@ impl Default for HuntConfig {
             attack_explore: 1.0,
             attack_decision_s: 20.0,
             strike_chosen_only: false,
+            meal_first: true,
+            carcass_scan_m: 3.0,
+            reachable_only: true,
+            route_refresh_s: 60.0,
+            success_memory_s: 1800.0,
+            success_boost: 1.0,
         }
     }
 }

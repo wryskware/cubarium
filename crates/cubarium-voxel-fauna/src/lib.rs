@@ -2603,6 +2603,18 @@ pub struct FaunaLedger {
     pub hunt_explored: u64,
     #[serde(default)]
     pub hunt_chosen: u64,
+    /// (HUNTER-MEAL) Controller samples a hungry hunter spent going to a usable carcass out
+    /// of its mouth's reach, and at one (the meal step's answers).
+    pub hunt_meal_walk_samples: u64,
+    pub hunt_meal_eat_samples: u64,
+    /// Strikes withheld because the striker's mouth was over a usable carcass.
+    pub hunt_strikes_withheld: u64,
+    /// Patch squares with food a patroller passed over as off its walking route.
+    pub hunt_unreachable_squares: u64,
+    /// Patch choices made with the patroller off its route graph (main's rule then).
+    pub hunt_off_route: u64,
+    /// Kills a patroller remembered as a productive place.
+    pub hunt_productive_kills: u64,
     /// (D2b) Seconds of contact a patroller had with prey of each lineage that its attack
     /// choice declined (met, seen or felt, and passed over), and strikes begun by a
     /// patroller on a prey its choice did not accept (only with

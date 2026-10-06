@@ -2154,6 +2154,7 @@ fn strike_tick(
                     prey: p.id,
                     damage,
                     by: founder,
+                    striker: a.id,
                 });
             }
         }
@@ -3848,3 +3849,6 @@ mod gut_tests;
 #[cfg(test)]
 #[path = "hunt_tests.rs"]
 mod hunt_tests;
+#[cfg(test)]
+#[path = "hunt_meal_tests.rs"]
+mod hunt_meal_tests;
