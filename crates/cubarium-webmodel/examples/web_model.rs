@@ -45,6 +45,9 @@ fn repo() -> PathBuf {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(k) = arg(&args, "encounter=") {
+        ENCOUNTER.with(|e| *e.borrow_mut() = k.parse().unwrap());
+    }
     match args.first().map(String::as_str) {
         Some("refarea") => refarea(&args),
         Some("budget") => budget(&args),
@@ -69,6 +72,18 @@ const PATCH_REF_AREA: [f64; Food::COUNT] = [74.19, 30.66, 74.19, 32.69, 15.09, 0
 /// Patch's support faces (the floor the hunt's encounter rates and the nest crowding were
 /// fitted on), from the same run (4,638 / 4,858).
 const PATCH_FACES: f64 = 4748.0;
+
+thread_local! {
+    /// **Model lever, not a sim knob** (`encounter=K`): every kill rate times `K` on the
+    /// terrarium. 1 is the patch fit carried by mass action over the floor.
+    static ENCOUNTER: std::cell::RefCell<f64> = const { std::cell::RefCell::new(1.0) };
+}
+
+fn encounter(f: &mut FaunaModel, k: f64) {
+    for g in Founder::ALL {
+        f.fits.of_mut(g).kill_rate *= k;
+    }
+}
 
 /// Seeds' saves: (start, the weather snapshots), the producer half's own sets (`long.sh`).
 fn soak_saves(d: &Path, seed: u32) -> (PathBuf, Vec<PathBuf>) {
@@ -108,6 +123,7 @@ fn terrarium(d: &Path, seed: u32, cfg: &Path, sets: &[String], wseed: u64) -> We
     let census = FaunaCensus::read(&d.join(format!("wml/f370/s{seed}.csv"))).unwrap_or_else(|e| panic!("{e}"));
     let mut fauna = start::fauna(&p, start::closed_fits(), &census, &STEPPED, 1.0);
     scale(&mut fauna, faces(&flora));
+    encounter(&mut fauna, ENCOUNTER.with(|e| *e.borrow()));
     eprintln!("terrarium s{seed}: setup {:.1} s, {} zones, {:.0} faces, area scale {:.2}", t.elapsed().as_secs_f64(), flora.z.len(), faces(&flora), fauna.area_scale);
     Web::new(flora, fauna)
 }
@@ -141,15 +157,41 @@ fn refarea(args: &[String]) {
 // ---------------------------------------------------------------------------------------
 // budget and scenario
 
+/// **The gut-throughput knob rows** (`gut=LINEAGE:S,..`): the animal half's own Q1 knob
+/// (`fauna_model`'s `knob_sets`): every diet food's `digestion_s` over `S` and
+/// `bite_per_body_s` times `S`, as `path=value` sets on the resolved config.
+fn gut_sets(cfg: &Path, base: &[String], spec: &str) -> Vec<String> {
+    let p = start::params(cfg, base).unwrap_or_else(|e| panic!("{e}"));
+    let mut v = Vec::new();
+    for part in spec.split(',') {
+        let (name, x) = part.split_once(':').expect("gut=LINEAGE:SCALE");
+        let s: f64 = x.parse().unwrap();
+        let f = *Founder::ALL.iter().find(|f| f.name() == name).unwrap_or_else(|| panic!("no lineage {name}"));
+        let ph = p.fauna.founder(f);
+        let pre = format!("fauna.founders.{name}");
+        for g in ph.diet.foods() {
+            v.push(format!("{pre}.gut.digestion_s.{}={}", g.name(), ph.gut.digestion_s[g.index()] / s));
+        }
+        v.push(format!("{pre}.gut.bite_per_body_s={}", ph.gut.bite_per_body_s * s));
+    }
+    v
+}
+
 fn world_of(args: &[String]) -> Web {
     let d = data(args);
     let map = arg(args, "map=").or_else(|| arg(args, "base=")).unwrap_or("terrarium");
     let seed: u32 = arg(args, "seed=").map_or(5, |s| s.parse().unwrap());
     let wseed: u64 = arg(args, "wseed=").map_or(1, |s| s.parse().unwrap());
     let cfg = arg(args, "config=").map(PathBuf::from).unwrap_or_else(|| repo().join(format!("config/scenarios/{map}.toml")));
+    let mut sets = sets(args);
+    if let Some(g) = arg(args, "gut=") {
+        let extra = gut_sets(&cfg, &sets, g);
+        eprintln!("gut sets: {}", extra.join(" "));
+        sets.extend(extra);
+    }
     let mut w = match map {
-        "patch" => patch_world(&d, seed, &cfg, &sets(args), wseed),
-        _ => terrarium(&d, seed, &cfg, &sets(args), wseed),
+        "patch" => patch_world(&d, seed, &cfg, &sets, wseed),
+        _ => terrarium(&d, seed, &cfg, &sets, wseed),
     };
     if let Some(b) = arg(args, "browse=") {
         let per_day: f64 = b.parse().unwrap();
@@ -169,7 +211,8 @@ fn world_of(args: &[String]) -> Web {
     w
 }
 
-/// Replace the free lanternjaws with `n` adults at the arrival stores (riders and the bank kept).
+/// Replace the free lanternjaws with `n` adults at the arrival stores (riders and the bank kept;
+/// on patch, as `patch-hunters` introduces them, at minute 120).
 fn set_hunters(w: &mut Web, n: f64) {
     let lj = Founder::Lanternjaw;
     w.fauna.pops[lj.index()].retain(|c| c.host.is_some());
@@ -181,8 +224,9 @@ fn set_hunters(w: &mut Web, n: f64) {
     *w = Web::new(w.flora.clone(), w.fauna.clone());
 }
 
-/// Patch at minute 120 of a founding: the plant half on the patch save, the animals the
-/// patch founders run to minute 120 on it (closed).
+/// Patch at minute 120 of a founding: the plant half on the patch save (f1, or f3 for seed
+/// 3), the patch founders run from minute 0 on its minute-120 offer (the animal half alone,
+/// as D2b's start), then joined. The lanternjaws come with `lj=` (none on `patch`).
 fn patch_world(d: &Path, seed: u32, cfg: &Path, sets: &[String], wseed: u64) -> Web {
     let p = start::params(cfg, sets).unwrap_or_else(|e| panic!("{e}"));
     let (s0, snaps) = patch_saves(d, seed);
@@ -191,16 +235,20 @@ fn patch_world(d: &Path, seed: u32, cfg: &Path, sets: &[String], wseed: u64) -> 
     for f in Founder::ALL {
         fauna.enabled[f.index()] = STEPPED.contains(&f);
     }
+    scale(&mut fauna, faces(&flora));
     let counts = p.fauna.founder_counts();
-    for f in STEPPED {
+    for f in D2B_PREY {
         let n = counts[f.index()] as f64;
-        if n > 0.0 && f != Founder::Lanternjaw {
+        if n > 0.0 {
             fauna.add(f, Cohort::founders(&p.fauna, f, n));
         }
     }
+    let offer = flora.offer();
+    while fauna.t_s < flora.t_s - 1e-9 {
+        fauna.step(&offer);
+    }
     fauna.t_s = flora.t_s;
     fauna.mineral = fauna.mineral_wanted();
-    scale(&mut fauna, faces(&flora));
     Web::new(flora, fauna)
 }
 
