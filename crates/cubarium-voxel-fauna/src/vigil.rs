@@ -49,8 +49,9 @@
 //!   dodges nor runs;
 //! - **the pack's work** ([`pry`]): each awake hunter of it in contact (centres within half
 //!   their summed lengths plus `pry_reach_m`) pries at `pry_per_member_s`; the body resists at
-//!   `resist_per_s`, × (1 + `ring_resist_per_kin` per hunkered kin within `ring_m`, at most
-//!   `ring_kin_max`). At progress 1 it is turned over: **opened** for `opened_s`, its shield
+//!   `resist_per_s` × (its body over the adult's)^`shield_growth_exp` (PACK-TUNE: the young
+//!   are soft to prying too) × (1 + `ring_resist_per_kin` per hunkered kin within `ring_m`, at
+//!   most `ring_kin_max`). At progress 1 it is turned over: **opened** for `opened_s`, its shield
 //!   and its armour gone. One member below the resistance cannot open it; several can, slowly.
 //!
 //! **S2's bite collapse** (HUNKER's diagnosis): a flight's hold read every threat in the
@@ -217,6 +218,26 @@ impl Hunker {
         (self.shield * hard * (1.0 - self.wound_opens * wound.max(0.0))).clamp(0.0, 1.0)
     }
 
+    /// **Its resistance to prying** (PACK-TUNE), progress per second, at `body` (adult at
+    /// `adult_body`) with `ringed` hunkered kin beside it: `resist_per_s` × (body over the
+    /// adult body)^`shield_growth_exp` (the armour grows with the body, as the shield does: the
+    /// young stay soft) × (1 + `ring_resist_per_kin` per kin, at most `ring_kin_max`).
+    pub fn resist_of(&self, body: f64, adult_body: f64, ringed: u32) -> f64 {
+        let grown = if adult_body > 0.0 { (body / adult_body).clamp(0.0, 1.0) } else { 1.0 };
+        let hard = grown.powf(self.shield_growth_exp.max(0.0));
+        self.resist_per_s * hard * (1.0 + self.ring_resist_per_kin * f64::from(ringed.min(self.ring_kin_max)))
+    }
+
+    /// The fewest hunters in contact that open it ([`Hunker::resist_of`] under their summed
+    /// `pry_per_member_s`); `None` when no number does (no pry).
+    pub fn members_to_open(&self, body: f64, adult_body: f64, ringed: u32) -> Option<u32> {
+        if !(self.pry_per_member_s > 0.0) {
+            return None;
+        }
+        let n = (self.resist_of(body, adult_body, ringed) / self.pry_per_member_s).floor() + 1.0;
+        (n.is_finite() && n < f64::from(u32::MAX)).then_some(n as u32)
+    }
+
     /// Its calm at `condition` (reserve over cap), in ticks.
     fn calm_ticks(&self, condition: f64) -> u64 {
         ticks(self.calm_s * condition.clamp(0.0, 1.0).powf(self.hunger_calm_exp.max(0.0)))
@@ -231,11 +252,24 @@ impl Hunker {
 ///   (twice the flight's 10 s calm: a clamped animal waits out a circling pack); 0.9 of strikes
 ///   glance off a grown, unwounded shield (a tortoise's or an armadillo's carapace defeats
 ///   most bites); the shield grows as the square of the body fraction (a juvenile at half size
-///   has a quarter of it). One hunter pries at 1/60 per second and it resists at 1/40, so one
-///   cannot open it, two open it in about 2 min and three in 40 s (lions on a buffalo, wolves
-///   on a musk ox: minutes of work by several). Turned over, open for 20 s. Kin within 1.5 m
-///   (about two body lengths) bunch; each hunkered one beside it adds half its resistance, up
-///   to three (the musk-ox ring). Below a tenth of its reserve it cannot afford to hunker.
+///   has a quarter of it). Turned over, open for 20 s. Kin within 1.5 m (about two body
+///   lengths) bunch; each hunkered one beside it adds half its resistance, up to three (the
+///   musk-ox ring). Below a tenth of its reserve it cannot afford to hunker.
+///
+///   **The pry** (PACK-TUNE, Wrysk: "one Veilhound can't open an adult; a pack can,
+///   slowly"): n hunters in contact against resistance R open it in 1 / (n·p − R) s, and
+///   never when n·p ≤ R. With R = 1/40 s⁻¹ and p = 1/90 s⁻¹ (R = 2.25 p): one or two never
+///   (2/90 < 1/40), three in 1 / (3/90 − 1/40) = 120 s, four in 51 s. One hunkered kin beside
+///   it (R × 1.5 = 3.375 p): three never, four in 144 s; two kin (4.5 p): four never. The
+///   resistance grows with the body as the shield does ([`Hunker::resist_of`]): a half-grown
+///   juvenile resists at R/4, so one hunter opens it in 206 s and two in 63 s. HUNKER's 1/60
+///   let two open an adult in 120 s (57–378 opens a seed in 6 h). Armoured herds need several
+///   hunters and still usually win: wolves rarely kill musk oxen standing in their defensive
+///   group, and test and leave (Gray 1987, *The Muskoxen of Polar Bear Pass*; Mech 1970,
+///   *The Wolf*); wolves' success on bison rises with pack size and stays low (MacNulty et
+///   al. 2014, PLoS ONE 9:e112884); lions take buffalo only in larger groups, and a herd that
+///   stands drives them off (Scheel & Packer 1991, Anim. Behav. 41:697; Packer & Ruttan 1988,
+///   Am. Nat. 132:159).
 pub fn hunker_of(founder: Founder) -> Hunker {
     match founder {
         Founder::Browser => Hunker {
@@ -248,7 +282,7 @@ pub fn hunker_of(founder: Founder) -> Hunker {
             shield: 0.9,
             shield_growth_exp: 2.0,
             wound_opens: 1.0,
-            pry_per_member_s: 1.0 / 60.0,
+            pry_per_member_s: 1.0 / 90.0,
             resist_per_s: 1.0 / 40.0,
             pry_reach_m: 0.3,
             opened_s: 20.0,
@@ -827,7 +861,8 @@ pub(crate) fn pry(fauna: &mut Fauna, ring: f64) {
                 members += 1;
             }
         }
-        let resist = hk.resist_per_s * (1.0 + hk.ring_resist_per_kin * f64::from(ringed.min(hk.ring_kin_max)));
+        let adult = fauna.config.founder(f).core.birth_body;
+        let resist = hk.resist_of(p.body, adult, ringed);
         let l = &mut fauna.ledger.vigil;
         l.hunker_ticks[f.index()] += 1;
         if members > 0 {

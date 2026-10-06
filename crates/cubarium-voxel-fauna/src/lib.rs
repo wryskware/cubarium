@@ -1078,6 +1078,11 @@ pub struct PackRecord {
     /// taken again until the pack has taken another.
     #[serde(default)]
     pub abandoned: Option<u64>,
+    /// **Shunned targets** (PACK-TUNE): bodies the pack dropped alive (broken off, late, lost,
+    /// spent, trespassing), each with the tick until which it is not taken again
+    /// (`Pack::shun_s`); `(0, 0)` is an empty slot. The oldest slot is reused.
+    #[serde(default)]
+    pub shunned: [(u64, u64); 4],
     /// **The draw** (VEILHOUND-SEARCH, the lineage's [`SenseTable`]): the prey the
     /// pack's leader is walking to by route — sensed by the pack, on its route component,
     /// not yet its target. Remade at each of the leader's samples; cleared when the pack
@@ -2796,6 +2801,13 @@ pub struct FaunaLedger {
     /// ([`PerceptionConfig::give_up_s`]).
     #[serde(default)]
     pub pack_targets_lost: u64,
+    /// **The prey choice's readouts** (PACK-TUNE): pack targets broken off in a chase (their
+    /// prospect under `Pack::break_off_below`), and sensed takeable prey a pack declined at a
+    /// choice for a prospect under `Pack::select_min_prospect` (one count per body per choice).
+    #[serde(default)]
+    pub pack_break_offs: u64,
+    #[serde(default)]
+    pub pack_declined: u64,
     /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
     #[serde(default)]
     pub vigil: VigilLedger,
@@ -3382,6 +3394,8 @@ pub enum ChaseEnd {
     /// No member had sensed it within the pursuit's memory (SENSES-CORE,
     /// [`PerceptionConfig::give_up_s`]).
     Lost,
+    /// Its prospect fell under `Pack::break_off_below` (PACK-TUNE: the test went badly).
+    BrokeOff,
 }
 
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
@@ -3817,6 +3831,7 @@ impl Fauna {
             feast: None,
             feast_eaten: 0.0,
             abandoned: None,
+            shunned: [(0, 0); 4],
             drawn: None,
             drawn_scent: false,
         });

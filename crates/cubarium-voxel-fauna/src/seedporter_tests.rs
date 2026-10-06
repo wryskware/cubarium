@@ -988,3 +988,49 @@ fn a_fruit_bite_lands_in_the_stomach_and_the_gut_seeds() {
     assert!(pool.mineral > 0.0, "stand fruit carries mineral");
     assert!((flora.view().ledger.consumed_organic_out - consumed - l.eaten_organic_in).abs() <= 1e-15);
 }
+
+/// **A seedporter that has landed does not relaunch without a reason** (PACK-TUNE, the glide
+/// loop: GAIT's s4 run had 49,704 glides). A vine-covered wall whose cover reaches its top.
+/// A seedporter walks in, climbs the face and perches at its top; it is then set hugging
+/// the face, its centre 0.02 m off it and its footprint in the wall's column (the probe's
+/// state on GAIT's s4 save: a glide's fall goes down its centre column and can end there).
+/// Held at full forward it glides off the face, from clear of the wall, once; it comes down
+/// on the floor and walks on, and is not pressed back onto the face to climb it and launch
+/// again (the loop: a glide blocked in place, a fall, the same face, a climb, a glide).
+#[test]
+fn a_seedporter_gliding_off_a_vine_face_lands_once_and_does_not_relaunch() {
+    let (mut world, mut flora, _) = vine_wall_in_fruit();
+    // The rock stops where the cover does (y = 10): the face's top is the wall's top.
+    for z in 0..world.config().depth {
+        for y in 11..=12 {
+            world.apply(WorldCommand::SetMaterial { x: 6, y, z, material: Material::Air });
+        }
+    }
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = on_ground(&mut fauna, &world, SP, 3, 2, HUNGRY_ADULT);
+    hold(&mut fauna, id, 1.0, 0.0);
+    let on_face = |f: &Fauna| {
+        let a = animal(f, id);
+        a.mobility.mode == MobilityMode::Perched && matches!(a.mobility.perch.map(|p| p.anchor), Some(PerchAnchor::Vine(_)))
+    };
+    let n = until(&mut fauna, &world, &mut flora, 2000, on_face);
+    assert!(on_face(&fauna), "fixture: it perches at the face's top ({n} ticks)");
+    let k = fauna.animals.iter().position(|a| a.id == id).expect("the body");
+    fauna.animals[k].pose.x = 6.0 * V - 0.02;
+    hold(&mut fauna, id, 1.0, 0.0);
+    let climbs = fauna.view().ledger.climbs;
+    let mut launches = 0;
+    let mut last = mode(&fauna, id);
+    for _ in 0..600 {
+        fauna.step(&world, &mut flora);
+        let m = mode(&fauna, id);
+        if last == MobilityMode::Perched && m == MobilityMode::Glide {
+            launches += 1;
+        }
+        last = m;
+    }
+    let again = fauna.view().ledger.climbs - climbs;
+    assert!(launches <= 1, "it leaves the face once in 600 ticks, not a loop: {launches} launches, {again} climbs");
+    assert_eq!(again, 0, "it does not climb the face again");
+    assert_eq!(mode(&fauna, id), MobilityMode::Ground, "it came down and walks: {:?}", animal(&fauna, id).mobility);
+}

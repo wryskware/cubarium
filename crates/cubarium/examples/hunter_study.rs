@@ -125,6 +125,7 @@ fn main() {
         Some("ledger") => ledger_dump(&args),
         Some("strikes") => strike_probe(&args),
         Some("budget") => budget_probe(&args),
+        Some("glide") => glide_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -823,6 +824,7 @@ fn run(args: &[String]) {
     let mut ages = grazer_ages(&sim);
     let mut vh_kills_before = vh_grazer_kills(&sim);
     let (mut age_win, mut age_all) = ([0u64; 2], [0u64; 2]);
+    let mut hunts = Hunts { log: arg(args, "hunt_log=") == Some("1"), chase_kills: sim.fauna().view().ledger.pack_chase_kills, ..Hunts::default() };
     sample(&sim, &params, &arm, minute0, &lw, &lw, &win, &mut track, 0, 0.0);
     for minute in minute0 + 1..=end {
         for _ in 0..per_min {
@@ -875,6 +877,7 @@ fn run(args: &[String]) {
             vh_kills_before = vk;
             ages = ages_now;
             before = now;
+            hunts.tick(&sim, &params);
         }
         if (minute - minute0) % every == 0 || minute == end {
             let ms = t0.elapsed().as_secs_f64() * 1000.0 / ticks_in_window.max(1) as f64;
@@ -896,6 +899,11 @@ fn run(args: &[String]) {
             println!("hunk,{arm},{minute},{}", hunk_line(&lw, &l));
             /*}HUNK*/
             println!("gait,{arm},{minute},{}", gait_line(&lw, &l));
+            println!("hunt,{arm},{minute},{}", hunts.win.line());
+            /*PT{*/
+            println!("ptune,{arm},{minute},break_offs={},declined={}", l.pack_break_offs - lw.pack_break_offs, l.pack_declined - lw.pack_declined);
+            /*}PT*/
+            hunts.win = HuntTally::default();
             vh_all.add(&vh_win);
             vh_win = Vh::default();
             meal_all.add(&meal_win);
@@ -937,6 +945,10 @@ fn run(args: &[String]) {
     println!("sumhunk,{arm},{},{}", minute0, hunk_line(&l0, &l));
     /*}HUNK*/
     println!("sumgait,{arm},{},{}", minute0, gait_line(&l0, &l));
+    println!("sumhunt,{arm},{},{}", minute0, hunts.all.line());
+    /*PT{*/
+    println!("sumptune,{arm},{},break_offs={},declined={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined);
+    /*}PT*/
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;
@@ -1128,6 +1140,273 @@ fn wdelta(fx: f64, fz: f64, tx: f64, tz: f64, ring: f64) -> (f64, f64) {
 /// feeding on the move, walking, still), its bites and the gaps between them, and its
 /// flights' lengths and what was near while it fled. `vig=off` turns every lineage's ground
 /// response off on the same save.
+// ------------------------------------------------------------------ PACK-TUNE: the hunt
+//
+// **A hunt** is one pack pursuit of one target, from commitment (the pack takes it) to a kill
+// or a give-up. The pack's record is read every tick: a new target is a chase; a chase on the
+// target the pack dropped alive within `HUNT_MERGE_S` is the same hunt resumed, not a new
+// one; a new target within `RETARGET_S` of a dropped one is a re-target (a new hunt, counted
+// apart so the measure is not inflated). A hunt is killed when its target died while it was
+// the target and the pack booked a chase kill that tick.
+const HUNT_MERGE_S: f64 = 60.0;
+const RETARGET_S: f64 = 30.0;
+/// A target with no kin of its lineage within this is isolated (readout only).
+const ISOLATED_M: f64 = 3.0;
+/// The prey classes at commitment: hunkered adult, other adult, juvenile, airborne, aware,
+/// isolated (a hunt can be in several).
+const HUNT_CLASSES: [&str; 6] = ["hunk_adult", "adult", "juvenile", "airborne", "aware", "isolated"];
+
+#[derive(Clone, Copy, Default)]
+struct HuntCur {
+    target: u64,
+    prey: usize,
+    since: u64,
+    struck: bool,
+    classes: [bool; 6],
+    chases: u32,
+}
+
+#[derive(Clone, Default)]
+struct HuntTally {
+    chases: u64,
+    hunts: u64,
+    resumes: u64,
+    retargets: u64,
+    kills: u64,
+    struck: u64,
+    struck_kills: u64,
+    dropped_alive: u64,
+    gone: u64,
+    secs: f64,
+    by_prey: [[u64; 2]; Founder::COUNT],
+    by_class: [[u64; 2]; 6],
+}
+
+impl HuntTally {
+    fn line(&self) -> String {
+        let prey = Founder::ALL
+            .iter()
+            .filter(|f| self.by_prey[f.index()][0] > 0)
+            .map(|f| format!("{}:{}/{}", f.name(), self.by_prey[f.index()][1], self.by_prey[f.index()][0]))
+            .collect::<Vec<_>>()
+            .join(";");
+        let classes = HUNT_CLASSES
+            .iter()
+            .enumerate()
+            .map(|(k, n)| format!("{n}:{}/{}", self.by_class[k][1], self.by_class[k][0]))
+            .collect::<Vec<_>>()
+            .join(";");
+        format!(
+            "chases={},hunts={},resumes={},retargets={},kills={},success={:.3},struck_hunts={},struck_kills={},dropped_alive={},gone={},mean_hunt_s={:.1},prey={prey},class={classes}",
+            self.chases,
+            self.hunts,
+            self.resumes,
+            self.retargets,
+            self.kills,
+            self.kills as f64 / self.hunts.max(1) as f64,
+            self.struck,
+            self.struck_kills,
+            self.dropped_alive,
+            self.gone,
+            self.secs / self.hunts.max(1) as f64,
+        )
+    }
+}
+
+#[derive(Default)]
+struct Hunts {
+    cur: rustc_hash::FxHashMap<u64, HuntCur>,
+    last_end: rustc_hash::FxHashMap<u64, (u64, u64, bool, bool, HuntCur)>,
+    chase_kills: u64,
+    win: HuntTally,
+    all: HuntTally,
+    log: bool,
+}
+
+impl Hunts {
+    fn end(&mut self, pack: u64, c: HuntCur, now: u64, alive: bool, killed: bool, resumable: bool) {
+        // A hunt is tallied when it ends for good: a kill, its target gone, or no resume in time.
+        let _ = resumable;
+        self.last_end.insert(pack, (c.target, now, killed || !alive, killed, c));
+        if killed || !alive {
+            self.close(c, now, alive, killed);
+        }
+    }
+
+    fn close(&mut self, c: HuntCur, now: u64, alive: bool, killed: bool) {
+        for t in [&mut self.win, &mut self.all] {
+            t.hunts += 1;
+            t.kills += u64::from(killed);
+            t.struck += u64::from(c.struck);
+            t.struck_kills += u64::from(c.struck && killed);
+            t.dropped_alive += u64::from(alive && !killed);
+            t.gone += u64::from(!alive && !killed);
+            t.secs += now.saturating_sub(c.since) as f64 / f64::from(TICK_HZ);
+            t.by_prey[c.prey][0] += 1;
+            t.by_prey[c.prey][1] += u64::from(killed);
+            for k in 0..6 {
+                if c.classes[k] {
+                    t.by_class[k][0] += 1;
+                    t.by_class[k][1] += u64::from(killed);
+                }
+            }
+        }
+        if self.log {
+            println!(
+                "hunt_end,{now},{},{},{},chases={},s={:.1},struck={},killed={killed},alive={alive}",
+                c.target,
+                Founder::ALL[c.prey].name(),
+                HUNT_CLASSES.iter().enumerate().filter(|(k, _)| c.classes[*k]).map(|(_, n)| *n).collect::<Vec<_>>().join("+"),
+                c.chases,
+                now.saturating_sub(c.since) as f64 / f64::from(TICK_HZ),
+                c.struck,
+            );
+        }
+    }
+
+    /// One tick of the readout.
+    fn tick(&mut self, sim: &Sim, params: &Params) {
+        let fa = sim.fauna();
+        let v = fa.view();
+        let now = v.tick;
+        let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+        let ck = v.ledger.pack_chase_kills;
+        let killed_now = ck > self.chase_kills;
+        self.chase_kills = ck;
+        let merge = (HUNT_MERGE_S * f64::from(TICK_HZ)) as u64;
+        let retarget = (RETARGET_S * f64::from(TICK_HZ)) as u64;
+        // Dropped hunts not resumed in time close as given up.
+        let stale: Vec<u64> = self
+            .last_end
+            .iter()
+            .filter(|(p, (_, t, closed, _, _))| !closed && now.saturating_sub(*t) > merge && !self.cur.get(p).is_some_and(|c| c.target == self.last_end[p].0))
+            .map(|(p, _)| *p)
+            .collect();
+        for p in stale {
+            let (_, t, _, _, c) = self.last_end[&p];
+            let alive = v.animal(c.target).is_some();
+            self.close(c, t, alive, false);
+            self.last_end.get_mut(&p).unwrap().2 = true; // closed
+        }
+        for rec in fa.packs().iter().filter(|r| r.lineage == VH) {
+            let cur = self.cur.get(&rec.id).copied();
+            if let Some(c) = cur {
+                if rec.target != Some(c.target) {
+                    let alive = v.animal(c.target).is_some();
+                    self.cur.remove(&rec.id);
+                    let killed = !alive && killed_now;
+                    self.end(rec.id, c, now, alive, killed, true);
+                } else {
+                    let struck = v.animals.iter().any(|a| a.founder == Some(VH) && a.strike.is_some_and(|s| s.prey == c.target));
+                    if struck {
+                        self.cur.get_mut(&rec.id).unwrap().struck = true;
+                    }
+                    continue;
+                }
+            }
+            let Some(t) = rec.target else { continue };
+            let Some(o) = v.animal(t).copied() else { continue };
+            self.win.chases += 1;
+            self.all.chases += 1;
+            let last = self.last_end.get(&rec.id).copied();
+            if let Some((lt, tick, closed, was_kill, lc)) = last {
+                if lt == t && !closed && now.saturating_sub(tick) <= merge {
+                    self.win.resumes += 1;
+                    self.all.resumes += 1;
+                    self.cur.insert(rec.id, HuntCur { chases: lc.chases + 1, ..lc });
+                    self.last_end.remove(&rec.id);
+                    continue;
+                }
+                if !closed {
+                    // The dropped hunt is over: a new target took its place.
+                    let alive = v.animal(lc.target).is_some();
+                    self.close(lc, tick, alive, false);
+                }
+                if !was_kill && now.saturating_sub(tick) <= retarget {
+                    self.win.retargets += 1;
+                    self.all.retargets += 1;
+                }
+                self.last_end.remove(&rec.id);
+            }
+            let f = o.founder.unwrap_or(Founder::Browser);
+            let members: Vec<u64> = v.animals.iter().filter(|a| a.pack.is_some_and(|m| m.pack == rec.id)).map(|a| a.id).collect();
+            let juvenile = o.body < params.fauna.founder(f).core.birth_body;
+            let aware = members.iter().any(|&m| cubarium_voxel_fauna::vigil::aware_of(&params.fauna, fa.percept(o.id), m, now));
+            let kin = v.animals.iter().any(|k| {
+                k.id != o.id && k.founder == o.founder && {
+                    let dx = (k.pose.x - o.pose.x + 0.5 * ring).rem_euclid(ring) - 0.5 * ring;
+                    let dz = k.pose.z - o.pose.z;
+                    (dx * dx + dz * dz).sqrt() <= ISOLATED_M
+                }
+            });
+            let classes = [
+                o.hunkered && !juvenile,
+                !o.hunkered && !juvenile,
+                juvenile,
+                o.mobility.mode == cubarium_voxel_fauna::MobilityMode::Fly,
+                aware,
+                !kin,
+            ];
+            self.cur.insert(rec.id, HuntCur { target: t, prey: f.index(), since: now, struck: false, classes, chases: 1 });
+        }
+    }
+}
+
+/// **The glide probe** (PACK-TUNE): `hunter_study glide load=DIR minutes=M [max=N]` prints each
+/// seedporter's mobility-mode changes (tick, id, from -> to, position, height, state, held
+/// forward, fleeing, sprint stamina, the nearest Veilhound) up to `max` lines, then the counts.
+fn glide_probe(args: &[String]) {
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(3, |m| m.parse().unwrap());
+    let max: usize = arg(args, "max=").map_or(120, |m| m.parse().unwrap());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna) = (s.world, s.flora, s.fauna);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+    let total = minutes * 60 * u64::from(TICK_HZ);
+    let mut last: rustc_hash::FxHashMap<u64, String> = Default::default();
+    let mut lines = 0usize;
+    let mut changes: rustc_hash::FxHashMap<u64, u64> = Default::default();
+    let g0 = sim.fauna().view().ledger.glides;
+    for _ in 0..total {
+        sim.step();
+        let fa = sim.fauna();
+        let v = fa.view();
+        let vhs: Vec<_> = v.animals.iter().filter(|a| a.founder == Some(VH)).collect();
+        for a in v.animals.iter().filter(|a| a.founder == Some(Founder::Seedporter)) {
+            let m = format!("{:?}", a.mobility.mode);
+            if last.get(&a.id).is_some_and(|l| *l == m) {
+                continue;
+            }
+            let from = last.insert(a.id, m.clone()).unwrap_or_default();
+            *changes.entry(a.id).or_default() += 1;
+            if lines < max {
+                lines += 1;
+                let vg = fa.percept(a.id).map(|r| r.vigil).unwrap_or_default();
+                let near = vhs
+                    .iter()
+                    .map(|h| {
+                        let dx = (h.pose.x - a.pose.x + 0.5 * ring).rem_euclid(ring) - 0.5 * ring;
+                        let dz = h.pose.z - a.pose.z;
+                        ((dx * dx + dz * dz).sqrt(), format!("{:?}", h.state))
+                    })
+                    .min_by(|x, y| x.0.total_cmp(&y.0));
+                println!(
+                    "glide,{},{},{}->{},x={:.2},z={:.2},y={:.2},head={:.2},state={:?},fwd={:.2},turn={:.2},fleeing={},spent={:.2},winded={},vh={:?}",
+                    v.tick, a.id, from, m, a.pose.x, a.pose.z, a.pose.y_m, a.pose.heading_rad, a.state,
+                    a.founder_state.held.forward, a.founder_state.held.turn, vg.fleeing,
+                    a.founder_state.sprint_spent, a.founder_state.winded, near
+                );
+            }
+        }
+    }
+    println!("glides {} over {} min; mode changes by id {:?}", sim.fauna().view().ledger.glides - g0, minutes, changes);
+}
+
 fn budget_probe(args: &[String]) {
     use cubarium_voxel_fauna::State;
     let mut params = resolve(args);
