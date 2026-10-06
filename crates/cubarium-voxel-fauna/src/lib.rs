@@ -35,7 +35,7 @@ pub mod perception;
 pub mod scent;
 pub mod vigil;
 pub use perception::{Percept, Track};
-pub use vigil::{Vigil, VigilLedger, VigilMode, Vigilance};
+pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
@@ -869,6 +869,11 @@ pub struct Animal {
     /// away. `false` for every other body.
     #[serde(default)]
     pub yielding: bool,
+    /// **Hunkered** (HUNKER, [`crate::Hunker`]): clamped down under its shield, neither moving
+    /// nor eating. Its state is [`State::Resting`]; the presenter may read this flag to draw
+    /// the hunker (a pose of its own is a later art package). False for every other body.
+    #[serde(default)]
+    pub hunkered: bool,
     /// **The stomach** (the minimal gut, `design/metabolism-meals-2026-10-02.md` repair 2
     /// item 10): raw food eaten and not yet digested, per food class, in all three
     /// currencies. Separate from [`Animal::gut`], which is egesta. Counted in the stored
@@ -4111,6 +4116,7 @@ impl Fauna {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            hunkered: false,
             stomach: Stomach::default(),
             eating: false,
             emergency: false,

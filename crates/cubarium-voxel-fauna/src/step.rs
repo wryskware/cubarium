@@ -272,6 +272,8 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
         }
         act(fauna, &view, flora, seed, tick, &sky, &mut hits);
         let ring = f64::from(view.config.width) * view.config.voxel_m;
+        // HUNKER: the pack's work on its hunkered prey, before this tick's strikes land.
+        crate::vigil::pry(fauna, ring);
         for hit in hits {
             let stood = fauna
                 .animals
@@ -2192,13 +2194,29 @@ fn strike_tick(
                     fauna.ledger.vigil.unaware_strikes[pf.index()] += 1;
                 }
             }
-            let chance = crate::dodge_chance_with(&fauna.config.predation, pp.agility, awareness, from_rear, condition);
-            if crate::dodges(chance, seed, a.id, p.id, tick) {
+            // HUNKER: a hunkered prey neither dodges nor runs; its shield may turn the strike,
+            // and turned over by the pack it has no armour at all.
+            let guard = crate::vigil::guard(&fauna.config, &p, fauna.percept(p.id), tick);
+            let (chance, armour) = match guard {
+                crate::vigil::Guard::Open => {
+                    (crate::dodge_chance_with(&fauna.config.predation, pp.agility, awareness, from_rear, condition), pp.armour)
+                }
+                crate::vigil::Guard::Shield(_) => (0.0, pp.armour),
+                crate::vigil::Guard::Bared => (0.0, 0.0),
+            };
+            let glanced = match guard {
+                // A keyed draw of its own, apart from the dodge's.
+                crate::vigil::Guard::Shield(shield) => crate::dodges(shield, seed ^ GLANCE_KEY, a.id, p.id, tick),
+                _ => false,
+            };
+            if glanced {
+                fauna.ledger.vigil.glances[pf.index()] += 1;
+            } else if crate::dodges(chance, seed, a.id, p.id, tick) {
                 fauna.ledger.dodges_by_founder[founder.index()] += 1;
             } else {
                 // Counted when `apply_hit` lands it on a live prey, not here.
                 let damage = if p.body > 0.0 {
-                    h.strike_power * (a.body / p.body) * (1.0 - pp.armour)
+                    h.strike_power * (a.body / p.body) * (1.0 - armour)
                 } else {
                     1.0
                 };
@@ -2217,6 +2235,9 @@ fn strike_tick(
         ..s
     });
 }
+
+/// The key the shield's glance draw is salted with, apart from the dodge's (a pure numeric).
+const GLANCE_KEY: u64 = 0x6c61_6e63_6500_0001;
 
 /// **One [`Hit`] applied** (predation §2.4, §2.5): the wound adds, the hit wakes the prey
 /// and keeps it up for [`crate::PredationConfig::alert_s`], and a wound of 1 kills — the whole body to
@@ -2258,6 +2279,12 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
         fauna.ledger.funnel[by.index()][f.index()][crate::perception::KILLED] += 1;
+        // HUNKER's readout: the kill by the prey's age class.
+        if a.body < fauna.config.founder(f).core.birth_body {
+            fauna.ledger.vigil.kills_juvenile[f.index()] += 1;
+        } else {
+            fauna.ledger.vigil.kills_adult[f.index()] += 1;
+        }
     }
     let laid = bury_corpse(fauna, flora, &a, cause);
     if laid && matches!(cause, Departure::Killed { .. }) {
@@ -3155,6 +3182,7 @@ fn newborn(
         pack: None,
         homing_ticks: 0,
         yielding: false,
+        hunkered: false,
         // A newborn starts with an empty stomach and its eating latch off (repair 2
         // item 3).
         stomach: crate::Stomach::default(),
@@ -3926,3 +3954,6 @@ mod senses_core_tests;
 #[cfg(test)]
 #[path = "ground_response_tests.rs"]
 mod ground_response_tests;
+#[cfg(test)]
+#[path = "hunker_tests.rs"]
+mod hunker_tests;
