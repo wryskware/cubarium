@@ -81,6 +81,13 @@ pub struct Meadow {
     /// **e.** Per zone and species: faces with at least `root_soil_min` soil
     /// ([`Meadow::set_deep`]); empty when the lever is off.
     pub deep: Vec<[f64; NS]>,
+    /// **g.** Seed rain from outside the plant half (round 2): whole seeds per face per second
+    /// landing in the bank of every open-sky drained soil zone, per species (0: off). Its
+    /// sim meaning: seed carried in from elsewhere — burrs dropped by grazers that fed on a
+    /// meadow beyond the zone (the sim's `burrs`), or a regional seed rain. An import: each
+    /// seed brings its package's organic matter and mineral (`Counters::rain_in`,
+    /// `rain_mineral`).
+    pub rain_per_face_s: [f64; NS],
 }
 
 impl Default for Meadow {
@@ -110,6 +117,7 @@ impl Default for Meadow {
             lifespan_s: [0.0; NS],
             root_soil_min: [0; NS],
             deep: Vec::new(),
+            rain_per_face_s: [0.0; NS],
         }
     }
 }

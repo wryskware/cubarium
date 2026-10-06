@@ -33,7 +33,8 @@ fn main() {
              run start=DIR snaps=DIR,.. [log=SOAKLOG] [minutes=1200] [every=30] [weather=frozen] [wseed=N] [config=FILE] [set=P=V].. \
              [browse=PER_DAY] [hold=SPECIES,..] [zocc=1] [prod=1] [rcheck=SPECIES[:seed]] [zfunnel=SPECIES] [zdeaths=SPECIES] [trace=ZONE:SPECIES]\n  \
              meadow levers (design/webmodel/meadow.md): [take_hold=1] [take_const=FOLIAGE_PER_2H[:LITTER]] [crop=K] [cropw=SHARE] [dry=EVERY_D:LEN_D:WATER[:PHASE_D]] [drywet=1] \
-             [thatch=X] [draw=X] [contest=ESCAPE_SHARE[:TAU] | contest=sim] [life=DAYS | life=SPECIES:DAYS,..] [soilmin=SPECIES:N,..] [soilhist=1] [rare=SPECIES:KEEP]"
+             [thatch=X] [draw=X] [contest=ESCAPE_SHARE[:TAU] | contest=sim] [life=DAYS | life=SPECIES:DAYS,..] [soilmin=SPECIES:N,..] [soilhist=1] [rare=SPECIES:KEEP[:AT_DAY]] [rain=SPECIES:SEEDS_PER_FACE_DAY,..]\n  \
+             diagnosis (meadow round 2): [diag=SPECIES,..] (per-zone ledger lines `tz` at every print) [gates=SPECIES] (per-zone gate shares in each snapshot)"
         ),
     }
 }
@@ -444,10 +445,45 @@ fn run(a: &[String]) {
                 }
             }
         }
+        if let Some(x) = kv(a, "rain=") {
+            // Lever g: seed rain into the open-sky drained soil zones, seeds per face per day.
+            for part in x.split(',') {
+                let (sp, r) = part.split_once(':').expect("rain=SPECIES:SEEDS_PER_FACE_DAY");
+                mw.rain_per_face_s[Species::parse(sp).unwrap().index()] = r.parse::<f64>().unwrap() / day_s;
+            }
+        }
         if let Some(x) = kv(a, "soilmin=") {
             for part in x.split(',') {
                 let (sp, d) = part.split_once(':').expect("soilmin=SPECIES:N");
                 mw.root_soil_min[Species::parse(sp).unwrap().index()] = d.parse().unwrap();
+            }
+        }
+    }
+    let diag: Vec<Species> = kv(a, "diag=").map(|x| x.split(',').map(|n| Species::parse(n).expect("diag=SPECIES")).collect()).unwrap_or_default();
+    mp.diag = !diag.is_empty();
+    if let Some(name) = kv(a, "gates=") {
+        // Per zone and snapshot: the share of its faces where the species' water gates, its
+        // terrain-light gate, and both pass; the mean root-box water; the share at or above
+        // its `establish_water_min`; and the share with banked seed of it.
+        let sp = Species::parse(name).unwrap();
+        let k = cubarium_webmodel::flora::census::PHOTO.iter().position(|&p| p == sp).unwrap();
+        let wmin = fc.species(sp).establish_water_min;
+        for (st, snap) in snaps.iter().enumerate() {
+            let mut h = vec![[0.0f64; 7]; zs.zones.len()];
+            for f in snap {
+                let Some(&zi) = zs.of_face.get(&(f.x, f.y, f.z)) else { continue };
+                let x = &mut h[zi];
+                x[0] += 1.0;
+                x[1] += f64::from(u8::from(f.water_ok[k]));
+                x[2] += f64::from(u8::from(f.light_ok[k]));
+                x[3] += f64::from(u8::from(f.water_ok[k] && f.light_ok[k]));
+                x[4] += f.water[k].unwrap_or(0.0);
+                x[5] += f64::from(u8::from(f.water[k].unwrap_or(0.0) >= wmin));
+                x[6] += f64::from(u8::from(f.seeds[sp.index()] > 0));
+            }
+            for (zi, z) in zs.zones.iter().enumerate() {
+                let n = h[zi][0].max(1.0);
+                println!("gates,{},{st},{zi},{},faces={:.0},water_ok={:.2},light_ok={:.2},both={:.2},water_mean={:.3},ge_wmin={:.2},seeded={:.2}", sp.name(), z.key.name(), h[zi][0], h[zi][1] / n, h[zi][2] / n, h[zi][3] / n, h[zi][4] / n, h[zi][5] / n, h[zi][6] / n);
             }
         }
     }
@@ -473,9 +509,16 @@ fn run(a: &[String]) {
     let mut m = model::Model::new(fc.clone(), DayModel::of(&p.world, fc.upkeep_q10), zs, kern, rb, &snaps[0], minute0, mp);
     // A recovery-from-rarity start (`rare=SPECIES:KEEP`): the species thinned to KEEP of its
     // stands and seeds at the start.
+    // `rare=SPECIES:KEEP:AT_DAY` thins it at that model day instead: invasion when rare into
+    // the community the run has built by then (the Chesson test on a late state).
+    let mut rare_at: Option<(usize, f64, f64)> = None;
     if let Some(x) = kv(a, "rare=") {
-        let (sp, keep) = x.split_once(':').expect("rare=SPECIES:KEEP");
-        m.make_rare(Species::parse(sp).unwrap().index(), keep.parse().unwrap());
+        let v: Vec<&str> = x.split(':').collect();
+        let (sp, keep) = (Species::parse(v[0]).unwrap().index(), v.get(1).expect("rare=SPECIES:KEEP").parse::<f64>().unwrap());
+        match v.get(2) {
+            Some(d) => rare_at = Some((sp, keep, minute0 + d.parse::<f64>().unwrap() * m.day.day_s() / 60.0)),
+            None => m.make_rare(sp, keep),
+        }
     }
     // The animals' take, clamped to the run's logged flux windows (`flux,ARM,A-B,...,
     // foliage_taken=X,litter_taken=Y`): spread evenly over each window, the foliage over
@@ -627,10 +670,20 @@ fn run(a: &[String]) {
                     println!("zocc,{:.0},{},{},{},{},donors={},N={},litter={:.2},dead_wood={:.2}", m.minute(), i, z.key.name(), z.area, occ.join(","), don.join("/"), pool.join("/"), m.z[i].litter, m.z[i].dead_wood);
                 }
             }
+            for sp in &diag {
+                zdiag_lines(&m, *sp);
+            }
             next += every;
         }
         if m.minute() >= end - 1e-9 {
             break;
+        }
+        if let Some((sp, keep, at)) = rare_at
+            && m.minute() + 1e-9 >= at
+        {
+            m.make_rare(sp, keep);
+            println!("rare,{:.0},{},keep={keep}", m.minute(), Species::ALL[sp].name());
+            rare_at = None;
         }
         if let Some(&(a0, b0, fol, lit)) = clamp.iter().find(|w| m.minute() >= w.0 && m.minute() < w.1) {
             let per = m.p.dt / ((b0 - a0) * 60.0);
@@ -733,6 +786,61 @@ fn run(a: &[String]) {
         }
         let occ: Vec<String> = Species::ALL.iter().filter(|s| m.z[i].count(s.index()) >= 0.5).map(|s| format!("{}={:.0}", &s.name()[..5], m.z[i].count(s.index()))).collect();
         println!("zone {} {} cover {:.2} {}", i, z.key.name(), m.z[i].cover, occ.join(" "));
+    }
+}
+
+/// The diagnosis ledger of species `sp` per zone, cumulative since the start
+/// (`model::ZoneDiag`): one `tz` line per zone with any of it, plus the zone's state now.
+fn zdiag_lines(m: &cubarium_webmodel::flora::model::Model, sp: cubarium_voxel_flora::Species) {
+    use cubarium_voxel_flora::Species;
+    let k = sp.index();
+    let sc = m.config.species(sp);
+    let woody = [Species::Bloomcrown, Species::Lanternberry, Species::Vaulttree];
+    for (zi, z) in m.zones.zones.iter().enumerate() {
+        let d = &m.c.zdiag[zi];
+        let zs = &m.z[zi];
+        let held: f64 = Species::ALL.iter().filter(|s| **s != Species::Glowcap).map(|s| zs.count(s.index())).sum();
+        let vacant = (z.area - held).max(0.0);
+        let under: f64 = woody.iter().map(|w| zs.understorey(w.index())).sum();
+        // Who took the vacant faces here (seed births on vacant, all species).
+        let by: Vec<String> = Species::ALL.iter().filter(|s| d.born_vacant[s.index()] >= 0.5).map(|s| format!("{}:{:.0}", &s.name()[..4], d.born_vacant[s.index()])).collect();
+        let occ: Vec<String> = Species::ALL.iter().filter(|s| **s != Species::Glowcap && zs.count(s.index()) >= 0.5).map(|s| format!("{}:{:.0}", &s.name()[..4], zs.count(s.index()))).collect();
+        println!(
+            "tz,{:.0},{},{zi},{},area={},vacant={:.1},open={:.1},under={:.1},donors={:.1},bank={:.1},packages={:.1},seeds_out={:.1},landed={:.1},landed_self={:.1},lost={:.1},bank_died={:.1},born_vacant={:.1},born_cover={:.1},born_runner={:.1},starved={:.1},drought={:.1},overtopped={:.1},displaced={:.1},under_starved={:.1},killed={:.1},f_time={:.0},f_vacant={:.0},f_seeded={:.0},f_gates={:.0},f_canopy={:.0},f_lottery={:.0},rained={:.1},vac_by=[{}],occ=[{}]",
+            m.minute(),
+            sp.name(),
+            z.key.name(),
+            z.area,
+            vacant,
+            zs.count(k),
+            under,
+            m.count_at_least(zi, k, sc.donor_min),
+            zs.bank[k],
+            d.packages[k],
+            d.seeds_out[k],
+            d.landed[k],
+            d.landed_self[k],
+            d.lost[k],
+            d.bank_died[k],
+            d.born_vacant[k],
+            d.born_cover[k],
+            d.born_runner[k],
+            d.starved[k],
+            d.drought[k],
+            d.overtopped[k],
+            d.displaced[k],
+            d.under_starved[k],
+            d.killed[k],
+            d.f_time,
+            d.f_vacant,
+            d.f_seeded[k],
+            d.f_gates[k],
+            d.f_canopy[k],
+            d.f_lottery[k],
+            d.rained[k],
+            by.join(" "),
+            occ.join(" ")
+        );
     }
 }
 

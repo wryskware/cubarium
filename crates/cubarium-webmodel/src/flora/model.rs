@@ -186,6 +186,9 @@ pub struct Params {
     /// **Scenario levers, not sim knobs**: the meadow candidates
     /// ([`super::meadow::Meadow`], `design/webmodel/meadow.md`). All off by default.
     pub meadow: super::meadow::Meadow,
+    /// Readout: integrate the vacant-face funnel into [`ZoneDiag`] (a second pass-share
+    /// reading per species and step; off by default).
+    pub diag: bool,
 }
 
 impl Default for Params {
@@ -210,6 +213,7 @@ impl Default for Params {
             hold_mineral: [false; NS],
             sample_sigma: 0.1,
             meadow: super::meadow::Meadow::default(),
+            diag: false,
         }
     }
 }
@@ -274,11 +278,65 @@ pub struct Counters {
     pub film_upkeep: f64,
     /// Mineral the `hold_mineral` lever added (a scenario's external source).
     pub held_in: f64,
+    /// Meadow lever g: the seed rain's import, organic units and mineral.
+    pub rain_in: f64,
+    pub rain_mineral: f64,
     /// Per zone, the producers' output: `[litter in, dead wood in, glowcap caps built,
     /// plant foliage built]` (organic units; the animals' returns not in it).
     pub prod_z: Vec<[f64; 4]>,
     /// Per zone: `[births (seed + runner), starved + drought]` per species.
     pub by_zone: Vec<[[f64; NS]; 2]>,
+    /// Per zone: the diagnosis ledger ([`ZoneDiag`]).
+    pub zdiag: Vec<ZoneDiag>,
+}
+
+/// **The diagnosis ledger of one zone** (meadow round 2, `design/webmodel/meadow.md` §6):
+/// per species, where its propagules come from and go, how its seed bank ends, what its
+/// newborns come up on, and what kills its stands, all cumulative since the start; and the
+/// establishment funnel on the zone's vacant faces, integrated over daytime seconds (only
+/// with [`Params::diag`] on: it costs a second pass-share reading per species and step).
+#[derive(Clone, Debug, Default)]
+pub struct ZoneDiag {
+    /// Propagule packages the species' stands here sent (runners and seeds), and the seeds
+    /// among them (into the dispersal kernel).
+    pub packages: [f64; NS],
+    pub seeds_out: [f64; NS],
+    /// Seeds landing in this zone's bank from every zone, and of them from this zone; seeds
+    /// sent from here that left the world (`Kernel::lost`).
+    pub landed: [f64; NS],
+    pub landed_self: [f64; NS],
+    pub lost: [f64; NS],
+    /// Banked seeds that died (the bank's one rate: age cut-off and attrition,
+    /// `seeds.rs:745`), and banked seeds that came up.
+    pub bank_died: [f64; NS],
+    /// Newborns: from seed on a vacant face, from seed through a cover (or into the turf as a
+    /// contested recruit), by runner.
+    pub born_vacant: [f64; NS],
+    pub born_cover: [f64; NS],
+    pub born_runner: [f64; NS],
+    /// Deaths by cause: starved (budget, open stands and contested recruits), drought (a
+    /// cured turf past `cure_max_s`), overtopped by a woody seedling, displaced by a
+    /// runner, starved as understorey under an escaped canopy, killed by a scenario lever
+    /// (crop, age, rarity, the seedling browser).
+    pub starved: [f64; NS],
+    pub drought: [f64; NS],
+    pub overtopped: [f64; NS],
+    pub displaced: [f64; NS],
+    pub under_starved: [f64; NS],
+    pub killed: [f64; NS],
+    /// The vacant-face funnel (face·seconds, daytime): vacant faces; of them seeded for the
+    /// species; of those, the ones whose water and terrain-light gates pass; of those, the
+    /// ones that also pass the canopy gate (and the soil lever).
+    pub f_time: f64,
+    pub f_vacant: f64,
+    pub f_seeded: [f64; NS],
+    pub f_gates: [f64; NS],
+    pub f_canopy: [f64; NS],
+    /// The species' share of the lottery's weight on vacant faces (·seconds): who wins the
+    /// vacant faces it could take.
+    pub f_lottery: [f64; NS],
+    /// Seeds the seed rain (meadow lever g) brought into the zone's bank.
+    pub rained: [f64; NS],
 }
 
 /// The whole half.
@@ -557,7 +615,7 @@ impl Model {
                 Weather::Frozen => 0,
             }),
             p,
-            c: Counters { by_zone: vec![[[0.0; NS]; 2]; nz], prod_z: vec![[0.0; 4]; nz], take_z: vec![[0.0; 2]; nz], ..Counters::default() },
+            c: Counters { by_zone: vec![[[0.0; NS]; 2]; nz], zdiag: vec![ZoneDiag::default(); nz], prod_z: vec![[0.0; 4]; nz], take_z: vec![[0.0; 2]; nz], ..Counters::default() },
             weather_ix: 0,
             frozen,
             carrion: start.iter().map(|_| 0.0).sum(),
@@ -814,6 +872,7 @@ impl Model {
         self.c.prod_z[zi][0] += mat - wood;
         self.c.prod_z[zi][1] += wood;
         self.c.by_zone[zi][1][s] += gone;
+        self.c.zdiag[zi].killed[s] += gone;
         if s != GLOW {
             zs.pool[s] += nt * mat;
             let carried = zs.pool[s] * gone / count.max(gone);
@@ -1203,6 +1262,7 @@ impl Model {
             let c = zs.under[s].remove(ci);
             self.c.starved_under[t] += c.n;
             self.c.by_zone[zi][1][t] += c.n;
+            self.c.zdiag[zi].under_starved[t] += c.n;
             zs.dead_wood += c.n * c.st.wood;
             zs.litter += c.n * (c.st.material() - c.st.wood);
             self.c.prod_z[zi][0] += c.n * (c.st.material() - c.st.wood);
@@ -1312,6 +1372,7 @@ impl Model {
             let c = zs.contest[s].remove(ci);
             self.c.contest_died[s] += c.n;
             self.c.by_zone[zi][1][s] += c.n;
+            self.c.zdiag[zi].starved[s] += c.n;
             zs.dead_wood += c.n * c.st.wood;
             zs.litter += c.n * (c.st.material() - c.st.wood);
             self.c.prod_z[zi][0] += c.n * (c.st.material() - c.st.wood);
@@ -1336,6 +1397,7 @@ impl Model {
             zs.pool[t] += nt * mat;
             self.c.cropped[s] += gone;
             self.c.by_zone[zi][1][s] += gone;
+            self.c.zdiag[zi].killed[s] += gone;
         }
         // The escapes, and the recruits whose turf is gone (more recruits than turf faces).
         let turf_n = zs.count(t);
@@ -1506,8 +1568,14 @@ impl Model {
                 for &(ci, d) in dead.iter().rev() {
                     let c = self.z[zi].cohorts[s].remove(ci);
                     match d {
-                        Death::Starved => self.c.starved[s] += c.n,
-                        Death::Drought => self.c.drought[s] += c.n,
+                        Death::Starved => {
+                            self.c.starved[s] += c.n;
+                            self.c.zdiag[zi].starved[s] += c.n;
+                        }
+                        Death::Drought => {
+                            self.c.drought[s] += c.n;
+                            self.c.zdiag[zi].drought[s] += c.n;
+                        }
                     }
                     self.c.by_zone[zi][1][s] += c.n;
                     self.z[zi].dead_wood += c.n * c.st.wood;
@@ -1535,6 +1603,7 @@ impl Model {
                         mat += d * c.st.material();
                     }
                     self.c.browsed[s] += gone;
+                    self.c.zdiag[zi].killed[s] += gone;
                     // The browser ate the seedlings' tissue: out of the half, as a take.
                     self.c.browsed_organic += mat;
                     self.c.taken.foliage[s] += mat;
@@ -1617,6 +1686,7 @@ impl Model {
                                 m
                             } else {
                                 self.c.displaced[o] += n;
+                                self.c.zdiag[zi].displaced[o] += n;
                                 self.c.pairs[o][s] += n;
                                 self.remove_stands(zi, o, n, Some(cm))
                             };
@@ -1625,9 +1695,12 @@ impl Model {
                         }
                         self.c.births_runner[s] += runners;
                         self.c.by_zone[zi][0][s] += runners;
+                        self.c.zdiag[zi].born_runner[s] += runners;
                     }
                 }
                 let seeds = pk - runners;
+                self.c.zdiag[zi].packages[s] += pk;
+                self.c.zdiag[zi].seeds_out[s] += seeds;
                 // Each package's mineral leaves the donor's faces with it (`seeds.rs:953`):
                 // `nt` per unit; the pool already paid it as material. Seeds land in banks.
                 let kern = &self.kernels[s];
@@ -1636,14 +1709,34 @@ impl Model {
                     if f > 0.0 {
                         self.z[z2].bank[s] += seeds * f;
                         self.c.seeds_landed[s] += seeds * f;
+                        self.c.zdiag[z2].landed[s] += seeds * f;
+                        if z2 == zi {
+                            self.c.zdiag[zi].landed_self[s] += seeds * f;
+                        }
                     }
                 }
                 let lost = seeds * kern.lost[zi];
+                self.c.zdiag[zi].lost[s] += lost;
                 if lost > 0.0 {
                     self.z[zi].litter += lost * package;
                     self.c.prod_z[zi][0] += lost * package;
                     if s != GLOW {
                         self.spread_mineral(zi, nt * lost * package);
+                    }
+                }
+            }
+            // ---- meadow lever g: seed rain from outside, into open-sky drained soil zones.
+            if zone.key.soil && !zone.key.wet && !zone.key.under_roof {
+                for s in 0..NS {
+                    let r = mw.rain_per_face_s[s];
+                    if r > 0.0 && s != GLOW {
+                        let sc = config.species(Species::ALL[s]);
+                        let pk = package_of(sc);
+                        let add = r * zone.area * dt;
+                        self.z[zi].bank[s] += add;
+                        self.c.zdiag[zi].rained[s] += add;
+                        self.c.rain_in += add * pk;
+                        self.c.rain_mineral += add * pk * sc.n_tissue;
                     }
                 }
             }
@@ -1662,6 +1755,7 @@ impl Model {
                 if d > 0.0 {
                     self.z[zi].bank[s] -= d;
                     self.c.seeds_died[s] += d;
+                    self.c.zdiag[zi].bank_died[s] += d;
                     let pk = package_of(sc);
                     self.z[zi].litter += d * pk;
                     self.c.prod_z[zi][0] += d * pk;
@@ -1708,6 +1802,9 @@ impl Model {
         }
         let config = self.config.clone();
         let dt = self.p.dt;
+        if self.p.diag {
+            self.c.zdiag[zi].f_time += dt;
+        }
         let check = config.seed_check_s.max(cubarium_voxel::DT);
         let zone_sky = self.zones.zones[zi].sky;
         let a = self.zones.zones[zi].area.max(1.0);
@@ -1763,6 +1860,14 @@ impl Model {
                     let (kind, gate_now) = if self.floats(s) { (SampleKind::Open, 1.0) } else { (SampleKind::Seeded, readings[s].gate) };
                     let (f, m, site) = self.pass_share(zi, s, VACANT, mean, self.p.sigma[VACANT], kind, gate_now, fallback[s]);
                     let f = f * deep[s];
+                    if self.p.diag {
+                        // The gates alone: every face rich enough (the funnel's own reading).
+                        let g = self.pass_share(zi, s, VACANT, 1e9, 0.0, kind, gate_now, fallback[s]).0;
+                        let zd = &mut self.c.zdiag[zi];
+                        zd.f_seeded[s] += vacant * seed[s] * dt;
+                        zd.f_gates[s] += vacant * seed[s] * g * dt;
+                        zd.f_canopy[s] += vacant * seed[s] * f * dt;
+                    }
                     pres[s] = seed[s] * f;
                     cm[s] = m;
                     sites[s] = site;
@@ -1770,6 +1875,15 @@ impl Model {
                 }
                 let none: f64 = pres.iter().map(|p| 1.0 - p).product();
                 let wsum: f64 = weight.iter().sum();
+                if self.p.diag {
+                    let zd = &mut self.c.zdiag[zi];
+                    zd.f_vacant += vacant * dt;
+                    if wsum > 0.0 {
+                        for s in 0..NS {
+                            zd.f_lottery[s] += weight[s] / wsum * dt;
+                        }
+                    }
+                }
                 // The species' persistence weighs the lottery's rate by its winners' shares.
                 let phi = if wsum > 0.0 { (0..NS).map(|s| weight[s] * self.p.establish_phi[s]).sum::<f64>() / wsum } else { 1.0 };
                 let lam = phi * (1.0 - none) / (2.0 * check);
@@ -1788,6 +1902,7 @@ impl Model {
                         self.add_newborns(zi, s, k, organic, if l { 1.0 } else { 0.0 }, 0.0, sites[s], cm[s]);
                         self.c.births_seed[s] += k;
                         self.c.by_zone[zi][0][s] += k;
+                        self.c.zdiag[zi].born_vacant[s] += k;
                     }
                 }
             }
@@ -1831,6 +1946,7 @@ impl Model {
                         self.c.contested[s] += k;
                         self.c.births_seed[s] += k;
                         self.c.by_zone[zi][0][s] += k;
+                        self.c.zdiag[zi].born_cover[s] += k;
                         let organic = package_of(config.species(Species::ALL[s]));
                         self.add_contest(zi, s, k, organic, site, cm);
                         continue;
@@ -1839,11 +1955,13 @@ impl Model {
                     self.z[zi].pool[s] += carried;
                     self.z[zi].bank[s] -= k;
                     self.c.overtopped[c] += k;
+                    self.c.zdiag[zi].overtopped[c] += k;
                     self.c.pairs[c][s] += k;
                     let organic = package_of(config.species(Species::ALL[s]));
                     self.add_newborns(zi, s, k, organic, if l { 1.0 } else { 0.0 }, 0.0, site, cm);
                     self.c.births_seed[s] += k;
                     self.c.by_zone[zi][0][s] += k;
+                    self.c.zdiag[zi].born_cover[s] += k;
                 }
             }
         }
