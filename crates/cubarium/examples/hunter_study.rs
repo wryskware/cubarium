@@ -417,11 +417,17 @@ fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh)
     let all_kills: u64 = Founder::ALL.iter().map(|&f| kills(f)).sum();
     // [sight, hearing, tremor, smell] (SENSES-CORE: every sense in the mask counts).
     let d3 = |x: &[u64; 4], y: &[u64; 4]| format!("{}/{}/{}/{}", y[0] - x[0], y[1] - x[1], y[2] - x[2], y[3] - x[3]);
+    // The hunt funnel (SENSES-CORE): sensed/approached/struck/killed/eaten, on frondgrazers
+    // and on every prey.
+    let funnel = |prey: &[Founder]| {
+        let n = |s: usize| prey.iter().map(|p| b.funnel[i][p.index()][s] - a.funnel[i][p.index()][s]).sum::<u64>();
+        (0..5).map(|s| n(s).to_string()).collect::<Vec<_>>().join("/")
+    };
     let hungry = b.pack_hungry_samples - a.pack_hungry_samples;
     let lead = b.pack_draw_lead_samples - a.pack_draw_lead_samples;
     let follow = b.pack_draw_follow_samples - a.pack_draw_follow_samples;
     format!(
-        "n={},adults={},pups={pups},fullness={fullness:.3},emergency={:.3},hungry={:.3},strikes={},hits={},kills={all_kills},grazer_kills={},chases={},chase_kills={},chases_by_sense={},draws_by_sense={},draw_chases={},hungry_samples={hungry},draw_lead={lead},draw_follow={follow},draw_share={:.3},vh_hours={:.3}",
+        "n={},adults={},pups={pups},fullness={fullness:.3},emergency={:.3},hungry={:.3},strikes={},hits={},kills={all_kills},grazer_kills={},chases={},chase_kills={},chases_by_sense={},draws_by_sense={},draw_chases={},hungry_samples={hungry},draw_lead={lead},draw_follow={follow},draw_share={:.3},vh_hours={:.3},funnel_grazer={},funnel_all={}",
         bodies.len(),
         adults.len(),
         share(w.emergency_ticks),
@@ -436,6 +442,8 @@ fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh)
         b.pack_draw_chases - a.pack_draw_chases,
         if hungry > 0 { (lead + follow) as f64 / hungry as f64 } else { f64::NAN },
         w.alive_ticks as f64 / f64::from(TICK_HZ) / 3600.0,
+        funnel(&[Founder::Browser]),
+        funnel(&Founder::ALL),
     )
 }
 

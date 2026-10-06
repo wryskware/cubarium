@@ -2,7 +2,7 @@
 //! founders' heuristics, for the no-outcome-change readout and the tick's cost.
 //!
 //! ```text
-//! cargo run --release -p cubarium --example senses_probe -- seed=1 ticks=2000 threads=8
+//! cargo run --release -p cubarium --example senses_probe -- seed=1 ticks=2000 threads=8 [lanternjaws=N]
 //! cargo run --release -p cubarium --example senses_probe -- config=config/desktop/terrarium.toml set=PATH=VALUE
 //! ```
 //!
@@ -59,14 +59,27 @@ fn main() {
     );
     eprintln!("founded seed {} ({})", founded.seed, if founded.accepted { "accepted" } else { "NOT accepted" });
     let mut sim = Sim::ambient(founded.world, founded.flora, founded.fauna, SimConfig::experiment());
+    // `lanternjaws=N`: N adult lanternjaws introduced on prey ground at the start (the egg
+    // bank hatches too late for a short probe), so the patrol runs.
+    if let Some(n) = arg(&args, "lanternjaws=").and_then(|s| s.parse::<usize>().ok()).filter(|&n| n > 0) {
+        match sim.with_layers_mut(|w, fl, fa| cubarium_voxel_sim::habitat::introduce_lanternjaws(w, fl, fa, n)) {
+            Ok(ids) => eprintln!("introduced {} lanternjaws", ids.len()),
+            Err(e) => eprintln!("no lanternjaws introduced: {e}"),
+        }
+    }
     let start: Vec<Vec<u64>> = Founder::ALL.iter().map(|&f| ids_of(sim.fauna(), f)).collect();
     let mut seen: Vec<std::collections::BTreeSet<u64>> = start.iter().map(|v| v.iter().copied().collect()).collect();
     let mut born = [0u64; Founder::COUNT];
     let mut spent = std::time::Duration::ZERO;
-    for _ in 0..ticks {
+    let wall = Instant::now();
+    eprintln!("stepping");
+    for t in 0..ticks {
         let t0 = Instant::now();
         sim.step();
         spent += t0.elapsed();
+        if (t + 1) % 200 == 0 {
+            eprintln!("tick {} ms_tick {:.3} bodies {}", t + 1, spent.as_secs_f64() * 1000.0 / (t + 1) as f64, sim.fauna().view().animals.len());
+        }
         for (k, &f) in Founder::ALL.iter().enumerate() {
             for id in ids_of(sim.fauna(), f) {
                 if seen[k].insert(id) {
@@ -92,6 +105,7 @@ fn main() {
             l.hits_by_founder[f.index()],
         );
     }
+    eprintln!("stepped in {:.1} s", wall.elapsed().as_secs_f64());
     println!("ms_tick,{:.3}", spent.as_secs_f64() * 1000.0 / ticks.max(1) as f64);
     println!("pack_chases,{},pack_kills,{}", l.pack_chases, l.pack_chase_kills);
     let t = ticks.max(1) as f64;
