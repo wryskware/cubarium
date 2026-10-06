@@ -74,7 +74,11 @@ use crate::Fauna;
 //     and the capgnawer's tables live), `ScentChannel::Nectar` and `ScentConfig::nectar_per_s`,
 //     `FaunaConfig::light`, the percept record's light reading, failed-visit marks and visit,
 //     the lanternjaw `DarkActive`, the light ledger lines.
-pub const SCHEMA: u32 = 49;
+// 50: S3b WHICH LIGHT PAYS — `Percept::{expect, expect_tick, last_sip}` (the learned
+//     reward expectation per beacon class), `LightConfig::{learn, uv_innate, cyan_innate,
+//     learn_rate, forget_s, expect_min, loom_tau_s}`, the ledger's `light_budget`,
+//     `stalled_visits`, `sipped_visits` and `naive_kills`.
+pub const SCHEMA: u32 = 50;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

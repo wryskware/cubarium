@@ -14,7 +14,8 @@
 //! - **Rows** (stdout, CSV): `row,minute,…` every 10 minutes; `funnel,…` and `light,…` at the
 //!   end; `ms_tick`.
 //!
-//! Lines marked `S3-ONLY` read the S3 ledger; the main build strips them.
+//! Lines marked `S3-ONLY` read the S3 ledger and `S3B-ONLY` the S3b readouts (the time budget,
+//! stalls, naive kills); the main build strips them.
 
 use std::path::Path;
 use std::time::Instant;
@@ -164,4 +165,6 @@ fn main() {
         println!("light,{},visits[flower glowcap lure],{:?},failed,{:?},loom,{},repel,{},beacon,{},scent_led,{}", f.name(), l.beacon_visits[f.index()], l.failed_visits[f.index()], l.loom_samples[f.index()], l.repel_samples[f.index()], l.beacon_samples[f.index()], l.scent_led_samples[f.index()]); // S3-ONLY
     }
     println!("lure_kills,bellwing,{},capgnawer,{}", l.lure_kills[BW.index()], l.lure_kills[CAP.index()]); // S3-ONLY
+    println!("budget,bellwing,{}", cubarium_voxel_fauna::light::LightMode::NAMES.iter().zip(l.light_budget[BW.index()]).map(|(n, c)| format!("{n}={c}")).collect::<Vec<_>>().join(",")); // S3B-ONLY
+    println!("s3b,bellwing,stalled,{},sipped_visits[flower glowcap lure],{:?},naive_killed_by_lanternjaw,{},naive_killed_by_chorister,{}", l.stalled_visits[BW.index()], l.sipped_visits[BW.index()], l.naive_kills[LJ.index()][BW.index()], l.naive_kills[Founder::Chorister.index()][BW.index()]); // S3B-ONLY
 }

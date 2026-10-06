@@ -43,6 +43,28 @@
 //! 6. **smell leads**: up the nectar channel's gradient where it smells it;
 //! 7. otherwise its heuristic (the wander, its flower fan).
 //!
+//! # Learning which light pays (S3b, [`expectation`])
+//!
+//! A flyer keeps a reward expectation per beacon **class** — UV (flowers) and cyan
+//! (glowcaps, lures) — as an offset from the innate value ([`LightConfig::uv_innate`],
+//! [`LightConfig::cyan_innate`]) in its percept record. A sip bout moves the class it came to
+//! (the inspected beacon's, else UV: it sips at a flower) `learn_rate` of the way to 1; a
+//! failed visit moves the visited class the same way to 0; the offset relaxes back with time
+//! constant `forget_s`. A still beacon draws it by **level × expectation**, and a class
+//! expected to pay under `expect_min` is not approached at all. A naive bellwing (both
+//! classes innate) ranks beacons by level alone, as in S3: it falls for a still lure; an
+//! experienced one passes it by. The spatial failed-visit mark stays as it is. Off
+//! ([`LightConfig::learn`]): by level alone.
+//!
+//! # Two repairs (S3b)
+//!
+//! - **A beacon it cannot reach is given up**: a flyer steering for a still beacon short of
+//!   it that has not moved for `visit_s` (wedged under a crown, against a wall) marks the
+//!   place as a failed visit would, without learning from it ([`crate::FaunaLedger::stalled_visits`]).
+//! - **Looming is an approach**: a moving body looms only while it closes on the eye fast
+//!   enough to reach it within [`LightConfig::loom_tau_s`] (time to contact); a grazer
+//!   cropping past or a capgnawer crossing under a hovering bellwing does not.
+//!
 //! # The capgnawer ([`steer_glow`], D2)
 //!
 //! Its fungal chemistry first (its forager's `Chem`): only hungry, with the chemistry under
@@ -67,8 +89,77 @@ pub enum BeaconKind {
     Lure,
 }
 
+/// The learned classes ([`BeaconKind::class`]): UV reflectors and cyan emitters.
+pub const CLASSES: usize = 2;
+/// The UV class (flowers).
+pub const UV: usize = 0;
+/// The cyan class (glowcaps, lures).
+pub const CYAN: usize = 1;
+
+/// A kill's prey counts as **naive** about cyan (the readout
+/// [`crate::FaunaLedger::naive_kills`]) while its cyan expectation is at least this fraction
+/// of the innate value: a readout cut, not ecology.
+pub const NAIVE_FRACTION: f64 = 0.5;
+
+/// **What a flyer's light steer did with a controller sample** (S3b, the time budget,
+/// [`crate::FaunaLedger::light_budget`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LightMode {
+    /// Sipping at its mouth.
+    Sip,
+    /// Evading a looming body.
+    Loom,
+    /// Fed, perched, dropping or blocked: its heuristic's answer.
+    Held,
+    /// Turned from a moving light.
+    Repel,
+    /// Gave up a beacon it stalled short of.
+    Stall,
+    ApproachFlower,
+    ApproachGlowcap,
+    ApproachLure,
+    InspectFlower,
+    InspectGlowcap,
+    InspectLure,
+    /// Led up the nectar smell.
+    Scent,
+    /// Its heuristic's search (wander, its flower fan).
+    Search,
+}
+
+impl LightMode {
+    pub const COUNT: usize = 13;
+    pub const NAMES: [&'static str; 13] = [
+        "sip", "loom", "held", "repel", "stall", "approach_flower", "approach_glowcap", "approach_lure", "inspect_flower", "inspect_glowcap", "inspect_lure", "scent", "search",
+    ];
+
+    fn approach(kind: u8) -> LightMode {
+        match BeaconKind::from_index(kind) {
+            BeaconKind::Flower => LightMode::ApproachFlower,
+            BeaconKind::Glowcap => LightMode::ApproachGlowcap,
+            BeaconKind::Lure => LightMode::ApproachLure,
+        }
+    }
+
+    fn inspect(kind: u8) -> LightMode {
+        match BeaconKind::from_index(kind) {
+            BeaconKind::Flower => LightMode::InspectFlower,
+            BeaconKind::Glowcap => LightMode::InspectGlowcap,
+            BeaconKind::Lure => LightMode::InspectLure,
+        }
+    }
+}
+
 impl BeaconKind {
     pub const COUNT: usize = 3;
+
+    /// Its learned class: [`UV`] for a flower, [`CYAN`] for a glowcap or a lure.
+    pub fn class(self) -> usize {
+        match self {
+            BeaconKind::Flower => UV,
+            BeaconKind::Glowcap | BeaconKind::Lure => CYAN,
+        }
+    }
     pub const ALL: [BeaconKind; 3] = [BeaconKind::Flower, BeaconKind::Glowcap, BeaconKind::Lure];
 
     pub fn index(self) -> usize {
@@ -125,6 +216,46 @@ impl Beacon {
         let den = around + cfg.background_floor.max(0.0);
         if den > 0.0 { b / den } else if b > 0.0 { f64::INFINITY } else { 0.0 }
     }
+}
+
+/// **The reward expectation** of `kind`'s class in the record `p` at tick `now` (module note,
+/// "Learning"): the innate value plus the learned offset, relaxed over `forget_s`.
+pub fn expectation(cfg: &LightConfig, p: &crate::perception::Percept, kind: BeaconKind, now: u64) -> f64 {
+    let c = kind.class();
+    let innate = if c == UV { cfg.uv_innate } else { cfg.cyan_innate };
+    let offset = p.expect[c];
+    if offset == 0.0 {
+        return innate;
+    }
+    let tau = cfg.forget_s * f64::from(crate::TICK_HZ);
+    let dt = now.saturating_sub(p.expect_tick) as f64;
+    let decay = if tau > 0.0 { (-dt / tau).exp() } else { 0.0 };
+    innate + offset * decay
+}
+
+/// Move the class of `kind` in the record of `id` toward `outcome` (1 a sip, 0 a failed
+/// visit) by `learn_rate` (module note); both offsets are brought up to now first.
+fn learn(fauna: &mut Fauna, id: u64, kind: BeaconKind, outcome: f64) {
+    let cfg = fauna.config.light;
+    if !cfg.learn {
+        return;
+    }
+    let now = fauna.tick;
+    let p = fauna.percepts.entry(id).or_default();
+    let now_e = [expectation(&cfg, p, BeaconKind::Flower, now), expectation(&cfg, p, BeaconKind::Glowcap, now)];
+    let innate = [cfg.uv_innate, cfg.cyan_innate];
+    let c = kind.class();
+    let mut e = now_e;
+    e[c] += cfg.learn_rate.clamp(0.0, 1.0) * (outcome - e[c]);
+    p.expect = [e[0] - innate[0], e[1] - innate[1]];
+    p.expect_tick = now;
+}
+
+/// Whether the body `id` is naive about cyan now (the readout cut [`NAIVE_FRACTION`]): a
+/// body with no record is.
+pub(crate) fn naive(fauna: &Fauna, id: u64) -> bool {
+    let cfg = fauna.config.light;
+    fauna.percepts.get(&id).is_none_or(|p| expectation(&cfg, p, BeaconKind::Glowcap, fauna.tick) >= NAIVE_FRACTION * cfg.cyan_innate)
 }
 
 /// The level a beacon of `contrast` is received at `d` metres (module note).
@@ -205,6 +336,13 @@ impl Beacons {
     /// The static beacons as last built.
     pub fn list(&self) -> &[Beacon] {
         &self.list
+    }
+
+    /// A test's hand-placed beacons, held until the plant layer or the terrain changes.
+    #[cfg(test)]
+    pub(crate) fn fixed(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>, list: Vec<Beacon>) {
+        self.stamp = Some((fv.tick, view.terrain_version));
+        self.list = list;
     }
 }
 
@@ -298,7 +436,16 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
             }
             let dy = crate::perception::base_m(o, v) + 0.5 * og.height_m - eye.1;
             let d = (dx * dx + dy * dy + dz * dz).sqrt();
-            if d <= table.loom_m && loom.is_none_or(|(n, _)| d < n) {
+            // S3b: only a body closing in, to reach the eye within `loom_tau_s` (its ground
+            // velocity toward the eye; `dx, dz` run from the eye to it).
+            let tau = fauna.config.light.loom_tau_s;
+            let closing = || {
+                let h = (dx * dx + dz * dz).sqrt();
+                let (vx, vz) = (o.speed_m_s * o.pose.heading_rad.sin(), o.speed_m_s * o.pose.heading_rad.cos());
+                let toward = if h > 0.0 { -(vx * dx + vz * dz) / h } else { 0.0 };
+                toward > 0.0 && d < tau * toward
+            };
+            if d <= table.loom_m && (tau <= 0.0 || closing()) && loom.is_none_or(|(n, _)| d < n) {
                 loom = Some((d, bearing(a.pose.heading_rad, dx, dz)));
             }
         }
@@ -318,7 +465,10 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
         let cfg = fauna.config.light;
         let record = fauna.percepts.get(&a.id).copied().unwrap_or_default();
         let lures = lures(fauna, view);
-        let mut seen: Vec<(f64, f64, Beacon)> = Vec::new();
+        // S3b: a still beacon draws by level × its class's expectation; a class expected to
+        // pay under `expect_min` is passed by. Moving lights repel by level.
+        let weight = |k: BeaconKind| if cfg.learn { expectation(&cfg, &record, k, tick) } else { 1.0 };
+        let mut seen: Vec<(f64, f64, f64, Beacon)> = Vec::new();
         for b in fauna.beacons.list().iter().chain(lures.iter()) {
             if (b.kind == BeaconKind::Lure && b.body == a.id) || (!table.uv && b.kind == BeaconKind::Flower) {
                 continue;
@@ -337,12 +487,16 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
             }
             let level = received(&cfg, b.contrast(&cfg, daylight), d);
             if level >= table.light_min && level > 0.0 {
-                seen.push((level, d, *b));
+                let score = if b.moving { level } else { level * weight(b.kind) };
+                if !b.moving && cfg.learn && weight(b.kind) < cfg.expect_min {
+                    continue;
+                }
+                seen.push((score, level, d, *b));
             }
         }
-        seen.sort_by(|p, q| q.0.total_cmp(&p.0).then(p.1.total_cmp(&q.1)));
+        seen.sort_by(|p, q| q.0.total_cmp(&p.0).then(p.2.total_cmp(&q.2)));
         let (mut still, mut moving): (Option<(f64, Beacon)>, Option<(f64, Beacon)>) = (None, None);
-        for &(level, d, b) in seen.iter().take(MAX_LIGHT_RAYS) {
+        for &(_, level, d, b) in seen.iter().take(MAX_LIGHT_RAYS) {
             if (b.moving && moving.is_some()) || (!b.moving && still.is_some()) {
                 continue;
             }
@@ -459,8 +613,24 @@ pub(crate) fn steer_flyer(
     }
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
-    // 1. A sip at its mouth stands: an inspection that ends in a sip is rewarded.
+    let budget = |fauna: &mut Fauna, m: LightMode| fauna.ledger.light_budget[founder.index()][m as usize] += 1;
+    // 1. A sip at its mouth stands: an inspection that ends in a sip is rewarded, and (S3b) a
+    //    new sip bout teaches its class — the inspected beacon's, else UV (a flower).
     if asked.feed > 0.5 && asked.forward == 0.0 && asked.turn == 0.0 && asked_lift == 0.0 {
+        budget(fauna, LightMode::Sip);
+        let tick = fauna.tick;
+        let gap = cubarium_voxel::ticks_at_least_one(fauna.config.light.visit_s);
+        let p = fauna.percepts.entry(a.id).or_default();
+        let bout = p.last_sip == 0 || tick.saturating_sub(p.last_sip) > gap;
+        p.last_sip = tick;
+        let visited = p.visit.active.then_some(p.visit.kind);
+        if bout {
+            let kind = visited.map_or(BeaconKind::Flower, BeaconKind::from_index);
+            if let Some(k) = visited {
+                fauna.ledger.sipped_visits[founder.index()][usize::from(k).min(BeaconKind::COUNT - 1)] += 1;
+            }
+            learn(fauna, a.id, kind, 1.0);
+        }
         rewarded(fauna, a.id);
         return None;
     }
@@ -469,6 +639,7 @@ pub(crate) fn steer_flyer(
     // 2. A looming shadow repels: away and up.
     if p.light.looming > 0.0 {
         fauna.ledger.loom_samples[founder.index()] += 1;
+        budget(fauna, LightMode::Loom);
         rewarded(fauna, a.id);
         return Some((Actions { forward: 1.0, turn: away(p.light.loom_bearing), feed: 0.0 }, 1.0));
     }
@@ -476,12 +647,14 @@ pub(crate) fn steer_flyer(
     let fb = a.founder_state.feedback;
     let refused = fb.attempted_equivalent > 0.0 && fb.delivered_equivalent / fb.attempted_equivalent < fauna.config.teachers.motor_refused;
     if !a.eating || a.mobility.mode != MobilityMode::Fly || a.mobility.falling || refused {
+        budget(fauna, LightMode::Held);
         return None;
     }
     let cfg = fauna.config.light;
     // 4. A moving light repels when it outshines the brightest still one.
     if p.light.repel_level > 0.0 && p.light.repel_level >= p.light.beacon_level {
         fauna.ledger.repel_samples[founder.index()] += 1;
+        budget(fauna, LightMode::Repel);
         return Some((Actions { forward: 1.0, turn: away(p.light.repel_bearing), feed: 0.0 }, asked_lift));
     }
     // 5. A still light attracts.
@@ -492,15 +665,31 @@ pub(crate) fn steer_flyer(
         let lift = (cfg.lift_per_m * (p.light.beacon_y - 0.5 * h - a.pose.y_m)).clamp(-1.0, 1.0);
         let want = dx.atan2(dz);
         if dh <= cfg.visit_m {
+            let kind = p.light.beacon_kind;
             if let Inspection::Failed = inspect(fauna, i, ring) {
+                learn(fauna, a.id, BeaconKind::from_index(kind), 0.0);
+                budget(fauna, LightMode::inspect(kind));
                 return None;
             }
             fauna.ledger.beacon_samples[founder.index()] += 1;
+            budget(fauna, LightMode::inspect(kind));
             let mut act = crate::hunt::head(a.pose.heading_rad, want, 0.0, 1.0);
             act.forward = 0.0;
             return Some((act, lift));
         }
+        // S3b: short of it and not moving for `visit_s` — wedged — it gives the beacon up.
+        if a.still_ticks >= cubarium_voxel::ticks_at_least_one(cfg.visit_s) {
+            let until = fauna.tick + cubarium_voxel::ticks_at_least_one(cfg.mark_s);
+            let rec = fauna.percepts.entry(a.id).or_default();
+            rec.mark(p.light.beacon_x, p.light.beacon_z, until);
+            rec.visit = Visit::default();
+            rec.light.beacon = false;
+            fauna.ledger.stalled_visits[founder.index()] += 1;
+            budget(fauna, LightMode::Stall);
+            return None;
+        }
         fauna.ledger.beacon_samples[founder.index()] += 1;
+        budget(fauna, LightMode::approach(p.light.beacon_kind));
         let forward = if dh <= cfg.near_m { cfg.near_forward } else { 1.0 };
         return Some((crate::hunt::head(a.pose.heading_rad, want, forward, 1.0), lift));
     }
@@ -509,9 +698,11 @@ pub(crate) fn steer_flyer(
         let s = fauna.scent.read_below(view, a.pose.x, a.pose.z, a.pose.y_m)[ScentChannel::Nectar.index()];
         if s.level >= table.smell_min && (s.gx != 0.0 || s.gz != 0.0) {
             fauna.ledger.scent_led_samples[founder.index()] += 1;
+            budget(fauna, LightMode::Scent);
             return Some((crate::hunt::head(a.pose.heading_rad, s.gx.atan2(s.gz), 1.0, 0.0), asked_lift));
         }
     }
+    budget(fauna, LightMode::Search);
     None
 }
 

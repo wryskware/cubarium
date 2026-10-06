@@ -839,6 +839,34 @@ pub struct LightConfig {
     /// reads, `cue / (cue + chem_saturation)`, of the capgnawer's fungal field at its receptor
     /// — is below this. 0.05.
     pub glow_scent_gate: f64,
+    /// **Which light pays** (S3b, [`crate::light`] "Learning"): a flyer with a light sense
+    /// keeps a reward expectation per beacon class — UV (flowers) and cyan (glowcaps, lures)
+    /// — and is drawn to a still beacon by its level × its class's expectation. Off: by its
+    /// level alone (S3). A switch, no registry row. On.
+    pub learn: bool,
+    /// The **innate** expectation (a probability of reward, `0..=1`) of a UV reflector: what
+    /// a naive body expects, and what a learned one relaxes back to. 0.5: either colour may pay
+    /// (pollinators come with a colour bias but are drawn to both; Giurfa et al. 1995).
+    pub uv_innate: f64,
+    /// The innate expectation of a cyan emitter. 0.5, like UV: a naive bellwing is drawn to
+    /// any bright thing, so the still lure works on the young and the inexperienced.
+    pub cyan_innate: f64,
+    /// Each outcome moves its class's expectation this fraction of the way to it: 1 after a
+    /// sip, 0 after a failed visit (Rescorla–Wagner). 0.3: bees and bumblebees learn a
+    /// colour–reward pairing within a few visits (Menzel 1985; Dukas & Real 1991).
+    pub learn_rate: f64,
+    /// A learned expectation relaxes back toward innate with this time constant, seconds
+    /// (the offset shrinks by e each `forget_s`). 3600 s: half the 2 h world day — a colour
+    /// memory that lasts days at life scale (Menzel 1999), compressed like the day.
+    pub forget_s: f64,
+    /// A still beacon whose class is expected to pay less than this is not approached at all.
+    /// 0.1.
+    pub expect_min: f64,
+    /// **Looming is an approach** (S3b): a moving body within `loom_m` looms only while it
+    /// closes in fast enough to reach the eye within this, seconds — distance over closing
+    /// speed, the time-to-contact an insect's looming detector reads (Gabbiani et al. 1999;
+    /// Card & Dickinson 2008). 0: any moving body within `loom_m` looms (S3). 1 s.
+    pub loom_tau_s: f64,
 }
 
 impl Default for LightConfig {
@@ -858,6 +886,13 @@ impl Default for LightConfig {
             near_m: 1.0,
             near_forward: 0.3,
             glow_scent_gate: 0.05,
+            learn: true,
+            uv_innate: 0.5,
+            cyan_innate: 0.5,
+            learn_rate: 0.3,
+            forget_s: 3600.0,
+            expect_min: 0.1,
+            loom_tau_s: 1.0,
         }
     }
 }

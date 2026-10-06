@@ -165,22 +165,25 @@ fn smell_leads_and_brightness_steers() {
 
 // ------------------------------------------------------- the looming shadow
 
-/// A body of another lineage moving within the bellwing's `loom_m`, on its right: it turns
-/// away and climbs. The same body still, or moving just beyond `loom_m`, is no shadow.
+/// A body of another lineage moving within the bellwing's `loom_m`, on its right, coming at
+/// it (S3b: closing in within `loom_tau_s`): it turns away and climbs. The same body still,
+/// or moving just beyond `loom_m`, is no shadow.
 #[test]
 fn a_looming_shadow_repels() {
     let world = clock_off(7);
     let flora = Flora::new(FloraConfig::default());
     let loom_m = FaunaConfig::default().founder(BW).senses.loom_m;
+    let tau = config().light.loom_tau_s;
     let arm = |dx: f64, moving: bool| {
         let mut fauna = Fauna::new(config());
         let bw = bellwing(&mut fauna, &world, 2.0, LANE_Z, 0.1, NORTH);
         let g = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
-        place(&mut fauna, g, 2.0 + dx, LANE_Z, NORTH);
+        place(&mut fauna, g, 2.0 + dx, LANE_Z, WEST);
         drive(&mut fauna, g, 0.0, false);
         let a = animal_mut(&mut fauna, g);
         a.pose.y_m = SURFACE_M;
         a.still_ticks = if moving { 0 } else { u64::MAX / 2 };
+        a.speed_m_s = if moving && tau > 0.0 { 2.0 * (dx + 1.0) / tau } else { 0.0 };
         let got = steer(&mut fauna, &world, &flora, bw, 1.0);
         (got, fauna.ledger.loom_samples[BW.index()])
     };

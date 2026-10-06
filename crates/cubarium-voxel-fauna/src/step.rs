@@ -2539,9 +2539,13 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     let rule = body::effective_config(&fauna.config, &fauna.animals[j]).reproduction;
     fail_gestation(fauna, j, &rule);
     // S3: a kill of a prey drawn to a lure.
-    if let (Departure::Killed { .. }, Some(f)) = (cause, fauna.animals[j].founder) {
+    if let (Departure::Killed { by }, Some(f)) = (cause, fauna.animals[j].founder) {
         if crate::light::drawn_to_lure(fauna, fauna.animals[j].id) {
             fauna.ledger.lure_kills[f.index()] += 1;
+        }
+        // S3b: a prey with a light sense still naive about cyan.
+        if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id) {
+            fauna.ledger.naive_kills[by.index()][f.index()] += 1;
         }
     }
     let a = fauna.animals.remove(j);
@@ -4284,6 +4288,9 @@ mod senses_core_tests;
 #[cfg(test)]
 #[path = "light_tests.rs"]
 mod light_tests;
+#[cfg(test)]
+#[path = "light_learning_tests.rs"]
+mod light_learning_tests;
 
 #[cfg(test)]
 #[path = "ground_response_tests.rs"]

@@ -2813,6 +2813,19 @@ pub struct FaunaLedger {
     /// still beacon), by prey lineage.
     #[serde(default)]
     pub lure_kills: [u64; Founder::COUNT],
+    /// **S3b readouts** ([`crate::light`]): a flyer's controller samples by what its light
+    /// steer did ([`crate::light::LightMode`]), the time budget; approaches given up because
+    /// the body stalled short of the beacon; inspections that ended in a sip, by beacon kind;
+    /// and kills, `[killer][prey]`, of a prey still naive about cyan (its cyan expectation at
+    /// least half its innate value) when it died.
+    #[serde(default)]
+    pub light_budget: [[u64; light::LightMode::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub stalled_visits: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub sipped_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub naive_kills: [[u64; Founder::COUNT]; Founder::COUNT],
     /// Lanternjaws that left a carcass to a body that hunts them (roster R3, the yield).
     #[serde(default)]
     pub carcass_yields: u64,

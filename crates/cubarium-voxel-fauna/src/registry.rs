@@ -588,6 +588,13 @@ fn knob_rows() -> Vec<Row> {
         lk("near_m", "m", nonneg, "inside this of a beacon a flyer slows to near_forward"),
         lk("near_forward", "fraction", fraction, "a flyer's forward effort near a beacon"),
         lk("glow_scent_gate", "chem response", fraction, "a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this").search(0.0, 0.5),
+        // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming.
+        lk("uv_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a UV reflector (flowers); learned ones relax back to it"),
+        lk("cyan_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures)"),
+        lk("learn_rate", "fraction", fraction, "S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way").search(0.05, 1.0),
+        lk("forget_s", "s", pos, "S3b: a learned expectation relaxes back to innate with this time constant").search(300.0, 21600.0).log(),
+        lk("expect_min", "probability", fraction, "S3b: a still beacon whose class is expected to pay less than this is not approached").search(0.0, 0.5),
+        lk("loom_tau_s", "s", nonneg, "S3b: a moving body looms only while it would reach the eye within this (distance / closing speed; 0: any moving body)").search(0.2, 3.0),
     ]);
 
     // `fauna.founding.*`: the seeder's founders.

@@ -1356,7 +1356,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1666 rows)
+**`fauna.*`** (1672 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -3012,6 +3012,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.light.near_m` | 1.0 | m | [0, inf) |  | - | placeholder | inside this of a beacon a flyer slows to near_forward |
 | `fauna.light.near_forward` | 0.3 | fraction | [0, 1] |  | - | placeholder | a flyer's forward effort near a beacon |
 | `fauna.light.glow_scent_gate` | 0.05 | chem response | [0, 1] | 0–0.5 | - | placeholder | a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this |
+| `fauna.light.uv_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a UV reflector (flowers); learned ones relax back to it |
+| `fauna.light.cyan_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures) |
+| `fauna.light.learn_rate` | 0.3 | fraction | [0, 1] | 0.05–1 | - | placeholder | S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way |
+| `fauna.light.forget_s` | 3600.0 | s | (0, inf) | 300–21600 log | - | placeholder | S3b: a learned expectation relaxes back to innate with this time constant |
+| `fauna.light.expect_min` | 0.1 | probability | [0, 1] | 0–0.5 | - | placeholder | S3b: a still beacon whose class is expected to pay less than this is not approached |
+| `fauna.light.loom_tau_s` | 1.0 | s | [0, inf) | 0.2–3 | - | placeholder | S3b: a moving body looms only while it would reach the eye within this (distance / closing speed; 0: any moving body) |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
 | `fauna.founding.starter_litter_organic` | 0.2 | organic units | [0, inf) | 0.05–1 | - | placeholder | leaf litter laid under each seeded littershredder |
