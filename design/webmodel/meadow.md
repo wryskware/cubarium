@@ -7,9 +7,9 @@ decision_refs: []
 # A lasting niche for grass: the meadow candidates, in the model first
 
 **Status:** exploration, not canon. The levers are scenario levers of the whole-web model's
-plant half (`crates/cubarium-webmodel/src/flora/meadow.rs`); none is a sim knob and no sim
-code changed. The long batch is launched (below); its table is the evidence this document
-still owes.
+plant half (`crates/cubarium-webmodel/src/flora/meadow.rs`) or sim knobs moved through `set=`;
+no sim code changed. Round 1's batch is read (§6). Round 2 (§7 the diagnosis, §8 the levers and
+their batch) is launched; its table is the evidence still owed.
 
 **The ask (Wrysk, 2026-10-05):** "i want vault trees to spread for sure. and definitely groves
 of lanternberries. i guess itd be nice if we came up with a way for grass to have its own
@@ -157,7 +157,7 @@ Each lever does what it says. Two findings already:
   needs a lever that limits woody recruitment on bare ground too (a, b, e).
 - **Thatch (c) only delays**, as Astra predicted for a lowered `overtop_per_check`.
 
-## 5. The batch (launched, not waited on)
+## 5. Round 1's batch
 
 - **Where:** eidolon, `~/webmodel-meadow/` (source at ac45982d, its own `target/`), 10 runs at a
   time at `nice -n 10`. Script `~/webmodel-meadow/run.sh` (copy in the session scratchpad
@@ -191,11 +191,152 @@ Each lever does what it says. Two findings already:
    zones or thin-soil share, not sit as a thin mix everywhere.
 4. Fill section 6 with the table, then pick the smallest set for Wrysk and Astra.
 
-## 6. Results
+## 6. Round 1's results (300 days, seeds 5, 6, 1, 30 arms)
 
-Pending the batch.
+Table: session scratchpad `meadow/batch/runs/table.txt`. No arm met the target on every seed.
+- **s5 only** keeps a meadow: the sward levers 0.25–0.29, but vaulttree then loses the summit to
+  grass (forest 0.00); `contest25+crop30+life40` 0.15 with forest 0.12, and 0.17 from rarity;
+  dry spells 0.12–0.13 with forest 0.12.
+- **s6:** meadow ≤ 0.09 in every arm. **s1:** 0.00 in every arm; stonecushion holds 0.85–0.99.
+- The rarity arms on s6 and s1 end at 0.
 
-## 7. What each lever would mean as a sim change
+## 7. Round 2: the diagnosis (why grass vanishes on s6 and s1, and why it cannot return)
+
+Runs: `contest=sim` (the sim's CONTEST, main d9a1bb1b) from m370, 60 days, seeds 5, 6, 1, base and
+`rare=springturf:0.05`, with the per-zone turf ledger (`diag=springturf`, `model::ZoneDiag`) and
+the census's gate shares (`gates=springturf`). Outputs: session scratchpad `meadow2/diag/`;
+summary `meadow2/tzsum.py FILE [d0:d1,..]`.
+
+**Where turf can be at all.** Its terrain light gate (`establish_light_min` 0.75) passes on no
+face of the dim, mid or bright drained zones (their sky is under 0.75 by the zone bands) and on
+every face of open and summit drained. Runners read the same gates. So the meadow's ceiling is
+the open + summit share of the drained ground: 0.24 + 0.14 (s5), 0.19 + 0.23 (s6), 0.20 + 0.17
+(s1). Vaulttree's gate (0.9) passes only on the summit. **If the forest keeps the summit, a
+meadow can hold at most the open-drained share: 0.24, 0.19, 0.20.** The 0.20–0.30 target asks
+for nearly all of open-drained on every seed, and more than all of it on s6 and s1.
+
+**Water on that ground.** Share of open / summit drained faces where turf's water gates pass,
+per census weather state:
+
+| seed | open-drained | summit-drained |
+|---|---|---|
+| s5 | 0.12 0.48 0.99 0.86 0.91 0.88 | 0.00 0.22 1.00 0.84 0.94 0.97 |
+| s6 | 0.20 0.03 0.77 0.95 | 0.08 0.00 0.81 1.00 |
+| s1 | 0.09 0.32 0.19 | 0.00 0.10 0.02 |
+
+The pore gate is `establish_water_min` 0.3. The sim's own stand law (`flora_model physio`, the
+sim's `study::probe`, N 0.87, held 3 days) keeps a turf adult alive down to water 0.15 at light
+0.8–0.95 and 0.2 at light 0.6, and a newborn down to 0.15–0.17 at light 0.8–0.95. Below about
+0.14 it starves, and it cures only under `cure_water` 0.1 (and dies past `cure_max_s`, 1.83
+days): between 0.10 and 0.14 it neither pays nor cures. Stonecushion lives at every water down to
+0.12 at light 0.5 (maintenance 8.2e-5 /s against turf's 6.6e-4).
+
+**Propagule supply is not the bottleneck while turf has donors.** On s6 open-drained in the
+first 10 days turf sent 7.1e5 seeds, 5.9e5 landed there (1.9e5 from its own zone); every vacant
+face is seeded (seeded share 1.00); its bank peaks at 2.2e5. After the local turf is gone, seed
+from the zones that keep turf (summit-wet, 70 stands at day 60) still lands: 2.0e4 on open and
+4.6e4 on summit drained over days 30–60, the bank never under a few hundred. The bank's life
+(about 4.6 days, attrition and age together) does not bind: there is always seed, and no face
+to take.
+
+**Establishment narrows twice.** Over days 0–10 on vacant faces (mean faces by day):
+
+| seed, zone | vacant | seeded | gates pass | canopy pass | turf's lottery share |
+|---|---|---|---|---|---|
+| s5 open | 38 | 38 | 2.3 | 2.0 | 0.40 |
+| s5 summit | 54 | 54 | 3.4 | 0.6 | 0.25 |
+| s6 open | 101 | 101 | 10.7 | 2.3 | 0.24 |
+| s6 summit | 78 | 78 | 1.9 | 0.04 | 0.00 |
+| s1 open | 328 | 328 | 0.0 | 0.0 | 0.00 |
+| s1 summit | 144 | 144 | 1.2 | 1.2 | 0.24 |
+
+The water gate fails on 90–100 % of seeded vacant faces; the canopy gate (the newborn's income
+under the woody crowns near it) then cuts the s6 rest 5–50×.
+
+**Survival: turf turns over fast and loses its gaps.** Turf stands starve at about the rate they
+are born: s6 open-drained, days 0–10, 3,542 starved (and 207 as understorey) against 3,303
+births; s5 open-drained, days 30–60, 5,818 against 5,282. Each death is a vacant face entered in
+the lottery woody seed also plays. Cumulative vacant-face births on s6 open-drained by day 60:
+turf 2,411, velvetpad 1,073, lanternberry 1,092, stonecushion 698. Lanternberry also comes up
+through the turf as contested recruits (s6, world, 40 days with `ewater`: 2,558 contested, 1,027
+escaped) and its adults then shade the turf around them. **No woody adult ever leaves** (no
+lifespan in the sim), so every face a woody stand wins is lost for good: on s6 open-drained ends
+100 % lanternberry and summit 99 % vaulttree, with 0–4 vacant faces.
+
+**Rarity.** From m370 the turf recovers from 5 % at once while the ground is open (s6 open 45 →
+932 stands in 5 days, s5 open 60 → 1,389): the rarity arms do not fail on recovery from rarity
+but on the same late takeover as base. A real invasion test needs rarity in the late community
+(round 2's `rare=springturf:0.05:150`).
+
+**Verdict per seed.**
+- **s6: the ground itself, through an absorbing woody occupancy, and establishment.** The
+  turf's ground is open and summit drained; lanternberry takes open and vaulttree the summit,
+  through turnover gaps (the lottery) and contested recruits, and never vacates. The turf's
+  water gate (0.3, twice its newborn's survival water) and the canopy gate leave it few of the
+  gaps that do open. Not propagule supply, not the bank's life.
+- **s5: the same, slower.** Open-drained keeps 0.52–0.74 turf at day 40, but the summit goes to
+  vaulttree by day 20.
+- **s1: the ground (water), and stonecushion there is right under the sim's rules.** No woody
+  plant competes on s1's open and summit ground (lanternberry ≤ 109 vacant-face births on open,
+  40 on summit). The turf starves there without shade (open-drained, days 0–10: 3,143 starved, 24
+  drought), because the root-box water sits in the band where it neither pays nor cures (open
+  0.19–0.30, summit 0.12–0.24 in the three states), and its establishment gate passes on 0 % of
+  open-drained in 30 days. Stonecushion lives at any of these waters at an eighth of the upkeep.
+  The sim agrees in direction: its own s1 soak lost turf 2,394 → 1,719 and gained stonecushion
+  106 → 1,112 from m370 to m1090. A meadow on s1 belongs only on its wetter open faces; the
+  model's three s1 weather states are all dry on the high ground (flora.md: s1 has 3 snapshots),
+  so the model may understate them. Forcing a 0.20 meadow on s1 would mean overriding its
+  ground.
+
+## 8. Round 2: levers and batch
+
+Every arm runs `contest=sim`. Levers that answer the diagnosis, and two that test the
+supply hypothesis and should do nothing:
+
+| lever | flag | sim meaning | answers | literature |
+|---|---|---|---|---|
+| turf establishment water 0.3 → 0.2 | `set=flora.springturf.establish_water_min=0.2` | a turf seed comes up where its root box holds ≥ 0.2 available water; its newborn's measured break-even at its light gate is 0.15–0.17 | establishment: the water gate fails on 90–100 % of seeded vacant faces | grasses recruit on small rain pulses, woody seedlings need sustained moisture (Wilson & Witkowski 1998, *J. Arid Environ.* 38:541); tree recruitment in semi-arid savanna is limited to high-rainfall years (Kraaij & Ward 2006, *Plant Ecol.* 186:235); Astra §1A |
+| turf runners | `set=flora.springturf.clonal_share=0.6 set=flora.springturf.runner_reach=3` | more of a turf's packages go to runners (0.4 → 0.6) and they reach 3 voxels (2) | survival: turnover gaps lost to woody seed in the lottery | small gaps in grassland are closed mainly by vegetative ingrowth from neighbours (Bullock et al. 1995, *Oikos* 72:273) |
+| turf seed-bank life ×4 | `set=flora.springturf.seed_max_age_s=210784 set=flora.springturf.seed_attrition_per_s=4.74425e-6` | a banked turf seed lives four times as long (about 18 days, not 4.6) | **control:** the diagnosis says the bank does not bind | transient grass seed banks (Thompson & Grime 1979, *J. Ecol.* 67:893); Astra §1C |
+| g, seed rain | `rain=springturf:1` | one turf seed per face per day into every open-sky drained soil zone, from outside (grazers' burrs from meadows elsewhere) | **control:** supply | adhesive dispersal by grazers links grasslands (Couvreur et al. 2004, *Appl. Veg. Sci.* 7:229) |
+| lanternberry and bloomcrown lifespan 40 days, vaulttree immortal | `life=lanternberry:40,bloomcrown:40` | round 1's d, kept off the forest | the absorbing woody occupancy of open ground, while the forest keeps the summit | gap-phase mosaic (Watt 1947) |
+| round 1's best | `crop=30`, `dry=10:0.5:0.2:5` | as §3 | woody recruitment through and beside the sward | §2 |
+
+**Arms** (23, `batch/arms.txt`): base; bank4; rain1; run; ew; ew+run; ew+run+bank4+rain1;
+L40; ew+run+L40; crop30+L40; ew+run+crop30+L40; crop30+L40+dryA; ew+run+crop30+L40+dryA;
+ew+run+crop30+life40+dryA (vaulttree mortal too: the summit comparison); ew+run+crop100+L40;
+ew+dryA; all (every lever); rarity at m370 (`rare0-`) on base and ew+run+crop30+L40+dryA;
+rarity at day 150 (`rare150-`) on base, ew+run+crop30+L40, ew+run+crop30+L40+dryA and all.
+
+**40-day probe** (`meadow2/probe1/`, same setup): `ew` lifts s1 open-drained turf from 0.02 to
+0.22 at day 40 and holds s6 at 0.73 to day 20, but s6 still falls to 0 by day 40 (lanternberry
+escapes through the turf and shades it out). Runners alone change little. So turf's own levers
+widen its window; only the woody levers can stop the absorbing takeover.
+
+**Where it runs:** eidolon, `~/webmodel-meadow2/batch/run.sh` (copy: session scratchpad
+`meadow2/batch/`), source branch `meadow2` at 4a0a4fc2 in `~/webmodel-meadow2/src`, its own
+target `~/webmodel-meadow2/target`, 16 runs at a time at `nice -n 10`, about 11 min a run (69
+runs, about an hour). Starts: the census files `census-terrarium/` and `census-ewater20/` beside
+`~/webmodel-meadow/ckpt/*` (the loader takes the one nearest the run's config).
+- Outputs: `~/webmodel-meadow2/batch/runs/ARM-sSEED.txt` (with `tz` lines), the log `runs/log`,
+  the table `runs/table.txt`, the marker **`~/webmodel-meadow2/batch/runs/DONE`**
+  (`runs/FAILED` beside it if the build failed).
+- The table (`table.py`) is round 1's with columns m@150, openT (turf share of open-drained),
+  sumV (vaulttree share of summit-drained), sumT, and a second check, **niche**: meadow ≥ 0.10
+  of drained and ≥ 0.40 of open-drained, grove and forest ≥ 0.05, on every seed.
+
+**What is left once DONE lands:**
+1. Read `table.txt`. Expect the controls (bank4, rain1) to match base; if they do not, the
+   diagnosis is wrong about supply.
+2. Which arms keep turf on open-drained **and** vaulttree on the summit (openT, sumV) on s5 and
+   s6. The L40 arms against life40: the summit question.
+3. The rare150 arms against their counterparts' m@150 and end: invasion when rare into the late
+   community. An arm that holds grass only when it starts common is not a niche.
+4. s1: whether `ew` gives a meadow on s1's open-drained, and whether stonecushion then still
+   holds the summit. Judge it against the s1 verdict above, not the 0.20 target.
+5. Per-zone ledgers (`tz` lines, `meadow2/tzsum.py`) for the best arm: what still kills the turf.
+
+## 9. What each lever would mean as a sim change
 
 | | rule or role it adds | presets it touches | fauna? |
 |---|---|---|---|
@@ -204,7 +345,11 @@ Pending the batch.
 | c | thatch on overtopping through turf (`overtop_per_check / (1 + g · fill)`), and woody juveniles reading the topsoil layer the turf drinks from | flora species knobs (`overtop_thatch`, `juvenile_sward_draw`) | no |
 | d | a stand lifespan: a birth tick on `Stand` (schema bump: fresh worlds, no migration), a per-species median life with spread, a new `DeathCause::Aged` | flora species knobs (`lifespan_median_s`, spread) | no |
 | e | a rooting-soil requirement: a woody newborn (and, per Astra, a growing woody stand, as its size asks more) needs N soil voxels under its face; a new gate in `establishment_gates_with_sky` beside `pore_ok` | flora species knob (`root_soil_min`) | no |
-| f | a recruit stage: a woody seedling coming up through turf becomes a recruit beside the turf (a second place on the face, as the fungus has its own `FaceLayer`), shaded by it and drinking its water, and overtops it only on escape | flora species knobs (`recruit_escape`, the sward's shade over a recruit) | no (unless a is taken too: the crop then reaches recruits) |
+| f | a recruit stage: a woody seedling coming up through turf becomes a recruit beside the turf (a second place on the face, as the fungus has its own `FaceLayer`), shaded by it and drinking its water, and overtops it only on escape | flora species knobs (`recruit_escape`, the sward's shade over a recruit) | no (unless a is taken too: the crop then reaches recruits). **Done on main** (CONTEST, flora schema 31) |
+| ew | none: springturf `establish_water_min` 0.3 → 0.2 in the presets | `[flora.springturf]` | no |
+| runners | none: springturf `clonal_share`, `runner_reach` | `[flora.springturf]` | no |
+| bank | none: springturf `seed_max_age_s`, `seed_attrition_per_s` | `[flora.springturf]` | no |
+| g | seed carried in by grazers: the sim's burrs already ride animals; the lever stands for burrs from meadows beyond the zone. In the sim it would be a fauna-side drop rate where animals rest, not a flora rule | fauna burr knobs | **yes** |
 
 ## Roles (balance through roles)
 
@@ -213,3 +358,5 @@ Pending the batch.
 | woody occupancy of drained ground, absorbing (no adult ever leaves) | a lifespan (d) or a disturbance role; Astra suggests a large browser damaging crowded woody patches, deferred until the recruitment levers are measured |
 | woody recruitment on the turf's own turnover gaps | the frondgrazer cropping seedlings (a); dry spells (b); thin soil (e) |
 | the turf, gone by about day 25 on s5/s6 | a refuge it wins: thin soil (e), a grazing lawn (a), or recurring drought (b) |
+| woody seedlings coming up through the turf (contested recruits; s6, 40 days: 2,558, 1,027 escaped) | the frondgrazer cropping recruits in the sward (a); Astra's browsing filter |
+| stonecushion on s1's dry high ground | none needed: the ground is too dry for turf under its own rules (§7) |
