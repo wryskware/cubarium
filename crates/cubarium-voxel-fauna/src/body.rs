@@ -508,6 +508,10 @@ pub struct FounderPhysiology {
     /// `live` (the Veilhound in S1); inert for the others until S2 and S3.
     #[serde(default)]
     pub senses: SenseTable,
+    /// **Its ground response** (S2, [`crate::Vigilance`]): what its heuristics do with what its
+    /// live table senses. Inert while its table is not live.
+    #[serde(default)]
+    pub vigilance: crate::Vigilance,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -576,6 +580,30 @@ pub struct Pack {
     /// An adult that wants a rest walks home to its den first, for at most this long;
     /// after it, it rests where it is, seconds. A placeholder.
     pub home_give_up_s: f64,
+    /// **The stalk** (S2, [`crate::vigil::stalk`]): closing on its prey beyond `commit_m`, a
+    /// member walks no faster than keeps its emission under this fraction of the prey's
+    /// hearing floor; 0 does not stalk. 0.7.
+    #[serde(default = "pack_stalk_margin")]
+    pub stalk_margin: f64,
+    /// ...and rushes within this of it, metres. 2.5.
+    #[serde(default = "pack_commit_m")]
+    pub commit_m: f64,
+    /// ...and stands still while a prey it sees is in a scan pause (a switch, no registry
+    /// row).
+    #[serde(default = "pack_stalk_freeze")]
+    pub stalk_freeze: bool,
+}
+
+fn pack_stalk_margin() -> f64 {
+    Pack::CHORISTER.stalk_margin
+}
+
+fn pack_commit_m() -> f64 {
+    Pack::CHORISTER.commit_m
+}
+
+fn pack_stalk_freeze() -> bool {
+    Pack::CHORISTER.stalk_freeze
 }
 
 fn pack_route_refresh_s() -> f64 {
@@ -609,6 +637,9 @@ impl Pack {
         den_search_m: 8.0,
         follow_radius_m: 3.0,
         home_give_up_s: 600.0,
+        stalk_margin: 0.7,
+        commit_m: 2.5,
+        stalk_freeze: true,
     };
 }
 
@@ -1129,6 +1160,7 @@ impl FounderPhysiology {
         let mut p = FounderPhysiology::placeholder_table(founder);
         p.burr_coat = burr_coat_of(founder);
         p.senses = senses_of(founder);
+        p.vigilance = crate::vigil::vigilance_of(founder);
         p
     }
 
@@ -1229,6 +1261,7 @@ impl FounderPhysiology {
                 gut_seeds: None,
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
+                vigilance: crate::Vigilance::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1296,6 +1329,7 @@ impl FounderPhysiology {
                 gut_seeds: None,
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
+                vigilance: crate::Vigilance::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1383,6 +1417,7 @@ impl FounderPhysiology {
                 gut_seeds: None,
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
+                vigilance: crate::Vigilance::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -5021,6 +5056,12 @@ pub struct SenseTable {
     /// The scent channel its body lays ([`crate::ScentChannel`]); `None` lays none (a switch,
     /// no registry row).
     pub scent: Option<crate::ScentChannel>,
+    /// **Head down** (S2): while it crops between scan pauses ([`crate::Vigil::head_down`])
+    /// sight reaches this fraction of its range: the blind window. 1 is no change.
+    pub feeding_sight_fraction: f64,
+    /// At most this many of its own lineage are weighed per remote sensing, nearest first
+    /// (S2: a herd hears its neighbours bolt). 1.
+    pub kin_tracks: u32,
 }
 
 impl Default for SenseTable {
@@ -5038,6 +5079,8 @@ impl Default for SenseTable {
             tremor_min: 0.0,
             smell_min: 0.0,
             scent: None,
+            feeding_sight_fraction: 1.0,
+            kin_tracks: 1,
         }
     }
 }
@@ -5063,7 +5106,9 @@ impl SenseTable {
 /// the levels the scent field holds at the review's distances from a still adult source at
 /// steady state on open ground ([`crate::scent`]'s calibration note).
 ///
-/// Only the Veilhound's table is **live** in S1; the others are read by no heuristic yet.
+/// The Veilhound's table is **live** since S1; S2 turns on the frondgrazer's, the loftstrider's,
+/// the seedporter's and the littershredder's ([`crate::vigil`]); the others are read by no
+/// heuristic yet.
 pub fn senses_of(founder: Founder) -> SenseTable {
     use crate::ScentChannel::{Grazer, Hunter, SmallPrey};
     use crate::scent::{SMELL_AT_2_5_M, SMELL_AT_2_M, SMELL_AT_3_5_M, SMELL_AT_6_M};
@@ -5071,7 +5116,7 @@ pub fn senses_of(founder: Founder) -> SenseTable {
     match founder {
         // Eyeless (dossier): substrate tremor ~1 m, 2 m for heavy steps; litter chemistry is
         // its own detritus field.
-        Founder::Blind => SenseTable { tremor_m: 2.0, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
+        Founder::Blind => SenseTable { live: true, tremor_m: 2.0, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
         // Coarse silhouettes at 1 m by day and 0.5 m dim over 240°, motion over shape;
         // substrate vibration 1–1.5 m; fungal chemistry is its own field.
         Founder::Capgnawer => SenseTable {
@@ -5101,7 +5146,12 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         // Moving bodies at 8 m by day and 4 m at night, static at 5 and 2 (0.625); 300° from
         // its eye stalks; a walking Veilhound heard at 6 m, a running one to 8 m; predator
         // odour at 3–4 m; ~1 m of footfall.
+        // S2: live; head down while cropping it sees a quarter of its range (Astra's "reduced
+        // clarity while cropping"); it weighs its three nearest herd-mates.
         Founder::Browser => SenseTable {
+            live: true,
+            feeding_sight_fraction: 0.25,
+            kin_tracks: 3,
             sight_m: 8.0,
             sight_night_m: 4.0,
             sight_still_fraction: 0.625,
@@ -5118,6 +5168,7 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         // 4; large-body movement heard at 8 m, louder to 10; ~2 m of ground disturbance;
         // animal odour at 2–3 m.
         Founder::Loftstrider => SenseTable {
+            live: true,
             sight_m: 12.0,
             sight_night_m: 6.0,
             sight_still_fraction: 8.0 / 12.0,
@@ -5137,6 +5188,7 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         // recognition in the community, about 180° with a forward binocular centre; predator
         // movement heard around 6 m; branch movement ~0.5 m; odour ~2 m.
         Founder::Seedporter => SenseTable {
+            live: true,
             sight_m: 16.0,
             sight_night_m: 3.0,
             sight_still_fraction: 1.0,
@@ -5184,6 +5236,7 @@ pub fn senses_of(founder: Founder) -> SenseTable {
             tremor_min: 0.003,
             smell_min: SMELL_AT_6_M,
             scent: Some(Hunter),
+            ..t
         },
     }
 }

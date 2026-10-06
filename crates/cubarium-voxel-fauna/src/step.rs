@@ -1238,7 +1238,8 @@ fn controllers(
         // fruit at its mouth, its heuristic gives way to a walk to the nearest fruiting
         // stand in reach. Flight from a threat and the roost come after it and win.
         if driven && fauna.controllers.flees(id) && fauna.config.founder(founder).glider.is_some() {
-            if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv) {
+            let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
+            if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv, day) {
                 actions = go;
             }
         }
@@ -1249,7 +1250,7 @@ fn controllers(
             retract(fauna, i);
         }
         if driven && hunters_here && !retracts && fauna.controllers.flees(id) {
-            if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy) {
+            if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
                 actions = flee;
                 lure = 0.0;
                 lift = 0.0;
@@ -1366,12 +1367,17 @@ fn controllers(
 /// rule: [`crate::kind_of`], so a still hunter beyond 0.5 m is not one, and not hidden by
 /// terrain or foliage); the blind shredder turns away from tremor above
 /// [`crate::PredationConfig::flee_tremor`]. Full forward, no feeding.
+///
+/// **S2**: a lineage whose table is live and that has a ground response
+/// ([`crate::Vigilance::mode`]) runs that instead ([`crate::vigil::respond`]), on its record
+/// alone; `held` is what its heuristic asked this sample.
 fn flee(
     fauna: &mut Fauna,
     i: usize,
     view: &VoxelView<'_>,
     fv: &cubarium_voxel_flora::FloraView<'_>,
     occupancy: Option<crate::senses::Occ<'_>>,
+    held: Actions,
 ) -> Option<Actions> {
     let a = fauna.animals[i];
     let founder = a.founder?;
@@ -1381,6 +1387,12 @@ fn flee(
         .any(|&f| config.founder(f).hunter.is_some_and(|h| h.hunts(founder)));
     if !hunted {
         return None;
+    }
+    let phys = config.founder(founder);
+    if phys.senses.live && phys.vigilance.mode != crate::VigilMode::None {
+        let want = crate::perception::Want { tremor: phys.vigilance.mode == crate::VigilMode::Freeze, ..Default::default() };
+        crate::perception::refresh(fauna, i, view, fv, occupancy, want);
+        return crate::vigil::respond(fauna, i, view, fv, held);
     }
     let away = |turn: f64| Actions {
         forward: 1.0,
@@ -1415,6 +1427,18 @@ fn flee(
     }
     let (_, side) = nearest?;
     Some(away(if side > 0.0 { -1.0 } else { 1.0 }))
+}
+
+/// **The arboreal refuge** (S2, [`crate::vigil`]): a grounded glider's walk to the nearest
+/// stand it can climb within `search_m` (walking into the stem climbs it).
+pub(crate) fn refuge_step(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &cubarium_voxel_flora::FloraView<'_>,
+    search_m: f64,
+) -> Option<Actions> {
+    glider::refuge_step(fauna, i, view, fv, search_m)
 }
 
 /// **The retraction** (AMPHIBIOUS-SNAIL, senses review §1): a body whose record holds a
@@ -2380,7 +2404,22 @@ fn strike_tick(
             let from_rear = dx * fx + dz * fz < 0.0;
             let cap = pp.core.reserve_of(p.body);
             let condition = if cap > 0.0 { p.reserve / cap } else { 0.0 };
-            let chance = crate::dodge_chance(&fauna.config.predation, pp.agility, p.state, from_rear, condition);
+            // D5 (S2): a live prey's awareness is whether its record holds the striker.
+            let (awareness, aware) = {
+                let record = fauna.percept(p.id);
+                (
+                    crate::vigil::awareness(&fauna.config, &p, record, a.id, tick),
+                    crate::vigil::aware_of(&fauna.config, record, a.id, tick),
+                )
+            };
+            if pp.senses.live && p.state != State::Asleep {
+                if aware {
+                    fauna.ledger.vigil.aware_strikes[pf.index()] += 1;
+                } else {
+                    fauna.ledger.vigil.unaware_strikes[pf.index()] += 1;
+                }
+            }
+            let chance = crate::dodge_chance_with(&fauna.config.predation, pp.agility, awareness, from_rear, condition);
             if crate::dodges(chance, seed, a.id, p.id, tick) {
                 fauna.ledger.dodges_by_founder[founder.index()] += 1;
             } else {
@@ -4183,3 +4222,7 @@ mod pack_search_tests;
 #[cfg(test)]
 #[path = "senses_core_tests.rs"]
 mod senses_core_tests;
+
+#[cfg(test)]
+#[path = "ground_response_tests.rs"]
+mod ground_response_tests;

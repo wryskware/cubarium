@@ -1132,6 +1132,12 @@ pub(crate) fn steer(
                     go_to(&a, gx, gz, ring, 0.0, 1.0)
                 }
             };
+            // S2, the stalk: under the prey's hearing beyond the commit distance, still while
+            // it looks up, then the rush.
+            let act = match crate::vigil::stalk(fauna, &a, &o, d_target, act.forward) {
+                Some(forward) => Actions { forward, ..act },
+                None => act,
+            };
             return Some(clamp(fauna, act));
         }
     }

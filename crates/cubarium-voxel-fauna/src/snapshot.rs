@@ -62,7 +62,15 @@ use crate::Fauna;
 //     tremor, smell, live, scent channel), `FaunaConfig::{perception, scent}`, the percept
 //     records (`Fauna::percepts`), `PackRecord::drawn_scent`, `ChaseEnd::Lost`, the funnel
 //     and the perception ledger lines; `pack_*_by_sense` widened to four modalities.
-pub const SCHEMA: u32 = 47;
+// 47: S2 GROUND RESPONSES — `Percept::vigil` (`Vigil`), `Track::heading`, `SenseTable::
+//     {feeding_sight_fraction, kin_tracks}`, `FounderPhysiology::vigilance`, `Pack::{stalk_margin,
+//     commit_m, stalk_freeze}`, `PredationConfig::{awareness_sensed, awareness_unaware,
+//     aware_within_s}`, `HuntConfig::patch_scent_weight`, the `vigil` ledger lines.
+// 48: AMPHIBIOUS SNAIL — `FounderPhysiology::amphibious` (`Amphibious`: the water rule, the
+//     drying clock, the thirst return, retraction and the roam reflex), `Mobility::{dryness,
+//     ashore, retract_ticks, thirsty}`, `Departure::Desiccation`, `Fauna::last_rain_tick`,
+//     the ledger's `amphibious_ticks`, `retracts` and `ashore_assimilated`.
+pub const SCHEMA: u32 = 48;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

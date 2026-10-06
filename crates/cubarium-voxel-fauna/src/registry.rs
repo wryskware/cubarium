@@ -258,6 +258,24 @@ fn founder_rows() -> Vec<Row> {
         r("senses.tremor_m", "m", nonneg, "tremor's range for bodies on the ground (0: none)"),
         r("senses.tremor_min", "organic x m/s / m^2", nonneg, "the faintest footfall felt (mass x speed / d^2, through terrain x occlusion)"),
         r("senses.smell_min", "scent units", nonneg, "the faintest scent level smelled on the scent field (0: no smell)").log(),
+        r("senses.feeding_sight_fraction", "fraction", nonneg, "S2: head down cropping between scans, sight reaches this fraction of its range (1: no change)"),
+        r("senses.kin_tracks", "bodies", nonneg, "S2: at most this many of its own lineage weighed per remote sensing, nearest first"),
+        // S2's ground response (`Vigilance`); `vigilance.mode` is a switch: no row.
+        r("vigilance.flee_start_m", "m", nonneg, "S2: flight starts with threats (seen moving or near, heard, felt) within this"),
+        r("vigilance.flee_stop_m", "m", nonneg, "S2: flight stops beyond this of the last-known threat..."),
+        r("vigilance.calm_s", "s", nonneg, "S2: ...once no threat has come within the stop distance for this long"),
+        r("vigilance.group_min", "threats", nonneg, "S2: an adult flees only from at least this many threats (a juvenile from one)"),
+        r("vigilance.run_noise", "x emission", nonneg, "S2: its emission while it flees or bolts (a run is loud)"),
+        r("vigilance.scan_every_s", "s", nonneg, "S2: cropping between scan pauses (0: never scans)"),
+        r("vigilance.scan_s", "s", nonneg, "S2: a scan pause"),
+        r("vigilance.orient_s", "s", nonneg, "S2: it faces a newly sensed approaching threat this long (0: never orients)"),
+        r("vigilance.alarm_emission_factor", "x walking emission", nonneg, "S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm)"),
+        r("vigilance.alarm_bolt_s", "s", nonneg, "S2: an alarm bolt lasts this long"),
+        r("vigilance.alarm_refractory_s", "s", nonneg, "S2: after a bolt it hears no alarm this long"),
+        r("vigilance.freeze_tremor", "organic x m/s / m^2", nonneg, "S2: footfall (left + right) that freezes it (0: never)"),
+        r("vigilance.withdraw_tremor", "organic x m/s / m^2", nonneg, "S2: footfall at which it also turns away in place"),
+        r("vigilance.freeze_s", "s", nonneg, "S2: a freeze lasts this long after the last tremor that set it"),
+        r("vigilance.refuge_search_m", "m", nonneg, "S2: an arboreal body in flight runs to a stand it climbs within this"),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
@@ -318,6 +336,8 @@ fn founder_rows() -> Vec<Row> {
         r("pack.den_search_m", "m", nonneg, "the breeder looks for a covered den within this of the founding point").optional().prov("decision"),
         r("pack.follow_radius_m", "m", nonneg, "an idle adult walks back to within this of the breeder").optional(),
         r("pack.home_give_up_s", "s", nonneg, "an adult wanting rest walks home this long, then rests where it is").optional(),
+        r("pack.stalk_margin", "fraction of the prey's hearing floor", nonneg, "S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk)").optional(),
+        r("pack.commit_m", "m", nonneg, "S2: ...and rushes within this of its prey").optional(),
         // The counter-strike seam (`Counter`): unused, `None` for every lineage.
         r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
         r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),
@@ -376,6 +396,9 @@ fn knob_rows() -> Vec<Row> {
         p("awareness_resting", "fraction", fraction, "dodge table awareness, awake resting").prov("decision"),
         p("awareness_cropping", "fraction", fraction, "dodge table awareness, cropping and climbing").prov("decision"),
         p("awareness_asleep", "fraction", fraction, "dodge table awareness, asleep").prov("decision"),
+        p("awareness_sensed", "fraction", fraction, "D5 (S2): a live lineage's prey whose record holds the striker dodges at this awareness"),
+        p("awareness_unaware", "fraction", fraction, "D5 (S2): ...and one whose record does not, at this"),
+        p("aware_within_s", "s", nonneg, "D5 (S2): ...sensed within this long before contact"),
         p("dodge_rear_aspect", "fraction", fraction, "dodge aspect factor when struck from the rear half").search(0.1, 1.0).prov("decision"),
         p("dodge_condition_floor", "fraction", fraction, "the dodge's condition factor is the reserve fraction clamped to [this, 1]").search(0.1, 1.0).prov("decision"),
         p("egg_footfall_min", "distinct prey", nonneg, "lowest footfall threshold a dormant egg draws").search(1.0, 6.0),
@@ -509,6 +532,7 @@ fn knob_rows() -> Vec<Row> {
         hk("route_refresh_s", "s", pos, "how long a lineage's walking route graph stands before it is rebuilt").search(10.0, 600.0).log(),
         hk("success_memory_s", "s", nonneg, "how long a kill marks its place productive in the killer's memory").search(120.0, 14400.0).log(),
         hk("success_boost", "fraction", nonneg, "a patch by a remembered kill scores 1 + this times its food cue").search(0.0, 4.0),
+        hk("patch_scent_weight", "weight", nonneg, "S2: its prey's scent on a square's food faces is one more patch cue at this weight (0: no scent)"),
     ]);
 
     // `fauna.perception.*`: the perception core (SENSES-CORE).

@@ -73,6 +73,7 @@ fn config((sight, half, hearing, smell): Senses) -> FaunaConfig {
         tremor_min: 0.0,
         smell_min: smell,
         scent: Some(crate::ScentChannel::Hunter),
+        ..crate::SenseTable::default()
     };
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
     c

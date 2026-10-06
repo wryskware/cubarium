@@ -37,7 +37,9 @@
 //!    patch as fruitless for [`HuntConfig::fruitless_memory_s`], and it chooses the next:
 //!    the food of its prey within [`HuntConfig::cue_scan_m`] pooled into
 //!    [`HuntConfig::patch_m`] squares, each lineage's cue scaled to its best square and
-//!    weighted by its attack preference, the best open square at least
+//!    weighted by its attack preference — and (S2) the scent its prey lay on those food faces
+//!    ([`HuntConfig::patch_scent_weight`], the small-prey channel: a boom's scent draws it) —
+//!    the best open square at least
 //!    [`HuntConfig::patch_min_hop_m`] away — or, a [`HuntConfig::patrol_explore`] share
 //!    of the time, any open square. With no food in reach it walks off in a drawn
 //!    direction.
@@ -350,7 +352,12 @@ pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     let a = fauna.animals[i];
     // Which foods mark which prey lineage's habitat.
     let lineages: Vec<Founder> = Founder::ALL.iter().copied().filter(|&f| h.hunts(f)).collect();
-    let weight: Vec<f64> = lineages.iter().map(|&f| attack_preference(&cfg, h, &a.hunt.image, f)).collect();
+    let mut weight: Vec<f64> = lineages.iter().map(|&f| attack_preference(&cfg, h, &a.hunt.image, f)).collect();
+    // S2: one more cue, the scent its prey lay (its record's channels, review §4 item 3).
+    let followed = a.founder.map(|f| crate::perception::prey_channels(&fauna.config, f)).unwrap_or_default();
+    let smells = cfg.patch_scent_weight > 0.0 && followed.iter().any(|&c| c);
+    weight.push(if smells { cfg.patch_scent_weight } else { 0.0 });
+    let n = weight.len();
     /// One square: the cue per lineage, and its nearest reachable food node `(steps, node)`.
     struct Square {
         cues: Vec<f64>,
@@ -369,7 +376,7 @@ pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
         }
         let reach = route.as_ref().and_then(|r| r.reach(site, v).map(|(j, d)| (d, j)));
         let key = ((x.rem_euclid(ring) / pm).floor() as i64, (z / pm).floor() as i64);
-        let sq = squares.entry(key).or_insert_with(|| Square { cues: vec![0.0; lineages.len()], node: None });
+        let sq = squares.entry(key).or_insert_with(|| Square { cues: vec![0.0; n], node: None });
         for (c, &cue) in sq.cues.iter_mut().zip(cues) {
             *c += cue;
         }
@@ -380,7 +387,7 @@ pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
         }
     };
     let cell_m2 = v * v;
-    let mut cues = vec![0.0; lineages.len()];
+    let mut cues = vec![0.0; n];
     for g in fv.ground.iter() {
         if g.litter <= 0.0 && g.carrion <= 0.0 && g.film <= 0.0 {
             continue;
@@ -389,8 +396,18 @@ pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
             let diet = fauna.config.founder(*f).diet;
             cues[k] = diet.foods().map(|food| ground_cue(fv, fauna, g, food, cell_m2)).sum();
         }
+        cues[n - 1] = if smells {
+            crate::ScentChannel::ALL
+                .iter()
+                .filter(|ch| followed[ch.index()])
+                .map(|&ch| fauna.scent.level(view, ch, i64::from(g.site.x), g.site.y, g.site.z))
+                .sum()
+        } else {
+            0.0
+        };
         add(g.site, &cues, &mut squares);
     }
+    cues[n - 1] = 0.0;
     for st in fv.stands.iter() {
         for (k, f) in lineages.iter().enumerate() {
             let diet = fauna.config.founder(*f).diet;
