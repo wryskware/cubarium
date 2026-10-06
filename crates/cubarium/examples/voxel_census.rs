@@ -545,6 +545,7 @@ fn run(
     let mut since = std::time::Instant::now();
     let mut weather = WeatherLog::new(sim, timing.weather_log.as_deref());
     let mut deaths = DeathLog::new(sim);
+    let mut spells = SpellLog::new(sim);
     let mut lj = LjChain::new(sim);
     while tick < total_ticks {
         lj.before(sim);
@@ -561,6 +562,7 @@ fn run(
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
             let minute = tick / TICKS_PER_MIN;
             print_row(minute, sim, ms);
+            spells.minute(sim, minute);
             phases.report(minute, sim, ms);
             if let Some(from) = timing.ab_from_min.filter(|from| minute >= *from) {
                 let n = timing.modes.len() as u64;
@@ -593,7 +595,92 @@ fn run(
         }
     }
     weather.summary(sim);
+    spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
+}
+
+/// `SPELLLOG=path` (env, package DORMANCY): **dry spells under the turf**. Each minute,
+/// every springturf stand whose root box reads below the species' wake water
+/// (`cure_resume_water`, through its moisture ramp: `μ < moisture_at(resume)`) is in a
+/// spell; one line per spell when it ends: `site,start_min,end_min,len_min,how` with `how`
+/// `wet` (the water came back), `died` (the stand is gone) or `run_end`, and whether the
+/// stand was cured at its end. The ground's dry spells as the turf on it reads them.
+struct SpellLog {
+    out: Option<std::io::BufWriter<std::fs::File>>,
+    open: std::collections::HashMap<u64, (cubarium_voxel_flora::Site, u64, bool)>,
+    mu_wake: f64,
+}
+
+impl SpellLog {
+    fn new(sim: &Sim) -> SpellLog {
+        use std::io::Write;
+        let out = std::env::var("SPELLLOG").ok().map(|p| {
+            let mut f = std::io::BufWriter::new(std::fs::File::create(p).expect("spell log"));
+            writeln!(f, "x,y,z,start_min,end_min,len_min,how,cured").unwrap();
+            f
+        });
+        let sc = sim.flora().config().species(Plant::Springturf);
+        SpellLog { out, open: std::collections::HashMap::new(), mu_wake: sc.moisture_at(sc.cure_resume_water) }
+    }
+
+    fn line(&mut self, site: cubarium_voxel_flora::Site, start: u64, end: u64, how: &str, cured: bool) {
+        use std::io::Write;
+        if let Some(f) = self.out.as_mut() {
+            writeln!(f, "{},{},{},{start},{end},{},{how},{}", site.x, site.y, site.z, end - start, u8::from(cured)).unwrap();
+        }
+    }
+
+    fn minute(&mut self, sim: &Sim, minute: u64) {
+        if self.out.is_none() {
+            return;
+        }
+        let f = sim.flora().view();
+        let mut seen = std::collections::HashSet::with_capacity(self.open.len());
+        let mut ended = Vec::new();
+        for st in f.stands.iter().filter(|s| s.species == Plant::Springturf) {
+            let dry = st.moisture < self.mu_wake;
+            match (dry, self.open.get_mut(&st.id)) {
+                (true, Some(e)) => {
+                    e.2 = st.cured;
+                    seen.insert(st.id);
+                }
+                (true, None) => {
+                    self.open.insert(st.id, (st.site, minute, st.cured));
+                    seen.insert(st.id);
+                }
+                (false, Some(_)) => ended.push((st.id, "wet", st.cured)),
+                (false, None) => {}
+            }
+        }
+        for (id, how, cured) in ended {
+            if let Some((site, start, _)) = self.open.remove(&id) {
+                self.line(site, start, minute, how, cured);
+            }
+        }
+        let gone: Vec<u64> = self.open.keys().copied().filter(|id| !seen.contains(id)).collect();
+        for id in gone {
+            if let Some((site, start, cured)) = self.open.remove(&id) {
+                self.line(site, start, minute, "died", cured);
+            }
+        }
+        if minute % 30 == 0
+            && let Some(f) = self.out.as_mut()
+        {
+            use std::io::Write;
+            f.flush().ok();
+        }
+    }
+
+    fn end(&mut self, minute: u64) {
+        let open: Vec<_> = self.open.drain().collect();
+        for (_, (site, start, cured)) in open {
+            self.line(site, start, minute, "run_end", cured);
+        }
+        if let Some(f) = self.out.as_mut() {
+            use std::io::Write;
+            f.flush().ok();
+        }
+    }
 }
 
 /// `--weather-log`: the finished events, and the run's weather totals.
@@ -1059,6 +1146,9 @@ fn print_header() {
         let n = s.name();
         header.push_str(&format!(",under_{n},recruits_{n},escapes_{n},under_starved_{n},under_died_{n}"));
     }
+    // Curing (package DORMANCY, 2026-10-05): the turf cured now, and cures and wakes,
+    // cumulative.
+    header.push_str(",cured_springturf,cures_springturf,wakes_springturf");
     println!("{header}");
 }
 
@@ -1297,6 +1387,12 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
         row.push(l.escapes[k].to_string());
         row.push(l.under_deaths[cubarium_voxel_flora::DeathCause::Starved.index()][k].to_string());
         row.push(l.under_deaths.iter().map(|c| c[k]).sum::<u64>().to_string());
+    }
+    {
+        let k = Plant::Springturf.index();
+        row.push(f.stands.iter().filter(|st| st.species == Plant::Springturf && st.cured).count().to_string());
+        row.push(f.ledger.cures[k].to_string());
+        row.push(f.ledger.cure_wakes[k].to_string());
     }
     println!("{}", row.join(","));
 }
