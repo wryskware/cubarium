@@ -545,6 +545,68 @@ meadow's edge. Round 2's cost applies: on s6 the groves fall from 0.77 to about 
 drained ground and stonecushion takes the rest, and the summit forest thins (vaulttree
 0.7 → 0.3). Whether the world gets a dry season is Wrysk's call; nothing is implemented.
 
+### 11.6 Round 3's results against §11.2 (2026-10-06)
+
+All 97 runs exited 0 (`~/webmodel-meadow3/batch/runs/`; table copy in the session scratchpad
+`meadow3/batch/runs/table.txt`). Cells: meadow / grove / forest (openT, sumV).
+
+**The control arms matched §11.2 within about 0.03, with two misses.**
+- `base` s5 came out 0.09 (openT 0.35) against 0.06 (0.22) predicted. Dormancy helps s5
+  without any dry spells.
+- `ew+run+crop30+L40` s5 came out 0.16 (0.62) against 0.05 (0.20) predicted.
+- s6 matched: `dryA` 0.06 (0.03 predicted), `ew+run+dryA` 0.06, `ew+run+crop30+dryA` 0.10,
+  `ew+run+L40+dryA` 0.08, and `ew+run+crop30+L40+dryA` 0.11 (0.12 predicted).
+- s1 is 0 in every arm.
+
+**Rarity:** both `rare150-` arms come back to their counterpart's end within 0.01, as predicted.
+But only `ew+run+crop30+L40+dryA` holds meadow on s6 (0.10). `ew+run+dryA` sits at 0.05.
+
+**The sweep's predictions were wrong, and in a useful way.**
+- **WATER 0.5 is not too mild.** On s6 it gives meadow 0.05–0.13, and three of the four arms
+  that reach the niche on s5 and s6 (`niche56`) use WATER 0.5.
+- **EVERY 20 is not too rare** with the woody levers: `ew+run+crop30+L40+d20:0.5:0.2` reaches
+  `niche56`.
+- **The predicted mildest seasons (5:0.25:0.2, 10:0.5:0.2) don't reach the niche.** On s6
+  their openT is 0.34–0.36.
+- **The dose LEN/EVERY × (1 − WATER) doesn't order the outcomes.** Long, shallow seasons
+  hold the meadow and spare the woody adults. Deep seasons (WATER 0.2, LEN 1, EVERY 5) erase
+  the summit forest: sumV is 0.00 at 5:1:0.2 on both bases.
+- **Candidate mechanism, untested:** at half water the turf's lower establishment gate
+  (`ew` 0.2) still lets it recruit, while woody juveniles fall below break-even. Adults
+  survive.
+
+**The arms that reach `niche56`:**
+
+| arm | s5 | s6 |
+|---|---|---|
+| **`ew+run+d5:1:0.5`** (no new rule: two turf knobs and a season) | 0.12 / 0.37 / 0.12 (0.42, 0.84) | 0.11 / 0.35 / 0.12 (0.45, 0.54) |
+| `ew+run+crop30+L40+d5:0.5:0.5` | 0.15 / 0.29 / 0.13 (0.61, 0.96) | 0.10 / 0.17 / 0.10 (0.44, 0.43) |
+| `ew+run+crop30+L40+d10:1:0.5` | 0.15 / 0.33 / 0.11 (0.53, 0.78) | 0.12 / 0.16 / 0.06 (0.41, 0.28) |
+| `ew+run+crop30+L40+d20:0.5:0.2` | 0.16 / 0.30 / 0.12 (0.61, 0.85) | 0.11 / 0.12 / 0.08 (0.43, 0.35) |
+
+**Reading:**
+- **`ew+run+d5:1:0.5` is the best fit to Wrysk's end state:**
+  - meadows, at the niche's floor;
+  - lanternberry groves at 0.35–0.37 of drained ground, about half of today's 0.77–0.79;
+  - forest 0.12;
+  - vaulttree keeps 0.54–0.84 of the summit.
+
+  It needs **no crop or lifespan rule.** The crop and lifespan arms buy a little more meadow
+  at the cost of half the groves.
+- **The season, in sim terms:** every 5 world days (10 h at 1×) a dry season of 1 world day
+  (2 h), with drained root water at about half its normal level.
+- **Meadow tops out at 0.10–0.13 of drained ground on s6** in every arm. The 0.20 share target
+  is out of reach on this ground. Wrysk's own target is "at least one continuous meadow
+  patch", which the sim's patch readout (§11.4) measures.
+
+**Left:**
+1. `rare150-ew+run+d5:1:0.5`, which was not run.
+2. Wrysk's call on a dry season. If yes:
+   - the weather mode (§11.5);
+   - `establish_water_min` 0.2 and turf runners 0.6 / 3 in the presets;
+   - a short fixture for the drained soil's water during the season;
+   - a long display-world run with the patch readout.
+
 ## Roles (balance through roles)
 
 | stock growing or shrinking without check | the role that should answer |
