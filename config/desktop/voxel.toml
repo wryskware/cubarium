@@ -58,7 +58,7 @@ dry_season = true
 dry_season_every_days = 5.0   # world days (the day clock's, as the plants count)
 dry_season_len_days = 1.0
 dry_season_phase_days = 5.0
-dry_season_rain = 0.0            # the natural hazards' multiplier in the season
+dry_season_rain = 0.05           # the natural hazards' multiplier in the season (dry-hills fixture: about half the root water)
 # [world.climate.downpour]
 # rate_r0 = 1.5         # a mode's key, e.g. the rate it rains at in multiples of R0
 

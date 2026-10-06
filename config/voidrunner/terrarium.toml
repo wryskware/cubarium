@@ -35,7 +35,7 @@ dry_season = true
 dry_season_every_days = 5.0   # world days (the day clock's, as the plants count)
 dry_season_len_days = 1.0
 dry_season_phase_days = 5.0
-dry_season_rain = 0.0            # the natural hazards' multiplier in the season
+dry_season_rain = 0.05           # the natural hazards' multiplier in the season (dry-hills fixture: about half the root water)
 
 [light]
 # Wrysk, 2026-09-25: the red-dwarf day sky is too bright on this screen. 1 is the look as
