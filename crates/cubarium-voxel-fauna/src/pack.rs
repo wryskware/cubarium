@@ -654,6 +654,14 @@ pub(crate) fn steer(
         }
     }
 
+    // HUNTER-MEAL: between hunts (no target), a member that wants food goes to a usable
+    // carcass it can walk to and eats there before the pack takes a new target.
+    if joins && fauna.pack(own).and_then(|p| p.target).is_none() {
+        if let Some(go) = crate::hunt::meal_step(fauna, i, view, fv) {
+            return Some(clamp(fauna, go));
+        }
+    }
+
     // A new target: a member that is hungry, with every adult above the floor and a packmate within
     // `pack_radius_m` takes the nearest prey it sees ahead (its cone's range) inside the
     // pack's window and outside every other territory. Alone, it hunts as the lanternjaw.

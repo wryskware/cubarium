@@ -1344,7 +1344,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1223 rows)
+**`fauna.*`** (1227 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -2557,6 +2557,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.hunt.attack_half_s` | 60.0 | s of contact | (0, inf) | 5–600 log | - | placeholder | D2's rule: encounter memory at which the attack preference is halfway to 1 |
 | `fauna.hunt.attack_explore` | 1.0 | fraction | [0, 1] | 0–1 | - | placeholder | D2's rule: the attack preference for a prey it has not met lately (1: opportunistic) |
 | `fauna.hunt.attack_decision_s` | 20.0 | s | [0, inf) | 2–120 log | - | placeholder | one attack decision on one prey stands this long |
+| `fauna.hunt.carcass_scan_m` | 3.0 | m | [0, inf) | 1–8 | - | placeholder | how far a hungry hunter looks for a usable carcass it can walk to and eat |
+| `fauna.hunt.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | how long a lineage's walking route graph stands before it is rebuilt |
+| `fauna.hunt.success_memory_s` | 1800.0 | s | [0, inf) | 120–14400 log | - | placeholder | how long a kill marks its place productive in the killer's memory |
+| `fauna.hunt.success_boost` | 1.0 | fraction | [0, inf) | 0–4 | - | placeholder | a patch by a remembered kill scores 1 + this times its food cue |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
 | `fauna.founding.starter_litter_organic` | 0.2 | organic units | [0, inf) | 0.05–1 | - | placeholder | leaf litter laid under each seeded littershredder |

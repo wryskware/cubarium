@@ -53,7 +53,10 @@ use crate::Fauna;
 // 43: the lanternjaw's switching (D2b) — `HuntConfig::{share_switching, switch_exponent,
 //     attack_prior_s, strike_chosen_only}`, the declined-contact and unchosen-strike ledger
 //     lines.
-pub const SCHEMA: u32 = 43;
+// 44: HUNTER-MEAL — `HuntConfig::{meal_first, carcass_scan_m, reachable_only,
+//     route_refresh_s, success_memory_s, success_boost}`, `HuntMemory::productive`, the meal
+//     and route ledger lines.
+pub const SCHEMA: u32 = 44;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

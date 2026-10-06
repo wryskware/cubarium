@@ -1246,6 +1246,13 @@ impl World {
         &self.config
     }
 
+    /// Re-key the draws that read `config.seed` (the weather's, and the plant and animal
+    /// layers' keyed draws) from now on, leaving terrain and state as they are: a study's
+    /// replicate of one saved world under other weather and draws.
+    pub fn reseed(&mut self, seed: u64) {
+        self.config.seed = seed;
+    }
+
     pub fn tick(&self) -> u64 {
         self.tick
     }

@@ -264,8 +264,20 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             }
         }
         act(fauna, &view, flora, seed, tick, &sky, &mut hits);
+        let ring = f64::from(view.config.width) * view.config.voxel_m;
         for hit in hits {
+            let stood = fauna
+                .animals
+                .binary_search_by_key(&hit.prey, |a| a.id)
+                .ok()
+                .map(|j| (fauna.animals[j].pose.x, fauna.animals[j].pose.z));
             apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
+            // HUNTER-MEAL: a kill marks its place productive in the striker's memory.
+            if let Some((x, z)) = stood {
+                if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
+                    crate::hunt::remember_kill(fauna, hit.striker, x, z, ring);
+                }
+            }
         }
     });
     cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora, dusk) });
@@ -1633,6 +1645,18 @@ fn founder_act(
             }
             _ => None,
         };
+        // HUNTER-MEAL: a hunter whose mouth is over a usable carcass eats it; it does not
+        // strike while that meal lies there.
+        let target = match target {
+            Some(_)
+                if fauna.config.hunt.meal_first
+                    && crate::hunt::mouth_on_carcass(&flora.view(), view, &fauna.animals[i], &geometry) =>
+            {
+                fauna.ledger.hunt_strikes_withheld += 1;
+                None
+            }
+            t => t,
+        };
         if let Some(prey) = target {
             let h = phys.hunter.expect("a hunter");
             let a = &mut fauna.animals[i];
@@ -2154,6 +2178,7 @@ fn strike_tick(
                     prey: p.id,
                     damage,
                     by: founder,
+                    striker: a.id,
                 });
             }
         }
@@ -3848,3 +3873,6 @@ mod gut_tests;
 #[cfg(test)]
 #[path = "hunt_tests.rs"]
 mod hunt_tests;
+#[cfg(test)]
+#[path = "hunt_meal_tests.rs"]
+mod hunt_meal_tests;
