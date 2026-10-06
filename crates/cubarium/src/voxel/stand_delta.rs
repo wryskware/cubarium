@@ -123,10 +123,17 @@ struct ModelSig {
     ripe_at: bool,
     foliage: [Band; MAX_FOLIAGE_LAYERS],
     fruit: Band,
+    /// The model of the plant over a plant beneath, whose trunk it is drawn in front of.
+    over: Option<(usize, usize)>,
+}
+
+/// A model's identity: the library slice it is.
+fn model_id(cells: &[ModelCell]) -> (usize, usize) {
+    (cells.as_ptr() as usize, cells.len())
 }
 
 impl ModelSig {
-    fn of(cells: &[ModelCell], id: u64, inp: &ModelInputs) -> ModelSig {
+    fn of(cells: &[ModelCell], id: u64, inp: &ModelInputs, over: Option<&[ModelCell]>) -> ModelSig {
         let mut foliage = [Band::ANY; MAX_FOLIAGE_LAYERS];
         for (i, band) in foliage.iter_mut().enumerate() {
             let f = effective(inp.foliage[i]);
@@ -152,19 +159,21 @@ impl ModelSig {
             Band::ANY
         };
         ModelSig {
-            model: (cells.as_ptr() as usize, cells.len()),
+            model: model_id(cells),
             anchor: (inp.anchor.x, inp.anchor.y, inp.anchor.z),
             wilt: inp.wilt,
             lip: inp.lip,
             ripe_at: inp.ripe >= model::RIPE_AT,
             foliage,
             fruit,
+            over: over.map(model_id),
         }
     }
 
     /// Whether a stamp of `cells` from `inp` would place what this one did.
-    fn holds(&self, cells: &[ModelCell], inp: &ModelInputs) -> bool {
-        self.model == (cells.as_ptr() as usize, cells.len())
+    fn holds(&self, cells: &[ModelCell], inp: &ModelInputs, over: Option<&[ModelCell]>) -> bool {
+        self.model == model_id(cells)
+            && self.over == over.map(model_id)
             && self.anchor == (inp.anchor.x, inp.anchor.y, inp.anchor.z)
             && self.wilt == inp.wilt
             && self.lip == inp.lip
@@ -353,18 +362,19 @@ fn stands(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>, lib: Optio
         match lib.and_then(|lib| model_cells(lib, flora, stand)) {
             Some(cells) => {
                 let inp = s.model_inputs(flora, stand);
+                let over = lib.and_then(|lib| over_cells(lib, flora, stand));
                 let held = inc(s).claimants[slot as usize]
                     .sig
                     .as_ref()
-                    .is_some_and(|sig| sig.holds(cells, &inp));
+                    .is_some_and(|sig| sig.holds(cells, &inp, over));
                 if held {
                     continue;
                 }
                 let claims = collect(s, |s| {
-                    s.stamp_model(view, flora, stand, cells);
+                    s.stamp_model(view, flora, stand, cells, over);
                 });
                 let i = inc(s);
-                i.claimants[slot as usize].sig = Some(ModelSig::of(cells, stand.id, &inp));
+                i.claimants[slot as usize].sig = Some(ModelSig::of(cells, stand.id, &inp, over));
                 set_claims(i, slot, claims, false);
             }
             None => {

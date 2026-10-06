@@ -561,6 +561,33 @@ pub(crate) fn as_drawn(view: &VoxelView<'_>, flora: FloraView<'_>, stand: &Stand
     (site != stand.site).then_some(Stand { site, ..*stand })
 }
 
+/// The model cells of the plant **over** `stand`, when `stand` is the plant beneath on its
+/// face ([`FaceLayer::Under`]) and the top plant has a model: the trunk [`stamp_model`]
+/// draws the cover in front of ([`in_front_of_trunk`]).
+pub(crate) fn over_cells<'l>(
+    lib: &'l ModelLibrary,
+    flora: FloraView<'_>,
+    stand: &Stand,
+) -> Option<&'l [ModelCell]> {
+    if stand.place != FaceLayer::Under {
+        return None;
+    }
+    model_cells(lib, flora, flora.stand_at(stand.site)?)
+}
+
+/// Where a cell of the plant beneath is drawn when the top plant's trunk stands in it
+/// (package RENDER-UNDER): the first cell toward the camera (`z − 1`, `z − 2`, …) in the
+/// same `x` and `y` that the trunk does not hold, so the cover reads at the trunk's foot
+/// instead of vanishing inside it. `trunk` is the top plant's trunk cells, sorted; `None`
+/// when the cell walks off the world's front edge. A cell outside the trunk stays put.
+fn in_front_of_trunk(trunk: &[(i64, u32, u32)], cell: Cell) -> Option<Cell> {
+    let mut z = cell.z;
+    while trunk.binary_search(&(cell.x, cell.y, z)).is_ok() {
+        z = z.checked_sub(1)?;
+    }
+    Some(Cell { z, ..cell })
+}
+
 /// The cells of `stand`'s model at its crown height, if the library has one.
 fn model_cells<'l>(
     lib: &'l ModelLibrary,
@@ -803,7 +830,8 @@ impl Stands {
             let moved = as_drawn(view, flora, stand);
             let stand = moved.as_ref().unwrap_or(stand);
             if let Some(cells) = lib.and_then(|lib| model_cells(lib, flora, stand)) {
-                if !self.stamp_model(view, flora, stand, cells) {
+                let over = lib.and_then(|lib| over_cells(lib, flora, stand));
+                if !self.stamp_model(view, flora, stand, cells, over) {
                     break;
                 }
                 continue;
@@ -1046,6 +1074,7 @@ impl Stands {
         flora: FloraView<'_>,
         stand: &Stand,
         cells: &[ModelCell],
+        over: Option<&[ModelCell]>,
     ) -> bool {
         let ModelInputs {
             foliage,
@@ -1057,11 +1086,47 @@ impl Stands {
         } = self.model_inputs(flora, stand);
         // The model's highest cell: each cell's colour comes from its height in the model.
         let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
+        // The plant beneath: the top plant's trunk cells (it shares this anchor), and the
+        // beneath plant's own cells outside them, so a cell moved in front of the trunk
+        // never lands on one the model already draws.
+        let mut trunk = Vec::new();
+        let mut own = Vec::new();
+        if let Some(over) = over {
+            model::each_plant_cell(over, anchor, stand.id, &[], view, |c, m| {
+                if m.tag == Tag::Trunk {
+                    trunk.push((c.x, c.y, c.z));
+                }
+            });
+            trunk.sort_unstable();
+            if !trunk.is_empty() {
+                model::each_plant_cell(cells, anchor, stand.id, &foliage, view, |c, _| {
+                    if trunk.binary_search(&(c.x, c.y, c.z)).is_err() {
+                        own.push((c.x, c.y, c.z));
+                    }
+                });
+                own.sort_unstable();
+            }
+        }
         let mut ok = true;
         model::each_plant_cell(cells, anchor, stand.id, &foliage, view, |cell, m| {
             if !ok {
                 return;
             }
+            let cell = if trunk.is_empty() {
+                cell
+            } else {
+                let Some(front) = in_front_of_trunk(&trunk, cell) else {
+                    return;
+                };
+                if front != cell {
+                    let key = (front.x, front.y, front.z);
+                    match own.binary_search(&key) {
+                        Ok(_) => return,
+                        Err(at) => own.insert(at, key),
+                    }
+                }
+                front
+            };
             let band = colours::band(m.offset[1], top);
             let (tint, shown, part) = match m.tag {
                 Tag::Trunk => (0, true, PartKind::Trunk),
@@ -2424,5 +2489,108 @@ mod tests {
             nearest > 0.6,
             "the nearest producer crown is {nearest} away"
         );
+    }
+
+    // --- RENDER-UNDER: the plant beneath drawn in front of the top plant's trunk ----
+
+    /// A one-step, one-variant plant model of these `(offset, tag)` cells.
+    fn one_step(cells: &[([i32; 3], Tag)]) -> model::PlantModel {
+        model::PlantModel {
+            steps: vec![model::PlantStep {
+                height_m: 1.0,
+                radius_m: 1.0,
+                variants: vec![
+                    cells
+                        .iter()
+                        .map(|&(offset, tag)| ModelCell { offset, material: 0, tag })
+                        .collect(),
+                ],
+            }],
+        }
+    }
+
+    /// A tree whose trunk fills its anchor cell, the cell behind it and two above, and a
+    /// cover of three cells: one beside the trunk, two inside it. Foliage layers past the
+    /// stand's own read full, so nothing is thinned.
+    fn under_lib() -> ModelLibrary {
+        let leaf = Tag::Foliage(MAX_FOLIAGE_LAYERS as u8);
+        let mut lib = ModelLibrary::default();
+        lib.insert_plant(
+            Species::Vaulttree,
+            one_step(&[
+                ([0, 0, 0], Tag::Trunk),
+                ([0, 0, 1], Tag::Trunk),
+                ([0, 1, 0], Tag::Trunk),
+                ([0, 2, 0], Tag::Trunk),
+            ]),
+        );
+        lib.insert_plant(
+            Species::Springturf,
+            one_step(&[([0, 0, 0], leaf), ([1, 0, 0], leaf), ([0, 0, 1], leaf)]),
+        );
+        lib
+    }
+
+    fn tree(flora: &mut Flora, world: &World, x: i64) {
+        let wood = flora.config().species(Species::Vaulttree).wood_max;
+        assert!(flora.apply(world, Command::Seed { x, z: 2, species: Species::Vaulttree, wood }));
+    }
+
+    fn grid(lib: &ModelLibrary, world: &World, flora: &Flora, incremental: bool) -> Stands {
+        let mut stands = Stands::empty(32, 16, 4);
+        stands.set_incremental(incremental);
+        stands.rebuild_with(&world.view(), flora.view(), lib);
+        stands
+    }
+
+    /// A cover beneath a tree on its face draws the cells the trunk holds in the first
+    /// cell in front of it (toward the camera, `z − 1`), once; the trunk's own cells
+    /// are the trunk exactly as with no cover; a cell beside the trunk stays put. The
+    /// change-only rebuild draws the same.
+    #[test]
+    fn a_cover_beneath_a_trunk_is_drawn_in_front_of_it() {
+        let (world, lib) = (world(), under_lib());
+        let mut bare = Flora::new(FloraConfig::default());
+        tree(&mut bare, &world, 10);
+        let mut shared = Flora::new(FloraConfig::default());
+        tree(&mut shared, &world, 10);
+        let turf = shared.config().species(Species::Springturf).wood_max;
+        let site = Site { x: 10, y: 3, z: 2 };
+        assert!(shared.apply(&world, Command::SeedBeneath { site, species: Species::Springturf, wood: turf }));
+        assert!(shared.view().understorey_at(site).is_some(), "the turf is beneath");
+
+        let before = grid(&lib, &world, &bare, false);
+        for incremental in [false, true] {
+            let after = grid(&lib, &world, &shared, incremental);
+            for (x, y, z) in [(10, 4, 2), (10, 4, 3), (10, 5, 2), (10, 6, 2)] {
+                assert!(matches!(after.at(x, y, z), Part::Trunk(_)), "trunk at {x},{y},{z}");
+                assert_eq!(after.at(x, y, z), before.at(x, y, z), "the trunk is unchanged");
+            }
+            assert!(matches!(after.at(10, 4, 1), Part::Crown { .. }), "the cover in front");
+            assert!(matches!(after.at(11, 4, 2), Part::Crown { .. }), "the cell beside stays");
+            assert_eq!(before.at(10, 4, 1), Part::None);
+            let cover = after
+                .cells()
+                .filter(|&(x, y, z)| matches!(after.at(i64::from(x), i64::from(y), z), Part::Crown { .. }))
+                .count();
+            assert_eq!(cover, 2, "two cover cells: the one moved in front and the one beside");
+        }
+    }
+
+    /// A face without a plant beneath stamps as before: a cover on its **own** face whose
+    /// cell falls in a neighbour's trunk is hidden by it, not moved.
+    #[test]
+    fn a_cover_on_its_own_face_is_not_moved() {
+        let (world, lib) = (world(), under_lib());
+        let mut flora = Flora::new(FloraConfig::default());
+        tree(&mut flora, &world, 10);
+        let turf = flora.config().species(Species::Springturf).wood_max;
+        // Its cell (0, 0, 1) is (9, 4, 3), its (1, 0, 0) is (10, 4, 2): both trunk.
+        assert!(flora.apply(&world, Command::Seed { x: 9, z: 2, species: Species::Springturf, wood: turf }));
+        let stands = grid(&lib, &world, &flora, false);
+        assert!(matches!(stands.at(10, 4, 2), Part::Trunk(_)));
+        assert!(matches!(stands.at(9, 4, 2), Part::Crown { .. }));
+        assert!(matches!(stands.at(9, 4, 3), Part::Crown { .. }));
+        assert_eq!(stands.at(10, 4, 1), Part::None, "nothing drawn in front of the trunk");
     }
 }
