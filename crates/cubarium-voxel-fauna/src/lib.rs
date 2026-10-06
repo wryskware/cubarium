@@ -33,7 +33,9 @@ mod predation;
 mod pack;
 pub mod perception;
 pub mod scent;
+pub mod vigil;
 pub use perception::{Percept, Track};
+pub use vigil::{Vigil, VigilLedger, VigilMode, Vigilance};
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
@@ -77,7 +79,7 @@ pub use controller::{
     FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, heuristic, resolve_actions,
 };
 pub use predation::{
-    BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodges,
+    BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodge_chance_with, dodges,
     egg_hatches, hatch_draw, is_prey_of, kind_of, moved_recently, tremor_of,
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
@@ -2750,6 +2752,9 @@ pub struct FaunaLedger {
     /// ([`PerceptionConfig::give_up_s`]).
     #[serde(default)]
     pub pack_targets_lost: u64,
+    /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
+    #[serde(default)]
+    pub vigil: VigilLedger,
     #[serde(default)]
     pub pack_draw_chases: u64,
     #[serde(default)]
@@ -3386,9 +3391,11 @@ impl Fauna {
     /// Whether the scent field runs: a body of a live lineage ([`SenseTable::live`]) that
     /// smells is alive.
     pub(crate) fn scent_wanted(&self) -> bool {
+        // S2: a patrolling hunter's patch choice reads its prey's scent too.
+        let patrol_smells = self.config.hunt.patrol && self.config.hunt.patch_scent_weight > 0.0;
         self.animals.iter().any(|a| a.founder.is_some_and(|f| {
             let t = self.config.founder(f).senses;
-            t.live && t.smell_min > 0.0
+            (t.live && t.smell_min > 0.0) || (patrol_smells && self.config.founder(f).hunter.is_some() && self.config.founder(f).pack.is_none())
         }))
     }
 

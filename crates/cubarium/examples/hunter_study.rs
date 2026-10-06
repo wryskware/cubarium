@@ -46,6 +46,9 @@
 //!   chases and chase kills, chases and draws by the sense that found the prey
 //!   `[sight, hearing, smell]`, chases begun while drawn, and the **draw share**: hungry
 //!   pack-tactic samples spent leading or following a draw, over all hungry samples.
+//! - `vig,` (S2 GROUND RESPONSES): per lineage with a response, scan pauses, flights, alarm
+//!   bolts, orientations, freezes and refuge samples; strikes on frondgrazers aware and
+//!   unaware of their striker; the Veilhound's stalk, rush and stalk-freeze samples.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
 //! - At the end, `sum,` lines over the whole run.
 
@@ -399,6 +402,37 @@ impl Vh {
     }
 }
 
+/// **The ground responses' window line** (S2), `a` → `b`: scan pauses, flights, alarm bolts,
+/// orientations, freezes and refuge samples per lineage that has any, the strikes on
+/// frondgrazers that had sensed their striker and that had not, and the Veilhound's stalk,
+/// rush and freeze samples.
+fn vig_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let (x, y) = (&a.vigil, &b.vigil);
+    let d = |p: &[u64; Founder::COUNT], q: &[u64; Founder::COUNT], f: Founder| q[f.index()] - p[f.index()];
+    let mut out = Vec::new();
+    for f in [Founder::Browser, Founder::Loftstrider, Founder::Seedporter, Founder::Blind] {
+        out.push(format!(
+            "{}={}/{}/{}/{}/{}/{}",
+            f.name(),
+            d(&x.scans, &y.scans, f),
+            d(&x.flees, &y.flees, f),
+            d(&x.alarm_bolts, &y.alarm_bolts, f),
+            d(&x.orients, &y.orients, f),
+            d(&x.freezes, &y.freezes, f),
+            d(&x.refuges, &y.refuges, f),
+        ));
+    }
+    format!(
+        "scans/flees/bolts/orients/freezes/refuges,{},grazer_aware={},grazer_unaware={},stalk={},rush={},stalk_freeze={}",
+        out.join(","),
+        d(&x.aware_strikes, &y.aware_strikes, Founder::Browser),
+        d(&x.unaware_strikes, &y.unaware_strikes, Founder::Browser),
+        y.stalk_samples - x.stalk_samples,
+        y.rush_samples - x.rush_samples,
+        y.stalk_freezes - x.stalk_freezes,
+    )
+}
+
 /// The Veilhound's window line, `a` → `b`.
 fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh) -> String {
     let i = VH.index();
@@ -542,6 +576,7 @@ fn run(args: &[String]) {
             println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
             println!("route,{arm},{minute},{}", route_line(&lw, &l));
             println!("vh,{arm},{minute},{}", vh_line(&sim, &params, &lw, &l, &vh_win));
+            println!("vig,{arm},{minute},{}", vig_line(&lw, &l));
             vh_all.add(&vh_win);
             vh_win = Vh::default();
             meal_all.add(&meal_win);
@@ -565,6 +600,7 @@ fn run(args: &[String]) {
     println!("sumroute,{arm},{},{}", minute0, route_line(&l0, &l));
     vh_all.add(&vh_win);
     println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
+    println!("sumvig,{arm},{},{}", minute0, vig_line(&l0, &l));
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;

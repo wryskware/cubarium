@@ -83,6 +83,29 @@ pub struct PredationConfig {
     pub carcass_yield_radius_m: f64,
     /// ...and walks directly away until none is within this, then resumes, metres. 5.
     pub threat_clear_m: f64,
+    /// **D5, the senses as the dodge's awareness** (S2, [`crate::vigil::awareness`]): a prey
+    /// of a live lineage whose record holds its striker dodges at this awareness. 1.
+    #[serde(default = "awareness_sensed")]
+    pub awareness_sensed: f64,
+    /// ...and one whose record does not, at this (the review's unaware value, the asleep
+    /// column's). 0.
+    #[serde(default = "awareness_unaware")]
+    pub awareness_unaware: f64,
+    /// ...sensed within this long before the lunge's contact, seconds. 1.
+    #[serde(default = "aware_within_s")]
+    pub aware_within_s: f64,
+}
+
+fn awareness_sensed() -> f64 {
+    PredationConfig::default().awareness_sensed
+}
+
+fn awareness_unaware() -> f64 {
+    PredationConfig::default().awareness_unaware
+}
+
+fn aware_within_s() -> f64 {
+    PredationConfig::default().aware_within_s
 }
 
 impl Default for PredationConfig {
@@ -116,6 +139,9 @@ impl Default for PredationConfig {
             flee_tremor: 0.015,
             carcass_yield_radius_m: 3.0,
             threat_clear_m: 5.0,
+            awareness_sensed: 1.0,
+            awareness_unaware: 0.0,
+            aware_within_s: 1.0,
         }
     }
 }
@@ -619,6 +645,16 @@ pub struct HuntConfig {
     /// scores `1 + success_boost` times its food cue. 1: twice as appealing. Exploration
     /// ([`HuntConfig::patrol_explore`]) still draws uniformly among the open patches.
     pub success_boost: f64,
+    /// **Scent in the patch choice** (S2, review §4 item 3): the scent of the channels its
+    /// prey lay ([`crate::perception::prey_channels`]: the lanternjaw's small-prey channel)
+    /// on a square's food faces is one more cue, scaled to its best square like the food
+    /// cues and weighted by this, so a boom's scent draws it. 0 reads no scent. 1.
+    #[serde(default = "patch_scent_weight")]
+    pub patch_scent_weight: f64,
+}
+
+fn patch_scent_weight() -> f64 {
+    HuntConfig::default().patch_scent_weight
 }
 
 impl Default for HuntConfig {
@@ -650,6 +686,7 @@ impl Default for HuntConfig {
             route_refresh_s: 60.0,
             success_memory_s: 1800.0,
             success_boost: 1.0,
+            patch_scent_weight: 1.0,
         }
     }
 }

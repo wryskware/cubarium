@@ -434,6 +434,8 @@ fn in_the_world_dodges_follow_awareness_and_aspect() {
         for seed in 1..=worlds {
             let (world, mut flora, mut fauna) = arena(Some(hour), seed);
             fauna.config.founders[Founder::Browser.index()].agility = 0.5;
+            // The state column's dodge (S1): the grazer's senses off (S2's D5 has its own case).
+            fauna.config.founders[Founder::Browser.index()].senses.live = false;
             fauna.config.predation.awareness_resting = 0.7;
             fauna.config.predation.dodge_rear_aspect = 0.5;
             fauna.config.predation.dodge_condition_floor = 0.5;

@@ -1353,7 +1353,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1323 rows)
+**`fauna.*`** (1498 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1459,6 +1459,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.senses.tremor_m` | 2.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.littershredder.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.littershredder.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.littershredder.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.littershredder.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.littershredder.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.littershredder.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.littershredder.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.littershredder.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.littershredder.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.littershredder.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.littershredder.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.littershredder.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.littershredder.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.littershredder.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.littershredder.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.littershredder.vigilance.freeze_tremor` | 0.015 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.littershredder.vigilance.withdraw_tremor` | 0.06 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.littershredder.vigilance.freeze_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.littershredder.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1512,6 +1529,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.littershredder.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.littershredder.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1588,6 +1607,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.frondgrazer.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.frondgrazer.senses.smell_min` | 0.42 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.frondgrazer.senses.feeding_sight_fraction` | 0.25 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.frondgrazer.senses.kin_tracks` | 3 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.frondgrazer.vigilance.flee_start_m` | 4.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.frondgrazer.vigilance.flee_stop_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.frondgrazer.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.frondgrazer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.frondgrazer.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.frondgrazer.vigilance.scan_every_s` | 6.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.frondgrazer.vigilance.scan_s` | 1.5 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.frondgrazer.vigilance.orient_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.frondgrazer.vigilance.alarm_emission_factor` | 2.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.frondgrazer.vigilance.alarm_bolt_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.frondgrazer.vigilance.alarm_refractory_s` | 20.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.frondgrazer.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.frondgrazer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.frondgrazer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.frondgrazer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1641,6 +1677,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.frondgrazer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.frondgrazer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1717,6 +1755,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.senses.tremor_m` | 3.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.lanternjaw.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.lanternjaw.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.lanternjaw.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.lanternjaw.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.lanternjaw.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.lanternjaw.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.lanternjaw.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.lanternjaw.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.lanternjaw.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.lanternjaw.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.lanternjaw.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.lanternjaw.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.lanternjaw.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.lanternjaw.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.lanternjaw.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.lanternjaw.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.lanternjaw.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.lanternjaw.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.lanternjaw.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1770,6 +1825,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.lanternjaw.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.lanternjaw.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1846,6 +1903,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.senses.tremor_m` | 1.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.capgnawer.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.capgnawer.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.capgnawer.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.capgnawer.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.capgnawer.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.capgnawer.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.capgnawer.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.capgnawer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.capgnawer.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.capgnawer.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.capgnawer.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.capgnawer.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.capgnawer.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.capgnawer.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.capgnawer.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.capgnawer.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.capgnawer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.capgnawer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.capgnawer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1899,6 +1973,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.capgnawer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.capgnawer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.capgnawer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1975,6 +2051,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.senses.tremor_m` | 2.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.loftstrider.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.loftstrider.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.loftstrider.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.loftstrider.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.loftstrider.vigilance.flee_start_m` | 6.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.loftstrider.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.loftstrider.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.loftstrider.vigilance.group_min` | 2 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.loftstrider.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.loftstrider.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.loftstrider.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.loftstrider.vigilance.orient_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.loftstrider.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.loftstrider.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.loftstrider.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.loftstrider.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.loftstrider.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.loftstrider.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.loftstrider.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2028,6 +2121,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.loftstrider.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.loftstrider.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2104,6 +2199,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.ripple-snail.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.ripple-snail.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.ripple-snail.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.ripple-snail.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.ripple-snail.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.ripple-snail.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.ripple-snail.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.ripple-snail.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.ripple-snail.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.ripple-snail.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.ripple-snail.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.ripple-snail.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.ripple-snail.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.ripple-snail.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.ripple-snail.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.ripple-snail.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.ripple-snail.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.ripple-snail.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.ripple-snail.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2157,6 +2269,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.ripple-snail.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.ripple-snail.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.ripple-snail.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2233,6 +2347,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.senses.tremor_m` | 0.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.bellwing.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.bellwing.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.bellwing.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.bellwing.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.bellwing.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.bellwing.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.bellwing.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.bellwing.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.bellwing.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.bellwing.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.bellwing.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.bellwing.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.bellwing.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.bellwing.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.bellwing.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.bellwing.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.bellwing.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.bellwing.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.bellwing.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2286,6 +2417,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.bellwing.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.bellwing.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2362,6 +2495,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.senses.tremor_m` | 0.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.seedporter.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.seedporter.senses.smell_min` | 0.9 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.seedporter.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.seedporter.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.seedporter.vigilance.flee_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.seedporter.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.seedporter.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.seedporter.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.seedporter.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.seedporter.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.seedporter.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.seedporter.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.seedporter.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.seedporter.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.seedporter.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.seedporter.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.seedporter.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.seedporter.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.seedporter.vigilance.refuge_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2415,6 +2565,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.seedporter.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.seedporter.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2491,6 +2643,23 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.chorister.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.chorister.senses.smell_min` | 0.13 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.chorister.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
+| `fauna.founders.chorister.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.chorister.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
+| `fauna.founders.chorister.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
+| `fauna.founders.chorister.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
+| `fauna.founders.chorister.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.chorister.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.chorister.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
+| `fauna.founders.chorister.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.chorister.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
+| `fauna.founders.chorister.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
+| `fauna.founders.chorister.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
+| `fauna.founders.chorister.vigilance.alarm_refractory_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: after a bolt it hears no alarm this long |
+| `fauna.founders.chorister.vigilance.freeze_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall (left + right) that freezes it (0: never) |
+| `fauna.founders.chorister.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
+| `fauna.founders.chorister.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
+| `fauna.founders.chorister.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2544,6 +2713,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.den_search_m` | 8.0 | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
 | `fauna.founders.chorister.pack.follow_radius_m` | 3.0 | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.chorister.pack.commit_m` | 2.5 | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.chorister.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.chorister.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2559,6 +2730,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.predation.awareness_resting` | 0.7 | fraction | [0, 1] |  | - | decision | dodge table awareness, awake resting |
 | `fauna.predation.awareness_cropping` | 0.4 | fraction | [0, 1] |  | - | decision | dodge table awareness, cropping and climbing |
 | `fauna.predation.awareness_asleep` | 0.0 | fraction | [0, 1] |  | - | decision | dodge table awareness, asleep |
+| `fauna.predation.awareness_sensed` | 1.0 | fraction | [0, 1] |  | - | placeholder | D5 (S2): a live lineage's prey whose record holds the striker dodges at this awareness |
+| `fauna.predation.awareness_unaware` | 0.0 | fraction | [0, 1] |  | - | placeholder | D5 (S2): ...and one whose record does not, at this |
+| `fauna.predation.aware_within_s` | 1.0 | s | [0, inf) |  | - | placeholder | D5 (S2): ...sensed within this long before contact |
 | `fauna.predation.dodge_rear_aspect` | 0.5 | fraction | [0, 1] | 0.1–1 | - | decision | dodge aspect factor when struck from the rear half |
 | `fauna.predation.dodge_condition_floor` | 0.5 | fraction | [0, 1] | 0.1–1 | - | decision | the dodge's condition factor is the reserve fraction clamped to [this, 1] |
 | `fauna.predation.egg_footfall_min` | 2 | distinct prey | [0, inf) | 1–6 | - | placeholder | lowest footfall threshold a dormant egg draws |
@@ -2651,6 +2825,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.hunt.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | how long a lineage's walking route graph stands before it is rebuilt |
 | `fauna.hunt.success_memory_s` | 1800.0 | s | [0, inf) | 120–14400 log | - | placeholder | how long a kill marks its place productive in the killer's memory |
 | `fauna.hunt.success_boost` | 1.0 | fraction | [0, inf) | 0–4 | - | placeholder | a patch by a remembered kill scores 1 + this times its food cue |
+| `fauna.hunt.patch_scent_weight` | 1.0 | weight | [0, inf) |  | - | placeholder | S2: its prey's scent on a square's food faces is one more patch cue at this weight (0: no scent) |
 | `fauna.perception.remote_hz` | 4.0 | Hz | (0, inf) | 1–20 | - | placeholder | how often a body's remote senses (sight, hearing, the pair's tremor) run, staggered by id |
 | `fauna.perception.max_candidates` | 8 | bodies | [0, inf) | 2–32 | - | placeholder | prey and threats weighed (one terrain ray each) per observer per remote sensing, nearest first |
 | `fauna.perception.bin_m` | 2.0 | m | (0, inf) | 0.5–8 | - | placeholder | the spatial bins bodies are sorted into each tick |
