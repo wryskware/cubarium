@@ -396,6 +396,97 @@ turf reads light under 0.57 and mineral under 0.5.
 edible foliage, and the dry spells under the turf (`SPELLLOG`). The 300-day model arms run
 in the same batch.
 
+## 11. Round 3: the mildest dry season, on main's model (2026-10-06)
+
+### 11.1 Round 2's hang, found and fixed
+
+`crop30+L40` on s5 stopped writing at minute 6370 (day 53) and spun for 4 h. Reproduced
+locally on round 2's source (4a0a4fc2, `timeout`: no output past minute 6370); main's build
+runs through on the same command only because DORMANCY changed the trajectory.
+
+- **Where:** `Model::under_step` (gdb: inside `stand::grow` over the understorey list). The
+  turf under the vaulttree on summit-wet held 125 cohorts at one step, 816 the next, then
+  1,957, 3,747, 6,311, 9,774 … 222,640.
+- **Why:** two splits feed each other between the hourly rebins. `move_under` (a recruit
+  escaping through the turf) splits *every* turf cohort into the understorey list, once per
+  escaping cohort; `under_step`'s "the canopy died over some" (L40 kills adults) splits
+  *every* understorey cohort back into the turf's list. Each step each list gains the other's
+  length, a geometric growth, and the next rebin is 360 steps away.
+- **Fix:** `model::COHORT_LIST_MAX` (4096, above every rebin key count, 2,448): a zone whose
+  cohort, contest or understorey list passes it is rebinned in that step
+  (`Model::rebin_zones`, the scheduled rebin's own law; `Counters::early_rebins`). A run
+  that never fragments is unchanged: s5 `crop30+L40` to minute 6600 on main is byte-identical
+  before and after; on round 2's source with the fix it passes minute 7800 in 84 s.
+- **Test:** `meadow_levers::turf_moving_under_and_back_keeps_the_cohort_lists_bounded`
+  (recruits escaping each step while L40-style ageing thins the canopy, no scheduled rebin):
+  before the fix a list reached 6,303 entries in 60 steps; after, every list stays within the
+  bound and `early_rebins` fired.
+- **The same pattern elsewhere:** the other list moves are keyed merges (newborns and
+  recruits merge into an existing cohort by key) or one-way (`contest_step`'s escapes, one
+  push per contest cohort, the contest list itself keyed). Only the turf ↔ understorey pair
+  splits whole lists both ways. `stand::fund`'s loop is bounded by the parcel. Not changed:
+  `move_under` is still called once per escaping cohort (one call with their sum would move
+  the same stands with a factor fewer fragments).
+
+### 11.2 Predictions, written before the batch
+
+Model on main: DORMANCY is the default (`cure_cover` 1, no cure cap), `contest=sim` in every
+arm. Cells: meadow / grove / forest of drained ground (openT, sumV), 300-day end means.
+
+| arm | s5 | s6 | s1 |
+|---|---|---|---|
+| base | 0.06 / 0.75 / 0.14 (0.22, 0.97) | 0.00 / 0.77 / 0.17 (0.00, 0.71) | 0.00 / 0.11 / 0.00 (0.01, 0.00) |
+| dryA | 0.13 / 0.35 / 0.12 (0.45, 0.85) | 0.03 / 0.38 / 0.14 (0.15, 0.62) | 0.00 / 0.00 / 0.00 |
+| ew+run+dryA | 0.15 / 0.32 / 0.12 (0.52, 0.84) | 0.06 / 0.30 / 0.13 (0.25, 0.55) | 0.00 / 0.00 / 0.00 |
+| ew+run+crop30+dryA | 0.16 / 0.30 / 0.12 (0.58, 0.82) | 0.09 / 0.15 / 0.09 (0.35, 0.40) | 0.00 / 0.00 / 0.00 |
+| ew+run+L40+dryA | 0.16 / 0.30 / 0.12 (0.58, 0.84) | 0.08 / 0.20 / 0.10 (0.30, 0.45) | 0.00 / 0.00 / 0.00 |
+| ew+run+crop30+L40+dryA | 0.17 / 0.29 / 0.11 (0.60, 0.82) | 0.12 / 0.11 / 0.07 (0.42, 0.32) | 0.00 / 0.00 / 0.00 |
+| ew+run+crop30+L40 | 0.05 / 0.55 / 0.14 (0.20, 0.98) | 0.00 / 0.36 / 0.18 (0.00, 0.80) | 0.00 / 0.00 / 0.00 |
+
+Reasoning:
+- **Without dry spells** DORMANCY changes little on s5 and s6: their turf starves of light and
+  mineral under the woody takeover, not of water (§10: starvation equals births with or
+  without the rule). So base and `ew+run+crop30+L40` repeat round 2 within 0.02.
+- **With dry spells** the turf now rides out the spell's tail (water between 0.10 and 0.15,
+  where it used to starve) and its cure is no longer capped: about +0.01 to +0.02 meadow and
+  openT over round 2. The woody side is unchanged (woody plants have no cure).
+- **s1** stays stonecushion ground (§10: its turf still declines to ~0 by day 60).
+- **The components on s6:** round 2's `ew+dryA` (0.04) against `ew+run+crop30+L40+dryA`
+  (0.11) says the dry spells need help from the woody levers there. Each of crop30 and L40
+  alone gets part of the way; both are needed for openT ≥ 0.40.
+- **Rarity:** `rare150-` arms recover to their counterpart's end within 0.02 (round 2 did).
+
+**The sweep** (`dry=EVERY:LEN:WATER`, phase 5 days; dose = LEN/EVERY × (1 − WATER); dryA is
+10:0.5:0.2, dose 0.04):
+- WATER 0.5 is too mild everywhere on s6 (a woody stand at half its root water still pays its
+  upkeep): s6 meadow ≤ 0.03 on both bases at every EVERY and LEN.
+- EVERY 20 is too rare on s6: lanternberry juveniles regrow between spells (s6 meadow ≤ 0.05).
+- On `ew+run+crop30+L40`, the niche on s5 and s6 needs WATER 0.2 and dose ≥ about 0.04:
+  10:0.5, 5:0.25 and 10:1 hold; 10:0.25 (dose 0.02) does not (s6 meadow ~0.05). 5:1 (0.16)
+  is the strongest and may cut s6's groves under 0.05, failing the niche from the woody side.
+  **The mildest season that holds: 5:0.25:0.2 or 10:0.5:0.2 (dose 0.04).**
+- On `ew+run` alone (no crop, no lifespan) dose 0.04 does not hold s6 (as `ew+dryA`, ~0.05);
+  only 5:0.5:0.2 and 5:1:0.2 might, at the cost of groves.
+- s5 holds meadow ≥ 0.10 under any WATER-0.2 season; its openT ≥ 0.40 needs dose ≥ 0.02.
+
+### 11.3 Round 3's arms and batch
+
+Every arm `contest=sim`, 300 days from census m370 as round 2 (`batch/arms.txt` lists name,
+seeds, flags):
+- controls and the components, seeds 5, 6, 1: base; dryA; ew+run+dryA; ew+run+crop30+dryA;
+  ew+run+L40+dryA; ew+run+crop30+L40+dryA; ew+run+crop30+L40;
+- the sweep, seeds 5 and 6: on `ew+run` and on `ew+run+crop30+L40`, `dry=E:L:W:5` for E in
+  {5, 10, 20}, L in {0.25, 0.5, 1}, W in {0.2, 0.5} (10:0.5:0.2 is the dryA arm), and
+  `ew+run` without dry spells as the sweep's zero;
+- rarity at day 150, seeds 5, 6, 1: `rare150-ew+run+dryA`, `rare150-ew+run+crop30+L40+dryA`.
+
+97 runs on eidolon (`~/webmodel-meadow3/batch/run.sh`, source branch `meadow3` in
+`~/webmodel-meadow3/src`, own target), 16 at a time at `nice -n 10`, each under `timeout
+2700`. Outputs `~/webmodel-meadow3/batch/runs/ARM-sSEED.txt`, the log `runs/log`, the table
+`runs/table.txt` (round 2's, plus the sweep grid ordered by dose with a niche-on-s5-and-s6
+column), and the marker **`runs/DONE`**, written on every exit (`runs/FAILED` if the build
+failed).
+
 ## Roles (balance through roles)
 
 | stock growing or shrinking without check | the role that should answer |
