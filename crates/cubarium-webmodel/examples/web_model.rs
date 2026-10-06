@@ -303,13 +303,14 @@ fn scenario(args: &[String]) {
     println!("trajectory (mean field), every {every} world days:");
     println!("  day 0 {}", census_line(&w));
     let mut last_day_start = a.clone();
+    let mut offers = Vec::new();
     while d < days - 1e-9 {
         d = (d + every).min(days);
         if d >= days - 1.0 - 1e-9 && last_day_start.minute < m0 + (days - 1.0) * dm - 1e-6 {
-            w.run_to(m0 + (days - 1.0) * dm);
+            w.run_to_recording(m0 + (days - 1.0) * dm, &mut offers);
             last_day_start = w.snap();
         }
-        w.run_to(m0 + d * dm);
+        w.run_to_recording(m0 + d * dm, &mut offers);
         println!("  day {d:.0} {}", census_line(&w));
     }
     let b = w.snap();
@@ -320,17 +321,16 @@ fn scenario(args: &[String]) {
         let mut gone = [0usize; Founder::COUNT];
         let mut ends: BTreeMap<usize, Vec<f64>> = BTreeMap::new();
         for k in 0..twins {
-            let mut tw = w0.twin(1000 + k as u64);
-            tw.run_to(m0 + days * dm);
+            let tw = w0.twin_replay(1000 + k as u64, &offers);
             for f in STEPPED {
-                let c = tw.fauna.census(f);
+                let c = tw.census(f);
                 ends.entry(f.index()).or_default().push(c.n);
                 if c.n + c.eggs + c.bank < 0.5 && w0.fauna.census(f).n > 0.0 {
                     gone[f.index()] += 1;
                 }
             }
         }
-        println!("stochastic twin ({twins} runs, plants mean field): P(lineage gone by day {days:.0}) and bodies at the end [min..max]");
+        println!("stochastic twin ({twins} runs on the mean field's supply): P(lineage gone by day {days:.0}) and bodies at the end [min..max]");
         for f in STEPPED {
             let v = &ends[&f.index()];
             let (lo, hi) = (v.iter().cloned().fold(f64::INFINITY, f64::min), v.iter().cloned().fold(0.0, f64::max));

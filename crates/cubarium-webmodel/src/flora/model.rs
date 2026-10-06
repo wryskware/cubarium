@@ -1022,6 +1022,9 @@ impl Model {
                         mat += d * c.st.material();
                     }
                     self.c.browsed[s] += gone;
+                    // The browser ate the seedlings' tissue: out of the half, as a take.
+                    self.c.browsed_organic += mat;
+                    self.c.taken.foliage[s] += mat;
                     if gone > 0.0 && counts[s] > 0.0 {
                         self.z[zi].pool[s] += nt * mat;
                         let carried = self.z[zi].pool[s] * gone / counts[s].max(gone);
@@ -1116,11 +1119,13 @@ impl Model {
             self.germinate(zi, &readings, clock.daylight > 0.0);
             // ---- the fungus place.
             self.germinate_fungus(zi, &readings);
-            // ---- the bank's attrition and age (seeds.rs:745), as one rate: a bank e-folding at
-            // its lifetime and cut off at it keeps `1 − 1/e` of a lifetime on average.
+            // ---- the bank's attrition and age (seeds.rs:745), as one rate: the sim's mean seed
+            // life, attrition `a` with the cut-off at `T`, is `(1 − e^(−aT)) / a` (`T` with no
+            // attrition).
             for s in 0..NS {
                 let sc = config.species(Species::ALL[s]);
-                let life = (1.0 - (-1.0f64).exp()) * sc.seed_max_age_s.max(1.0);
+                let (ra, tm) = (sc.seed_attrition_per_s, sc.seed_max_age_s.max(1.0));
+                let life = if ra > 0.0 { (1.0 - (-ra * tm).exp()) / ra } else { tm }.max(1.0);
                 let d = self.z[zi].bank[s] * (1.0 - (-dt / life).exp());
                 if d > 0.0 {
                     self.z[zi].bank[s] -= d;
@@ -1555,9 +1560,11 @@ impl Model {
                     mat += d * c.st.material();
                 }
                 if gone > 0.0 {
-                    // The tissue to the browser; its mineral to the faces it frees.
+                    // The tissue to the browser (booked as a take of the species' tissue and
+                    // on its own line); its mineral to the faces it frees.
                     self.c.browsed[s] += gone;
                     self.c.browsed_organic += mat;
+                    self.c.taken.foliage[s] += mat;
                     let zs = &mut self.z[zi];
                     zs.pool[s] += sc.n_tissue * mat;
                     let carried = zs.pool[s] * gone / count.max(gone);

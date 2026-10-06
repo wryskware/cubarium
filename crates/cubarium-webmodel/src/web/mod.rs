@@ -143,9 +143,44 @@ impl Web {
 
     /// **One step** (the module doc's order).
     pub fn step(&mut self) {
+        self.step_recording(None);
+    }
+
+    /// Step to world minute `minute`, keeping each step's offer to the animals (for
+    /// [`Web::twin_replay`]).
+    pub fn run_to_recording(&mut self, minute: f64, rec: &mut Vec<Supply>) {
+        while self.minute() < minute - 1e-9 {
+            self.step_recording(Some(rec));
+        }
+    }
+
+    /// **The stochastic twin on a recorded supply**: the animals made whole bodies with the
+    /// twin's draws (seeded), stepped against the mean field's offers step by step (`offers`,
+    /// from [`Web::run_to_recording`] started at this state), their own take within each step
+    /// coming off as in the loop. The plants do not answer the twin's take: an approximation
+    /// that holds while the animals take a small share of each stock (the budget sheet shows
+    /// it), and that keeps a twin at the animal half's cost.
+    pub fn twin_replay(&self, seed: u64, offers: &[Supply]) -> FaunaModel {
+        let mut f = self.fauna.clone();
+        to_whole(&mut f);
+        f.draws = Draws::Twin(Rng::new(seed));
+        for offer in offers {
+            let mut left = offer.clone();
+            for _ in 0..self.sub {
+                let (t, _) = f.step(&left);
+                sub_take(&mut left, &t);
+            }
+        }
+        f
+    }
+
+    fn step_recording(&mut self, rec: Option<&mut Vec<Supply>>) {
         // 1. Supply.
         self.flora.step();
         let offer = self.flora.offer();
+        if let Some(r) = rec {
+            r.push(offer.clone());
+        }
         // 2. Take: the animals' steps against what is left.
         let mut left = offer.clone();
         let mut take = Take::default();
@@ -222,7 +257,7 @@ impl Web {
             c.fixed + c.seep - c.respired - c.decomposed - animals - self.fauna.carcass_decayed - c.browsed_organic + l.unmet,
             c.cap_mineral_taken + c.held_in,
             -c.taken_mineral + c.returned_mineral + c.held_in,
-            c.fixed + c.seep + c.returned - c.respired - c.decomposed - c.taken.organic() - c.browsed_organic,
+            c.fixed + c.seep + c.returned - c.respired - c.decomposed - c.taken.organic(),
             l.booked.organic() - l.returned.litter - l.returned.carrion - animals - self.fauna.carcass_decayed,
         ]
     }

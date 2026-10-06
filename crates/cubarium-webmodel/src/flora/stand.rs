@@ -133,10 +133,53 @@ pub fn monod(sc: &SpeciesConfig, n: f64) -> f64 {
     if n + sc.nutrient_half > 0.0 { n / (n + sc.nutrient_half) } else { 0.0 }
 }
 
-/// **One growth step** of one stand (`step::grow_stand_cause`, `step.rs:2924–3260`),
-/// followed by nothing else: funding and landing are [`fund`]. The fruit-rest draw is the
-/// mean of the sim's exponential (`step.rs:3201`), not a keyed draw.
+/// **The longest step the stand law is taken in**, seconds (numerics, not ecology). The law is
+/// the sim's explicit per-tick update; taken whole at the model's 10 s step its error grows
+/// in proportion to the step and always runs low (the independent test pass: a dry adult
+/// springturf's foliage −56 % over a day at 10 s, −8 % at 1 s, −1.3 % at 0.2 s). [`grow`]
+/// sub-steps a longer step at this length, the clock's light, upkeep and night held over it
+/// and its time to dawn counted down.
+pub const SUB_STEP_S: f64 = 0.25;
+
+/// **One step** of one stand: the growth law (`step::grow_stand_cause`, `step.rs:2924–3260`),
+/// then the donor's saving into its parcel (`seeds::propagate`, `seeds.rs:880–905`, [`save`]),
+/// its construction respiration in the flows; sending whole packages is [`fund`]. The
+/// fruit-rest draw is the mean of the sim's exponential (`step.rs:3201`), not a keyed draw.
+/// A step longer than [`SUB_STEP_S`] is taken in equal sub-steps no longer than it, growth
+/// and saving in each (the saving's cadence matters as much as the law's: saved once per
+/// 10 s, a newborn springturf ends a day with 22 % less reserve); a death ends it.
 pub fn grow(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (Flows, Option<Death>) {
+    let n = (c.dt / SUB_STEP_S).ceil().max(1.0) as usize;
+    if n <= 1 {
+        let (mut f, d) = grow_once(sc, st, site, c);
+        if d.is_none() {
+            f.respired += save(sc, st, c.dt);
+        }
+        return (f, d);
+    }
+    let h = c.dt / n as f64;
+    // A fungus's substrate is an amount for the whole step: each sub-step takes its share.
+    let site = Site { substrate_taken: site.substrate_taken / n as f64, substrate_gross: site.substrate_gross / n as f64, ..site };
+    let mut out = Flows::default();
+    for k in 0..n {
+        let ck = Clock { dt: h, to_dawn_s: c.to_dawn_s.map(|t| (t - k as f64 * h).max(h)), ..c };
+        let (f, d) = grow_once(sc, st, site, ck);
+        let saved = if d.is_none() { save(sc, st, h) } else { 0.0 };
+        out.respired += saved;
+        out.income += f.income;
+        out.respired += f.respired;
+        out.built += f.built;
+        out.litter += f.litter;
+        out.dead_wood += f.dead_wood;
+        out.seep += f.seep;
+        if d.is_some() {
+            return (out, d);
+        }
+    }
+    (out, None)
+}
+
+fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (Flows, Option<Death>) {
     let dt = c.dt;
     let mut out = Flows::default();
     let mu = sc.moisture_at(site.available);
@@ -330,12 +373,12 @@ fn dormant(sc: &SpeciesConfig, st: &mut StandState, scale: f64, dt: f64, mut out
 }
 
 /// **The donor's saving rule** (`seeds::propagate`, `seeds.rs:880–905`): a stand at or
-/// over `donor_min` funds `propagule_rate · dt` (times its caps' fullness for a fungus,
-/// `seeds.rs:815`) out of its reserve above the floor, at `1 + c_g`; whole packages leave.
-/// Returns the packages sent this step and the construction respiration.
-pub fn fund(sc: &SpeciesConfig, st: &mut StandState, dt: f64) -> (u32, f64) {
+/// over `donor_min` saves `propagule_rate · dt` (times its caps' fullness for a fungus,
+/// `seeds.rs:815`) out of its reserve above the floor into its parcel, at `1 + c_g`.
+/// Returns the construction respiration. [`grow`] runs it after each (sub-)step.
+pub fn save(sc: &SpeciesConfig, st: &mut StandState, dt: f64) -> f64 {
     if st.cured {
-        return (0, 0.0);
+        return 0.0;
     }
     let mut respired = 0.0;
     if st.wood >= sc.donor_min {
@@ -352,6 +395,17 @@ pub fn fund(sc: &SpeciesConfig, st: &mut StandState, dt: f64) -> (u32, f64) {
             respired += take - net;
         }
     }
+    respired
+}
+
+/// **Whole packages leave** (`seeds.rs:905`): the parcel [`grow`] saved, sent a package at a
+/// time. Returns the packages sent and the construction respiration (none here: it was booked
+/// as [`grow`] saved; the pair is kept for the callers).
+pub fn fund(sc: &SpeciesConfig, st: &mut StandState, _dt: f64) -> (u32, f64) {
+    if st.cured {
+        return (0, 0.0);
+    }
+    let respired = 0.0;
     let package = package_of(sc);
     let mut sent = 0;
     // The sim sends at most one package a tick; the model's longer step may hold several.

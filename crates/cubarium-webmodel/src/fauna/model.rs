@@ -1147,7 +1147,10 @@ fn absorb(a: &mut Cohort, b: &Cohort) {
         return;
     }
     let (wa, wb) = (a.n / n, b.n / n);
-    let w = |x: f64, y: f64| x * wa + y * wb;
+    // The weighted mean kept inside its inputs' range: a rounding below both (two `body_min`
+    // hatchlings merging to `body_min − 1 ulp`) would starve a whole cohort (the plant half's
+    // finding 2).
+    let w = |x: f64, y: f64| (x * wa + y * wb).clamp(x.min(y), x.max(y));
     a.b.body = w(a.b.body, b.b.body);
     a.b.reserve = w(a.b.reserve, b.b.reserve);
     a.b.brood = w(a.b.brood, b.b.brood).min(a.b.reserve);
