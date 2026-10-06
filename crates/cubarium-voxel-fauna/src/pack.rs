@@ -923,6 +923,8 @@ pub(crate) fn steer(
                     tick: now,
                     pack: own,
                     why: if killed { crate::ChaseEnd::Killed } else { crate::ChaseEnd::Gone },
+                    target: tid,
+                    by: a.id,
                 });
             }
             Some(o) => {
@@ -977,7 +979,7 @@ pub(crate) fn steer(
                     } else {
                         crate::ChaseEnd::Trespass
                     };
-                    fauna.log_pack_event(crate::PackEvent::ChaseEnd { tick: now, pack: own, why });
+                    fauna.log_pack_event(crate::PackEvent::ChaseEnd { tick: now, pack: own, why, target: tid, by: a.id });
                 }
             }
         }
@@ -1082,8 +1084,16 @@ pub(crate) fn steer(
             // hand, its meat and its distance; the best first, none under the floor.
             let n = 1 + participating as u32;
             let mut candidates: Vec<(f64, u64, Site, (f64, f64), u8)> = Vec::new();
+            // CHURN's readout: the last target dropped alive, scored as the taker sees it now.
+            let prev = fauna.pack(own).and_then(|p| p.abandoned);
+            let mut prev_score = None;
             for k in &sensed {
                 let Some(o) = fauna.view().animal(k.id).copied() else { continue };
+                if prev == Some(o.id) {
+                    let d = distance(&a, k.x, k.z, ring);
+                    let pr = prospect(fauna, i, &o, k, n, ring);
+                    prev_score = Some(pr * o.body.max(0.0).powf(t.select_body_exp) / (1.0 + d / t.select_judge_m.max(1e-9)));
+                }
                 if o.id == a.id || fauna.pack(own).and_then(|p| p.abandoned) == Some(o.id) || shuns(fauna, own, o.id) {
                     continue;
                 }
@@ -1114,7 +1124,7 @@ pub(crate) fn steer(
                         .map(|c| (c.0, c.1, c.2, c.4));
                 }
             }
-            if let Some((_, tid, site, sense)) = best {
+            if let Some((neg_score, tid, site, sense)) = best {
                 let mut drawn = false;
                 if let Some(p) = fauna.pack_mut(own) {
                     p.target = Some(tid);
@@ -1136,7 +1146,16 @@ pub(crate) fn steer(
                 let now_tick = fauna.tick;
                 fauna.percepts.entry(a.id).or_default().set_focus(tid, now_tick);
                 let participants = 1 + participating as u32;
-                fauna.log_pack_event(crate::PackEvent::ChaseStart { tick: now, pack: own, participants });
+                fauna.log_pack_event(crate::PackEvent::ChaseStart {
+                    tick: now,
+                    pack: own,
+                    participants,
+                    taker: a.id,
+                    target: tid,
+                    score: -neg_score,
+                    prev,
+                    prev_score,
+                });
                 call(fauna, i);
             }
         }

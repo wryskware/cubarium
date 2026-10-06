@@ -3419,9 +3419,12 @@ pub(crate) struct PackPath {
 pub enum PackEvent {
     /// A pack took a target, with this many participants (the taker and its
     /// participating mates within `pack_radius_m`).
-    ChaseStart { tick: u64, pack: u64, participants: u32 },
-    /// A pack's target was dropped, and why.
-    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd },
+    /// `taker` is the member that chose `target` and `score` its choice score; `prev` is the
+    /// pack's last target dropped alive with the score the taker gave it now (`None` when it
+    /// does not sense it), the re-target's comparison (CHURN's readout).
+    ChaseStart { tick: u64, pack: u64, participants: u32, taker: u64, target: u64, score: f64, prev: Option<u64>, prev_score: Option<f64> },
+    /// A pack's target was dropped, and why; `by` is the member whose sampling dropped it.
+    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd, target: u64, by: u64 },
     /// A pack's feast ended, with the carrion its members ate there, and why.
     FeastEnd { tick: u64, pack: u64, site: Site, eaten: f64, why: FeastEnd },
 }
