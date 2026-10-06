@@ -253,6 +253,65 @@ fn one_veilhound_cannot_open_a_hunkered_adult_and_enough_pack_members_can() {
     assert!(opened_within(enough, 2 * opens_in), "{enough} members: opened within {} ticks", 2 * opens_in);
 }
 
+/// Whether a grazer of `body_fraction` × the adult body, hunkered alone under `h` and worked
+/// by `members` Veilhounds in contact around it, is opened within `ticks` (the pry alone).
+fn opened_by(h: Hunker, members: usize, body_fraction: f64, ticks: u64) -> bool {
+    let world = world(44);
+    let mut c = config();
+    c.founders[GRAZER.index()].hunker = h;
+    let ring = f64::from(world.view().config.width) * world.view().config.voxel_m;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let g = body(&mut fauna, &world, GRAZER, 3.0, EAST, 0.0);
+    let birth = fauna.config.founder(GRAZER).core.birth_body;
+    animal_mut(&mut fauna, g).body = body_fraction * birth;
+    fauna.percepts.entry(g).or_default().vigil.hunkered = true;
+    animal_mut(&mut fauna, g).hunkered = true;
+    for k in 0..members {
+        let id = body(&mut fauna, &world, VH, 3.0, EAST, 0.0);
+        let (a, r) = (k as f64 * std::f64::consts::TAU / members as f64, 0.5);
+        place(&mut fauna, id, 3.0 + r * a.sin(), LANE_Z + r * a.cos(), a + std::f64::consts::PI);
+    }
+    for _ in 0..ticks {
+        fauna.tick += 1;
+        crate::vigil::pry(&mut fauna, ring);
+        if crate::vigil::opened(&fauna, g) {
+            return true;
+        }
+    }
+    false
+}
+
+/// **The shipped armour** (PACK-TUNE, Wrysk: "one Veilhound can't open an adult; a pack can,
+/// slowly"): under the lineage's own rates, one or two Veilhounds working a lone hunkered adult
+/// do not open it in half an hour, and four do within it.
+#[test]
+fn under_the_shipped_rates_one_or_two_veilhounds_cannot_open_a_lone_adult_and_four_can() {
+    let h = crate::vigil::hunker_of(GRAZER);
+    let long = cubarium_voxel::ticks_at_least_one(1800.0);
+    assert!(!opened_by(h, 1, 1.0, long), "one Veilhound opened a lone hunkered adult");
+    assert!(!opened_by(h, 2, 1.0, long), "two Veilhounds opened a lone hunkered adult");
+    assert!(opened_by(h, 4, 1.0, long), "four Veilhounds did not open a lone hunkered adult in 30 min");
+}
+
+/// **The young are soft to prying too**: the resistance grows with the body as the shield does,
+/// so a half-grown juvenile needs fewer members than an adult ([`Hunker::members_to_open`]),
+/// and that many open it.
+#[test]
+fn a_hunkered_juvenile_needs_fewer_members_than_an_adult_and_that_many_open_it() {
+    let h = Hunker { enabled: true, pry_per_member_s: 0.5, resist_per_s: 1.2, ring_resist_per_kin: 0.0, ..crate::vigil::hunker_of(GRAZER) };
+    let birth = config().founder(GRAZER).core.birth_body;
+    let adult = h.members_to_open(birth, birth, 0).expect("some number opens an adult");
+    let young = h.members_to_open(0.5 * birth, birth, 0).expect("some number opens a juvenile");
+    assert!(young < adult, "juvenile needs {young}, adult {adult}");
+    let long = cubarium_voxel::ticks_at_least_one(600.0);
+    assert!(opened_by(h, young as usize, 0.5, long), "{young} members did not open the juvenile");
+    assert!(!opened_by(h, young as usize, 1.0, long), "{young} members opened the adult");
+    // Kin hunkered beside it raise the bar.
+    let ringed = Hunker { ring_resist_per_kin: 0.5, ..h };
+    assert!(ringed.members_to_open(birth, birth, 2).unwrap() > ringed.members_to_open(birth, birth, 0).unwrap());
+}
+
 // ------------------------------------------------------------------ bunching
 
 /// An alarmed grazer with kin in hearing range moves toward them, not away: the alarm's run

@@ -600,6 +600,75 @@ pub struct Pack {
     /// row).
     #[serde(default = "pack_stalk_freeze")]
     pub stalk_freeze: bool,
+    /// **The prey choice** (PACK-TUNE, [`crate::pack::prospect`]): a pack weighs each target
+    /// it could take by its prospect — the chance-like share of a hunt on it that ends in a
+    /// kill, from what it can see — times its meat, over its distance, and commits to the best.
+    /// The prospect: 0 for a hunkering lineage's body the members present cannot open (its
+    /// [`crate::Hunker::members_to_open`] with the kin within its ring), else the share of
+    /// their pry left over its resistance; × `select_kin_factor` per kin of its lineage within
+    /// `select_kin_m` (at most `select_kin_max`); × `select_aware_factor` when it is aware of
+    /// a member; × (1 + `select_wound_gain` × its wound); × `select_airborne_factor` in flight
+    /// (in reach). 1 for an isolated, unaware, unarmoured body on the ground.
+    #[serde(default = "pack_select_kin_m")]
+    pub select_kin_m: f64,
+    #[serde(default = "pack_select_kin_factor")]
+    pub select_kin_factor: f64,
+    #[serde(default = "pack_select_kin_max")]
+    pub select_kin_max: u32,
+    #[serde(default = "pack_select_aware_factor")]
+    pub select_aware_factor: f64,
+    #[serde(default = "pack_select_wound_gain")]
+    pub select_wound_gain: f64,
+    #[serde(default = "pack_select_airborne_factor")]
+    pub select_airborne_factor: f64,
+    /// The score is prospect × body^`select_body_exp` / (1 + distance / `select_judge_m`).
+    #[serde(default = "pack_select_body_exp")]
+    pub select_body_exp: f64,
+    #[serde(default = "pack_select_judge_m")]
+    pub select_judge_m: f64,
+    /// It commits only to a prospect of at least this.
+    #[serde(default = "pack_select_min_prospect")]
+    pub select_min_prospect: f64,
+    /// **The test**: in a chase, a target whose prospect falls under this is broken off.
+    #[serde(default = "pack_break_off_below")]
+    pub break_off_below: f64,
+    /// A target dropped alive (broken off, late or lost) is not taken again for this, seconds.
+    #[serde(default = "pack_shun_s")]
+    pub shun_s: f64,
+}
+
+fn pack_select_kin_m() -> f64 {
+    Pack::CHORISTER.select_kin_m
+}
+fn pack_select_kin_factor() -> f64 {
+    Pack::CHORISTER.select_kin_factor
+}
+fn pack_select_kin_max() -> u32 {
+    Pack::CHORISTER.select_kin_max
+}
+fn pack_select_aware_factor() -> f64 {
+    Pack::CHORISTER.select_aware_factor
+}
+fn pack_select_wound_gain() -> f64 {
+    Pack::CHORISTER.select_wound_gain
+}
+fn pack_select_airborne_factor() -> f64 {
+    Pack::CHORISTER.select_airborne_factor
+}
+fn pack_select_body_exp() -> f64 {
+    Pack::CHORISTER.select_body_exp
+}
+fn pack_select_judge_m() -> f64 {
+    Pack::CHORISTER.select_judge_m
+}
+fn pack_select_min_prospect() -> f64 {
+    Pack::CHORISTER.select_min_prospect
+}
+fn pack_break_off_below() -> f64 {
+    Pack::CHORISTER.break_off_below
+}
+fn pack_shun_s() -> f64 {
+    Pack::CHORISTER.shun_s
 }
 
 fn pack_stalk_margin() -> f64 {
@@ -648,6 +717,28 @@ impl Pack {
         stalk_margin: 0.7,
         commit_m: 2.5,
         stalk_freeze: true,
+        // PACK-TUNE's prey choice, placeholders at the terrarium's scale. Wolves and lions
+        // test prey and quit fast on healthy, defended animals; they take the young, the
+        // isolated, the wounded and the unaware far more often than their share (Mech 1970,
+        // *The Wolf*; MacNulty, Mech & Smith 2007, J. Mammal. 88:595, wolf hunting stages:
+        // most encounters end at the approach or the watch; Packer & Ruttan 1988, Am. Nat.
+        // 132:159). Kin within 3 m (about two grazer lengths) each take a fifth off, counting
+        // four; an aware target half; a wound of w adds 2w; a body in flight in reach is a
+        // quarter of one on the ground. Meat counts as the square root of the body (a big
+        // carcass feeds the pack longer, not proportionally better); distance halves the
+        // score at 6 m (the pack radius). Committed at 0.1 and broken off under 0.05; a
+        // target dropped alive is left for 2 min.
+        select_kin_m: 3.0,
+        select_kin_factor: 0.8,
+        select_kin_max: 4,
+        select_aware_factor: 0.5,
+        select_wound_gain: 2.0,
+        select_airborne_factor: 0.25,
+        select_body_exp: 0.5,
+        select_judge_m: 6.0,
+        select_min_prospect: 0.1,
+        break_off_below: 0.05,
+        shun_s: 120.0,
     };
 }
 

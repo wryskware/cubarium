@@ -1360,7 +1360,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1795 rows)
+**`fauna.*`** (1894 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1571,6 +1571,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.littershredder.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.littershredder.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.littershredder.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.littershredder.pack.select_kin_max` | (absent) | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.littershredder.pack.select_aware_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.littershredder.pack.select_wound_gain` | (absent) | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.littershredder.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.littershredder.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.littershredder.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.littershredder.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.littershredder.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.littershredder.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1686,7 +1697,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.hunker.shield` | 0.9 | fraction | [0, 1] |  | - | placeholder | HUNKER: chance a strike glances off a grown, unwounded hunkered body |
 | `fauna.founders.frondgrazer.hunker.shield_growth_exp` | 2.0 | exponent | [0, inf) |  | - | placeholder | HUNKER: the shield grows as (body / adult body)^this |
 | `fauna.founders.frondgrazer.hunker.wound_opens` | 1.0 | x wound | [0, inf) |  | - | placeholder | HUNKER: a wound w takes this x w of the shield away |
-| `fauna.founders.frondgrazer.hunker.pry_per_member_s` | 0.016666666666666666 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
+| `fauna.founders.frondgrazer.hunker.pry_per_member_s` | 0.011111111111111112 | 1/s | [0, inf) |  | - | placeholder | HUNKER: one hunter in contact pries it open at this (1 opens) |
 | `fauna.founders.frondgrazer.hunker.resist_per_s` | 0.025 | 1/s | [0, inf) |  | - | placeholder | HUNKER: it resists the prying at this (above one member: one cannot open it) |
 | `fauna.founders.frondgrazer.hunker.pry_reach_m` | 0.3 | m | [0, inf) |  | - | placeholder | HUNKER: a hunter is in contact within half their summed lengths plus this |
 | `fauna.founders.frondgrazer.hunker.opened_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: turned over, it is open (no shield, no armour) this long |
@@ -1752,6 +1763,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.frondgrazer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.frondgrazer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.frondgrazer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.frondgrazer.pack.select_kin_max` | (absent) | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.frondgrazer.pack.select_aware_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.frondgrazer.pack.select_wound_gain` | (absent) | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.frondgrazer.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.frondgrazer.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.frondgrazer.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.frondgrazer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.frondgrazer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.frondgrazer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -1933,6 +1955,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.lanternjaw.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.lanternjaw.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.lanternjaw.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.lanternjaw.pack.select_kin_max` | (absent) | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.lanternjaw.pack.select_aware_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.lanternjaw.pack.select_wound_gain` | (absent) | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.lanternjaw.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.lanternjaw.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.lanternjaw.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.lanternjaw.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.lanternjaw.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.lanternjaw.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2114,6 +2147,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.capgnawer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.capgnawer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.capgnawer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.capgnawer.pack.select_kin_max` | (absent) | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.capgnawer.pack.select_aware_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.capgnawer.pack.select_wound_gain` | (absent) | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.capgnawer.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.capgnawer.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.capgnawer.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.capgnawer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.capgnawer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.capgnawer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.capgnawer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2295,6 +2339,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.loftstrider.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.loftstrider.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.loftstrider.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.loftstrider.pack.select_kin_max` | (absent) | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.loftstrider.pack.select_aware_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.loftstrider.pack.select_wound_gain` | (absent) | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.loftstrider.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.loftstrider.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.loftstrider.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.loftstrider.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.loftstrider.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.loftstrider.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2476,6 +2531,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.ripple-snail.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.ripple-snail.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.ripple-snail.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.ripple-snail.pack.select_kin_max` | (absent) | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.ripple-snail.pack.select_aware_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.ripple-snail.pack.select_wound_gain` | (absent) | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.ripple-snail.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.ripple-snail.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.ripple-snail.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.ripple-snail.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.ripple-snail.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.ripple-snail.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.ripple-snail.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2657,6 +2723,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.bellwing.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.bellwing.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.bellwing.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.bellwing.pack.select_kin_max` | (absent) | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.bellwing.pack.select_aware_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.bellwing.pack.select_wound_gain` | (absent) | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.bellwing.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.bellwing.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.bellwing.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.bellwing.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.bellwing.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.bellwing.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -2838,6 +2915,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.seedporter.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.seedporter.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.seedporter.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.seedporter.pack.select_kin_max` | (absent) | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.seedporter.pack.select_aware_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.seedporter.pack.select_wound_gain` | (absent) | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.seedporter.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.seedporter.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.seedporter.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.seedporter.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.seedporter.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.seedporter.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
@@ -3019,6 +3107,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.chorister.pack.commit_m` | 2.5 | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
+| `fauna.founders.chorister.pack.select_kin_m` | 3.0 | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
+| `fauna.founders.chorister.pack.select_kin_factor` | 0.8 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
+| `fauna.founders.chorister.pack.select_kin_max` | 4 | kin | [0, inf) |  | - | placeholder | PACK-TUNE: ...counting at most this many |
+| `fauna.founders.chorister.pack.select_aware_factor` | 0.5 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target aware of a member: prospect x this |
+| `fauna.founders.chorister.pack.select_wound_gain` | 2.0 | x wound | [0, inf) |  | - | placeholder | PACK-TUNE: a wounded target: prospect x (1 + this x wound) |
+| `fauna.founders.chorister.pack.select_airborne_factor` | 0.25 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
+| `fauna.founders.chorister.pack.select_body_exp` | 0.5 | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
+| `fauna.founders.chorister.pack.select_judge_m` | 6.0 | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.chorister.pack.select_min_prospect` | 0.1 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
+| `fauna.founders.chorister.pack.break_off_below` | 0.05 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
+| `fauna.founders.chorister.pack.shun_s` | 120.0 | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
 | `fauna.founders.chorister.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
 | `fauna.founders.chorister.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |

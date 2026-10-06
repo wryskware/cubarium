@@ -483,6 +483,9 @@ fn a_pack_hunts_when_half_want_food_or_one_is_in_emergency() {
         let mut flora = Flora::new(FloraConfig::default());
         let mut c = FaunaConfig::default();
         c.founders[Founder::Chorister.index()].active = Activity::Always;
+        // The hunt-start rule alone: a grazer that does not hunker (PACK-TUNE's prey choice
+        // would leave an armoured one to a lone member in emergency).
+        c.founders[Founder::Browser.index()].hunker.enabled = false;
         let mut fauna = Fauna::new(c);
         fauna.set_births_enabled(false);
         let den = Site { x: 8, y: SURFACE_Y, z: 6 };

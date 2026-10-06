@@ -267,6 +267,37 @@ fn away_from(face: VineFace) -> f64 {
     }
 }
 
+/// **Where a glide off a covered face starts** (PACK-TUNE): the body moved straight out from
+/// the face until its footprint clears the wall by [`PRESSED_M`], heading away from it; `None`
+/// when that point is itself blocked (the body stays and climbs down).
+fn off_face(view: &VoxelView<'_>, s: Shape, a: &Animal, face: VineFace) -> Option<crate::Pose> {
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let want = s.r + PRESSED_M;
+    let (mut x, mut z) = (a.pose.x, a.pose.z);
+    match face.dir {
+        FaceDir::NegX => {
+            let wall = face.x as f64 * v;
+            let gap = crate::pose::wrapped_delta(x, 0.0, wall, 0.0, ring).0;
+            x = (x - (want - gap).max(0.0)).rem_euclid(ring);
+        }
+        FaceDir::PosX => {
+            let wall = (face.x + 1) as f64 * v;
+            let gap = -crate::pose::wrapped_delta(x, 0.0, wall, 0.0, ring).0;
+            x = (x + (want - gap).max(0.0)).rem_euclid(ring);
+        }
+        FaceDir::NegZ => z = z.min(face.z as f64 * v - want),
+        _ => z = z.max((face.z + 1) as f64 * v + want),
+    }
+    let from = crate::Pose { x, z, heading_rad: away_from(face), ..a.pose };
+    (!flight::blocked(view, s, x, z, a.pose.y_m)).then_some(from)
+}
+
+/// Whether two covered faces are on the same wall column and side (any height).
+fn same_wall(f: VineFace, g: VineFace) -> bool {
+    f.x == g.x && f.z == g.z && f.dir == g.dir
+}
+
 /// The heading pointing into a wall face.
 fn into_face(face: VineFace) -> f64 {
     (away_from(face) + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
@@ -942,12 +973,19 @@ fn perched_tick(
         };
         match perch.anchor {
             PerchAnchor::Vine(face) => {
-                let from = crate::Pose {
-                    heading_rad: away_from(face),
-                    ..a.pose
-                };
-                if high && !glide_ends_deep(view, &flora.view(), &glider, phys, a.body, from) {
-                    fauna.animals[i].pose.heading_rad = away_from(face);
+                // PACK-TUNE, the glide loop: a body on a face hangs with its footprint in the
+                // wall's columns, so a glide begun where it hangs is blocked in place, falls,
+                // is pressed against the same face and climbs it again (49,704 glides in
+                // GAIT's s4). It leaves from a point clear of the wall, as a glide off an
+                // edge does, and only for a glide that does not come back to this face.
+                let fv = flora.view();
+                let from = off_face(view, s, &a, face).filter(|&from| {
+                    !glide_ends_deep(view, &fv, &glider, phys, a.body, from)
+                        && !matches!(glide_end(view, &fv, &glider, phys, a.body, from),
+                            Some(GlideEnd::Vine(f)) if same_wall(f, face))
+                });
+                if high && let Some(from) = from {
+                    fauna.animals[i].pose = from;
                     start_glide(fauna, i, false);
                 } else {
                     if high {
