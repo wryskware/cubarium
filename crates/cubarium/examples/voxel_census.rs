@@ -99,6 +99,10 @@ const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
 /// a model default, and the same one `cubarium-voxel`'s `water_cycle` example uses.
 const CLOSED_EVAPORATION_M_PER_S: f64 = 0.0001;
 
+/// The species whose deaths by cause the rows carry: the turf, the pad and the two
+/// woody species the contest is about.
+const CONTEST_SPECIES: [Plant; 4] = [Plant::Springturf, Plant::Velvetpad, Plant::Lanternberry, Plant::Vaulttree];
+
 /// First seed a `preset=` arm offers the host's lake gate; `seed=N` for another. The
 /// host draws at random, and an arm has to be re-runnable.
 const PRESET_SEED_BASE: u64 = 1;
@@ -1039,6 +1043,15 @@ fn print_header() {
     // fruit, and the organic matter in each.
     header.push_str(",vines,vine_faces,vine_wall_faces,vine_under_faces,vine_buds,vine_flowers,vine_fruits");
     header.push_str(",vine_nectar,vine_fruit,bloom_in_nectar,bloom_nectar,lantern_in_fruit,lantern_fruit");
+    // The woody contest's readouts (package CONTEST, 2026-10-05): the edible foliage
+    // standing (above every layer's grazing floor), then plant deaths by cause for the
+    // turf, the pad and the two woody species, cumulative.
+    header.push_str(",edible_foliage");
+    for s in CONTEST_SPECIES {
+        for c in cubarium_voxel_flora::DeathCause::ALL {
+            header.push_str(&format!(",died_{}_{}", c.name(), s.name()));
+        }
+    }
     println!("{header}");
 }
 
@@ -1260,6 +1273,13 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
         row.push(format!("{:.6}", of(Plant::Bloomcrown).map(|s| s.nectar).sum::<f64>()));
         row.push(of(Plant::Lanternberry).filter(|s| s.fruit > 0.0).count().to_string());
         row.push(format!("{:.6}", of(Plant::Lanternberry).map(|s| s.fruit).sum::<f64>()));
+    }
+    let edible: f64 = f.stands.iter().flat_map(|s| f.layers(s)).map(|l| l.edible()).sum();
+    row.push(format!("{edible:.6}"));
+    for s in CONTEST_SPECIES {
+        for c in cubarium_voxel_flora::DeathCause::ALL {
+            row.push(f.ledger.deaths_by_cause[c.index()][s.index()].to_string());
+        }
     }
     println!("{}", row.join(","));
 }
