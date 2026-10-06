@@ -870,8 +870,8 @@ pub struct Animal {
     #[serde(default)]
     pub yielding: bool,
     /// **Hunkered** (HUNKER, [`crate::Hunker`]): clamped down under its shield, neither moving
-    /// nor eating. Its state is [`State::Resting`]; the presenter may read this flag to draw
-    /// the hunker (a pose of its own is a later art package). False for every other body.
+    /// nor eating. Its state is [`State::Resting`]; the presenter reads this flag to draw the
+    /// hunker pose (`cubarium::voxel::hunker`). False for every other body.
     #[serde(default)]
     pub hunkered: bool,
     /// **The stomach** (the minimal gut, `design/metabolism-meals-2026-10-02.md` repair 2

@@ -1930,6 +1930,31 @@
      "cells": 45
     }
    ]
+  },
+  "frondgrazer-hunker": {
+   "bytes": 699,
+   "bins": [
+    {
+     "length_m": 0.3481,
+     "cells": 9
+    },
+    {
+     "length_m": 0.4486,
+     "cells": 15
+    },
+    {
+     "length_m": 0.5491,
+     "cells": 17
+    },
+    {
+     "length_m": 0.6495,
+     "cells": 30
+    },
+    {
+     "length_m": 0.75,
+     "cells": 39
+    }
+   ]
   }
  },
  "specimens": {
@@ -1941,6 +1966,7 @@
   "loftstrider": "loftstrider.cvm",
   "seedporter-stand": "seedporter-stand.cvm",
   "seedporter-ground": "seedporter-ground.cvm",
-  "seedporter-glide": "seedporter-glide.cvm"
+  "seedporter-glide": "seedporter-glide.cvm",
+  "frondgrazer-hunker": "frondgrazer-hunker.cvm"
  }
 }
