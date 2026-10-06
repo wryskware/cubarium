@@ -9,5 +9,6 @@
 pub mod exchange;
 pub mod fauna;
 pub mod flora;
+pub mod web;
 
 pub use exchange::{Returns, Supply, Take};

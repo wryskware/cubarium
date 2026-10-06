@@ -148,7 +148,6 @@ fn the_stand_law_is_the_sims_over_a_whole_day_and_night() {
 /// reserve −0.3 % / −2.1 % / −22 %; bloomcrown adult reserve −0.2 % / −1.2 % / −12 %;
 /// velvetpad newborn reserve −8 % at 10 s). Every case errs low.
 #[test]
-#[ignore = "DISAGREES: at the model's default dt (10 s) the stand law drifts from the sim's per-tick law over a day, error ∝ dt, always low (worst: dry adult springturf foliage −56 %, wood −14 %; reserves −8 % to −22 %)"]
 fn the_stand_law_at_the_models_own_step_tracks_the_sim_over_a_day() {
     let (p, fc) = resolved();
     let dm = DayModel::of(&p.world, fc.upkeep_q10);
@@ -593,7 +592,6 @@ fn the_ledgers_close_over_a_long_run() {
 /// their mineral goes to the pool, but the organic is booked nowhere (not litter, not
 /// taken, not respired).
 #[test]
-#[ignore = "BUG: juvenile_browse removes seedlings' organic matter without booking it (no litter, no taken, no respired line): the organic ledger does not close with browse= on"]
 fn the_organic_ledger_closes_with_the_browse_lever() {
     let (p, fc) = resolved();
     let mut m = busy(&fc, &p, false, false, true);
@@ -608,7 +606,6 @@ fn the_organic_ledger_closes_with_the_browse_lever() {
 /// `Model::mineral()` (it skips the glowcap), so the ledger gains the caps' mineral from
 /// nothing.
 #[test]
-#[ignore = "BUG: apply_take books the glowcap caps' mineral in taken_mineral while Model::mineral() never counted the fungus's inventory: the mineral ledger drifts by n_tissue × caps taken"]
 fn the_mineral_ledger_closes_with_caps_taken() {
     let (p, fc) = resolved();
     let mut m = busy(&fc, &p, true, false, false);
@@ -623,7 +620,6 @@ fn the_mineral_ledger_closes_with_caps_taken() {
 /// lose their own species' `n_tissue` per unit. In the terrarium every species has the same
 /// `n_tissue`, so the defect is latent; a config with lanternberry's own shows it.
 #[test]
-#[ignore = "BUG (latent): apply_take books nectar/fruit mineral at springturf's n_tissue, not the producer's; the mineral ledger drifts once n_tissue differs by species"]
 fn the_mineral_ledger_closes_with_fruit_of_its_own_tissue() {
     let (p, mut fc) = resolved();
     fc.species_mut(Species::Lanternberry).n_tissue *= 2.0;
@@ -698,7 +694,6 @@ fn bank_life(fc: &FloraConfig, p: &cubarium_voxel_sim::params::Params, s: Specie
 /// which is that mean life only when `a = 1/T`). The bank's e-folding time follows the mean
 /// life when either knob moves.
 #[test]
-#[ignore = "DISAGREES: the model's bank rate reads only seed_max_age_s (it assumes seed_attrition_per_s = 1/seed_max_age_s, true in today's presets); seed_attrition_per_s does not flow, and seed_max_age_s moves it in the wrong form"]
 fn config_flow_the_bank_follows_both_of_its_knobs() {
     let (p, base) = resolved();
     let s = Species::Lanternberry;

@@ -168,6 +168,7 @@ pub struct Census {
 }
 
 /// The model's whole state and its numbers.
+#[derive(Clone)]
 pub struct FaunaModel {
     pub config: FaunaConfig,
     /// The carrion pool's decomposition rate, per second (`flora.carrion_decomposition`): the
@@ -198,6 +199,17 @@ pub struct FaunaModel {
     /// fitted on; on a floor this many times larger a hunter meets each prey body this much
     /// less often (mass action over area), and a layer's neighbours are as much sparser.
     pub area_scale: f64,
+    /// **The areas the responses were fitted on** (m², per [`Food`] class; the closed loop's
+    /// glue, `design/webmodel/loop.md`): the faces each food stood on on patch. A supply that
+    /// gives its own areas ([`crate::exchange::Areas`]) is read as the stock per
+    /// `area / ref_area` patch-sized areas, food by food; a zero on either side falls back to
+    /// [`FaunaModel::area_scale`] (the open-loop clamps give no areas).
+    pub ref_area: [f64; Food::COUNT],
+    /// **The animals' mineral** (closed loop): what their tissue holds, `n_tissue` per unit of
+    /// organic matter held, topped up only by the mineral in the living tissue they eat
+    /// ([`FaunaModel::settle_mineral`]). The half itself runs no mineral budget (every yield
+    /// is taken as funded); this inventory is the glue that returns what passes through.
+    pub mineral: f64,
     /// **The cohort bound** (numerics, not ecology): a merge pass keeps at most this many
     /// cohorts per lineage, merging the closest compatible pair until it holds. Every clutch a
     /// crowded nest refuses splits a cohort in two (the layers and the refused, who retry), so
@@ -228,6 +240,26 @@ pub fn stocks_of(s: &Supply) -> [f64; Food::COUNT] {
             Food::Film => s.film,
             Food::Nectar => s.nectar,
             Food::Fruit => s.fruit,
+        };
+    }
+    out
+}
+
+/// The areas of a [`Supply`]'s [`Food`] classes (m²; zero where not given): the photosynthetic
+/// stands' faces summed for foliage, the glowcap's for its caps.
+pub fn areas_of(s: &Supply) -> [f64; Food::COUNT] {
+    let glow = Species::Glowcap.index();
+    let a = &s.area;
+    let mut out = [0.0; Food::COUNT];
+    for food in Food::ALL {
+        out[food.index()] = match food {
+            Food::Litter => a.litter,
+            Food::CapTissue => a.foliage[glow],
+            Food::Carrion => a.carrion,
+            Food::Foliage => a.foliage.iter().enumerate().filter(|(i, _)| *i != glow).map(|(_, v)| *v).sum(),
+            Food::Film => a.film,
+            Food::Nectar => a.nectar,
+            Food::Fruit => a.fruit,
         };
     }
     out
@@ -270,6 +302,8 @@ impl FaunaModel {
             enabled: [true; Founder::COUNT],
             extra_bodies: [0.0; Founder::COUNT],
             area_scale: 1.0,
+            ref_area: [0.0; Food::COUNT],
+            mineral: 0.0,
             max_cohorts: 48,
             min_cohort: 0.01,
             merge_every_s: 60.0,
@@ -447,8 +481,11 @@ impl FaunaModel {
             let hunter = phys.hunter.is_some();
             let diet: Vec<Food> = phys.diet.foods().collect();
             // The response is fitted on patch's world totals: on a larger floor the stock and the
-            // crowd are read per patch-sized area.
+            // crowd are read per patch-sized area. A supply that carries its areas is read per
+            // its own area over the one fitted on, food by food.
             let area = self.area_scale.max(1e-9);
+            let given = areas_of(supply);
+            let area_of: [f64; Food::COUNT] = std::array::from_fn(|k| if given[k] > 0.0 && self.ref_area[k] > 0.0 { given[k] / self.ref_area[k] } else { area });
             let own: f64 = (self.pops[f.index()].iter().filter(|c| c.host.is_none()).map(|c| c.n).sum::<f64>() + self.extra_bodies[f.index()]) / area;
             for (k, c) in self.pops[f.index()].iter_mut().enumerate() {
                 let a = awake_of[f.index()].get(k).copied().unwrap_or(0.0);
@@ -462,10 +499,11 @@ impl FaunaModel {
                 // ψ per food at its stock; a hunter's carrion is its own kill's carcass.
                 let mut psi = [0.0f64; Food::COUNT];
                 for &food in &diet {
+                    let density = left[food.index()] / area_of[food.index()];
                     psi[food.index()] = if hunter && food == Food::Carrion {
-                        if c.carcass > 0.0 { 1.0 } else { fit.psi(food, left[food.index()] / area, own) }
+                        if c.carcass > 0.0 { 1.0 } else { fit.psi(food, density, own) }
                     } else {
-                        fit.psi(food, left[food.index()] / area, own)
+                        fit.psi(food, density, own)
                     };
                 }
                 let total: f64 = psi.iter().sum();
@@ -647,7 +685,10 @@ impl FaunaModel {
                             continue;
                         }
                         c.n -= dead;
-                        laid_here += dead * c.b.organic();
+                        // A gestating body's escrow: the loss respired, the rest in the corpse.
+                        let (esc_body, esc_loss) = escrow_split(c, pp.core.reproduction.gestation_loss_fraction);
+                        self.ledger[pf.index()].gestation_loss += dead * esc_loss;
+                        laid_here += dead * (c.b.organic() + esc_body);
                         self.ledger[pf.index()].killed_by[hf.index()] += dead;
                         kills_here += dead;
                     }
@@ -916,8 +957,10 @@ impl FaunaModel {
                 if !(c.n > 0.0) {
                     continue;
                 }
+                let (esc_body, esc_loss) = escrow_split(c, sc.reproduction.gestation_loss_fraction);
                 if c.b.body < sc.body_min {
-                    ret.carrion += c.n * c.b.organic() + c.carcass;
+                    self.ledger[f.index()].gestation_loss += c.n * esc_loss;
+                    ret.carrion += c.n * (c.b.organic() + esc_body) + c.carcass;
                     self.carcass_left += c.carcass;
                     c.carcass = 0.0;
                     self.ledger[f.index()].starved += c.n;
@@ -931,7 +974,8 @@ impl FaunaModel {
                     let died = self.draws.of(c.n, p).min(c.n);
                     if died > 0.0 {
                         let kill_share = c.carcass * died / c.n;
-                        ret.carrion += died * c.b.organic() + kill_share;
+                        self.ledger[f.index()].gestation_loss += died * esc_loss;
+                        ret.carrion += died * (c.b.organic() + esc_body) + kill_share;
                         self.carcass_left += kill_share;
                         c.carcass -= kill_share;
                         self.ledger[f.index()].aged += died;
@@ -980,6 +1024,37 @@ impl FaunaModel {
             out.push(e);
         }
         self.eggs = out;
+    }
+
+    /// The mineral the animals' tissue holds at `n_tissue` per unit of organic matter held
+    /// (bodies, reserves, stomachs, escrows, eggs and the bank at their layer's own
+    /// `n_tissue`; the fresh-kill carcass at the hunter's): what [`FaunaModel::mineral`] must
+    /// cover before any goes back.
+    pub fn mineral_wanted(&self) -> f64 {
+        let mut s = 0.0;
+        for f in Founder::ALL {
+            let nt = self.phys(f).core.n_tissue;
+            for c in &self.pops[f.index()] {
+                s += nt * (c.n * (c.b.organic() + c.escrow.map_or(0.0, |e| e.0)) + c.carcass);
+            }
+        }
+        for e in &self.eggs {
+            s += self.phys(e.lineage).core.n_tissue * e.n * e.organic;
+        }
+        s
+    }
+
+    /// **The mineral that goes back** this step ([`crate::exchange::Returns::mineral`]): the
+    /// mineral in the living tissue just eaten joins the inventory, and what the tissue held
+    /// now does not need leaves with the dung and the corpses. While the tissue holds less than
+    /// it wants (a detritivore eats litter whose mineral the plant half already keeps in the
+    /// site pool), nothing goes back. Mineral is conserved exactly: inventory in = eaten,
+    /// out = returned.
+    pub fn settle_mineral(&mut self, eaten: f64) -> f64 {
+        self.mineral += eaten.max(0.0);
+        let out = (self.mineral - self.mineral_wanted()).max(0.0);
+        self.mineral -= out;
+        out
     }
 
     /// Organic matter the animals hold now: bodies, reserves, stomachs, escrows, eggs, the bank,
@@ -1057,13 +1132,25 @@ pub fn cohort_distance(phys: &FounderPhysiology, a: &Cohort, b: &Cohort) -> f64 
 
 /// `b` into `a`, body-weighted: every per-body stock and clock is the bodies' mean, so the
 /// cohort's totals are kept exactly. The latches and the surplus window are the larger's.
+/// **A dying body's open escrow** (`gestate`, `step.rs:2883-3018`: a parent that dies carrying
+/// one loses `gestation_loss_fraction` of it to respiration and gets the rest back, so the rest
+/// is in its corpse): `(back in the body, respired)`, per body.
+fn escrow_split(c: &Cohort, loss_fraction: f64) -> (f64, f64) {
+    let e = c.escrow.map_or(0.0, |e| e.0);
+    let loss = e * loss_fraction.clamp(0.0, 1.0);
+    (e - loss, loss)
+}
+
 fn absorb(a: &mut Cohort, b: &Cohort) {
     let n = a.n + b.n;
     if !(n > 0.0) {
         return;
     }
     let (wa, wb) = (a.n / n, b.n / n);
-    let w = |x: f64, y: f64| x * wa + y * wb;
+    // The weighted mean kept inside its inputs' range: a rounding below both (two `body_min`
+    // hatchlings merging to `body_min − 1 ulp`) would starve a whole cohort (the plant half's
+    // finding 2).
+    let w = |x: f64, y: f64| (x * wa + y * wb).clamp(x.min(y), x.max(y));
     a.b.body = w(a.b.body, b.b.body);
     a.b.reserve = w(a.b.reserve, b.b.reserve);
     a.b.brood = w(a.b.brood, b.b.brood).min(a.b.reserve);

@@ -14,7 +14,7 @@ use cubarium_voxel_fauna::{
 };
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraConfig, Site};
 use cubarium_voxel_sim::params::Params;
-use cubarium_webmodel::Supply;
+use cubarium_webmodel::{Supply, Take};
 use cubarium_webmodel::fauna::model::EggCohort;
 use cubarium_webmodel::fauna::{Body, Cohort, Draws, FaunaModel, Fits, Response, Rng, laws};
 
@@ -43,7 +43,7 @@ fn respired(m: &FaunaModel) -> f64 {
     m.ledger.iter().map(|l| l.flows.upkeep + l.flows.motor + l.flows.digestion_heat + l.gestation_loss + l.bank_upkeep).sum()
 }
 
-fn took(t: &Supply) -> f64 {
+fn took(t: &Take) -> f64 {
     t.litter + t.carrion + t.film + t.nectar + t.fruit + t.foliage.iter().sum::<f64>()
 }
 
@@ -191,7 +191,6 @@ fn hatchlings(cfg: &FaunaConfig, f: Founder, ns: &[f64]) -> FaunaModel {
 /// 2: a weighted mean a rounding below `alive_min`); the animal half's `absorb` takes
 /// `x·wa + y·wb` unclamped and rounds below.
 #[test]
-#[ignore = "BUG (latent): fauna absorb's weighted mean rounds a body_min hatchling to body_min − 1 ulp (the flora merge's finding-2 bug, unfixed in model.rs absorb)"]
 fn a_merge_never_takes_a_body_below_body_min() {
     let cfg = patch();
     for f in [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail, Founder::Lanternjaw] {
@@ -214,7 +213,6 @@ fn a_merge_never_takes_a_body_below_body_min() {
 /// running world the step's own growth lifts a fed hatchling past the rounding before the
 /// death check, so the defect above bites only a body whose free reserve is exactly zero.)
 #[test]
-#[ignore = "BUG (latent): merged body_min hatchlings starve when nothing else moves the structure (same absorb rounding)"]
 fn merged_hatchlings_at_body_min_do_not_starve() {
     let mut cfg = patch();
     let f = Founder::Blind;
@@ -330,7 +328,6 @@ fn gestating(cfg: &FaunaConfig, n: f64, body: f64, reserve: f64) -> (Cohort, f64
 /// `hunt` lays `dead · b.organic()` (structure, reserve, stomach) and drops the escrow of
 /// the killed bodies from every ledger line: matter vanishes.
 #[test]
-#[ignore = "BUG: a killed gestating body's escrow vanishes (hunt lays only b.organic(); the sim's kill runs fail_gestation first, step.rs:2203/3107)"]
 fn a_killed_parents_escrow_goes_as_the_sim_sends_it() {
     let cfg = FaunaConfig::default();
     let mut fits = Fits::unfitted();
@@ -345,6 +342,9 @@ fn a_killed_parents_escrow_goes_as_the_sim_sends_it() {
     let bs = cfg.founder(Founder::Browser).core;
     let (c, esc) = gestating(&cfg, 5.0, bs.birth_body, 0.8 * bs.reserve_of(bs.birth_body));
     m.add(Founder::Browser, c);
+    // (webmodel-loop: the corpse is laid in the act, before this step's births pay the next
+    // instalment out of the survivors' reserve, as in the sim's tick, `step.rs:162-281`; so the
+    // body at the kill is the body after upkeep and digestion, before the instalment.)
     let h0 = m.organic_held();
     let n0 = 5.0;
     let (take, ret) = m.step(&Supply::default());
@@ -352,8 +352,10 @@ fn a_killed_parents_escrow_goes_as_the_sim_sends_it() {
     let killed = n0 - p.n;
     assert!(killed > 0.0, "fixture: it killed a gestating body");
     let lam = bs.reproduction.gestation_loss_fraction;
+    let instalment = p.escrow.map_or(0.0, |e| e.0) - esc;
+    let at_kill = p.b.organic() + instalment;
     let corpse = m.carcass_laid + ret.carrion;
-    assert!(close(corpse, killed * (p.b.organic() + (1.0 - lam) * esc), 1e-9), "corpse {corpse} vs the sim's {}", killed * (p.b.organic() + (1.0 - lam) * esc));
+    assert!(close(corpse, killed * (at_kill + (1.0 - lam) * esc), 1e-9), "corpse {corpse} vs the sim's {}", killed * (at_kill + (1.0 - lam) * esc));
     let lhs = m.organic_held() - h0;
     let rhs = took(&take) - ret.litter - ret.carrion - respired(&m) - m.carcass_decayed;
     assert!((lhs - rhs).abs() <= 1e-9 * h0, "held moved {lhs}, the flows say {rhs}");
@@ -365,7 +367,6 @@ fn a_killed_parents_escrow_goes_as_the_sim_sends_it() {
 /// their escrow nowhere. (A starving parent is not caught: its unpaid instalment already
 /// returns the escrow in `reproduce`, as the sim's `gestate` does.)
 #[test]
-#[ignore = "BUG: a gestating body that ages out loses its escrow from the ledger (deaths returns only b.organic(); the sim runs fail_gestation before bury_corpse, step.rs:3800)"]
 fn an_aged_parents_escrow_goes_as_the_sim_sends_it() {
     let mut cfg = FaunaConfig::default();
     cfg.founders[Founder::Browser.index()].core.lifespan_median_s = 300.0;
