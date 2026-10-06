@@ -70,6 +70,8 @@ pub struct Hit {
     pub prey: u64,
     pub damage: f64,
     pub by: Founder,
+    /// The striker's id (HUNTER-MEAL: a kill marks its place productive in its memory).
+    pub striker: u64,
 }
 
 /// Whether `hunter` would take `prey` (§2.1): its lineage is on the hunter's list and its

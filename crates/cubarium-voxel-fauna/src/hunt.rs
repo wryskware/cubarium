@@ -44,11 +44,24 @@
 //!
 //! A fed lanternjaw (latch off) stands still, lure dark. Eating carrion at its mouth and
 //! yielding a carcass stay the ambush's and the carcass yield's.
+//!
+//! **HUNTER-MEAL** (Astra's open questions §3, 2026-10-05): with [`HuntConfig::meal_first`]
+//! a hungry hunter first eats a usable carcass (carrion under a carcass record) at its mouth
+//! or walks to one within [`HuntConfig::carcass_scan_m`] ([`meal_step`], the Veilhound's
+//! pack tactic too between hunts), and does not strike while its mouth is over one. With
+//! [`HuntConfig::reachable_only`] patches and carcasses count only on the hunter's walking
+//! route graph (the Veilhound's chase graph, [`crate::encounter::RouteGraph`]) within the
+//! route steps it walks before giving up, and it walks there along the graph. A kill marks
+//! its place productive ([`HuntMemory::productive`]), which the patch choice favours.
+
+use std::sync::Arc;
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_flora::{FloraView, Trophic};
+use cubarium_voxel_flora::{FloraView, Site, Trophic};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
+use crate::encounter::RouteGraph;
 use crate::{Actions, Fauna, Food, Founder, HuntConfig};
 
 /// How many fruitless patches one hunter remembers at once (a cache size, not ecology).
@@ -64,6 +77,8 @@ pub enum HuntMode {
     Travel,
     /// Waiting still on it, the lure lit.
     Wait,
+    /// Going to a usable carcass, or eating at one (HUNTER-MEAL's meal step).
+    Meal,
 }
 
 /// One remembered fruitless patch: its centre, metres, and the tick it is forgotten at.
@@ -80,11 +95,17 @@ pub struct HuntMemory {
     pub mode: HuntMode,
     /// The patch centre it walks to or waits on, metres `(x, z)`.
     pub patch: (f64, f64),
+    /// The face it walks to on its route graph (`(x, y, z)`), when the patch was chosen
+    /// on it ([`HuntConfig::reachable_only`]).
+    pub patch_face: Option<(u32, u32, u32)>,
     /// Controller samples in the current mode.
     pub samples: u32,
     /// Samples of an escape from a refused motor left.
     pub escape: u32,
     pub fruitless: [FruitlessPatch; FRUITLESS_SLOTS],
+    /// **Productive places** (HUNTER-MEAL): where its recent kills were, each until the tick
+    /// it is forgotten ([`HuntConfig::success_memory_s`]).
+    pub productive: [FruitlessPatch; FRUITLESS_SLOTS],
     /// **The search image**: seconds of contact with size-eligible prey per lineage, decayed
     /// with [`HuntConfig::search_memory_s`].
     pub image: [f64; Founder::COUNT],
@@ -127,13 +148,40 @@ impl HuntMemory {
     /// Whether `(x, z)` is within [`HuntConfig::fruitless_radius_m`] of a fruitless patch
     /// still remembered at `tick`.
     pub fn is_fruitless(&self, cfg: &HuntConfig, x: f64, z: f64, tick: u64, ring: f64) -> bool {
-        self.fruitless.iter().any(|p| {
-            p.until_tick > tick && {
-                let (dx, dz) = crate::pose::wrapped_delta(p.x, p.z, x, z, ring);
-                dx * dx + dz * dz <= cfg.fruitless_radius_m * cfg.fruitless_radius_m
-            }
-        })
+        near_any(&self.fruitless, cfg.fruitless_radius_m, x, z, tick, ring)
     }
+
+    /// Remember a kill at `(x, z)` as a productive place until `until_tick`, over the slot
+    /// forgotten soonest, and forget any fruitless patch there.
+    pub fn remember_productive(&mut self, cfg: &HuntConfig, x: f64, z: f64, tick: u64, until_tick: u64, ring: f64) {
+        let slot = self
+            .productive
+            .iter_mut()
+            .min_by_key(|p| p.until_tick)
+            .expect("at least one slot");
+        *slot = FruitlessPatch { x, z, until_tick };
+        for p in &mut self.fruitless {
+            if near_any(std::slice::from_ref(p), cfg.fruitless_radius_m, x, z, tick, ring) {
+                p.until_tick = 0;
+            }
+        }
+    }
+
+    /// Whether `(x, z)` is within [`HuntConfig::fruitless_radius_m`] of a productive place
+    /// still remembered at `tick`.
+    pub fn is_productive(&self, cfg: &HuntConfig, x: f64, z: f64, tick: u64, ring: f64) -> bool {
+        near_any(&self.productive, cfg.fruitless_radius_m, x, z, tick, ring)
+    }
+}
+
+/// Whether `(x, z)` is within `radius` of a place in `places` still remembered at `tick`.
+fn near_any(places: &[FruitlessPatch], radius: f64, x: f64, z: f64, tick: u64, ring: f64) -> bool {
+    places.iter().any(|p| {
+        p.until_tick > tick && {
+            let (dx, dz) = crate::pose::wrapped_delta(p.x, p.z, x, z, ring);
+            dx * dx + dz * dz <= radius * radius
+        }
+    })
 }
 
 /// **The encounter share** of `prey` (share switching): its recent contact plus the naive
@@ -280,69 +328,98 @@ fn stand_cue(fv: &FloraView<'_>, st: &cubarium_voxel_flora::Stand, food: Food) -
 
 /// **Choose the next patch** for the hunter at `i`: the centre of the best open square
 /// of its prey's food within the scan, or (exploring, or with none) a drawn one. Books the
-/// choice. `None` when nothing is open at all.
-fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, h: &crate::Hunter) -> (f64, f64) {
+/// choice.
+///
+/// HUNTER-MEAL: with [`HuntConfig::reachable_only`] and the hunter on its route graph, a
+/// square counts only when one of its food faces can be taken from a node on its route
+/// field (the walk it makes before giving up), and the patch it walks to is that node (the
+/// nearest by route); with no food in reach, a drawn node of the field. A square by a
+/// remembered kill ([`HuntMemory::is_productive`]) scores `1 + success_boost` times its
+/// cue and is not held fruitless. The face walked to goes to [`HuntMemory::patch_face`].
+pub(crate) fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, h: &crate::Hunter) -> (f64, f64) {
     let cfg = fauna.config.hunt;
-    let a = fauna.animals[i];
     let tick = fauna.tick;
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let pm = cfg.patch_m.max(v);
     let scan = cfg.cue_scan_m.max(0.0);
+    let route = route_from(fauna, i, view);
+    if cfg.reachable_only && route.is_none() {
+        fauna.ledger.hunt_off_route += 1;
+    }
+    let a = fauna.animals[i];
     // Which foods mark which prey lineage's habitat.
     let lineages: Vec<Founder> = Founder::ALL.iter().copied().filter(|&f| h.hunts(f)).collect();
     let weight: Vec<f64> = lineages.iter().map(|&f| attack_preference(&cfg, h, &a.hunt.image, f)).collect();
-    // Squares keyed by their absolute index; each holds the cue per lineage.
-    let mut squares: rustc_hash::FxHashMap<(i64, i64), Vec<f64>> = rustc_hash::FxHashMap::default();
-    let add = |x: f64, z: f64, k: usize, cue: f64, squares: &mut rustc_hash::FxHashMap<(i64, i64), Vec<f64>>| {
-        if !(cue > 0.0) {
+    /// One square: the cue per lineage, and its nearest reachable food node `(steps, node)`.
+    struct Square {
+        cues: Vec<f64>,
+        node: Option<(u32, usize)>,
+    }
+    // Squares keyed by their absolute index.
+    let mut squares: FxHashMap<(i64, i64), Square> = FxHashMap::default();
+    let add = |site: Site, cues: &[f64], squares: &mut FxHashMap<(i64, i64), Square>| {
+        if !cues.iter().any(|&c| c > 0.0) {
             return;
         }
+        let (x, z) = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
         if dx * dx + dz * dz > scan * scan {
             return;
         }
+        let reach = route.as_ref().and_then(|r| r.reach(site, v).map(|(j, d)| (d, j)));
         let key = ((x.rem_euclid(ring) / pm).floor() as i64, (z / pm).floor() as i64);
-        squares.entry(key).or_insert_with(|| vec![0.0; lineages.len()])[k] += cue;
+        let sq = squares.entry(key).or_insert_with(|| Square { cues: vec![0.0; lineages.len()], node: None });
+        for (c, &cue) in sq.cues.iter_mut().zip(cues) {
+            *c += cue;
+        }
+        if let Some(n) = reach {
+            if sq.node.is_none_or(|b| n < b) {
+                sq.node = Some(n);
+            }
+        }
     };
     let cell_m2 = v * v;
+    let mut cues = vec![0.0; lineages.len()];
     for g in fv.ground.iter() {
         if g.litter <= 0.0 && g.carrion <= 0.0 && g.film <= 0.0 {
             continue;
         }
-        let (x, z) = ((f64::from(g.site.x) + 0.5) * v, (f64::from(g.site.z) + 0.5) * v);
         for (k, f) in lineages.iter().enumerate() {
             let diet = fauna.config.founder(*f).diet;
-            let cue: f64 = diet.foods().map(|food| ground_cue(fv, fauna, g, food, cell_m2)).sum();
-            add(x, z, k, cue, &mut squares);
+            cues[k] = diet.foods().map(|food| ground_cue(fv, fauna, g, food, cell_m2)).sum();
         }
+        add(g.site, &cues, &mut squares);
     }
     for st in fv.stands.iter() {
-        let (x, z) = ((f64::from(st.site.x) + 0.5) * v, (f64::from(st.site.z) + 0.5) * v);
         for (k, f) in lineages.iter().enumerate() {
             let diet = fauna.config.founder(*f).diet;
-            let cue: f64 = diet.foods().map(|food| stand_cue(fv, st, food)).sum();
-            add(x, z, k, cue, &mut squares);
+            cues[k] = diet.foods().map(|food| stand_cue(fv, st, food)).sum();
         }
+        add(st.site, &cues, &mut squares);
     }
     // Each lineage's cue against its own best square, weighted by its preference.
     let mut best = vec![0.0f64; lineages.len()];
-    for cues in squares.values() {
-        for (b, &c) in best.iter_mut().zip(cues) {
+    for sq in squares.values() {
+        for (b, &c) in best.iter_mut().zip(&sq.cues) {
             *b = b.max(c);
         }
     }
     let centre = |(kx, kz): (i64, i64)| (((kx as f64) + 0.5) * pm, ((kz as f64) + 0.5) * pm);
-    let mut open: Vec<((f64, f64), f64, f64)> = Vec::new();
-    let mut fruitless: Vec<((f64, f64), f64, f64)> = Vec::new();
-    for (&key, cues) in &squares {
+    // (square centre, score, distance, the node walked to)
+    type Entry = ((f64, f64), f64, f64, Option<usize>);
+    let mut open: Vec<Entry> = Vec::new();
+    let mut fruitless: Vec<Entry> = Vec::new();
+    let mut unreachable = 0u64;
+    for (&key, sq) in &squares {
         let (x, z) = centre(key);
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
         let d = (dx * dx + dz * dz).sqrt();
         if d < cfg.patch_min_hop_m {
             continue;
         }
-        let score: f64 = cues
+        let mut score: f64 = sq
+            .cues
             .iter()
             .zip(&best)
             .zip(&weight)
@@ -351,13 +428,22 @@ fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
         if !(score > 0.0) {
             continue;
         }
-        let entry = ((x, z), score, d);
-        if a.hunt.is_fruitless(&cfg, x, z, tick, ring) {
+        if route.is_some() && sq.node.is_none() {
+            unreachable += 1;
+            continue;
+        }
+        let productive = a.hunt.is_productive(&cfg, x, z, tick, ring);
+        if productive {
+            score *= 1.0 + cfg.success_boost.max(0.0);
+        }
+        let entry = ((x, z), score, d, sq.node.map(|n| n.1));
+        if !productive && a.hunt.is_fruitless(&cfg, x, z, tick, ring) {
             fruitless.push(entry);
         } else {
             open.push(entry);
         }
     }
+    fauna.ledger.hunt_unreachable_squares += unreachable;
     // Every square remembered fruitless: the memory gives way rather than strand it.
     let pool = if open.is_empty() { &mut fruitless } else { &mut open };
     // A stable order, so a draw picks the same square for the same world.
@@ -367,11 +453,13 @@ fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
         None
     } else if explore {
         let k = ((draw(DOMAIN_EXPLORE, a.id, tick, 1) * pool.len() as f64) as usize).min(pool.len() - 1);
-        Some(pool[k].0)
+        Some(pool[k])
     } else {
-        pool.iter()
-            .max_by(|p, q| p.1.total_cmp(&q.1).then(q.2.total_cmp(&p.2)))
-            .map(|p| p.0)
+        pool.iter().copied().max_by(|p, q| p.1.total_cmp(&q.1).then(q.2.total_cmp(&p.2)))
+    };
+    let face_of = |r: &Route, j: usize| {
+        let f = r.graph.faces[j];
+        (f.x, f.y, f.z)
     };
     match pick {
         Some(p) => {
@@ -380,11 +468,41 @@ fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
             } else {
                 fauna.ledger.hunt_chosen += 1;
             }
-            (p.0.rem_euclid(ring), p.1)
+            match (p.3, &route) {
+                (Some(j), Some(r)) => {
+                    fauna.animals[i].hunt.patch_face = Some(face_of(r, j));
+                    r.graph.centre(j)
+                }
+                _ => {
+                    fauna.animals[i].hunt.patch_face = None;
+                    (p.0.0.rem_euclid(ring), p.0.1)
+                }
+            }
         }
         None => {
-            // No food in reach: walk off half the scan in a drawn direction.
+            // No food in reach: walk off in a drawn direction — on its route, a drawn node of
+            // the field at least the minimum hop away.
             fauna.ledger.hunt_explored += 1;
+            if let Some(r) = &route {
+                let mut far: Vec<usize> = r
+                    .field
+                    .keys()
+                    .copied()
+                    .filter(|&j| {
+                        let (x, z) = r.graph.centre(j);
+                        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
+                        let d = (dx * dx + dz * dz).sqrt();
+                        d >= cfg.patch_min_hop_m && d <= scan.max(cfg.patch_min_hop_m)
+                    })
+                    .collect();
+                if !far.is_empty() {
+                    far.sort_unstable();
+                    let k = ((draw(DOMAIN_EXPLORE, a.id, tick, 2) * far.len() as f64) as usize).min(far.len() - 1);
+                    fauna.animals[i].hunt.patch_face = Some(face_of(r, far[k]));
+                    return r.graph.centre(far[k]);
+                }
+            }
+            fauna.animals[i].hunt.patch_face = None;
             let angle = draw(DOMAIN_EXPLORE, a.id, tick, 2) * std::f64::consts::TAU;
             let r = 0.5 * scan.max(cfg.patch_min_hop_m);
             let depth_m = f64::from(view.config.depth) * v;
@@ -393,6 +511,236 @@ fn choose_patch(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
                 (a.pose.z + r * angle.cos()).clamp(0.5 * v, (depth_m - 0.5 * v).max(0.5 * v)),
             )
         }
+    }
+}
+
+// ------------------------------------------------------------------ routes (HUNTER-MEAL)
+
+/// A hunter's place on its lineage's walking route graph ([`HuntConfig::reachable_only`]):
+/// the graph, its node, the route field from that node out to the steps it walks before it
+/// gives a walk up, and how near a node must be to a food face for its mouth to take it.
+pub(crate) struct Route {
+    pub graph: Arc<RouteGraph>,
+    pub from: usize,
+    pub field: FxHashMap<usize, u32>,
+    pub steps: u32,
+    pub food_r: u32,
+}
+
+impl Route {
+    /// The node a body takes `site` from (within its mouth's reach of the face) if it is
+    /// on the field, and its route distance.
+    pub fn reach(&self, site: Site, v: f64) -> Option<(usize, u32)> {
+        let centre = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
+        let j = self.graph.node_near(site, centre, self.food_r)?;
+        self.field.get(&j).map(|&d| (j, d))
+    }
+}
+
+/// The route steps (one voxel each) a hunter walks before it gives a walk up:
+/// `cruise × patrol_give_up_s / voxel`.
+fn reach_steps(fauna: &Fauna, founder: Founder, v: f64) -> u32 {
+    let m = fauna.config.manifest(founder).cruise_m_per_s * fauna.config.hunt.patrol_give_up_s;
+    if m.is_finite() && m > 0.0 && v > 0.0 { (m / v).floor().min(f64::from(u32::MAX)) as u32 } else { 0 }
+}
+
+/// The hunter at `i` on its walking route graph, `None` when [`HuntConfig::reachable_only`]
+/// is off or it stands off the graph (the graph is the adult disc's; a juvenile in a gap
+/// may be off it): the callers then take main's rule.
+pub(crate) fn route_from(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<Route> {
+    let cfg = fauna.config.hunt;
+    if !cfg.reachable_only {
+        return None;
+    }
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let v = view.config.voxel_m;
+    let graph = fauna.routes(view, founder, cfg.route_refresh_s);
+    let geometry = phys.body_at(a.body);
+    let cols = |m: f64| if m.is_finite() && v > 0.0 { (m / v).ceil().max(0.0) as u32 } else { 0 };
+    let own_r = cols(geometry.footprint_radius());
+    let food_r = cols(geometry.footprint_radius() + geometry.mouth_reach_m);
+    let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r)?;
+    let steps = reach_steps(fauna, founder, v);
+    let field = graph.distances(from, steps);
+    Some(Route { graph, from, field, steps, food_r })
+}
+
+/// Where the hunter at `i` heads on its way to node `goal` at `goal_xy`: straight at it when
+/// the line is walkable on the graph, else the next node of its route there.
+fn waypoint(fauna: &mut Fauna, i: usize, graph: &Arc<RouteGraph>, from: usize, goal: usize, steps: u32) -> (f64, f64) {
+    let a = fauna.animals[i];
+    let goal_xy = graph.centre(goal);
+    if from == goal || graph.walk_line(from, (a.pose.x, a.pose.z), goal_xy) {
+        return goal_xy;
+    }
+    let field = fauna.hunt_path(graph, a.id, goal, steps);
+    graph.next_toward(&field, from).map_or(goal_xy, |j| graph.centre(j))
+}
+
+/// Whether a mouth column of `a` (standing as it is) holds a **usable carcass**: carrion
+/// under the plant layer's carcass record, at its standing face's height (where a mouth
+/// takes a pool).
+pub(crate) fn mouth_on_carcass(fv: &FloraView<'_>, view: &VoxelView<'_>, a: &crate::Animal, geometry: &crate::Body) -> bool {
+    crate::body::mouth_columns(view, &a.pose, geometry).into_iter().any(|(x, z)| {
+        let site = Site { x: x.rem_euclid(i64::from(view.config.width)) as u32, y: a.site.y, z };
+        fv.ground_at(site).is_some_and(|g| g.carcass.is_some() && g.carrion > 0.0)
+    })
+}
+
+/// **The meal step** (HUNTER-MEAL, [`HuntConfig::meal_first`]) for the hungry hunter at `i`
+/// that eats carrion: with its mouth over a usable carcass, eat (feed held, still); else,
+/// with one it can walk to within [`HuntConfig::carcass_scan_m`] (on its route field when
+/// [`HuntConfig::reachable_only`], the nearest by route; else the nearest), go to it, feed
+/// off so nothing is struck on the way. A walk that has not reached its carcass after
+/// [`HuntConfig::patrol_give_up_s`] remembers it fruitless. `None`: no meal to go to.
+pub(crate) fn meal_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
+    let cfg = fauna.config.hunt;
+    let a = fauna.animals[i];
+    if !cfg.meal_first || !a.eating || a.attached.is_some() || a.strike.is_some() {
+        return None;
+    }
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    phys.hunter?;
+    if !phys.diet.foods().any(|f| f == Food::Carrion) {
+        return None;
+    }
+    let tick = fauna.tick;
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let geometry = phys.body_at(a.body);
+    let mut m = a.hunt;
+    if mouth_on_carcass(fv, view, &a, &geometry) {
+        m.mode = HuntMode::Meal;
+        m.samples = 0;
+        fauna.animals[i].hunt = m;
+        fauna.ledger.hunt_meal_eat_samples += 1;
+        return Some(Actions { forward: 0.0, turn: 0.0, feed: 1.0 });
+    }
+    let scan = cfg.carcass_scan_m.max(0.0);
+    let centre = |s: Site| ((f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v);
+    let near: Vec<(Site, f64)> = fauna
+        .carcass_sites(fv)
+        .iter()
+        .filter_map(|&s| {
+            let (x, z) = centre(s);
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
+            let d = (dx * dx + dz * dz).sqrt();
+            (d <= scan && !a.hunt.is_fruitless(&cfg, x, z, tick, ring)).then_some((s, d))
+        })
+        .collect();
+    let leave = |fauna: &mut Fauna, mut m: HuntMemory| {
+        if m.mode == HuntMode::Meal {
+            m.mode = HuntMode::Idle;
+            m.samples = 0;
+        }
+        fauna.animals[i].hunt = m;
+    };
+    if near.is_empty() {
+        leave(fauna, m);
+        return None;
+    }
+    // The carcass to go to, and the point to head for.
+    let route = route_from(fauna, i, view);
+    let (site, go) = match &route {
+        Some(r) => {
+            let best = near
+                .iter()
+                .filter_map(|&(s, _)| r.reach(s, v).map(|(j, d)| (d, s, j)))
+                .min_by(|p, q| p.0.cmp(&q.0).then(p.1.cmp(&q.1)));
+            let Some((_, s, j)) = best else {
+                leave(fauna, m);
+                return None;
+            };
+            let go = waypoint(fauna, i, &r.graph, r.from, j, r.steps);
+            (s, go)
+        }
+        None => {
+            let (s, _) = near
+                .iter()
+                .copied()
+                .min_by(|p, q| p.1.total_cmp(&q.1).then(p.0.cmp(&q.0)))
+                .expect("not empty");
+            (s, centre(s))
+        }
+    };
+    let cadence_s = fauna.config.manifest(founder).controller_period_s;
+    if m.mode == HuntMode::Meal {
+        m.samples += 1;
+        if m.samples >= samples_for(cfg.patrol_give_up_s, cadence_s) {
+            let (x, z) = centre(site);
+            m.remember_fruitless(x, z, tick + cubarium_voxel::ticks_at_least_one(cfg.fruitless_memory_s));
+            fauna.ledger.hunt_fruitless += 1;
+            m.mode = HuntMode::Idle;
+            m.samples = 0;
+            fauna.animals[i].hunt = m;
+            return None;
+        }
+    } else {
+        m.mode = HuntMode::Meal;
+        m.samples = 0;
+        m.escape = 0;
+    }
+    // Walking: the teachers' escape from a refused motor, else toward the carcass.
+    let t = fauna.config.teachers;
+    let fb = a.founder_state.feedback;
+    let refused = fb.attempted_equivalent > 0.0 && fb.delivered_equivalent / fb.attempted_equivalent < t.motor_refused;
+    if refused && m.escape == 0 {
+        m.escape = t.escape_samples.max(1);
+    }
+    let act = if m.escape > 0 {
+        m.escape -= 1;
+        let side = if draw(DOMAIN_ESCAPE, a.id, tick / u64::from(t.escape_samples.max(1)), 1) < 0.5 { -1.0 } else { 1.0 };
+        Actions { forward: t.escape_creep, turn: side, feed: 0.0 }
+    } else {
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, go.0, go.1, ring);
+        head(a.pose.heading_rad, dx.atan2(dz), 1.0, 0.0)
+    };
+    fauna.animals[i].hunt = m;
+    fauna.ledger.hunt_meal_walk_samples += 1;
+    Some(act)
+}
+
+/// The point a travelling patroller heads for on its way to [`HuntMemory::patch_face`]
+/// ([`waypoint`]); `None` off the route rule, off the graph, or with no face (straight at
+/// the patch, main's rule).
+fn travel_point(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<(f64, f64)> {
+    let cfg = fauna.config.hunt;
+    if !cfg.reachable_only {
+        return None;
+    }
+    let a = fauna.animals[i];
+    let (x, y, z) = a.hunt.patch_face?;
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let v = view.config.voxel_m;
+    let graph = fauna.routes(view, founder, cfg.route_refresh_s);
+    let goal = graph.face(Site { x, y, z })?;
+    let own_r = (phys.body_at(a.body).footprint_radius() / v).ceil().max(0.0) as u32;
+    let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r)?;
+    let steps = reach_steps(fauna, founder, v);
+    Some(waypoint(fauna, i, &graph, from, goal, steps))
+}
+
+/// Controller samples in `s` seconds at `cadence_s` a sample, at least one.
+fn samples_for(s: f64, cadence_s: f64) -> u32 {
+    if cadence_s > 0.0 && s.is_finite() { (s / cadence_s).ceil().clamp(1.0, f64::from(u32::MAX)) as u32 } else { 1 }
+}
+
+/// A kill by `striker` of a prey that stood at `(x, z)` (HUNTER-MEAL): the place is
+/// remembered productive in the striker's memory for [`HuntConfig::success_memory_s`].
+pub(crate) fn remember_kill(fauna: &mut Fauna, striker: u64, x: f64, z: f64, ring: f64) {
+    let cfg = fauna.config.hunt;
+    if !(cfg.success_memory_s > 0.0) {
+        return;
+    }
+    let tick = fauna.tick;
+    let until = tick + cubarium_voxel::ticks_at_least_one(cfg.success_memory_s);
+    if let Ok(j) = fauna.animals.binary_search_by_key(&striker, |a| a.id) {
+        fauna.animals[j].hunt.remember_productive(&cfg, x, z, tick, until, ring);
+        fauna.ledger.hunt_productive_kills += 1;
     }
 }
 
@@ -474,6 +822,10 @@ pub(crate) fn steer(
     if !a.eating {
         fauna.animals[i].hunt.mode = HuntMode::Idle;
         return Some((still, 0.0));
+    }
+    // HUNTER-MEAL: a usable carcass at its mouth or one it can walk to comes first.
+    if let Some(go) = meal_step(fauna, i, view, fv) {
+        return Some((go, 0.0));
     }
 
     // 1. Senses: the size-eligible prey it sees or feels, and its encounters.
@@ -605,7 +957,10 @@ pub(crate) fn steer(
         let side = if draw(DOMAIN_ESCAPE, a.id, tick / u64::from(t.escape_samples.max(1)), 0) < 0.5 { -1.0 } else { 1.0 };
         Actions { forward: t.escape_creep, turn: side, feed: 0.0 }
     } else {
-        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, m.patch.0, m.patch.1, ring);
+        // HUNTER-MEAL: along its route graph where the straight line is not walkable.
+        fauna.animals[i].hunt = m;
+        let go = travel_point(fauna, i, view).unwrap_or(m.patch);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, go.0, go.1, ring);
         head(a.pose.heading_rad, dx.atan2(dz), 1.0, 0.0)
     };
     fauna.animals[i].hunt = m;
