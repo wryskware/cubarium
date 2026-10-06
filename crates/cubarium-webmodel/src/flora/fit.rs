@@ -24,7 +24,9 @@ pub fn cai(config: &FloraConfig, zones: &Zones, faces: &[Face]) -> Vec<f64> {
         if let Some((sp, r)) = f.plant {
             let sc = config.species(sp);
             if sc.trophic == Trophic::Photo && !sc.ground_cover && r.wood >= sc.donor_min {
-                sum[zones.of_face[&(f.x, f.y, f.z)]] += crown_of(config, sp, r.wood, r.foliage).0;
+                if let Some(&z) = zones.of_face.get(&(f.x, f.y, f.z)) {
+                    sum[z] += crown_of(config, sp, r.wood, r.foliage).0;
+                }
             }
         }
     }
@@ -72,7 +74,8 @@ pub fn light(config: &FloraConfig, zones: &Zones, snaps: &[Vec<Face>]) -> [[[Fit
             let h = sc.light_half;
             let raw = if 1.0 + h - r.light > 1e-9 { h * r.light / (1.0 + h - r.light) } else { f.sky };
             let y = (raw / f.sky).clamp(0.0, 1.0);
-            let x = c[zones.of_face[&(f.x, f.y, f.z)]];
+            let Some(&z) = zones.of_face.get(&(f.x, f.y, f.z)) else { continue };
+            let x = c[z];
             let j = usize::from(r.wood >= sc.donor_min);
             let a = &mut acc[sp.index()][j];
             a.n += 1.0;

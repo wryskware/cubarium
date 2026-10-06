@@ -258,7 +258,8 @@ pub fn build(config: &FloraConfig, snapshots: &[Vec<Face>]) -> Zones {
             let mut at: HashMap<(i64, i64), Vec<&Face>> = HashMap::new();
             for f in snap {
                 at.entry((i64::from(f.x), i64::from(f.z))).or_default().push(f);
-                let z = zi[&keys[&(f.x, f.y, f.z)]];
+                // A face a later snapshot has and the first lacks (the terrain moved) is left out.
+                let Some(z) = keys.get(&(f.x, f.y, f.z)).map(|k| zi[k]) else { continue };
                 zone_n[z][f.plant.map_or(Species::COUNT, |(p, _)| p.index())] += 1.0;
             }
             for f in snap {
@@ -267,7 +268,8 @@ pub fn build(config: &FloraConfig, snapshots: &[Vec<Face>]) -> Zones {
                 if sc.clonal_share <= 0.0 || r.wood < sc.donor_min {
                     continue;
                 }
-                let z = zi[&keys[&(f.x, f.y, f.z)]];
+                // A face a later snapshot has and the first lacks (the terrain moved) is left out.
+                let Some(z) = keys.get(&(f.x, f.y, f.z)).map(|k| zi[k]) else { continue };
                 let reach = i64::from(sc.runner_reach);
                 for dx in -reach..=reach {
                     for dz in -reach..=reach {
@@ -285,13 +287,15 @@ pub fn build(config: &FloraConfig, snapshots: &[Vec<Face>]) -> Zones {
         // Mean site mineral per zone and occupant (bare last).
         let mut occ_min = vec![[[0.0f64; 2]; Species::COUNT + 1]; zones.len()];
         for f in snap {
-            let z = zi[&keys[&(f.x, f.y, f.z)]];
+            // A face a later snapshot has and the first lacks (the terrain moved) is left out.
+            let Some(z) = keys.get(&(f.x, f.y, f.z)).map(|k| zi[k]) else { continue };
             let o = f.plant.map_or(Species::COUNT, |(p, _)| p.index());
             occ_min[z][o][0] += f.mineral;
             occ_min[z][o][1] += 1.0;
         }
         for f in snap {
-            let z = zi[&keys[&(f.x, f.y, f.z)]];
+            // A face a later snapshot has and the first lacks (the terrain moved) is left out.
+            let Some(z) = keys.get(&(f.x, f.y, f.z)).map(|k| zi[k]) else { continue };
             if let Some((p, r)) = f.plant {
                 zones[z].foliage_ref[si][p.index()] += r.foliage;
             }
