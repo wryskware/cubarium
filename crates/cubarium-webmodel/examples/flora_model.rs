@@ -23,18 +23,42 @@ fn main() {
             }
             eprintln!("{} faces, minute {}", faces.len(), std::fs::read_to_string(dir.join("minute")).unwrap_or_default().trim());
         }
+        Some("export") => export(&args[2..]),
         Some("physio") => physio(&args[2..]),
         Some("elig") => elig(&args[2..]),
         Some("hetero") => hetero(&args[2..]),
         Some("run") => run(&args[2..]),
         _ => eprintln!(
-            "usage: flora_model dump [CONFIG] | census DIR | physio SPECIES L WATER SAT N DAYS newborn|adult | elig DIR.. | hetero DIR SPECIES MINUTES\n  \
+            "usage: flora_model dump [CONFIG] | census DIR | export SAVE OUT [config=FILE] [overlay=FILE] [set=P=V].. | physio SPECIES L WATER SAT N DAYS newborn|adult | elig DIR.. | hetero DIR SPECIES MINUTES\n  \
              run start=DIR snaps=DIR,.. [log=SOAKLOG] [minutes=1200] [every=30] [weather=frozen] [wseed=N] [config=FILE] [set=P=V].. \
              [browse=PER_DAY] [hold=SPECIES,..] [zocc=1] [prod=1] [rcheck=SPECIES[:seed]] [zfunnel=SPECIES] [zdeaths=SPECIES] [trace=ZONE:SPECIES]\n  \
              meadow levers (design/webmodel/meadow.md): [take_hold=1] [take_const=FOLIAGE_PER_2H[:LITTER]] [crop=K] [cropw=SHARE] [dry=EVERY_D:LEN_D:WATER[:PHASE_D]] [drywet=1] \
              [thatch=X] [draw=X] [contest=ESCAPE_SHARE[:TAU] | contest=sim] [life=DAYS | life=SPECIES:DAYS,..] [soilmin=SPECIES:N,..] [soilhist=1] [rare=SPECIES:KEEP]"
         ),
     }
+}
+
+/// `export SAVE OUT [config=FILE] [overlay=FILE] [set=P=V]..`: the census of a save, read
+/// with this build (the one that shares the save's schemas) under the config's plant layer,
+/// written to `OUT/` as a census file (`census::write_census`): the model's start state from
+/// then on, whatever schema later builds read. `overlay=` lays a scenario file's tables over
+/// the config, as the closed loop's soak validation does (`web::start::params_with_overlay`).
+fn export(a: &[String]) {
+    let save = Path::new(a.first().expect("export SAVE OUT"));
+    let out = Path::new(a.get(1).expect("export SAVE OUT"));
+    let cfg = kv(a, "config=").unwrap_or("config/scenarios/terrarium.toml");
+    let sets: Vec<String> = a.iter().filter_map(|x| x.strip_prefix("set=").map(str::to_string)).collect();
+    let p = match kv(a, "overlay=") {
+        Some(o) => cubarium_webmodel::web::start::params_with_overlay(Path::new(cfg), Path::new(o), &sets).unwrap(),
+        None => config::resolve(Path::new(cfg), &sets).unwrap(),
+    };
+    let fc = config::flora_of(&p);
+    let (world, flora) = census::read_save(save).unwrap_or_else(|e| panic!("{e}"));
+    let minute: f64 = std::fs::read_to_string(save.join("minute")).unwrap().trim().parse().unwrap();
+    let c = census::Census { width: world.config().width, depth: world.config().depth, minute, faces: census::census(&world, &flora, Some(&fc)) };
+    let note = format!("save {} config {cfg}{} sets [{}]", save.display(), kv(a, "overlay=").map(|o| format!(" overlay {o}")).unwrap_or_default(), sets.join(" "));
+    census::write_census(out, &c, &toml::to_string(&fc).unwrap(), &note).unwrap();
+    eprintln!("{}: {} faces, minute {}", out.display(), c.faces.len(), c.minute);
 }
 
 /// One stand under held conditions, by the sim's own probe and by the model's law.
@@ -91,10 +115,10 @@ fn hetero(a: &[String]) {
     let minutes: f64 = a[2].parse().unwrap();
     let k = PHOTO.iter().position(|&x| x == sp).unwrap();
     let sc = fc.species(sp);
-    let (world, flora) = census::read_save(dir).unwrap();
-    let faces = census::census(&world, &flora, Some(&fc));
+    let cs = census::load(dir, &fc).unwrap();
+    let faces = cs.faces;
     let zs = zones::build(&fc, &[faces.clone()]);
-    let minute0: f64 = std::fs::read_to_string(dir.join("minute")).unwrap().trim().parse().unwrap();
+    let minute0 = cs.minute;
     let dm = DayModel::of(&p.world, fc.upkeep_q10);
     // (zone, light_eff, available, saturated, mineral, stand)
     let mut st: Vec<(usize, [f64; 4], stand::StandState)> = Vec::new();
@@ -169,8 +193,7 @@ fn elig(a: &[String]) {
     let p = config::resolve(Path::new("config/scenarios/terrarium.toml"), &[]).unwrap();
     let fc = config::flora_of(&p);
     for d in a {
-        let (world, flora) = census::read_save(Path::new(d)).unwrap();
-        let faces = census::census(&world, &flora, Some(&fc));
+        let faces = census::load(Path::new(d), &fc).unwrap().faces;
         println!("== {d}");
         for (k, sp) in PHOTO.iter().enumerate() {
             let sc = fc.species(*sp);
@@ -307,12 +330,15 @@ fn run(a: &[String]) {
     let t = std::time::Instant::now();
     let mut snaps = Vec::new();
     let mut dims = (0, 0);
-    for d in &dirs {
-        let (world, flora) = census::read_save(d).unwrap();
-        dims = (world.config().width, world.config().depth);
-        snaps.push(census::census(&world, &flora, Some(&fc)));
+    let mut minute0 = 0.0;
+    for (i, d) in dirs.iter().enumerate() {
+        let cs = census::load(d, &fc).unwrap_or_else(|e| panic!("{e}"));
+        dims = (cs.width, cs.depth);
+        if i == 0 {
+            minute0 = cs.minute;
+        }
+        snaps.push(cs.faces);
     }
-    let minute0: f64 = std::fs::read_to_string(start.join("minute")).unwrap().trim().parse().unwrap();
     let zs = zones::build(&fc, &snaps);
     let (kern, rb) = kernel::build(&fc, dims.0, dims.1, &zs, &snaps, 3000, 7);
     eprintln!("setup {:.1} s: {} zones", t.elapsed().as_secs_f64(), zs.zones.len());

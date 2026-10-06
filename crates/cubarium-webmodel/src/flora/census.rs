@@ -6,6 +6,14 @@
 //! are not read: the census is the producers' and the ground's. Reading a save with the
 //! build that shares its schemas is not a migration; a save of another schema is refused by
 //! the decoders themselves.
+//!
+//! **Census files** (`faces.tsv`, [`write_census`], [`load`]): the census is written once, by
+//! the build that shares a save's schemas, to a plain tab-separated file beside a copy of
+//! the plant config it was read under (`flora.toml`) and the world's size and minute
+//! (`meta`). The model then starts from the file, never from the save, so a new plant or
+//! world schema on main does not cut the model off from its start states. Nothing is
+//! migrated: the file holds what the old build read, field for field (every float in its
+//! shortest round-trip form, so it reads back bit for bit).
 
 use std::path::Path;
 
@@ -25,7 +33,7 @@ pub const PHOTO: [Species; 8] = [
 ];
 
 /// One stand's state as the census reads it.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StandRec {
     pub wood: f64,
     pub foliage: f64,
@@ -43,7 +51,7 @@ pub struct StandRec {
 }
 
 /// One support face.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Face {
     pub x: u32,
     pub y: u32,
@@ -402,4 +410,341 @@ impl Shade {
         }
         out
     }
+}
+
+
+/// A census with the world's size and the minute it was taken at: what the model needs from
+/// a start state.
+#[derive(Clone, Debug)]
+pub struct Census {
+    pub width: u32,
+    pub depth: u32,
+    pub minute: f64,
+    pub faces: Vec<Face>,
+}
+
+/// The census file's first line (its format version).
+pub const CENSUS_MAGIC: &str = "# cubarium-webmodel census 1";
+
+fn opt(v: Option<f64>) -> String {
+    v.map_or("NA".into(), |w| format!("{w}"))
+}
+
+fn sparse<'a>(it: impl Iterator<Item = (String, f32)> + 'a) -> String {
+    let v: Vec<String> = it.filter(|(_, t)| *t != 0.0).map(|(k, t)| format!("{k}={t}")).collect();
+    if v.is_empty() { "-".into() } else { v.join(";") }
+}
+
+/// One face as a census-file row (tab-separated, the order [`face_of_row`] reads).
+pub fn face_row(f: &Face) -> String {
+    let rec = |r: &StandRec| {
+        format!("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}", r.wood, r.foliage, r.reserve, r.light, r.moisture, r.aeration_stress, u8::from(r.cured), r.edible, r.mineral)
+    };
+    let mut c: Vec<String> = vec![
+        f.x.to_string(),
+        f.y.to_string(),
+        f.z.to_string(),
+        u8::from(f.soil).to_string(),
+        f.soil_depth.to_string(),
+        u8::from(f.highest).to_string(),
+        format!("{}", f.sky),
+        bits(&f.water_ok),
+        bits(&f.light_ok),
+        opt(f.turf_water),
+        format!("{}", f.turf_saturated),
+        format!("{}", f.pad_saturated),
+        format!("{}", f.depth_m),
+        format!("{}", f.darkness),
+        u8::from(f.glow_ok).to_string(),
+        format!("{}", f.canopy),
+    ];
+    match f.plant {
+        Some((sp, r)) => {
+            c.push(sp.name().into());
+            c.push(rec(&r));
+        }
+        None => {
+            c.push("-".into());
+            c.push(rec(&StandRec::default()));
+        }
+    }
+    c.push(u8::from(f.fungus.is_some()).to_string());
+    c.push(rec(&f.fungus.unwrap_or_default()));
+    for v in [f.litter, f.dead_wood, f.mineral, f.film, f.litter_mineral, f.dead_wood_mineral, f.seed_mineral] {
+        c.push(format!("{v}"));
+    }
+    c.extend(f.water.iter().map(|w| opt(*w)));
+    c.extend(f.saturated.iter().map(|v| format!("{v}")));
+    c.extend(f.seeds.iter().map(u32::to_string));
+    c.push(sparse(f.nb_tau.iter().enumerate().flat_map(|(k, row)| row.iter().enumerate().map(move |(j, &t)| (format!("{k}.{j}"), t)))));
+    c.push(sparse(f.pl_tau.iter().enumerate().map(|(j, &t)| (j.to_string(), t))));
+    c.join("\t")
+}
+
+/// The header row of a census file (after [`CENSUS_MAGIC`]).
+pub fn face_header() -> String {
+    let rec = |p: &str| ["wood", "foliage", "reserve", "light", "moisture", "stress", "cured", "edible", "mineral"].map(|k| format!("{p}{k}")).join("\t");
+    let mut h = vec![
+        "x", "y", "z", "soil", "soil_depth", "highest", "sky", "water_ok", "light_ok", "turf_water", "turf_sat", "pad_sat", "depth_m", "darkness", "glow_ok", "canopy", "plant",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect::<Vec<_>>();
+    h.push(rec("p_"));
+    h.push("fungus".into());
+    h.push(rec("f_"));
+    for k in ["litter", "dead_wood", "mineral", "film", "litter_min", "dead_wood_min", "seed_min"] {
+        h.push(k.into());
+    }
+    h.extend(PHOTO.iter().map(|s| format!("w_{}", s.name())));
+    h.extend(PHOTO.iter().map(|s| format!("sat_{}", s.name())));
+    h.extend(Species::ALL.iter().map(|s| format!("seed_{}", s.name())));
+    h.push("nb_tau(photo.shader=tau)".into());
+    h.push("pl_tau(shader=tau)".into());
+    h.join("\t")
+}
+
+/// Read one census-file row back ([`face_row`]).
+pub fn face_of_row(line: &str) -> Result<Face, String> {
+    struct Cur<'a> {
+        c: Vec<&'a str>,
+        i: usize,
+    }
+    impl<'a> Cur<'a> {
+        fn next(&mut self) -> Result<&'a str, String> {
+            let v = self.c.get(self.i).copied().ok_or_else(|| format!("census row: {} columns, wanted more", self.c.len()))?;
+            self.i += 1;
+            Ok(v)
+        }
+        fn rec(&mut self) -> Result<StandRec, String> {
+            Ok(StandRec {
+                wood: num(self.next()?)?,
+                foliage: num(self.next()?)?,
+                reserve: num(self.next()?)?,
+                light: num(self.next()?)?,
+                moisture: num(self.next()?)?,
+                aeration_stress: num(self.next()?)?,
+                cured: flag(self.next()?)?,
+                edible: num(self.next()?)?,
+                mineral: num(self.next()?)?,
+            })
+        }
+    }
+    fn num<T: std::str::FromStr>(v: &str) -> Result<T, String> {
+        v.parse::<T>().map_err(|_| format!("census row: bad number `{v}`"))
+    }
+    fn flag(v: &str) -> Result<bool, String> {
+        match v {
+            "0" => Ok(false),
+            "1" => Ok(true),
+            _ => Err(format!("census row: bad flag `{v}`")),
+        }
+    }
+    fn onum(v: &str) -> Result<Option<f64>, String> {
+        if v == "NA" { Ok(None) } else { num(v).map(Some) }
+    }
+    fn bitset(v: &str) -> Result<[bool; 8], String> {
+        let b: Vec<char> = v.chars().collect();
+        if b.len() != 8 {
+            return Err(format!("census row: bad gate bits `{v}`"));
+        }
+        let mut out = [false; 8];
+        for k in 0..8 {
+            out[k] = flag(&b[k].to_string())?;
+        }
+        Ok(out)
+    }
+    let mut cur = Cur { c: line.split('\t').collect(), i: 0 };
+    let x = num(cur.next()?)?;
+    let y = num(cur.next()?)?;
+    let z = num(cur.next()?)?;
+    let soil = flag(cur.next()?)?;
+    let soil_depth = num(cur.next()?)?;
+    let highest = flag(cur.next()?)?;
+    let sky = num(cur.next()?)?;
+    let water_ok = bitset(cur.next()?)?;
+    let light_ok = bitset(cur.next()?)?;
+    let turf_water = onum(cur.next()?)?;
+    let turf_saturated = num(cur.next()?)?;
+    let pad_saturated = num(cur.next()?)?;
+    let depth_m = num(cur.next()?)?;
+    let darkness = num(cur.next()?)?;
+    let glow_ok = flag(cur.next()?)?;
+    let canopy = num(cur.next()?)?;
+    let plant_name = cur.next()?.to_string();
+    let prec = cur.rec()?;
+    let plant = if plant_name == "-" { None } else { Some((Species::parse(&plant_name).ok_or_else(|| format!("census row: unknown species `{plant_name}`"))?, prec)) };
+    let has_fungus = flag(cur.next()?)?;
+    let frec = cur.rec()?;
+    let fungus = has_fungus.then_some(frec);
+    let mut f = Face::bare(x, y, z, sky, 0.0);
+    f.soil = soil;
+    f.soil_depth = soil_depth;
+    f.highest = highest;
+    f.water_ok = water_ok;
+    f.light_ok = light_ok;
+    f.turf_water = turf_water;
+    f.turf_saturated = turf_saturated;
+    f.pad_saturated = pad_saturated;
+    f.depth_m = depth_m;
+    f.darkness = darkness;
+    f.glow_ok = glow_ok;
+    f.canopy = canopy;
+    f.plant = plant;
+    f.fungus = fungus;
+    f.litter = num(cur.next()?)?;
+    f.dead_wood = num(cur.next()?)?;
+    f.mineral = num(cur.next()?)?;
+    f.film = num(cur.next()?)?;
+    f.litter_mineral = num(cur.next()?)?;
+    f.dead_wood_mineral = num(cur.next()?)?;
+    f.seed_mineral = num(cur.next()?)?;
+    for k in 0..8 {
+        f.water[k] = onum(cur.next()?)?;
+    }
+    for k in 0..8 {
+        f.saturated[k] = num(cur.next()?)?;
+    }
+    for k in 0..Species::COUNT {
+        f.seeds[k] = num(cur.next()?)?;
+    }
+    f.nb_tau = [[0.0; Species::COUNT]; 8];
+    let nb = cur.next()?;
+    if nb != "-" {
+        for part in nb.split(';') {
+            let (key, v) = part.split_once('=').ok_or_else(|| format!("census row: bad tau `{part}`"))?;
+            let (k, j) = key.split_once('.').ok_or_else(|| format!("census row: bad tau key `{key}`"))?;
+            let (k, j): (usize, usize) = (num(k)?, num(j)?);
+            if k >= 8 || j >= Species::COUNT {
+                return Err(format!("census row: tau key `{key}` out of range"));
+            }
+            f.nb_tau[k][j] = num(v)?;
+        }
+    }
+    f.pl_tau = [0.0; Species::COUNT];
+    let pl = cur.next()?;
+    if pl != "-" {
+        for part in pl.split(';') {
+            let (j, v) = part.split_once('=').ok_or_else(|| format!("census row: bad tau `{part}`"))?;
+            let j: usize = num(j)?;
+            if j >= Species::COUNT {
+                return Err(format!("census row: tau key `{j}` out of range"));
+            }
+            f.pl_tau[j] = num(v)?;
+        }
+    }
+    if cur.i != cur.c.len() {
+        return Err(format!("census row: {} columns, read {}", cur.c.len(), cur.i));
+    }
+    Ok(f)
+}
+
+/// Write a census to `out/` (created): `faces.tsv`, `meta` (`width depth minute`, one per
+/// line as `key=value`), `minute`, and `flora.toml`, the plant config the census was read
+/// under (`flora_toml`, the resolved and rescaled one).
+pub fn write_census(out: &Path, c: &Census, flora_toml: &str, note: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    let e = |x: std::io::Error| format!("{}: {x}", out.display());
+    std::fs::create_dir_all(out).map_err(e)?;
+    let mut w = std::io::BufWriter::new(std::fs::File::create(out.join("faces.tsv")).map_err(e)?);
+    writeln!(w, "{CENSUS_MAGIC}").map_err(e)?;
+    writeln!(w, "{}", face_header()).map_err(e)?;
+    for f in &c.faces {
+        writeln!(w, "{}", face_row(f)).map_err(e)?;
+    }
+    w.flush().map_err(e)?;
+    std::fs::write(out.join("meta"), format!("width={}\ndepth={}\nminute={}\nnote={}\n", c.width, c.depth, c.minute, note.replace('\n', " "))).map_err(e)?;
+    std::fs::write(out.join("minute"), format!("{}\n", c.minute)).map_err(e)?;
+    std::fs::write(out.join("flora.toml"), flora_toml).map_err(e)?;
+    Ok(())
+}
+
+/// Read a census directory written by [`write_census`].
+pub fn read_census(dir: &Path) -> Result<Census, String> {
+    let e = |x: std::io::Error| format!("{}: {x}", dir.display());
+    let meta = std::fs::read_to_string(dir.join("meta")).map_err(e)?;
+    let get = |k: &str| meta.lines().find_map(|l| l.strip_prefix(k)?.strip_prefix('=')).ok_or_else(|| format!("{}/meta: no `{k}`", dir.display()));
+    let width = get("width")?.trim().parse().map_err(|_| format!("{}/meta: width", dir.display()))?;
+    let depth = get("depth")?.trim().parse().map_err(|_| format!("{}/meta: depth", dir.display()))?;
+    let minute = get("minute")?.trim().parse().map_err(|_| format!("{}/meta: minute", dir.display()))?;
+    let text = std::fs::read_to_string(dir.join("faces.tsv")).map_err(e)?;
+    let mut lines = text.lines();
+    if lines.next() != Some(CENSUS_MAGIC) {
+        return Err(format!("{}/faces.tsv: not a census file of this format (`{CENSUS_MAGIC}`)", dir.display()));
+    }
+    lines.next();
+    let faces = lines.filter(|l| !l.is_empty()).map(face_of_row).collect::<Result<Vec<_>, _>>().map_err(|x| format!("{}/faces.tsv: {x}", dir.display()))?;
+    Ok(Census { width, depth, minute, faces })
+}
+
+/// The keys (dotted paths) where two plant configs' TOML forms disagree, keys present in
+/// only one of them left out (knobs added or retired between builds).
+pub fn config_differences(a: &str, b: &str) -> Result<Vec<String>, String> {
+    fn flat(prefix: &str, v: &toml::Value, out: &mut std::collections::BTreeMap<String, String>) {
+        match v {
+            toml::Value::Table(t) => {
+                for (k, x) in t {
+                    flat(&if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") }, x, out);
+                }
+            }
+            other => {
+                out.insert(prefix.to_string(), other.to_string());
+            }
+        }
+    }
+    let parse = |s: &str| -> Result<std::collections::BTreeMap<String, String>, String> {
+        let v: toml::Value = toml::from_str(s).map_err(|e| format!("plant config: {e}"))?;
+        let mut m = Default::default();
+        flat("", &v, &mut m);
+        Ok(m)
+    };
+    let (ma, mb) = (parse(a)?, parse(b)?);
+    Ok(ma.iter().filter(|(k, v)| mb.get(*k).is_some_and(|w| w != *v)).map(|(k, _)| k.clone()).collect())
+}
+
+/// **A start state for the model**: a census file in `dir` (`dir/faces.tsv`), or the census
+/// files beside a save (`dir/census-*/`, the one whose plant config is nearest `config`),
+/// or, with neither, the save itself read with this build ([`read_save`], which refuses a
+/// save of another schema). A census read under a plant config that differs from `config`
+/// in keys both know is used with the differing keys printed: the census's gates, crown
+/// heights and shade are the export config's, so a run that moves one of those knobs needs
+/// a census written under it.
+pub fn load(dir: &Path, config: &FloraConfig) -> Result<Census, String> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if dir.join("faces.tsv").is_file() {
+        candidates.push(dir.to_path_buf());
+    } else if let Ok(rd) = std::fs::read_dir(dir) {
+        let mut v: Vec<std::path::PathBuf> = rd
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("census-")) && p.join("faces.tsv").is_file())
+            .collect();
+        v.sort();
+        candidates = v;
+    }
+    if candidates.is_empty() {
+        let (world, flora) = read_save(dir)?;
+        let minute = std::fs::read_to_string(dir.join("minute")).map_err(|e| format!("{}/minute: {e}", dir.display()))?.trim().parse().map_err(|e| format!("minute: {e}"))?;
+        return Ok(Census { width: world.config().width, depth: world.config().depth, minute, faces: census(&world, &flora, Some(config)) });
+    }
+    let want = toml::to_string(config).map_err(|e| format!("plant config: {e}"))?;
+    let mut best: Option<(usize, std::path::PathBuf, Vec<String>)> = None;
+    for c in candidates {
+        let have = std::fs::read_to_string(c.join("flora.toml")).map_err(|e| format!("{}/flora.toml: {e}", c.display()))?;
+        let d = config_differences(&have, &want)?;
+        if best.as_ref().is_none_or(|b| d.len() < b.0) {
+            best = Some((d.len(), c, d));
+        }
+    }
+    let (_, path, diff) = best.expect("a candidate");
+    if !diff.is_empty() {
+        eprintln!(
+            "census {}: read under a plant config that differs from this run's in {} key(s): {}{}",
+            path.display(),
+            diff.len(),
+            diff.iter().take(12).cloned().collect::<Vec<_>>().join(", "),
+            if diff.len() > 12 { ", .." } else { "" }
+        );
+    }
+    read_census(&path)
 }

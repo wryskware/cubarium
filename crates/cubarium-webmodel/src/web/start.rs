@@ -70,16 +70,16 @@ pub fn flora(p: &Params, start: &Path, snaps: &[PathBuf], wseed: u64) -> Result<
     dirs.extend(snaps.iter().cloned());
     let mut faces = Vec::new();
     let mut dims = (0, 0);
-    for d in &dirs {
-        let (world, flora) = census::read_save(d)?;
-        dims = (world.config().width, world.config().depth);
-        faces.push(census::census(&world, &flora, Some(&fc)));
+    let mut minute0 = 0.0;
+    for (i, d) in dirs.iter().enumerate() {
+        // The census file beside the save when there is one (`census::load`).
+        let cs = census::load(d, &fc)?;
+        dims = (cs.width, cs.depth);
+        if i == 0 {
+            minute0 = cs.minute;
+        }
+        faces.push(cs.faces);
     }
-    let minute0: f64 = std::fs::read_to_string(start.join("minute"))
-        .map_err(|e| format!("{}/minute: {e}", start.display()))?
-        .trim()
-        .parse()
-        .map_err(|e| format!("minute: {e}"))?;
     let zs = zones::build(&fc, &faces);
     let (kern, rb) = kernel::build(&fc, dims.0, dims.1, &zs, &faces, 3000, 7);
     let mut mp = model::Params::default();
