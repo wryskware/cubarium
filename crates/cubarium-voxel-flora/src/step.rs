@@ -3140,23 +3140,31 @@ pub(crate) fn grow_stand_cause(
     // to the litter and goes dormant — and a cured stand wakes at `cure_resume_water` and
     // regrows by the ordinary rules below (the reflush from its reserve). While cured it
     // runs [`dormant`] instead of the rest of this function.
+    //
+    // A green stand's clock also runs while its root box is below `cure_resume_water` and
+    // the income its water lets it earn cannot pay its upkeep ([`water_short`],
+    // [`SpeciesConfig::cure_cover`]): it goes dormant on its reserve instead of starving.
     if sc.cure_after_s > 0.0 && sc.trophic == Trophic::Photo {
-        if stand.cured {
-            if drink.available >= sc.cure_resume_water {
+        let read = CureRead {
+            available: drink.available,
+            moisture: mu,
+            light_eff: l_eff,
+            stress,
+            mineral: g.mineral,
+            wood: stand.wood,
+            foliage: stand.foliage,
+        };
+        match cure_step(sc, stand.cured, &mut stand.dry_s, &read, dt) {
+            CureStep::Green => {}
+            CureStep::Wake => {
                 stand.cured = false;
-                stand.dry_s = 0.0;
                 book.woke = true;
-            } else {
-                return dormant(config, stand, g, upkeep * night, book, dt);
             }
-        } else if drink.available < sc.cure_water {
-            stand.dry_s += dt;
-            if stand.dry_s >= sc.cure_after_s {
+            CureStep::Dormant => return dormant(config, stand, g, upkeep * night, book, dt),
+            CureStep::Cure => {
                 cure(config, stand, g, book);
                 return dormant(config, stand, g, upkeep * night, book, dt);
             }
-        } else {
-            stand.dry_s = 0.0;
         }
     }
 
@@ -3456,7 +3464,7 @@ fn cure(config: &FloraConfig, stand: &mut Stand, g: &mut Ground, book: &mut Book
 /// growth, no senescence, no reflush — and `cure_upkeep` of its maintenance (`scale` the
 /// temperature and night factors) paid from its reserve; maintenance it cannot pay
 /// diebacks its wood as usual. Its dormancy clock runs, and past `cure_max_s` the drought
-/// kills it.
+/// kills it, as it does when its reserve and wood run out.
 fn dormant(
     config: &FloraConfig,
     stand: &mut Stand,
@@ -3482,8 +3490,10 @@ fn dormant(
     g.dead_wood_energy += e_v * die_back;
     stand.resync_layers(sc);
     stand.dry_s += dt;
+    // A dormant stand whose reserve and crown run out has died of the drought it slept
+    // through, as one past `cure_max_s` has.
     if stand.wood < sc.alive_min {
-        Some(DeathCause::Starved)
+        Some(DeathCause::Drought)
     } else if sc.cure_max_s > 0.0 && stand.dry_s >= sc.cure_max_s {
         Some(DeathCause::Drought)
     } else {
@@ -3944,6 +3954,85 @@ pub fn break_even_cover(
         return f64::INFINITY;
     }
     (income / upkeep).max(0.0)
+}
+
+/// What a curing species' dry clock reads on one tick (package DORMANCY): the root box's
+/// mean available water and the stand's moisture `μ` (its ramp of it), its light response,
+/// aeration stress, its site's mineral, and its wood and foliage.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CureRead {
+    pub available: f64,
+    pub moisture: f64,
+    pub light_eff: f64,
+    pub stress: f64,
+    pub mineral: f64,
+    pub wood: f64,
+    pub foliage: f64,
+}
+
+/// **Is the stand short on its water?** ([`SpeciesConfig::cure_cover`]): `Some(true)` when
+/// the income its water lets it earn, after the reserve's share, covers less than
+/// `cure_cover` of its upkeep and leaf turnover while full water would cover it;
+/// `Some(false)` when it covers it (or the knob is off); `None` when even full water would
+/// not — water is not the question (no light, too little mineral).
+pub fn water_short(sc: &SpeciesConfig, r: &CureRead) -> Option<bool> {
+    if !(sc.cure_cover > 0.0) {
+        return Some(false);
+    }
+    let usable = (1.0 - sc.reserve_share).max(0.0);
+    let n = monod(sc, r.mineral);
+    let wet = (1.0 - r.stress).clamp(0.0, 1.0);
+    let at = |mu: f64| usable * break_even_cover(sc, r.wood, r.foliage, r.light_eff, mu * wet, n);
+    if at(1.0) < sc.cure_cover {
+        return None;
+    }
+    Some(at(r.moisture) < sc.cure_cover)
+}
+
+/// What the curing clock does to a stand this tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CureStep {
+    /// Green, growing by the ordinary rules (its clock ran, held or reset).
+    Green,
+    /// Green, and its clock reached `cure_after_s`: it cures now.
+    Cure,
+    /// Cured, and stays dormant this tick.
+    Dormant,
+    /// Cured, and its water reached `cure_resume_water`: it wakes now.
+    Wake,
+}
+
+/// **The curing clock** of a curing species ([`SpeciesConfig::cure_after_s`] positive): a
+/// cured stand wakes at `cure_resume_water`; a green one's `dry_s` runs while its root box
+/// is below `cure_water`, or below `cure_resume_water` and [`water_short`]; holds while
+/// below `cure_resume_water` and water is not the question; and resets otherwise. One rule,
+/// read by the plant step and by the webmodel's stand law.
+pub fn cure_step(sc: &SpeciesConfig, cured: bool, dry_s: &mut f64, r: &CureRead, dt: f64) -> CureStep {
+    if cured {
+        if r.available >= sc.cure_resume_water {
+            *dry_s = 0.0;
+            return CureStep::Wake;
+        }
+        return CureStep::Dormant;
+    }
+    let dry = if r.available < sc.cure_water {
+        Some(true)
+    } else if r.available < sc.cure_resume_water {
+        water_short(sc, r)
+    } else {
+        Some(false)
+    };
+    match dry {
+        Some(true) => {
+            *dry_s += dt;
+            if *dry_s >= sc.cure_after_s {
+                return CureStep::Cure;
+            }
+        }
+        Some(false) => *dry_s = 0.0,
+        None => {}
+    }
+    CureStep::Green
 }
 
 /// **The canopy gate** ([`SpeciesConfig::establish_light_margin`]): whether a newborn of

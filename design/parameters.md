@@ -364,7 +364,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (975 rows)
+**`flora.*`** (984 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -451,6 +451,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.bloomcrown.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
 | `flora.bloomcrown.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.bloomcrown.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.bloomcrown.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.bloomcrown.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.bloomcrown.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -551,6 +552,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.umbrellafrond.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
 | `flora.umbrellafrond.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.umbrellafrond.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.umbrellafrond.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.umbrellafrond.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.umbrellafrond.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -650,7 +652,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.cure_shed` | 0.8 | fraction of foliage | [0, 1] | 0–1 | - | placeholder | curing: share of the foliage dropped to the litter at once |
 | `flora.springturf.cure_upkeep` | 0.1 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.springturf.cure_resume_water` | 0.25 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
-| `flora.springturf.cure_max_s` | 21600.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.springturf.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.springturf.cure_cover` | 1.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.springturf.cured_srgb` | 12755290 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.springturf.founder_per_m2` | 0.6 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.springturf.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -751,6 +754,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.stonecushion.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
 | `flora.stonecushion.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.stonecushion.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.stonecushion.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.stonecushion.founder_per_m2` | 0.2 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.stonecushion.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -851,6 +855,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.velvetpad.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
 | `flora.velvetpad.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.velvetpad.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.velvetpad.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.velvetpad.founder_per_m2` | 0.4 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.velvetpad.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -951,6 +956,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.glowcap.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
 | `flora.glowcap.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.glowcap.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.glowcap.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.glowcap.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.glowcap.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -1051,6 +1057,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.vaulttree.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
 | `flora.vaulttree.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.vaulttree.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.vaulttree.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.vaulttree.founder_per_m2` | 0.1 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.vaulttree.founder_colony` | 1 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -1151,6 +1158,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.lanternberry.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
 | `flora.lanternberry.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.lanternberry.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.lanternberry.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.lanternberry.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.lanternberry.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
@@ -1251,6 +1259,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.cure_upkeep` | 1.0 | fraction of maintenance | [0, 1] | 0–1 | - | placeholder | curing: a dormant stand's maintenance against its waking rate |
 | `flora.siphonreed.cure_resume_water` | 0.0 | available water | [0, inf) | 0–1 | - | placeholder | curing: a dormant stand wakes and reflushes at and above this |
 | `flora.siphonreed.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
+| `flora.siphonreed.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.siphonreed.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
 | `flora.siphonreed.founder_per_m2` | 4.0 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.siphonreed.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |

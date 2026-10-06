@@ -29,7 +29,7 @@ fn main() {
         Some("hetero") => hetero(&args[2..]),
         Some("run") => run(&args[2..]),
         _ => eprintln!(
-            "usage: flora_model dump [CONFIG] | census DIR | export SAVE OUT [config=FILE] [overlay=FILE] [set=P=V].. | physio SPECIES L WATER SAT N DAYS newborn|adult | elig DIR.. | hetero DIR SPECIES MINUTES\n  \
+            "usage: flora_model dump [CONFIG] | census DIR | export SAVE OUT [config=FILE] [overlay=FILE] [set=P=V].. | physio SPECIES L WATER SAT N DAYS newborn|adult [trace=S] [set=P=V].. | elig DIR.. | hetero DIR SPECIES MINUTES\n  \
              run start=DIR snaps=DIR,.. [log=SOAKLOG] [minutes=1200] [every=30] [weather=frozen] [wseed=N] [config=FILE] [set=P=V].. \
              [browse=PER_DAY] [hold=SPECIES,..] [zocc=1] [prod=1] [rcheck=SPECIES[:seed]] [zfunnel=SPECIES] [zdeaths=SPECIES] [trace=ZONE:SPECIES]\n  \
              meadow levers (design/webmodel/meadow.md): [take_hold=1] [take_const=FOLIAGE_PER_2H[:LITTER]] [crop=K] [cropw=SHARE] [dry=EVERY_D:LEN_D:WATER[:PHASE_D]] [drywet=1] \
@@ -71,7 +71,8 @@ fn physio(a: &[String]) {
     let f = |i: usize| a[i].parse::<f64>().unwrap();
     let (l, water, sat, n, days) = (f(1), f(2), f(3), f(4), f(5));
     let start = if a[6] == "adult" { Start::Adult } else { Start::Newborn };
-    let p = config::resolve(Path::new("config/scenarios/terrarium.toml"), &[]).unwrap();
+    let sets: Vec<String> = a.iter().filter_map(|x| x.strip_prefix("set=")).map(String::from).collect();
+    let p = config::resolve(Path::new("config/scenarios/terrarium.toml"), &sets).unwrap();
     let fc = config::flora_of(&p);
     let sc = fc.species(sp);
     let dm = DayModel::of(&p.world, fc.upkeep_q10);
@@ -84,7 +85,17 @@ fn physio(a: &[String]) {
         })
         .collect();
     let s0 = start_stand(&fc, sp, start);
-    let o = probe(&fc, s0, &clim, |_| Held { water, saturated: sat, light: l, mineral: n });
+    let every: Option<f64> = a.iter().find_map(|x| x.strip_prefix("trace=")).map(|v| v.parse().unwrap());
+    let qcap = sc.reserve_cap;
+    let o = cubarium_voxel_flora::study::probe_traced(&fc, s0, &clim, |_| Held { water, saturated: sat, light: l, mineral: n }, |t, s| {
+        if let Some(e) = every {
+            let k = (e / cubarium_voxel::DT).round().max(1.0) as usize;
+            if (t + 1) % k == 0 {
+                let c = clim[t];
+                println!("t {:>8.0} day {:.2} dl {:.2} W {:.4} P/aW {:.3} Q/qcap {:.3} cured {} dry_s {:.0}", (t + 1) as f64 * cubarium_voxel::DT, (t + 1) as f64 * cubarium_voxel::DT / dm.day_s(), c.daylight, s.wood, s.foliage / (sc.alpha * s.wood), s.reserve / (qcap * s.wood), s.cured, s.dry_s);
+            }
+        }
+    });
     println!("probe: alive {} died_s {:?} W {:.4}->{:.4} P {:.4}->{:.4} Q {:.4}->{:.4} fixed {:.4} funded {:.4} packages {} donor_s {:?}", o.alive, o.died_s, o.wood[0], o.wood[1], o.foliage[0], o.foliage[1], o.reserve[0], o.reserve[1], o.fixed, o.funded, o.packages, o.donor_s);
     for dt in [cubarium_voxel::DT, 1.0, 5.0, 10.0, 30.0] {
         let mut st = stand::StandState { wood: s0.wood, foliage: s0.foliage, reserve: s0.reserve, ..Default::default() };
@@ -902,7 +913,7 @@ fn line(m: &cubarium_webmodel::flora::model::Model) {
         let k = sp.index();
         let by: Vec<String> = Species::ALL.iter().filter(|n| c.pairs[k][n.index()] >= 0.5).map(|n| format!("{}={:.0}", n.name(), c.pairs[k][n.index()])).collect();
         println!(
-            "spm,{:.0},{},landed={:.0},germinated={:.0},seeds_died={:.0},runner_births={:.0},deaths=[starved={:.0} drought={:.0} overtopped={:.0} displaced={:.0} browsed={:.0} cropped={:.0} aged={:.0}],overtopped_by=[{}],built={:.3},shed={:.3}",
+            "spm,{:.0},{},landed={:.0},germinated={:.0},seeds_died={:.0},runner_births={:.0},deaths=[starved={:.0} drought={:.0} overtopped={:.0} displaced={:.0} browsed={:.0} cropped={:.0} aged={:.0}],overtopped_by=[{}],built={:.3},shed={:.3},cures={:.0},wakes={:.0},cured_now={:.0}",
             m.minute(),
             sp.name(),
             c.seeds_landed[k],
@@ -918,7 +929,10 @@ fn line(m: &cubarium_webmodel::flora::model::Model) {
             c.aged[k],
             by.join(" "),
             c.built[k],
-            c.shed[k]
+            c.shed[k],
+            c.cures[k],
+            c.wakes[k],
+            m.z.iter().map(|z| z.cohorts[k].iter().filter(|x| x.st.cured).map(|x| x.n).sum::<f64>()).sum::<f64>()
         );
     }
     println!(

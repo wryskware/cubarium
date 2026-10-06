@@ -88,6 +88,51 @@ fn the_stand_law_is_the_sims_on_a_one_stand_fixture() {
     }
 }
 
+/// **Law anchor, curing** (DORMANCY): the model's curing clock is the sim's (`cure_step`,
+/// on the budget and below `cure_water`). A springturf adult on a dry root box — short on
+/// its water at its light, above `cure_water` — then rewetted to `cure_resume_water`: the
+/// model cures and wakes on the same ticks as `study::probe` and ends on the same stocks.
+#[test]
+fn the_curing_clock_is_the_sims_through_a_cure_and_a_wake() {
+    let (p, fc) = resolved();
+    let dm = DayModel::of(&p.world, fc.upkeep_q10);
+    let sc = fc.species(Species::Springturf);
+    assert!(sc.cure_after_s > 0.0 && sc.cure_cover > 0.0, "fixture: turf cures on the budget");
+    let t0 = 0.2 * dm.day_s();
+    let ticks = (0.6 * dm.day_s() / cubarium_voxel::DT) as usize;
+    let wet_at = ticks / 2;
+    let dry = (sc.cure_water + sc.cure_resume_water) / 2.0;
+    let water = |k: usize| if k < wet_at { dry } else { sc.cure_resume_water };
+    let held = |k: usize| Held { water: water(k), saturated: 0.0, light: 0.9, mineral: 0.6 };
+    let clim = clock(&dm, t0, ticks);
+    let s0 = start_stand(&fc, Species::Springturf, Start::Adult);
+    let mut sim_cured = vec![false; ticks];
+    let o = cubarium_voxel_flora::study::probe_traced(&fc, s0, &clim, held, |k, s| sim_cured[k] = s.cured);
+    assert!(o.alive, "fixture: it lives through the window");
+    assert!(sim_cured.iter().any(|&c| c), "fixture: the sim's stand cured");
+    assert!(!sim_cured[ticks - 1], "fixture: and woke");
+    let mut st = StandState { wood: s0.wood, foliage: s0.foliage, reserve: s0.reserve, ..StandState::default() };
+    for k in 0..ticks {
+        let h = held(k);
+        let site = stand::Site {
+            light_eff: light_response(sc, h.light),
+            available: h.water,
+            saturated: 0.0,
+            mineral: h.mineral,
+            darkness: 0.0,
+            substrate_taken: 0.0,
+            substrate_gross: 0.0,
+        };
+        let c = dm.at(t0 + k as f64 * cubarium_voxel::DT, cubarium_voxel::DT);
+        let (_, d) = stand::grow(sc, &mut st, site, c);
+        assert!(d.is_none(), "model: alive at tick {k}");
+        stand::fund(sc, &mut st, cubarium_voxel::DT);
+        assert_eq!(st.cured, sim_cured[k], "cured at tick {k}");
+    }
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * (1.0 + a.abs().max(b.abs()));
+    assert!(close(st.wood, o.wood[1]) && close(st.foliage, o.foliage[1]) && close(st.reserve, o.reserve[1]), "stocks: {st:?} vs {o:?}");
+}
+
 /// **Law anchor**: the model's clock is the world's day clock: daylight, the night factor
 /// and the time to dawn at a world tick, read from the sim's own `DayClock::sun`.
 #[test]

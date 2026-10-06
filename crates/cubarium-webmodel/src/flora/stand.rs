@@ -11,7 +11,7 @@
 //! the sim's own `grow_stand` on a one-stand fixture.
 
 use cubarium_voxel::organism::{Budget, settle_mineral, tissue_funded};
-use cubarium_voxel_flora::{SpeciesConfig, Trophic};
+use cubarium_voxel_flora::{CureRead, CureStep, SpeciesConfig, Trophic, cure_step};
 
 use super::climate::Clock;
 
@@ -198,18 +198,23 @@ fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (
         was
     };
     st.aeration_stress = stress;
-    // 4.0 curing (step.rs:2976)
+    // 4.0 curing (step.rs, `grow_stand_cause` §4.0): the sim's own clock, `cure_step`, on
+    // the budget (`water_short`, DORMANCY) as well as below `cure_water`.
     if sc.cure_after_s > 0.0 && sc.trophic == Trophic::Photo {
-        if st.cured {
-            if site.available >= sc.cure_resume_water {
-                st.cured = false;
-                st.dry_s = 0.0;
-            } else {
-                return dormant(sc, st, c.upkeep * c.night, dt, out);
-            }
-        } else if site.available < sc.cure_water {
-            st.dry_s += dt;
-            if st.dry_s >= sc.cure_after_s {
+        let read = CureRead {
+            available: site.available,
+            moisture: mu,
+            light_eff: site.light_eff,
+            stress,
+            mineral: site.mineral,
+            wood: st.wood,
+            foliage: st.foliage,
+        };
+        match cure_step(sc, st.cured, &mut st.dry_s, &read, dt) {
+            CureStep::Green => {}
+            CureStep::Wake => st.cured = false,
+            CureStep::Dormant => return dormant(sc, st, c.upkeep * c.night, dt, out),
+            CureStep::Cure => {
                 let shed = (sc.cure_shed.clamp(0.0, 1.0) * st.foliage).max(0.0);
                 st.foliage -= shed;
                 out.litter += shed;
@@ -217,8 +222,6 @@ fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (
                 st.dry_s = 0.0;
                 return dormant(sc, st, c.upkeep * c.night, dt, out);
             }
-        } else {
-            st.dry_s = 0.0;
         }
     }
     // 4.1 income, 4.2 demands (step.rs:3002)
@@ -365,9 +368,8 @@ fn dormant(sc: &SpeciesConfig, st: &mut StandState, scale: f64, dt: f64, mut out
     st.wood -= die_back;
     out.dead_wood += die_back;
     st.dry_s += dt;
-    let death = if st.wood < sc.alive_min {
-        Some(Death::Starved)
-    } else if sc.cure_max_s > 0.0 && st.dry_s >= sc.cure_max_s {
+    // A dormant stand that runs out of stores died of the drought (step.rs, `dormant`).
+    let death = if st.wood < sc.alive_min || (sc.cure_max_s > 0.0 && st.dry_s >= sc.cure_max_s) {
         Some(Death::Drought)
     } else {
         None

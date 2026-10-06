@@ -351,6 +351,51 @@ runs, about an hour). Starts: the census files `census-terrarium/` and `census-e
 | bank | none: springturf `seed_max_age_s`, `seed_attrition_per_s` | `[flora.springturf]` | no |
 | g | seed carried in by grazers: the sim's burrs already ride animals; the lever stands for burrs from meadows beyond the zone. In the sim it would be a fauna-side drop rate where animals rest, not a flora rule | fauna burr knobs | **yes** |
 
+## 10. DORMANCY: grass goes dormant in drought instead of starving (2026-10-05)
+
+Wrysk: "yes, grass should go dormant in drought and not starve." The gap (§7): turf starved
+between water 0.10 and 0.15, where it neither paid nor cured.
+
+**The rule** (`step::cure_step`, `water_short`, flora schema 32; the model calls the same
+function). Below `cure_resume_water` a green stand's dry clock also runs while its income on
+its water, after the reserve's share (`1 − reserve_share`), covers less than `cure_cover` (1)
+of its upkeep and leaf turnover (`break_even_cover`, the canopy gate's law, at its light,
+moisture net of stress, mineral, wood and foliage), and full water would cover it; when full
+water would not (shade, a bare pool) the clock holds and the stand starves as before. The
+probe's boundary (adult, light 0.6–0.95): raw cover ≤ 1.07 starves, ≥ 1.16 lives; usable cover
+1 is raw 1.25, so every starving case cures, and the marginal survivors held at a quarter of
+their foliage cure too. No fixed dormancy cap (`cure_max_s` 0, was 1.83 days): a cured adult
+lasts about 0.6 days on its reserve and 12 days in all on its crown; it then dies of
+`Drought`.
+
+**The model's prediction, written before any sim run** (`flora_model run`, census m370, 60
+days, `contest=sim`, `diag=springturf`; old = `cure_cover=0`, `cure_max_s=13173.904`):
+
+| seed | day | turf old → new | open-drained turf share old → new | turf starved old → new | drought deaths | cures (wakes) new |
+|---|---|---|---|---|---|---|
+| s1 | 10 | 614 → 1,287 | 0.07 → 0.47 | 7,856 → 4,183 | 35 → 383 | 4,141 (3,188) |
+| s1 | 60 | 3 → 289 | 0.00 → 0.03 | 9,271 → 6,563 | 35 → 895 | 11,653 (10,786) |
+| s5 | 10 | 2,740 → 2,479 | 0.92 → 0.91 | 5,846 → 5,610 | 19 → 7 | 1,412 (1,396) |
+| s5 | 60 | 628 → 803 | 0.33 → 0.44 | 19,856 → 22,123 | 19 → 20 | 11,591 (11,359) |
+| s6 | 10 | 1,552 → 1,889 | 0.36 → 0.63 | 6,155 → 6,547 | 0 → 0 | 2,633 (2,633) |
+| s6 | 60 | 70 → 4 | 0.00 → 0.00 | 9,769 → 11,090 | 0 → 0 | 3,749 (3,707) |
+
+s1's open-drained ledger at day 10 reproduces §7 under the old rule (3,140 starved, 27
+drought; §7: 3,143 and 24); the new rule gives 2,172 starved, 125 drought and 791 open turf
+against 124. So: dormancy roughly halves s1's early turf starvation and holds 2–6 times the
+turf on its dry high ground through day 30, but does not stop the decline (s1 open-drained 51
+stands at day 60). On s5 and s6 the turf's starvation is not drought: it stays at about the
+birth rate with or without the rule (open-drained s5 days 0–60: 13,212 → 15,129 starved
+against 12,381 → 14,480 births); the woody takeover and the light and mineral the stands
+read decide there (lanternberry stands are the same in both arms). The stands the rule cannot
+reach are those whose income would not pay even at full water: a quarter of the census's
+turf reads light under 0.57 and mineral under 0.5.
+
+**Sim check** (launched after this was written): patch and dry-hills, fresh foundings, seeds
+1–4, 6 h, main vs dormancy; readouts turf stands, cured, cures, wakes, deaths by cause,
+edible foliage, and the dry spells under the turf (`SPELLLOG`). The 300-day model arms run
+in the same batch.
+
 ## Roles (balance through roles)
 
 | stock growing or shrinking without check | the role that should answer |

@@ -220,7 +220,7 @@ fn the_crop_follows_the_grazing_on_the_juveniles_only() {
 
 /// **A dry spell starves uncured woody juveniles while the turf cures and waits** — the
 /// sim's own laws under the lever's water: lanternberry has no cure (`cure_after_s` 0) and
-/// turf cures after `cure_after_s` below `cure_water`, dying only past `cure_max_s`. A spell
+/// turf cures after `cure_after_s` below `cure_water`, dying only past `cure_max_s` (if any) or on its stores. A spell
 /// with no water, longer than the turf's cure delay and shorter than its cure limit: the
 /// juveniles starve, the turf cures and none of it dies; the same run without the spell
 /// starves no juvenile.
@@ -231,7 +231,7 @@ fn a_dry_spell_starves_woody_juveniles_and_cures_the_turf() {
     let (tsc, lsc) = (fc.species(TURF), fc.species(LB));
     assert!(lsc.cure_after_s <= 0.0 && tsc.cure_after_s > 0.0, "fixture: woody does not cure, turf does");
     let len = (3.0 * tsc.cure_after_s).max(3600.0);
-    assert!(len < tsc.cure_max_s, "fixture: the spell is shorter than the cure limit");
+    assert!(tsc.cure_max_s <= 0.0 || len < tsc.cure_max_s, "fixture: the spell is shorter than the cure limit (0: none)");
     let run = |water: f64| {
         let f = faces(&fc, 0, 300, 0.95, 1.0, &[(TURF, 1.0, 200), (LB, 1.0, 10)]);
         let mw = Meadow { dry_every_s: 10.0 * dm.day_s(), dry_len_s: len, dry_water: water, ..Meadow::default() };

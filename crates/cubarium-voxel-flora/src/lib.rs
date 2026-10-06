@@ -57,6 +57,8 @@ mod carrion_tests;
 #[cfg(test)]
 mod spread_tests;
 #[cfg(test)]
+mod cure_budget_tests;
+#[cfg(test)]
 mod shared_face_tests;
 #[cfg(test)]
 mod contest_tests;
@@ -103,6 +105,7 @@ pub use step::{DrinkPlan, PlantStep};
 /// What one cell of ground offers a root: the scale `μ` and the establishment
 /// water gate read.
 pub use step::available_water;
+pub use step::{CureRead, CureStep, break_even_cover, cure_step, water_short};
 
 /// The **stands** of the voxel ecology, each one a role: see the preset that carries its
 /// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
@@ -1400,6 +1403,16 @@ pub struct SpeciesConfig {
     /// Seconds a stand may stay cured before the drought kills it. 0: no limit (it dies
     /// only when its reserve runs out and its wood diebacks).
     pub cure_max_s: f64,
+    /// **Curing on the budget** (package DORMANCY, 2026-10-05): a green stand whose root box
+    /// is below [`SpeciesConfig::cure_resume_water`] also counts as dry — its clock runs
+    /// toward [`SpeciesConfig::cure_after_s`] — while the income its water lets it earn
+    /// cannot pay its upkeep: while `(1 − reserve_share) · cover` is under this, `cover`
+    /// being [`break_even_cover`] at the stand's light, moisture (net of aeration stress)
+    /// and site mineral, and at full water it would be at least this (else water is not
+    /// what is short — night, shade — and the clock holds). 1 is the break-even of the
+    /// income left once the reserve has taken its share; 0 turns the budget clock off, so
+    /// only [`SpeciesConfig::cure_water`] starts it.
+    pub cure_cover: f64,
     /// **Look, not ecology**: the sRGB colour the plain-voxel draw gives a cured stand's
     /// crown (`0x00RRGGBB`). Wrysk judges it; 0 keeps the species' own palette.
     pub cured_srgb: u32,
@@ -1821,6 +1834,7 @@ impl SpeciesConfig {
             cure_upkeep: 1.0,
             cure_resume_water: 0.0,
             cure_max_s: 0.0,
+            cure_cover: 0.0,
             cured_srgb: 0,
             // No founders: every preset that is seeded says so.
             founder_per_m2: 0.0,
@@ -2149,14 +2163,22 @@ impl SpeciesConfig {
             // of litter ... then it regrows from reserves in the roots"): below available
             // water 0.1 — where the drought probe's turf began to die — for half an hour,
             // it drops 0.8 of its foliage to the litter and goes dormant on a tenth of its
-            // maintenance; it wakes at 0.25 and reflushes from the reserve; six hours
-            // dormant (three days of the 2 h clock) kills it. Drawn straw brown.
+            // maintenance; it wakes at 0.25 and reflushes from the reserve. Drawn straw
+            // brown.
+            //
+            // **Dormant, not starved** (DORMANCY, 2026-10-05, Wrysk: "grass should go
+            // dormant in drought and not starve"): the clock also runs below the wake water
+            // while the income its water allows, after the reserve's share, cannot pay its
+            // upkeep and leaf turnover (`cure_cover` 1, the break-even); and a dormant
+            // stand lives on its stores, its reserve and then its crown, with no fixed cap
+            // (the six-hour cap was shorter than the dry spells of the high ground).
             cure_water: 0.1,
             cure_after_s: 1800.0,
             cure_shed: 0.8,
             cure_upkeep: 0.1,
             cure_resume_water: 0.25,
-            cure_max_s: 21_600.0,
+            cure_max_s: 0.0,
+            cure_cover: 1.0,
             cured_srgb: 0x00C2_A15A,
             seed_max_age_s: 86_400.0,
             seed_attrition_per_s: 1.0 / 86_400.0,
@@ -4723,7 +4745,8 @@ pub enum DeathCause {
     Overtopped,
     /// A runner rooted on its face (a ground cover, [`SpeciesConfig::runners_overtop`]).
     Displaced,
-    /// Cured past its species' `cure_max_s`: the drought outlasted the dormancy.
+    /// Died while cured: past its species' `cure_max_s`, or its reserve and wood ran out on
+    /// the dormant upkeep. The drought outlasted the dormancy.
     Drought,
 }
 
