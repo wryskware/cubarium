@@ -480,6 +480,20 @@ fn the_funnel_counts_each_stage_in_order() {
     }
 }
 
+/// The funnel counts episodes: an event is first once, not again while it recurs within the
+/// window, and first again after a gap longer than the window; stages and keys are apart.
+#[test]
+fn the_funnel_counts_an_episode_once() {
+    let mut p = crate::Percept::default();
+    let w = 10;
+    assert!(p.first(perception::SENSED, 7, 100, w), "a new prey");
+    assert!(!p.first(perception::SENSED, 7, 105, w), "still sensed");
+    assert!(!p.first(perception::SENSED, 7, 115, w), "refreshed at 105, so 115 is within the window");
+    assert!(p.first(perception::APPROACHED, 7, 115, w), "another stage");
+    assert!(p.first(perception::SENSED, 8, 115, w), "another prey");
+    assert!(p.first(perception::SENSED, 7, 126, w), "lost longer than the window: a new episode");
+}
+
 /// **Study** (run by name): the grazer channel's steady level by distance from one still
 /// adult frondgrazer on open flat ground the terrarium's depth (6 m), at the config's scent
 /// knobs — what the smell floors in [`crate::body::senses_of`] were read from.

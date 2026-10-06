@@ -2605,7 +2605,7 @@ fn founder_feed(
     };
     // The funnel's eaten stage (SENSES-CORE): a bite of a carcass, by the dead body's lineage.
     let carcass_of = match meal {
-        body::Meal::Pool { site, food: Food::Carrion } => flora.view().ground_at(site).and_then(|g| g.carcass).map(|c| usize::from(c.lineage)),
+        body::Meal::Pool { site, food: Food::Carrion } => flora.view().ground_at(site).and_then(|g| g.carcass).map(|c| (usize::from(c.lineage), site)),
         _ => None,
     };
     let taken = match meal {
@@ -2651,8 +2651,9 @@ fn founder_feed(
     }
     if food == Food::Carrion {
         fauna.ledger.eaten_carrion_by_founder[founder.index()] += taken.organic;
-        if let Some(prey) = carcass_of.filter(|&k| k < Founder::COUNT) {
-            fauna.ledger.funnel[founder.index()][prey][crate::perception::EATEN] += 1;
+        if let Some((prey, site)) = carcass_of {
+            let id = fauna.animals[i].id;
+            crate::perception::eaten(fauna, id, founder, prey, site);
         }
         // A pack member eating at its pack's feast (repair 3's measure).
         if let (body::Meal::Pool { site, .. }, Some(m)) = (meal, fauna.animals[i].pack) {

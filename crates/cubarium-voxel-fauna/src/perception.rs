@@ -65,6 +65,8 @@ pub const MODALITIES: [u8; 4] = [SIGHT, HEARING, TREMOR, SMELL];
 pub const MAX_TRACKS: usize = 32;
 /// The carcasses one record holds at most.
 pub const MAX_CARCASSES: usize = 8;
+/// The funnel events one record remembers ([`Percept::first`]; a capacity).
+pub const FUNNEL_MEMORY: usize = 32;
 
 /// What a sensed body is to the observer ([`Track::class`]).
 pub mod class {
@@ -165,8 +167,10 @@ pub struct Percept {
     pub n_carcasses: u8,
     pub carcasses: [(u32, u32, u32); MAX_CARCASSES],
     pub light: LightReading,
-    /// The prey it last set out after (the funnel's approached stage counts a new one).
-    pub approached: u64,
+    /// **The funnel's memory**: `(stage, key, tick)` of the events it counted lately — a
+    /// prey sensed or approached (by id), a carcass eaten (by face). An event counts once
+    /// per episode: again only after [`crate::PerceptionConfig::give_up_s`] without it.
+    pub recent: [(u8, u64, u64); FUNNEL_MEMORY],
 }
 
 impl Percept {
@@ -185,6 +189,20 @@ impl Percept {
         self.carcasses[..usize::from(self.n_carcasses).min(MAX_CARCASSES)]
             .iter()
             .map(|&(x, y, z)| cubarium_voxel_flora::Site { x, y, z })
+    }
+
+    /// Whether the funnel event `(stage, key)` begins a new episode at `now` — not seen
+    /// within `window` ticks; it is remembered (or its tick refreshed) either way.
+    pub fn first(&mut self, stage: usize, key: u64, now: u64, window: u64) -> bool {
+        let stage = stage as u8;
+        if let Some(e) = self.recent.iter_mut().find(|e| e.0 == stage && e.1 == key && e.2 != 0) {
+            let new = now.saturating_sub(e.2) > window;
+            e.2 = now.max(1);
+            return new;
+        }
+        let k = (0..FUNNEL_MEMORY).min_by_key(|&k| self.recent[k].2).unwrap_or(0);
+        self.recent[k] = (stage, key, now.max(1));
+        true
     }
 
     fn set_tracks(&mut self, tracks: &[Track]) {
@@ -499,7 +517,6 @@ fn fold(fauna: &mut Fauna, id: u64, founder: Founder, tracks: &[Track], classes:
         Some(cs) => p.tracks().iter().filter(|t| !cs.contains(&t.class)).copied().collect(),
         None => Vec::new(),
     };
-    let before: Vec<u64> = p.tracks().iter().filter(|t| t.class == class::PREY).map(|t| t.id).collect();
     all.extend_from_slice(tracks);
     p.set_tracks(&all);
     p.tick = tick;
@@ -511,11 +528,15 @@ fn fold(fauna: &mut Fauna, id: u64, founder: Founder, tracks: &[Track], classes:
     if let Some(t) = tracks.iter().find(|t| t.id == p.focus.id) {
         p.focus = *t;
     }
-    for t in tracks.iter().filter(|t| t.class == class::PREY && !before.contains(&t.id)) {
-        let prey = usize::from(t.lineage);
-        if prey < Founder::COUNT {
-            fauna.ledger.funnel[founder.index()][prey][SENSED] += 1;
+    let window = funnel_window(&fauna.config);
+    let mut new: Vec<usize> = Vec::new();
+    for t in tracks.iter().filter(|t| t.class == class::PREY) {
+        if p.first(SENSED, t.id, tick, window) && usize::from(t.lineage) < Founder::COUNT {
+            new.push(usize::from(t.lineage));
         }
+    }
+    for prey in new {
+        fauna.ledger.funnel[founder.index()][prey][SENSED] += 1;
     }
 }
 
@@ -838,16 +859,32 @@ fn interim_prey(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, occupancy: Opti
 }
 
 /// **The funnel's approached stage**: hunter `a` sets out after prey `prey` (a pack target,
-/// a draw, a patrol's engage); counted once per new prey.
+/// a draw, a patrol's engage); counted once per episode ([`Percept::first`]).
 pub(crate) fn approach(fauna: &mut Fauna, hunter: u64, prey: u64) {
     let Some(hf) = fauna.view().animal(hunter).and_then(|a| a.founder) else { return };
     let Some(pf) = fauna.view().animal(prey).and_then(|a| a.founder) else { return };
-    let p = fauna.percepts.entry(hunter).or_default();
-    if p.approached == prey {
+    let (now, window) = (fauna.tick, funnel_window(&fauna.config));
+    if fauna.percepts.entry(hunter).or_default().first(APPROACHED, prey, now, window) {
+        fauna.ledger.funnel[hf.index()][pf.index()][APPROACHED] += 1;
+    }
+}
+
+/// The funnel's episode, ticks: the pursuit's memory ([`crate::PerceptionConfig::give_up_s`]).
+pub(crate) fn funnel_window(config: &FaunaConfig) -> u64 {
+    cubarium_voxel::ticks_at_least_one(config.perception.give_up_s)
+}
+
+/// **The funnel's eaten stage**: hunter `hunter` bites the carcass of a `prey` on `face`;
+/// counted once per carcass and hunter.
+pub(crate) fn eaten(fauna: &mut Fauna, hunter: u64, hf: Founder, prey: usize, face: cubarium_voxel_flora::Site) {
+    if prey >= Founder::COUNT {
         return;
     }
-    p.approached = prey;
-    fauna.ledger.funnel[hf.index()][pf.index()][APPROACHED] += 1;
+    let key = (u64::from(face.x) << 42) | (u64::from(face.y) << 21) | u64::from(face.z);
+    let (now, window) = (fauna.tick, funnel_window(&fauna.config));
+    if fauna.percepts.entry(hunter).or_default().first(EATEN, key, now, window) {
+        fauna.ledger.funnel[hf.index()][prey][EATEN] += 1;
+    }
 }
 
 /// Whether hunter `h` (its table `hunter`, current body) could take a sensed body where it

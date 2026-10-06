@@ -2732,8 +2732,10 @@ pub struct FaunaLedger {
     pub pack_draws_by_sense: [u64; 4],
     /// **The hunt funnel** (SENSES-CORE), per `[hunter][prey]` lineage and stage
     /// ([`crate::perception::FUNNEL_STAGES`]: sensed, approached, struck, killed, eaten):
-    /// a prey newly in a hunter's record, a hunter setting out after it (a pack target or a
-    /// draw, a patrol's engage), a strike begun on it, a kill, a bite of its carcass.
+    /// a hunter's detections of a prey, its setting out after one (a pack target or a draw,
+    /// a patrol's engage), each strike begun, each kill, and its first bite of a carcass.
+    /// Sensed, approached and eaten count **episodes**: once per hunter and prey (carcass),
+    /// again only after the pursuit's memory without it ([`crate::perception::Percept::first`]).
     #[serde(default)]
     pub funnel: [[[u64; 5]; Founder::COUNT]; Founder::COUNT],
     /// The perception core's cost (SENSES-CORE): remote sensings run, pairs weighed (one
