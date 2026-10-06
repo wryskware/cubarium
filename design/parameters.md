@@ -1360,7 +1360,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1942 rows)
+**`fauna.*`** (1943 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -3280,6 +3280,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.light.lure_height_fraction` | 0.4 | x body height | [0, inf) |  | - | placeholder | the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle |
 | `fauna.light.visit_m` | 0.25 | m | [0, inf) | 0.1–1 | - | placeholder | a body this close (horizontally) to a beacon is inspecting it |
 | `fauna.light.visit_s` | 3.0 | s | [0, inf) | 0.5–20 log | - | placeholder | an inspection with no meal by then fails |
+| `fauna.light.visit_leave_m` | 0.5 | m | [0, inf) | 0.1–2 | - | placeholder | an open inspection whose body is farther than visit_m + this from its beacon is closed as failed |
 | `fauna.light.mark_s` | 120.0 | s | [0, inf) | 10–1800 log | - | placeholder | a failed visit marks the place 'no reward here' for this long |
 | `fauna.light.mark_radius_m` | 0.5 | m | [0, inf) | 0.1–2 | - | placeholder | a mark covers beacons within this of its centre |
 | `fauna.light.lift_per_m` | 4.0 | lift per m | [0, inf) |  | - | placeholder | a flyer approaching a beacon climbs or drops toward its height at this lift per metre |

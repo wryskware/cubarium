@@ -294,7 +294,6 @@ fn a_hunter_at_exactly_the_leave_distance_holds_the_hunker() {
 /// the pack has gone, that clamps down again at a new threat is under its shield, not bared
 /// by the earlier turn-over (its pry restarts from 0 on entry).
 #[test]
-#[ignore = "FINDING: a re-hunker within opened_s of an earlier turn-over starts Bared: opened_until is not cleared on exit or entry"]
 fn a_fresh_hunker_starts_under_its_shield_not_bared_by_an_earlier_turn_over() {
     let world = world(108);
     let flora = Flora::new(FloraConfig::default());

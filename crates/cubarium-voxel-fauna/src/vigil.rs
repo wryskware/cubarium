@@ -600,8 +600,10 @@ fn herd(fauna: &mut Fauna, i: usize, ring: f64, held: Actions) -> Option<Actions
                 v.hunker_close = now;
             }
             if now.saturating_sub(v.hunker_close) >= hk.calm_ticks(cond) {
+                // The turn-over ends with the hunker: a later hunker starts under its shield.
                 v.hunkered = false;
                 v.pry = 0.0;
+                v.opened_until = 0;
             }
         }
         v.fleeing = false;
@@ -610,6 +612,12 @@ fn herd(fauna: &mut Fauna, i: usize, ring: f64, held: Actions) -> Option<Actions
         if flight(&mut v, &vg, &a, &th, need, now, ring) {
             fauna.ledger.vigil.flees[k] += 1;
         }
+    }
+    if p.vigil.hunkered && !v.hunkered && now < p.vigil.opened_until {
+        fauna.ledger.vigil.open_exits[k] += 1;
+    }
+    if !p.vigil.hunkered && v.hunkered && now < v.opened_until {
+        fauna.ledger.vigil.bared_entries[k] += 1;
     }
     fauna.animals[i].hunkered = v.hunkered;
     if v.hunkered {
@@ -950,4 +958,10 @@ pub struct VigilLedger {
     pub glances: [u64; Founder::COUNT],
     pub kills_juvenile: [u64; Founder::COUNT],
     pub kills_adult: [u64; Founder::COUNT],
+    /// FINDINGS-FIX readouts: hunkers ended while still turned over (`opened_until` ahead),
+    /// and hunkers begun bared (an earlier turn-over's `opened_until` still ahead).
+    #[serde(default)]
+    pub open_exits: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub bared_entries: [u64; Founder::COUNT],
 }

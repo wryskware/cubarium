@@ -822,6 +822,11 @@ pub struct LightConfig {
     pub visit_m: f64,
     /// An inspection that brings no meal within this long fails, seconds. 3 s.
     pub visit_s: f64,
+    /// **The left visit** (FINDINGS-FIX): an open inspection whose body has flown farther
+    /// than `visit_m` + this (horizontally, metres) from its beacon is closed as failed
+    /// (marked, counted, its class taught 0), so a later sip elsewhere cannot credit it.
+    /// 0.5 m.
+    pub visit_leave_m: f64,
     /// **The failed-visit mark**: a failed inspection marks the place "no reward here" for
     /// this long, seconds; a marked beacon is not approached until it decays. 120 s.
     pub mark_s: f64,
@@ -880,6 +885,7 @@ impl Default for LightConfig {
             lure_height_fraction: 0.4,
             visit_m: 0.25,
             visit_s: 3.0,
+            visit_leave_m: 0.5,
             mark_s: 120.0,
             mark_radius_m: 0.5,
             lift_per_m: 4.0,
