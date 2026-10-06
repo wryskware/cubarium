@@ -49,6 +49,7 @@ pub mod chiplet;
 pub mod idle;
 pub mod colours;
 pub mod model;
+pub mod patches;
 pub mod placement;
 pub mod present;
 pub mod project;
