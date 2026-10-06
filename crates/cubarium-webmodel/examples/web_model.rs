@@ -312,6 +312,22 @@ fn drained_shares(w: &Web) -> [f64; 6] {
     [me / t, gr / t, fo / t, (all - me - gr - fo) / t, open_t / open.max(1e-9), sum_v / sum.max(1e-9)]
 }
 
+/// Each species' stands as a share of the drained ground.
+fn drained_species(w: &Web) -> [f64; Species::COUNT] {
+    let m = &w.flora;
+    let (mut tot, mut sp) = (0.0, [0.0; Species::COUNT]);
+    for (i, z) in m.zones.zones.iter().enumerate() {
+        let name = z.key.name();
+        if ["dim", "mid", "bright", "open", "summit"].iter().any(|b| name == format!("{b}-drained")) {
+            tot += z.area;
+            for s in Species::ALL {
+                sp[s.index()] += m.z[i].count(s.index());
+            }
+        }
+    }
+    sp.map(|v| v / f64::max(tot, 1e-9))
+}
+
 /// **The dry season, closed loop** (DRY-SEASON): the run's day-by-day line, then the
 /// means. Intake: the frondgrazers' foliage swallowed, and the turf's foliage the animals
 /// got, per world day inside and outside the seasons.
@@ -337,7 +353,10 @@ fn season(args: &[String]) {
         let st = w.flora.stands();
         let c = &w.flora.c;
         let cured: f64 = w.flora.z.iter().map(|z| z.cohorts[tk].iter().filter(|x| x.st.cured).map(|x| x.n).sum::<f64>()).sum();
-        let fauna: Vec<String> = lineages.iter().map(|f| format!("{}={:.1}", lineage_name(*f), w.fauna.census(*f).n)).collect();
+        let mut fauna: Vec<String> = lineages.iter().map(|f| format!("{}={:.1}", lineage_name(*f), w.fauna.census(*f).n)).collect();
+        // The rest of the drained ground by species.
+        let o = drained_species(w);
+        fauna.push(format!("rest=[{}]", Species::ALL.iter().filter(|s| ![Species::Springturf, Species::Lanternberry, Species::Vaulttree, Species::Glowcap].contains(s) && o[s.index()] >= 0.005).map(|s| format!("{}:{:.3}", s.name(), o[s.index()])).collect::<Vec<_>>().join(" ")));
         println!(
             "season,day={d:.1},dry={},meadow={:.3},grove={:.3},forest={:.3},other={:.3},openT={:.3},sumV={:.3},turf={:.0},cured={:.0},cures={:.0},wakes={:.0},turf_starved={:.0},turf_drought={:.0},{}",
             u8::from(dry(w)), sh[0], sh[1], sh[2], sh[3], sh[4], sh[5], st[tk].0, cured, c.cures[tk], c.wakes[tk], c.starved[tk], c.drought[tk], fauna.join(",")
