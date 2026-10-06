@@ -497,10 +497,9 @@ pub struct FounderPhysiology {
     /// (`placeholder`'s `burr_coat_of`), for Wrysk to judge.
     #[serde(default)]
     pub burr_coat: f64,
-    /// **Its senses for finding bodies** ([`SenseTable`]; VEILHOUND-SEARCH, the base of the
-    /// senses pass): sight, hearing and smell, each with its range and what it detects.
-    /// Read by [`crate::perception`]; today only the Veilhound's pack tactic reads it, and
-    /// every other lineage carries its manifest cone ([`senses_of`]).
+    /// **Its senses** ([`SenseTable`]; SENSES-CORE): sight, hearing, tremor and smell, each
+    /// with its range and floor. Read by [`crate::perception`] for a lineage whose table is
+    /// `live` (the Veilhound in S1); inert for the others until S2 and S3.
     #[serde(default)]
     pub senses: SenseTable,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
@@ -4799,74 +4798,220 @@ mod step_rule_tests {
     }
 }
 
-/// **A lineage's senses for finding bodies** (VEILHOUND-SEARCH, 2026-10-06; Wrysk: "veilhounds
-/// should have good eyesight and be able to see pretty far. also good hearing and smell. like
-/// wolves or lions"; the base of the senses pass for every lineage). What each sense detects
-/// is fixed by [`crate::perception::sense_of`]:
-/// - **sight**: any body within `sight_m` inside the forward cone of half-angle
-///   `sight_half_angle_deg`, on a line of sight terrain does not block;
-/// - **hearing**: a body moving at `hearing_min_speed_m_s` or faster within `hearing_m`, all
-///   around, terrain not blocking;
-/// - **smell**: any body within `smell_m`, all around, around terrain (plain range, no wind).
+/// **A lineage's senses** (SENSES-CORE, S1 of the senses pass; VEILHOUND-SEARCH before it):
+/// what the perception core ([`crate::perception`]) senses for it. Every number is a knob
+/// (`fauna.founders.<lineage>.senses.*`), set from the senses review's §1
+/// (`design/7_Research/senses-review-2026-10-06.md`, which keeps Astra's ranges where it
+/// agrees), the same in every preset. 0 turns a range off.
 ///
-/// A world query standing for the senses, read by heuristics; the manifest's cone (the
-/// brain's observation) is a separate, fixed contract. 0 turns a sense off.
+/// - **Sight**: a body within `sight_m` by day (`sight_night_m` below the day line), at
+///   `sight_still_fraction` of that for a still body, inside `sight_half_angle_deg` of its
+///   heading, on a terrain ray from its eye to the body's middle that terrain does not block.
+///   3D distance.
+/// - **Hearing**: a body within `hearing_m` whose received loudness — its emission
+///   `speed^a × length^b` ([`crate::PerceptionConfig`]'s exponents) over the 3D distance
+///   (at least `hearing_near_m`), times the occlusion factor when terrain blocks the ray —
+///   is at least `hearing_min`. All around.
+/// - **Tremor**: a grounded body within `tremor_m` whose footfall at it (the tremor rule,
+///   `mass × speed / d²`, times the occlusion factor through terrain) is at least
+///   `tremor_min`. All around.
+/// - **Smell**: the scent field ([`crate::scent`]), never a body: it reads a channel's level
+///   and gradient where it stands, and smells a channel at `smell_min` or above.
+///   `scent` is the channel its own body lays.
+///
+/// **`live`** says whether its heuristics read the core's record. Off (every lineage but the
+/// Veilhound in S1), its record is filled by the interim rules its reflexes ran on before the
+/// senses pass ([`crate::perception::refresh`]): these values are inert until the packages
+/// that give it behaviour (S2 ground responses, S3 light and flight) turn it on.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SenseTable {
-    /// Sight's range, metres.
+    /// The core fills its record (a switch, no registry row).
+    pub live: bool,
+    /// Sight's range by day for a moving body, metres; 0 is blind.
     pub sight_m: f64,
-    /// Sight's half-angle from the heading, degrees (90: the half-plane ahead).
+    /// Sight's range below the day line, metres.
+    pub sight_night_m: f64,
+    /// A still body is seen within this fraction of the range.
+    pub sight_still_fraction: f64,
+    /// Sight's half-angle from the heading, degrees (180 all around).
     pub sight_half_angle_deg: f64,
     /// Hearing's range, metres; 0 is deaf.
     pub hearing_m: f64,
-    /// The slowest a body moves and is heard, metres per second.
-    pub hearing_min_speed_m_s: f64,
-    /// Smell's range, metres; 0 smells nothing.
-    pub smell_m: f64,
+    /// The faintest received loudness heard (emission / distance, m/s at the default
+    /// exponents).
+    pub hearing_min: f64,
+    /// Tremor's range, metres; 0 feels none.
+    pub tremor_m: f64,
+    /// The faintest footfall felt, in the tremor's units (organic × m/s / m²).
+    pub tremor_min: f64,
+    /// The faintest scent level smelled, in the field's units; 0 smells nothing.
+    pub smell_min: f64,
+    /// The scent channel its body lays ([`crate::ScentChannel`]); `None` lays none (a switch,
+    /// no registry row).
+    pub scent: Option<crate::ScentChannel>,
 }
 
 impl Default for SenseTable {
-    /// Today's sighted lineage: a 2 m cone over the half-plane ahead, no hearing, no smell.
+    /// Senseless: every range off, read by no one.
     fn default() -> SenseTable {
-        SenseTable { sight_m: 2.0, sight_half_angle_deg: 90.0, hearing_m: 0.0, hearing_min_speed_m_s: 0.05, smell_m: 0.0 }
+        SenseTable {
+            live: false,
+            sight_m: 0.0,
+            sight_night_m: 0.0,
+            sight_still_fraction: 1.0,
+            sight_half_angle_deg: 90.0,
+            hearing_m: 0.0,
+            hearing_min: 0.0,
+            tremor_m: 0.0,
+            tremor_min: 0.0,
+            smell_min: 0.0,
+            scent: None,
+        }
     }
 }
 
 impl SenseTable {
-    /// The longest of its ranges, metres.
-    pub fn reach_m(&self) -> f64 {
-        self.sight_m.max(self.hearing_m).max(self.smell_m)
+    /// The longest of its pairwise ranges at this light, metres.
+    pub fn reach_m(&self, day: bool) -> f64 {
+        self.sight_range_m(day).max(self.hearing_m).max(self.tremor_m)
+    }
+
+    /// Sight's range for a moving body at this light, metres.
+    pub fn sight_range_m(&self, day: bool) -> f64 {
+        if day { self.sight_m } else { self.sight_night_m }
     }
 }
 
-/// **Each lineage's senses** ([`SenseTable`]). Every lineage but the Veilhound keeps exactly
-/// what it sensed before: its manifest's cone range (0 for the blind littershredder, 2 m, 4 m
-/// for the bellwing) over the half-plane ahead, no hearing, no smell.
+/// **Each lineage's senses** ([`SenseTable`]), from the senses review's §1 and Astra's per-species
+/// values (`design/7_Research/astra-senses-2026-10-06.md`), at the terrarium's scale (a 32 m ring,
+/// 6 m deep, 16 m tall). Hearing thresholds are set from the review's distances for a
+/// representative source at cruise (1 body length a second), emission `speed × length`:
+/// a walking Veilhound emits 1.4 × 1.4 = 1.96. Tremor's floor is the patrol's `tremor_turn`
+/// (a walking ripple-snail at the tremor radius), for every lineage alike. Smell floors are
+/// the levels the scent field holds at the review's distances from a still adult source at
+/// steady state on open ground ([`crate::scent`]'s calibration note).
 ///
-/// The Veilhound (`chorister`), set from wolves and lions at the terrarium's scale (a
-/// 1.4 m body on a 32 m ring 6 m deep, 0.125 m voxels; its territory radius 10 m, its chase
-/// reach 13 m by route):
-/// - sight 16 m, half-angle 120°: half the ring, so on open ground it sees across the map
-///   as a wolf or lion sees prey across open country — its farthest sense; terraces still
-///   hide what lies below them. A wolf's visual field is about 250°, a lion's 200° and more.
-/// - hearing 10 m of a body moving at 0.05 m/s or more: the territory radius. Wolves hear
-///   prey and packs kilometres off; on a map this small the terraces bound it below sight.
-/// - smell 6 m: the map's depth, under hearing, as a wolf's nose (prey scented 1.5–2.4 km
-///   downwind, Mech & Boitani 2003) is under its ears.
+/// Only the Veilhound's table is **live** in S1; the others are read by no heuristic yet.
 pub fn senses_of(founder: Founder) -> SenseTable {
+    use crate::ScentChannel::{Grazer, Hunter, SmallPrey};
+    use crate::scent::{SMELL_AT_2_5_M, SMELL_AT_2_M, SMELL_AT_3_5_M, SMELL_AT_6_M};
+    let t = SenseTable::default();
     match founder {
-        Founder::Chorister => SenseTable {
+        // Eyeless (dossier): substrate tremor ~1 m, 2 m for heavy steps; litter chemistry is
+        // its own detritus field.
+        Founder::Blind => SenseTable { tremor_m: 2.0, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
+        // Coarse silhouettes at 1 m by day and 0.5 m dim over 240°, motion over shape;
+        // substrate vibration 1–1.5 m; fungal chemistry is its own field.
+        Founder::Capgnawer => SenseTable {
+            sight_m: 1.0,
+            sight_night_m: 0.5,
+            sight_still_fraction: 0.5,
+            sight_half_angle_deg: 120.0,
+            tremor_m: 1.5,
+            tremor_min: 0.003,
+            scent: Some(SmallPrey),
+            ..t
+        },
+        // Shadow and looming at 0.5 m by day, 0.25 m dim over 180°; a large walker felt at
+        // ~1 m; film chemistry is its own field.
+        Founder::RippleSnail => SenseTable {
+            sight_m: 0.5,
+            sight_night_m: 0.25,
+            sight_still_fraction: 0.5,
+            sight_half_angle_deg: 90.0,
+            tremor_m: 1.0,
+            tremor_min: 0.003,
+            scent: Some(SmallPrey),
+            ..t
+        },
+        // Moving bodies at 8 m by day and 4 m at night, static at 5 and 2 (0.625); 300° from
+        // its eye stalks; a walking Veilhound heard at 6 m, a running one to 8 m; predator
+        // odour at 3–4 m; ~1 m of footfall.
+        Founder::Browser => SenseTable {
+            sight_m: 8.0,
+            sight_night_m: 4.0,
+            sight_still_fraction: 0.625,
+            sight_half_angle_deg: 150.0,
+            hearing_m: 8.0,
+            hearing_min: 1.96 / 6.0,
+            tremor_m: 1.0,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_3_5_M,
+            scent: Some(Grazer),
+            ..t
+        },
+        // 360° from the eye ring: moving bodies at 12 m by day, 6 at night, static at 8 and
+        // 4; large-body movement heard at 8 m, louder to 10; ~2 m of ground disturbance;
+        // animal odour at 2–3 m.
+        Founder::Loftstrider => SenseTable {
+            sight_m: 12.0,
+            sight_night_m: 6.0,
+            sight_still_fraction: 8.0 / 12.0,
+            sight_half_angle_deg: 180.0,
+            hearing_m: 10.0,
+            hearing_min: 1.96 / 8.0,
+            tremor_m: 2.0,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_2_5_M,
+            scent: Some(Grazer),
+            ..t
+        },
+        // D3: no form vision (its light sense is S3's); perch vibration over ~0.5 m; floral
+        // smell is S3's nectar channel.
+        Founder::Bellwing => SenseTable { tremor_m: 0.5, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
+        // The review raises it to the Veilhound's 16 m by day (3 m at night), the best still
+        // recognition in the community, about 180° with a forward binocular centre; predator
+        // movement heard around 6 m; branch movement ~0.5 m; odour ~2 m.
+        Founder::Seedporter => SenseTable {
             sight_m: 16.0,
+            sight_night_m: 3.0,
+            sight_still_fraction: 1.0,
+            sight_half_angle_deg: 90.0,
+            hearing_m: 8.0,
+            hearing_min: 1.96 / 6.0,
+            tremor_m: 0.5,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_2_M,
+            scent: Some(Grazer),
+            ..t
+        },
+        // Moving small prey at 4 m by day and 3 at night, still at half; ~220°; local rustling
+        // at 1–2 m (a walking littershredder, 0.375 × 0.375, at 1.5 m) and a Veilhound's
+        // footfalls to 3 m; strong substrate tremor 2–3 m; live-prey odour 2–3 m (carrion
+        // carries farther by its source).
+        Founder::Lanternjaw => SenseTable {
+            sight_m: 4.0,
+            sight_night_m: 3.0,
+            sight_still_fraction: 0.5,
+            sight_half_angle_deg: 110.0,
+            hearing_m: 3.0,
+            hearing_min: 0.375 * 0.375 / 1.5,
+            tremor_m: 3.0,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_2_5_M,
+            scent: Some(Hunter),
+            ..t
+        },
+        // The Veilhound (`chorister`), from wolves and lions at the terrarium's scale, the branch's
+        // values (VEILHOUND-SEARCH) kept: sight 16 m by day over 240° (half the ring: it sees
+        // across the map in the open, terraces still hide what lies below them), a still body as
+        // far as a moving one; 9 m at night (Astra's 8–10; it stays a day hunter, D4); hearing
+        // 10 m, the territory radius, of a frondgrazer moving at 0.05 m/s (the branch's
+        // threshold for its main prey: 0.05 × 0.75 / 10); ~1 m of footfall; smell ~6 m.
+        Founder::Chorister => SenseTable {
+            live: true,
+            sight_m: 16.0,
+            sight_night_m: 9.0,
+            sight_still_fraction: 1.0,
             sight_half_angle_deg: 120.0,
             hearing_m: 10.0,
-            hearing_min_speed_m_s: 0.05,
-            smell_m: 6.0,
+            hearing_min: 0.05 * 0.75 / 10.0,
+            tremor_m: 1.0,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_6_M,
+            scent: Some(Hunter),
         },
-        // Its manifest's `cone_range_m` (the manifest is built from this table, so it is
-        // written here; a test holds the two equal).
-        Founder::Blind | Founder::Capgnawer | Founder::RippleSnail => SenseTable { sight_m: 0.0, ..SenseTable::default() },
-        Founder::Bellwing => SenseTable { sight_m: 4.0, ..SenseTable::default() },
-        Founder::Browser | Founder::Lanternjaw | Founder::Loftstrider | Founder::Seedporter => SenseTable::default(),
     }
 }
 

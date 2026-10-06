@@ -227,6 +227,13 @@ pub(crate) fn read(
                 s.update(&view, &fv);
             }
         }
+        // SENSES-CORE: the scent field, while a live lineage smells it.
+        if start.tick % crate::UPDATE_TICKS == 0 && fauna.scent_wanted() {
+            let fv = flora.view();
+            let mut field = std::mem::take(&mut fauna.scent);
+            field.update(&view, &fv, &fauna.animals, &fauna.config);
+            fauna.scent = field;
+        }
     });
     cubarium_voxel::voxel_phase!(FaunaSense, {
         // The controller stage: sample due founders and hold their actions, before
@@ -1058,6 +1065,9 @@ fn controllers(
 ) {
     #[cfg(feature = "profile")]
     let mut timer = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaWindows);
+    // SENSES-CORE: the live lineages' remote senses, staggered by id, before any controller
+    // of the tick reads a record.
+    crate::perception::sense_pass(fauna, view, sky.clock_on, sky.daylight, threads);
     let due: Vec<usize> = fauna
         .animals
         .iter()
@@ -1225,7 +1235,7 @@ fn controllers(
             }
         }
         if driven && hunters_here && fauna.controllers.flees(id) {
-            if let Some(flee) = flee(fauna, i, view, predation_occupancy) {
+            if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy) {
                 actions = flee;
                 lure = 0.0;
                 lift = 0.0;
@@ -1311,17 +1321,19 @@ fn controllers(
 }
 
 /// **The flee rule** of the prey heuristics (predation §2.7), `None` when there is
-/// nothing to flee: the grazer turns away from the nearest threat it can see within 3 m
-/// ([`crate::kind_of`], so a still hunter beyond 0.5 m is not one), inside its field of
-/// view and not hidden by terrain or foliage; the blind shredder turns away from tremor
-/// above [`crate::PredationConfig::flee_tremor`]. Full forward, no feeding.
+/// nothing to flee, read from the body's record ([`crate::perception`]): the grazer turns
+/// away from the nearest threat it sees within `flee_sight_m` ahead of it (by the interim
+/// rule: [`crate::kind_of`], so a still hunter beyond 0.5 m is not one, and not hidden by
+/// terrain or foliage); the blind shredder turns away from tremor above
+/// [`crate::PredationConfig::flee_tremor`]. Full forward, no feeding.
 fn flee(
-    fauna: &Fauna,
+    fauna: &mut Fauna,
     i: usize,
     view: &VoxelView<'_>,
+    fv: &cubarium_voxel_flora::FloraView<'_>,
     occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Option<Actions> {
-    let a = &fauna.animals[i];
+    let a = fauna.animals[i];
     let founder = a.founder?;
     let config = &fauna.config;
     let hunted = Founder::ALL
@@ -1335,55 +1347,31 @@ fn flee(
         turn,
         feed: 0.0,
     };
-    if founder.manifest().cone_range_m <= 0.0 {
-        let [left, right] = fauna.view().tremor(view, a.id);
-        if left + right < config.predation.flee_tremor {
+    let blind = founder.manifest().cone_range_m <= 0.0;
+    if !blind && occupancy.is_none() {
+        return None;
+    }
+    let want = crate::perception::Want { threats: !blind, tremor: blind, ..Default::default() };
+    crate::perception::refresh(fauna, i, view, fv, occupancy, want);
+    let p = crate::perception::percept(fauna, a.id)?;
+    if blind {
+        let [left, right] = p.tremor;
+        if left + right < fauna.config.predation.flee_tremor {
             return None;
         }
         return Some(away(if left > right { 1.0 } else { -1.0 }));
     }
-    let occupancy = occupancy?;
-    let geometry = crate::body_of(config, a)?;
-    let v = view.config.voxel_m;
-    let ring = f64::from(view.config.width) * v;
-    let origin = crate::senses::cone_origin(view, &a.pose, a.sense_layer(v), &geometry);
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
     let (fx, fz) = a.pose.forward();
     let (rx, rz) = (fz, -fx);
     let mut nearest: Option<(f64, f64)> = None;
-    for o in &fauna.animals {
-        if o.id == a.id {
-            continue;
-        }
-        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+    for t in p.tracks().iter().filter(|t| t.class == crate::perception::class::THREAT && t.modes & crate::perception::SIGHT != 0) {
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
         let d = (dx * dx + dz * dz).sqrt();
-        if d > config.predation.flee_sight_m || nearest.is_some_and(|(n, _)| d >= n) {
+        if d > fauna.config.predation.flee_sight_m || dx * fx + dz * fz < 0.0 || nearest.is_some_and(|(n, _)| d >= n) {
             continue;
         }
-        if crate::kind_of(config, a, o, d) != crate::BodyKind::Threat {
-            continue;
-        }
-        // The cone looks forward: a threat behind it is not seen.
-        if dx * fx + dz * fz < 0.0 {
-            continue;
-        }
-        let Some(og) = crate::body_of(config, o) else {
-            continue;
-        };
-        let ty = crate::surface_m(o.sense_layer(v), v) + 0.5 * og.height_m;
-        let (tx, tz) = (origin.0 + dx, origin.2 + dz);
-        let (ex, ey, ez) = (tx - origin.0, ty - origin.1, tz - origin.2);
-        let dist = (ex * ex + ey * ey + ez * ez).sqrt();
-        if !(dist > 0.0) {
-            continue;
-        }
-        let dir = (ex / dist, ey / dist, ez / dist);
-        let seen = matches!(
-            crate::senses::ray_first_hit(view, &occupancy, a.id, origin, dir, dist + og.width_m),
-            Some((hit, crate::senses::Fine::Body)) if hit >= dist - og.width_m - v
-        );
-        if seen {
-            nearest = Some((d, dx * rx + dz * rz));
-        }
+        nearest = Some((d, dx * rx + dz * rz));
     }
     let (_, side) = nearest?;
     Some(away(if side > 0.0 { -1.0 } else { 1.0 }))
@@ -1672,6 +1660,7 @@ fn founder_act(
             if let Ok(j) = fauna.animals.binary_search_by_key(&prey, |p| p.id) {
                 if let Some(pf) = fauna.animals[j].founder {
                     fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
+                    fauna.ledger.funnel[founder.index()][pf.index()][crate::perception::STRUCK] += 1;
                     // D2b readout: a patroller's strike its choice did not accept.
                     let choosy = fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(fauna.animals[i].id);
                     if choosy && !crate::hunt::accepts(&fauna.config, &fauna.animals[i], &fauna.animals[j], fauna.tick) {
@@ -2228,6 +2217,9 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     fauna.controllers.take(a.id);
     fauna.free_riders(&a);
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
+    if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
+        fauna.ledger.funnel[by.index()][f.index()][crate::perception::KILLED] += 1;
+    }
     let laid = bury_corpse(fauna, flora, &a, cause);
     if laid && matches!(cause, Departure::Killed { .. }) {
         if let Some(f) = a.founder {
@@ -2611,6 +2603,11 @@ fn founder_feed(
         body::Meal::Stand { root, place, .. } => flora.view().stand_in(root, place).map(|s| s.species),
         body::Meal::Pool { .. } => None,
     };
+    // The funnel's eaten stage (SENSES-CORE): a bite of a carcass, by the dead body's lineage.
+    let carcass_of = match meal {
+        body::Meal::Pool { site, food: Food::Carrion } => flora.view().ground_at(site).and_then(|g| g.carcass).map(|c| usize::from(c.lineage)),
+        _ => None,
+    };
     let taken = match meal {
         body::Meal::Stand { root, place, .. } => flora
             .take_foliage_of(root, place, bite, &layers)
@@ -2654,6 +2651,9 @@ fn founder_feed(
     }
     if food == Food::Carrion {
         fauna.ledger.eaten_carrion_by_founder[founder.index()] += taken.organic;
+        if let Some(prey) = carcass_of.filter(|&k| k < Founder::COUNT) {
+            fauna.ledger.funnel[founder.index()][prey][crate::perception::EATEN] += 1;
+        }
         // A pack member eating at its pack's feast (repair 3's measure).
         if let (body::Meal::Pool { site, .. }, Some(m)) = (meal, fauna.animals[i].pack) {
             if let Some(p) = fauna.pack_mut(m.pack).filter(|p| p.feast == Some(site)) {
@@ -3879,3 +3879,6 @@ mod hunt_meal_tests;
 #[cfg(test)]
 #[path = "pack_search_tests.rs"]
 mod pack_search_tests;
+#[cfg(test)]
+#[path = "senses_core_tests.rs"]
+mod senses_core_tests;

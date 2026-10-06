@@ -1353,7 +1353,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1272 rows)
+**`fauna.*`** (1323 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1450,11 +1450,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.littershredder.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.littershredder.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.littershredder.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.littershredder.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.littershredder.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.littershredder.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.littershredder.senses.sight_night_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.littershredder.senses.sight_still_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.littershredder.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.littershredder.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.littershredder.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.littershredder.senses.tremor_m` | 2.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.littershredder.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.littershredder.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1575,11 +1579,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.burr_coat` | 0.6 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.frondgrazer.senses.sight_m` | 2.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.frondgrazer.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.frondgrazer.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.frondgrazer.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.frondgrazer.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.frondgrazer.senses.sight_m` | 8.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.frondgrazer.senses.sight_night_m` | 4.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.frondgrazer.senses.sight_still_fraction` | 0.625 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.frondgrazer.senses.sight_half_angle_deg` | 150.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.frondgrazer.senses.hearing_m` | 8.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.frondgrazer.senses.hearing_min` | 0.32666666666666666 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.frondgrazer.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.frondgrazer.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.frondgrazer.senses.smell_min` | 0.42 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1700,11 +1708,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.lanternjaw.senses.sight_m` | 2.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.lanternjaw.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.lanternjaw.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.lanternjaw.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.lanternjaw.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.lanternjaw.senses.sight_m` | 4.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.lanternjaw.senses.sight_night_m` | 3.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.lanternjaw.senses.sight_still_fraction` | 0.5 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.lanternjaw.senses.sight_half_angle_deg` | 110.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.lanternjaw.senses.hearing_m` | 3.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.lanternjaw.senses.hearing_min` | 0.09375 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.lanternjaw.senses.tremor_m` | 3.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.lanternjaw.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.lanternjaw.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1825,11 +1837,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.capgnawer.burr_coat` | 0.8 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.capgnawer.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.capgnawer.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.capgnawer.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.capgnawer.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.capgnawer.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.capgnawer.senses.sight_m` | 1.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.capgnawer.senses.sight_night_m` | 0.5 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.capgnawer.senses.sight_still_fraction` | 0.5 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.capgnawer.senses.sight_half_angle_deg` | 120.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.capgnawer.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.capgnawer.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.capgnawer.senses.tremor_m` | 1.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.capgnawer.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.capgnawer.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1950,11 +1966,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.loftstrider.burr_coat` | 0.4 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.loftstrider.senses.sight_m` | 2.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.loftstrider.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.loftstrider.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.loftstrider.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.loftstrider.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.loftstrider.senses.sight_m` | 12.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.loftstrider.senses.sight_night_m` | 6.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.loftstrider.senses.sight_still_fraction` | 0.6666666666666666 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.loftstrider.senses.sight_half_angle_deg` | 180.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.loftstrider.senses.hearing_m` | 10.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.loftstrider.senses.hearing_min` | 0.245 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.loftstrider.senses.tremor_m` | 2.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.loftstrider.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.loftstrider.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2075,11 +2095,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.ripple-snail.burr_coat` | 0.1 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.ripple-snail.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.ripple-snail.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.ripple-snail.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.ripple-snail.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.ripple-snail.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.ripple-snail.senses.sight_m` | 0.5 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.ripple-snail.senses.sight_night_m` | 0.25 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.ripple-snail.senses.sight_still_fraction` | 0.5 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.ripple-snail.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.ripple-snail.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.ripple-snail.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.ripple-snail.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.ripple-snail.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.ripple-snail.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2200,11 +2224,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.bellwing.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.bellwing.senses.sight_m` | 4.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.bellwing.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.bellwing.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.bellwing.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.bellwing.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.bellwing.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.bellwing.senses.sight_night_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.bellwing.senses.sight_still_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.bellwing.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.bellwing.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.bellwing.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.bellwing.senses.tremor_m` | 0.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.bellwing.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.bellwing.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2325,11 +2353,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.seedporter.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.seedporter.senses.sight_m` | 2.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.seedporter.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.seedporter.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.seedporter.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.seedporter.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.seedporter.senses.sight_m` | 16.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.seedporter.senses.sight_night_m` | 3.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.seedporter.senses.sight_still_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.seedporter.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.seedporter.senses.hearing_m` | 8.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.seedporter.senses.hearing_min` | 0.32666666666666666 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.seedporter.senses.tremor_m` | 0.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.seedporter.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.seedporter.senses.smell_min` | 0.9 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2450,11 +2482,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.chorister.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
-| `fauna.founders.chorister.senses.sight_m` | 16.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
-| `fauna.founders.chorister.senses.sight_half_angle_deg` | 120.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
-| `fauna.founders.chorister.senses.hearing_m` | 10.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
-| `fauna.founders.chorister.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
-| `fauna.founders.chorister.senses.smell_m` | 6.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
+| `fauna.founders.chorister.senses.sight_m` | 16.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
+| `fauna.founders.chorister.senses.sight_night_m` | 9.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
+| `fauna.founders.chorister.senses.sight_still_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | a still body is seen within this fraction of the range |
+| `fauna.founders.chorister.senses.sight_half_angle_deg` | 120.0 | deg | [0, inf) |  | - | placeholder | sight's field half-angle from the heading (180: all around) |
+| `fauna.founders.chorister.senses.hearing_m` | 10.0 | m | [0, inf) |  | - | placeholder | hearing's range, all around (0: deaf) |
+| `fauna.founders.chorister.senses.hearing_min` | 0.0037500000000000007 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
+| `fauna.founders.chorister.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
+| `fauna.founders.chorister.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
+| `fauna.founders.chorister.senses.smell_min` | 0.13 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2615,6 +2651,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.hunt.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | how long a lineage's walking route graph stands before it is rebuilt |
 | `fauna.hunt.success_memory_s` | 1800.0 | s | [0, inf) | 120–14400 log | - | placeholder | how long a kill marks its place productive in the killer's memory |
 | `fauna.hunt.success_boost` | 1.0 | fraction | [0, inf) | 0–4 | - | placeholder | a patch by a remembered kill scores 1 + this times its food cue |
+| `fauna.perception.remote_hz` | 4.0 | Hz | (0, inf) | 1–20 | - | placeholder | how often a body's remote senses (sight, hearing, the pair's tremor) run, staggered by id |
+| `fauna.perception.max_candidates` | 8 | bodies | [0, inf) | 2–32 | - | placeholder | prey and threats weighed (one terrain ray each) per observer per remote sensing, nearest first |
+| `fauna.perception.bin_m` | 2.0 | m | (0, inf) | 0.5–8 | - | placeholder | the spatial bins bodies are sorted into each tick |
+| `fauna.perception.occlusion` | 0.25 | fraction | [0, 1] | 0–1 | - | placeholder | hearing and tremor through terrain are multiplied by this (sight is stopped) |
+| `fauna.perception.hearing_speed_exp` | 1.0 | exponent | [0, inf) | 0.5–3 | - | placeholder | hearing's emission is speed^this x length^size_exp |
+| `fauna.perception.hearing_size_exp` | 1.0 | exponent | [0, inf) | 0–3 | - | placeholder | the length exponent of hearing's emission |
+| `fauna.perception.hearing_near_m` | 0.5 | m | (0, inf) |  | - | placeholder | received loudness is emission over the distance, read as at least this |
+| `fauna.perception.give_up_s` | 10.0 | s | [0, inf) | 1–60 log | - | placeholder | a body not sensed again within this is given up; a pursuit walks to its last-known point until then |
+| `fauna.scent.cell_m` | 0.5 | m | (0, inf) | 0.25–2 | - | placeholder | the scent field's cell (rounded to whole voxels): the connected surface faces in a cell are one node |
+| `fauna.scent.half_life_s` | 60.0 | s | (0, inf) | 5–1200 log | - | placeholder | scent's half-life |
+| `fauna.scent.diffuse_fraction` | 0.5 | fraction per update | [0, 1] | 0.05–1 | - | placeholder | the share of a node's difference to its neighbours mixed in per 0.5 s update |
+| `fauna.scent.threshold` | 0.000001 | scent units | [0, inf) |  | - | placeholder | levels below this are dropped after an update |
+| `fauna.scent.deposit_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what a standing body lays, by its organic matter |
+| `fauna.scent.carrion_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what carrion lays, by its stock |
+| `fauna.scent.step_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | neighbouring surface faces connect within this height difference, with open air over the lower one |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
 | `fauna.founding.starter_litter_organic` | 0.2 | organic units | [0, inf) | 0.05–1 | - | placeholder | leaf litter laid under each seeded littershredder |

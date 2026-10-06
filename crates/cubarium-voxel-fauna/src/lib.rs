@@ -31,7 +31,10 @@ mod manifest;
 mod pose;
 mod predation;
 mod pack;
-pub(crate) mod perception;
+pub mod perception;
+pub mod scent;
+pub use perception::{Percept, Track};
+pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
 mod registry;
@@ -91,7 +94,7 @@ pub use manifest::{
     Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
     Transfer, Tunings, gru32_parameter_count,
 };
-pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PredationConfig, TeacherConfig};
+pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PerceptionConfig, PredationConfig, ScentConfig, TeacherConfig};
 pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, attack_preference, encounter_share, profitability, FRUITLESS_SLOTS};
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
@@ -1055,6 +1058,11 @@ pub struct PackRecord {
     /// takes a target.
     #[serde(default)]
     pub drawn: Option<u64>,
+    /// **The scent draw** (SENSES-CORE): the leader is walking up its prey's scent, with no
+    /// prey sensed on its component. Set and cleared at each of the leader's samples, as
+    /// [`PackRecord::drawn`] is.
+    #[serde(default)]
+    pub drawn_scent: bool,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -2013,6 +2021,13 @@ pub struct FaunaConfig {
     /// patch-to-patch search, tremor sense and prey switching.
     #[serde(default)]
     pub hunt: HuntConfig,
+    /// **The perception core** (SENSES-CORE, [`PerceptionConfig`]): the pairwise senses'
+    /// cadence, candidates, occlusion, hearing's emission and the pursuit's memory.
+    #[serde(default)]
+    pub perception: PerceptionConfig,
+    /// **The scent field** (SENSES-CORE, [`ScentConfig`]).
+    #[serde(default)]
+    pub scent: ScentConfig,
 }
 
 fn default_lineage_body_ceiling() -> u32 {
@@ -2051,6 +2066,8 @@ impl Default for FaunaConfig {
             founding: FoundingConfig::default(),
             lineage_body_ceiling: LINEAGE_BODY_CEILING,
             hunt: HuntConfig::default(),
+            perception: PerceptionConfig::default(),
+            scent: ScentConfig::default(),
         }
     }
 }
@@ -2702,16 +2719,35 @@ pub struct FaunaLedger {
     pub pack_chases: u64,
     #[serde(default)]
     pub pack_chase_kills: u64,
-    /// **The pack's senses** (VEILHOUND-SEARCH): chases begun on a prey first sensed by
-    /// `[sight, hearing, smell]` (the cheapest sense that has it: smell, then hearing, then
-    /// sight); draws begun (the leader set out toward a new prey beyond its reach) by the
-    /// same; chases begun while drawn; controller samples of a hungry adult (wanting food or
-    /// in an emergency) under the pack tactic, and of those the samples spent leading a draw
-    /// and following its leader.
+    /// **The pack's senses** (VEILHOUND-SEARCH, SENSES-CORE): chases begun on a prey sensed
+    /// by each of `[sight, hearing, tremor, smell]` ([`crate::perception::MODALITIES`]) — a
+    /// prey seen and heard counts under both, so the entries need not sum to the chases;
+    /// draws begun (the leader set out toward a new prey beyond its reach, or up its prey's
+    /// scent, counted under smell) by the same; chases begun while drawn; controller samples
+    /// of a hungry adult (wanting food or in an emergency) under the pack tactic, and of
+    /// those the samples spent leading a draw and following its leader.
     #[serde(default)]
-    pub pack_chases_by_sense: [u64; 3],
+    pub pack_chases_by_sense: [u64; 4],
     #[serde(default)]
-    pub pack_draws_by_sense: [u64; 3],
+    pub pack_draws_by_sense: [u64; 4],
+    /// **The hunt funnel** (SENSES-CORE), per `[hunter][prey]` lineage and stage
+    /// ([`crate::perception::FUNNEL_STAGES`]: sensed, approached, struck, killed, eaten):
+    /// a prey newly in a hunter's record, a hunter setting out after it (a pack target or a
+    /// draw, a patrol's engage), a strike begun on it, a kill, a bite of its carcass.
+    #[serde(default)]
+    pub funnel: [[[u64; 5]; Founder::COUNT]; Founder::COUNT],
+    /// The perception core's cost (SENSES-CORE): remote sensings run, pairs weighed (one
+    /// terrain ray each) and the cells those rays crossed.
+    #[serde(default)]
+    pub percept_sensings: u64,
+    #[serde(default)]
+    pub percept_pairs: u64,
+    #[serde(default)]
+    pub percept_ray_cells: u64,
+    /// Pack targets given up because no member had sensed them within the pursuit's memory
+    /// ([`PerceptionConfig::give_up_s`]).
+    #[serde(default)]
+    pub pack_targets_lost: u64,
     #[serde(default)]
     pub pack_draw_chases: u64,
     #[serde(default)]
@@ -3213,11 +3249,15 @@ pub struct Fauna {
     /// `pack_paths`. Not saved.
     #[serde(skip)]
     hunt_paths: FxHashMap<u64, PackPath>,
-    /// Per pack id (VEILHOUND-SEARCH): the prey its awake adults sense this tick and the
-    /// sense that has each ([`SenseTable`]; 0 sight, 1 hearing, 2 smell), with the tick
-    /// it was read. Not saved.
+    /// **Each body's percept record** (SENSES-CORE, [`Percept`]), by id: what its heuristics
+    /// read of the other bodies, the scent and the tremor. Saved with the world (it holds the
+    /// last-known positions a pursuit walks to); a dead body's is dropped.
+    #[serde(default)]
+    pub(crate) percepts: FxHashMap<u64, Percept>,
+    /// **The scent field** (SENSES-CORE, [`scent::ScentField`]). Not saved: it refills
+    /// within a few half-lives of a load.
     #[serde(skip)]
-    pub(crate) pack_sensed: FxHashMap<u64, (u64, std::sync::Arc<Vec<(u64, u8)>>)>,
+    pub(crate) scent: scent::ScentField,
     /// The faces holding a usable carcass (carrion under a carcass record) and the tick the
     /// list was read from the plant layer (HUNTER-MEAL's meal step). Not saved.
     #[serde(skip)]
@@ -3273,6 +3313,9 @@ pub enum ChaseEnd {
     Spent,
     /// The target stood in another pack's territory.
     Trespass,
+    /// No member had sensed it within the pursuit's memory (SENSES-CORE,
+    /// [`PerceptionConfig::give_up_s`]).
+    Lost,
 }
 
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
@@ -3338,6 +3381,26 @@ impl Fauna {
 
     /// The faces holding a usable carcass — carrion under the plant layer's carcass record —
     /// read once a tick (HUNTER-MEAL).
+    /// Whether the scent field runs: a body of a live lineage ([`SenseTable::live`]) that
+    /// smells is alive.
+    pub(crate) fn scent_wanted(&self) -> bool {
+        self.animals.iter().any(|a| a.founder.is_some_and(|f| {
+            let t = self.config.founder(f).senses;
+            t.live && t.smell_min > 0.0
+        }))
+    }
+
+    /// **A body's percept record** (SENSES-CORE, [`Percept`]): what its heuristics read.
+    pub fn percept(&self, id: u64) -> Option<&Percept> {
+        self.percepts.get(&id)
+    }
+
+    /// The scent level of channel `ch` on the support face `site` (a readout; 0 off the
+    /// field).
+    pub fn scent_level(&self, view: &VoxelView<'_>, ch: ScentChannel, site: Site) -> f64 {
+        self.scent.level(view, ch, i64::from(site.x), site.y, site.z)
+    }
+
     pub(crate) fn carcass_sites(&mut self, fv: &cubarium_voxel_flora::FloraView<'_>) -> &[cubarium_voxel_flora::Site] {
         if self.carcass_sites.0 != Some(self.tick) {
             let list = &mut self.carcass_sites.1;
@@ -3415,7 +3478,8 @@ impl Fauna {
             pack_routes: FxHashMap::default(),
             open_air: None,
             pack_paths: FxHashMap::default(),
-            pack_sensed: FxHashMap::default(),
+            percepts: FxHashMap::default(),
+            scent: scent::ScentField::default(),
             hunt_paths: FxHashMap::default(),
             carcass_sites: (None, Vec::new()),
             packs: Vec::new(),
@@ -3568,7 +3632,6 @@ impl Fauna {
         self.config = config;
         self.pack_routes.clear();
         self.pack_paths.clear();
-        self.pack_sensed.clear();
         self.open_air = None;
         Ok(())
     }
@@ -3686,6 +3749,7 @@ impl Fauna {
             feast_eaten: 0.0,
             abandoned: None,
             drawn: None,
+            drawn_scent: false,
         });
         Some(id)
     }

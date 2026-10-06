@@ -415,7 +415,8 @@ fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh)
     let share = |x: u64| if w.alive_ticks > 0 { x as f64 / w.alive_ticks as f64 } else { f64::NAN };
     let kills = |f: Founder| b.departed_founder(f, Departure::Killed { by: VH }) - a.departed_founder(f, Departure::Killed { by: VH });
     let all_kills: u64 = Founder::ALL.iter().map(|&f| kills(f)).sum();
-    let d3 = |x: &[u64; 3], y: &[u64; 3]| format!("{}/{}/{}", y[0] - x[0], y[1] - x[1], y[2] - x[2]);
+    // [sight, hearing, tremor, smell] (SENSES-CORE: every sense in the mask counts).
+    let d3 = |x: &[u64; 4], y: &[u64; 4]| format!("{}/{}/{}/{}", y[0] - x[0], y[1] - x[1], y[2] - x[2], y[3] - x[3]);
     let hungry = b.pack_hungry_samples - a.pack_hungry_samples;
     let lead = b.pack_draw_lead_samples - a.pack_draw_lead_samples;
     let follow = b.pack_draw_follow_samples - a.pack_draw_follow_samples;

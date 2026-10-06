@@ -27,6 +27,7 @@ use cubarium_voxel::{DT, TICK_HZ, VoxelView};
 use cubarium_voxel_flora::{FloraView, Site};
 
 use crate::controller::Actions;
+use crate::perception::{Track, class};
 use crate::{Animal, Fauna, Pack};
 
 /// A den's (or any face's) column centre, metres.
@@ -381,7 +382,8 @@ fn node_radii(geometry: &crate::Body, h: &crate::Hunter, v: f64) -> (u32, u32) {
 
 /// **The next step on the route** (bellwing3 item 1, bellwing4): `None` when the member
 /// can walk straight to `goal` on the disc's graph (or is off the graph); else the centre
-/// of the next node on its route to the node it would strike the target from.
+/// of the next node on its route to the node it would strike the target from — the
+/// target where the member last knew it to be (SENSES-CORE).
 #[allow(clippy::too_many_arguments)]
 fn route_step(
     fauna: &mut Fauna,
@@ -391,7 +393,7 @@ fn route_step(
     t: &Pack,
     cruise_m_per_s: f64,
     a: &Animal,
-    o: &Animal,
+    o: &Track,
     geometry: &crate::Body,
     h: &crate::Hunter,
     goal: (f64, f64),
@@ -403,7 +405,7 @@ fn route_step(
     if graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
         return None;
     }
-    let target = graph.node_near(o.site, (o.pose.x, o.pose.z), prey_r)?;
+    let target = graph.node_near(o.face(), (o.x, o.z), prey_r)?;
     let (graph, field) = fauna.pack_path(view, founder, own, target, reach_steps(t, cruise_m_per_s, v));
     graph.next_toward(&field, from).map(|j| graph.centre(j))
 }
@@ -421,62 +423,93 @@ fn reach_steps(t: &Pack, cruise_m_per_s: f64, voxel_m: f64) -> u32 {
 
 // ------------------------------------------------------------------ the pack's senses
 
-/// **What pack `own` senses this tick** (VEILHOUND-SEARCH): every body of a lineage its
-/// hunter table lists (on the ground — not climbing, flying, perched or gliding — and not of
-/// its own pack) that one of its awake adults
-/// senses by its lineage's [`crate::SenseTable`] ([`crate::perception::sense_of`]), with the
-/// cheapest sense that has it (smell, then hearing, then sight). Read once a tick per pack.
-pub(crate) fn pack_sensed(fauna: &mut Fauna, view: &VoxelView<'_>, own: u64, h: &crate::Hunter) -> std::sync::Arc<Vec<(u64, u8)>> {
-    let tick = fauna.tick;
-    if let Some((at, list)) = fauna.pack_sensed.get(&own) {
-        if *at == tick {
-            return list.clone();
-        }
+/// The pursuit's memory, ticks ([`crate::PerceptionConfig::give_up_s`]).
+fn give_up_ticks(fauna: &Fauna) -> u64 {
+    cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s)
+}
+
+/// **What the member at `i` knows of its prey** (SENSES-CORE): the prey tracks of its own
+/// record, and those of every awake adult packmate standing within its hearing range — the
+/// sighting shared by the pack's calls, not pooled across the whole pack (the branch's
+/// telepathy). One track per body, the freshest; positions are where it was last sensed.
+pub(crate) fn known(fauna: &Fauna, i: usize, ring: f64) -> Vec<Track> {
+    let a = &fauna.animals[i];
+    let prey = |p: &crate::Percept| -> Vec<Track> { p.tracks().iter().filter(|t| t.class == class::PREY).copied().collect() };
+    let mut out: Vec<Track> = fauna.percept(a.id).map(prey).unwrap_or_default();
+    let Some(m) = a.pack else {
+        return out;
+    };
+    let hearing = a.founder.map_or(0.0, |f| fauna.config.founder(f).senses.hearing_m);
+    if !(hearing > 0.0) {
+        return out;
     }
-    let ring = f64::from(view.config.width) * view.config.voxel_m;
-    let lineage = fauna.pack(own).map(|p| p.lineage);
-    let table = lineage.map(|f| fauna.config.founder(f).senses).unwrap_or_default();
-    let reach = table.reach_m();
-    let mut out: Vec<(u64, u8)> = Vec::new();
-    if reach > 0.0 {
-        let adults: Vec<&Animal> = fauna
-            .animals
-            .iter()
-            .filter(|b| b.pack.is_some_and(|m| m.pack == own && !m.pup) && b.state != crate::State::Asleep)
-            .collect();
-        for o in &fauna.animals {
-            // A walker takes only a body on the ground: not climbing, and not flying,
-            // perched or gliding (VEILHOUND-SEARCH: smelled bellwings overhead held the pack
-            // in chases it could not end).
-            if o.mobility.climb.is_some()
-                || o.mobility.mode != crate::MobilityMode::Ground
-                || o.pack.is_some_and(|m| m.pack == own)
-                || !o.founder.is_some_and(|f| h.hunts(f))
-            {
-                continue;
-            }
-            let mut best: Option<u8> = None;
-            for b in &adults {
-                let (dx, dz, d) = delta(b, o.pose.x, o.pose.z, ring);
-                if d > reach {
-                    continue;
-                }
-                if let Some(s) = crate::perception::sense_of(&fauna.config, view, &table, b, o, (dx, dz), d) {
-                    // The cheapest sense wins: smell (2), then hearing (1), then sight (0).
-                    best = Some(best.map_or(s, |x: u8| x.max(s)));
-                    if s == crate::perception::SMELL {
-                        break;
-                    }
-                }
-            }
-            if let Some(s) = best {
-                out.push((o.id, s));
+    for o in &fauna.animals {
+        if o.id == a.id
+            || !o.pack.is_some_and(|om| om.pack == m.pack && !om.pup)
+            || o.state == crate::State::Asleep
+            || distance(a, o.pose.x, o.pose.z, ring) > hearing
+        {
+            continue;
+        }
+        let Some(p) = fauna.percept(o.id) else { continue };
+        for t in prey(p) {
+            match out.iter_mut().find(|k| k.id == t.id) {
+                Some(k) if t.tick > k.tick => *k = t,
+                Some(_) => {}
+                None => out.push(t),
             }
         }
     }
-    let list = std::sync::Arc::new(out);
-    fauna.pack_sensed.insert(own, (tick, list.clone()));
-    list
+    out
+}
+
+/// Whether the member at `i` could take a body it knows of where it was
+/// ([`crate::perception::in_reach`]): not climbing, and on the ground or within the jaw
+/// band over the support under it — a perched or low-hovering bellwing in reach counts
+/// (Wrysk: hunters eat bellwings "grounded or in reach").
+pub(crate) fn takeable(fauna: &Fauna, i: usize, t: &Track) -> bool {
+    crate::perception::in_reach(&fauna.config, &fauna.animals[i], t)
+}
+
+/// What the member at `i` knows of body `tid` within the pursuit's memory: the freshest of
+/// what it and its packmates in hearing sensed, and of its own focus (the last-known point).
+fn knows_of(fauna: &Fauna, i: usize, tid: u64, ring: f64) -> Option<Track> {
+    let a = &fauna.animals[i];
+    let mut best = known(fauna, i, ring).into_iter().find(|t| t.id == tid);
+    if let Some(f) = fauna.percept(a.id).map(|p| p.focus).filter(|f| f.known && f.id == tid) {
+        if best.is_none_or(|b| f.tick > b.tick) {
+            best = Some(f);
+        }
+    }
+    best.filter(|t| t.age(fauna.tick) <= give_up_ticks(fauna))
+}
+
+/// Whether any awake adult of pack `own` knows of `tid` within the pursuit's memory.
+fn pack_knows(fauna: &Fauna, own: u64, tid: u64, ring: f64) -> bool {
+    fauna.animals.iter().enumerate().any(|(k, b)| {
+        b.pack.is_some_and(|m| m.pack == own && !m.pup) && b.state != crate::State::Asleep && knows_of(fauna, k, tid, ring).is_some()
+    })
+}
+
+/// A point a metre up the strongest scent of its prey the member at `i` smells (its
+/// lineage's [`crate::SenseTable::smell_min`] or above, on a channel its prey lay:
+/// [`crate::perception::prey_channels`]); `None` with none.
+fn scent_step(fauna: &Fauna, i: usize, founder: crate::Founder) -> Option<(f64, f64)> {
+    let a = &fauna.animals[i];
+    let floor = fauna.config.founder(founder).senses.smell_min;
+    if !(floor > 0.0) {
+        return None;
+    }
+    let p = fauna.percept(a.id)?;
+    let chans = crate::perception::prey_channels(&fauna.config, founder);
+    let best = crate::ScentChannel::ALL
+        .into_iter()
+        .filter(|c| chans[c.index()])
+        .map(|c| p.scent[c.index()])
+        .filter(|r| r.level >= floor && (r.gx != 0.0 || r.gz != 0.0) && r.gx.is_finite() && r.gz.is_finite())
+        .max_by(|x, y| x.level.total_cmp(&y.level))?;
+    let g = (best.gx * best.gx + best.gz * best.gz).sqrt();
+    Some((a.pose.x + best.gx / g, a.pose.z + best.gz / g))
 }
 
 /// **The pack's leader** (VEILHOUND-DIAG's leading breeder, VEILHOUND-SEARCH's draw): the
@@ -496,20 +529,22 @@ fn pack_leader(rec: &crate::PackRecord, adults: &[Animal]) -> Option<u64> {
 /// pack keeps main's rule.
 fn drawn_leader(fauna: &Fauna, own: u64, rec: &crate::PackRecord, adults: &[Animal], me: u64) -> Option<Animal> {
     let p = fauna.pack(own)?;
-    if p.drawn.is_none() || p.target.is_some() || !pack_wants(adults) {
+    if (p.drawn.is_none() && !p.drawn_scent) || p.target.is_some() || !pack_wants(adults) {
         return None;
     }
     let l = pack_leader(rec, adults).filter(|&l| l != me)?;
     adults.iter().find(|b| b.id == l).copied()
 }
 
-/// **The draw** (VEILHOUND-SEARCH) for the pack's leader at `i`: the nearest prey by route
-/// the pack senses ([`pack_sensed`]) that it takes (its window, outside every other
-/// territory, not the abandoned target) and stands on the leader's route component; the
-/// point to head for on the way — straight at it when the line is walkable, else the next
-/// node of the route. Recorded as the pack's [`crate::PackRecord::drawn`] (`before` is the
-/// draw at its last sample: a new prey counts a draw); `None` (and the record cleared) with
-/// nothing sensed on its component.
+/// **The draw** (VEILHOUND-SEARCH, SENSES-CORE) for the pack's leader at `i`: the nearest
+/// prey by route it knows of ([`known`]: its own sensing and its packmates' in hearing) that
+/// it takes (in reach, its window, outside every other territory, not the abandoned target)
+/// and stands on the leader's route component; the point to head for on the way — straight
+/// at where it was last sensed when the line is walkable, else the next node of the route.
+/// Recorded as the pack's [`crate::PackRecord::drawn`] (`before` is the draw at its last
+/// sample: a new prey counts a draw under each sense that has it). Failing that, a point up
+/// its prey's scent ([`scent_step`], [`crate::PackRecord::drawn_scent`], counted under smell
+/// when it begins). `None` (and the record cleared) with neither.
 #[allow(clippy::too_many_arguments)]
 fn draw_step(
     fauna: &mut Fauna,
@@ -521,49 +556,61 @@ fn draw_step(
     geometry: &crate::Body,
     h: &crate::Hunter,
     before: Option<u64>,
+    before_scent: bool,
 ) -> Option<(f64, f64)> {
     let a = fauna.animals[i];
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
-    let sensed = pack_sensed(fauna, view, own, h);
-    let set = |fauna: &mut Fauna, drawn: Option<(u64, u8)>| {
-        if let Some((_, s)) = drawn.filter(|d| Some(d.0) != before) {
-            fauna.ledger.pack_draws_by_sense[usize::from(s)] += 1;
+    let sensed: Vec<Track> = known(fauna, i, ring).into_iter().filter(|k| takeable(fauna, i, k)).collect();
+    let set = |fauna: &mut Fauna, drawn: Option<(u64, u8)>, scent: bool| {
+        if let Some((id, modes)) = drawn.filter(|d| Some(d.0) != before) {
+            for (k, bit) in crate::perception::MODALITIES.iter().enumerate() {
+                if modes & bit != 0 {
+                    fauna.ledger.pack_draws_by_sense[k] += 1;
+                }
+            }
+            crate::perception::approach(fauna, a.id, id);
+        }
+        if scent && !before_scent {
+            fauna.ledger.pack_draws_by_sense[3] += 1;
         }
         if let Some(p) = fauna.pack_mut(own) {
             p.drawn = drawn.map(|d| d.0);
+            p.drawn_scent = scent;
         }
     };
+    let by_scent = |fauna: &mut Fauna| -> Option<(f64, f64)> {
+        let go = scent_step(fauna, i, founder);
+        set(fauna, None, go.is_some());
+        go
+    };
     if sensed.is_empty() {
-        set(fauna, None);
-        return None;
+        return by_scent(fauna);
     }
     let graph = fauna.pack_routes(view, founder);
     let (own_r, prey_r) = node_radii(geometry, h, v);
     let Some(from) = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r) else {
-        set(fauna, None);
-        return None;
+        return by_scent(fauna);
     };
     let abandoned = fauna.pack(own).and_then(|p| p.abandoned);
     let window = window_body(fauna, i, ring);
     let component = graph.components[from];
     let mut goals: Vec<(usize, u64, u8, (f64, f64))> = Vec::new();
-    for &(id, s) in sensed.iter() {
-        let Some(o) = fauna.view().animal(id).copied() else { continue };
-        if abandoned == Some(id)
+    for k in &sensed {
+        let Some(o) = fauna.view().animal(k.id).copied() else { continue };
+        if abandoned == Some(k.id)
             || !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window)
-            || trespass(fauna, own, o.pose.x, o.pose.z, t, v, ring)
+            || trespass(fauna, own, k.x, k.z, t, v, ring)
         {
             continue;
         }
-        let Some(j) = graph.node_near(o.site, (o.pose.x, o.pose.z), prey_r) else { continue };
+        let Some(j) = graph.node_near(k.face(), (k.x, k.z), prey_r) else { continue };
         if graph.components[j] == component {
-            goals.push((j, id, s, (o.pose.x, o.pose.z)));
+            goals.push((j, k.id, k.modes, (k.x, k.z)));
         }
     }
     if goals.is_empty() {
-        set(fauna, None);
-        return None;
+        return by_scent(fauna);
     }
     // Route distances from the leader over its whole component — the pack's route field to
     // the leader, which its followers walk on too ([`follow_step`]).
@@ -573,10 +620,9 @@ fn draw_step(
         .filter_map(|(j, id, s, xy)| field.get(&j).map(|&d| (d, j, id, s, xy)))
         .min_by(|p, q| (p.0, p.2).cmp(&(q.0, q.2)))
     else {
-        set(fauna, None);
-        return None;
+        return by_scent(fauna);
     };
-    set(fauna, Some((id, s)));
+    set(fauna, Some((id, s)), false);
     if d == 0 || graph.walk_line(from, (a.pose.x, a.pose.z), xy) {
         return Some(xy);
     }
@@ -723,6 +769,8 @@ pub(crate) fn steer(
         });
     }
 
+    // SENSES-CORE: the record's tick-rate parts (scent) before the tactic reads it.
+    crate::perception::refresh(fauna, i, view, fv, occupancy, crate::perception::Want { scent: true, ..Default::default() });
     let manifest = fauna.config.manifest(founder);
     let guard = manifest.cruise_m_per_s * manifest.controller_period_s
         + (h.strike_reach_length_fraction + h.jaw_forward_length_fraction) * geometry.length_m;
@@ -752,6 +800,7 @@ pub(crate) fn steer(
     if pack_leader(&rec, &adults) == Some(a.id) {
         if let Some(p) = fauna.pack_mut(own) {
             p.drawn = None;
+            p.drawn_scent = false;
         }
     }
 
@@ -796,9 +845,20 @@ pub(crate) fn steer(
                 let late = now.saturating_sub(rec.chase_since_tick)
                     >= cubarium_voxel::ticks_at_least_one(t.chase_give_up_s);
                 let spent = adults.iter().any(|b| spent(fauna, b, &t));
-                let out = trespass(fauna, own, o.pose.x, o.pose.z, &t, v, ring);
-                keep = !(late || spent || out);
+                // SENSES-CORE: the member's own focus follows what it and its packmates in
+                // hearing know of the target; the pack gives it up when no awake adult has
+                // sensed it within the pursuit's memory.
+                if let Some(k) = knows_of(fauna, i, tid, ring) {
+                    let p = fauna.percepts.entry(a.id).or_default();
+                    if !(p.focus.known && p.focus.id == tid && p.focus.tick >= k.tick) {
+                        p.focus = k;
+                    }
+                }
+                let lost = !pack_knows(fauna, own, tid, ring);
+                let out = knows_of(fauna, i, tid, ring).is_some_and(|k| trespass(fauna, own, k.x, k.z, &t, v, ring));
+                keep = !(late || spent || out || lost);
                 if keep {
+                    // The kill's bookkeeping: where the carcass will lie if a member kills it.
                     if let Some(p) = fauna.pack_mut(own) {
                         p.target_site = Some(o.site);
                     }
@@ -807,6 +867,9 @@ pub(crate) fn steer(
                         crate::ChaseEnd::Late
                     } else if spent {
                         crate::ChaseEnd::Spent
+                    } else if lost {
+                        fauna.ledger.pack_targets_lost += 1;
+                        crate::ChaseEnd::Lost
                     } else {
                         crate::ChaseEnd::Trespass
                     };
@@ -903,23 +966,24 @@ pub(crate) fn steer(
             // route graph, at most `cruise × chase_give_up_s × route_reach_fraction` away by
             // route (bellwing-finding item 3, bellwing3 item 1: grazers on a cliff top 3 m
             // over the pack drew 74 timed-out chases in seed 1).
-            // VEILHOUND-SEARCH: what the pack senses (sight, hearing, smell; main's rule was
-            // its own 2 m cone ahead).
+            // VEILHOUND-SEARCH, SENSES-CORE: what the member knows of (its own record and its
+            // packmates' in hearing, [`known`]), where it was last sensed, takeable there
+            // (main's rule was its own 2 m cone ahead).
             let window = window_body(fauna, i, ring);
-            let sensed = pack_sensed(fauna, view, own, &h);
+            let sensed: Vec<Track> = known(fauna, i, ring).into_iter().filter(|k| takeable(fauna, i, k)).collect();
             let mut candidates: Vec<(f64, u64, Site, (f64, f64), u8)> = Vec::new();
-            for &(id, sense) in sensed.iter() {
-                let Some(o) = fauna.view().animal(id).copied() else { continue };
+            for k in &sensed {
+                let Some(o) = fauna.view().animal(k.id).copied() else { continue };
                 if o.id == a.id || fauna.pack(own).and_then(|p| p.abandoned) == Some(o.id) {
                     continue;
                 }
                 if !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window)
-                    || trespass(fauna, own, o.pose.x, o.pose.z, &t, v, ring)
+                    || trespass(fauna, own, k.x, k.z, &t, v, ring)
                 {
                     continue;
                 }
-                let d = distance(&a, o.pose.x, o.pose.z, ring);
-                candidates.push((d, o.id, o.site, (o.pose.x, o.pose.z), sense));
+                let d = distance(&a, k.x, k.z, ring);
+                candidates.push((d, o.id, k.face(), (k.x, k.z), k.modes));
             }
             let mut best: Option<(f64, u64, Site, u8)> = None;
             if !candidates.is_empty() {
@@ -944,10 +1008,17 @@ pub(crate) fn steer(
                     drawn = p.drawn.take().is_some() || rec.drawn.is_some();
                 }
                 fauna.ledger.pack_chases += 1;
-                fauna.ledger.pack_chases_by_sense[usize::from(sense)] += 1;
+                for (k, bit) in crate::perception::MODALITIES.iter().enumerate() {
+                    if sense & bit != 0 {
+                        fauna.ledger.pack_chases_by_sense[k] += 1;
+                    }
+                }
                 if drawn {
                     fauna.ledger.pack_draw_chases += 1;
                 }
+                crate::perception::approach(fauna, a.id, tid);
+                let now_tick = fauna.tick;
+                fauna.percepts.entry(a.id).or_default().set_focus(tid, now_tick);
                 let participants = 1 + participating as u32;
                 fauna.log_pack_event(crate::PackEvent::ChaseStart { tick: now, pack: own, participants });
                 call(fauna, i);
@@ -966,7 +1037,7 @@ pub(crate) fn steer(
         && fauna.pack(own).is_some_and(|p| p.target.is_none())
         && pack_leader(&rec, &adults) == Some(a.id)
     {
-        draw_step(fauna, i, view, own, founder, &t, &geometry, &h, rec.drawn)
+        draw_step(fauna, i, view, own, founder, &t, &geometry, &h, rec.drawn, rec.drawn_scent)
     } else {
         None
     };
@@ -985,9 +1056,9 @@ pub(crate) fn steer(
         let on_route = fauna
             .pack(own)
             .and_then(|p| p.target)
-            .and_then(|tid| fauna.view().animal(tid).copied())
-            .filter(|o| joins && distance(&a, o.pose.x, o.pose.z, ring) <= 2.0 * t.pack_radius_m)
-            .and_then(|o| route_step(fauna, view, founder, own, &t, manifest.cruise_m_per_s, &a, &o, &geometry, &h, (o.pose.x, o.pose.z)));
+            .and_then(|tid| knows_of(fauna, i, tid, ring))
+            .filter(|o| joins && distance(&a, o.x, o.z, ring) <= 2.0 * t.pack_radius_m)
+            .and_then(|o| route_step(fauna, view, founder, own, &t, manifest.cruise_m_per_s, &a, &o, &geometry, &h, (o.x, o.z)));
         match on_route.or(draw_go) {
             Some((nx, nz)) => return Some(clamp(fauna, go_to(&a, nx, nz, ring, 0.0, 1.0))),
             None => return Some(clamp(fauna, held)),
@@ -998,13 +1069,14 @@ pub(crate) fn steer(
     // points `flank_offset_m` either side of it (across the driver's line), alternately
     // by id, and close in once there. Feed is held throughout: a prey in the capsule is
     // struck.
+    // SENSES-CORE: at the target's last-known point, as this member knows it.
     if let Some(o) = fauna
         .pack(own)
         .and_then(|p| p.target)
-        .and_then(|tid| fauna.view().animal(tid).copied())
+        .and_then(|tid| knows_of(fauna, i, tid, ring))
         .filter(|_| joins)
     {
-        let d_target = distance(&a, o.pose.x, o.pose.z, ring);
+        let d_target = distance(&a, o.x, o.z, ring);
         if d_target <= 2.0 * t.pack_radius_m {
             // Repair 3 item 5: the driver and the flankers are the participants near the
             // target — awake and wanting food or in an emergency — never a fed adult.
@@ -1012,13 +1084,13 @@ pub(crate) fn steer(
                 .iter()
                 .filter(|b| {
                     (b.id == a.id || participates(b, own))
-                        && distance(b, o.pose.x, o.pose.z, ring) <= 2.0 * t.pack_radius_m
+                        && distance(b, o.x, o.z, ring) <= 2.0 * t.pack_radius_m
                 })
                 .copied()
                 .collect();
             let mut driver: Option<(f64, u64)> = None;
             for b in &hunters {
-                let d = distance(b, o.pose.x, o.pose.z, ring);
+                let d = distance(b, o.x, o.z, ring);
                 if driver.is_none_or(|(bd, bid)| d < bd || (d == bd && b.id < bid)) {
                     driver = Some((d, b.id));
                 }
@@ -1031,11 +1103,11 @@ pub(crate) fn steer(
                 route_step(fauna, view, founder, own, &t, manifest.cruise_m_per_s, &a, &o, &geometry, &h, (gx, gz))
             };
             let act = if driver_id == Some(a.id) {
-                match routed(fauna, o.pose.x, o.pose.z) {
+                match routed(fauna, o.x, o.z) {
                     Some((nx, nz)) => go_to(&a, nx, nz, ring, 0.0, 1.0),
-                    None => go_to(&a, o.pose.x, o.pose.z, ring, stop, 1.0),
+                    None => go_to(&a, o.x, o.z, ring, stop, 1.0),
                 }
-            } else if let Some((nx, nz)) = routed(fauna, o.pose.x, o.pose.z) {
+            } else if let Some((nx, nz)) = routed(fauna, o.x, o.z) {
                 go_to(&a, nx, nz, ring, 0.0, 1.0)
             } else {
                 let rank = hunters
@@ -1047,15 +1119,15 @@ pub(crate) fn steer(
                     .and_then(|id| hunters.iter().find(|b| b.id == id))
                     .copied()
                     .unwrap_or(a);
-                let (lx, lz, ld) = delta(&d_ref, o.pose.x, o.pose.z, ring);
+                let (lx, lz, ld) = delta(&d_ref, o.x, o.z, ring);
                 let (ux, uz) = if ld > 0.0 { (lx / ld, lz / ld) } else { a.pose.forward() };
                 let (px, pz) = (uz * side, -ux * side);
                 let (gx, gz) = (
-                    o.pose.x + px * t.flank_offset_m,
-                    o.pose.z + pz * t.flank_offset_m,
+                    o.x + px * t.flank_offset_m,
+                    o.z + pz * t.flank_offset_m,
                 );
                 if distance(&a, gx, gz, ring) <= 0.5 {
-                    go_to(&a, o.pose.x, o.pose.z, ring, stop, 1.0)
+                    go_to(&a, o.x, o.z, ring, stop, 1.0)
                 } else {
                     go_to(&a, gx, gz, ring, 0.0, 1.0)
                 }
@@ -1107,12 +1179,14 @@ pub(crate) fn steer(
         let window = window_body(fauna, i, ring);
         let sight = manifest.cone_range_m;
         let (fx, fz) = a.pose.forward();
-        let prey_ahead = fauna.animals.iter().any(|o| {
-            if o.id == a.id || o.pack.is_some_and(|om| om.pack == own) {
-                return false;
-            }
-            let (dx, dz, d) = delta(&a, o.pose.x, o.pose.z, ring);
-            d <= sight && dx * fx + dz * fz >= 0.0 && crate::predation::is_prey_in_window(&fauna.config, &a, o, window)
+        // SENSES-CORE: a prey in its own record, where it was sensed.
+        let prey_ahead = fauna.percept(a.id).is_some_and(|p| {
+            p.tracks().iter().filter(|k| k.class == class::PREY).any(|k| {
+                let (dx, dz, d) = delta(&a, k.x, k.z, ring);
+                d <= sight
+                    && dx * fx + dz * fz >= 0.0
+                    && fauna.view().animal(k.id).is_some_and(|o| crate::predation::is_prey_in_window(&fauna.config, &a, o, window))
+            })
         });
         if !prey_ahead && !crate::hunt::mouth_on_carcass(fv, view, &a, &geometry) {
             // The breeder leads the search: a member keeps within the follow radius of
