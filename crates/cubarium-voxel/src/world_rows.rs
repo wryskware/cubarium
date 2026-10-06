@@ -138,6 +138,21 @@ pub(crate) fn rows() -> Vec<Row> {
             .search(0.0, 1800.0)
             .grade("C")
             .prov("decision"),
+        // The dry season (DRY-SEASON, 2026-10-06; the switch `climate.dry_season` is a bool).
+        p("climate.dry_season_every_days", "world days", nonneg, "one dry season starts every this many world days (0: none)")
+            .search(3.0, 20.0)
+            .grade("C")
+            .prov("model:meadow §11.6"),
+        p("climate.dry_season_len_days", "world days", nonneg, "how long a dry season lasts (0: none)")
+            .search(0.25, 2.0)
+            .grade("C")
+            .prov("model:meadow §11.6"),
+        p("climate.dry_season_phase_days", "world days", nonneg, "world days from the founding to the first season")
+            .prov("decision"),
+        p("climate.dry_season_rain", "x the natural hazards", nonneg, "the natural rain hazards' multiplier inside a season (0: no natural rain)")
+            .search(0.0, 1.0)
+            .grade("C")
+            .prov("measured:DRY-SEASON fixture"),
         p("climate.fog_form_rh", "RH", nonneg_inf, "fog forms at or above (visual only)").prov("visual"),
         p("climate.fog_clear_rh", "RH", nonneg_inf, "fog clears below (visual only)").prov("visual"),
         p("climate.fog_span_rh", "RH", nonneg_inf, "fog density span (visual only)").prov("visual"),
@@ -154,7 +169,7 @@ pub(crate) fn rows() -> Vec<Row> {
         p("climate.cc_per_c", "per degC", nonneg, "Clausius-Clapeyron: what the air holds grows by this fraction per degC")
             .search(0.05, 0.09)
             .prov("physical"),
-        p("climate.rh_max", "RH", positive, "relative humidity never passes this: reaching it starts a forced downpour")
+        p("climate.rh_max", "RH", positive, "relative humidity never passes this outside a dry season: reaching it starts a forced downpour")
             .search(1.1, 2.0)
             .grade("D")
             .prov("tuned:WX1"),
