@@ -4405,8 +4405,9 @@ mod starting_stores_tests {
             // the grazing lineages' reserve cap of 0.5; the lanternjaw's is 1.0).
             let full = sc.body_max + sc.reserve_of(sc.body_max);
             assert!(
-                // The chorister (roster R3) keeps the lanternjaw's reserve cap.
-                matches!(founder, Founder::Lanternjaw | Founder::Chorister) ||
+                // The chorister (roster R3) keeps the lanternjaw's reserve cap; the bellwing
+                // (BELLWING) carries an egg load.
+                matches!(founder, Founder::Lanternjaw | Founder::Chorister | Founder::Bellwing) ||
                 ((full - body) - sc.body_max).abs() < 1e-15,
                 "{founder:?}: headroom {} is not one body_max",
                 full - body

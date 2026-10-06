@@ -206,6 +206,26 @@ fn world_of(args: &[String]) -> Web {
     if let Some(n) = arg(args, "lj=") {
         set_hunters(&mut w, n.parse().unwrap());
     }
+    // BELLWING: the bellwing's nectar response `psi_max:half:hill` (interference kept) and the
+    // kill rates on it `lj:vh` (per hunting body-second per prey body, the hunters' units), to
+    // run the loop against the sim's measured intake and losses.
+    if let Some(v) = arg(args, "bwnectar=") {
+        let p: Vec<f64> = v.split(':').map(|x| x.parse().unwrap()).collect();
+        let r = &mut w.fauna.fits.of_mut(Founder::Bellwing).response[Food::Nectar.index()];
+        let mut resp = r.unwrap_or(cubarium_webmodel::fauna::fits::Response::holling(0.0, 0.0));
+        resp.psi_max = p[0];
+        resp.half = p[1];
+        resp.hill = p[2];
+        *r = Some(resp);
+    }
+    if let Some(v) = arg(args, "bwkill=") {
+        let p: Vec<f64> = v.split(':').map(|x| x.parse().unwrap()).collect();
+        for (h, rate) in [(Founder::Lanternjaw, p[0]), (Founder::Chorister, p[1])] {
+            if let Some(hf) = w.fauna.fits.hunters[h.index()].as_mut() {
+                hf.kill[Founder::Bellwing.index()] = rate;
+            }
+        }
+    }
     if let Some(only) = arg(args, "only=") {
         let keep: Vec<&str> = only.split(',').collect();
         for f in Founder::ALL {

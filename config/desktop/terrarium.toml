@@ -156,7 +156,7 @@ founding_count = 6
 core.growth_max_per_s = 0.000013379177104092358
 core.reproduction.birth_interval_s = 1097.8253659193513
 core.reproduction.incubation_s = 182.97089431989187
-core.reproduction.surplus_hold_s = 548.9126829596756
+core.reproduction.surplus_hold_s = 182.97089431989187
 
 # F3: the seedporter, a diurnal fruit eater that climbs stems and vine faces and glides
 # between groves, founded on the ground within its roost reach of fruit (lanternberry

@@ -88,7 +88,10 @@ use crate::Fauna;
 //     failed-visit marks and visit, `Percept::{expect, expect_tick, last_sip}`, the lanternjaw
 //     `DarkActive`, the light ledger lines (`light_budget`, `stalled_visits`, `sipped_visits`,
 //     `naive_kills`).
-pub const SCHEMA: u32 = 52;
+// 53: BELLWING — `LightConfig::{lure_uv, lure_scent}` (the lure mimics a flower); the
+//     bellwing's r-strategist reproduction defaults. (CHURN and LIFE-HISTORY also took 53:
+//     renumber at merge.)
+pub const SCHEMA: u32 = 53;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

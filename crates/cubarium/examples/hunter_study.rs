@@ -583,6 +583,62 @@ fn hunk_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
 /// (gross) per bellwing-hour, glowcap visits begun / failed / left (closed as failed when it
 /// flew away; 0 where the build has no such rule) / ended in a sip, flower visits begun /
 /// failed, and the living bellwings' mean UV and cyan expectations now.
+/// **BELLWING: lure encounters**, sampled once a sim second: seconds with a lit lure (an
+/// awake lanternjaw's lure lit), with an awake bellwing in flight, with both, and with the
+/// nearest pair (3D, bellwing to lure point) within 4, 10 and 20 m.
+#[derive(Clone, Copy, Default)]
+struct LureMeet {
+    lit_s: u64,
+    bw_s: u64,
+    both_s: u64,
+    near: [u64; 3],
+}
+
+impl LureMeet {
+    fn tick(&mut self, sim: &Sim) {
+        let f = sim.fauna().view();
+        if f.tick % u64::from(TICK_HZ) != 0 {
+            return;
+        }
+        let v = sim.world().config().voxel_m;
+        let ring = f64::from(sim.world().config().width) * v;
+        let lures: Vec<(f64, f64, f64)> = f
+            .animals
+            .iter()
+            .filter(|a| a.state != cubarium_voxel_fauna::State::Asleep && a.attached.is_none() && a.founder_state.lure > 0.0)
+            .filter_map(|a| cubarium_voxel_fauna::light::lure_point(&f.config, a, v))
+            .collect();
+        let bws: Vec<(f64, f64, f64)> = f
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(Founder::Bellwing) && a.state != cubarium_voxel_fauna::State::Asleep && a.mobility.mode == cubarium_voxel_fauna::MobilityMode::Fly)
+            .map(|a| (a.pose.x, a.pose.z, a.pose.y_m))
+            .collect();
+        self.lit_s += u64::from(!lures.is_empty());
+        self.bw_s += u64::from(!bws.is_empty());
+        if lures.is_empty() || bws.is_empty() {
+            return;
+        }
+        self.both_s += 1;
+        let mut best = f64::INFINITY;
+        for &(lx, lz, ly) in &lures {
+            for &(bx, bz, by) in &bws {
+                let dx = (bx - lx).rem_euclid(ring);
+                let dx = dx.min(ring - dx);
+                let d = (dx * dx + (bz - lz).powi(2) + (by - ly).powi(2)).sqrt();
+                best = best.min(d);
+            }
+        }
+        for (k, r) in [4.0, 10.0, 20.0].into_iter().enumerate() {
+            self.near[k] += u64::from(best <= r);
+        }
+    }
+
+    fn line(&self) -> String {
+        format!("lit_s={},bw_awake_s={},both_s={},near4_s={},near10_s={},near20_s={}", self.lit_s, self.bw_s, self.both_s, self.near[0], self.near[1], self.near[2])
+    }
+}
+
 fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
     let b = Founder::Bellwing.index();
     let hours = (l.founder_ticks_by_founder[b] - a.founder_ticks_by_founder[b]) as f64 / f64::from(TICK_HZ) / 3600.0;
@@ -598,8 +654,15 @@ fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
         n += 1;
     }
     let m = |s: f64| if n > 0 { s / n as f64 } else { f64::NAN };
+    // BELLWING: the lure's visits, the bellwing's eggs and its kills by killer.
+    let d = |x: &[u64; Founder::COUNT], y: &[u64; Founder::COUNT]| y[b].saturating_sub(x[b]);
+    let killed = |by: Founder| l.departed_founder(Founder::Bellwing, Departure::Killed { by }) - a.departed_founder(Founder::Bellwing, Departure::Killed { by });
+    let lj = LJ.index();
+    let lj_hours = (l.alive_ticks_by_founder[lj] - a.alive_ticks_by_founder[lj]) as f64 / f64::from(TICK_HZ) / 3600.0;
+    let budget = |m: cubarium_voxel_fauna::light::LightMode| l.light_budget[b][m as usize] - a.light_budget[b][m as usize];
+    let eggs_now: u32 = fauna.view().clutches.iter().filter(|c| c.lineage == Founder::Bellwing).map(|c| c.count).sum();
     format!(
-        "bw_hours={:.3},nectar_per_bwh={:.5},glowcap_visits={},glowcap_failed={},glowcap_left={},glowcap_sipped={},flower_visits={},flower_failed={},bellwings={n},uv_expect={:.3},cyan_expect={:.3}",
+        "bw_hours={:.3},nectar_per_bwh={:.5},glowcap_visits={},glowcap_failed={},glowcap_left={},glowcap_sipped={},flower_visits={},flower_failed={},bellwings={n},uv_expect={:.3},cyan_expect={:.3},lure_visits={},lure_failed={},lure_kills={},bw_laid={},bw_hatched={},bw_clutches={},bw_eggs_now={eggs_now},bw_nest_refusals={},bw_ceiling_refusals={},bw_killed_lj={},bw_killed_vh={},bw_killed_sp={},bw_starved={},bw_aged={},lj_hours={:.3},bw_killed_lj_per_ljh={:.4},approach_lure={},inspect_lure={},repel={},light_samples={}",
         hours,
         if hours > 0.0 { nectar / hours } else { f64::NAN },
         l.beacon_visits[b][1] - a.beacon_visits[b][1],
@@ -610,6 +673,25 @@ fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
         l.failed_visits[b][0] - a.failed_visits[b][0],
         m(uv),
         m(cyan),
+        l.beacon_visits[b][2] - a.beacon_visits[b][2],
+        l.failed_visits[b][2] - a.failed_visits[b][2],
+        d(&a.lure_kills, &l.lure_kills),
+        d(&a.eggs_laid_by_founder, &l.eggs_laid_by_founder),
+        d(&a.eggs_hatched_by_founder, &l.eggs_hatched_by_founder),
+        d(&a.clutches_by_founder, &l.clutches_by_founder),
+        d(&a.nest_refusals_by_founder, &l.nest_refusals_by_founder),
+        d(&a.ceiling_refusals_by_founder, &l.ceiling_refusals_by_founder),
+        killed(LJ),
+        killed(Founder::Chorister),
+        killed(Founder::Seedporter),
+        l.departed_founder(Founder::Bellwing, Departure::Starved) - a.departed_founder(Founder::Bellwing, Departure::Starved),
+        l.departed_founder(Founder::Bellwing, Departure::Aged) - a.departed_founder(Founder::Bellwing, Departure::Aged),
+        lj_hours,
+        if lj_hours > 0.0 { killed(LJ) as f64 / lj_hours } else { f64::NAN },
+        budget(cubarium_voxel_fauna::light::LightMode::ApproachLure),
+        budget(cubarium_voxel_fauna::light::LightMode::InspectLure),
+        budget(cubarium_voxel_fauna::light::LightMode::Repel),
+        (0..cubarium_voxel_fauna::light::LightMode::COUNT).map(|k| l.light_budget[b][k] - a.light_budget[b][k]).sum::<u64>(),
     )
 }
 
@@ -858,6 +940,7 @@ fn run(args: &[String]) {
     let mut ages = grazer_ages(&sim);
     let mut vh_kills_before = vh_grazer_kills(&sim);
     let (mut age_win, mut age_all) = ([0u64; 2], [0u64; 2]);
+    let (mut meet_win, mut meet_all) = (LureMeet::default(), LureMeet::default());
     let mut hunts = Hunts { log: arg(args, "hunt_log=") == Some("1"), chase_kills: sim.fauna().view().ledger.pack_chase_kills, ..Hunts::default() };
     sample(&sim, &params, &arm, minute0, &lw, &lw, &win, &mut track, 0, 0.0);
     for minute in minute0 + 1..=end {
@@ -912,6 +995,7 @@ fn run(args: &[String]) {
             ages = ages_now;
             before = now;
             hunts.tick(&sim, &params);
+            meet_win.tick(&sim);
         }
         if (minute - minute0) % every == 0 || minute == end {
             let ms = t0.elapsed().as_secs_f64() * 1000.0 / ticks_in_window.max(1) as f64;
@@ -933,6 +1017,14 @@ fn run(args: &[String]) {
             println!("hunk,{arm},{minute},{}", hunk_line(&lw, &l));
             println!("ffx,{arm},{minute},open_exits={},bared_entries={}", l.vigil.open_exits[GRAZER.index()] - lw.vigil.open_exits[GRAZER.index()], l.vigil.bared_entries[GRAZER.index()] - lw.vigil.bared_entries[GRAZER.index()]);
             println!("bwl,{arm},{minute},{}", bwl_line(&sim, &lw, &l));
+            println!("meet,{arm},{minute},{}", meet_win.line());
+            for (x, y) in [(&mut meet_all.lit_s, meet_win.lit_s), (&mut meet_all.bw_s, meet_win.bw_s), (&mut meet_all.both_s, meet_win.both_s)] {
+                *x += y;
+            }
+            for k in 0..3 {
+                meet_all.near[k] += meet_win.near[k];
+            }
+            meet_win = LureMeet::default();
             /*}HUNK*/
             println!("gait,{arm},{minute},{}", gait_line(&lw, &l));
             println!("hunt,{arm},{minute},{}", hunts.win.line());
@@ -981,6 +1073,7 @@ fn run(args: &[String]) {
     println!("sumhunk,{arm},{},{}", minute0, hunk_line(&l0, &l));
     println!("sumffx,{arm},{},open_exits={},bared_entries={}", minute0, l.vigil.open_exits[GRAZER.index()] - l0.vigil.open_exits[GRAZER.index()], l.vigil.bared_entries[GRAZER.index()] - l0.vigil.bared_entries[GRAZER.index()]);
     println!("sumbwl,{arm},{},{}", minute0, bwl_line(&sim, &l0, &l));
+    println!("summeet,{arm},{},{}", minute0, meet_all.line());
     /*}HUNK*/
     println!("sumgait,{arm},{},{}", minute0, gait_line(&l0, &l));
     println!("sumhunt,{arm},{},{}", minute0, hunts.all.line());

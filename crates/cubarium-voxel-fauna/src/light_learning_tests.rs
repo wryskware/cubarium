@@ -219,7 +219,10 @@ fn the_preference_relaxes_back_toward_innate_over_the_forgetting_time() {
 fn a_naive_bellwing_approaches_a_still_lit_lure() {
     let world = clock_off(53);
     let flora = Flora::new(FloraConfig::default());
-    let c = config(0.3, 1e9);
+    let mut c = config(0.3, 1e9);
+    // The cyan lure (BELLWING: a lure that mimics a flower is UV to this eye; see
+    // `bellwing_lure_tests`).
+    c.light.lure_uv = 0.0;
     let lure_scene = |fauna: &mut Fauna| {
         let lj = introduce(fauna, &world, LJ, StartingStores::FULL);
         place(fauna, lj, MID_X + 2.5, LANE_Z, WEST);

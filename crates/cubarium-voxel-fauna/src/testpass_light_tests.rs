@@ -320,7 +320,10 @@ fn a_lure_kill_is_counted_naive_only_while_the_prey_is_naive_and_the_books_close
     let world = clock_off(308);
     for learned in [false, true] {
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(config(0.5));
+        // The cyan lure (BELLWING: one that mimics a flower is UV to a bellwing's eye).
+        let mut c = config(0.5);
+        c.light.lure_uv = 0.0;
+        let mut fauna = Fauna::new(c);
         fauna.set_births_enabled(false);
         let bw = bellwing(&mut fauna, &world, 3.0);
         let now = fauna.tick;

@@ -1673,6 +1673,27 @@ impl FounderPhysiology {
                 // full flower gives about nine tenths of a sip and a nearly drained one
                 // crumbs. Not a mass (the food's stock does not scale with the eater).
                 core.bite_half_stock = 0.002;
+                // BELLWING (Wrysk 2026-10-06: "bellwing should have fast reproduction"): an
+                // r-strategist moth, an income breeder whose eggs are paid from nectar
+                // (Boggs 1997; Jervis, Boggs & Ferns 2005), on the egg-layer machinery:
+                // - small young: a hatchling of a tenth of the adult (`body_min`; a moth's
+                //   egg is ~0.1-2 % of the female, Garcia-Barros 2000 — no caterpillar here,
+                //   so the smallest flyer), its egg the hatchling plus a sliver of reserve;
+                // - early breeding at half the adult body (`birth_body`; moths lay within
+                //   the first days of an adult life of one to two weeks, Fitt 1989);
+                // - a clutch from surplus, up to six eggs, waiting at most 300 s to fill
+                //   it: fecundity grows with the female's stores (Honek 1993), so a flush
+                //   of flowers is laid out as large clutches; a gravid reserve of up to 0.8
+                //   of the body (the egg load, Jervis et al. 2005) holds the full clutch;
+                // - the surplus judged over 300 s (was 900 s).
+                core.body_min = 0.1 * core.body_max;
+                core.birth_body = 0.5 * core.body_max;
+                core.reserve_cap = 0.8;
+                // The egg: the hatchling and a sixth of it again as its reserve.
+                core.reproduction.egg_organic = core.body_min * (1.0 + 1.0 / 6.0);
+                core.reproduction.clutch_max = 6;
+                core.reproduction.clutch_hold_max_s = 300.0;
+                core.reproduction.surplus_hold_s = 300.0;
                 FounderPhysiology {
                     core,
                     // Cruise 8 BL/s, 1 m/s at 0.125 m (§3.3).
