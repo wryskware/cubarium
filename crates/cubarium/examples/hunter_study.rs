@@ -5,7 +5,12 @@
 //! ```text
 //! hunter_study found seed=N save=DIR [minutes=120] [lanternjaws=3|1,3] [config=FILE] [set=P=V ...] [threads=T]
 //! hunter_study run   load=DIR/mM arm=NAME hours=H [every=10] [reseed=N] [config=FILE] [set=...] [run=DIR ...]
+//! hunter_study pack  load=DIR/mM [minutes=10] [sample_s=30] [reseed=N] [config=FILE] [set=...]
 //! ```
+//!
+//! `pack` (VEILHOUND-DIAG) prints every Veilhound's state each `sample_s` seconds — tactic
+//! state, latch, fullness, distance to its den, nearest frondgrazer — with the pack's target
+//! and feast and the chase and strike counters.
 //!
 //! `reseed=N` (N > 0) re-keys the loaded world's draws (weather, and the layers' keyed draws)
 //! by `N`: replicates of one save under other weather and draws.
@@ -85,6 +90,7 @@ fn main() {
         Some("found") => found(&args),
         Some("run") => run(&args),
         Some("probe") => probe(&args),
+        Some("pack") => pack_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -188,6 +194,89 @@ fn probe(args: &[String]) {
             a.hunt.samples,
             a.strike.is_some(),
         );
+    }
+}
+
+/// `pack load=DIR minutes=M [sample_s=30] [reseed=N] [config=...] [set=...]`: the Veilhound
+/// diagnosis (VEILHOUND-DIAG): every chorister's state every `sample_s` seconds, and the
+/// strike / chase counters per minute.
+fn pack_probe(args: &[String]) {
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(10, |m| m.parse().unwrap());
+    let sample_s: u64 = arg(args, "sample_s=").map_or(30, |m| m.parse().unwrap());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (mut world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    if let Some(n) = arg(args, "reseed=").and_then(|n| n.parse::<u64>().ok()).filter(|&n| n > 0) {
+        let seed = world.config().seed ^ n.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        world.reseed(seed);
+    }
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let ch = Founder::Chorister;
+    let p = *params.fauna.founder(ch);
+    let man = params.fauna.manifest(ch);
+    let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+    let v = sim.world().config().voxel_m;
+    println!("cone_range_m={:.2} cruise={:.2} pack={:?}", man.cone_range_m, man.cruise_m_per_s, p.pack);
+    let every = sample_s * u64::from(TICK_HZ);
+    let total = minutes * 60 * u64::from(TICK_HZ);
+    let l0 = sim.fauna().view().ledger.clone();
+    for t in 0..=total {
+        if t > 0 {
+            sim.step();
+        }
+        if t % every != 0 {
+            continue;
+        }
+        let fa = sim.fauna();
+        let view = fa.view();
+        let l = &view.ledger;
+        let sec = t / u64::from(TICK_HZ);
+        println!(
+            "T,{},{}s,chases={},chase_kills={},ch_strikes={},strikes_on_browser={},daylight_hint",
+            minute0, sec,
+            l.pack_chases - l0.pack_chases,
+            l.pack_chase_kills - l0.pack_chase_kills,
+            l.strikes_by_founder[ch.index()] - l0.strikes_by_founder[ch.index()],
+            l.strikes_on_by_founder[Founder::Browser.index()] - l0.strikes_on_by_founder[Founder::Browser.index()],
+        );
+        for r in fa.packs() {
+            println!("P,{sec},pack={},den=({},{},{}),breeder={:?},target={:?},feast={:?},abandoned={:?}", r.id, r.den.x, r.den.y, r.den.z, r.breeder, r.target, r.feast, r.abandoned);
+        }
+        for a in view.animals.iter().filter(|a| a.founder == Some(ch)) {
+            let cap = p.core.reserve_of(a.body).max(1e-300);
+            let k = p.gut.capacity(a.body).max(1e-300);
+            let (dden, pk, pup) = match a.pack {
+                Some(m) => {
+                    let den = fa.pack(m.pack).map(|r| r.den);
+                    let d = den.map_or(f64::NAN, |d| {
+                        let (cx, cz) = ((f64::from(d.x) + 0.5) * v, (f64::from(d.z) + 0.5) * v);
+                        let (dx, dz) = wdelta(a.pose.x, a.pose.z, cx, cz, ring);
+                        (dx * dx + dz * dz).sqrt()
+                    });
+                    (d, m.pack as i64, m.pup)
+                }
+                None => (f64::NAN, -1, false),
+            };
+            let (fx, fz) = (a.pose.heading_rad.sin(), a.pose.heading_rad.cos());
+            let mut near = f64::INFINITY;
+            let mut near_ahead = f64::INFINITY;
+            for o in view.animals.iter().filter(|o| o.founder == Some(Founder::Browser)) {
+                let (dx, dz) = wdelta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+                let d = (dx * dx + dz * dz).sqrt();
+                near = near.min(d);
+                if dx * fx + dz * fz >= 0.0 {
+                    near_ahead = near_ahead.min(d);
+                }
+            }
+            println!(
+                "A,{sec},id={},pack={pk},pup={pup},body={:.3},state={:?},rest={:?},eating={},emerg={},fullness={:.3},stomach/K={:.3},d_den={:.1},homing={},speed={:.2},site=({},{},{}),near_browser={:.1},ahead={:.1},hunt={:?},strike={}",
+                a.id, a.body, a.state, a.rest, a.eating, a.emergency, a.reserve / cap, a.stomach.organic() / k, dden, a.homing_ticks, a.speed_m_s, a.site.x, a.site.y, a.site.z, near, near_ahead, a.hunt.mode, a.strike.is_some(),
+            );
+        }
     }
 }
 
@@ -514,4 +603,12 @@ fn sample(
             .collect::<Vec<_>>()
             .join(" "),
     );
+}
+
+fn wdelta(fx: f64, fz: f64, tx: f64, tz: f64, ring: f64) -> (f64, f64) {
+    let mut dx = (tx - fx).rem_euclid(ring);
+    if dx > 0.5 * ring {
+        dx -= ring;
+    }
+    (dx, tz - fz)
 }

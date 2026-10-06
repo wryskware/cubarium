@@ -473,6 +473,7 @@ pub(crate) fn steer(
     clock_on: bool,
     daylight: f64,
     held: Actions,
+    occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Option<Actions> {
     let a = fauna.animals[i];
     let m = a.pack?;
@@ -626,6 +627,13 @@ pub(crate) fn steer(
 
     // The pack's carcass first (repair 3 item 5): while its carcass lasts, a member that wants
     // food eats there, and no new target is taken.
+    //
+    // With the meal rule ([`crate::HuntConfig::meal_first`]) a member walks to it as the meal
+    // step walks to a carcass — along its route graph, given up and remembered fruitless after
+    // `patrol_give_up_s` — and a member that cannot reach it, or has given it up, is not held
+    // by it: it may hunt (VEILHOUND-DIAG: adults walked straight at a feast on the face below
+    // their ledge, which their disc could not step down to, for the whole of a 6-minute probe
+    // while the breeder starved, and took no target meanwhile).
     let joins = a.eating || a.emergency;
     let mut feast_usable = false;
     if let Some(fs) = fauna.pack(own).and_then(|p| p.feast) {
@@ -635,8 +643,15 @@ pub(crate) fn steer(
                 if at_feast(fs) {
                     return Some(clamp(fauna, eat));
                 }
-                let (fx, fz) = centre(fs, v);
-                return Some(clamp(fauna, go_to(&a, fx, fz, ring, 0.0, 1.0)));
+                if fauna.config.hunt.meal_first {
+                    match crate::hunt::meal_step_to(fauna, i, view, fv, fs) {
+                        Some(go) => return Some(clamp(fauna, go)),
+                        None => feast_usable = false,
+                    }
+                } else {
+                    let (fx, fz) = centre(fs, v);
+                    return Some(clamp(fauna, go_to(&a, fx, fz, ring, 0.0, 1.0)));
+                }
             }
         } else {
             let eaten = fauna.pack(own).map_or(0.0, |p| p.feast_eaten);
@@ -840,7 +855,47 @@ pub(crate) fn steer(
         }
     }
 
-    // Its own heuristic: the lanternjaw's ambush, with no lure.
+    // Its own heuristic: the lanternjaw's ambush, with no lure — but not its hold on a body
+    // it does not take (VEILHOUND-DIAG). The ambush stalks and waits on any body in its cone,
+    // and a pack keeps its members in one another's cones: a hungry member crept up on a
+    // packmate until they stood on one point and waited there, the wait renewed every sample
+    // the packmate stayed in sight, so the pack stood still for four hours (the main arm,
+    // every seed). Likewise its stop for carrion at its mouth where no carcass stands (a smear
+    // the lanternjaw's patrol already passes over). With the world's patrol on
+    // ([`crate::HuntConfig::patrol`]), a hungry member with no target whose ambush holds it
+    // with feed held (still, or creeping at the stalk) when no prey its pack takes is within
+    // its sight ahead, and no carcass is at its mouth, patrols as the lanternjaw does
+    // ([`crate::hunt::steer`]): patch to patch along its prey's food.
+    if joins && fauna.config.hunt.patrol && fauna.pack(own).and_then(|p| p.target).is_none() && held.feed > 0.0 && held.forward <= fauna.config.teachers.stalk {
+        let window = window_body(fauna, i, ring);
+        let sight = manifest.cone_range_m;
+        let (fx, fz) = a.pose.forward();
+        let prey_ahead = fauna.animals.iter().any(|o| {
+            if o.id == a.id || o.pack.is_some_and(|om| om.pack == own) {
+                return false;
+            }
+            let (dx, dz, d) = delta(&a, o.pose.x, o.pose.z, ring);
+            d <= sight && dx * fx + dz * fz >= 0.0 && crate::predation::is_prey_in_window(&fauna.config, &a, o, window)
+        });
+        if !prey_ahead && !crate::hunt::mouth_on_carcass(fv, view, &a, &geometry) {
+            // The breeder leads the search: a member keeps within the follow radius of
+            // a breeder that wants food too, and the breeder (or a member whose breeder is
+            // fed) patrols — so the pack moves together and a member that meets prey has a
+            // packmate by it.
+            let leader = rec
+                .breeder
+                .filter(|&b| b != a.id)
+                .and_then(|b| adults.iter().find(|o| o.id == b))
+                .filter(|b| b.eating || b.emergency)
+                .copied();
+            if let Some(b) = leader {
+                return Some(clamp(fauna, go_to(&a, b.pose.x, b.pose.z, ring, t.follow_radius_m, 0.0)));
+            }
+            if let Some((go, _)) = crate::hunt::steer(fauna, i, view, fv, occupancy) {
+                return Some(clamp(fauna, go));
+            }
+        }
+    }
     Some(clamp(fauna, held))
 }
 

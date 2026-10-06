@@ -437,3 +437,99 @@ fn veilhound_meal(meal_first: bool) -> f64 {
     assert_closes(&fauna, "after the Veilhound's meal");
     ate
 }
+
+// ------------------------------------------------------------------ VEILHOUND-DIAG
+
+/// A Veilhound pack founded on `den` with its members' heuristics, every member hungry (the
+/// eating latch on); the members' ids, the breeder first.
+fn hungry_pack(fauna: &mut Fauna, world: &World, den: Site) -> Vec<u64> {
+    assert!(fauna.apply(world, Command::FoundPack { den, founder: Founder::Chorister, stores: HUNTING, heading_rad: EAST }));
+    let teachers = fauna.config.teachers;
+    let breeder = fauna.packs()[0].breeder;
+    let mut members: Vec<u64> = fauna.animals.iter().filter(|a| a.founder == Some(Founder::Chorister)).map(|a| a.id).collect();
+    members.sort_by_key(|&id| Some(id) != breeder);
+    for &id in &members {
+        fauna.controllers.set(id, crate::controller::heuristic(Founder::Chorister, teachers));
+        animal_mut(fauna, id).eating = true;
+    }
+    members
+}
+
+/// A hungry Veilhound pack between hunts, with no prey and no carrion anywhere, its members
+/// in pairs facing each other inside their sight: no member holds its feed — the lanternjaw's
+/// ambush, which the Veilhound's heuristic is, stalks and waits on any body in its cone, and
+/// held a pack waiting on its own members — and a member walks farther than the gap between
+/// the pairs (a stalk on its partner closes at most that gap).
+#[test]
+fn a_hungry_veilhound_pack_does_not_wait_on_its_own_members() {
+    let world = clock_off(17);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(quick_meal_config(patrol(), Founder::Browser));
+    let members = hungry_pack(&mut fauna, &world, Site { x: 24, y: SURFACE_Y, z: 6 });
+    let gap = 0.5 * fauna.config.manifest(Founder::Chorister).cone_range_m;
+    for (k, &id) in members.iter().enumerate() {
+        let (x, z) = (4.0 + 3.0 * (k / 2) as f64, LANE_Z);
+        if k % 2 == 0 {
+            place(&mut fauna, id, x, z, EAST);
+        } else {
+            place(&mut fauna, id, x + gap, z, WEST);
+        }
+    }
+    let start: Vec<(f64, f64)> = members.iter().map(|&id| (animal(&fauna, id).pose.x, animal(&fauna, id).pose.z)).collect();
+    let mut fed_holds = 0u32;
+    let mut walked = 0.0f64;
+    for _ in 0..200 {
+        fauna.step_with(&world, &mut flora, 1);
+        for (k, &id) in members.iter().enumerate() {
+            let Some(a) = fauna.view().animal(id).copied() else { continue };
+            if a.founder_state.held.feed > 0.0 {
+                fed_holds += 1;
+            }
+            let (dx, dz) = crate::pose::wrapped_delta(start[k].0, start[k].1, a.pose.x, a.pose.z, 48.0 * VOXEL_M);
+            walked = walked.max((dx * dx + dz * dz).sqrt());
+        }
+    }
+    assert_eq!(fed_holds, 0, "no member holds its feed with nothing to eat or take in sight");
+    assert!(walked > gap, "a member walks farther than a stalk on its partner could: {walked} ≤ {gap}");
+    assert_closes(&fauna, "after the pack's search");
+}
+
+/// A hungry Veilhound pack whose feast lies on a ledge above the step its members can climb,
+/// and a frondgrazer in sight ahead of a member on the floor: with the meal rule the pack
+/// is not held by a feast it cannot reach — it takes the grazer as its target. (Main walked
+/// every hungry member straight at the feast and took no target while it lasted.)
+#[test]
+fn a_veilhound_pack_is_not_held_by_a_feast_it_cannot_reach() {
+    let mut fauna = Fauna::new(quick_meal_config(patrol(), Founder::Browser));
+    let (x0, x1) = (7.0, 9.0);
+    let rise = fauna.config.founder(Founder::Chorister).step_limits(VOXEL_M).up + 2;
+    let mut world = plain_of_height(
+        cubarium_voxel::weather::DayClock { mode: cubarium_voxel::weather::DayMode::Off, ..Default::default() },
+        18,
+        8 + rise,
+    );
+    for z in 0..12u32 {
+        for x in (x0 / VOXEL_M) as i64..(x1 / VOXEL_M) as i64 {
+            for y in SURFACE_Y + 1..=SURFACE_Y + rise {
+                world.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Soil });
+            }
+        }
+    }
+    let top = SURFACE_Y + rise;
+    let mut flora = Flora::new(FloraConfig::default());
+    let members = hungry_pack(&mut fauna, &world, Site { x: 4, y: SURFACE_Y, z: 6 });
+    for (k, &id) in members.iter().enumerate() {
+        place(&mut fauna, id, 2.0 + 0.6 * (k / 2) as f64, 0.75 + 1.5 * (k % 2) as f64, EAST);
+    }
+    let feast = carcass_at(&mut flora, 8.0, LANE_Z, top, 5.0);
+    let pack = fauna.packs()[0].id;
+    fauna.pack_mut(pack).expect("the pack").feast = Some(feast);
+    let (px, pz) = ahead_of(&fauna, members[0], 0.5 * fauna.config.manifest(Founder::Chorister).cone_range_m);
+    let prey = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
+    place(&mut fauna, prey, px, pz, EAST);
+    drive(&mut fauna, prey, 0.0, false);
+    let chased = step_until(&mut fauna, &world, &mut flora, 100, |f| f.ledger.pack_chases > 0);
+    assert!(chased.is_some(), "the pack takes the grazer in sight instead of walking at a feast it cannot reach");
+    assert!(flora.view().ground_at(feast).is_some_and(|g| g.carcass.is_some()), "the feast still stands: it did not end the hold");
+    assert_closes(&fauna, "after the unreachable feast");
+}

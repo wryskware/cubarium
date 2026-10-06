@@ -596,6 +596,18 @@ pub(crate) fn mouth_on_carcass(fv: &FloraView<'_>, view: &VoxelView<'_>, a: &cra
 /// off so nothing is struck on the way. A walk that has not reached its carcass after
 /// [`HuntConfig::patrol_give_up_s`] remembers it fruitless. `None`: no meal to go to.
 pub(crate) fn meal_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
+    meal_step_among(fauna, i, view, fv, None)
+}
+
+/// [`meal_step`] to one carcass, `site` (the Veilhound pack's feast), at any distance: the
+/// same walk — on the route field when [`HuntConfig::reachable_only`], given up and
+/// remembered fruitless after [`HuntConfig::patrol_give_up_s`]. `None`: it is not on the
+/// hunter's route field, or remembered fruitless, or the meal step does not apply.
+pub(crate) fn meal_step_to(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, site: Site) -> Option<Actions> {
+    meal_step_among(fauna, i, view, fv, Some(site))
+}
+
+fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, only: Option<Site>) -> Option<Actions> {
     let cfg = fauna.config.hunt;
     let a = fauna.animals[i];
     if !cfg.meal_first || !a.eating || a.attached.is_some() || a.strike.is_some() {
@@ -621,14 +633,17 @@ pub(crate) fn meal_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &
     }
     let scan = cfg.carcass_scan_m.max(0.0);
     let centre = |s: Site| ((f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v);
-    let near: Vec<(Site, f64)> = fauna
-        .carcass_sites(fv)
+    let sites: Vec<Site> = match only {
+        Some(s) => vec![s],
+        None => fauna.carcass_sites(fv).to_vec(),
+    };
+    let near: Vec<(Site, f64)> = sites
         .iter()
         .filter_map(|&s| {
             let (x, z) = centre(s);
             let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
             let d = (dx * dx + dz * dz).sqrt();
-            (d <= scan && !a.hunt.is_fruitless(&cfg, x, z, tick, ring)).then_some((s, d))
+            ((only.is_some() || d <= scan) && !a.hunt.is_fruitless(&cfg, x, z, tick, ring)).then_some((s, d))
         })
         .collect();
     let leave = |fauna: &mut Fauna, mut m: HuntMemory| {
