@@ -258,6 +258,10 @@ fn founder_rows() -> Vec<Row> {
         r("senses.tremor_m", "m", nonneg, "tremor's range for bodies on the ground (0: none)"),
         r("senses.tremor_min", "organic x m/s / m^2", nonneg, "the faintest footfall felt (mass x speed / d^2, through terrain x occlusion)"),
         r("senses.smell_min", "scent units", nonneg, "the faintest scent level smelled on the scent field (0: no smell)").log(),
+        // `senses.uv` is a switch: no row.
+        r("senses.light_m", "m", nonneg, "the photoreceptor's range for a beacon (3D; 0: no light sense)"),
+        r("senses.light_min", "contrast", nonneg, "the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2)").log(),
+        r("senses.loom_m", "m", nonneg, "a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none)"),
         r("senses.feeding_sight_fraction", "fraction", nonneg, "S2: head down cropping between scans, sight reaches this fraction of its range (1: no change)"),
         r("senses.kin_tracks", "bodies", nonneg, "S2: at most this many of its own lineage weighed per remote sensing, nearest first"),
         // S2's ground response (`Vigilance`); `vigilance.mode` is a switch: no row.
@@ -594,6 +598,35 @@ fn knob_rows() -> Vec<Row> {
         sk("deposit_per_s", "scent units per organic unit per s", nonneg, "what a standing body lays, by its organic matter").search(0.1, 10.0).log(),
         sk("carrion_per_s", "scent units per organic unit per s", nonneg, "what carrion lays, by its stock").search(0.1, 10.0).log(),
         sk("step_m", "m", nonneg, "neighbouring surface faces connect within this height difference, with open air over the lower one").search(0.0, 2.0),
+        sk("nectar_per_s", "scent units per s", nonneg, "what a flower holding nectar lays on the surface under it (the nectar channel)").search(0.1, 10.0).log(),
+    ]);
+
+    // `fauna.light.*`: light and flight (S3).
+    let lk = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.light.{path}"), unit, range, what)
+    };
+    rows.extend([
+        lk("flower_reflectance", "brightness per unit light", nonneg, "a nectar flower's brightness (UV) per unit of the light falling on it").search(0.1, 4.0),
+        lk("glowcap_emission", "brightness", nonneg, "a glowcap's own light").search(0.0, 2.0),
+        lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light").search(0.0, 4.0),
+        lk("background_floor", "light", pos, "a beacon's contrast is its brightness over the light around it plus this (the darkest background)").search(0.01, 0.5).log(),
+        lk("half_m", "m", pos, "a beacon's received level halves at this distance").search(0.25, 4.0),
+        lk("lure_height_fraction", "x body height", nonneg, "the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle"),
+        lk("visit_m", "m", nonneg, "a body this close (horizontally) to a beacon is inspecting it").search(0.1, 1.0),
+        lk("visit_s", "s", nonneg, "an inspection with no meal by then fails").search(0.5, 20.0).log(),
+        lk("mark_s", "s", nonneg, "a failed visit marks the place 'no reward here' for this long").search(10.0, 1800.0).log(),
+        lk("mark_radius_m", "m", nonneg, "a mark covers beacons within this of its centre").search(0.1, 2.0),
+        lk("lift_per_m", "lift per m", nonneg, "a flyer approaching a beacon climbs or drops toward its height at this lift per metre"),
+        lk("near_m", "m", nonneg, "inside this of a beacon a flyer slows to near_forward"),
+        lk("near_forward", "fraction", fraction, "a flyer's forward effort near a beacon"),
+        lk("glow_scent_gate", "chem response", fraction, "a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this").search(0.0, 0.5),
+        // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming.
+        lk("uv_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a UV reflector (flowers); learned ones relax back to it"),
+        lk("cyan_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures)"),
+        lk("learn_rate", "fraction", fraction, "S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way").search(0.05, 1.0),
+        lk("forget_s", "s", pos, "S3b: a learned expectation relaxes back to innate with this time constant").search(300.0, 21600.0).log(),
+        lk("expect_min", "probability", fraction, "S3b: a still beacon whose class is expected to pay less than this is not approached").search(0.0, 0.5),
+        lk("loom_tau_s", "s", nonneg, "S3b: a moving body looms only while it would reach the eye within this (distance / closing speed; 0: any moving body)").search(0.2, 3.0),
     ]);
 
     // `fauna.founding.*`: the seeder's founders.

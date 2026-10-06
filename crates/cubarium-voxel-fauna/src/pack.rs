@@ -500,6 +500,14 @@ pub(crate) fn prospect(fauna: &Fauna, i: usize, o: &Animal, t: &Track, n: u32, r
     if !takeable(fauna, i, t) {
         return 0.0;
     }
+    // A flyer counts only where the strike could take it now (S3's `is_prey_of` rule: in
+    // flight, its body inside the member's jaw band over the member's own base), so the
+    // `select_airborne_factor` below weighs only a bellwing in reach.
+    if let Some(h) = a.founder.and_then(|f| fauna.config.founder(f).hunter) {
+        if !crate::predation::flyer_takeable(&fauna.config, a, &h, of, o) {
+            return 0.0;
+        }
+    }
     let near = |r: f64| -> u32 {
         fauna
             .animals

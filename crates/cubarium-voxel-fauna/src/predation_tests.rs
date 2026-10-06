@@ -57,14 +57,14 @@ fn striker_and_prey(
 
 // ------------------------------------------------------------------ the tables
 
-/// §2.12 and §2.3's tables, their structure only: a nocturnal carrion-eating hunter whose
+/// §2.12 and §2.3's tables, their structure only: a dark-active (S3, D1) carrion-eating hunter whose
 /// list takes the grazer and the shredder and not itself. No tuned number is pinned.
 #[test]
 fn the_lanternjaw_and_its_prey_have_the_notes_shape() {
     let c = FaunaConfig::default();
     let lj = c.founder(Founder::Lanternjaw);
     assert_eq!(Founder::Lanternjaw.name(), "lanternjaw");
-    assert_eq!(lj.active, Activity::Nocturnal);
+    assert_eq!(lj.active, Activity::DarkActive);
     assert_eq!(FaunaConfig::default().founder(Founder::Lanternjaw).diet, Diet::only(crate::Food::Carrion));
     for t in [Trophic::Photo, Trophic::Saprotroph] {
         assert!(!Diet::only(crate::Food::Carrion).accepts(t), "a carnivore's mouth takes no {t:?}");

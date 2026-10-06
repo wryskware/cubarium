@@ -1360,7 +1360,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1894 rows)
+**`fauna.*`** (1942 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1480,6 +1480,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.senses.tremor_m` | 2.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.littershredder.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.littershredder.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.littershredder.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.littershredder.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.littershredder.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.littershredder.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.littershredder.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.littershredder.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -1672,6 +1675,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.frondgrazer.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.frondgrazer.senses.smell_min` | 0.42 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.frondgrazer.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.frondgrazer.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.frondgrazer.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.frondgrazer.senses.feeding_sight_fraction` | 0.25 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.frondgrazer.senses.kin_tracks` | 3 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.frondgrazer.vigilance.flee_start_m` | 4.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -1864,6 +1870,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.senses.tremor_m` | 3.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.lanternjaw.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.lanternjaw.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.lanternjaw.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.lanternjaw.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.lanternjaw.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.lanternjaw.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.lanternjaw.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.lanternjaw.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -2056,6 +2065,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.senses.tremor_m` | 1.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.capgnawer.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.capgnawer.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.capgnawer.senses.light_m` | 1.5 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.capgnawer.senses.light_min` | 0.05 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.capgnawer.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.capgnawer.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.capgnawer.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.capgnawer.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -2248,6 +2260,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.senses.tremor_m` | 2.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.loftstrider.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.loftstrider.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.loftstrider.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.loftstrider.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.loftstrider.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.loftstrider.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.loftstrider.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.loftstrider.vigilance.flee_start_m` | 6.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -2440,6 +2455,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.ripple-snail.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.ripple-snail.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.ripple-snail.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.ripple-snail.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.ripple-snail.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.ripple-snail.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.ripple-snail.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.ripple-snail.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -2631,7 +2649,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.senses.hearing_min` | 0.0 | m/s at the default exponents | [0, inf) |  | - | placeholder | the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion |
 | `fauna.founders.bellwing.senses.tremor_m` | 0.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.bellwing.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
-| `fauna.founders.bellwing.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.bellwing.senses.smell_min` | 0.13 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.bellwing.senses.light_m` | 4.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.bellwing.senses.light_min` | 0.05 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.bellwing.senses.loom_m` | 1.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.bellwing.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.bellwing.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.bellwing.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -2824,6 +2845,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.senses.tremor_m` | 0.5 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.seedporter.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.seedporter.senses.smell_min` | 0.9 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.seedporter.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.seedporter.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.seedporter.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.seedporter.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.seedporter.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.seedporter.vigilance.flee_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -3016,6 +3040,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.senses.tremor_m` | 1.0 | m | [0, inf) |  | - | placeholder | tremor's range for bodies on the ground (0: none) |
 | `fauna.founders.chorister.senses.tremor_min` | 0.003 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | the faintest footfall felt (mass x speed / d^2, through terrain x occlusion) |
 | `fauna.founders.chorister.senses.smell_min` | 0.13 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
+| `fauna.founders.chorister.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
+| `fauna.founders.chorister.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.chorister.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.chorister.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.chorister.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.chorister.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -3244,6 +3271,27 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.scent.deposit_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what a standing body lays, by its organic matter |
 | `fauna.scent.carrion_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what carrion lays, by its stock |
 | `fauna.scent.step_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | neighbouring surface faces connect within this height difference, with open air over the lower one |
+| `fauna.scent.nectar_per_s` | 2.25 | scent units per s | [0, inf) | 0.1–10 log | - | placeholder | what a flower holding nectar lays on the surface under it (the nectar channel) |
+| `fauna.light.flower_reflectance` | 1.0 | brightness per unit light | [0, inf) | 0.1–4 | - | placeholder | a nectar flower's brightness (UV) per unit of the light falling on it |
+| `fauna.light.glowcap_emission` | 0.3 | brightness | [0, inf) | 0–2 | - | placeholder | a glowcap's own light |
+| `fauna.light.lure_emission` | 1.0 | brightness | [0, inf) | 0–4 | - | placeholder | a fully lit lure's own light |
+| `fauna.light.background_floor` | 0.05 | light | (0, inf) | 0.01–0.5 log | - | placeholder | a beacon's contrast is its brightness over the light around it plus this (the darkest background) |
+| `fauna.light.half_m` | 1.0 | m | (0, inf) | 0.25–4 | - | placeholder | a beacon's received level halves at this distance |
+| `fauna.light.lure_height_fraction` | 0.4 | x body height | [0, inf) |  | - | placeholder | the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle |
+| `fauna.light.visit_m` | 0.25 | m | [0, inf) | 0.1–1 | - | placeholder | a body this close (horizontally) to a beacon is inspecting it |
+| `fauna.light.visit_s` | 3.0 | s | [0, inf) | 0.5–20 log | - | placeholder | an inspection with no meal by then fails |
+| `fauna.light.mark_s` | 120.0 | s | [0, inf) | 10–1800 log | - | placeholder | a failed visit marks the place 'no reward here' for this long |
+| `fauna.light.mark_radius_m` | 0.5 | m | [0, inf) | 0.1–2 | - | placeholder | a mark covers beacons within this of its centre |
+| `fauna.light.lift_per_m` | 4.0 | lift per m | [0, inf) |  | - | placeholder | a flyer approaching a beacon climbs or drops toward its height at this lift per metre |
+| `fauna.light.near_m` | 1.0 | m | [0, inf) |  | - | placeholder | inside this of a beacon a flyer slows to near_forward |
+| `fauna.light.near_forward` | 0.3 | fraction | [0, 1] |  | - | placeholder | a flyer's forward effort near a beacon |
+| `fauna.light.glow_scent_gate` | 0.05 | chem response | [0, 1] | 0–0.5 | - | placeholder | a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this |
+| `fauna.light.uv_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a UV reflector (flowers); learned ones relax back to it |
+| `fauna.light.cyan_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures) |
+| `fauna.light.learn_rate` | 0.3 | fraction | [0, 1] | 0.05–1 | - | placeholder | S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way |
+| `fauna.light.forget_s` | 3600.0 | s | (0, inf) | 300–21600 log | - | placeholder | S3b: a learned expectation relaxes back to innate with this time constant |
+| `fauna.light.expect_min` | 0.1 | probability | [0, 1] | 0–0.5 | - | placeholder | S3b: a still beacon whose class is expected to pay less than this is not approached |
+| `fauna.light.loom_tau_s` | 1.0 | s | [0, inf) | 0.2–3 | - | placeholder | S3b: a moving body looms only while it would reach the eye within this (distance / closing speed; 0: any moving body) |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
 | `fauna.founding.starter_litter_organic` | 0.2 | organic units | [0, inf) | 0.05–1 | - | placeholder | leaf litter laid under each seeded littershredder |

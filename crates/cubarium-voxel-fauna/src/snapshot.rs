@@ -81,7 +81,14 @@ use crate::Fauna;
 //     select_judge_m, select_min_prospect, break_off_below, shun_s}`, `PackRecord::shunned`,
 //     `ChaseEnd::BrokeOff`, the ledger's `pack_break_offs` and `pack_declined`; the hunker's
 //     `pry_per_member_s` default and the resistance's growth with the body.
-pub const SCHEMA: u32 = 51;
+// 52: S3 LIGHT AND FLIGHT with S3b WHICH LIGHT PAYS — `SenseTable::{light_m, light_min, uv,
+//     loom_m}` (the bellwing's and the capgnawer's tables live), `ScentChannel::Nectar` and
+//     `ScentConfig::nectar_per_s`, `FaunaConfig::light` (with `learn, uv_innate, cyan_innate,
+//     learn_rate, forget_s, expect_min, loom_tau_s`), the percept record's light reading,
+//     failed-visit marks and visit, `Percept::{expect, expect_tick, last_sip}`, the lanternjaw
+//     `DarkActive`, the light ledger lines (`light_budget`, `stalled_visits`, `sipped_visits`,
+//     `naive_kills`).
+pub const SCHEMA: u32 = 52;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -33,6 +33,8 @@ mod predation;
 mod pack;
 pub mod perception;
 pub mod scent;
+pub mod light;
+pub use light::{Beacon, BeaconKind};
 pub mod vigil;
 pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
@@ -98,7 +100,7 @@ pub use manifest::{
     Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
     Transfer, Tunings, gru32_parameter_count,
 };
-pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PerceptionConfig, PredationConfig, ScentConfig, TeacherConfig};
+pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, LightConfig, PerceptionConfig, PredationConfig, ScentConfig, TeacherConfig};
 pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, attack_preference, encounter_share, profitability, FRUITLESS_SLOTS};
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
@@ -2067,6 +2069,10 @@ pub struct FaunaConfig {
     /// **The scent field** (SENSES-CORE, [`ScentConfig`]).
     #[serde(default)]
     pub scent: ScentConfig,
+    /// **Light** (S3, [`LightConfig`]): the beacons' brightness, the photoreceptor, the lure's
+    /// point, inspections and the failed-visit mark.
+    #[serde(default)]
+    pub light: LightConfig,
 }
 
 fn default_lineage_body_ceiling() -> u32 {
@@ -2107,6 +2113,7 @@ impl Default for FaunaConfig {
             hunt: HuntConfig::default(),
             perception: PerceptionConfig::default(),
             scent: ScentConfig::default(),
+            light: LightConfig::default(),
         }
     }
 }
@@ -2819,6 +2826,39 @@ pub struct FaunaLedger {
     pub pack_draw_lead_samples: u64,
     #[serde(default)]
     pub pack_draw_follow_samples: u64,
+    /// **Light and flight** (S3, [`crate::light`]), per lineage: inspections begun by
+    /// beacon kind (`[flower, glowcap, lure]`, [`BeaconKind`]) and those that failed (marked
+    /// "no reward here"); controller samples spent evading a looming shadow, turned from a
+    /// moving light, steered by a beacon, and led up the nectar smell.
+    #[serde(default)]
+    pub beacon_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub failed_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub loom_samples: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub repel_samples: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub beacon_samples: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub scent_led_samples: [u64; Founder::COUNT],
+    /// Kills of a prey drawn to a lure when struck (inspecting one, or a lure its brightest
+    /// still beacon), by prey lineage.
+    #[serde(default)]
+    pub lure_kills: [u64; Founder::COUNT],
+    /// **S3b readouts** ([`crate::light`]): a flyer's controller samples by what its light
+    /// steer did ([`crate::light::LightMode`]), the time budget; approaches given up because
+    /// the body stalled short of the beacon; inspections that ended in a sip, by beacon kind;
+    /// and kills, `[killer][prey]`, of a prey still naive about cyan (its cyan expectation at
+    /// least half its innate value) when it died.
+    #[serde(default)]
+    pub light_budget: [[u64; light::LightMode::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub stalled_visits: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub sipped_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub naive_kills: [[u64; Founder::COUNT]; Founder::COUNT],
     /// Lanternjaws that left a carcass to a body that hunts them (roster R3, the yield).
     #[serde(default)]
     pub carcass_yields: u64,
@@ -3336,6 +3376,10 @@ pub struct Fauna {
     /// within a few half-lives of a load.
     #[serde(skip)]
     pub(crate) scent: scent::ScentField,
+    /// **The static beacons** (S3, [`light::Beacons`]): flowers and glowcaps, rebuilt on the
+    /// plant clock. Not saved.
+    #[serde(skip)]
+    pub(crate) beacons: light::Beacons,
     /// The faces holding a usable carcass (carrion under a carcass record) and the tick the
     /// list was read from the plant layer (HUNTER-MEAL's meal step). Not saved.
     #[serde(skip)]
@@ -3563,6 +3607,7 @@ impl Fauna {
             pack_paths: FxHashMap::default(),
             percepts: FxHashMap::default(),
             scent: scent::ScentField::default(),
+            beacons: light::Beacons::default(),
             hunt_paths: FxHashMap::default(),
             carcass_sites: (None, Vec::new()),
             packs: Vec::new(),

@@ -1251,11 +1251,13 @@ fn controllers(
         if driven && hunters_here && retracts && fauna.controllers.flees(id) {
             retract(fauna, i);
         }
+        let mut fled = false;
         if driven && hunters_here && !retracts && fauna.controllers.flees(id) {
             if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
                 actions = flee;
                 lure = 0.0;
                 lift = 0.0;
+                fled = true;
             }
         }
         // A glider's roost reflex (F3): at its rest hour or in a downpour, its own
@@ -1319,7 +1321,23 @@ fn controllers(
                 crate::hunt::steer(fauna, i, view, &fv, predation_occupancy)
             {
                 actions = go;
-                lure = lit;
+                // S3 (D1): the lure is lit only where it is dark — the light at its face,
+                // `sky × daylight`, under the day line (at night, in caves, in deep shade).
+                lure = if lit > 0.0 && sky.clock_on {
+                    let a = &fauna.animals[i];
+                    let v = view.config.voxel_m;
+                    let face_sky = match a.pose.column(v, view.config.depth) {
+                        Some((cx, cz)) => {
+                            let wx = cx.rem_euclid(i64::from(view.config.width));
+                            let y = a.sense_layer(v);
+                            fauna.face_sky(view, wx, y, cz)
+                        }
+                        None => 1.0,
+                    };
+                    if face_sky * sky.daylight < fauna.config.life.day_line { lit } else { 0.0 }
+                } else {
+                    lit
+                };
             }
         }
         // R3: the lanternjaw's carcass yield (its heuristic only), and the chorister's
@@ -1340,6 +1358,41 @@ fn controllers(
             {
                 actions = tactic;
                 lure = 0.0;
+            }
+        }
+        // S3 LIGHT AND FLIGHT (`crate::light`): over a live lineage's heuristic with a light
+        // sense — the bellwing's looming, light and nectar smell over its hover-sip (the fed
+        // perching above stands but for a looming shadow), the capgnawer's cyan over its
+        // forager when hungry with no fungal scent near. Flight from a threat wins. Over its
+        // own heuristic only (the hover-sip teacher, which rests when fed; a forager, which
+        // flees): a saved policy or a scripted body behaves only through the world.
+        if driven && !fled {
+            let phys = *fauna.config.founder(founder);
+            let table = phys.senses;
+            let heuristic = if phys.flight.is_some() { fauna.controllers.rests_when_fed(id) } else { fauna.controllers.flees(id) };
+            if heuristic && table.live && (table.light_m > 0.0 || table.loom_m > 0.0) {
+                let daylight = if sky.clock_on { sky.daylight } else { 1.0 };
+                if phys.flight.is_some() {
+                    if let Some((go, up)) = crate::light::steer_flyer(fauna, i, view, &fv, daylight, actions, lift) {
+                        actions = go;
+                        lift = up;
+                        lure = 0.0;
+                    }
+                } else {
+                    let fungal = match (senses.as_deref(), manifest.modules.iter().any(|m| m.name == "Chem(fungal)")) {
+                        (Some(s), true) => {
+                            let a = &fauna.animals[i];
+                            s.sample_fungal(view, &a.pose, a.sense_layer(view.config.voxel_m)).map(|c| {
+                                let sat = manifest.tunings.chem_saturation;
+                                if c + sat > 0.0 { c / (c + sat) } else { 0.0 }
+                            })
+                        }
+                        _ => None,
+                    };
+                    if let Some(go) = crate::light::steer_glow(fauna, i, view, &fv, daylight, actions, fungal) {
+                        actions = go;
+                    }
+                }
             }
         }
         // The stay-on-food readout: a heuristic body holding still to feed.
@@ -2509,6 +2562,16 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
 fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     let rule = body::effective_config(&fauna.config, &fauna.animals[j]).reproduction;
     fail_gestation(fauna, j, &rule);
+    // S3: a kill of a prey drawn to a lure.
+    if let (Departure::Killed { by }, Some(f)) = (cause, fauna.animals[j].founder) {
+        if crate::light::drawn_to_lure(fauna, fauna.animals[j].id) {
+            fauna.ledger.lure_kills[f.index()] += 1;
+        }
+        // S3b: a prey with a light sense still naive about cyan.
+        if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id) {
+            fauna.ledger.naive_kills[by.index()][f.index()] += 1;
+        }
+    }
     let a = fauna.animals.remove(j);
     fauna.controllers.take(a.id);
     fauna.free_riders(&a);
@@ -4253,6 +4316,12 @@ mod pack_search_tests;
 #[cfg(test)]
 #[path = "senses_core_tests.rs"]
 mod senses_core_tests;
+#[cfg(test)]
+#[path = "light_tests.rs"]
+mod light_tests;
+#[cfg(test)]
+#[path = "light_learning_tests.rs"]
+mod light_learning_tests;
 
 #[cfg(test)]
 #[path = "ground_response_tests.rs"]

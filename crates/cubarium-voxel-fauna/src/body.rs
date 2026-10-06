@@ -1498,7 +1498,10 @@ impl FounderPhysiology {
                 // number so none is a silent zero.
                 yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
-                active: crate::Activity::Nocturnal,
+                // S3 (D1, Wrysk 2026-10-06): active wherever it is dark — at night, and by
+                // day in caves and deep shade, its lure lit — so it meets bellwings at dusk
+                // and in shade, like the dark-active prey it mostly eats.
+                active: crate::Activity::DarkActive,
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -5175,6 +5178,17 @@ pub struct SenseTable {
     /// The scent channel its body lays ([`crate::ScentChannel`]); `None` lays none (a switch,
     /// no registry row).
     pub scent: Option<crate::ScentChannel>,
+    /// **Light** (S3, [`crate::light`]): the photoreceptor's range for a beacon, metres (3D);
+    /// 0 has none.
+    pub light_m: f64,
+    /// The faintest beacon level it reads ([`crate::LightConfig`]'s contrast × falloff).
+    pub light_min: f64,
+    /// It sees the flowers' UV (the bellwing), not only the cyan of glowcaps and lures (a
+    /// switch, no registry row).
+    pub uv: bool,
+    /// **Looming**: a moving body (any but its own lineage) within this, metres (3D), is a
+    /// shadow falling on it; 0 reads none.
+    pub loom_m: f64,
     /// **Head down** (S2): while it crops between scan pauses ([`crate::Vigil::head_down`])
     /// sight reaches this fraction of its range: the blind window. 1 is no change.
     pub feeding_sight_fraction: f64,
@@ -5198,6 +5212,10 @@ impl Default for SenseTable {
             tremor_min: 0.0,
             smell_min: 0.0,
             scent: None,
+            light_m: 0.0,
+            light_min: 0.0,
+            uv: false,
+            loom_m: 0.0,
             feeding_sight_fraction: 1.0,
             kin_tracks: 1,
         }
@@ -5226,8 +5244,8 @@ impl SenseTable {
 /// steady state on open ground ([`crate::scent`]'s calibration note).
 ///
 /// The Veilhound's table is **live** since S1; S2 turns on the frondgrazer's, the loftstrider's,
-/// the seedporter's and the littershredder's ([`crate::vigil`]); the others are read by no
-/// heuristic yet.
+/// the seedporter's and the littershredder's ([`crate::vigil`]), S3 the bellwing's and the
+/// capgnawer's (their light sense, [`crate::light`]); the others are read by no heuristic yet.
 pub fn senses_of(founder: Founder) -> SenseTable {
     use crate::ScentChannel::{Grazer, Hunter, SmallPrey};
     use crate::scent::{SMELL_AT_2_5_M, SMELL_AT_2_M, SMELL_AT_3_5_M, SMELL_AT_6_M};
@@ -5238,7 +5256,10 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         Founder::Blind => SenseTable { live: true, tremor_m: 2.0, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
         // Coarse silhouettes at 1 m by day and 0.5 m dim over 240°, motion over shape;
         // substrate vibration 1–1.5 m; fungal chemistry is its own field.
+        // S3 (D2): live; its fungal chemistry leads (its forager's `Chem`), and a weak cyan
+        // light sense (glowcaps, lures) to 1.5 m pulls a hungry one with no fungal scent near.
         Founder::Capgnawer => SenseTable {
+            live: true,
             sight_m: 1.0,
             sight_night_m: 0.5,
             sight_still_fraction: 0.5,
@@ -5246,6 +5267,8 @@ pub fn senses_of(founder: Founder) -> SenseTable {
             tremor_m: 1.5,
             tremor_min: 0.003,
             scent: Some(SmallPrey),
+            light_m: 1.5,
+            light_min: 0.05,
             ..t
         },
         // Shadow and looming at 0.5 m by day, 0.25 m dim over 180°; a large walker felt at
@@ -5300,9 +5323,22 @@ pub fn senses_of(founder: Founder) -> SenseTable {
             scent: Some(Grazer),
             ..t
         },
-        // D3: no form vision (its light sense is S3's); perch vibration over ~0.5 m; floral
-        // smell is S3's nectar channel.
-        Founder::Bellwing => SenseTable { tremor_m: 0.5, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
+        // D3: no form vision. S3: live; one photoreceptor (UV and blue) reads the brightest still
+        // beacon to 4 m (Astra: flowers ~4 m by day, a lure 2–3 m against the dark) and a
+        // looming shadow within 1 m; floral smell on the nectar channel to ~6 m (Astra 4–6);
+        // perch vibration over ~0.5 m.
+        Founder::Bellwing => SenseTable {
+            live: true,
+            tremor_m: 0.5,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_6_M,
+            scent: Some(SmallPrey),
+            light_m: 4.0,
+            light_min: 0.05,
+            uv: true,
+            loom_m: 1.0,
+            ..t
+        },
         // The review raises it to the Veilhound's 16 m by day (3 m at night), the best still
         // recognition in the community, about 180° with a forward binocular centre; predator
         // movement heard around 6 m; branch movement ~0.5 m; odour ~2 m.
