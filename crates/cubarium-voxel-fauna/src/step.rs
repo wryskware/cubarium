@@ -1298,6 +1298,16 @@ fn controllers(
                 lift = 0.0;
             }
         }
+        // SNAIL-LAND: a ready layer whose eggs go on the shore walks to a shore egg face
+        // its drying clock can afford, and outside its roam hours one ashore that is not
+        // ready goes back to the water. Thirst (below) still wins.
+        if driven && fauna.controllers.flees(id) {
+            if let Some(go) = shore_reflex(fauna, i, view, sky) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+            }
+        }
         // AMPHIBIOUS-SNAIL: a thirsty body out of water heads for the nearest water.
         if driven && fauna.controllers.flees(id) {
             if let Some(go) = water_reflex(fauna, i, view) {
@@ -1530,11 +1540,20 @@ fn retract(fauna: &mut Fauna, i: usize) {
 /// above its own face. A heuristic world query, not a sense (as the shallows reflex is).
 /// `None` when it is not thirsty ashore or no water is in reach.
 fn water_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    if !fauna.animals[i].mobility.thirsty {
+        return None;
+    }
+    to_water(fauna, i, view)
+}
+
+/// The water reflex's walk: an amphibious body allowed on land, ashore on the ground and
+/// free, to the nearest support face with standing water within `water_search_m`.
+fn to_water(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
     let a = &fauna.animals[i];
     let founder = a.founder?;
     let phys = fauna.config.founder(founder);
     let am = phys.amphibious.filter(|am| am.on_land)?;
-    if !(a.mobility.thirsty && a.mobility.ashore) || a.mobility.mode != crate::MobilityMode::Ground || a.attached.is_some() {
+    if !a.mobility.ashore || a.mobility.mode != crate::MobilityMode::Ground || a.attached.is_some() {
         return None;
     }
     let c = view.config;
@@ -1565,6 +1584,97 @@ fn water_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions
             if d <= reach && best.is_none_or(|(b, _, _)| d < b) {
                 best = Some((d, ddx, ddz));
             }
+        }
+    }
+    let (_, dx, dz) = best?;
+    Some(glider::walk_toward(a, dx, dz, 0.0))
+}
+
+/// **The trip ashore to lay** (SNAIL-LAND, [`crate::EggSite::Shore`]). For an amphibious
+/// body allowed on land whose lineage lays on the shore, on the ground, free, awake, not
+/// retracted and not thirsty:
+/// - **ready to lay** (its hold met, no retry pending, a clutch its reserve pays for): on a
+///   shore egg face ([`shore_egg_site`]) it holds still to lay; otherwise it walks to the
+///   nearest shore egg face within `roam_search_m` whose round trip its drying clock can
+///   afford — the clock now plus twice the walk at cruise, at the drying rate of the
+///   target's ground (times the day factor by day), stays under the line it turns back
+///   at — and with none, its heuristic steers;
+/// - **not ready**, ashore and outside its roam hours: back to the water ([`to_water`]):
+///   after a laying, and a hatchling on the bank.
+fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    if phys.egg_site != crate::EggSite::Shore {
+        return None;
+    }
+    let am = phys.amphibious.filter(|am| am.on_land)?;
+    let m = &a.mobility;
+    if m.thirsty
+        || m.retract_ticks > 0
+        || m.mode != crate::MobilityMode::Ground
+        || a.attached.is_some()
+        || a.state == State::Asleep
+    {
+        return None;
+    }
+    let sc = body::effective_config(&fauna.config, a);
+    let rule = sc.reproduction;
+    let ready = rule.mode == crate::BirthMode::Eggs
+        && !rule.dormant
+        && rule.hold_met(&a.reproduction)
+        && a.reproduction.retry_ticks == 0
+        && rule.clutch_for(a.reserve) > 0;
+    if !ready {
+        return if m.ashore && !roam_hours(fauna, &am, view, sky) { to_water(fauna, i, view) } else { None };
+    }
+    if shore_egg_site(view, &am, a.site) {
+        return Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let day = sky.clock_on && sky.daylight >= fauna.config.life.day_line;
+    let raining = view.is_raining();
+    let back_at = if day && !raining { am.day_return_fraction } else { am.return_fraction };
+    let speed = crate::body_of(&fauna.config, a).map_or(0.0, |b| b.length_m) * phys.cruise_body_lengths_per_s;
+    if !(speed > 0.0) {
+        return None;
+    }
+    let reach = am.roam_search_m.max(0.0);
+    let k = (reach / v).ceil() as i64;
+    let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
+    let ring = f64::from(c.width) * v;
+    let top = (a.site.y + k.max(0) as u32).min(c.height.saturating_sub(1));
+    let mut best: Option<(f64, f64, f64)> = None;
+    for dz in -k..=k {
+        let z = hz + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            let x = (hx + dx).rem_euclid(i64::from(c.width));
+            let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
+                continue;
+            };
+            let s = Site { x: x as u32, y, z: z as u32 };
+            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if d > reach || best.is_some_and(|(b, _, _)| d >= b) || !shore_egg_site(view, &am, s) {
+                continue;
+            }
+            // The clock's check: the round trip at the target's drying rate.
+            let mut rate = am.drying_per_s(body::ground_moisture(view, x, y, z as u32));
+            if day {
+                rate *= am.day_drying_factor;
+            }
+            if raining {
+                rate *= am.rain_drying_factor;
+            }
+            if !(m.dryness + rate * 2.0 * d / speed < back_at) {
+                continue;
+            }
+            best = Some((d, ddx, ddz));
         }
     }
     let (_, dx, dz) = best?;
@@ -3174,6 +3284,7 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
         return;
     }
     clutch_fate(fauna, view, flora);
+    shore_eggs(fauna, view, flora);
     let parents = fauna.animals.len();
     let mut newborns: Vec<Animal> = Vec::new();
     for i in 0..parents {
@@ -3573,6 +3684,11 @@ fn lay(
                     && view.standing_depth_m(i64::from(site.x), site.y, site.z) > 0.0
             }
             crate::EggSite::Fungus => fungus_near(view, flora, site, rule.egg_fungus_radius_m),
+            crate::EggSite::Shore => fauna
+                .config
+                .founder(lineage)
+                .amphibious
+                .is_some_and(|am| shore_egg_site(view, &am, site)),
         };
         if !fits {
             return;
@@ -3656,6 +3772,8 @@ fn lay(
                 laid_tick,
                 lineage,
                 dormancy: Some(crate::Dormancy::draw(&fauna.config.predation, seed, serial, laid_tick)),
+                wet_ticks: 0,
+                dry_ticks: 0,
             });
             fauna.ledger.eggs_laid += 1;
         }
@@ -3669,6 +3787,8 @@ fn lay(
             laid_tick,
             lineage,
             dormancy: None,
+            wet_ticks: 0,
+            dry_ticks: 0,
         });
         fauna.ledger.eggs_laid += u64::from(eggs);
     }
@@ -3676,6 +3796,98 @@ fn lay(
     fauna.ledger.clutches_by_founder[lineage.index()] += 1;
     fauna.ledger.eggs_laid_by_founder[lineage.index()] += u64::from(eggs);
     fauna.ledger.reproduction_by_founder[lineage.index()] += cost;
+}
+
+/// **A shore egg site** (SNAIL-LAND, [`crate::EggSite::Shore`]): `site` has no standing
+/// water over it, its ground moisture ([`body::ground_moisture`]) is at least
+/// `egg_moisture_min`, and a column within `egg_water_max_m` (horizontal, centre to centre;
+/// `x` wraps) has its highest support face at or below `site` under standing water whose
+/// surface is at most `egg_climb_max_m` below `site`'s top.
+pub(crate) fn shore_egg_site(view: &VoxelView<'_>, am: &crate::Amphibious, site: Site) -> bool {
+    let (x, y, z) = (i64::from(site.x), site.y, site.z);
+    if view.standing_depth_m(x, y, z) > 0.0 || body::ground_moisture(view, x, y, z) < am.egg_moisture_min {
+        return false;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let reach = am.egg_water_max_m;
+    if !(reach >= 0.0) || !(v > 0.0) {
+        return false;
+    }
+    let top = crate::surface_m(y, v);
+    let r = reach / v;
+    let k = (r + 1e-9).floor() as i64;
+    for dz in -k..=k {
+        let zz = i64::from(z) + dz;
+        if zz < 0 || zz >= i64::from(c.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            if ((dx * dx + dz * dz) as f64) > r * r + 1e-9 {
+                continue;
+            }
+            let xx = (x + dx).rem_euclid(i64::from(c.width));
+            let Some(wy) = view.highest_support_in(xx, zz as u32, 0, y) else {
+                continue;
+            };
+            let depth = view.standing_depth_m(xx, wy, zz as u32);
+            if depth > 0.0 && top - (crate::surface_m(wy, v) + depth) <= am.egg_climb_max_m + 1e-9 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// **A shore egg's risks** (SNAIL-LAND): every clutch of a lineage laying on the shore
+/// ([`crate::EggSite::Shore`]) with an amphibious table counts its ticks in a row under
+/// standing water and on ground drier than `egg_dry_moisture`; past `egg_drown_s` or
+/// `egg_dry_s` the clutch dies, its material to the litter of its face, booked drowned or
+/// dried.
+fn shore_eggs(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
+    let mut k = 0;
+    while k < fauna.clutches.len() {
+        let c = fauna.clutches[k];
+        let phys = fauna.config.founder(c.lineage);
+        let am = match (phys.egg_site, phys.amphibious) {
+            (crate::EggSite::Shore, Some(am)) if c.dormancy.is_none() => am,
+            _ => {
+                k += 1;
+                continue;
+            }
+        };
+        let (x, y, z) = (i64::from(c.site.x), c.site.y, c.site.z);
+        let under = view.standing_depth_m(x, y, z) > 0.0;
+        let dry = !under && body::ground_moisture(view, x, y, z) < am.egg_dry_moisture;
+        let e = &mut fauna.clutches[k];
+        e.wet_ticks = if under { e.wet_ticks.saturating_add(1) } else { 0 };
+        e.dry_ticks = if dry { e.dry_ticks.saturating_add(1) } else { 0 };
+        let past = |ticks: u32, s: f64| f64::from(ticks) * DT > s;
+        let drowned = past(e.wet_ticks, am.egg_drown_s);
+        let dried = past(e.dry_ticks, am.egg_dry_s);
+        if !(drowned || dried) {
+            k += 1;
+            continue;
+        }
+        let c = fauna.clutches.remove(k);
+        let n = u64::from(c.count);
+        fauna.ledger.eggs_died += n;
+        if drowned {
+            fauna.ledger.eggs_drowned_by_founder[c.lineage.index()] += n;
+        } else {
+            fauna.ledger.eggs_dried_by_founder[c.lineage.index()] += n;
+        }
+        fauna.book_deposit(
+            flora,
+            c.site,
+            DepositKind::Litter,
+            Taken {
+                organic: c.organic,
+                mineral: c.mineral,
+                energy: c.energy,
+            },
+        );
+    }
 }
 
 /// **A fungal egg site** ([`crate::EggSite::Fungus`]): whether a fungus holding cap tissue

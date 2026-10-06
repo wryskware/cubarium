@@ -1045,3 +1045,133 @@ fn land_film_grows_only_at_or_above_its_wetness_threshold_and_takes_no_cover_slo
     assert_film_budget(&flora, "land film");
     assert_closes(&flora, "land film");
 }
+
+// ---------------------------------------------------------------- the shore (SNAIL-LAND)
+
+/// A one-deep strip for the shore: column 0 a pond (bedrock face at `y = 0`, two cells of
+/// water over it), every other column soil at `y = 1..=2` (face `y = 2`) holding the given
+/// pore fill and no water over it.
+fn shore_strip(pores: &[f64]) -> World {
+    let mut world = World::empty(VoxelConfig {
+        width: pores.len() as u32 + 1,
+        height: 6,
+        depth: 1,
+        voxel_m: VOXEL_M,
+        seed: 29,
+        day: DayClock {
+            mode: DayMode::Off,
+            ..DayClock::default()
+        },
+        ..VoxelConfig::default()
+    });
+    let cap = world.config().materials.pore_capacity(Material::Soil) * world.config().voxel_volume();
+    for (i, &p) in pores.iter().enumerate() {
+        let x = i as i64 + 1;
+        for y in 1..=2u32 {
+            world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Air });
+            world.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: p * cap });
+            world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+        }
+    }
+    let cell = world.config().voxel_volume();
+    for y in 1..=2u32 {
+        world.apply(WorldCommand::AddWater { x: 0, y, z: 0, volume_m3: cell });
+    }
+    let v = world.view();
+    assert!(v.standing_depth_m(0, 0, 0) > 0.0, "fixture: the pond stands");
+    for (i, &p) in pores.iter().enumerate() {
+        let x = i as i64 + 1;
+        assert!((v.pore_at(x, 2, 0) - p).abs() < 1e-9, "fixture: column {x} pore fill");
+        assert_eq!(v.standing_depth_m(x, 2, 0), 0.0, "fixture: no water on column {x}");
+    }
+    world
+}
+
+/// **Shore film** (SNAIL-LAND, [`FloraConfig::film_shore_band_m`],
+/// [`FloraConfig::film_shore_moisture_min`], [`FloraConfig::film_land_capacity_wet_per_m2`]):
+/// a dry-surfaced face in the shore band is land-wet from the shore's floor, the same pore
+/// fill out of the band is dry, and a land-wet face's capacity runs linearly with pore fill
+/// from the land capacity at its floor to the wet capacity at saturation. Every number is
+/// set here; the run checks that film grows in the band and dies out of it, and stops at
+/// the face's own capacity.
+#[test]
+fn land_film_capacity_rises_with_moisture_and_the_shore_band_admits_damp_bank() {
+    let mut c = config();
+    c.film_land_moisture_min = 0.9;
+    c.film_shore_moisture_min = 0.5;
+    c.film_shore_band_m = 2.2 * VOXEL_M; // columns 1 and 2 are in it, 3 on are not
+    c.film_land_capacity_per_m2 = 0.2;
+    c.film_land_capacity_wet_per_m2 = 0.4;
+    // Columns 1..=6: in-band damp, in-band too dry, out-of-band damp, saturated,
+    // between the land floor and saturation, out-of-band too dry.
+    let pores = [0.6, 0.4, 0.6, 1.0, 0.95, 0.4];
+    let mut world = shore_strip(&pores);
+    let at = |x: u32| Site { x, y: 2, z: 0 };
+    {
+        let v = world.view();
+        assert!(crate::shore_band(&v, c.film_shore_band_m, 1, 2, 0));
+        assert!(crate::shore_band(&v, c.film_shore_band_m, 2, 2, 0));
+        assert!(!crate::shore_band(&v, c.film_shore_band_m, 3, 2, 0));
+        let wet = |x: i64| crate::film_wet(&v, &c, x, 2, 0);
+        assert_eq!(wet(1), crate::FilmWet::Land, "damp bank in the band");
+        assert_eq!(wet(2), crate::FilmWet::Dry, "under the shore floor");
+        assert_eq!(wet(3), crate::FilmWet::Dry, "damp, out of the band");
+        assert_eq!(wet(4), crate::FilmWet::Land);
+        assert_eq!(wet(5), crate::FilmWet::Land);
+        assert_eq!(wet(6), crate::FilmWet::Dry);
+        let mut no_band = c.clone();
+        no_band.film_shore_band_m = 0.0;
+        assert_eq!(crate::film_wet(&v, &no_band, 1, 2, 0), crate::FilmWet::Dry, "band 0: no shore");
+    }
+    // The capacity: linear in pore fill from each face's floor.
+    let k = |m: f64, floor: f64| crate::land_capacity_per_m2(&c, m, floor);
+    let lerp = |m: f64, floor: f64| {
+        c.film_land_capacity_per_m2
+            + (c.film_land_capacity_wet_per_m2 - c.film_land_capacity_per_m2) * (m - floor) / (1.0 - floor)
+    };
+    assert!((k(0.6, 0.5) - lerp(0.6, 0.5)).abs() < 1e-12);
+    assert!((k(0.95, 0.9) - lerp(0.95, 0.9)).abs() < 1e-12);
+    assert!((k(1.0, 0.9) - c.film_land_capacity_wet_per_m2).abs() < 1e-12);
+    assert!((k(0.9, 0.9) - c.film_land_capacity_per_m2).abs() < 1e-12);
+    assert!(k(0.95, 0.9) > k(0.9, 0.9) && k(1.0, 0.9) > k(0.95, 0.9), "rises with moisture");
+    let mut flat = c.clone();
+    flat.film_land_capacity_wet_per_m2 = flat.film_land_capacity_per_m2;
+    assert!((crate::land_capacity_per_m2(&flat, 1.0, 0.9) - flat.film_land_capacity_per_m2).abs() < 1e-12, "equal knobs: flat");
+
+    // A short run: film grows on the damp bank in the band and dies out of it; on the
+    // saturated face film over its (wet) capacity is held to it, not the land floor's.
+    c.film_spread_per_s = 0.0;
+    let mut flora = Flora::in_world(&world, c.clone());
+    let small = 0.1 * c.film_land_capacity_per_m2 * AREA_M2;
+    for x in [1, 3] {
+        put_film(&mut flora, at(x), small);
+    }
+    let wet_cap = c.film_land_capacity_wet_per_m2 * AREA_M2;
+    put_film(&mut flora, at(4), 0.9 * wet_cap);
+    run(&mut flora, &mut world, TICKS);
+    let film = |x: u32| flora.view().film_at(at(x));
+    assert!(film(1) > small, "in the band it grows: {} from {small}", film(1));
+    assert!(film(3) < small, "out of the band it dies: {} from {small}", film(3));
+    assert!(
+        film(4) > c.film_land_capacity_per_m2 * AREA_M2,
+        "saturated ground holds film above the floor's capacity: {}",
+        film(4)
+    );
+    assert_film_budget(&flora, "shore film");
+    assert_closes(&flora, "shore film");
+}
+
+/// **The shore knobs round-trip** (SNAIL-LAND): the config is in the snapshot.
+#[test]
+fn the_shore_knobs_survive_a_snapshot() {
+    let world = strip(&[1; 4]);
+    let mut c = config();
+    c.film_shore_band_m = 0.75;
+    c.film_shore_moisture_min = 0.55;
+    c.film_land_capacity_wet_per_m2 = 0.33;
+    let flora = Flora::in_world(&world, c.clone());
+    let back = decode(&encode(&flora)).expect("round trip");
+    assert_eq!(back.config.film_shore_band_m, c.film_shore_band_m);
+    assert_eq!(back.config.film_shore_moisture_min, c.film_shore_moisture_min);
+    assert_eq!(back.config.film_land_capacity_wet_per_m2, c.film_land_capacity_wet_per_m2);
+}

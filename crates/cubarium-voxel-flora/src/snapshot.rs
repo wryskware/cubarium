@@ -50,7 +50,9 @@ use crate::Flora;
 //     death on its stores is `DeathCause::Drought`.
 // 33: SNAIL-FIX — glassfilm on wet ground: `FloraConfig::{film_land_moisture_min,
 //     film_land_growth_per_s, film_land_capacity_per_m2}`.
-pub const SCHEMA: u32 = 33;
+// 34: SNAIL-LAND — the shore band and the wet capacity: `FloraConfig::{film_shore_band_m,
+//     film_shore_moisture_min, film_land_capacity_wet_per_m2}`.
+pub const SCHEMA: u32 = 34;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

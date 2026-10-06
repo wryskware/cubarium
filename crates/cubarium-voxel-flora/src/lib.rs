@@ -65,7 +65,7 @@ mod contest_tests;
 #[cfg(test)]
 mod canopy_establish_tests;
 mod film;
-pub use film::{FilmWet, film_wet, land_census};
+pub use film::{FilmWet, film_wet, land_capacity_per_m2, land_census, shore_band};
 #[cfg(test)]
 mod film_tests;
 mod seeds;
@@ -3080,6 +3080,24 @@ pub struct FloraConfig {
     /// face only up to it.
     #[serde(default = "default_film_land_capacity_per_m2")]
     pub film_land_capacity_per_m2: f64,
+    /// **Wetter ground carries more film** (SNAIL-LAND, Wrysk 2026-10-06: "increase the
+    /// amount of food for them on land in waterlogged / shore soil"): the land capacity per
+    /// square metre on saturated ground (pore fill 1). Between a land-wet face's moisture
+    /// floor (`film_land_moisture_min`, or `film_shore_moisture_min` in the shore band) and
+    /// 1 the capacity runs linearly from `film_land_capacity_per_m2` to this. Equal to it:
+    /// one flat land capacity.
+    #[serde(default = "default_film_land_capacity_wet_per_m2")]
+    pub film_land_capacity_wet_per_m2: f64,
+    /// **The shore band** (SNAIL-LAND): a support face with no standing water over it
+    /// within this horizontal distance, metres, of a column whose highest support face at
+    /// or below it holds standing water is land-wet from `film_shore_moisture_min` (the
+    /// bank's capillary fringe and splash zone), not only from `film_land_moisture_min`.
+    /// 0: no shore band.
+    #[serde(default = "default_film_shore_band_m")]
+    pub film_shore_band_m: f64,
+    /// ... and the least pore fill a face in the shore band grows film at.
+    #[serde(default = "default_film_shore_moisture_min")]
+    pub film_shore_moisture_min: f64,
     /// Glassfilm: mineral per unit of film tissue, drawn from the site's pool as it grows
     /// (springturf's `n_tissue` by default).
     pub film_n_tissue: f64,
@@ -3145,6 +3163,9 @@ impl Default for FloraConfig {
             film_land_moisture_min: default_film_land_moisture_min(),
             film_land_growth_per_s: default_film_land_growth_per_s(),
             film_land_capacity_per_m2: default_film_land_capacity_per_m2(),
+            film_land_capacity_wet_per_m2: default_film_land_capacity_wet_per_m2(),
+            film_shore_band_m: default_film_shore_band_m(),
+            film_shore_moisture_min: default_film_shore_moisture_min(),
             film_maintenance_per_s: 0.0001,
             film_spread_per_s: 0.0002,
             film_dry_death_per_s: 0.005,
@@ -6021,6 +6042,31 @@ fn default_film_land_growth_per_s() -> f64 {
 
 fn default_film_land_capacity_per_m2() -> f64 {
     FILM_LAND_CAPACITY_PER_M2
+}
+
+/// The shipped [`FloraConfig::film_land_capacity_wet_per_m2`] (SNAIL-LAND): the underwater
+/// capacity (`film_capacity_per_m2`, 0.4): saturated soil is as good a film bed as a
+/// pond's floor. Plausible, untuned.
+pub const FILM_LAND_CAPACITY_WET_PER_M2: f64 = 0.4;
+/// The shipped [`FloraConfig::film_shore_band_m`] (SNAIL-LAND): half a metre of bank, the
+/// capillary fringe and splash zone over a pond's edge. Plausible, untuned.
+pub const FILM_SHORE_BAND_M: f64 = 0.5;
+/// The shipped [`FloraConfig::film_shore_moisture_min`] (SNAIL-LAND): just under drained
+/// soil's field capacity (0.65), so a bank at field capacity carries film and drier ground
+/// does not. The probe (terrarium s1 at founding): faces within 0.5 m of water sit at
+/// pore fill 0.65, and 32 of 1031 reach the 0.9 land floor. Plausible, untuned.
+pub const FILM_SHORE_MOISTURE_MIN: f64 = 0.6;
+
+fn default_film_land_capacity_wet_per_m2() -> f64 {
+    FILM_LAND_CAPACITY_WET_PER_M2
+}
+
+fn default_film_shore_band_m() -> f64 {
+    FILM_SHORE_BAND_M
+}
+
+fn default_film_shore_moisture_min() -> f64 {
+    FILM_SHORE_MOISTURE_MIN
 }
 
 /// The shipped [`FloraConfig::film_graze_refuge`]: a tenth of a site's capacity, plausible

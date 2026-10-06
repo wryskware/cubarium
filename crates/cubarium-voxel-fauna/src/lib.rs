@@ -62,6 +62,8 @@ mod roster_mechanics_tests;
 #[cfg(test)]
 mod snail_tests;
 #[cfg(test)]
+mod snail_land_tests;
+#[cfg(test)]
 mod flight_tests;
 #[cfg(test)]
 mod seedporter_tests;
@@ -1381,6 +1383,13 @@ pub struct Clutch {
     /// hatches by [`egg_hatches`], not by incubation, pays [`PredationConfig::egg_upkeep_per_s`], and dies
     /// to the litter when its viability runs out.
     pub dormancy: Option<Dormancy>,
+    /// **A shore egg's clocks** (SNAIL-LAND, [`EggSite::Shore`]): ticks in a row under
+    /// standing water, and on ground drier than its lineage's `egg_dry_moisture`. 0 for
+    /// every other clutch.
+    #[serde(default)]
+    pub wet_ticks: u32,
+    #[serde(default)]
+    pub dry_ticks: u32,
 }
 
 impl Clutch {
@@ -2982,6 +2991,13 @@ pub struct FaunaLedger {
     /// Eggs lost before hatching (face gone, flooded), by lineage.
     #[serde(default)]
     pub eggs_lost_by_founder: [u64; Founder::COUNT],
+    /// **Shore eggs drowned** (SNAIL-LAND): under standing water past `egg_drown_s`, to
+    /// the litter of their face, by lineage.
+    #[serde(default)]
+    pub eggs_drowned_by_founder: [u64; Founder::COUNT],
+    /// ... and dried: on ground drier than `egg_dry_moisture` past `egg_dry_s`.
+    #[serde(default)]
+    pub eggs_dried_by_founder: [u64; Founder::COUNT],
     /// **AMPHIBIOUS-SNAIL readouts** (counters only): ticks an amphibious body was alive,
     /// `[day, night][in water, ashore]` (day: daylight at or above the day line, or the
     /// clock off), and retractions begun.
@@ -4152,6 +4168,8 @@ impl Fauna {
                 laid_tick: self.tick,
                 lineage,
                 dormancy: Some(Dormancy::draw(&self.config.predation, c.seed, serial, self.tick)),
+                wet_ticks: 0,
+                dry_ticks: 0,
             });
             self.ledger.eggs_buried += 1;
             self.ledger.introduced_organic_in += organic;

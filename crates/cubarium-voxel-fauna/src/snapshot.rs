@@ -88,7 +88,10 @@ use crate::Fauna;
 //     failed-visit marks and visit, `Percept::{expect, expect_tick, last_sip}`, the lanternjaw
 //     `DarkActive`, the light ledger lines (`light_budget`, `stalled_visits`, `sipped_visits`,
 //     `naive_kills`).
-pub const SCHEMA: u32 = 52;
+// 53: SNAIL-LAND — `EggSite::Shore`, `Amphibious::{egg_water_max_m, egg_climb_max_m,
+//     egg_moisture_min, egg_drown_s, egg_dry_moisture, egg_dry_s}`, `Clutch::{wet_ticks,
+//     dry_ticks}`, the ledger's `eggs_drowned_by_founder` and `eggs_dried_by_founder`.
+pub const SCHEMA: u32 = 53;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
