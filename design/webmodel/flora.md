@@ -15,6 +15,16 @@ Validation). Not canon.
 Code: `crates/cubarium-webmodel/src/flora/`. Driver: `examples/flora_model.rs` (its usage
 line lists the subcommands and levers). Tests: `tests/flora_laws.rs`.
 
+**Start states are census files** (2026-10-05): `flora_model export SAVE OUT` writes a save's
+census, read by the build that shares its schemas, to `OUT/faces.tsv` with the plant config it
+was read under (`flora.toml`); `census::load` takes the census file in a directory, or the one
+beside a save (`census-*/`) nearest the run's plant config, before the save itself. The soak and
+patch saves (flora schema 30) have theirs, written by 170671be with the census commit 07e97f03
+cherry-picked: `census-terrarium/` (and `census-ewater20/`, turf `establish_water_min` 0.2) beside
+the soak saves, `census-patch/` beside the patch saves. A run that moves a gate, crown or shade
+knob needs a census exported under it (the loader prints the keys that differ). Check: 24 model
+days on s6 from the save and from its census at the export build print the same lines.
+
 A world day (120 min) runs in about 0.13 s, and setup takes about 40 s.
 
 ## State and laws
