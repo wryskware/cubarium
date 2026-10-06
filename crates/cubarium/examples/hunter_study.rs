@@ -939,7 +939,7 @@ fn run(args: &[String]) {
             println!("gait,{arm},{minute},{}", gait_line(&lw, &l));
             println!("hunt,{arm},{minute},{}", hunts.win.line());
             /*PT{*/
-            println!("ptune,{arm},{minute},break_offs={},declined={}", l.pack_break_offs - lw.pack_break_offs, l.pack_declined - lw.pack_declined);
+            println!("ptune,{arm},{minute},break_offs={},declined={},switches={}", l.pack_break_offs - lw.pack_break_offs, l.pack_declined - lw.pack_declined, l.pack_switches - lw.pack_switches);
             /*}PT*/
             hunts.win = HuntTally::default();
             vh_all.add(&vh_win);
@@ -987,7 +987,7 @@ fn run(args: &[String]) {
     println!("sumgait,{arm},{},{}", minute0, gait_line(&l0, &l));
     println!("sumhunt,{arm},{},{}", minute0, hunts.all.line());
     /*PT{*/
-    println!("sumptune,{arm},{},break_offs={},declined={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined);
+    println!("sumptune,{arm},{},break_offs={},declined={},switches={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined, l.pack_switches - l0.pack_switches);
     /*}PT*/
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {

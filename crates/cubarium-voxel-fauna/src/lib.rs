@@ -1036,6 +1036,11 @@ pub enum DenChoice {
     FoundingPoint,
 }
 
+/// An unbounded distance (a serde default).
+fn far() -> f64 {
+    f64::INFINITY
+}
+
 /// A pack (roster R3): its den, its breeder, and the scripted pack tactic's state (its
 /// target, its chase clock, its carcass). Saved with the layer.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1061,9 +1066,18 @@ pub struct PackRecord {
     /// **The pack target**: the prey every adult member is driving or flanking now.
     #[serde(default)]
     pub target: Option<u64>,
-    /// The tick the chase on `target` began ([`Pack::chase_give_up_s`]).
+    /// The tick the chase on `target` began.
     #[serde(default)]
     pub chase_since_tick: u64,
+    /// **CHURN, the chase's progress** ([`Pack::chase_give_up_s`]): the last tick the pack
+    /// made progress on `target`, its nearest member's distance to it so far, and the work
+    /// done on it (its wound plus its pry, plus 1 while it is turned over) last read.
+    #[serde(default)]
+    pub chase_progress_tick: u64,
+    #[serde(default = "far")]
+    pub chase_best_m: f64,
+    #[serde(default)]
+    pub chase_work: f64,
     /// The target's face when last seen: where its carcass lies if it was killed.
     #[serde(default)]
     pub target_site: Option<Site>,
@@ -2815,6 +2829,9 @@ pub struct FaunaLedger {
     pub pack_break_offs: u64,
     #[serde(default)]
     pub pack_declined: u64,
+    /// **CHURN**: pack targets given up for a better one (past `Pack::switch_margin`).
+    #[serde(default)]
+    pub pack_switches: u64,
     /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
     #[serde(default)]
     pub vigil: VigilLedger,
@@ -3447,6 +3464,8 @@ pub enum ChaseEnd {
     Lost,
     /// Its prospect fell under `Pack::break_off_below` (PACK-TUNE: the test went badly).
     BrokeOff,
+    /// Another target scored past `Pack::switch_margin` of it and took the hunt (CHURN).
+    Switched,
 }
 
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
@@ -3879,6 +3898,9 @@ impl Fauna {
             last_litter_tick: None,
             target: None,
             chase_since_tick: 0,
+            chase_progress_tick: 0,
+            chase_best_m: f64::INFINITY,
+            chase_work: 0.0,
             target_site: None,
             feast: None,
             feast_eaten: 0.0,

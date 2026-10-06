@@ -88,7 +88,10 @@ use crate::Fauna;
 //     failed-visit marks and visit, `Percept::{expect, expect_tick, last_sip}`, the lanternjaw
 //     `DarkActive`, the light ledger lines (`light_budget`, `stalled_visits`, `sipped_visits`,
 //     `naive_kills`).
-pub const SCHEMA: u32 = 52;
+// 53: CHURN — `Pack::{chase_progress_m, switch_margin}`, `PackRecord::{chase_progress_tick,
+//     chase_best_m, chase_work}`, `ChaseEnd::Switched`, the ledger's `pack_switches`; a
+//     chase's give-up reads time without progress, not a chase clock.
+pub const SCHEMA: u32 = 53;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

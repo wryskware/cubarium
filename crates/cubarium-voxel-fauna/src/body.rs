@@ -561,8 +561,18 @@ pub struct Pack {
     /// Flankers go to points this far either side of the pack target, metres. A
     /// placeholder.
     pub flank_offset_m: f64,
-    /// A chase is dropped after this, seconds. 20.
+    /// A chase is dropped after this long without progress, seconds (CHURN: the pack closed
+    /// on its target by `chase_progress_m`, or worked it — a wound or pry gained). 20.
     pub chase_give_up_s: f64,
+    /// **CHURN, the progress**: a chase's give-up clock restarts when the pack's nearest
+    /// member has come this much closer to the target than its nearest so far, metres.
+    #[serde(default = "pack_chase_progress_m")]
+    pub chase_progress_m: f64,
+    /// **CHURN, the commitment**: in a chase, another target takes the hunt only when it
+    /// scores at least this many times the current target's score, as the member weighing
+    /// them sees both (hysteresis: an equal or slightly better prey never steals it).
+    #[serde(default = "pack_switch_margin")]
+    pub switch_margin: f64,
     /// A pack takes only prey standing in its own walking route component; the
     /// lineage's components are rebuilt from the terrain at most this often, seconds (a
     /// placeholder: the terrain and its water change slowly). 60.
@@ -670,6 +680,12 @@ fn pack_break_off_below() -> f64 {
 fn pack_shun_s() -> f64 {
     Pack::CHORISTER.shun_s
 }
+fn pack_chase_progress_m() -> f64 {
+    Pack::CHORISTER.chase_progress_m
+}
+fn pack_switch_margin() -> f64 {
+    Pack::CHORISTER.switch_margin
+}
 
 fn pack_stalk_margin() -> f64 {
     Pack::CHORISTER.stalk_margin
@@ -707,6 +723,8 @@ impl Pack {
         territory_radius_m: 10.0,
         flank_offset_m: 1.5,
         chase_give_up_s: 20.0,
+        chase_progress_m: 0.5,
+        switch_margin: 1.5,
         route_refresh_s: 60.0,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,
