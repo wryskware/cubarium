@@ -58,7 +58,11 @@ use crate::Fauna;
 //     and route ledger lines.
 // 45: VEILHOUND-SEARCH — `FounderPhysiology::senses` (`SenseTable`), `PackRecord::drawn`,
 //     the senses' ledger lines.
-pub const SCHEMA: u32 = 45;
+// 46: SENSES-CORE — `SenseTable`'s new fields (night and still sight, hearing's floor,
+//     tremor, smell, live, scent channel), `FaunaConfig::{perception, scent}`, the percept
+//     records (`Fauna::percepts`), `PackRecord::drawn_scent`, `ChaseEnd::Lost`, the funnel
+//     and the perception ledger lines; `pack_*_by_sense` widened to four modalities.
+pub const SCHEMA: u32 = 46;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

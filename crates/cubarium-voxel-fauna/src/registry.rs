@@ -232,11 +232,16 @@ fn founder_rows() -> Vec<Row> {
             .search(0.5, 1.0),
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
         r("burr_coat", "factor", fraction, "how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance"),
-        r("senses.sight_m", "m", nonneg, "sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic)"),
-        r("senses.sight_half_angle_deg", "deg", nonneg, "sight's cone half-angle from the heading (90: the half-plane ahead)"),
-        r("senses.hearing_m", "m", nonneg, "hearing: a moving body within this, all around (0: deaf)"),
-        r("senses.hearing_min_speed_m_s", "m/s", nonneg, "the slowest a body moves and is heard"),
-        r("senses.smell_m", "m", nonneg, "smell: any body within this, all around, around terrain (0: none)"),
+        // `senses.live` and `senses.scent` are switches: no rows.
+        r("senses.sight_m", "m", nonneg, "sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind)"),
+        r("senses.sight_night_m", "m", nonneg, "sight's range below the day line"),
+        r("senses.sight_still_fraction", "fraction", nonneg, "a still body is seen within this fraction of the range"),
+        r("senses.sight_half_angle_deg", "deg", nonneg, "sight's field half-angle from the heading (180: all around)"),
+        r("senses.hearing_m", "m", nonneg, "hearing's range, all around (0: deaf)"),
+        r("senses.hearing_min", "m/s at the default exponents", nonneg, "the faintest received loudness heard: emission speed^a x length^b over the distance, through terrain x occlusion"),
+        r("senses.tremor_m", "m", nonneg, "tremor's range for bodies on the ground (0: none)"),
+        r("senses.tremor_min", "organic x m/s / m^2", nonneg, "the faintest footfall felt (mass x speed / d^2, through terrain x occlusion)"),
+        r("senses.smell_min", "scent units", nonneg, "the faintest scent level smelled on the scent field (0: no smell)").log(),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
@@ -488,6 +493,35 @@ fn knob_rows() -> Vec<Row> {
         hk("route_refresh_s", "s", pos, "how long a lineage's walking route graph stands before it is rebuilt").search(10.0, 600.0).log(),
         hk("success_memory_s", "s", nonneg, "how long a kill marks its place productive in the killer's memory").search(120.0, 14400.0).log(),
         hk("success_boost", "fraction", nonneg, "a patch by a remembered kill scores 1 + this times its food cue").search(0.0, 4.0),
+    ]);
+
+    // `fauna.perception.*`: the perception core (SENSES-CORE).
+    let pk = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.perception.{path}"), unit, range, what)
+    };
+    rows.extend([
+        pk("remote_hz", "Hz", pos, "how often a body's remote senses (sight, hearing, the pair's tremor) run, staggered by id").search(1.0, 20.0),
+        pk("max_candidates", "bodies", nonneg, "prey and threats weighed (one terrain ray each) per observer per remote sensing, nearest first").search(2.0, 32.0),
+        pk("bin_m", "m", pos, "the spatial bins bodies are sorted into each tick").search(0.5, 8.0),
+        pk("occlusion", "fraction", fraction, "hearing and tremor through terrain are multiplied by this (sight is stopped)").search(0.0, 1.0),
+        pk("hearing_speed_exp", "exponent", nonneg, "hearing's emission is speed^this x length^size_exp").search(0.5, 3.0),
+        pk("hearing_size_exp", "exponent", nonneg, "the length exponent of hearing's emission").search(0.0, 3.0),
+        pk("hearing_near_m", "m", pos, "received loudness is emission over the distance, read as at least this"),
+        pk("give_up_s", "s", nonneg, "a body not sensed again within this is given up; a pursuit walks to its last-known point until then").search(1.0, 60.0).log(),
+    ]);
+
+    // `fauna.scent.*`: the scent field (SENSES-CORE).
+    let sk = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.scent.{path}"), unit, range, what)
+    };
+    rows.extend([
+        sk("cell_m", "m", pos, "the scent field's cell (rounded to whole voxels): the connected surface faces in a cell are one node").search(0.25, 2.0),
+        sk("half_life_s", "s", pos, "scent's half-life").search(5.0, 1200.0).log(),
+        sk("diffuse_fraction", "fraction per update", fraction, "the share of a node's difference to its neighbours mixed in per 0.5 s update").search(0.05, 1.0),
+        sk("threshold", "scent units", nonneg, "levels below this are dropped after an update"),
+        sk("deposit_per_s", "scent units per organic unit per s", nonneg, "what a standing body lays, by its organic matter").search(0.1, 10.0).log(),
+        sk("carrion_per_s", "scent units per organic unit per s", nonneg, "what carrion lays, by its stock").search(0.1, 10.0).log(),
+        sk("step_m", "m", nonneg, "neighbouring surface faces connect within this height difference, with open air over the lower one").search(0.0, 2.0),
     ]);
 
     // `fauna.founding.*`: the seeder's founders.

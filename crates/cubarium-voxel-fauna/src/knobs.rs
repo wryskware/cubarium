@@ -653,3 +653,102 @@ impl Default for HuntConfig {
         }
     }
 }
+
+/// **The perception core's knobs** (SENSES-CORE, S1; `design/7_Research/senses-review-2026-10-06.md`
+/// §3): how often and how widely the pairwise senses (sight, hearing, tremor) look, the one
+/// terrain ray's occlusion, hearing's emission rule and the pursuit's memory. Per-lineage
+/// ranges are each lineage's [`crate::SenseTable`]. Every number a plausible start, untuned.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PerceptionConfig {
+    /// Remote sensing (sight, hearing and the tremor mark of a pair) runs this often per
+    /// body, Hz: on the ticks where `tick ≡ id (mod TICK_HZ / remote_hz)`, staggered by id.
+    /// Contact, the tremor reading and flight run at tick rate. 4 Hz.
+    pub remote_hz: f64,
+    /// At most this many bodies (prey and threats, nearest first) are weighed per observer
+    /// per remote sensing, each with one terrain ray; the nearest of its own lineage besides.
+    /// 8.
+    pub max_candidates: u32,
+    /// The spatial bins bodies are sorted into each tick, metres on a side. 2 m.
+    pub bin_m: f64,
+    /// Hearing and tremor through terrain (the ray blocked) are multiplied by this; sight
+    /// is stopped. 0.25.
+    pub occlusion: f64,
+    /// Hearing's emission is `speed^speed_exp × length^size_exp` (speed in m/s, length in
+    /// m). 1.
+    pub hearing_speed_exp: f64,
+    /// 1.
+    pub hearing_size_exp: f64,
+    /// Received loudness is emission over the distance, read as at least this, metres.
+    /// 0.5.
+    pub hearing_near_m: f64,
+    /// **The pursuit's memory**: a body not sensed again within this long is given up, and
+    /// a pursuit walks to its last-known point until then, seconds. 10 s.
+    pub give_up_s: f64,
+}
+
+impl Default for PerceptionConfig {
+    fn default() -> PerceptionConfig {
+        PerceptionConfig {
+            remote_hz: 4.0,
+            max_candidates: 8,
+            bin_m: 2.0,
+            occlusion: 0.25,
+            hearing_speed_exp: 1.0,
+            hearing_size_exp: 1.0,
+            hearing_near_m: 0.5,
+            give_up_s: 10.0,
+        }
+    }
+}
+
+impl PerceptionConfig {
+    /// Ticks between a body's remote sensings, at least one.
+    pub fn stagger_ticks(&self) -> u64 {
+        if self.remote_hz.is_finite() && self.remote_hz > 0.0 {
+            (f64::from(crate::TICK_HZ) / self.remote_hz).round().max(1.0) as u64
+        } else {
+            1
+        }
+    }
+}
+
+/// **The scent field's knobs** (SENSES-CORE, [`crate::scent`]): animals lay scent on the
+/// surface where they stand, by mass; carrion by its stock; it decays and spreads only
+/// between connected surface cells.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScentConfig {
+    /// The field's cell, metres on a side (rounded to whole voxels): surface faces in one
+    /// cell's columns that connect are one node. 0.5 m.
+    pub cell_m: f64,
+    /// Scent's half-life, seconds. 60 s.
+    pub half_life_s: f64,
+    /// The share of a node's difference to its neighbours mixed in per update (every
+    /// 0.5 s), at most 1. 0.5.
+    pub diffuse_fraction: f64,
+    /// Levels below this are dropped after an update. 1e-6.
+    pub threshold: f64,
+    /// A standing body lays this much per unit of its organic matter per second. 1.
+    pub deposit_per_s: f64,
+    /// Carrion lays this much per unit of its stock per second. 1.
+    pub carrion_per_s: f64,
+    /// Two neighbouring surface faces connect when their heights differ by at most this,
+    /// metres, with open air over the lower face up to the higher (a ledge connects, a
+    /// wall does not). 0.5 m.
+    pub step_m: f64,
+}
+
+impl Default for ScentConfig {
+    fn default() -> ScentConfig {
+        ScentConfig {
+            cell_m: 0.5,
+            half_life_s: 60.0,
+            diffuse_fraction: 0.5,
+            threshold: 1e-6,
+            deposit_per_s: 1.0,
+            carrion_per_s: 1.0,
+            step_m: 0.5,
+        }
+    }
+}

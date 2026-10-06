@@ -633,9 +633,14 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
     }
     let scan = cfg.carcass_scan_m.max(0.0);
     let centre = |s: Site| ((f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v);
+    // SENSES-CORE: the carcasses it knows of are its record's (the carcass scan).
     let sites: Vec<Site> = match only {
         Some(s) => vec![s],
-        None => fauna.carcass_sites(fv).to_vec(),
+        None => {
+            let want = crate::perception::Want { carcasses: true, ..Default::default() };
+            crate::perception::refresh(fauna, i, view, fv, None, want);
+            fauna.percept(a.id).map(|p| p.carcass_sites().collect()).unwrap_or_default()
+        }
     };
     let near: Vec<(Site, f64)> = sites
         .iter()
@@ -759,47 +764,6 @@ pub(crate) fn remember_kill(fauna: &mut Fauna, striker: u64, x: f64, z: f64, rin
     }
 }
 
-/// Whether the hunter at `a` sees `o`, `(dx, dz)` away: ahead of it (the cone looks
-/// forward) and not hidden, by the flee rule's ray against the predation occupancy.
-fn sees(
-    fauna: &Fauna,
-    view: &VoxelView<'_>,
-    occupancy: Option<crate::senses::Occ<'_>>,
-    a: &crate::Animal,
-    o: &crate::Animal,
-    (dx, dz): (f64, f64),
-) -> bool {
-    let (fx, fz) = a.pose.forward();
-    if dx * fx + dz * fz < 0.0 {
-        return false;
-    }
-    let Some(occupancy) = occupancy else {
-        return true;
-    };
-    let config = &fauna.config;
-    let (Some(geometry), Some(og)) = (crate::body_of(config, a), crate::body_of(config, o)) else {
-        return false;
-    };
-    let v = view.config.voxel_m;
-    let origin = crate::senses::cone_origin(view, &a.pose, a.sense_layer(v), &geometry);
-    let base = if o.mobility.mode != crate::MobilityMode::Ground && o.pose.y_m.is_finite() {
-        o.pose.y_m
-    } else {
-        crate::surface_m(o.sense_layer(v), v)
-    };
-    let ty = base + 0.5 * og.height_m;
-    let (ex, ey, ez) = (dx, ty - origin.1, dz);
-    let dist = (ex * ex + ey * ey + ez * ez).sqrt();
-    if !(dist > 0.0) {
-        return true;
-    }
-    let dir = (ex / dist, ey / dist, ez / dist);
-    matches!(
-        crate::senses::ray_first_hit(view, &occupancy, a.id, origin, dir, dist + og.width_m),
-        Some((hit, crate::senses::Fine::Body)) if hit >= dist - og.width_m - v
-    )
-}
-
 /// The patrol's answer for the due body at `i` — its held actions and its lure — or
 /// `None` to leave its controller's (the patrol off, no hunter table, riding, striking).
 pub(crate) fn steer(
@@ -852,28 +816,39 @@ pub(crate) fn steer(
     let mut target: Option<(f64, f64, f64)> = None;
     let mut tremor = [0.0f64; 2];
     let reach = cfg.sight_m.max(pc.tremor_radius_m);
-    for o in &fauna.animals {
-        if o.id == a.id || !crate::is_prey_of(&fauna.config, &a, o) {
+    // SENSES-CORE: the prey in its record — by the patrol's own rule while its lineage's
+    // table is not live ([`crate::perception::refresh`]); a live lineage's core tracks read
+    // through the same reach, sight range and tremor radius.
+    crate::perception::refresh(fauna, i, view, fv, occupancy, crate::perception::Want { prey: true, ..Default::default() });
+    let tracks: Vec<crate::Track> = fauna
+        .percept(a.id)
+        .map(|p| p.tracks().iter().filter(|t| t.class == crate::perception::class::PREY).copied().collect())
+        .unwrap_or_default();
+    let mut target_id: Option<u64> = None;
+    for t in &tracks {
+        let Some(o) = fauna.view().animal(t.id).copied() else { continue };
+        if !crate::is_prey_of(&fauna.config, &a, &o) {
             continue;
         }
-        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
         let d = (dx * dx + dz * dz).sqrt();
         if d > reach {
             continue;
         }
-        let felt = if d <= pc.tremor_radius_m { crate::tremor_of(o, d, pc.tremor_near_m) } else { 0.0 };
-        let seen = d <= cfg.sight_m && sees(fauna, view, occupancy, &a, o, (dx, dz));
+        let felt = if t.modes & crate::perception::TREMOR != 0 && d <= pc.tremor_radius_m { t.felt } else { 0.0 };
+        let seen = t.modes & crate::perception::SIGHT != 0 && d <= cfg.sight_m && dx * fx + dz * fz >= 0.0;
         if !(seen || felt > 0.0) {
             continue;
         }
         let Some(pf) = o.founder else { continue };
         met[pf.index()] = true;
-        if !accepts(&fauna.config, &a, o, tick) {
+        if !accepts(&fauna.config, &a, &o, tick) {
             declined[pf.index()] = true;
             continue;
         }
         if seen && target.is_none_or(|t| d < t.0) {
             target = Some((d, dx, dz));
+            target_id = Some(o.id);
         }
         if felt > 0.0 {
             let side = dx * rx + dz * rz;
@@ -907,6 +882,9 @@ pub(crate) fn steer(
         m.patch = (a.pose.x, a.pose.z);
         m.samples = 0;
         fauna.ledger.hunt_engaged_samples += 1;
+        if let Some(id) = target_id {
+            crate::perception::approach(fauna, a.id, id);
+        }
         return Some((head(a.pose.heading_rad, dx.atan2(dz), forward, 1.0), lit));
     }
     if tremor[0] + tremor[1] >= cfg.tremor_turn && tremor[0] + tremor[1] > 0.0 {
