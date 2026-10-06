@@ -46,6 +46,9 @@
 //!   chases and chase kills, chases and draws by the sense that found the prey
 //!   `[sight, hearing, smell]`, chases begun while drawn, and the **draw share**: hungry
 //!   pack-tactic samples spent leading or following a draw, over all hungry samples.
+//! - `vig,` (S2 GROUND RESPONSES): per lineage with a response, scan pauses, flights, alarm
+//!   bolts, orientations, freezes and refuge samples; strikes on frondgrazers aware and
+//!   unaware of their striker; the Veilhound's stalk, rush and stalk-freeze samples.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
 //! - At the end, `sum,` lines over the whole run.
 
@@ -399,6 +402,37 @@ impl Vh {
     }
 }
 
+/// **The ground responses' window line** (S2), `a` → `b`: scan pauses, flights, alarm bolts,
+/// orientations, freezes and refuge samples per lineage that has any, the strikes on
+/// frondgrazers that had sensed their striker and that had not, and the Veilhound's stalk,
+/// rush and freeze samples.
+fn vig_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let (x, y) = (&a.vigil, &b.vigil);
+    let d = |p: &[u64; Founder::COUNT], q: &[u64; Founder::COUNT], f: Founder| q[f.index()] - p[f.index()];
+    let mut out = Vec::new();
+    for f in [Founder::Browser, Founder::Loftstrider, Founder::Seedporter, Founder::Blind] {
+        out.push(format!(
+            "{}={}/{}/{}/{}/{}/{}",
+            f.name(),
+            d(&x.scans, &y.scans, f),
+            d(&x.flees, &y.flees, f),
+            d(&x.alarm_bolts, &y.alarm_bolts, f),
+            d(&x.orients, &y.orients, f),
+            d(&x.freezes, &y.freezes, f),
+            d(&x.refuges, &y.refuges, f),
+        ));
+    }
+    format!(
+        "scans/flees/bolts/orients/freezes/refuges,{},grazer_aware={},grazer_unaware={},stalk={},rush={},stalk_freeze={}",
+        out.join(","),
+        d(&x.aware_strikes, &y.aware_strikes, Founder::Browser),
+        d(&x.unaware_strikes, &y.unaware_strikes, Founder::Browser),
+        y.stalk_samples - x.stalk_samples,
+        y.rush_samples - x.rush_samples,
+        y.stalk_freezes - x.stalk_freezes,
+    )
+}
+
 /// The Veilhound's window line, `a` → `b`.
 fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh) -> String {
     let i = VH.index();
@@ -542,6 +576,8 @@ fn run(args: &[String]) {
             println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
             println!("route,{arm},{minute},{}", route_line(&lw, &l));
             println!("vh,{arm},{minute},{}", vh_line(&sim, &params, &lw, &l, &vh_win));
+            println!("snail,{arm},{minute},{}", snail_line(&sim, &lw, &l));
+            println!("vig,{arm},{minute},{}", vig_line(&lw, &l));
             vh_all.add(&vh_win);
             vh_win = Vh::default();
             meal_all.add(&meal_win);
@@ -563,8 +599,20 @@ fn run(args: &[String]) {
     meal_all.add(&meal_win);
     println!("summeal,{arm},{},{}", minute0, meal_line(&l0, &l, &meal_all));
     println!("sumroute,{arm},{},{}", minute0, route_line(&l0, &l));
+    // The hunt funnel per hunter and prey over the run (S2's readout): sensed, approached,
+    // struck, killed, eaten.
+    for h in Founder::ALL {
+        for p in Founder::ALL {
+            let n: Vec<u64> = (0..5).map(|s| l.funnel[h.index()][p.index()][s] - l0.funnel[h.index()][p.index()][s]).collect();
+            if n.iter().any(|&x| x > 0) {
+                println!("funnel,{arm},{},{},{}", h.name(), p.name(), n.iter().map(u64::to_string).collect::<Vec<_>>().join(","));
+            }
+        }
+    }
     vh_all.add(&vh_win);
     println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
+    println!("sumsnail,{arm},{},{}", minute0, snail_line(&sim, &l0, &l));
+    println!("sumvig,{arm},{},{}", minute0, vig_line(&l0, &l));
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;
@@ -578,6 +626,42 @@ fn run(args: &[String]) {
             prey_line(&l0, &l, f, t.body_ticks, total_ticks),
         );
     }
+}
+
+/// **AMPHIBIOUS-SNAIL** readouts, `a` → `b`: ripple-snails now; their deaths by
+/// desiccation, by lanternjaws and in all; the share of amphibious ticks ashore by day and
+/// by night; intake (assimilated) per snail-hour and the share of it taken ashore; and
+/// retractions begun.
+fn snail_line(sim: &Sim, a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let f = Founder::RippleSnail;
+    let i = f.index();
+    let now = sim.fauna().view().animals.iter().filter(|x| x.founder == Some(f)).count();
+    let dead = |c: Departure| b.departed_founder(f, c) - a.departed_founder(f, c);
+    let all: u64 = Departure::ALL.iter().filter(|c| c.is_death()).map(|&c| dead(c)).sum();
+    let t = |d: usize, w: usize| b.amphibious_ticks[d][w].saturating_sub(a.amphibious_ticks[d][w]) as f64;
+    let share = |d: usize| {
+        let n = t(d, 0) + t(d, 1);
+        if n > 0.0 { t(d, 1) / n } else { f64::NAN }
+    };
+    let alive = b.alive_ticks_by_founder[i].saturating_sub(a.alive_ticks_by_founder[i]) as f64;
+    let hours = alive / f64::from(TICK_HZ) / 3600.0;
+    let intake = b.assimilated_by_founder[i] - a.assimilated_by_founder[i];
+    let ashore = b.ashore_assimilated - a.ashore_assimilated;
+    let ratio = |x: f64, y: f64| if y > 0.0 { x / y } else { f64::NAN };
+    // SNAIL-FIX: the film on land-wet ground now, the faces holding it, and the land-wet
+    // faces (column tops) it could stand on.
+    let (land_film, land_filmed, land_wet) = cubarium_voxel_flora::land_census(sim.flora(), sim.world());
+    let per_wet = if land_wet > 0 { land_film / land_wet as f64 } else { f64::NAN };
+    format!(
+        "n={now},desiccated={},lj_kills={},deaths={all},land_day={:.3},land_night={:.3},snail_h={hours:.2},intake_per_h={:.6},ashore_intake_share={:.3},retracts={},land_film={land_film:.5},land_film_faces={land_filmed},land_wet_faces={land_wet},land_film_per_wet_face={per_wet:.3e}",
+        dead(Departure::Desiccation),
+        dead(Departure::Killed { by: LJ }),
+        share(0),
+        share(1),
+        ratio(intake, hours),
+        ratio(ashore, intake),
+        b.retracts - a.retracts,
+    )
 }
 
 /// The lanternjaw's window measures, `a` → `b`.

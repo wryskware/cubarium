@@ -185,13 +185,25 @@ pub fn dodge_chance(
     struck_from_rear: bool,
     reserve_fraction: f64,
 ) -> f64 {
+    dodge_chance_with(cfg, agility, cfg.awareness(state), struck_from_rear, reserve_fraction)
+}
+
+/// [`dodge_chance`] with the awareness given: S2's senses as the awareness (D5,
+/// [`crate::vigil::awareness`]) replace the state column, they do not stack on it.
+pub fn dodge_chance_with(
+    cfg: &PredationConfig,
+    agility: f64,
+    awareness: f64,
+    struck_from_rear: bool,
+    reserve_fraction: f64,
+) -> f64 {
     let aspect = if struck_from_rear { cfg.dodge_rear_aspect } else { 1.0 };
     let condition = if reserve_fraction.is_finite() {
         reserve_fraction.clamp(cfg.dodge_condition_floor, 1.0)
     } else {
         cfg.dodge_condition_floor
     };
-    (agility * cfg.awareness(state) * aspect * condition).clamp(0.0, 1.0)
+    (agility * awareness * aspect * condition).clamp(0.0, 1.0)
 }
 
 /// Stream key for the dodge draw, apart from the step's own.

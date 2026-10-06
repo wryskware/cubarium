@@ -39,6 +39,12 @@
 //! - **Tick-rate parts** at each of its controller samples ([`refresh`]): the tremor
 //!   reading, the scent reading, the carcasses.
 //!
+//! S2 turns on the frondgrazer's, loftstrider's, seedporter's and littershredder's tables, with
+//! two inputs from their responses ([`crate::vigil`]): a grazer with its head down between
+//! scans sees [`crate::SenseTable::feeding_sight_fraction`] of its range, and a running body
+//! is louder by its [`crate::Vigilance::run_noise`]. An observer weighs up to
+//! [`crate::SenseTable::kin_tracks`] of its own lineage.
+//!
 //! Every other lineage's record is filled by the **interim rules** its reflexes ran on before
 //! the senses pass ([`refresh`]), so it behaves as before until S2 and S3 turn its table on:
 //! - threats: the flee rule's — the nearest body that hunts it ([`crate::kind_of`]: moving,
@@ -132,6 +138,8 @@ pub struct Track {
     pub size_m: f64,
     /// The tick it was sensed.
     pub tick: u64,
+    /// Its heading then, radians (S2: a herd bolts the way a neighbour runs).
+    pub heading: f64,
 }
 
 impl Track {
@@ -218,6 +226,9 @@ pub struct Percept {
     /// prey sensed or approached (by id), a carcass eaten (by face). An event counts once
     /// per episode: again only after [`crate::PerceptionConfig::give_up_s`] without it.
     pub recent: [(u8, u64, u64); FUNNEL_MEMORY],
+    /// **Its ground response's state** (S2, [`crate::vigil`]): scans, flight, alarm,
+    /// orientation, freeze.
+    pub vigil: crate::Vigil,
 }
 
 impl Percept {
@@ -354,8 +365,9 @@ pub(crate) struct Cost {
 }
 
 /// **The pairwise senses for one pair** (module note): which of `b`'s senses (`table`, at
-/// this light) detect `o`, sharing one terrain ray; `None` when none does (no ray is marched
-/// when no sense could reach it).
+/// this light, its sight ranges times `sight_scale` — S2's head-down blind window) detect
+/// `o` (its emission times `noise` — S2's loud run), sharing one terrain ray; `None` when
+/// none does (no ray is marched when no sense could reach it).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sense_pair(
     config: &FaunaConfig,
@@ -367,6 +379,8 @@ pub(crate) fn sense_pair(
     class: u8,
     tick: u64,
     cost: &mut Cost,
+    sight_scale: f64,
+    noise: f64,
 ) -> Option<Track> {
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
@@ -384,9 +398,9 @@ pub(crate) fn sense_pair(
     let (fx, fz) = b.pose.forward();
     let cos = if dh > 0.0 { (dx * fx + dz * fz) / dh } else { 1.0 };
     let in_field = dh <= 0.0 || cos >= table.sight_half_angle_deg.to_radians().cos() - 1e-12;
-    let range = table.sight_range_m(day) * if moving { 1.0 } else { table.sight_still_fraction.max(0.0) };
+    let range = table.sight_range_m(day) * if moving { 1.0 } else { table.sight_still_fraction.max(0.0) } * sight_scale.max(0.0);
     let may_see = range > 0.0 && d3 <= range && in_field;
-    let e = emission(config, o);
+    let e = emission(config, o) * noise.max(0.0);
     let may_hear = table.hearing_m > 0.0 && d3 <= table.hearing_m && e > 0.0;
     let grounded = o.mobility.mode == crate::MobilityMode::Ground && o.attached.is_none();
     let may_feel = table.tremor_m > 0.0 && d3 <= table.tremor_m && grounded && o.speed_m_s > 0.0;
@@ -452,6 +466,7 @@ pub(crate) fn sense_pair(
         felt,
         size_m: og.length_m,
         tick,
+        heading: o.pose.heading_rad,
     })
 }
 
@@ -545,30 +560,60 @@ fn sense_one(fauna: &Fauna, view: &VoxelView<'_>, bins: &Bins, day: bool, i: usi
     }
     cand.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
     let cap = fauna.config.perception.max_candidates as usize;
+    let kin_cap = table.kin_tracks as usize;
     let mut weighed = 0usize;
-    let mut kin = false;
+    let mut kin = 0usize;
     let mut out: Vec<Track> = Vec::new();
+    // S2: head down between scans, it sees a fraction of its range.
+    let now = fauna.tick;
+    let sight_scale = if fauna.percepts.get(&b.id).is_some_and(|p| p.vigil.head_down(now)) { table.feeding_sight_fraction } else { 1.0 };
     for &(_, _, k, c) in &cand {
         if c == class::KIN {
-            if kin {
+            if kin >= kin_cap {
                 continue;
             }
-            kin = true;
+            kin += 1;
         } else {
             if weighed >= cap {
                 continue;
             }
             weighed += 1;
         }
-        if let Some(t) = sense_pair(&fauna.config, view, &table, day, b, &fauna.animals[k], c, fauna.tick, cost) {
+        let o = &fauna.animals[k];
+        let noise = run_noise(fauna, o, now);
+        if let Some(t) = sense_pair(&fauna.config, view, &table, day, b, o, c, now, cost, sight_scale, noise) {
             out.push(t);
         }
-        if weighed >= cap && kin {
+        if weighed >= cap && kin >= kin_cap {
             break;
         }
     }
     out.sort_by(|p, q| p.d_m.total_cmp(&q.d_m).then(p.id.cmp(&q.id)));
     out
+}
+
+/// A body's emission factor (S2): its lineage's [`crate::Vigilance::run_noise`] while it runs
+/// (flees or bolts), else 1.
+pub(crate) fn run_noise(fauna: &Fauna, o: &Animal, now: u64) -> f64 {
+    let running = fauna.percepts.get(&o.id).is_some_and(|p| p.vigil.running(now));
+    match o.founder {
+        Some(f) if running => fauna.config.founder(f).vigilance.run_noise,
+        _ => 1.0,
+    }
+}
+
+/// Whether terrain leaves the straight line from `from` to `to` (metres) open (S2's still
+/// fruit seen across the ground): the core's one-ray rule.
+pub(crate) fn line_clear(view: &VoxelView<'_>, id: u64, from: (f64, f64, f64), to: (f64, f64, f64)) -> bool {
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let (dx, dz) = crate::pose::wrapped_delta(from.0, from.2, to.0, to.2, ring);
+    let dy = to.1 - from.1;
+    let d = (dx * dx + dy * dy + dz * dz).sqrt();
+    if !(d > 0.0) {
+        return true;
+    }
+    let dir = (dx / d, dy / d, dz / d);
+    crate::senses::ray_first_hit(view, &TerrainOnly, id, from, dir, d).is_none_or(|(h, _)| h >= d - view.config.voxel_m)
 }
 
 /// Fold a sensing's tracks into a record: the tracks, the best per class (kept when this
@@ -810,6 +855,7 @@ fn interim_track(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, o: &Animal, cl
         felt,
         size_m: crate::body_of(&fauna.config, o).map_or(0.0, |g| g.length_m),
         tick: fauna.tick,
+        heading: o.pose.heading_rad,
     }
 }
 

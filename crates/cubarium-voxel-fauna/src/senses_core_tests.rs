@@ -25,6 +25,10 @@ fn config(table: SenseTable) -> FaunaConfig {
         c.founders[f.index()].active = Activity::Always;
     }
     c.founders[CH.index()].senses = SenseTable { live: true, ..table };
+    // S1's scenes: only the Veilhound senses by the core (S2's lineages back on S1).
+    for f in [Founder::Blind, Founder::Browser, Founder::Loftstrider, Founder::Seedporter] {
+        c.founders[f.index()].senses.live = false;
+    }
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
     c
 }

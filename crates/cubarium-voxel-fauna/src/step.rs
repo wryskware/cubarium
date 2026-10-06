@@ -288,7 +288,10 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
         }
     });
     cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora, dusk) });
-    cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
+    cubarium_voxel::voxel_phase!(FaunaDeaths, {
+        desiccation(fauna, &view, &sky);
+        deaths(fauna, &view, flora)
+    });
     // Burrs ride the bodies as they now stand: a seed latches on a step onto a donor's
     // face, falls off as its carrier walks, and drops where a body died.
     cubarium_voxel::voxel_phase!(FaunaBurrs, { burrs(fauna, world, flora) });
@@ -650,6 +653,8 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
             // A glider (F3) sleeps only perched.
             && (phys.glider.is_none() || a.mobility.mode == crate::MobilityMode::Perched)
             && a.mobility.submerged_ticks == 0
+            // AMPHIBIOUS-SNAIL: an amphibious body out of water stays up to get back.
+            && !a.mobility.ashore
             // Repair 3 item 4: attached (a rider) and falling bodies are awake.
             && a.attached.is_none()
             && !a.mobility.falling
@@ -889,6 +894,9 @@ fn digest(fauna: &mut Fauna) {
             l.digested_by_founder[f.index()] += t.organic;
             let placed = assimilate(fauna, i, &sc, t, phys.yield_for(food));
             fauna.ledger.assimilated_by_founder[f.index()] += placed;
+            if fauna.animals[i].mobility.ashore {
+                fauna.ledger.ashore_assimilated += placed;
+            }
             fauna.animals[i].founder_state.feedback.intake += placed;
         }
     }
@@ -1230,13 +1238,20 @@ fn controllers(
         // fruit at its mouth, its heuristic gives way to a walk to the nearest fruiting
         // stand in reach. Flight from a threat and the roost come after it and win.
         if driven && fauna.controllers.flees(id) && fauna.config.founder(founder).glider.is_some() {
-            if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv) {
+            let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
+            if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv, day) {
                 actions = go;
             }
         }
+        // AMPHIBIOUS-SNAIL: a body that retracts (its lineage's `retract_hold_s`) does so
+        // instead of fleeing: a threat it sees or feels stops and closes it.
+        let retracts = fauna.config.founder(founder).amphibious.is_some_and(|am| am.retract_hold_s > 0.0);
+        if driven && hunters_here && retracts && fauna.controllers.flees(id) {
+            retract(fauna, i);
+        }
         let mut fled = false;
-        if driven && hunters_here && fauna.controllers.flees(id) {
-            if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy) {
+        if driven && hunters_here && !retracts && fauna.controllers.flees(id) {
+            if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
                 actions = flee;
                 lure = 0.0;
                 lift = 0.0;
@@ -1269,6 +1284,32 @@ fn controllers(
                 actions = out;
                 lure = 0.0;
                 lift = 0.0;
+            }
+        }
+        // SNAIL-FIX: the roam drive. At night and in or after rain, an amphibious body
+        // that is not thirsty and not feeding where it stands walks out onto wet ground,
+        // to land film where there is any.
+        if driven && fauna.controllers.flees(id) {
+            if let Some(go) = roam_reflex(fauna, i, view, &fv, sky, actions) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+            }
+        }
+        // AMPHIBIOUS-SNAIL: a thirsty body out of water heads for the nearest water.
+        if driven && fauna.controllers.flees(id) {
+            if let Some(go) = water_reflex(fauna, i, view) {
+                actions = go;
+            }
+        }
+        // A retracted body is stopped and closed; a desiccated one cannot feed.
+        {
+            let m = fauna.animals[i].mobility;
+            if m.retract_ticks > 0 {
+                actions = Actions { forward: 0.0, turn: 0.0, feed: 0.0 };
+            }
+            if fauna.config.founder(founder).amphibious.is_some_and(|am| am.on_land) && m.dryness >= 1.0 {
+                actions.feed = 0.0;
             }
         }
         // The detritus web D2: the lanternjaw's patrol (its heuristic only, while the
@@ -1379,12 +1420,17 @@ fn controllers(
 /// rule: [`crate::kind_of`], so a still hunter beyond 0.5 m is not one, and not hidden by
 /// terrain or foliage); the blind shredder turns away from tremor above
 /// [`crate::PredationConfig::flee_tremor`]. Full forward, no feeding.
+///
+/// **S2**: a lineage whose table is live and that has a ground response
+/// ([`crate::Vigilance::mode`]) runs that instead ([`crate::vigil::respond`]), on its record
+/// alone; `held` is what its heuristic asked this sample.
 fn flee(
     fauna: &mut Fauna,
     i: usize,
     view: &VoxelView<'_>,
     fv: &cubarium_voxel_flora::FloraView<'_>,
     occupancy: Option<crate::senses::Occ<'_>>,
+    held: Actions,
 ) -> Option<Actions> {
     let a = fauna.animals[i];
     let founder = a.founder?;
@@ -1394,6 +1440,12 @@ fn flee(
         .any(|&f| config.founder(f).hunter.is_some_and(|h| h.hunts(founder)));
     if !hunted {
         return None;
+    }
+    let phys = config.founder(founder);
+    if phys.senses.live && phys.vigilance.mode != crate::VigilMode::None {
+        let want = crate::perception::Want { tremor: phys.vigilance.mode == crate::VigilMode::Freeze, ..Default::default() };
+        crate::perception::refresh(fauna, i, view, fv, occupancy, want);
+        return crate::vigil::respond(fauna, i, view, fv, held);
     }
     let away = |turn: f64| Actions {
         forward: 1.0,
@@ -1428,6 +1480,198 @@ fn flee(
     }
     let (_, side) = nearest?;
     Some(away(if side > 0.0 { -1.0 } else { 1.0 }))
+}
+
+/// **The arboreal refuge** (S2, [`crate::vigil`]): a grounded glider's walk to the nearest
+/// stand it can climb within `search_m` (walking into the stem climbs it).
+pub(crate) fn refuge_step(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &cubarium_voxel_flora::FloraView<'_>,
+    search_m: f64,
+) -> Option<Actions> {
+    glider::refuge_step(fauna, i, view, fv, search_m)
+}
+
+/// **The retraction** (AMPHIBIOUS-SNAIL, senses review §1): a body whose record holds a
+/// threat it sensed by sight (a looming shadow within its short sight) or tremor at its
+/// latest sensing stops and closes for its lineage's `retract_hold_s`
+/// ([`crate::Amphibious`]), renewed while the threat stays. Reads the live record
+/// ([`crate::perception`]); a lineage whose table is not live has no tracks and never
+/// retracts.
+fn retract(fauna: &mut Fauna, i: usize) {
+    let a = fauna.animals[i];
+    let Some(founder) = a.founder else { return };
+    let Some(am) = fauna.config.founder(founder).amphibious else { return };
+    let window = fauna.config.perception.stagger_ticks();
+    let now = fauna.tick;
+    let Some(p) = crate::perception::percept(fauna, a.id) else { return };
+    let threat = p.tracks().iter().any(|t| {
+        t.class == crate::perception::class::THREAT
+            && t.modes & (crate::perception::SIGHT | crate::perception::TREMOR) != 0
+            && now.saturating_sub(t.tick) <= window
+    });
+    if !threat {
+        return;
+    }
+    let m = &mut fauna.animals[i].mobility;
+    if m.retract_ticks == 0 {
+        fauna.ledger.retracts += 1;
+    }
+    fauna.animals[i].mobility.retract_ticks = crate::Hunter::ticks(am.retract_hold_s);
+}
+
+/// **The water reflex** (AMPHIBIOUS-SNAIL): a thirsty amphibious body out of water
+/// ([`crate::Mobility::thirsty`], [`crate::Mobility::ashore`]) walks to the nearest support
+/// face with standing water within its lineage's `water_search_m`, at most its step up
+/// above its own face. A heuristic world query, not a sense (as the shallows reflex is).
+/// `None` when it is not thirsty ashore or no water is in reach.
+fn water_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    let am = phys.amphibious.filter(|am| am.on_land)?;
+    if !(a.mobility.thirsty && a.mobility.ashore) || a.mobility.mode != crate::MobilityMode::Ground || a.attached.is_some() {
+        return None;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let reach = am.water_search_m.max(0.0);
+    let k = (reach / v).ceil() as i64;
+    let up = (phys.step_up_m / v).floor().max(0.0) as u32;
+    let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
+    let ring = f64::from(c.width) * v;
+    let top = (a.site.y + up).min(c.height.saturating_sub(1));
+    let mut best: Option<(f64, f64, f64)> = None;
+    for dz in -k..=k {
+        let z = hz + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            let x = (hx + dx).rem_euclid(i64::from(c.width));
+            let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
+                continue;
+            };
+            if !(view.standing_depth_m(x, y, z as u32) > 0.0) {
+                continue;
+            }
+            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if d <= reach && best.is_none_or(|(b, _, _)| d < b) {
+                best = Some((d, ddx, ddz));
+            }
+        }
+    }
+    let (_, dx, dz) = best?;
+    Some(glider::walk_toward(a, dx, dz, 0.0))
+}
+
+/// Whether `sky` and the rain record make this an amphibious body's **roam hours**
+/// (SNAIL-FIX): night (the clock on and daylight under the day line, or the clock off, as
+/// the drying clock reads it), rain falling, or within its `roam_after_rain_s` of the last
+/// rain.
+fn roam_hours(fauna: &Fauna, am: &crate::Amphibious, view: &VoxelView<'_>, sky: &Sky) -> bool {
+    let day = sky.clock_on && sky.daylight >= fauna.config.life.day_line;
+    if !day || view.is_raining() {
+        return true;
+    }
+    let after = (am.roam_after_rain_s.max(0.0) / DT).round() as u64;
+    fauna
+        .last_rain_tick
+        .is_some_and(|t| fauna.tick.saturating_sub(t) <= after)
+}
+
+/// **The roam drive** (SNAIL-FIX, [`crate::Amphibious::roam_search_m`]): in its roam hours
+/// ([`roam_hours`]) an amphibious body allowed on land, on the ground, awake, not thirsty,
+/// not retracted, and not feeding where it stands (its eating latch on and its heuristic
+/// tasting food) walks to the support face within `roam_search_m` that is out of water
+/// and wet enough to step on (`step_moisture_min`) and holds the most film per metre of
+/// distance (the plant layer's land film); in water with no such film in reach, to the
+/// nearest such face. Its own face is never the target, so a sated body moves on from a
+/// grazed patch. `None` otherwise: ashore with no land film in reach, its heuristic
+/// (film chemistry, or its wander) steers. A heuristic world query, not a sense, as the
+/// water reflex is.
+fn roam_reflex(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &cubarium_voxel_flora::FloraView<'_>,
+    sky: &Sky,
+    asked: Actions,
+) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    let am = phys.amphibious.filter(|am| am.on_land && am.roam_search_m > 0.0)?;
+    let m = &a.mobility;
+    if m.thirsty
+        || m.retract_ticks > 0
+        || m.mode != crate::MobilityMode::Ground
+        || a.attached.is_some()
+        || a.state == State::Asleep
+        || (a.eating && asked.feed > 0.5)
+        || !roam_hours(fauna, &am, view, sky)
+    {
+        return None;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let reach = am.roam_search_m;
+    let k = (reach / v).ceil() as i64;
+    let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
+    let ring = f64::from(c.width) * v;
+    // A pond's bank stands above the bed it grazes: faces up to the search reach above
+    // its own (a slope it walks up in strides; the step rule refuses what it cannot).
+    let top = (a.site.y + k.max(0) as u32).min(c.height.saturating_sub(1));
+    // (score, distance, dx, dz): the most film per metre, and the nearest bare wet face.
+    let mut film_best: Option<(f64, f64, f64)> = None;
+    let mut near: Option<(f64, f64, f64)> = None;
+    for dz in -k..=k {
+        let z = hz + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            if dx == 0 && dz == 0 {
+                continue;
+            }
+            let x = (hx + dx).rem_euclid(i64::from(c.width));
+            let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
+                continue;
+            };
+            let z = z as u32;
+            if body::water_within(view, x, y, z, phys.water_margin_m)
+                || body::ground_moisture(view, x, y, z) < am.step_moisture_min
+            {
+                continue;
+            }
+            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if d > reach || d <= 0.0 {
+                continue;
+            }
+            let film = fv.film_at(cubarium_voxel_flora::Site { x: x as u32, y, z });
+            if film > 0.0 {
+                let score = film / d;
+                if film_best.is_none_or(|(b, _, _)| score > b) {
+                    film_best = Some((score, ddx, ddz));
+                }
+            }
+            if near.is_none_or(|(b, _, _)| d < b) {
+                near = Some((d, ddx, ddz));
+            }
+        }
+    }
+    let (_, dx, dz) = match film_best {
+        Some(t) => t,
+        None if !m.ashore => near?,
+        None => return None,
+    };
+    Some(glider::walk_toward(a, dx, dz, 0.0))
 }
 
 /// Step 5: resolve each founder's held actions, in id order. A body with no lineage
@@ -1617,7 +1861,14 @@ fn founder_act(
             step_limits,
             wall_friction,
             held,
-            phys.aquatic.then_some(phys.water_margin_m),
+            // A thirsty amphibious body is held to the water-bound rule until it has
+            // drunk (AMPHIBIOUS-SNAIL).
+            body::WaterRule::of(&phys).map(|mut r| {
+                if a.mobility.thirsty {
+                    r.land_moisture_min = None;
+                }
+                r
+            }),
         );
         (motion, standing_y)
     };
@@ -2206,13 +2457,34 @@ fn strike_tick(
             let from_rear = dx * fx + dz * fz < 0.0;
             let cap = pp.core.reserve_of(p.body);
             let condition = if cap > 0.0 { p.reserve / cap } else { 0.0 };
-            let chance = crate::dodge_chance(&fauna.config.predation, pp.agility, p.state, from_rear, condition);
+            // D5 (S2): a live prey's awareness is whether its record holds the striker.
+            let (awareness, aware) = {
+                let record = fauna.percept(p.id);
+                (
+                    crate::vigil::awareness(&fauna.config, &p, record, a.id, tick),
+                    crate::vigil::aware_of(&fauna.config, record, a.id, tick),
+                )
+            };
+            if pp.senses.live && p.state != State::Asleep {
+                if aware {
+                    fauna.ledger.vigil.aware_strikes[pf.index()] += 1;
+                } else {
+                    fauna.ledger.vigil.unaware_strikes[pf.index()] += 1;
+                }
+            }
+            let chance = crate::dodge_chance_with(&fauna.config.predation, pp.agility, awareness, from_rear, condition);
             if crate::dodges(chance, seed, a.id, p.id, tick) {
                 fauna.ledger.dodges_by_founder[founder.index()] += 1;
             } else {
                 // Counted when `apply_hit` lands it on a live prey, not here.
                 let damage = if p.body > 0.0 {
-                    h.strike_power * (a.body / p.body) * (1.0 - pp.armour)
+                    // A retracted amphibious body is closed (AMPHIBIOUS-SNAIL): slower
+                    // to eat, not immune.
+                    let closed = match pp.amphibious {
+                        Some(am) if p.mobility.retract_ticks > 0 => 1.0 - am.retract_armour,
+                        _ => 1.0,
+                    };
+                    h.strike_power * (a.body / p.body) * (1.0 - pp.armour) * closed
                 } else {
                     1.0
                 };
@@ -2470,9 +2742,13 @@ fn attach(
     }
     // A water-bound body (roster R2b) climbs only to a face with standing water within
     // its margin, refused as a step there would be (a stranded body is not held).
-    if phys.aquatic
-        && body::water_within(view, cx, y, cz, phys.water_margin_m)
-        && !body::water_within(view, ax, to_y, az, phys.water_margin_m)
+    if let Some(rule) = body::WaterRule::of(phys).map(|mut r| {
+        if a.mobility.thirsty {
+            r.land_moisture_min = None;
+        }
+        r
+    }) && rule.admits(view, cx, y, cz)
+        && !rule.admits(view, ax, to_y, az)
     {
         return Attach::Nothing;
     }
@@ -3255,7 +3531,12 @@ fn lay(
         let ground = flora.view().ground_at(site);
         let fits = match fauna.config.founder(lineage).egg_site {
             crate::EggSite::Litter => ground.is_some_and(|g| g.litter > rule.litter_min),
-            crate::EggSite::Film => ground.is_some_and(|g| g.film > 0.0),
+            // Under water (SNAIL-FIX): land film is grazed, not laid on; laying above
+            // the waterline is not decided.
+            crate::EggSite::Film => {
+                ground.is_some_and(|g| g.film > 0.0)
+                    && view.standing_depth_m(i64::from(site.x), site.y, site.z) > 0.0
+            }
             crate::EggSite::Fungus => fungus_near(view, flora, site, rule.egg_fungus_radius_m),
         };
         if !fits {
@@ -3810,6 +4091,62 @@ fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Acti
     Some(glider::walk_toward(a, dx, dz, 0.0))
 }
 
+/// **The drying clock** (AMPHIBIOUS-SNAIL, [`crate::Amphibious`]): every amphibious body's
+/// retraction counts down; one allowed on land rehydrates in water (standing water
+/// within its `water_margin_m`, or riding) and dries out of it at the rate its face's
+/// [`body::ground_moisture`] sets, times the day factor while the sun is up (clock on,
+/// daylight at or above the day line) and the rain factor while rain falls. The
+/// readouts count its ticks in water and ashore, by day and by night.
+fn desiccation(fauna: &mut Fauna, view: &VoxelView<'_>, sky: &Sky) {
+    let day = sky.clock_on && sky.daylight >= fauna.config.life.day_line;
+    let raining = view.is_raining();
+    if raining {
+        fauna.last_rain_tick = Some(fauna.tick);
+    }
+    for i in 0..fauna.animals.len() {
+        let a = fauna.animals[i];
+        let Some(f) = a.founder else { continue };
+        let phys = fauna.config.founder(f);
+        let Some(amph) = phys.amphibious else { continue };
+        let m = &mut fauna.animals[i].mobility;
+        m.retract_ticks = m.retract_ticks.saturating_sub(1);
+        if !amph.on_land {
+            m.ashore = false;
+            m.thirsty = false;
+            continue;
+        }
+        let (x, y, z) = (i64::from(a.site.x), a.site.y, a.site.z);
+        let in_water = a.attached.is_some() || body::water_within(view, x, y, z, phys.water_margin_m);
+        if in_water {
+            m.dryness = (m.dryness - amph.rehydrate_per_s * DT).max(0.0);
+        } else {
+            let mut rate = amph.drying_per_s(body::ground_moisture(view, x, y, z));
+            if day {
+                rate *= amph.day_drying_factor;
+            }
+            if raining {
+                rate *= amph.rain_drying_factor;
+            }
+            if rate.is_finite() {
+                m.dryness += rate * DT;
+            } else {
+                m.dryness = amph.lethal_fraction;
+            }
+        }
+        m.ashore = !in_water;
+        let back_at = if day && !raining { amph.day_return_fraction } else { amph.return_fraction };
+        m.thirsty = m.dryness > back_at;
+        fauna.ledger.amphibious_ticks[usize::from(!day)][usize::from(!in_water)] += 1;
+    }
+}
+
+/// Whether `a`'s drying clock has reached its lineage's `lethal_fraction`.
+fn desiccated(config: &crate::FaunaConfig, a: &Animal) -> bool {
+    a.founder
+        .and_then(|f| config.founder(f).amphibious)
+        .is_some_and(|am| am.on_land && a.mobility.dryness >= am.lethal_fraction)
+}
+
 /// Step 7: starvation, drowning and old age, and the carrion they leave.
 fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     // A founder drowns **by its own height and over time** (package mobility, decision
@@ -3854,6 +4191,8 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
                 Some((i, Departure::Starved))
             } else if drowning[i] {
                 Some((i, Departure::Drowned))
+            } else if desiccated(&fauna.config, a) {
+                Some((i, Departure::Desiccation))
             } else if a.lifespan_ticks > 0 && a.age_ticks >= a.lifespan_ticks {
                 Some((i, Departure::Aged))
             } else {
@@ -3945,3 +4284,7 @@ mod senses_core_tests;
 #[cfg(test)]
 #[path = "light_tests.rs"]
 mod light_tests;
+
+#[cfg(test)]
+#[path = "ground_response_tests.rs"]
+mod ground_response_tests;
