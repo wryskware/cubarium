@@ -4,8 +4,11 @@
 //!
 //! ```text
 //! hunter_study found seed=N save=DIR [minutes=120] [lanternjaws=3|1,3] [config=FILE] [set=P=V ...] [threads=T]
-//! hunter_study run   load=DIR/mM arm=NAME hours=H [every=10] [config=FILE] [set=...] [run=DIR ...]
+//! hunter_study run   load=DIR/mM arm=NAME hours=H [every=10] [reseed=N] [config=FILE] [set=...] [run=DIR ...]
 //! ```
+//!
+//! `reseed=N` (N > 0) re-keys the loaded world's draws (weather, and the layers' keyed draws)
+//! by `N`: replicates of one save under other weather and draws.
 //!
 //! - `found`: the config's world (default `config/scenarios/patch-hunters.toml`: patch with
 //!   the lanternjaw's egg bank) from founding to `minutes`, then `lanternjaws` adults
@@ -27,6 +30,11 @@
 //!   contact seconds (locally available, size-eligible prey met), the contact seconds its
 //!   attack choice declined and strikes on a prey the choice did not accept (D2b), and the **per-prey
 //!   mortality**: kills per mean body per hour.
+//! - `meal,` (HUNTER-MEAL) for the lanternjaw: lanternjaw-hours (alive, free), kills per
+//!   lanternjaw-hour, the organic matter its kills died with (the carrion each laid), the
+//!   carrion its mouths took, their ratio (the share of the kills eaten, scavenged carrion
+//!   included), assimilated intake per lanternjaw-hour, and the **sated share**: free
+//!   lanternjaw ticks with the eating latch off over free lanternjaw ticks.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
 //! - At the end, `sum,` lines over the whole run.
 
@@ -200,6 +208,51 @@ struct Track {
     body_ticks: u64,
 }
 
+/// The lanternjaw's meal measures over a window (HUNTER-MEAL), integrated tick by tick.
+#[derive(Clone, Copy, Default)]
+struct Meal {
+    /// Free (unattached) lanternjaw ticks, and those with the eating latch off.
+    lj_ticks: u64,
+    sated_ticks: u64,
+    /// Organic matter the lanternjaws' kills died with (what each corpse laid as carrion).
+    kill_organic: f64,
+}
+
+impl Meal {
+    fn add(&mut self, o: &Meal) {
+        self.lj_ticks += o.lj_ticks;
+        self.sated_ticks += o.sated_ticks;
+        self.kill_organic += o.kill_organic;
+    }
+}
+
+/// What a body would lay as carrion if it died now (`kill`'s corpse: body, gut, gut seeds,
+/// stomach).
+fn corpse_organic(a: &cubarium_voxel_fauna::Animal) -> f64 {
+    a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.total().organic
+}
+
+fn kills_by_lj(l: &FaunaLedger) -> u64 {
+    Founder::ALL.iter().map(|&f| l.departed_founder(f, Departure::Killed { by: LJ })).sum()
+}
+
+fn meal_line(a: &FaunaLedger, b: &FaunaLedger, m: &Meal) -> String {
+    let i = LJ.index();
+    let hours = m.lj_ticks as f64 / f64::from(TICK_HZ) / 3600.0;
+    let per_h = |x: f64| if hours > 0.0 { x / hours } else { f64::NAN };
+    let kills = kills_by_lj(b) - kills_by_lj(a);
+    let eaten = b.eaten_carrion_by_founder[i] - a.eaten_carrion_by_founder[i];
+    let intake = b.assimilated_by_founder[i] - a.assimilated_by_founder[i];
+    format!(
+        "lj_hours={hours:.3},kills={kills},kills_per_lj_h={:.3},kill_organic={:.4},eaten_carrion={eaten:.4},eaten_share={:.3},intake_per_lj_h={:.5},sated={:.3}",
+        per_h(kills as f64),
+        m.kill_organic,
+        if m.kill_organic > 0.0 { eaten / m.kill_organic } else { f64::NAN },
+        per_h(intake),
+        if m.lj_ticks > 0 { m.sated_ticks as f64 / m.lj_ticks as f64 } else { f64::NAN },
+    )
+}
+
 fn run(args: &[String]) {
     let hours: f64 = arg(args, "hours=").map_or(2.0, |h| h.parse().unwrap());
     let every: u64 = arg(args, "every=").map_or(10, |m| m.parse().unwrap());
@@ -207,7 +260,12 @@ fn run(args: &[String]) {
     let params = resolve(args);
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
     let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
-    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    let (mut world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    if let Some(n) = arg(args, "reseed=").and_then(|n| n.parse::<u64>().ok()).filter(|&n| n > 0) {
+        let seed = world.config().seed ^ n.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        world.reseed(seed);
+        eprintln!("{arm}: reseeded by {n} (world seed {seed:#x})");
+    }
     flora.replace_config(params.flora_for_world()).expect("the arm's plant config validates");
     fauna.replace_config(params.fauna.clone()).expect("the arm's animal config validates");
     cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("the heuristics go back on");
@@ -223,6 +281,24 @@ fn run(args: &[String]) {
     let mut t0 = std::time::Instant::now();
     let mut ticks_in_window = 0u64;
     let mut total_ticks = 0u64;
+    let mut meal_win = Meal::default();
+    let mut meal_all = Meal::default();
+    let preys: Vec<Founder> = Founder::ALL
+        .iter()
+        .copied()
+        .filter(|&f| params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)))
+        .collect();
+    let prey_bodies = |sim: &Sim| -> rustc_hash::FxHashMap<u64, f64> {
+        sim.fauna()
+            .view()
+            .animals
+            .iter()
+            .filter(|a| a.founder.is_some_and(|f| preys.contains(&f)))
+            .map(|a| (a.id, corpse_organic(a)))
+            .collect()
+    };
+    let mut before = prey_bodies(&sim);
+    let mut kills_before = kills_by_lj(&sim.fauna().view().ledger);
     sample(&sim, &params, &arm, minute0, &lw, &lw, &win, &mut track, 0, 0.0);
     for minute in minute0 + 1..=end {
         for _ in 0..per_min {
@@ -235,13 +311,36 @@ fn run(args: &[String]) {
             for a in sim.fauna().view().animals {
                 if let Some(f) = a.founder {
                     win[f.index()].body_ticks += 1;
+                    if f == LJ && a.attached.is_none() {
+                        meal_win.lj_ticks += 1;
+                        if !a.eating {
+                            meal_win.sated_ticks += 1;
+                        }
+                    }
                 }
             }
+            // The kills this tick: the prey bodies gone, what they died with, shared out
+            // when deaths of other causes fell in the same tick.
+            let kills_now = kills_by_lj(&sim.fauna().view().ledger);
+            let now = prey_bodies(&sim);
+            if kills_now > kills_before {
+                let gone: Vec<f64> = before.iter().filter(|(id, _)| !now.contains_key(id)).map(|(_, o)| *o).collect();
+                if !gone.is_empty() {
+                    let k = (kills_now - kills_before) as f64;
+                    let share = (k / gone.len() as f64).min(1.0);
+                    meal_win.kill_organic += share * gone.iter().sum::<f64>();
+                }
+            }
+            kills_before = kills_now;
+            before = now;
         }
         if (minute - minute0) % every == 0 || minute == end {
             let ms = t0.elapsed().as_secs_f64() * 1000.0 / ticks_in_window.max(1) as f64;
             let l = sim.fauna().view().ledger.clone();
             sample(&sim, &params, &arm, minute, &lw, &l, &win, &mut track, ticks_in_window, ms);
+            println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
+            meal_all.add(&meal_win);
+            meal_win = Meal::default();
             for i in 0..Founder::COUNT {
                 track[i].body_ticks += win[i].body_ticks;
             }
@@ -256,6 +355,8 @@ fn run(args: &[String]) {
     }
     let l = sim.fauna().view().ledger.clone();
     println!("sum,{arm},{},{}", minute0, lj_line(&l0, &l));
+    meal_all.add(&meal_win);
+    println!("summeal,{arm},{},{}", minute0, meal_line(&l0, &l, &meal_all));
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;
