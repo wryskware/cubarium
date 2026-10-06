@@ -30,7 +30,9 @@ fn main() {
         _ => eprintln!(
             "usage: flora_model dump [CONFIG] | census DIR | physio SPECIES L WATER SAT N DAYS newborn|adult | elig DIR.. | hetero DIR SPECIES MINUTES\n  \
              run start=DIR snaps=DIR,.. [log=SOAKLOG] [minutes=1200] [every=30] [weather=frozen] [wseed=N] [config=FILE] [set=P=V].. \
-             [browse=PER_DAY] [hold=SPECIES,..] [zocc=1] [prod=1] [rcheck=SPECIES[:seed]] [zfunnel=SPECIES] [zdeaths=SPECIES] [trace=ZONE:SPECIES]"
+             [browse=PER_DAY] [hold=SPECIES,..] [zocc=1] [prod=1] [rcheck=SPECIES[:seed]] [zfunnel=SPECIES] [zdeaths=SPECIES] [trace=ZONE:SPECIES]\n  \
+             meadow levers (design/webmodel/meadow.md): [take_hold=1] [crop=K] [cropw=SHARE] [dry=EVERY_D:LEN_D:WATER[:PHASE_D]] [drywet=1] \
+             [thatch=X] [draw=X] [contest=ESCAPE_SHARE[:TAU]] [life=DAYS | life=SPECIES:DAYS,..] [soilmin=SPECIES:N,..] [soilhist=1] [rare=SPECIES:KEEP]"
         ),
     }
 }
@@ -369,9 +371,84 @@ fn run(a: &[String]) {
             mp.juvenile_browse[sp.index()] = h.parse::<f64>().unwrap() / DayModel::of(&p.world, fc.upkeep_q10).day_s();
         }
     }
+    // Meadow levers (`design/webmodel/meadow.md`), scenario levers of the model.
+    {
+        let day_s = DayModel::of(&p.world, fc.upkeep_q10).day_s();
+        let mw = &mut mp.meadow;
+        if let Some(x) = kv(a, "crop=") {
+            mw.crop_per_graze = x.parse().unwrap();
+        }
+        if let Some(x) = kv(a, "cropw=") {
+            mw.crop_wood_max = x.parse().unwrap();
+        }
+        if let Some(x) = kv(a, "dry=") {
+            let v: Vec<f64> = x.split(':').map(|y| y.parse().unwrap()).collect();
+            mw.dry_every_s = v[0] * day_s;
+            mw.dry_len_s = v[1] * day_s;
+            mw.dry_water = v[2];
+            mw.dry_phase_s = v.get(3).copied().unwrap_or(0.0) * day_s;
+        }
+        if kv(a, "drywet=") == Some("1") {
+            mw.dry_wet_zones = true;
+        }
+        if let Some(x) = kv(a, "thatch=") {
+            mw.sward_germ = x.parse().unwrap();
+        }
+        if let Some(x) = kv(a, "contest=") {
+            let v: Vec<f64> = x.split(':').map(|y| y.parse().unwrap()).collect();
+            mw.contest_escape = v[0];
+            mw.contest_tau = v.get(1).copied().unwrap_or(0.0);
+        }
+        if let Some(x) = kv(a, "draw=") {
+            mw.sward_draw = x.parse().unwrap();
+        }
+        if let Some(x) = kv(a, "life=") {
+            for part in x.split(',') {
+                match part.split_once(':') {
+                    Some((sp, d)) => mw.lifespan_s[Species::parse(sp).unwrap().index()] = d.parse::<f64>().unwrap() * day_s,
+                    None => {
+                        for s in 0..Species::COUNT {
+                            if mw.woody[s] {
+                                mw.lifespan_s[s] = part.parse::<f64>().unwrap() * day_s;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(x) = kv(a, "soilmin=") {
+            for part in x.split(',') {
+                let (sp, d) = part.split_once(':').expect("soilmin=SPECIES:N");
+                mw.root_soil_min[Species::parse(sp).unwrap().index()] = d.parse().unwrap();
+            }
+        }
+    }
+    if kv(a, "soilhist=") == Some("1") {
+        // Per zone: the share of faces with at least d soil voxels under them.
+        let mut h = vec![[0.0f64; 9]; zs.zones.len()];
+        for f in &snaps[0] {
+            let zi = zs.of_face[&(f.x, f.y, f.z)];
+            for (i, d) in [1u32, 2, 3, 4, 6, 8, 12, 16].iter().enumerate() {
+                if f.soil_depth >= *d {
+                    h[zi][i] += 1.0;
+                }
+            }
+            h[zi][8] += 1.0;
+        }
+        for (zi, z) in zs.zones.iter().enumerate() {
+            let n = h[zi][8].max(1.0);
+            println!("soilhist,{zi},{},area={},ge1/2/3/4/6/8/12/16={}", z.key.name(), z.area, (0..8).map(|i| format!("{:.2}", h[zi][i] / n)).collect::<Vec<_>>().join("/"));
+        }
+    }
     let minutes: f64 = kv(a, "minutes=").map_or(1200.0, |x| x.parse().unwrap());
     let every: f64 = kv(a, "every=").map_or(30.0, |x| x.parse().unwrap());
     let mut m = model::Model::new(fc.clone(), DayModel::of(&p.world, fc.upkeep_q10), zs, kern, rb, &snaps[0], minute0, mp);
+    // A recovery-from-rarity start (`rare=SPECIES:KEEP`): the species thinned to KEEP of its
+    // stands and seeds at the start.
+    if let Some(x) = kv(a, "rare=") {
+        let (sp, keep) = x.split_once(':').expect("rare=SPECIES:KEEP");
+        m.make_rare(Species::parse(sp).unwrap().index(), keep.parse().unwrap());
+    }
     // The animals' take, clamped to the run's logged flux windows (`flux,ARM,A-B,...,
     // foliage_taken=X,litter_taken=Y`): spread evenly over each window, the foliage over
     // the species by their edible stock (the log has no per-species split).
@@ -490,6 +567,17 @@ fn run(a: &[String]) {
             eprintln!("zf,{zi},{},open={:.0},seeded_census={:.0},bank_census={:.0},bank_model={:.0},seeded_model={:.1},sample_gate={}/{}", z.key.name(), st[0], st[1], st[2], bank, st[0] * cubarium_webmodel::flora::fit::seeded_share(bank / z.area.max(1.0), m.p.seed_k_zone.get(zi).map_or(m.p.seed_k[sp.index()], |v| v[sp.index()])), g, smp.len());
         }
     }
+    // The take past the log (`take_hold=1`): the mean of its last three windows, per 2 h.
+    let held_take: Option<(f64, f64, f64, f64)> = (clamp.len() >= 3).then(|| {
+        let tail = &clamp[clamp.len() - 3..];
+        let (mut f, mut l) = (0.0, 0.0);
+        for w in tail {
+            f += w.2 * 120.0 / (w.1 - w.0);
+            l += w.3 * 120.0 / (w.1 - w.0);
+        }
+        (0.0, 0.0, f / 3.0, l / 3.0)
+    });
+    let mut was_dry = false;
     let t = std::time::Instant::now();
     let end = minute0 + minutes;
     let mut next = minute0;
@@ -519,8 +607,27 @@ fn run(a: &[String]) {
                 }
             }
             m.take.litter = lit * per;
+        } else if let (Some("1"), Some(&(_, _, fol, lit))) = (kv(a, "take_hold="), held_take.as_ref()) {
+            // Past the log: the mean of its last three windows, spread as above.
+            let per = m.p.dt / 7200.0;
+            if m.cohorts() > 0 && (m.minute() as u64) % 10 == 0 {
+                let sup = m.supply();
+                let tot: f64 = sup.foliage.iter().enumerate().filter(|(k, _)| *k != Species::Glowcap.index()).map(|(_, v)| v).sum();
+                for k in 0..Species::COUNT {
+                    m.take.foliage[k] = if k == Species::Glowcap.index() || tot <= 0.0 { 0.0 } else { fol * per * sup.foliage[k] / tot };
+                }
+            }
+            m.take.litter = lit * per;
         } else {
             m.take = Default::default();
+        }
+        // Meadow lever b: the spells' edges, with the turf and the woody juveniles then.
+        let dry = (0..m.z.len()).any(|zi| m.dry_zone(zi));
+        if dry != was_dry {
+            let turf: f64 = m.z.iter().map(|z| z.count(Species::Springturf.index())).sum();
+            let juv: f64 = m.z.iter().flat_map(|z| [Species::Bloomcrown, Species::Lanternberry, Species::Vaulttree].map(|sp| z.cohorts[sp.index()].iter().filter(|c| c.st.wood < m.config.species(sp).donor_min).map(|c| c.n).sum::<f64>())).sum();
+            println!("dryedge,{:.0},{},turf={turf:.0},woody_juv={juv:.0}", m.minute(), if dry { "start" } else { "end" });
+            was_dry = dry;
         }
         if let Some(tr) = kv(a, "trace=") {
             let (zs, sp) = tr.split_once(':').unwrap();
@@ -544,6 +651,11 @@ fn run(a: &[String]) {
     println!("overtopped {}", n(&c.overtopped));
     println!("displaced {}", n(&c.displaced));
     println!("browsed {}", n(&c.browsed));
+    println!("cropped {}", n(&c.cropped));
+    println!("aged {}", n(&c.aged));
+    println!("contested {}", n(&c.contested));
+    println!("escaped {}", n(&c.escaped));
+    println!("contest_died {}", n(&c.contest_died));
     let pv = Species::Velvetpad.index();
     let pt = Species::Springturf.index();
     let woody = [Species::Bloomcrown.index(), Species::Lanternberry.index(), Species::Vaulttree.index()];
@@ -616,13 +728,26 @@ fn line(m: &cubarium_webmodel::flora::model::Model) {
         diag += &format!(" {}:bank={:.0},juv={:.0}@{:.3},cov={:.2},ad={:.0}", &sp.name()[..5], bank, jn, jw / jn.max(1e-9), jcov / jn.max(1e-9), an);
     }
     println!("diag,{:.0},{}", m.minute(), diag);
+    // The meadow levers' readout: recruits standing in the turf now, and the counters.
+    let woody = [Species::Bloomcrown, Species::Lanternberry, Species::Vaulttree];
+    println!(
+        "meadow,{:.0},dry={},in_turf={},contested={},escaped={},contest_died={},cropped={},aged={}",
+        m.minute(),
+        u8::from((0..m.z.len()).any(|zi| m.dry_zone(zi))),
+        woody.iter().map(|s| format!("{:.0}", m.z.iter().map(|z| z.contested(s.index())).sum::<f64>())).collect::<Vec<_>>().join("/"),
+        woody.iter().map(|s| format!("{:.0}", m.c.contested[s.index()])).collect::<Vec<_>>().join("/"),
+        woody.iter().map(|s| format!("{:.0}", m.c.escaped[s.index()])).collect::<Vec<_>>().join("/"),
+        woody.iter().map(|s| format!("{:.0}", m.c.contest_died[s.index()])).collect::<Vec<_>>().join("/"),
+        woody.iter().map(|s| format!("{:.0}", m.c.cropped[s.index()])).collect::<Vec<_>>().join("/"),
+        woody.iter().map(|s| format!("{:.0}", m.c.aged[s.index()])).collect::<Vec<_>>().join("/"),
+    );
     // The sim's `sp` ledger line's counterpart, cumulative since the start.
     let c = &m.c;
     for sp in Species::ALL {
         let k = sp.index();
         let by: Vec<String> = Species::ALL.iter().filter(|n| c.pairs[k][n.index()] >= 0.5).map(|n| format!("{}={:.0}", n.name(), c.pairs[k][n.index()])).collect();
         println!(
-            "spm,{:.0},{},landed={:.0},germinated={:.0},seeds_died={:.0},runner_births={:.0},deaths=[starved={:.0} drought={:.0} overtopped={:.0} displaced={:.0} browsed={:.0}],overtopped_by=[{}],built={:.3},shed={:.3}",
+            "spm,{:.0},{},landed={:.0},germinated={:.0},seeds_died={:.0},runner_births={:.0},deaths=[starved={:.0} drought={:.0} overtopped={:.0} displaced={:.0} browsed={:.0} cropped={:.0} aged={:.0}],overtopped_by=[{}],built={:.3},shed={:.3}",
             m.minute(),
             sp.name(),
             c.seeds_landed[k],
@@ -634,6 +759,8 @@ fn line(m: &cubarium_webmodel::flora::model::Model) {
             c.overtopped[k],
             c.displaced[k],
             c.browsed[k],
+            c.cropped[k],
+            c.aged[k],
             by.join(" "),
             c.built[k],
             c.shed[k]
