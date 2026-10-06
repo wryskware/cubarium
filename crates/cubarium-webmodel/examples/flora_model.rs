@@ -32,7 +32,7 @@ fn main() {
              run start=DIR snaps=DIR,.. [log=SOAKLOG] [minutes=1200] [every=30] [weather=frozen] [wseed=N] [config=FILE] [set=P=V].. \
              [browse=PER_DAY] [hold=SPECIES,..] [zocc=1] [prod=1] [rcheck=SPECIES[:seed]] [zfunnel=SPECIES] [zdeaths=SPECIES] [trace=ZONE:SPECIES]\n  \
              meadow levers (design/webmodel/meadow.md): [take_hold=1] [take_const=FOLIAGE_PER_2H[:LITTER]] [crop=K] [cropw=SHARE] [dry=EVERY_D:LEN_D:WATER[:PHASE_D]] [drywet=1] \
-             [thatch=X] [draw=X] [contest=ESCAPE_SHARE[:TAU]] [life=DAYS | life=SPECIES:DAYS,..] [soilmin=SPECIES:N,..] [soilhist=1] [rare=SPECIES:KEEP]"
+             [thatch=X] [draw=X] [contest=ESCAPE_SHARE[:TAU] | contest=sim] [life=DAYS | life=SPECIES:DAYS,..] [soilmin=SPECIES:N,..] [soilhist=1] [rare=SPECIES:KEEP]"
         ),
     }
 }
@@ -395,9 +395,11 @@ fn run(a: &[String]) {
             mw.sward_germ = x.parse().unwrap();
         }
         if let Some(x) = kv(a, "contest=") {
-            let v: Vec<f64> = x.split(':').map(|y| y.parse().unwrap()).collect();
+            // `contest=sim`: the sim's CONTEST rule — escape when the crown leaves its
+            // seedling cap (above the sward), the sward's shade by the shade law (both -1).
+            let v: Vec<f64> = x.split(':').map(|y| if y == "sim" { -1.0 } else { y.parse().unwrap() }).collect();
             mw.contest_escape = v[0];
-            mw.contest_tau = v.get(1).copied().unwrap_or(0.0);
+            mw.contest_tau = v.get(1).copied().unwrap_or(if v[0] < 0.0 { -1.0 } else { 0.0 });
         }
         if let Some(x) = kv(a, "draw=") {
             mw.sward_draw = x.parse().unwrap();
@@ -747,6 +749,18 @@ fn line(m: &cubarium_webmodel::flora::model::Model) {
         woody.iter().map(|s| format!("{:.0}", m.c.contest_died[s.index()])).collect::<Vec<_>>().join("/"),
         woody.iter().map(|s| format!("{:.0}", m.c.cropped[s.index()])).collect::<Vec<_>>().join("/"),
         woody.iter().map(|s| format!("{:.0}", m.c.aged[s.index()])).collect::<Vec<_>>().join("/"),
+    );
+    // Lever f's understorey (CONTEST): turf standing under each woody canopy now, and the
+    // turf's counters: gone under, starved there, left holding the face.
+    let t = Species::Springturf.index();
+    println!(
+        "under,{:.0},turf_under={},turf_open={:.0},under_in={:.0},starved_under={:.0},under_freed={:.0}",
+        m.minute(),
+        woody.iter().map(|s| format!("{:.0}", m.z.iter().map(|z| z.understorey(s.index())).sum::<f64>())).collect::<Vec<_>>().join("/"),
+        m.z.iter().map(|z| z.count(t)).sum::<f64>(),
+        m.c.under_in[t],
+        m.c.starved_under[t],
+        m.c.under_freed[t],
     );
     // The sim's `sp` ledger line's counterpart, cumulative since the start.
     let c = &m.c;

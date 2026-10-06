@@ -19,9 +19,14 @@
 //! - **f. contest** — a woody seed that comes up through turf no longer kills it at once:
 //!   the recruit stands in the sward (a separate stock, [`super::model::ZoneState::contest`])
 //!   under the turf's shade (`contest_tau` at a full sward) and in its topsoil water (lever
-//!   c's `sward_draw`), exposed to the crop (a) and dry spells (b), and the turf on its face
-//!   dies only when the recruit escapes above it (`W ≥ contest_escape · donor_min`). A
-//!   recruit that dies first leaves the turf in place.
+//!   c's `sward_draw`), exposed to the crop (a) and dry spells (b). When the recruit escapes
+//!   above it (`W ≥ contest_escape · donor_min`) the turf is **not** overtopped (CONTEST,
+//!   Wrysk 2026-10-05: "woody plants just naturally win over grass because they start
+//!   shading it"): it stays on as the face's understorey ([`super::model::ZoneState::under`]),
+//!   under the crown's shade, and dies only when its own budget fails. A recruit that dies
+//!   first leaves the turf in place. `contest=sim` is the sim's rule: escape when the crown
+//!   leaves its seedling cap (above the sward), the sward's shade by the shade law, and the
+//!   canopy gate read under it.
 //! - **e. thin soil** — a woody species needs at least `root_soil_min` soil voxels under
 //!   its face; a zone's woody newborns come up only on the share of its non-woody faces
 //!   with that much soil ([`Meadow::deep`], from the census's [`super::census::Face::soil_depth`]).
@@ -64,10 +69,12 @@ pub struct Meadow {
     /// **d.** Mean adult lifespan per species, seconds (0: immortal, as in the sim).
     pub lifespan_s: [f64; NS],
     /// **f.** The recruit's escape size as a share of its `donor_min` (0: off, the sim's
-    /// immediate overtopping).
+    /// immediate overtopping before CONTEST). Negative: the end of its capped seedling stage
+    /// (`w0 · wood_max`), where its crown rises above the sward — the sim's rule.
     pub contest_escape: f64,
     /// **f.** The optical depth of a full sward (turf foliage at its cap) over a contested
-    /// recruit; it scales with the zone's turf fill.
+    /// recruit; it scales with the zone's turf fill. Negative: the sim's shade law on the
+    /// zone's mean turf mat ([`super::model::Model::contest_shade`]).
     pub contest_tau: f64,
     /// **e.** Soil voxels a species needs under its face (0: none).
     pub root_soil_min: [u32; NS],
