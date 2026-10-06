@@ -232,6 +232,11 @@ fn founder_rows() -> Vec<Row> {
             .search(0.5, 1.0),
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
         r("burr_coat", "factor", fraction, "how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance"),
+        r("senses.sight_m", "m", nonneg, "sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic)"),
+        r("senses.sight_half_angle_deg", "deg", nonneg, "sight's cone half-angle from the heading (90: the half-plane ahead)"),
+        r("senses.hearing_m", "m", nonneg, "hearing: a moving body within this, all around (0: deaf)"),
+        r("senses.hearing_min_speed_m_s", "m/s", nonneg, "the slowest a body moves and is heard"),
+        r("senses.smell_m", "m", nonneg, "smell: any body within this, all around, around terrain (0: none)"),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),

@@ -1353,7 +1353,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1227 rows)
+**`fauna.*`** (1272 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1450,6 +1450,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.littershredder.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.littershredder.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.littershredder.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.littershredder.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.littershredder.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.littershredder.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1570,6 +1575,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.frondgrazer.burr_coat` | 0.6 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.frondgrazer.senses.sight_m` | 2.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.frondgrazer.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.frondgrazer.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.frondgrazer.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.frondgrazer.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1690,6 +1700,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.lanternjaw.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.lanternjaw.senses.sight_m` | 2.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.lanternjaw.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.lanternjaw.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.lanternjaw.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.lanternjaw.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1810,6 +1825,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.capgnawer.burr_coat` | 0.8 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.capgnawer.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.capgnawer.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.capgnawer.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.capgnawer.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.capgnawer.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1930,6 +1950,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.loftstrider.burr_coat` | 0.4 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.loftstrider.senses.sight_m` | 2.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.loftstrider.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.loftstrider.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.loftstrider.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.loftstrider.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2050,6 +2075,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.ripple-snail.burr_coat` | 0.1 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.ripple-snail.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.ripple-snail.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.ripple-snail.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.ripple-snail.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.ripple-snail.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2170,6 +2200,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.bellwing.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.bellwing.senses.sight_m` | 4.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.bellwing.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.bellwing.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.bellwing.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.bellwing.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2290,6 +2325,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.seedporter.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.seedporter.senses.sight_m` | 2.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.seedporter.senses.sight_half_angle_deg` | 90.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.seedporter.senses.hearing_m` | 0.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.seedporter.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.seedporter.senses.smell_m` | 0.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2410,6 +2450,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
 | `fauna.founders.chorister.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
+| `fauna.founders.chorister.senses.sight_m` | 16.0 | m | [0, inf) |  | - | placeholder | sight: any body within this inside the forward cone, terrain blocking the line of sight (read by the Veilhound's pack tactic) |
+| `fauna.founders.chorister.senses.sight_half_angle_deg` | 120.0 | deg | [0, inf) |  | - | placeholder | sight's cone half-angle from the heading (90: the half-plane ahead) |
+| `fauna.founders.chorister.senses.hearing_m` | 10.0 | m | [0, inf) |  | - | placeholder | hearing: a moving body within this, all around (0: deaf) |
+| `fauna.founders.chorister.senses.hearing_min_speed_m_s` | 0.05 | m/s | [0, inf) |  | - | placeholder | the slowest a body moves and is heard |
+| `fauna.founders.chorister.senses.smell_m` | 6.0 | m | [0, inf) |  | - | placeholder | smell: any body within this, all around, around terrain (0: none) |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |

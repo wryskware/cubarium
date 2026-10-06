@@ -3876,3 +3876,6 @@ mod hunt_tests;
 #[cfg(test)]
 #[path = "hunt_meal_tests.rs"]
 mod hunt_meal_tests;
+#[cfg(test)]
+#[path = "pack_search_tests.rs"]
+mod pack_search_tests;

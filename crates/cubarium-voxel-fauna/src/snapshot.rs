@@ -56,7 +56,9 @@ use crate::Fauna;
 // 44: HUNTER-MEAL — `HuntConfig::{meal_first, carcass_scan_m, reachable_only,
 //     route_refresh_s, success_memory_s, success_boost}`, `HuntMemory::productive`, the meal
 //     and route ledger lines.
-pub const SCHEMA: u32 = 44;
+// 45: VEILHOUND-SEARCH — `FounderPhysiology::senses` (`SenseTable`), `PackRecord::drawn`,
+//     the senses' ledger lines.
+pub const SCHEMA: u32 = 45;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

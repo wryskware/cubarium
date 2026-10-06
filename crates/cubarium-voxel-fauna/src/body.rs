@@ -497,6 +497,12 @@ pub struct FounderPhysiology {
     /// (`placeholder`'s `burr_coat_of`), for Wrysk to judge.
     #[serde(default)]
     pub burr_coat: f64,
+    /// **Its senses for finding bodies** ([`SenseTable`]; VEILHOUND-SEARCH, the base of the
+    /// senses pass): sight, hearing and smell, each with its range and what it detects.
+    /// Read by [`crate::perception`]; today only the Veilhound's pack tactic reads it, and
+    /// every other lineage carries its manifest cone ([`senses_of`]).
+    #[serde(default)]
+    pub senses: SenseTable,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -998,6 +1004,7 @@ impl FounderPhysiology {
     pub fn placeholder(founder: Founder) -> FounderPhysiology {
         let mut p = FounderPhysiology::placeholder_table(founder);
         p.burr_coat = burr_coat_of(founder);
+        p.senses = senses_of(founder);
         p
     }
 
@@ -1096,6 +1103,7 @@ impl FounderPhysiology {
                 glider: None,
                 gut_seeds: None,
                 burr_coat: 0.0,
+                senses: SenseTable::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1161,6 +1169,7 @@ impl FounderPhysiology {
                 glider: None,
                 gut_seeds: None,
                 burr_coat: 0.0,
+                senses: SenseTable::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1246,6 +1255,7 @@ impl FounderPhysiology {
                 glider: None,
                 gut_seeds: None,
                 burr_coat: 0.0,
+                senses: SenseTable::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -4786,6 +4796,77 @@ mod step_rule_tests {
         // A climb of zero is the old receptor exactly: the ledge is a wall again.
         let reading = contact_readings(&ledge.view(), &pose, 2, &body, 0);
         assert_eq!(reading.front, 1.0);
+    }
+}
+
+/// **A lineage's senses for finding bodies** (VEILHOUND-SEARCH, 2026-10-06; Wrysk: "veilhounds
+/// should have good eyesight and be able to see pretty far. also good hearing and smell. like
+/// wolves or lions"; the base of the senses pass for every lineage). What each sense detects
+/// is fixed by [`crate::perception::sense_of`]:
+/// - **sight**: any body within `sight_m` inside the forward cone of half-angle
+///   `sight_half_angle_deg`, on a line of sight terrain does not block;
+/// - **hearing**: a body moving at `hearing_min_speed_m_s` or faster within `hearing_m`, all
+///   around, terrain not blocking;
+/// - **smell**: any body within `smell_m`, all around, around terrain (plain range, no wind).
+///
+/// A world query standing for the senses, read by heuristics; the manifest's cone (the
+/// brain's observation) is a separate, fixed contract. 0 turns a sense off.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SenseTable {
+    /// Sight's range, metres.
+    pub sight_m: f64,
+    /// Sight's half-angle from the heading, degrees (90: the half-plane ahead).
+    pub sight_half_angle_deg: f64,
+    /// Hearing's range, metres; 0 is deaf.
+    pub hearing_m: f64,
+    /// The slowest a body moves and is heard, metres per second.
+    pub hearing_min_speed_m_s: f64,
+    /// Smell's range, metres; 0 smells nothing.
+    pub smell_m: f64,
+}
+
+impl Default for SenseTable {
+    /// Today's sighted lineage: a 2 m cone over the half-plane ahead, no hearing, no smell.
+    fn default() -> SenseTable {
+        SenseTable { sight_m: 2.0, sight_half_angle_deg: 90.0, hearing_m: 0.0, hearing_min_speed_m_s: 0.05, smell_m: 0.0 }
+    }
+}
+
+impl SenseTable {
+    /// The longest of its ranges, metres.
+    pub fn reach_m(&self) -> f64 {
+        self.sight_m.max(self.hearing_m).max(self.smell_m)
+    }
+}
+
+/// **Each lineage's senses** ([`SenseTable`]). Every lineage but the Veilhound keeps exactly
+/// what it sensed before: its manifest's cone range (0 for the blind littershredder, 2 m, 4 m
+/// for the bellwing) over the half-plane ahead, no hearing, no smell.
+///
+/// The Veilhound (`chorister`), set from wolves and lions at the terrarium's scale (a
+/// 1.4 m body on a 32 m ring 6 m deep, 0.125 m voxels; its territory radius 10 m, its chase
+/// reach 13 m by route):
+/// - sight 16 m, half-angle 120°: half the ring, so on open ground it sees across the map
+///   as a wolf or lion sees prey across open country — its farthest sense; terraces still
+///   hide what lies below them. A wolf's visual field is about 250°, a lion's 200° and more.
+/// - hearing 10 m of a body moving at 0.05 m/s or more: the territory radius. Wolves hear
+///   prey and packs kilometres off; on a map this small the terraces bound it below sight.
+/// - smell 6 m: the map's depth, under hearing, as a wolf's nose (prey scented 1.5–2.4 km
+///   downwind, Mech & Boitani 2003) is under its ears.
+pub fn senses_of(founder: Founder) -> SenseTable {
+    match founder {
+        Founder::Chorister => SenseTable {
+            sight_m: 16.0,
+            sight_half_angle_deg: 120.0,
+            hearing_m: 10.0,
+            hearing_min_speed_m_s: 0.05,
+            smell_m: 6.0,
+        },
+        // Its manifest's `cone_range_m` (the manifest is built from this table, so it is
+        // written here; a test holds the two equal).
+        Founder::Blind | Founder::Capgnawer | Founder::RippleSnail => SenseTable { sight_m: 0.0, ..SenseTable::default() },
+        Founder::Bellwing => SenseTable { sight_m: 4.0, ..SenseTable::default() },
+        Founder::Browser | Founder::Lanternjaw | Founder::Loftstrider | Founder::Seedporter => SenseTable::default(),
     }
 }
 

@@ -31,6 +31,7 @@ mod manifest;
 mod pose;
 mod predation;
 mod pack;
+pub(crate) mod perception;
 mod par;
 pub use pack::centre as pack_centre;
 mod registry;
@@ -65,7 +66,7 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, StepLimits, birth_readiness,
+    BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
     disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -1048,6 +1049,12 @@ pub struct PackRecord {
     /// taken again until the pack has taken another.
     #[serde(default)]
     pub abandoned: Option<u64>,
+    /// **The draw** (VEILHOUND-SEARCH, the lineage's [`SenseTable`]): the prey the
+    /// pack's leader is walking to by route — sensed by the pack, on its route component,
+    /// not yet its target. Remade at each of the leader's samples; cleared when the pack
+    /// takes a target.
+    #[serde(default)]
+    pub drawn: Option<u64>,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -2695,6 +2702,24 @@ pub struct FaunaLedger {
     pub pack_chases: u64,
     #[serde(default)]
     pub pack_chase_kills: u64,
+    /// **The pack's senses** (VEILHOUND-SEARCH): chases begun on a prey first sensed by
+    /// `[sight, hearing, smell]` (the cheapest sense that has it: smell, then hearing, then
+    /// sight); draws begun (the leader set out toward a new prey beyond its reach) by the
+    /// same; chases begun while drawn; controller samples of a hungry adult (wanting food or
+    /// in an emergency) under the pack tactic, and of those the samples spent leading a draw
+    /// and following its leader.
+    #[serde(default)]
+    pub pack_chases_by_sense: [u64; 3],
+    #[serde(default)]
+    pub pack_draws_by_sense: [u64; 3],
+    #[serde(default)]
+    pub pack_draw_chases: u64,
+    #[serde(default)]
+    pub pack_hungry_samples: u64,
+    #[serde(default)]
+    pub pack_draw_lead_samples: u64,
+    #[serde(default)]
+    pub pack_draw_follow_samples: u64,
     /// Lanternjaws that left a carcass to a body that hunts them (roster R3, the yield).
     #[serde(default)]
     pub carcass_yields: u64,
@@ -3188,6 +3213,11 @@ pub struct Fauna {
     /// `pack_paths`. Not saved.
     #[serde(skip)]
     hunt_paths: FxHashMap<u64, PackPath>,
+    /// Per pack id (VEILHOUND-SEARCH): the prey its awake adults sense this tick and the
+    /// sense that has each ([`SenseTable`]; 0 sight, 1 hearing, 2 smell), with the tick
+    /// it was read. Not saved.
+    #[serde(skip)]
+    pub(crate) pack_sensed: FxHashMap<u64, (u64, std::sync::Arc<Vec<(u64, u8)>>)>,
     /// The faces holding a usable carcass (carrion under a carcass record) and the tick the
     /// list was read from the plant layer (HUNTER-MEAL's meal step). Not saved.
     #[serde(skip)]
@@ -3213,6 +3243,8 @@ pub const SEED_VOID_LOG_MAX: usize = 65_536;
 pub(crate) struct PackPath {
     graph: std::sync::Arc<encounter::RouteGraph>,
     goal: usize,
+    /// The steps the field reaches out to.
+    steps: u32,
     field: std::sync::Arc<FxHashMap<usize, u32>>,
 }
 
@@ -3295,12 +3327,12 @@ impl Fauna {
         max_steps: u32,
     ) -> std::sync::Arc<FxHashMap<usize, u32>> {
         if let Some(p) = self.hunt_paths.get(&id) {
-            if std::sync::Arc::ptr_eq(&p.graph, graph) && p.goal == goal {
+            if std::sync::Arc::ptr_eq(&p.graph, graph) && p.goal == goal && p.steps >= max_steps {
                 return p.field.clone();
             }
         }
         let field = std::sync::Arc::new(graph.distances(goal, max_steps));
-        self.hunt_paths.insert(id, PackPath { graph: graph.clone(), goal, field: field.clone() });
+        self.hunt_paths.insert(id, PackPath { graph: graph.clone(), goal, steps: max_steps, field: field.clone() });
         field
     }
 
@@ -3328,12 +3360,12 @@ impl Fauna {
     ) -> (std::sync::Arc<encounter::RouteGraph>, std::sync::Arc<FxHashMap<usize, u32>>) {
         let graph = self.pack_routes(view, founder);
         if let Some(p) = self.pack_paths.get(&pack) {
-            if std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal {
+            if std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal && p.steps >= max_steps {
                 return (graph, p.field.clone());
             }
         }
         let field = std::sync::Arc::new(graph.distances(goal, max_steps));
-        self.pack_paths.insert(pack, PackPath { graph: graph.clone(), goal, field: field.clone() });
+        self.pack_paths.insert(pack, PackPath { graph: graph.clone(), goal, steps: max_steps, field: field.clone() });
         (graph, field)
     }
 
@@ -3383,6 +3415,7 @@ impl Fauna {
             pack_routes: FxHashMap::default(),
             open_air: None,
             pack_paths: FxHashMap::default(),
+            pack_sensed: FxHashMap::default(),
             hunt_paths: FxHashMap::default(),
             carcass_sites: (None, Vec::new()),
             packs: Vec::new(),
@@ -3535,6 +3568,7 @@ impl Fauna {
         self.config = config;
         self.pack_routes.clear();
         self.pack_paths.clear();
+        self.pack_sensed.clear();
         self.open_air = None;
         Ok(())
     }
@@ -3651,6 +3685,7 @@ impl Fauna {
             feast: None,
             feast_eaten: 0.0,
             abandoned: None,
+            drawn: None,
         });
         Some(id)
     }
