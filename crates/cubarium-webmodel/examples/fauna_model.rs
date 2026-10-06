@@ -43,6 +43,14 @@ fn main() {
         Some("answers") => answers_cmd(&args),
         Some("ljdiag") => ljdiag_cmd(&args),
         Some("q2") => q2_cmd(&args),
+        Some("fitcrowd") => fit_crowd(Path::new(arg(&args, "gen=").expect("gen=DIR"))),
+        Some("fitambush") => {
+            let gdir = PathBuf::from(arg(&args, "gen=").expect("gen=DIR"));
+            let ljdir = PathBuf::from(arg(&args, "lj=").expect("lj=DIR"));
+            let mut fits = cubarium_webmodel::web::start::closed_fits();
+            let med = median_stocks(&gdir);
+            fit_ambush(&mut fits, &med, &gdir, &ljdir, false);
+        }
         Some("fitbrowser") => {
             let mut fits = Fits::recorded();
             fit_browser(&mut fits, Path::new(arg(&args, "gen=").expect("gen=DIR")), false);
@@ -607,7 +615,7 @@ fn fit_all_with(gdir: &Path, lj: Option<&Path>, quiet: bool, obs_only: bool) -> 
         let litter_psi: Vec<f64> = if f == Founder::Capgnawer { vec![0.0, 0.1, 0.2, 0.3] } else { vec![-1.0] };
         let try_one = |pl: f64, h: f64, ifr: f64, psi_max: f64, best: &mut (f64, fits::LineageFit, Vec<f64>)| {
             let mut cand = fits.clone();
-            cand.of_mut(f).response[food.index()] = Some(fits::Response { psi_max, half: h, interference: ifr });
+            cand.of_mut(f).response[food.index()] = Some(fits::Response { psi_max, half: h, interference: ifr, hill: 1.0 });
             if pl >= 0.0 {
                 cand.of_mut(f).response[Food::Litter.index()] = Some(fits::Response::holling(pl, 0.0));
             }
@@ -696,7 +704,7 @@ fn fit_all_with(gdir: &Path, lj: Option<&Path>, quiet: bool, obs_only: bool) -> 
         let mut best = (f64::INFINITY, 1.0, base_resp);
         let mut line = String::new();
         for &ifr in &ifr_grid {
-            let resp = fits::Response { psi_max: psi_med * (e_med + base_resp.half + ifr * crowd) / e_med.max(1e-12), half: base_resp.half, interference: ifr };
+            let resp = fits::Response { psi_max: psi_med * (e_med + base_resp.half + ifr * crowd) / e_med.max(1e-12), half: base_resp.half, interference: ifr, hill: base_resp.hill };
             for kappa in [1.0, 1.5, 2.0, 3.0, 4.0] {
                 let mut cand = fits.clone();
                 cand.of_mut(f).nest_aggregation = kappa;
@@ -745,6 +753,78 @@ fn fit_all_with(gdir: &Path, lj: Option<&Path>, quiet: bool, obs_only: bool) -> 
     }
     let _ = lj;
     fits
+}
+
+/// **Size-asymmetric crowding** (`fitcrowd`): per detritivore, its crowding exponent `θ`
+/// ([`fits::LineageFit::crowd_size_exponent`]) × a scale on its recorded interference, on a
+/// grid, matched as the observation refit is (the D1b branch arm to m720, training seeds
+/// 4 5 7 8, `ln` error of count, adults, juveniles and cumulative hatched at 360-720), each
+/// lineage alone on its clamped stocks; `ψ_max` and the half stay as recorded. The held-out
+/// seeds are the `d1b` command's check.
+fn fit_crowd(gdir: &Path) {
+    let mut fits = Fits::recorded();
+    let starts = logs_of(&gdir.join("runs"), "branch");
+    let obs = logs_of(&gdir.join("obs"), "branch");
+    let train: Vec<(Clamp, Vec<(Founder, f64)>, &RunLog, &RunLog)> = starts
+        .iter()
+        .filter(|l| TRAIN_SEEDS.contains(&l.seed))
+        .filter_map(|st| {
+            let o = obs.iter().find(|o| o.seed == st.seed)?;
+            let mut c = Clamp::of(st);
+            c.extend(&Clamp::of(o));
+            Some((c, DETRITIVORES.iter().map(|&f| (f, get(st.det.get(&(0, f.index())), "n"))).collect(), st, o))
+        })
+        .collect();
+    let pb = params_of("branch");
+    let mins: Vec<u32> = vec![0, 360, 480, 600, 720];
+    for f in DETRITIVORES {
+        let i = f.index();
+        let food = fit_food(f);
+        let base = fits.of(f).response[food.index()].unwrap_or(fits::Response::ALWAYS);
+        let score = |cand: &Fits| -> f64 {
+            let mut err = 0.0;
+            for (clamp, n0, st, o) in &train {
+                let out = run_d1b_only(&pb, clamp, n0, cand, &mins, Draws::Mean, Some(f));
+                for &mi in &mins[1..] {
+                    let d = o.det.get(&(mi, i));
+                    let (sim_n, sim_a) = (get(d, "n"), get(d, "adults"));
+                    let mut hat = 0.0;
+                    for ((m2, j), w) in st.det.iter().chain(o.det.iter()) {
+                        if *j == i && *m2 > 0 && *m2 <= mi {
+                            hat += get(Some(w), "hatched").max(0.0);
+                        }
+                    }
+                    let r = out.get(&(mi, i)).copied().unwrap_or_default();
+                    if sim_n.is_finite() {
+                        let l = |x: f64| (x + 1.0).ln();
+                        err += (l(r.n) - l(sim_n)).powi(2) + (l(r.hatched) - l(hat)).powi(2) + (l(r.adults) - l(sim_a)).powi(2) + (l(r.juveniles) - l(sim_n - sim_a)).powi(2);
+                    }
+                }
+            }
+            err
+        };
+        let mut best = (f64::INFINITY, 0.0, base);
+        let mut line = String::new();
+        for theta in [0.0, 0.5, 1.0, 1.5, 2.0, 3.0] {
+            for k in [0.5, 1.0, 2.0, 4.0] {
+                if base.interference <= 0.0 && k != 1.0 {
+                    continue;
+                }
+                let mut cand = fits.clone();
+                let r = fits::Response { interference: base.interference * k, ..base };
+                cand.of_mut(f).response[food.index()] = Some(r);
+                cand.of_mut(f).crowd_size_exponent = theta;
+                let e = score(&cand);
+                line += &format!(" θ={theta},i×{k}:{e:.2}");
+                if e < best.0 {
+                    best = (e, theta, r);
+                }
+            }
+        }
+        fits.of_mut(f).crowd_size_exponent = best.1;
+        fits.of_mut(f).response[food.index()] = Some(best.2);
+        println!("fit,{},crowd_size_exponent={} interference={:.4} (error {:.2}; recorded θ=0: see θ=0,i×1); grid:{line}", f.name(), best.1, best.2.interference, best.0);
+    }
 }
 
 /// The observation's training seeds; the other four are held out.
@@ -959,7 +1039,19 @@ fn verdict(sim: &[f64], model: &[f64], factor: f64) -> &'static str {
 fn d1b_cmd(args: &[String]) {
     let gdir = PathBuf::from(arg(args, "gen=").expect("gen=DIR"));
     let twins: usize = arg(args, "twin=").map_or(0, |t| t.parse().unwrap());
-    let fits = if args.iter().any(|a| a == "refit") { fit_all(&gdir, None, true) } else { Fits::recorded() };
+    let mut fits = if args.iter().any(|a| a == "refit") { fit_all(&gdir, None, true) } else { Fits::recorded() };
+    // `crowd=LINEAGE:THETA:INTERFERENCE,..`: a crowding candidate in place of the recorded one.
+    if let Some(spec) = arg(args, "crowd=") {
+        for part in spec.split(',') {
+            let v: Vec<&str> = part.split(':').collect();
+            let f = founder(v[0]);
+            let food = fit_food(f);
+            fits.of_mut(f).crowd_size_exponent = v[1].parse().unwrap();
+            if let Some(r) = fits.of_mut(f).response[food.index()].as_mut() {
+                r.interference = v[2].parse().unwrap();
+            }
+        }
+    }
     let factor = 1.5;
     let fields: [(&str, fn(&Readout) -> f64, &str); 9] = [
         ("N", |r| r.n, "n"),
@@ -1347,6 +1439,56 @@ fn fit_kills(fits: &mut Fits, med: &BTreeMap<u32, (f64, f64, f64, f64)>, gdir: &
     }
 }
 
+/// **The crown ambush's encounter rate** (`fitambush`): the D2b `main` arm (`hunters/main.toml`:
+/// the patrol off, so the P1 crown-seeking ambush, the 2026-10-05 lanternjaw the soak build
+/// ran), minutes 120-240, 8 seeds. **One rate for every prey on its list**: the ambusher waits
+/// on a crown for whatever passes, so a prey's identity enters only through its size window
+/// and its strike share² (10 kills over 8 seeds cannot carry a rate per prey). Scaled until the
+/// model's kills, summed over the seeds, equal the sim's; its reach and strikes are the
+/// patrol's (the same mouth and strike).
+fn fit_ambush(fits: &mut Fits, med: &BTreeMap<u32, (f64, f64, f64, f64)>, gdir: &Path, ljdir: &Path, quiet: bool) {
+    let lj = Founder::Lanternjaw;
+    let p = params_of("lj-main");
+    let logs = logs_of(&ljdir.join("mech"), "main");
+    let sim: f64 = logs.iter().map(|l| d2b_sim(l, None, 240).get("lj.kills").copied().unwrap_or(0.0)).sum();
+    let patrol = fits.hunters[lj.index()].unwrap_or(fits::HunterFit::NONE);
+    let hunts = p.fauna.founder(lj).hunter.expect("a hunter");
+    let mut a = fits::HunterFit { kill: [0.0; Founder::COUNT], reach: patrol.reach, meal_cap: f64::INFINITY, strikes_per_kill: patrol.strikes_per_kill, encounter: fits::Encounter::Floor };
+    for g in Founder::ALL {
+        if hunts.hunts(g) {
+            a.kill[g.index()] = 1e-5;
+        }
+    }
+    let mut model = 0.0;
+    for round in 0..8 {
+        fits.ambush[lj.index()] = Some(a);
+        model = 0.0;
+        let mut hunting = 0.0;
+        for l in &logs {
+            let out = run_d2b(&p, fits, med, gdir, l, None, 240, Draws::Mean);
+            let r = out.get(&240);
+            model += r.and_then(|r| r.get("lj.kills")).copied().unwrap_or(0.0);
+            hunting += r.and_then(|r| r.get("lj.hunting_s")).copied().unwrap_or(0.0);
+        }
+        if !quiet {
+            println!("fit,ambush,round {round}: kills sim {sim:.0} model {model:.2}, rate {:.4e}, hunting LJ-s per seed {:.0}", a.kill.iter().cloned().fold(0.0, f64::max), hunting / logs.len() as f64);
+        }
+        let k = if model > 1e-9 { (sim / model).clamp(0.2, 5.0) } else { 5.0 };
+        for v in a.kill.iter_mut() {
+            *v *= k;
+        }
+    }
+    fits.ambush[lj.index()] = Some(a);
+    if !quiet {
+        let per: Vec<String> = D2B_PREY.iter().map(|f| {
+            let s: f64 = logs.iter().map(|l| d2b_sim(l, None, 240).get(&format!("{}.killed", f.name())).copied().unwrap_or(0.0)).sum();
+            let m: f64 = logs.iter().map(|l| run_d2b(&p, fits, med, gdir, l, None, 240, Draws::Mean).get(&240).and_then(|r| r.get(&format!("{}.killed", f.name()))).copied().unwrap_or(0.0)).sum();
+            format!("{} {s:.0}/{m:.1}", f.name())
+        }).collect();
+        println!("fit,ambush,rate={:.4e} per hunting LJ-s per prey body (patch floor), every listed prey; kills sim {sim:.0} model {model:.1} (main arm m120-240, {} seeds); by prey sim/model: {}", a.kill.iter().cloned().fold(0.0, f64::max), logs.len(), per.join(", "));
+    }
+}
+
 /// **The frondgrazer's food response** (foliage), by simulation on the D1b `branch` runs (no
 /// hunters): each seed's frondgrazers from its minute-0 count, the edible foliage clamped to
 /// the seed's own log, `ψ = ψ_max · F / (F + half)` on a grid, matched on the count at the
@@ -1539,6 +1681,8 @@ fn d2b_cmd(args: &[String]) {
     } else {
         fit_hunter(&mut fits, &med, &gdir, &ljdir, false);
     }
+    // The crown ambush's row (the `main` arm runs with the patrol off): `fitambush`'s record.
+    fits.ambush[Founder::Lanternjaw.index()] = cubarium_webmodel::web::start::closed_fits().ambush[Founder::Lanternjaw.index()];
     let keys = ["small", "littershredder.n", "capgnawer.n", "ripple-snail.n", "frondgrazer.n", "lj.kills", "littershredder.killed", "capgnawer.killed", "ripple-snail.killed", "frondgrazer.killed", "lj.intake", "lj.hunting_s", "lj.fullness", "lj.laid", "lj.bank", "lj.hatched"];
     for (arm, cfg_arm, obs_dir, minutes) in [
         ("d2", "d2", None, vec![150u32, 180, 210, 240]),

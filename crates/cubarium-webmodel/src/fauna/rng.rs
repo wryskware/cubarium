@@ -59,4 +59,13 @@ impl Draws {
     pub fn is_twin(&self) -> bool {
         matches!(self, Draws::Twin(_))
     }
+
+    /// A uniform draw in `[0, 1)` for the twin; the mean field's is 0.5 (callers that need the
+    /// mean field's expectation of a discrete draw compute it themselves).
+    pub fn unit(&mut self) -> f64 {
+        match self {
+            Draws::Mean => 0.5,
+            Draws::Twin(r) => r.unit(),
+        }
+    }
 }
