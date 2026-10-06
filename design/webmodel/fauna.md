@@ -117,6 +117,19 @@ aggregation loses.
     fitted and is currently 0.
   - A rider takes `parasite_take_per_day` of its host's body and drops off at
     `0.24 · body_max` (`step.rs:456-506`).
+- **Hunting rule by behaviour** (ANIMALS-3, below): per hunter lineage a row of kill rates
+  per prey, its reach, a **meal cap** per kill and where it meets prey (`Encounter`: the
+  floor, or the prey's own food habitat); a solitary hunter runs its crown-ambush row when the
+  sim's `fauna.hunt.patrol` is off. The Veilhound's pack window is its adults per pack.
+- **Packs** (the Veilhound): packs set from the adults (`pack_size` each), one litter per
+  pack per `litter_interval_s`, 2..`litter_size_max` young capped by the breeder's funds
+  (`litter_size`, `step.rs:3000-3035`); pups (under `independence_age_s`) neither hunt nor
+  feed and are provisioned by sleeping adults above `provision_reserve_fraction`
+  (`pack.rs:165-230`); a pack's feast is shared by its free adults.
+- **Body ceiling** (`lineage_body_ceiling`, `at_body_ceiling`, `step.rs:3331`): breeding
+  refused at the ceiling.
+- **Response shape**: a Hill exponent (type III) and size-asymmetric crowding `θ` (a body of
+  structure B counts another of B' as (B'/B)^θ).
 - **Ledger**: departures by cause, the sim's per-founder flows, births, maturations, first
   clutches, refusals, kills and strikes. Conservation is closed (tested).
 
@@ -407,3 +420,59 @@ Not built yet. Each step of `dt` seconds, in this order:
 What the closed loop needs from the flora half, beyond stocks: the *productions* of the foods
 (litter input, cap regrowth, film growth, foliage, nectar, fruit) respond to what was taken,
 and the carrion pool decomposes into litter and mineral.
+
+## ANIMALS-3: the held lineages, the hunt on the terrarium, crowding, carrion (2026-10-05)
+
+Commands: `web_model fitheld [check]`, `web_model fitcarrion`, `fauna_model fitambush`,
+`fauna_model fitcrowd`, `fauna_model d1b crowd=..`. Outputs under `<S>/wml3/`.
+
+**The soak ran the crown ambush, not the patrol.** Soak v2's build (18ca6e81) predates the
+patrol (no `HuntConfig`); its lanternjaws ran `LanternjawAmbush`. The model's soak validation
+now resolves the soak's config with `config/scenarios/hunters/main.toml` laid over it (the
+patrol off, that build's prey lists and lanternjaw), `start::params_with_overlay`. The 10×
+overprediction was the patrol's rate applied to an ambusher.
+- Ambush rate (`fitambush`): one rate for every listed prey, 5.28e-6 per hunting LJ-s per prey
+  body (floor units), D2b `main` arm, 10 kills over 8 seeds matched. The patrol's are 4-9e-5.
+- Carried to the terrarium over the floor, unfitted there: soak s5 kills 3 sim / 3.3 model,
+  s6 4 / 3.3 (open loop, plant stocks clamped).
+- The patrol on the terrarium is **open**: no terrarium patrol data exists, and HUNTER-MEAL is
+  changing the patrol in the sim (Astra's meal and reachability points). The code meets prey
+  in their habitat (`Encounter::PreyHabitat`) for the patrol; unchecked.
+- One-kill trace (a throwaway fixture in the sim's own `hunt_tests`, reverted): a hungry
+  lanternjaw strikes a shredder (or grazer) in its capsule at tick 12; the lunge carries it
+  0.6 m; the corpse lies 0.35 m ahead of its mouth point; it eats from it continuously
+  (0.02 organic per 20 s, still eating at 120 s), patrol on and off. The eating branch is the
+  ambush teacher's taste branch, which the patrol yields to (`at_carcass`,
+  `controller.rs:1434-1482`, `step.rs:1251`). On flat ground a kill is a meal; there is no
+  step that walks to a corpse out of taste reach, which HUNTER-MEAL is tracing.
+
+**The Veilhound** (`fitheld`, its prey held to the logged counts while fitted; kills per
+hunting VH-s per prey body, floor units, strike share 1): frondgrazer 1.92e-5 (s5 only),
+loftstrider 9.71e-5, lanternjaw 3.07e-6, seedporter 1.59e-5 (rounds move them 10-20 %).
+- Meal cap 0.208 organic a kill (its assimilation, 52.3 over s5+s6, matched): it swallowed
+  0.35 a kill off grazers (s5) and 0.33 off 3-unit loftstriders (s6), so a share cannot fit.
+- Held-out failures, each a mechanism: s6's packs killed **no** frondgrazer of 97 at hand
+  (mass action kills 22: a spatial refuge, likely the pack's route-reach rule); s1's packs
+  fell 8 → 3 by m970 and its grazers and loftstriders boomed (414, 417); the model keeps 11.
+- Its demography is low on s5 (born 3 vs 9): underfed when its prey are scarce early.
+
+**Herbivores** (`fitheld`): bellwing nectar sigmoid (Hill 3, half 2.0, interference 0.01,
+`psi_max` 2.63; Hill 2-4 × half 1-3 within 0.3 of the best error) reproduces s5's crash
+(16 → 1 → 0, starved 5.6 vs 5) and s6's boom (11 → 61/396 vs 70/462); s1 held out 335 vs
+767. Loftstrider foliage flat 0.415; seedporter fruit flat 0.027.
+
+**Crowding** (`fitcrowd`, D1b training seeds 4 5 7 8): shredder θ 0.5 at the recorded
+interference, snail θ 1 with interference ×4 (training error 20.4 → 2.5); capgnawer flat,
+left at 0. D1b held-out fails 16 → 9 (word count), all-arm fails 26 → 17; maturation timing
+83 → 79 cells. The shredder's grid is noisy (θ 0.5 ×4 scores best on training but slows every
+4 h arm), so the whole D1b table chose. **The soak still over-recruits** shredders (s5 39 vs
+3, s6 59 vs 0 closed): its terrarium intake per body-day is 0.08 against the sim's 0.03, a
+food-access gap (litter per zone, wet faces) the exchange's world totals cannot carry.
+
+**Carrion** (`fitcarrion`): the sim's shredder eats the richest food at its mouth (stock, not
+return, `body.rs:2649-2673`), so a corpse face beats thin litter; its carrion intake is the
+time on corpse faces: `0.3806 · C/(C + 100)`, closed loop, pooled carrion share 0.0753 vs the
+soak's bites 0.0754 (per seed 0.028 / 0.114 vs 0.060 / 0.103).
+
+**The closed loop also needs** nectar from the plant half: it offers 0.6-1.2 against the
+soak's 2.3-3.6, so the bellwing crashes closed (s6, s1) while it passes open.

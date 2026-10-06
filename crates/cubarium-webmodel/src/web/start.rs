@@ -9,7 +9,7 @@ use cubarium_voxel_fauna::{Food, Founder};
 use cubarium_voxel_flora::Species;
 use cubarium_voxel_sim::params::Params;
 
-use crate::fauna::fits::Response;
+use crate::fauna::fits::{Encounter, HunterFit, Response};
 use crate::fauna::model::EggCohort;
 use crate::fauna::{Cohort, FaunaModel, Fits};
 use crate::flora::climate::DayModel;
@@ -19,6 +19,45 @@ use crate::flora::{census, config, fit, kernel, model, zones};
 /// halves read (`flora::config::resolve`, the world table expanded as the sim expands it).
 pub fn params(cfg: &Path, sets: &[String]) -> Result<Params, String> {
     config::resolve(cfg, sets)
+}
+
+/// **A scenario file with an overlay laid over it**: `overlay`'s own `[world]`, `[flora]` and
+/// `[fauna]` tables (its `base` ignored) merged key by key over `cfg`'s chain, then resolved as
+/// [`params`] resolves a file. The soak validation runs the soak's config under the soak
+/// build's behaviour: the knobs added after 18ca6e81 (the patrol above all) at the values that
+/// reproduce that build, which `config/scenarios/hunters/main.toml` records ("main, the
+/// 2026-10-05 lanternjaw (the P1 crown-seeking ambush ...)").
+pub fn params_with_overlay(cfg: &Path, overlay: &Path, sets: &[String]) -> Result<Params, String> {
+    let mut table = config::config_table(cfg)?;
+    let text = std::fs::read_to_string(overlay).map_err(|e| format!("reading {}: {e}", overlay.display()))?;
+    let mut over: toml::Table = toml::from_str(&text).map_err(|e| format!("parsing {}: {e}", overlay.display()))?;
+    over.remove("base");
+    fn merge(under: &mut toml::Table, over: toml::Table) {
+        for (k, v) in over {
+            match (under.get_mut(&k), v) {
+                (Some(toml::Value::Table(u)), toml::Value::Table(o)) => merge(u, o),
+                (_, v) => {
+                    under.insert(k, v);
+                }
+            }
+        }
+    }
+    merge(&mut table, over);
+    let world = match table.remove("world") {
+        Some(toml::Value::Table(t)) => t,
+        _ => toml::Table::new(),
+    };
+    let world = cubarium_voxel::world_config_from_table(world)?;
+    let mut file = toml::Table::new();
+    for key in ["flora", "fauna"] {
+        if let Some(toml::Value::Table(t)) = table.remove(key) {
+            file.insert(key.into(), toml::Value::Table(t));
+        }
+    }
+    Params::resolve_over(
+        Params { world, ..Params::defaults() },
+        &cubarium_voxel_sim::params::Layers { file: Some(file), sets: sets.to_vec(), ..Default::default() },
+    )
 }
 
 /// **The plant half on a save** (`start`) with its weather snapshots (`snaps`, the start's
@@ -138,11 +177,9 @@ pub fn fauna(p: &Params, fits: Fits, census: &FaunaCensus, enabled: &[Founder], 
     m
 }
 
-/// The lineages the animal half has fitted rates for, which the closed loop steps: the three
-/// detritivores (D1b), the frondgrazer (`fitbrowser`) and the lanternjaw (D2b). The bellwing,
-/// the loftstrider, the seedporter and the Veilhound have none (`fauna.md`, "What this half
-/// cannot represent") and are held.
-pub const STEPPED: [Founder; 5] = [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail, Founder::Browser, Founder::Lanternjaw];
+/// The lineages the closed loop steps: every lineage, now that the held ones (the Veilhound,
+/// the bellwing, the loftstrider, the seedporter) have fitted rates ([`closed_fits`]).
+pub const STEPPED: [Founder; Founder::COUNT] = Founder::ALL;
 
 /// **The fits the loop runs with**: [`Fits::recorded`] and the hunter's, which the animal half
 /// refits deterministically at each D2b run (`fauna_model d2b`, `fit_hunter` on the `d2` arm,
@@ -163,5 +200,71 @@ pub fn closed_fits() -> Fits {
     f.of_mut(Founder::Browser).kill_rate = 4.351e-5;
     f.strikes_per_kill = 2.38;
     f.fitted[lj.index()] = true;
+    // The patrol's row: the D2b rates, met in each prey's own habitat (`Encounter::PreyHabitat`).
+    let mut patrol = HunterFit { kill: [0.0; Founder::COUNT], reach: f.kill_reach, meal_cap: f64::INFINITY, strikes_per_kill: f.strikes_per_kill, encounter: Encounter::PreyHabitat };
+    for g in Founder::ALL {
+        patrol.kill[g.index()] = f.of(g).kill_rate;
+    }
+    f.hunters[lj.index()] = Some(patrol);
+    // The crown ambush's row (`fauna_model fitambush`, the D2b `main` arm, m120-240, 8 seeds:
+    // 10 kills matched): one rate for every prey on its list, met over the floor; the patrol's
+    // reach and strikes.
+    f.ambush[lj.index()] = Some(HunterFit { kill: [AMBUSH_RATE; Founder::COUNT], reach: f.kill_reach, meal_cap: f64::INFINITY, strikes_per_kill: f.strikes_per_kill, encounter: Encounter::Floor });
+    held_recorded(&mut f);
     f
+}
+
+/// **The crown ambush's encounter rate**, kills per hunting lanternjaw-second per prey body at
+/// strike share 1, patch floor units (`fauna_model fitambush`, 2026-10-05): the D2b `main` arm
+/// (`hunters/main.toml`, the patrol off), m120-240, 8 seeds, 10 kills matched. The patrol's are
+/// 4-9e-5: the ambush meets prey about ten times less often.
+pub const AMBUSH_RATE: f64 = 5.2751e-6;
+
+/// **Starting guesses** for the held lineages' fit (`web_model fitheld`): every Veilhound kill
+/// rate 1e-5 per hunting body-second per prey body (patch floor units), the lanternjaw's reach
+/// and strikes, carrion only at its kills; each herbivore's response flat at 0.5.
+pub fn held_guess(f: &mut Fits) {
+    let vh = Founder::Chorister;
+    let mut h = HunterFit { kill: [0.0; Founder::COUNT], reach: 1.0, meal_cap: 0.34, strikes_per_kill: f.strikes_per_kill, encounter: Encounter::Floor };
+    for g in [Founder::Browser, Founder::Loftstrider, Founder::Lanternjaw, Founder::Seedporter] {
+        h.kill[g.index()] = 1e-5;
+    }
+    f.hunters[vh.index()] = Some(h);
+    f.of_mut(vh).response[Food::Carrion.index()] = Some(Response::holling(0.0, 0.0));
+    f.of_mut(Founder::Bellwing).response[Food::Nectar.index()] = Some(Response::holling(0.5, 0.0));
+    f.of_mut(Founder::Loftstrider).response[Food::Foliage.index()] = Some(Response::holling(0.5, 0.0));
+    f.of_mut(Founder::Seedporter).response[Food::Fruit.index()] = Some(Response::holling(0.5, 0.0));
+}
+
+/// **The held lineages' recorded fits** (`web_model fitheld`, 2026-10-05; the animal half alone
+/// on soak v2's books, the plant stocks clamped to the log; training seeds 5 and 6, seed 1 held
+/// out; `design/webmodel/fauna.md`, "The held lineages"):
+/// - **the Veilhound**, its prey held to the logged counts while fitted, matched on kills by
+///   prey over m370-1570: per hunting Veilhound-second per prey body (patch floor units, strike
+///   share 1) frondgrazer 1.92e-5 (seed 5 alone, 111 kills: seed 6's packs killed none of the
+///   97 at hand), loftstrider 9.71e-5 (190 kills, seeds 5 and 6), lanternjaw 3.07e-6 (3),
+///   seedporter 1.59e-5 (7); the last rounds move them by 10-20 %. Its meal is capped at 0.208
+///   organic a kill, its assimilation matched (52.3): it ate about the same per kill off a
+///   3-unit loftstrider as off a 1-unit grazer (0.33 and 0.35 swallowed per kill);
+/// - **the bellwing**: nectar, sigmoid (Hill 3, half 2.0, interference 0.01, `psi_max` 2.63),
+///   on a grid of shape × half × interference (error 1.17; Hill 2-4 with half 1-3 score within
+///   0.3 of it: the threshold near a nectar density of 2 is what is identified);
+/// - **the loftstrider**: foliage, flat `psi_max` 0.415 (seed 6's assimilation per body-day);
+/// - **the seedporter**: fruit, flat `psi_max` 0.027 (seeds 5 and 6).
+pub fn held_recorded(f: &mut Fits) {
+    held_guess(f);
+    let vh = Founder::Chorister;
+    if let Some(h) = f.hunters[vh.index()].as_mut() {
+        h.kill[Founder::Browser.index()] = 1.917e-5;
+        h.kill[Founder::Loftstrider.index()] = 9.715e-5;
+        h.kill[Founder::Lanternjaw.index()] = 3.066e-6;
+        h.kill[Founder::Seedporter.index()] = 1.586e-5;
+        h.meal_cap = 0.208;
+    }
+    f.of_mut(Founder::Bellwing).response[Food::Nectar.index()] = Some(Response { psi_max: 2.6275, half: 2.0, interference: 0.01, hill: 3.0 });
+    f.of_mut(Founder::Loftstrider).response[Food::Foliage.index()] = Some(Response::holling(0.415, 0.0));
+    f.of_mut(Founder::Seedporter).response[Food::Fruit.index()] = Some(Response::holling(0.0272, 0.0));
+    for g in [vh, Founder::Bellwing, Founder::Loftstrider, Founder::Seedporter] {
+        f.fitted[g.index()] = true;
+    }
 }

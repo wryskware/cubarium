@@ -19,7 +19,7 @@ use cubarium_voxel::weather::{DayClock, DayMode, Sun};
 use cubarium_voxel_fauna::{Activity, BirthMode, FaunaConfig, Food, Founder, FounderPhysiology, SurplusWindow, TICK_HZ};
 use cubarium_voxel_flora::Species;
 
-use super::fits::Fits;
+use super::fits::{habitat_food, Encounter, Fits, HunterFit};
 use super::laws::{self, Body, Flows};
 use super::rng::Draws;
 use crate::exchange::{Returns, Supply, Take};
@@ -60,6 +60,11 @@ pub struct Cohort {
     /// its mouth, which it alone eats (at a full bite) while it stays, which decay at the
     /// carrion rate, and which it leaves at `1 / carcass_stay_s` to the carrion pool.
     pub carcass: f64,
+    /// **Young per body of an open gestation**: 1 for an ordinary live-bearer, a pack
+    /// breeder's litter size (`litter_size`, `step.rs:3000-3035`) for a pack lineage.
+    pub litter: f64,
+    /// A pack breeder carrying its pack's litter: the pack's index ([`FaunaModel::packs`]).
+    pub breeder_of: Option<usize>,
 }
 
 impl Cohort {
@@ -80,6 +85,8 @@ impl Cohort {
             window: SurplusWindow::default(),
             escrow: None,
             carcass: 0.0,
+            litter: 1.0,
+            breeder_of: None,
         }
     }
 
@@ -123,6 +130,8 @@ pub struct LineageLedger {
     pub first_clutches: f64,
     pub first_clutch_age_s: f64,
     pub nest_refusals: f64,
+    /// Breedings refused at the lineage body ceiling (`lineage_body_ceiling`).
+    pub ceiling_refusals: f64,
     pub starved: f64,
     pub drowned: f64,
     pub aged: f64,
@@ -142,6 +151,13 @@ pub struct LineageLedger {
     pub rider_take: f64,
     pub rider_loss: f64,
     pub gestation_loss: f64,
+    /// **Pup provisioning** (a pack lineage): reserve the adults gave, and the share of it
+    /// respired in the transfer (`1 − provision_efficiency`; also booked in
+    /// [`LineageLedger::gestation_loss`], parental investment's loss, so every respiration
+    /// sum already holds it). Litters born.
+    pub provision_given: f64,
+    pub provision_loss: f64,
+    pub litters: f64,
     /// Body-seconds alive and awake (free bodies), and body-seconds of structure alive: the
     /// sim's `alive_ticks_by_founder`, `awake_ticks_by_founder` over 20 Hz, and its
     /// body-days readout.
@@ -165,6 +181,14 @@ pub struct Census {
     pub mean_fullness: f64,
     pub biomass: f64,
     pub reserve: f64,
+}
+
+/// **One pack** of a pack lineage (`PackRecord`, the sim's `pack.rs`): when its breeder last
+/// littered. The pack's adults are the lineage's; a pack is dropped when the lineage has
+/// fewer adults than packs (the sim drops a pack with no adult left).
+#[derive(Clone, Copy, Debug)]
+pub struct PackState {
+    pub last_litter_s: f64,
 }
 
 /// The model's whole state and its numbers.
@@ -221,6 +245,10 @@ pub struct FaunaModel {
     pub min_cohort: f64,
     /// Seconds between merge passes.
     pub merge_every_s: f64,
+    /// **The packs** of each pack lineage (the Veilhound's): set from the lineage's adults at
+    /// its first step (`pack_size` adults a pack, at least one), never more after (the sim
+    /// founds packs and never splits one).
+    pub packs: [Vec<PackState>; Founder::COUNT],
     last_daylight: Option<f64>,
     merge_clock: f64,
 }
@@ -307,6 +335,7 @@ impl FaunaModel {
             max_cohorts: 48,
             min_cohort: 0.01,
             merge_every_s: 60.0,
+            packs: Default::default(),
             last_daylight: None,
             merge_clock: 0.0,
         }
@@ -345,6 +374,37 @@ impl FaunaModel {
                     0.0
                 }
             }
+        }
+    }
+
+    /// **A pup** (a pack lineage's young under `independence_age_s`, `pack.rs:120`): it cannot
+    /// strike, stays at the den and is fed by the adults ([`FaunaModel::provision`]).
+    pub fn is_pup(&self, f: Founder, c: &Cohort) -> bool {
+        match self.phys(f).pack {
+            Some(p) => c.native && c.host.is_none() && c.age_s < p.independence_age_s,
+            None => false,
+        }
+    }
+
+    /// **The hunting rule** of hunter lineage `hf` now: a pack hunter's own row; a solitary one's
+    /// crown-ambush row when the sim's patrol is off (`fauna.hunt.patrol`), else its own row;
+    /// with none, the legacy per-prey rates ([`super::fits::LineageFit::kill_rate`]).
+    pub fn hunt_rule(&self, hf: Founder) -> HunterFit {
+        let pack = self.phys(hf).pack.is_some();
+        if !pack && !self.config.hunt.patrol {
+            if let Some(a) = self.fits.ambush[hf.index()] {
+                return a;
+            }
+        }
+        if let Some(h) = self.fits.hunters[hf.index()] {
+            return h;
+        }
+        HunterFit {
+            kill: std::array::from_fn(|k| self.fits.lineage[k].kill_rate),
+            reach: self.fits.kill_reach,
+            meal_cap: f64::INFINITY,
+            strikes_per_kill: self.fits.strikes_per_kill,
+            encounter: Encounter::Floor,
         }
     }
 
@@ -458,6 +518,8 @@ impl FaunaModel {
             l.body_s += lsum.2;
         }
         self.riders(dt);
+        self.provision(dt, &awake_of);
+        self.share_feasts();
 
         // 2. The act: feeding, then the hunt.
         let stocks = stocks_of(supply);
@@ -486,12 +548,21 @@ impl FaunaModel {
             let area = self.area_scale.max(1e-9);
             let given = areas_of(supply);
             let area_of: [f64; Food::COUNT] = std::array::from_fn(|k| if given[k] > 0.0 && self.ref_area[k] > 0.0 { given[k] / self.ref_area[k] } else { area });
-            let own: f64 = (self.pops[f.index()].iter().filter(|c| c.host.is_none()).map(|c| c.n).sum::<f64>() + self.extra_bodies[f.index()]) / area;
+            // Size-weighted crowding (`crowd_size_exponent` θ): a body of structure B counts each
+            // other body of structure B' as (B'/B)^θ; θ = 0 is every body 1.
+            let theta = fit.crowd_size_exponent;
+            let free: Vec<(f64, f64)> = self.pops[f.index()].iter().filter(|c| c.host.is_none()).map(|c| (c.n, c.b.body)).collect();
+            let n_free: f64 = free.iter().map(|x| x.0).sum();
+            let extra = self.extra_bodies[f.index()];
+            let mean_body = if n_free > 0.0 { free.iter().map(|x| x.0 * x.1).sum::<f64>() / n_free } else { 0.0 };
+            let s_theta: f64 = if theta == 0.0 { n_free + extra } else { free.iter().map(|x| x.0 * x.1.max(1e-12).powf(theta)).sum::<f64>() + extra * mean_body.max(1e-12).powf(theta) };
+            let pup_of: Vec<bool> = self.pops[f.index()].iter().map(|c| self.is_pup(f, c)).collect();
             for (k, c) in self.pops[f.index()].iter_mut().enumerate() {
                 let a = awake_of[f.index()].get(k).copied().unwrap_or(0.0);
-                if !c.b.eating || !(a > 0.0) || c.host.is_some() || !(c.n > 0.0) {
+                if !c.b.eating || !(a > 0.0) || c.host.is_some() || !(c.n > 0.0) || pup_of[k] {
                     continue;
                 }
+                let own = if theta == 0.0 { s_theta } else { s_theta / c.b.body.max(1e-12).powf(theta) } / area;
                 let want = laws::bite_want(&phys, &c.b, dt) * a;
                 if !(want > 0.0) {
                     continue;
@@ -540,7 +611,8 @@ impl FaunaModel {
                 }
             }
         }
-        self.hunt(dt, &awake_of, &mut ret);
+        let habitat_area = self.habitat_areas(supply);
+        self.hunt(dt, &awake_of, &habitat_area, &mut ret);
 
         // 3. Births, then 4. deaths.
         self.reproduce(dt, dusk, &mut ret);
@@ -628,29 +700,59 @@ impl FaunaModel {
         }
     }
 
-    /// **The lanternjaw's hunt** (and any lineage with a [`cubarium_voxel_fauna::Hunter`]): a
-    /// hunter awake with its eating latch on hunts; a prey body of a
-    /// lineage on its list, inside its size window, dies at hazard
-    /// `kill_rate(prey) · hunters hunting · share²` — the attack chance is the profitability
-    /// (`hunt::attack_chance` with the opportunistic preference 1, `hunt.rs:171-202`) and the
-    /// kill per strike the wound share (`apply_hit`, `step.rs:2207-2229`). The share
-    /// `kill_reach` of the corpse goes to the killer cohort's carcass, the rest to the carrion
-    /// pool; each kill costs `strikes_per_kill` strikes at `strike_cost_s` of awake
-    /// upkeep (`Hunter::strike_cost_s`).
-    fn hunt(&mut self, dt: f64, awake_of: &[Vec<f64>], ret: &mut Returns) {
+    /// **Each lineage's encounter area as prey**, in patch units: its floor (`area_scale`) and
+    /// its habitat, the area of its [`habitat_food`] over the area that food stood on on patch
+    /// (`ref_area`); a food with no area given falls back to the floor.
+    pub fn habitat_areas(&self, supply: &Supply) -> [(f64, f64); Founder::COUNT] {
+        let floor = self.area_scale.max(1e-9);
+        let given = areas_of(supply);
+        std::array::from_fn(|k| {
+            let f = Founder::ALL[k];
+            let diet: Vec<Food> = self.phys(f).diet.foods().collect();
+            let hab = habitat_food(self.fits.of(f), &diet).map_or(floor, |food| {
+                let (g, r) = (given[food.index()], self.ref_area[food.index()]);
+                if g > 0.0 && r > 0.0 { g / r } else { floor }
+            });
+            (floor, hab.max(1e-9))
+        })
+    }
+
+    /// **The hunt** of every lineage with a [`cubarium_voxel_fauna::Hunter`] (the lanternjaw, the
+    /// Veilhound): a hunter awake with its eating latch on hunts (a pup does not); a prey body
+    /// of a lineage on its list, inside its size window, dies at hazard
+    /// `kill(prey) · hunters hunting · share² / A(prey)` under the hunter's rule
+    /// ([`FaunaModel::hunt_rule`]): the attack chance is the profitability (`hunt::attack_chance`
+    /// with the opportunistic preference 1, `hunt.rs:171-202`) and the kill per strike the wound
+    /// share (`apply_hit`, `step.rs:2207-2229`); `A` is the encounter area
+    /// ([`Encounter`]: the floor, or the prey's habitat). A pack hunter's size window is its
+    /// pack's (`window_body`, `pack.rs:79-99`: the summed body of its adults, taken as the
+    /// lineage's adults per pack). The share `reach` of the corpse goes to the killer cohort's
+    /// carcass, the rest to the carrion pool; each kill costs `strikes_per_kill` strikes at
+    /// `strike_cost_s` of awake upkeep (`Hunter::strike_cost_s`).
+    fn hunt(&mut self, dt: f64, awake_of: &[Vec<f64>], habitat_area: &[(f64, f64); Founder::COUNT], ret: &mut Returns) {
         for hf in Founder::ALL {
             if !self.enabled[hf.index()] {
                 continue;
             }
             let hp = *self.phys(hf);
             let Some(h) = hp.hunter else { continue };
+            let rule = self.hunt_rule(hf);
+            // A pack's window: its adults per pack, each at the hunter cohort's body.
+            let per_pack = match hp.pack {
+                Some(_) => {
+                    let adults: f64 = self.pops[hf.index()].iter().filter(|c| c.host.is_none() && !self.is_pup(hf, c)).map(|c| c.n).sum();
+                    let packs = self.packs[hf.index()].len().max(1) as f64;
+                    (adults / packs).max(1.0)
+                }
+                None => 1.0,
+            };
             // Hunting bodies: awake, free, with the eating latch on — a hunter strikes only while
             // it wants food (`founder_act`, `step.rs:1655-1668`), and its patrol does not wait at
             // a carcass: it feeds from it as it passes and strikes again while still hungry.
             let mut hunting = Vec::new();
             for (k, c) in self.pops[hf.index()].iter().enumerate() {
                 let a = awake_of[hf.index()].get(k).copied().unwrap_or(0.0);
-                if c.host.is_none() && c.b.eating && a > 0.0 {
+                if c.host.is_none() && c.b.eating && a > 0.0 && !self.is_pup(hf, c) {
                     hunting.push((k, c.n * a, c.b.body));
                 }
             }
@@ -664,21 +766,27 @@ impl FaunaModel {
                 self.ledger[hf.index()].hunting_s += hn * dt;
                 let mut kills_here = 0.0;
                 let mut laid_here = 0.0;
+                let mut meal_here = 0.0;
                 for pf in Founder::ALL {
                     if !h.hunts(pf) || !self.enabled[pf.index()] {
                         continue;
                     }
-                    let alpha = self.fits.of(pf).kill_rate;
+                    let alpha = rule.kill[pf.index()];
                     if !(alpha > 0.0) {
                         continue;
                     }
+                    let area = match rule.encounter {
+                        Encounter::Floor => habitat_area[pf.index()].0,
+                        Encounter::PreyHabitat => habitat_area[pf.index()].1,
+                    };
                     let pp = *self.phys(pf);
+                    let cap = rule.meal_cap;
                     for c in self.pops[pf.index()].iter_mut() {
-                        if c.host.is_some() || !(c.n > 0.0) || !laws::in_size_window(&hp, hb, c.b.body) {
+                        if c.host.is_some() || !(c.n > 0.0) || !laws::in_size_window(&hp, hb * per_pack, c.b.body) {
                             continue;
                         }
                         let share = laws::strike_share(&hp, hb, &pp, c.b.body);
-                        let hazard = alpha / self.area_scale.max(1e-9) * hn * share * share;
+                        let hazard = alpha / area * hn * share * share;
                         let p = 1.0 - (-hazard * dt).exp();
                         let dead = self.draws.of(c.n, p).min(c.n);
                         if !(dead > 0.0) {
@@ -688,19 +796,22 @@ impl FaunaModel {
                         // A gestating body's escrow: the loss respired, the rest in the corpse.
                         let (esc_body, esc_loss) = escrow_split(c, pp.core.reproduction.gestation_loss_fraction);
                         self.ledger[pf.index()].gestation_loss += dead * esc_loss;
-                        laid_here += dead * (c.b.organic() + esc_body);
+                        let corpse = c.b.organic() + esc_body;
+                        // The share in reach, at most the meal cap per kill, is its carcass.
+                        let meal = (rule.reach.clamp(0.0, 1.0) * corpse).min(cap);
+                        laid_here += dead * corpse;
+                        meal_here += dead * meal;
                         self.ledger[pf.index()].killed_by[hf.index()] += dead;
                         kills_here += dead;
                     }
                 }
-                // The share of the corpse at its mouth is its carcass; the rest is carrion now.
-                let reach = self.fits.kill_reach.clamp(0.0, 1.0);
-                self.pops[hf.index()][k].carcass += reach * laid_here;
-                self.carcass_laid += reach * laid_here;
-                ret.carrion += (1.0 - reach) * laid_here;
-                self.carcass_out += (1.0 - reach) * laid_here;
+                // Its meal is its carcass; the rest of the corpses is carrion now.
+                self.pops[hf.index()][k].carcass += meal_here;
+                self.carcass_laid += meal_here;
+                ret.carrion += laid_here - meal_here;
+                self.carcass_out += laid_here - meal_here;
                 if kills_here > 0.0 {
-                    let strikes = kills_here * self.fits.strikes_per_kill;
+                    let strikes = kills_here * rule.strikes_per_kill;
                     let hc = &mut self.pops[hf.index()][k];
                     let each = strikes * h.strike_cost_s * laws::upkeep_per_s(&hp, hc.b.body, 1.0) / hc.n.max(1e-12);
                     let (paid, _) = laws::respire(&hp.core, &mut hc.b, each);
@@ -711,6 +822,85 @@ impl FaunaModel {
                     l.flows.motor += paid * hc.n;
                 }
             }
+        }
+    }
+
+    /// **A pack's feast is the pack's** (`steer`, `pack.rs:626-655`: while its carcass lasts a
+    /// member that wants food eats there): each pack lineage's fresh kills are pooled and held
+    /// per body by its free non-pup cohorts alike, so the young adult eats at the kill the old
+    /// one made.
+    fn share_feasts(&mut self) {
+        for f in Founder::ALL {
+            if self.phys(f).pack.is_none() || !self.enabled[f.index()] {
+                continue;
+            }
+            let who: Vec<bool> = self.pops[f.index()].iter().map(|c| c.host.is_none() && !self.is_pup(f, c) && c.n > 0.0).collect();
+            let total: f64 = self.pops[f.index()].iter().map(|c| c.carcass).sum();
+            let n: f64 = self.pops[f.index()].iter().zip(&who).filter(|(_, w)| **w).map(|(c, _)| c.n).sum();
+            if !(total > 0.0) || !(n > 0.0) {
+                continue;
+            }
+            for (c, w) in self.pops[f.index()].iter_mut().zip(&who) {
+                c.carcass = if *w { total * c.n / n } else { 0.0 };
+            }
+        }
+    }
+
+    /// **Pup provisioning** (`provision`, `pack.rs:165-230`): an adult at the den — asleep
+    /// there, `must_walk_home` (`pack.rs:332`) — whose reserve is above
+    /// `provision_reserve_fraction` of its cap passes reserve to the pups at
+    /// `provision_rate_per_s × its body` per second, of which the pups get
+    /// `provision_efficiency` and the rest is respired; never more than the pups' reserve
+    /// room. Loses: which pup is the hungriest (the gift is spread over the pups' room) and
+    /// adults resting at the den by day.
+    fn provision(&mut self, dt: f64, awake_of: &[Vec<f64>]) {
+        for f in Founder::ALL {
+            let Some(t) = self.phys(f).pack else { continue };
+            if !self.enabled[f.index()] || !(t.provision_rate_per_s > 0.0) {
+                continue;
+            }
+            let sc = self.phys(f).core;
+            let pup: Vec<bool> = self.pops[f.index()].iter().map(|c| self.is_pup(f, c)).collect();
+            let room: Vec<f64> = self.pops[f.index()].iter().zip(&pup).map(|(c, p)| if *p { c.n * (sc.reserve_of(c.b.body) - c.b.reserve).max(0.0) } else { 0.0 }).collect();
+            let room_total: f64 = room.iter().sum();
+            if !(room_total > 0.0) {
+                continue;
+            }
+            let give: Vec<f64> = self.pops[f.index()]
+                .iter()
+                .enumerate()
+                .map(|(k, c)| {
+                    if pup[k] || c.host.is_some() {
+                        return 0.0;
+                    }
+                    let a = awake_of[f.index()].get(k).copied().unwrap_or(0.0);
+                    let excess = (c.b.reserve - t.provision_reserve_fraction * sc.reserve_of(c.b.body)).max(0.0);
+                    excess.min(t.provision_rate_per_s * c.b.body * dt * (1.0 - a).max(0.0))
+                })
+                .collect();
+            let offered: f64 = self.pops[f.index()].iter().zip(&give).map(|(c, g)| c.n * g).sum();
+            if !(offered > 0.0) {
+                continue;
+            }
+            let eff = t.provision_efficiency.clamp(1e-9, 1.0);
+            let received = (offered * eff).min(room_total);
+            let given = received / eff;
+            let scale = given / offered;
+            for (c, g) in self.pops[f.index()].iter_mut().zip(&give) {
+                if *g > 0.0 {
+                    c.b.reserve -= g * scale;
+                    c.b.brood = c.b.brood.min(c.b.reserve);
+                }
+            }
+            for (c, r) in self.pops[f.index()].iter_mut().zip(&room) {
+                if *r > 0.0 {
+                    c.b.reserve += received * r / room_total / c.n.max(1e-12);
+                }
+            }
+            let l = &mut self.ledger[f.index()];
+            l.provision_given += given;
+            l.provision_loss += given - received;
+            l.gestation_loss += given - received;
         }
     }
 
@@ -808,6 +998,12 @@ impl FaunaModel {
             let required = (rule.surplus_share.clamp(0.0, 1.0) * hold_steps as f64).ceil() as u64;
             let mut split: Vec<Cohort> = Vec::new();
             let nest_n = self.nest_count(f);
+            let pack = phys.pack.filter(|_| rule.mode == BirthMode::Gestation);
+            let ceiling = f64::from(self.config.lineage_body_ceiling);
+            let living: f64 = self.pops[f.index()].iter().map(|c| c.n).sum();
+            if pack.is_some() {
+                self.keep_packs(f);
+            }
             let n_cohorts = self.pops[f.index()].len();
             for k in 0..n_cohorts {
                 let c = &mut self.pops[f.index()][k];
@@ -821,10 +1017,19 @@ impl FaunaModel {
                     continue;
                 }
                 if c.escrow.is_none() {
+                    // The body ceiling (`at_body_ceiling`, step.rs:3331: a compute guard): a
+                    // lineage holding the ceiling's living bodies refuses every breeding, and the
+                    // body retries after `nest_retry_s`.
+                    if ceiling > 0.0 && living >= ceiling && c.retry_s <= 0.0 {
+                        c.retry_s = rule.nest_retry_s;
+                        self.ledger[f.index()].ceiling_refusals += c.n;
+                        continue;
+                    }
                     let eligible = c.b.body >= sc.birth_body && c.b.reserve >= rule.surplus_reserve(&sc) && rule.package_cost(&sc) > 0.0;
                     c.window.tick(eligible, hold_steps);
                     let met = eligible && c.window.count_for(hold_steps) >= required;
-                    if !met || c.retry_s > 0.0 {
+                    // A pack lineage conceives only through its pack's breeder (below).
+                    if !met || c.retry_s > 0.0 || pack.is_some() {
                         continue;
                     }
                 }
@@ -832,7 +1037,8 @@ impl FaunaModel {
                     BirthMode::Gestation => {
                         let (mut esc, mut ran) = c.escrow.unwrap_or((0.0, 0.0));
                         ran += dt;
-                        let target = sc.birth_cost * (ran / rule.gestation_s.max(dt)).min(1.0);
+                        let litter = c.litter.max(1e-9);
+                        let target = sc.birth_cost * litter * (ran / rule.gestation_s.max(dt)).min(1.0);
                         let want = (target - esc).max(0.0);
                         if c.b.reserve < want {
                             // An instalment it cannot pay: the loss respired, the rest back.
@@ -840,6 +1046,8 @@ impl FaunaModel {
                             c.b.reserve += esc - loss;
                             self.ledger[f.index()].gestation_loss += loss * c.n;
                             c.escrow = None;
+                            c.litter = 1.0;
+                            c.breeder_of = None;
                             continue;
                         }
                         c.b.reserve -= want;
@@ -853,12 +1061,20 @@ impl FaunaModel {
                         c.escrow = None;
                         c.refractory_s = rule.birth_interval_s;
                         c.window.reset();
-                        let mut young = Cohort::new(c.n, sc.body_min, (esc - sc.body_min).max(0.0));
+                        // A litter's parcel split evenly over its young (`gestate`, step.rs:2950-2975).
+                        let mut young = Cohort::new(c.n * litter, sc.body_min, (esc / litter - sc.body_min).max(0.0));
                         young.native = true;
+                        if let Some(k) = c.breeder_of.take() {
+                            if let Some(p) = self.packs[f.index()].get_mut(k) {
+                                p.last_litter_s = self.t_s;
+                            }
+                            self.ledger[f.index()].litters += c.n;
+                        }
+                        c.litter = 1.0;
                         let l = &mut self.ledger[f.index()];
-                        l.born += c.n;
+                        l.born += c.n * litter;
                         l.clutches += c.n;
-                        l.laid += c.n;
+                        l.laid += c.n * litter;
                         if c.native && !c.bred {
                             l.first_clutches += c.n;
                             l.first_clutch_age_s += c.n * c.age_s;
@@ -934,12 +1150,118 @@ impl FaunaModel {
                 }
             }
             self.pops[f.index()].extend(split);
+            if let Some(t) = pack {
+                self.conceive_litters(f, &t, hold_steps, required);
+            }
         }
         for (f, c) in hatchlings {
             if c.n > 0.0 {
                 self.pops[f.index()].push(c);
             }
         }
+    }
+
+    /// **The packs of a pack lineage** kept to its adults: set at the first step that sees
+    /// adults (`pack_size` adults a pack, at least one), then dropped while the lineage has
+    /// fewer adults than packs (the sim drops a pack whose last adult is gone and founds none).
+    pub fn keep_packs(&mut self, f: Founder) {
+        let Some(t) = self.phys(f).pack else { return };
+        let adults: f64 = self.pops[f.index()].iter().filter(|c| c.host.is_none() && !self.is_pup(f, c) && c.b.body >= self.phys(f).core.birth_body).map(|c| c.n).sum();
+        let v = &mut self.packs[f.index()];
+        if v.is_empty() && adults > 0.0 {
+            let n = (adults / t.pack_size.max(1) as f64).round().max(1.0) as usize;
+            v.extend(std::iter::repeat_n(PackState { last_litter_s: f64::NEG_INFINITY }, n));
+        }
+        let keep = (adults - 1e-9).ceil().max(0.0) as usize;
+        if v.len() > keep {
+            // The pack whose breeder is carrying a litter is kept first.
+            let carrying: Vec<usize> = self.pops[f.index()].iter().filter_map(|c| c.breeder_of).collect();
+            let mut idx: Vec<usize> = (0..v.len()).collect();
+            idx.sort_by_key(|k| !carrying.contains(k));
+            let kept: Vec<usize> = idx.into_iter().take(keep).collect();
+            let mut map = vec![None; v.len()];
+            let mut nv = Vec::new();
+            for (new, &old) in kept.iter().enumerate() {
+                map[old] = Some(new);
+                nv.push(v[old]);
+            }
+            *v = nv;
+            for c in self.pops[f.index()].iter_mut() {
+                c.breeder_of = c.breeder_of.and_then(|k| map.get(k).copied().flatten());
+            }
+        }
+    }
+
+    /// **A pack's litter** (`litter_size`, `step.rs:3000-3035`; `gestate`, `step.rs:2840-2990`):
+    /// only the pack's breeder conceives, no sooner than `litter_interval_s` after its last
+    /// litter, once it is in surplus (the surplus window met); the litter is drawn uniform on
+    /// 2..=`litter_size_max` and is never more young than its reserve above the floor funds
+    /// (with too little for two it waits). The breeder is one body of the best-fed eligible
+    /// adult cohort, split off to carry the litter. In the mean field the litter is the draw's
+    /// expectation under the funding cap.
+    fn conceive_litters(&mut self, f: Founder, t: &cubarium_voxel_fauna::Pack, hold_steps: u64, required: u64) {
+        let sc = self.phys(f).core;
+        let rule = sc.reproduction;
+        let package = rule.package_cost(&sc);
+        let hi = t.litter_size_max.max(1);
+        let lo = hi.min(2);
+        for k in 0..self.packs[f.index()].len() {
+            if self.pops[f.index()].iter().any(|c| c.breeder_of == Some(k)) {
+                continue;
+            }
+            if self.t_s - self.packs[f.index()][k].last_litter_s < t.litter_interval_s {
+                continue;
+            }
+            let ceiling = f64::from(self.config.lineage_body_ceiling);
+            if ceiling > 0.0 && self.pops[f.index()].iter().map(|c| c.n).sum::<f64>() >= ceiling {
+                continue;
+            }
+            let pick = self.pops[f.index()]
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    c.host.is_none()
+                        && c.n > 0.0
+                        && c.escrow.is_none()
+                        && c.breeder_of.is_none()
+                        && c.retry_s <= 0.0
+                        && c.refractory_s <= 0.0
+                        && !self.is_pup(f, c)
+                        && c.b.body >= sc.birth_body
+                        && c.b.reserve >= rule.surplus_reserve(&sc)
+                        && c.window.count_for(hold_steps) >= required
+                })
+                .max_by(|a, b| a.1.b.reserve.partial_cmp(&b.1.b.reserve).unwrap())
+                .map(|(i, _)| i);
+            let Some(i) = pick else { continue };
+            let reserve = self.pops[f.index()][i].b.reserve;
+            let funds = if package > 0.0 { ((reserve - rule.surplus_floor) / package).floor().max(0.0) } else { f64::from(hi) };
+            let young = if self.draws.is_twin() {
+                let u = self.draws.unit();
+                let drawn = f64::from(lo) + (u * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo));
+                let n = drawn.min(funds);
+                if n < f64::from(lo) { 0.0 } else { n }
+            } else if funds < f64::from(lo) {
+                0.0
+            } else {
+                (lo..=hi).map(|d| f64::from(d).min(funds)).sum::<f64>() / f64::from(hi - lo + 1)
+            };
+            if !(young > 0.0) {
+                continue;
+            }
+            let c = &mut self.pops[f.index()][i];
+            let take = c.n.min(1.0);
+            let mut b = c.clone();
+            b.n = take;
+            b.carcass = c.carcass * take / c.n;
+            c.carcass -= b.carcass;
+            c.n -= take;
+            b.escrow = Some((0.0, 0.0));
+            b.litter = young;
+            b.breeder_of = Some(k);
+            self.pops[f.index()].push(b);
+        }
+        self.pops[f.index()].retain(|c| c.n > 1e-12 || c.escrow.is_some());
     }
 
     /// **Deaths** (`deaths`, `step.rs:3764-3842`): starved below `body_min` (a whole cohort,
