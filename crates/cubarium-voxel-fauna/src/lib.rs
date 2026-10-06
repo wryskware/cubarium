@@ -69,7 +69,7 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
+    Amphibious, BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
     disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -634,6 +634,23 @@ pub struct Mobility {
     /// Consecutive ticks under water deeper than its drown depth. It drowns when this
     /// reaches [`FounderPhysiology::drown_ticks`]; any tick not under resets it.
     pub submerged_ticks: u64,
+    /// **The drying clock** of an amphibious body ([`crate::Amphibious`]), 0 hydrated, 1
+    /// full; it dies of [`Departure::Desiccation`] at the lineage's `lethal_fraction`.
+    /// Always 0 for every other body.
+    #[serde(default)]
+    pub dryness: f64,
+    /// Out of water on the last tick (an amphibious body beyond its water margin): it
+    /// does not fall asleep there.
+    #[serde(default)]
+    pub ashore: bool,
+    /// Ticks left of a retraction ([`crate::Amphibious::retract_hold_s`]): stopped and
+    /// closed.
+    #[serde(default)]
+    pub retract_ticks: u32,
+    /// Its drying clock is past the return fraction of the hour (night or rain, or dry
+    /// day): it is held to the water-bound rule and its heuristic heads for water.
+    #[serde(default)]
+    pub thirsty: bool,
 }
 
 /// A body's locomotion mode ([`Mobility::mode`], predation-and-flight §3.1).
@@ -2168,11 +2185,15 @@ pub enum Departure {
     /// Its wound reached 1 (`design/predation-and-flight-2026-09-28.md` §2.5): a corpse,
     /// with a carcass record, killed by a body of lineage `by`.
     Killed { by: Founder },
+    /// An amphibious body's drying clock reached its lineage's `lethal_fraction`
+    /// ([`crate::Amphibious`], AMPHIBIOUS-SNAIL). A corpse.
+    Desiccation,
 }
 
 impl Departure {
-    pub const ALL: [Departure; 4 + Founder::COUNT] = {
-        let mut all = [Departure::Starved; 4 + Founder::COUNT];
+    pub const ALL: [Departure; 5 + Founder::COUNT] = {
+        let mut all = [Departure::Starved; 5 + Founder::COUNT];
+        all[4 + Founder::COUNT] = Departure::Desiccation;
         all[1] = Departure::Drowned;
         all[2] = Departure::Aged;
         all[3] = Departure::Removed;
@@ -2193,6 +2214,7 @@ impl Departure {
             Departure::Aged => 2,
             Departure::Removed => 3,
             Departure::Killed { by } => 4 + by.index(),
+            Departure::Desiccation => 4 + Founder::COUNT,
         }
     }
 
@@ -2207,6 +2229,7 @@ impl Departure {
             Departure::Drowned => "drowned",
             Departure::Aged => "aged",
             Departure::Removed => "removed",
+            Departure::Desiccation => "desiccated",
             Departure::Killed { by } => {
                 static NAMES: std::sync::OnceLock<[&'static str; Founder::COUNT]> =
                     std::sync::OnceLock::new();
@@ -2877,6 +2900,17 @@ pub struct FaunaLedger {
     /// Eggs lost before hatching (face gone, flooded), by lineage.
     #[serde(default)]
     pub eggs_lost_by_founder: [u64; Founder::COUNT],
+    /// **AMPHIBIOUS-SNAIL readouts** (counters only): ticks an amphibious body was alive,
+    /// `[day, night][in water, ashore]` (day: daylight at or above the day line, or the
+    /// clock off), and retractions begun.
+    #[serde(default)]
+    pub amphibious_ticks: [[u64; 2]; 2],
+    #[serde(default)]
+    pub retracts: u64,
+    /// Organic matter an amphibious body assimilated while ashore (its share of
+    /// `assimilated_by_founder`).
+    #[serde(default)]
+    pub ashore_assimilated: f64,
 }
 
 impl FaunaLedger {

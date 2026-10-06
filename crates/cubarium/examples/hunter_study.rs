@@ -542,6 +542,7 @@ fn run(args: &[String]) {
             println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
             println!("route,{arm},{minute},{}", route_line(&lw, &l));
             println!("vh,{arm},{minute},{}", vh_line(&sim, &params, &lw, &l, &vh_win));
+            println!("snail,{arm},{minute},{}", snail_line(&sim, &lw, &l));
             vh_all.add(&vh_win);
             vh_win = Vh::default();
             meal_all.add(&meal_win);
@@ -565,6 +566,7 @@ fn run(args: &[String]) {
     println!("sumroute,{arm},{},{}", minute0, route_line(&l0, &l));
     vh_all.add(&vh_win);
     println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
+    println!("sumsnail,{arm},{},{}", minute0, snail_line(&sim, &l0, &l));
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;
@@ -578,6 +580,38 @@ fn run(args: &[String]) {
             prey_line(&l0, &l, f, t.body_ticks, total_ticks),
         );
     }
+}
+
+/// **AMPHIBIOUS-SNAIL** readouts, `a` → `b`: ripple-snails now; their deaths by
+/// desiccation, by lanternjaws and in all; the share of amphibious ticks ashore by day and
+/// by night; intake (assimilated) per snail-hour and the share of it taken ashore; and
+/// retractions begun.
+fn snail_line(sim: &Sim, a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let f = Founder::RippleSnail;
+    let i = f.index();
+    let now = sim.fauna().view().animals.iter().filter(|x| x.founder == Some(f)).count();
+    let dead = |c: Departure| b.departed_founder(f, c) - a.departed_founder(f, c);
+    let all: u64 = Departure::ALL.iter().filter(|c| c.is_death()).map(|&c| dead(c)).sum();
+    let t = |d: usize, w: usize| b.amphibious_ticks[d][w].saturating_sub(a.amphibious_ticks[d][w]) as f64;
+    let share = |d: usize| {
+        let n = t(d, 0) + t(d, 1);
+        if n > 0.0 { t(d, 1) / n } else { f64::NAN }
+    };
+    let alive = b.alive_ticks_by_founder[i].saturating_sub(a.alive_ticks_by_founder[i]) as f64;
+    let hours = alive / f64::from(TICK_HZ) / 3600.0;
+    let intake = b.assimilated_by_founder[i] - a.assimilated_by_founder[i];
+    let ashore = b.ashore_assimilated - a.ashore_assimilated;
+    let ratio = |x: f64, y: f64| if y > 0.0 { x / y } else { f64::NAN };
+    format!(
+        "n={now},desiccated={},lj_kills={},deaths={all},land_day={:.3},land_night={:.3},snail_h={hours:.2},intake_per_h={:.6},ashore_intake_share={:.3},retracts={}",
+        dead(Departure::Desiccation),
+        dead(Departure::Killed { by: LJ }),
+        share(0),
+        share(1),
+        ratio(intake, hours),
+        ratio(ashore, intake),
+        b.retracts - a.retracts,
+    )
 }
 
 /// The lanternjaw's window measures, `a` → `b`.

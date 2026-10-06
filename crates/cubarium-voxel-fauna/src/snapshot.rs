@@ -62,7 +62,7 @@ use crate::Fauna;
 //     tremor, smell, live, scent channel), `FaunaConfig::{perception, scent}`, the percept
 //     records (`Fauna::percepts`), `PackRecord::drawn_scent`, `ChaseEnd::Lost`, the funnel
 //     and the perception ledger lines; `pack_*_by_sense` widened to four modalities.
-pub const SCHEMA: u32 = 46;
+pub const SCHEMA: u32 = 47;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

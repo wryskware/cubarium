@@ -1353,7 +1353,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1323 rows)
+**`fauna.*`** (1431 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1434,6 +1434,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.littershredder.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.littershredder.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.littershredder.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.littershredder.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.littershredder.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.littershredder.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.littershredder.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.littershredder.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.littershredder.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.littershredder.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.littershredder.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.littershredder.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.littershredder.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.littershredder.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1563,6 +1575,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.frondgrazer.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.frondgrazer.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.frondgrazer.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.frondgrazer.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.frondgrazer.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.frondgrazer.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.frondgrazer.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.frondgrazer.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.frondgrazer.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.frondgrazer.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.frondgrazer.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.frondgrazer.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.frondgrazer.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.frondgrazer.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1692,6 +1716,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.lanternjaw.founding_count` | 3 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.lanternjaw.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.lanternjaw.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.lanternjaw.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.lanternjaw.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.lanternjaw.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.lanternjaw.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.lanternjaw.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.lanternjaw.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.lanternjaw.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.lanternjaw.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.lanternjaw.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.lanternjaw.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.lanternjaw.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1821,6 +1857,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.capgnawer.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.capgnawer.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.capgnawer.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.capgnawer.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.capgnawer.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.capgnawer.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.capgnawer.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.capgnawer.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.capgnawer.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.capgnawer.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.capgnawer.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.capgnawer.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.capgnawer.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.capgnawer.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.capgnawer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1950,6 +1998,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.bite_spill_fraction` | 0.25 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.loftstrider.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.loftstrider.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.loftstrider.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.loftstrider.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.loftstrider.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.loftstrider.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.loftstrider.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.loftstrider.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.loftstrider.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.loftstrider.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.loftstrider.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.loftstrider.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.loftstrider.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.loftstrider.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.loftstrider.contact_height_fraction` | 0.15 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2079,6 +2139,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.ripple-snail.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.ripple-snail.water_margin_m` | 0.25 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.ripple-snail.amphibious.dry_ground_s` | 2400.0 | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.ripple-snail.amphibious.wet_ground_s` | 21600.0 | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.ripple-snail.amphibious.rehydrate_per_s` | 0.0033333333333333335 | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.ripple-snail.amphibious.step_moisture_min` | 0.33 | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.ripple-snail.amphibious.return_fraction` | 0.5 | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.ripple-snail.amphibious.day_return_fraction` | 0.1 | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.ripple-snail.amphibious.day_drying_factor` | 3.0 | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.ripple-snail.amphibious.rain_drying_factor` | 0.0 | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.ripple-snail.amphibious.lethal_fraction` | 1.25 | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.ripple-snail.amphibious.water_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.ripple-snail.amphibious.retract_hold_s` | 8.0 | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.ripple-snail.amphibious.retract_armour` | 0.5 | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.ripple-snail.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2208,6 +2280,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.bellwing.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.bellwing.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.bellwing.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.bellwing.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.bellwing.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.bellwing.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.bellwing.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.bellwing.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.bellwing.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.bellwing.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.bellwing.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.bellwing.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.bellwing.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.bellwing.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.bellwing.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2337,6 +2421,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.seedporter.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.seedporter.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.seedporter.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.seedporter.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.seedporter.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.seedporter.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.seedporter.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.seedporter.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.seedporter.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.seedporter.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.seedporter.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.seedporter.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.seedporter.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.seedporter.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.seedporter.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2466,6 +2562,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.chorister.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
 | `fauna.founders.chorister.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
+| `fauna.founders.chorister.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
+| `fauna.founders.chorister.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
+| `fauna.founders.chorister.amphibious.rehydrate_per_s` | (absent) | clock fraction/s | [0, inf) |  | - | decision | the clock falls this fast in water (standing water within water_margin_m) |
+| `fauna.founders.chorister.amphibious.step_moisture_min` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | the least ground moisture a step onto a face out of water needs |
+| `fauna.founders.chorister.amphibious.return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks |
+| `fauna.founders.chorister.amphibious.day_return_fraction` | (absent) | clock fraction | [0, inf) |  | - | decision | ... and past this by day in dry weather (the activity bias) |
+| `fauna.founders.chorister.amphibious.day_drying_factor` | (absent) | x | [0, inf) |  | - | decision | the clock runs this many times as fast while the sun is up |
+| `fauna.founders.chorister.amphibious.rain_drying_factor` | (absent) | x | [0, inf) |  | - | decision | ... and this many times as fast while rain falls (0: no drying in rain) |
+| `fauna.founders.chorister.amphibious.lethal_fraction` | (absent) | clock fraction | (0, inf) |  | - | decision | it dies of desiccation at this (from 1 up it cannot feed) |
+| `fauna.founders.chorister.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
+| `fauna.founders.chorister.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
+| `fauna.founders.chorister.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
 | `fauna.founders.chorister.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
