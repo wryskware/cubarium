@@ -27,7 +27,11 @@ fn main() {
         Some("elig") => elig(&args[2..]),
         Some("hetero") => hetero(&args[2..]),
         Some("run") => run(&args[2..]),
-        _ => eprintln!("usage: flora_model dump [CONFIG] | census DIR | physio SPECIES L WATER SAT N DAYS newborn|adult"),
+        _ => eprintln!(
+            "usage: flora_model dump [CONFIG] | census DIR | physio SPECIES L WATER SAT N DAYS newborn|adult | elig DIR.. | hetero DIR SPECIES MINUTES\n  \
+             run start=DIR snaps=DIR,.. [log=SOAKLOG] [minutes=1200] [every=30] [weather=frozen] [wseed=N] [config=FILE] [set=P=V].. \
+             [browse=PER_DAY] [hold=SPECIES,..] [zocc=1] [prod=1] [rcheck=SPECIES[:seed]] [zfunnel=SPECIES] [zdeaths=SPECIES] [trace=ZONE:SPECIES]"
+        ),
     }
 }
 
