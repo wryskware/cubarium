@@ -35,7 +35,7 @@ pub mod perception;
 pub mod scent;
 pub mod vigil;
 pub use perception::{Percept, Track};
-pub use vigil::{Vigil, VigilLedger, VigilMode, Vigilance};
+pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
 mod gait;
 pub use gait::Sprint;
 pub use scent::ScentChannel;
@@ -73,7 +73,7 @@ use cubarium_voxel_flora::{Deposit, DepositKind, Flora, FloraView, Site, Taken};
 use serde::{Deserialize, Serialize};
 
 pub use body::{
-    BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
+    Amphibious, BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
     disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
@@ -638,6 +638,23 @@ pub struct Mobility {
     /// Consecutive ticks under water deeper than its drown depth. It drowns when this
     /// reaches [`FounderPhysiology::drown_ticks`]; any tick not under resets it.
     pub submerged_ticks: u64,
+    /// **The drying clock** of an amphibious body ([`crate::Amphibious`]), 0 hydrated, 1
+    /// full; it dies of [`Departure::Desiccation`] at the lineage's `lethal_fraction`.
+    /// Always 0 for every other body.
+    #[serde(default)]
+    pub dryness: f64,
+    /// Out of water on the last tick (an amphibious body beyond its water margin): it
+    /// does not fall asleep there.
+    #[serde(default)]
+    pub ashore: bool,
+    /// Ticks left of a retraction ([`crate::Amphibious::retract_hold_s`]): stopped and
+    /// closed.
+    #[serde(default)]
+    pub retract_ticks: u32,
+    /// Its drying clock is past the return fraction of the hour (night or rain, or dry
+    /// day): it is held to the water-bound rule and its heuristic heads for water.
+    #[serde(default)]
+    pub thirsty: bool,
 }
 
 /// A body's locomotion mode ([`Mobility::mode`], predation-and-flight §3.1).
@@ -871,6 +888,11 @@ pub struct Animal {
     /// away. `false` for every other body.
     #[serde(default)]
     pub yielding: bool,
+    /// **Hunkered** (HUNKER, [`crate::Hunker`]): clamped down under its shield, neither moving
+    /// nor eating. Its state is [`State::Resting`]; the presenter reads this flag to draw the
+    /// hunker pose (`cubarium::voxel::hunker`). False for every other body.
+    #[serde(default)]
+    pub hunkered: bool,
     /// **The stomach** (the minimal gut, `design/metabolism-meals-2026-10-02.md` repair 2
     /// item 10): raw food eaten and not yet digested, per food class, in all three
     /// currencies. Separate from [`Animal::gut`], which is egesta. Counted in the stored
@@ -2180,11 +2202,15 @@ pub enum Departure {
     /// Its wound reached 1 (`design/predation-and-flight-2026-09-28.md` §2.5): a corpse,
     /// with a carcass record, killed by a body of lineage `by`.
     Killed { by: Founder },
+    /// An amphibious body's drying clock reached its lineage's `lethal_fraction`
+    /// ([`crate::Amphibious`], AMPHIBIOUS-SNAIL). A corpse.
+    Desiccation,
 }
 
 impl Departure {
-    pub const ALL: [Departure; 4 + Founder::COUNT] = {
-        let mut all = [Departure::Starved; 4 + Founder::COUNT];
+    pub const ALL: [Departure; 5 + Founder::COUNT] = {
+        let mut all = [Departure::Starved; 5 + Founder::COUNT];
+        all[4 + Founder::COUNT] = Departure::Desiccation;
         all[1] = Departure::Drowned;
         all[2] = Departure::Aged;
         all[3] = Departure::Removed;
@@ -2205,6 +2231,7 @@ impl Departure {
             Departure::Aged => 2,
             Departure::Removed => 3,
             Departure::Killed { by } => 4 + by.index(),
+            Departure::Desiccation => 4 + Founder::COUNT,
         }
     }
 
@@ -2219,6 +2246,7 @@ impl Departure {
             Departure::Drowned => "drowned",
             Departure::Aged => "aged",
             Departure::Removed => "removed",
+            Departure::Desiccation => "desiccated",
             Departure::Killed { by } => {
                 static NAMES: std::sync::OnceLock<[&'static str; Founder::COUNT]> =
                     std::sync::OnceLock::new();
@@ -2898,6 +2926,17 @@ pub struct FaunaLedger {
     /// Eggs lost before hatching (face gone, flooded), by lineage.
     #[serde(default)]
     pub eggs_lost_by_founder: [u64; Founder::COUNT],
+    /// **AMPHIBIOUS-SNAIL readouts** (counters only): ticks an amphibious body was alive,
+    /// `[day, night][in water, ashore]` (day: daylight at or above the day line, or the
+    /// clock off), and retractions begun.
+    #[serde(default)]
+    pub amphibious_ticks: [[u64; 2]; 2],
+    #[serde(default)]
+    pub retracts: u64,
+    /// Organic matter an amphibious body assimilated while ashore (its share of
+    /// `assimilated_by_founder`).
+    #[serde(default)]
+    pub ashore_assimilated: f64,
 }
 
 impl FaunaLedger {
@@ -3244,6 +3283,10 @@ pub struct Fauna {
     /// — daylight falling below [`LifeConfig::day_line`] — for the egg bank's trigger
     /// (§2.13). `None` before the first tick.
     last_daylight: Option<f64>,
+    /// The last tick rain fell (SNAIL-FIX: an amphibious body's roam hours run on for
+    /// [`Amphibious::roam_after_rain_s`] after it). `None` before any rain.
+    #[serde(default)]
+    last_rain_tick: Option<u64>,
     /// Gut-seed voids since the last [`Fauna::take_seed_voids`] (F3): a census's events,
     /// not world state, so not saved; bounded at [`SEED_VOID_LOG_MAX`] (the oldest go).
     #[serde(skip)]
@@ -3498,6 +3541,7 @@ impl Fauna {
             policy_driven: [false; Founder::COUNT],
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
+            last_rain_tick: None,
             seed_voids: Vec::new(),
             pack_events: Vec::new(),
             pack_routes: FxHashMap::default(),
@@ -4127,6 +4171,7 @@ impl Fauna {
             pack: None,
             homing_ticks: 0,
             yielding: false,
+            hunkered: false,
             stomach: Stomach::default(),
             eating: false,
             emergency: false,
