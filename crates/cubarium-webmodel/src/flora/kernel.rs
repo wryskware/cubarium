@@ -117,7 +117,7 @@ pub fn build(config: &FloraConfig, width: u32, depth: u32, zones: &Zones, snapsh
     let mut ground_pass = vec![[0.0; Species::COUNT]; faces.len()];
     for snap in snapshots {
         for f in snap {
-            let i = pos[&(f.x, f.y, f.z)];
+            let Some(&i) = pos.get(&(f.x, f.y, f.z)) else { continue };
             for (k, sp) in PHOTO.iter().enumerate() {
                 ground_pass[i][sp.index()] += f64::from(u8::from(f.water_ok[k])) / snapshots.len() as f64;
             }

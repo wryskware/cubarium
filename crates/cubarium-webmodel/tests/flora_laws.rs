@@ -122,17 +122,16 @@ fn one_zone(fc: &FloraConfig, n: usize, sky: f64, n0: f64, occupants: &[(Species
             i += 1;
         }
     }
+    // The zone as the model builds it from a census of these faces (its newborn samples
+    // among them), with the weather held: every gate open, water at field capacity.
+    let mut zones = cubarium_webmodel::flora::zones::build(fc, &[faces.clone()]);
+    assert_eq!(zones.zones.len(), 1, "one zone");
     let r = Reading { mu: 1.0, available: 1.0, saturated: 0.0, stress_target: 0.0, gate: 1.0, mu_held: 1.0, stress_held: 0.0, available_held: 1.0 };
-    let zone = Zone {
-        key: Key { soil: true, under_roof: false, band: 4, wet: false },
-        area: n as f64,
-        sky,
-        darkness: 0.0,
-        fungal_space: 1.0,
-        weather: vec![[r; Species::COUNT]],
-    };
-    let of_face = faces.iter().map(|f| ((f.x, f.y, f.z), 0)).collect();
-    (Zones { zones: vec![zone], of_face }, faces)
+    let zone: &mut Zone = &mut zones.zones[0];
+    zone.weather = vec![[r; Species::COUNT]];
+    zone.fungal_space = 1.0;
+    let _ = Key { soil: true, under_roof: false, band: 4, wet: false };
+    (zones, faces)
 }
 
 fn kernels() -> (Vec<Kernel>, Vec<RunnerBox>) {
@@ -255,4 +254,142 @@ fn cap_regrowth_follows_the_foliage_rate() {
     fast.species_mut(Species::Glowcap).foliage_rate *= 4.0;
     assert!(caps(&fast) > caps(&base));
     let _ = model::NS;
+}
+
+/// **Numerics, the death rule's edge**: two newborns at `alive_min`, merged in any shares,
+/// stay at or above `alive_min` (a weighted mean that rounds below its inputs would be killed
+/// by the sim's own death rule `W < alive_min`), and the merged stand survives a daylight
+/// step on a good site.
+#[test]
+fn merged_newborns_never_round_below_alive_min() {
+    let (p, fc) = resolved();
+    let dm = DayModel::of(&p.world, fc.upkeep_q10);
+    for sp in [Species::Velvetpad, Species::Springturf, Species::Lanternberry] {
+        let sc = fc.species(sp);
+        let nb = StandState::newborn(sc, stand::package_of(sc));
+        for i in 1..200 {
+            let wa = f64::from(i) * 0.37 + 0.013;
+            let mut a = model::Cohort { n: wa, st: nb, covered: false, opened_s: 0.0, site: model::Site::default() };
+            let b = model::Cohort { n: 1.0 / wa + 0.1, st: nb, covered: false, opened_s: 0.0, site: model::Site::default() };
+            model::merge(&mut a, &b);
+            assert!(a.st.wood >= sc.alive_min, "{sp:?}: merged W {} under alive_min {}", a.st.wood, sc.alive_min);
+        }
+        // A noon step on a bright, wet, rich site: no death.
+        let noon = (0..720).map(|k| dm.at(k as f64 * 10.0, 10.0)).find(|c| c.daylight >= 1.0).expect("a full-daylight step");
+        let mut st = nb;
+        let site = stand::Site { light_eff: light_response(sc, 1.0), available: sc.full_water, saturated: 0.0, mineral: 1.0, darkness: 0.0, substrate_taken: 0.0, substrate_gross: 0.0 };
+        assert!(stand::grow(sc, &mut st, site, noon).1.is_none(), "{sp:?} newborn dies on a good site");
+    }
+}
+
+/// **Fitted (spatial), the seed shadow**: `seeded_share` is the negative binomial's
+/// `P(≥1 seed)`: it rises with the seeds per face, falls as the clumping `k` falls, and is
+/// the Poisson `1 − e^−m` in the well-mixed limit; and the clumping fit, on a census whose
+/// seeds pile on a few faces, returns a `k` whose share is the census's.
+#[test]
+fn the_seed_shadow_fit_returns_the_census_share() {
+    use cubarium_webmodel::flora::fit::{clumping, clumping_by_zone, seeded_share};
+    for m in [0.01, 0.3, 1.0, 4.0] {
+        assert!((seeded_share(m, f64::INFINITY) - (1.0 - (-m as f64).exp())).abs() < 1e-12);
+        assert!(seeded_share(m, 0.05) < seeded_share(m, 1.0) && seeded_share(m, 1.0) < seeded_share(m, 100.0));
+        assert!(seeded_share(m, 1.0) < seeded_share(m * 2.0, 1.0));
+    }
+    let (_, fc) = resolved();
+    // 400 bare faces; 30 of them hold 10 lanternberry seeds each (a bank of 300 on 30 faces).
+    let (mut zones, mut faces) = one_zone(&fc, 400, 0.85, 1.0, &[]);
+    let k = Species::Lanternberry.index();
+    for f in faces.iter_mut().take(30) {
+        f.seeds[k] = 10;
+    }
+    zones = cubarium_webmodel::flora::zones::build(&fc, &[faces.clone()]);
+    let observed = 30.0 / 400.0;
+    let g = clumping(&zones);
+    let z = clumping_by_zone(&zones, &g);
+    let fitted = seeded_share(300.0 / 400.0, z[0][k]);
+    // The fit's grid is log-spaced (a step of 10^(1/12)): its share is the census's to the
+    // grid's resolution.
+    assert!((fitted - observed).abs() < 0.25 * observed, "fitted share {fitted} vs census {observed}");
+    assert!(fitted < 1.0 - (-0.75f64).exp(), "a piled bank covers fewer faces than a mixed one");
+}
+
+/// **A water seed** (`Dispersal::Water`, `seeds::water_target`) lands only on a margin its
+/// gates pass: with the zone's gate share at zero no siphonreed comes up, with it open some
+/// do, from the same bank.
+#[test]
+fn a_water_seed_comes_up_only_where_its_gates_pass() {
+    let (p, fc) = resolved();
+    let sp = Species::Siphonreed;
+    assert_eq!(fc.species(sp).dispersal, cubarium_voxel_flora::Dispersal::Water, "the preset's siphonreed floats");
+    let k = cubarium_webmodel::flora::census::PHOTO.iter().position(|&s| s == sp).unwrap();
+    let sc = fc.species(sp);
+    let births = |gate: f64| {
+        let (_, mut faces) = one_zone(&fc, 200, 0.95, 1.0, &[]);
+        for f in faces.iter_mut() {
+            f.water[k] = Some(sc.full_water + 0.1);
+        }
+        let mut zones = cubarium_webmodel::flora::zones::build(&fc, &[faces.clone()]);
+        let mut r = zones.zones[0].weather[0][sp.index()];
+        r.gate = gate;
+        r.mu = 1.0;
+        r.mu_held = 1.0;
+        r.available_held = sc.full_water + 0.1;
+        zones.zones[0].weather[0][sp.index()] = r;
+        let mut m = build(&fc, &p, zones, &faces, params());
+        m.z[0].bank[sp.index()] = 50.0;
+        for _ in 0..360 {
+            m.step();
+        }
+        m.c.births_seed[sp.index()]
+    };
+    assert_eq!(births(0.0), 0.0);
+    assert!(births(1.0) > 0.0);
+}
+
+/// **Config flow, the canopy gate**: raising a woody species' `establish_light_margin` (the
+/// sim's knob: the newborn must earn this many times its upkeep) never lets more of its
+/// seedlings up through a shaded mat, and lets fewer when some came up.
+#[test]
+fn the_canopy_margin_gates_the_seedlings() {
+    let (p, base) = resolved();
+    let sp = Species::Lanternberry;
+    let k = cubarium_webmodel::flora::census::PHOTO.iter().position(|&s| s == sp).unwrap();
+    let go = |fc: &FloraConfig| {
+        let (_, mut faces) = one_zone(fc, 300, 0.9, 1.0, &[(Species::Springturf, 1.0, 300)]);
+        for (i, f) in faces.iter_mut().enumerate() {
+            f.seeds[sp.index()] = 2;
+            // A spread of shade from the mat's neighbours over the newborn's crown top.
+            f.nb_tau[k][Species::Springturf.index()] = 0.2 + 1.2 * (i as f32 / 300.0);
+        }
+        let zones = cubarium_webmodel::flora::zones::build(fc, &[faces.clone()]);
+        let mut m = build(fc, &p, zones, &faces, params());
+        m.z[0].bank[sp.index()] = 600.0;
+        for _ in 0..360 {
+            m.step();
+        }
+        m.c.births_seed[sp.index()]
+    };
+    let b0 = go(&base);
+    assert!(b0 > 0.0, "some seedlings come up under the base margin");
+    let mut strict = base.clone();
+    strict.species_mut(sp).establish_light_margin *= 2.0;
+    assert!(go(&strict) < b0, "a stricter margin lets fewer up");
+}
+
+/// **Scenario lever**: holding a species' site mineral keeps its pool at the start mean on
+/// its faces (the top-up is booked as `held_in`), so its stands never read a drained site.
+#[test]
+fn the_hold_lever_tops_the_pool_up_to_the_start_mean() {
+    let (p, fc) = resolved();
+    let sp = Species::Springturf;
+    let (zones, faces) = one_zone(&fc, 200, 0.9, 0.5, &[(sp, 0.3, 150)]);
+    let mut mp = params();
+    mp.hold_mineral[sp.index()] = true;
+    let mut m = build(&fc, &p, zones, &faces, mp);
+    let start = m.start_mineral[0][sp.index()];
+    for _ in 0..720 {
+        m.step();
+        let n = m.z[0].count(sp.index());
+        assert!(m.z[0].pool[sp.index()] >= n * start - 1e-9, "the held pool fell under the start mean");
+    }
+    assert!(m.c.held_in >= 0.0);
 }
