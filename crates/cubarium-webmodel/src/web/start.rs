@@ -267,4 +267,25 @@ pub fn held_recorded(f: &mut Fits) {
     for g in [vh, Founder::Bellwing, Founder::Loftstrider, Founder::Seedporter] {
         f.fitted[g.index()] = true;
     }
+    senses_refit(f);
+}
+
+/// **The Veilhound's frondgrazer rate under the new senses** (LIFE-HISTORY's refit,
+/// 2026-10-06), kills per hunting Veilhound-second per grazer body (patch floor units, strike
+/// share 1). The soak v2 fit above (1.917e-5, the old senses that could not find prey) killed
+/// 111 grazers over 127.3 Veilhound-days at a mean 47.5 grazers (seed 5, m370-1570): 0.00918
+/// kills per Veilhound-hour per grazer. S2's check on the desktop terrarium (the same floor),
+/// with S1's senses and S2's vigilance (both on main), killed 47 over 144 Veilhound-hours at
+/// the grazers' logged counts (4 seeds x 6 h, 10-minute readouts): 0.0257, 2.80x. Scaled by
+/// that ratio, taking the hunting share of a Veilhound-hour as alike in both (both packs were
+/// hungry most of the time). S1 alone (S2's `main` arm, no prey vigilance) was 0.0368, 4.0x.
+/// The loftstrider, lanternjaw and seedporter rates keep the soak fit (S2's 13 and 15 kills
+/// of loftstriders and seedporters are too few to refit).
+pub const VH_GRAZER_RATE_SENSES: f64 = 1.917e-5 * 2.80;
+
+/// Apply [`VH_GRAZER_RATE_SENSES`] to the Veilhound's row.
+pub fn senses_refit(f: &mut Fits) {
+    if let Some(h) = f.hunters[Founder::Chorister.index()].as_mut() {
+        h.kill[Founder::Browser.index()] = VH_GRAZER_RATE_SENSES;
+    }
 }

@@ -202,7 +202,10 @@ fn a_breeder_below_the_breeding_reserve_does_not_conceive() {
 fn litter_size_falls_with_the_breeders_condition() {
     let (threshold, hi) = (0.6, 4u32);
     // The rule itself.
-    let sizes: Vec<u32> = (0..=40).map(|k| super::litter_by_condition(threshold + (1.0 - threshold) * f64::from(k) / 40.0, threshold, hi)).collect();
+    let mut t = crate::Pack::CHORISTER;
+    t.breed_reserve_fraction = threshold;
+    t.litter_size_max = hi;
+    let sizes: Vec<u32> = (0..=40).map(|k| t.condition_litter(threshold + (1.0 - threshold) * f64::from(k) / 40.0)).collect();
     assert_eq!(sizes[0], 1, "one young at the threshold");
     assert_eq!(*sizes.last().unwrap(), hi, "the most at a full reserve");
     assert!(sizes.windows(2).all(|w| w[0] <= w[1]), "never more young in poorer condition: {sizes:?}");

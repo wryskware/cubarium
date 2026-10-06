@@ -635,6 +635,17 @@ fn pack_route_reach_fraction() -> f64 {
 }
 
 impl Pack {
+    /// **A litter by condition** (LIFE-HISTORY, [`Pack::litter_by_condition`]): a breeder at
+    /// reserve fraction `r` has `1 + floor(c × litter_size_max)` young, at most
+    /// `litter_size_max`, with `c = (r − f) / (1 − f)` clamped to `[0, 1]` and `f` the
+    /// [`Pack::breed_reserve_fraction`].
+    pub fn condition_litter(&self, r: f64) -> u32 {
+        let hi = self.litter_size_max.max(1);
+        let f = self.breed_reserve_fraction.clamp(0.0, 1.0);
+        let c = if f < 1.0 { ((r - f) / (1.0 - f)).clamp(0.0, 1.0) } else { 1.0 };
+        (1 + (c * f64::from(hi)).floor() as u32).min(hi)
+    }
+
     /// The chorister's table (Brief R3).
     pub const CHORISTER: Pack = Pack {
         pack_radius_m: 6.0,

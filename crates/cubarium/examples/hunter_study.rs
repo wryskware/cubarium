@@ -504,7 +504,7 @@ fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh)
     let lead = b.pack_draw_lead_samples - a.pack_draw_lead_samples;
     let follow = b.pack_draw_follow_samples - a.pack_draw_follow_samples;
     format!(
-        "n={},adults={},pups={pups},fullness={fullness:.3},emergency={:.3},hungry={:.3},strikes={},hits={},kills={all_kills},grazer_kills={},chases={},chase_kills={},chases_by_sense={},draws_by_sense={},draw_chases={},hungry_samples={hungry},draw_lead={lead},draw_follow={follow},draw_share={:.3},vh_hours={:.3},funnel_grazer={},funnel_all={}",
+        "n={},adults={},pups={pups},fullness={fullness:.3},emergency={:.3},hungry={:.3},strikes={},hits={},kills={all_kills},grazer_kills={},chases={},chase_kills={},chases_by_sense={},draws_by_sense={},draw_chases={},hungry_samples={hungry},draw_lead={lead},draw_follow={follow},draw_share={:.3},vh_hours={:.3},funnel_grazer={},funnel_all={},litters_cum={},pups_born_cum={},pups_indep_cum={},season_waits_cum={},pregnant={},year={}",
         bodies.len(),
         adults.len(),
         share(w.emergency_ticks),
@@ -521,6 +521,14 @@ fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh)
         w.alive_ticks as f64 / f64::from(TICK_HZ) / 3600.0,
         funnel(&[Founder::Browser]),
         funnel(&Founder::ALL),
+        // LIFE-HISTORY: litters, pups born and come of age (cumulative), conceptions a
+        // season held back, breeders gestating now, and the year (number:phase).
+        b.litters,
+        b.pups_born,
+        b.pups_independent,
+        b.season_waits,
+        adults.iter().filter(|x| x.reproduction.escrow.is_some()).count(),
+        sim.world().year().map_or("-".to_string(), |y| format!("{}:{:.3}", y.number, y.phase)),
     )
 }
 

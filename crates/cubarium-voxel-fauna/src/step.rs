@@ -3404,7 +3404,7 @@ fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reprod
         return Litter::Not;
     }
     let (lo, drawn) = if t.litter_by_condition {
-        (1, litter_by_condition(r, f, hi))
+        (1, t.condition_litter(r))
     } else {
         let lo = hi.min(2);
         let mut rng = Rng::keyed(DOMAIN_LITTER, seed, a.id, fauna.tick);
@@ -3422,15 +3422,6 @@ fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reprod
     } else {
         Litter::Of(n)
     }
-}
-
-/// **A litter by condition** (LIFE-HISTORY, [`Pack::litter_by_condition`]): a breeder at
-/// reserve fraction `r` over the threshold `f` has `1 + floor(c × hi)` young, at most `hi`,
-/// with `c = (r − f) / (1 − f)` clamped to `[0, 1]`.
-pub(crate) fn litter_by_condition(r: f64, f: f64, hi: u32) -> u32 {
-    let hi = hi.max(1);
-    let c = if f < 1.0 { ((r - f) / (1.0 - f)).clamp(0.0, 1.0) } else { 1.0 };
-    (1 + (c * f64::from(hi)).floor() as u32).min(hi)
 }
 
 /// A newborn out of a paid `parcel`: a `body_min` juvenile with the rest of the parcel's
