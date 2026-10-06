@@ -25,7 +25,7 @@
 //!   face, away from the wall), else climbs: down from a crown top or a vine, on up from
 //!   under a crown. A downpour sends a crown-top perch down under its crown. A lost perch
 //!   (the crown eaten or grown, the face uncovered) is a forced glide.
-//! - **`Glide`**: no thrust; `glide_body_lengths_per_s` × its length a second across,
+//! - **`Glide`**: no thrust; `glide_speed_fraction` × its ground cruise a second across,
 //!   steered by `turn`, falling `1 / glide_ratio` of that; `glide_cost_factor` × basal in
 //!   all (the upkeep included, F1's hover convention). It lands on the first crown top of
 //!   a stand it could climb that it crosses at its centre column (perched), the floor of
@@ -317,12 +317,15 @@ pub(super) fn glider_act(
     if mode == MobilityMode::Ground {
         if asleep {
             fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+            crate::gait::rest(fauna, i, founder);
             return;
         }
         ground_tick(fauna, view, flora, seed, tick, glider, i, hits);
         return;
     }
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
+    // GAIT: off its feet it does not sprint, and rests.
+    crate::gait::rest(fauna, i, founder);
     let phys = *fauna.config.founder(founder);
     let manifest = fauna.config.manifest(founder);
     let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
@@ -394,7 +397,8 @@ fn ground_tick(
         }
         let ring = f64::from(view.config.width) * v;
         let (dx, dz) = crate::pose::wrapped_delta(before.x, before.z, a.pose.x, a.pose.z, ring);
-        let asked = held.forward * manifest.cruise_m_per_s * DT;
+        // At most cruise: a sprint the gate refused (winded) is not a blocked walk.
+        let asked = held.forward.min(1.0) * manifest.cruise_m_per_s * DT;
         if (dx * dx + dz * dz).sqrt() < 0.5 * asked {
             if let Some(face) = vine_ahead(view, &fv, &a, s) {
                 let a = &mut fauna.animals[i];
@@ -518,9 +522,10 @@ fn glide_motion(
     (moved.distance_m, end)
 }
 
-/// A glide's per-tick `(distance, fall)` for a body of `body` on `phys`.
-fn glide_pace(glider: &Glider, phys: &crate::FounderPhysiology, body: f64) -> (f64, f64) {
-    let distance = glider.glide_body_lengths_per_s * phys.body_at(body).length_m * DT;
+/// A glide's per-tick `(distance, fall)` for a lineage cruising at `cruise_m_per_s` (GAIT:
+/// `glide_speed_fraction` × the ground cruise, the walk's own reference at every size).
+fn glide_pace(glider: &Glider, cruise_m_per_s: f64) -> (f64, f64) {
+    let distance = glider.glide_speed_fraction * cruise_m_per_s * DT;
     let fall = if glider.glide_ratio > 0.0 {
         distance / glider.glide_ratio
     } else {
@@ -541,7 +546,7 @@ fn glide_end(
 ) -> Option<GlideEnd> {
     let s = shape(phys, body);
     let puddle = phys.drown_depth_m(&phys.body_at(body));
-    let (distance, fall) = glide_pace(glider, phys, body);
+    let (distance, fall) = glide_pace(glider, phys.cruise_body_lengths_per_s * phys.adult_length_m);
     if !(fall > 0.0) {
         return None;
     }
@@ -650,7 +655,7 @@ fn glide_tick(
     let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
     fauna.ledger.respired_flight_out += paid;
     let s = shape(phys, fauna.animals[i].body);
-    let (distance, fall) = glide_pace(&glider, phys, fauna.animals[i].body);
+    let (distance, fall) = glide_pace(&glider, manifest.cruise_m_per_s);
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
     let fv = flora.view();
     let asked = (fauna.animals[i].pose.heading_rad + held.turn * manifest.yaw_cap_rad_per_s * DT)

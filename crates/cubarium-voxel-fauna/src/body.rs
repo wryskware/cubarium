@@ -506,6 +506,10 @@ pub struct FounderPhysiology {
     /// live table senses. Inert while its table is not live.
     #[serde(default)]
     pub vigilance: crate::Vigilance,
+    /// **Its sprint** (GAIT, [`crate::Sprint`]): the gait above cruise its rush or ground
+    /// flight asks for, and the stamina that limits it. None for a lineage that only walks.
+    #[serde(default)]
+    pub sprint: crate::Sprint,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -646,8 +650,10 @@ pub struct Glider {
     pub climb_min_stand_m: f64,
     /// Horizontal metres covered per metre of descent in a glide. 2.5.
     pub glide_ratio: f64,
-    /// The glide's speed, body lengths per second. 3.0.
-    pub glide_body_lengths_per_s: f64,
+    /// **The glide's speed, × its ground cruise** (GAIT, Wrysk 2026-10-06: it "can glide
+    /// like 2x their base speed"): a glide covers this × the lineage's cruise
+    /// (`cruise_body_lengths_per_s` × the adult length) a second across. 2.0.
+    pub glide_speed_fraction: f64,
     /// What a second gliding costs, × basal upkeep (the whole, upkeep included). 1.2.
     pub glide_cost_factor: f64,
     /// A glide starts only from at least this height over the landing surface, metres.
@@ -679,11 +685,11 @@ fn fruit_search_m() -> f64 {
 
 impl Glider {
     /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
-    /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 3 BL/s for 1.2 × basal.
+    /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 2 × its cruise for 1.2 × basal.
     pub const SEEDPORTER: Glider = Glider {
         climb_min_stand_m: 1.0,
         glide_ratio: 2.5,
-        glide_body_lengths_per_s: 3.0,
+        glide_speed_fraction: 2.0,
         glide_cost_factor: 1.2,
         glide_min_height_m: 1.0,
         roost_search_m: 4.0,
@@ -1036,6 +1042,7 @@ impl FounderPhysiology {
         p.burr_coat = burr_coat_of(founder);
         p.senses = senses_of(founder);
         p.vigilance = crate::vigil::vigilance_of(founder);
+        p.sprint = crate::gait::sprint_of(founder);
         p
     }
 
@@ -1136,6 +1143,7 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1203,6 +1211,7 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1290,6 +1299,7 @@ impl FounderPhysiology {
                 burr_coat: 0.0,
                 senses: SenseTable::default(),
                 vigilance: crate::Vigilance::default(),
+                sprint: crate::Sprint::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -1491,7 +1501,11 @@ impl FounderPhysiology {
                     adult_length_m: 0.5,
                     adult_width_m: 0.25,
                     adult_height_m: 0.2,
-                    cruise_body_lengths_per_s: 1.0,
+                    // GAIT (Wrysk 2026-10-06: "a bit below veilhound when on the ground"):
+                    // 0.85 × the Veilhound's 1.4 m/s cruise, 1.19 m/s on its 0.5 m, ≈ 2.4
+                    // BL/s. It climbs at `climb_speed_fraction` (0.5) of this, slower than it
+                    // walks, and glides at its glider's `glide_speed_fraction` × this.
+                    cruise_body_lengths_per_s: 0.85 * 1.4 / 0.5,
                     // Half its length up or down in a stride; it does not climb terrain
                     // walls (stems and vine faces are its climbing, [`Glider`]).
                     step_up_m: 0.25,
@@ -1551,6 +1565,12 @@ impl FounderPhysiology {
                 core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
                 FounderPhysiology {
                     core,
+                    // GAIT: its own cruise, 1 BL/s (1.4 m/s; the standing pace rule), no
+                    // longer the lanternjaw's 0.6 (0.84 m/s; Wrysk 2026-10-06: "they
+                    // probably should move faster"). Full cruise still costs its basal rate
+                    // (the motor tie): a second at cruise costs what it did, a metre less;
+                    // its rush at 2.5 × cruise costs 2.5 × a second's walking.
+                    cruise_body_lengths_per_s: 1.0,
                     motor_respiration_per_s: core.maintenance_per_s,
                     // Its own height both ways, the lanternjaw's rule.
                     step_up_m: 0.6,

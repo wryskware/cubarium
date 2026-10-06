@@ -441,12 +441,16 @@ fn vig_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
 fn gait_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
     let sp = Founder::Seedporter.index();
     format!(
-        "glides={},glides_forced={},climbs={},sp_flees={},sp_refuge_samples={}",
+        "glides={},glides_forced={},climbs={},sp_flees={},sp_refuge_samples={},vh_sprint_ticks={},vh_winded={},sp_sprint_ticks={},sp_winded={}",
         b.glides - a.glides,
         b.glides_forced - a.glides_forced,
         b.climbs - a.climbs,
         b.vigil.flees[sp] - a.vigil.flees[sp],
         b.vigil.refuges[sp] - a.vigil.refuges[sp],
+        b.sprint_ticks_by_founder[VH.index()] - a.sprint_ticks_by_founder[VH.index()],
+        b.winded_by_founder[VH.index()] - a.winded_by_founder[VH.index()],
+        b.sprint_ticks_by_founder[sp] - a.sprint_ticks_by_founder[sp],
+        b.winded_by_founder[sp] - a.winded_by_founder[sp],
     )
 }
 

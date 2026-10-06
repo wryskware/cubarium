@@ -411,7 +411,7 @@ fn the_seedporter_table_scales_the_browsers_and_glides() {
     assert!(sp.flight.is_none(), "it glides, it does not fly");
 
     let g = sp.glider.expect("the seedporter glides");
-    assert!(g.glide_ratio > 0.0 && g.glide_body_lengths_per_s > 0.0);
+    assert!(g.glide_ratio > 0.0 && g.glide_speed_fraction > 0.0);
     for other in Founder::ALL.into_iter().filter(|&o| o != SP) {
         let p = FounderPhysiology::frozen(other);
         assert!(p.glider.is_none() && p.gut_seeds.is_none(), "{other:?} neither glides nor carries seeds");
@@ -484,6 +484,8 @@ fn it_climbs_a_1_m_lanternberry_stem_at_half_walking_pace_and_perches_in_the_cro
     assert!(walk.len() >= 3 && climb.len() >= 10, "it walked ({}) and climbed ({})", walk.len(), climb.len());
     let (w, c) = (median(walk), median(climb));
     assert!(w > 0.0 && c > 0.0, "it went east and up: {w}, {c}");
+    // GAIT (Wrysk 2026-10-06): "climb is slower that walking".
+    assert!(c < w, "it climbs ({c} m/tick) slower than it walks ({w} m/tick)");
     let pace = c / w;
     assert!(
         (pace - p.climb_speed_fraction).abs() <= 0.15 * p.climb_speed_fraction,
@@ -554,7 +556,8 @@ fn a_glide_from_2_m_covers_about_5_m_before_landing_at_1_2_times_basal() {
     let want = 2.0 * g.glide_ratio;
     assert!((across - want).abs() <= 0.5, "a 2 m glide covers about {want} m: {across}");
     let speed = across / (gliding as f64 * DT);
-    let pace = g.glide_body_lengths_per_s * p.adult_length_m;
+    // GAIT: `glide_speed_fraction` × its ground cruise.
+    let pace = g.glide_speed_fraction * fauna.config().manifest(SP).cruise_m_per_s;
     assert!((speed - pace).abs() <= 0.15 * pace, "glide pace {speed} m/s against {pace}");
     let per_tick = median(costs);
     assert!(

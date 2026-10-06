@@ -293,7 +293,7 @@ fn a_stalking_veilhound_under_the_hearing_floor_is_not_heard_and_the_rush_is() {
         if stalks {
             assert!(forward < 1.0, "beyond the commit distance it slows: {forward}");
         } else {
-            assert_eq!(forward, 1.0, "within it, the rush");
+            assert_eq!(forward, crate::gait::sprint_forward(&fauna.config, VH), "within it, the rush: its sprint (GAIT)");
         }
         set_speed(&mut fauna, vh, forward * full);
         sense(&mut fauna, &world);

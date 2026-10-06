@@ -66,7 +66,12 @@ use crate::Fauna;
 //     {feeding_sight_fraction, kin_tracks}`, `FounderPhysiology::vigilance`, `Pack::{stalk_margin,
 //     commit_m, stalk_freeze}`, `PredationConfig::{awareness_sensed, awareness_unaware,
 //     aware_within_s}`, `HuntConfig::patch_scent_weight`, the `vigil` ledger lines.
-pub const SCHEMA: u32 = 47;
+// 48: (HUNKER, senses-s2b.)
+// 49: GAIT — `FounderPhysiology::sprint` (`Sprint`), `FounderState::{sprint_spent, winded}`,
+//     `Glider::glide_speed_fraction` (replaces `glide_body_lengths_per_s`), the ledger's
+//     `sprint_ticks_by_founder` and `winded_by_founder`; the Veilhound's and the seedporter's
+//     cruise and motor defaults.
+pub const SCHEMA: u32 = 49;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
