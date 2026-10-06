@@ -122,17 +122,16 @@ fn one_zone(fc: &FloraConfig, n: usize, sky: f64, n0: f64, occupants: &[(Species
             i += 1;
         }
     }
+    // The zone as the model builds it from a census of these faces (its newborn samples
+    // among them), with the weather held: every gate open, water at field capacity.
+    let mut zones = cubarium_webmodel::flora::zones::build(fc, &[faces.clone()]);
+    assert_eq!(zones.zones.len(), 1, "one zone");
     let r = Reading { mu: 1.0, available: 1.0, saturated: 0.0, stress_target: 0.0, gate: 1.0, mu_held: 1.0, stress_held: 0.0, available_held: 1.0 };
-    let zone = Zone {
-        key: Key { soil: true, under_roof: false, band: 4, wet: false },
-        area: n as f64,
-        sky,
-        darkness: 0.0,
-        fungal_space: 1.0,
-        weather: vec![[r; Species::COUNT]],
-    };
-    let of_face = faces.iter().map(|f| ((f.x, f.y, f.z), 0)).collect();
-    (Zones { zones: vec![zone], of_face }, faces)
+    let zone: &mut Zone = &mut zones.zones[0];
+    zone.weather = vec![[r; Species::COUNT]];
+    zone.fungal_space = 1.0;
+    let _ = Key { soil: true, under_roof: false, band: 4, wet: false };
+    (zones, faces)
 }
 
 fn kernels() -> (Vec<Kernel>, Vec<RunnerBox>) {

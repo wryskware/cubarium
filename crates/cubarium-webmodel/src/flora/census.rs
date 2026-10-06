@@ -10,7 +10,6 @@
 use std::path::Path;
 
 use cubarium_voxel::{Material, World};
-use cubarium_voxel_flora::study::canopy_at;
 use cubarium_voxel_flora::{Flora, FloraConfig, Species, Trophic};
 
 /// The photosynthetic species, in [`Species::ALL`] order (the glowcap left out).
@@ -87,6 +86,14 @@ pub struct Face {
     pub saturated: [f64; 8],
     /// Whole banked seeds per species ([`Species::ALL`] order).
     pub seeds: [u32; Species::COUNT],
+    /// Per photo species ([`PHOTO`] order): the optical depth over its **newborn's** crown
+    /// top from every other site's foliage above it, split by the shading species
+    /// ([`Species::ALL`] order): `exp(−Σ τ)` is the canopy transmission the canopy gate
+    /// (`step::canopy_pays`, `step.rs:3899`) reads, terrain sky not in it.
+    pub nb_tau: [[f32; Species::COUNT]; 8],
+    /// The same over the crown top of the plant stand holding the face (zero when bare),
+    /// split by shading species: what its light (`StandRec::light`) was cut by.
+    pub pl_tau: [f32; Species::COUNT],
 }
 
 impl Face {
@@ -120,6 +127,8 @@ impl Face {
             water: [Some(1.0); 8],
             saturated: [0.0; 8],
             seeds: [0; Species::COUNT],
+            nb_tau: [[0.0; Species::COUNT]; 8],
+            pl_tau: [0.0; Species::COUNT],
         }
     }
 }
@@ -154,6 +163,11 @@ pub fn census(world: &World, flora: &Flora, config: Option<&FloraConfig>) -> Vec
     let config = config.unwrap_or(fv.config);
     let turf = config.species(Species::Springturf);
     let top = turf.crown_height(turf.wood_max, c.voxel_m);
+    let nb_height: [f64; 8] = std::array::from_fn(|k| {
+        let sc = config.species(PHOTO[k]);
+        sc.crown_height(crate::flora::stand::StandState::newborn(sc, crate::flora::stand::package_of(sc)).wood, c.voxel_m)
+    });
+    let shade = Shade::new(&fv, c.width, c.depth, c.voxel_m);
     let mut out = Vec::new();
     for z in 0..c.depth {
         for x in 0..c.width {
@@ -203,6 +217,12 @@ pub fn census(world: &World, flora: &Flora, config: Option<&FloraConfig>) -> Vec
                         }
                     }
                 }
+                let tops: [f64; 8] = std::array::from_fn(|k| f64::from(y) + nb_height[k]);
+                let nb_tau = shade.tau(&fv, site, &tops);
+                let pl_tau = match fv.stand_at(site) {
+                    Some(st) => shade.tau(&fv, site, &[f64::from(y) + config.species(st.species).crown_height(st.wood, c.voxel_m); 8])[0],
+                    None => [0.0; Species::COUNT],
+                };
                 let plant = fv.stand_at(site).map(|s| (s.species, rec(&fv, s)));
                 let fungus = fv.fungus_at(site).filter(|s| config.species(s.species).trophic == Trophic::Saprotroph).map(|s| rec(&fv, s));
                 out.push(Face {
@@ -220,7 +240,7 @@ pub fn census(world: &World, flora: &Flora, config: Option<&FloraConfig>) -> Vec
                     depth_m: depth,
                     darkness: gsc.darkness(sky),
                     glow_ok: glow.passes(),
-                    canopy: canopy_at(&fv, c.width, c.depth, site, f64::from(y) + top),
+                    canopy: (-shade.tau(&fv, site, &[f64::from(y) + top; 8])[0].iter().map(|&v| f64::from(v)).sum::<f64>()).exp(),
                     plant,
                     fungus,
                     litter,
@@ -233,6 +253,8 @@ pub fn census(world: &World, flora: &Flora, config: Option<&FloraConfig>) -> Vec
                     water,
                     saturated,
                     seeds,
+                    nb_tau,
+                    pl_tau,
                 });
             }
         }
@@ -250,6 +272,9 @@ pub fn csv_header() -> String {
     }
     for sp in Species::ALL {
         h += &format!(",seed_{}", sp.name());
+    }
+    for sp in PHOTO {
+        h += &format!(",nbc_{}", sp.name());
     }
     h
 }
@@ -309,5 +334,64 @@ pub fn to_csv(f: &Face) -> String {
     for n in f.seeds {
         line += &format!(",{n}");
     }
+    for t in f.nb_tau {
+        line += &format!(",{:.4}", (-t.iter().map(|&v| f64::from(v)).sum::<f64>()).exp());
+    }
     line
+}
+
+/// Every stand's foliage layers indexed by column, for the newborn canopy reading.
+struct Shade {
+    /// Per column `x * depth + z`: the shading layers of the stands rooted there:
+    /// `(site, species index, top, radius, optical depth)`.
+    cols: Vec<Vec<(cubarium_voxel_flora::Site, usize, f64, f64, f64)>>,
+    reach: i64,
+    width: u32,
+    depth: u32,
+}
+
+impl Shade {
+    fn new(fv: &cubarium_voxel_flora::FloraView<'_>, width: u32, depth: u32, voxel_m: f64) -> Shade {
+        let config = fv.config;
+        let mut cols = vec![Vec::new(); (width * depth) as usize];
+        let mut reach = 0.0f64;
+        for s in fv.stands {
+            for l in cubarium_voxel_flora::layer_iter(config, s, voxel_m) {
+                if !l.kind.bears_foliage() {
+                    continue;
+                }
+                // The shade model's own factor, `exp(−k (1 − p) stock / area)` (`lib.rs:2857`).
+                let tau = config.shade_k_per_m2 * (1.0 - l.porosity) * l.stock / l.area_m2;
+                reach = reach.max(l.radius_v);
+                cols[(s.site.x * depth + s.site.z) as usize].push((s.site, s.species.index(), l.band_v[1], l.radius_v, tau));
+            }
+        }
+        Shade { cols, reach: reach.ceil() as i64 + 1, width, depth }
+    }
+
+    /// `study::canopy_at`'s sweep for several receiver tops at once, split by shader.
+    fn tau(&self, _fv: &cubarium_voxel_flora::FloraView<'_>, site: cubarium_voxel_flora::Site, tops: &[f64; 8]) -> [[f32; Species::COUNT]; 8] {
+        let mut out = [[0.0f32; Species::COUNT]; 8];
+        let w = i64::from(self.width);
+        for dx in -self.reach..=self.reach {
+            let x = (i64::from(site.x) + dx).rem_euclid(w) as u32;
+            for dz in -self.reach..=self.reach {
+                let z = i64::from(site.z) + dz;
+                if z < 0 || z >= i64::from(self.depth) {
+                    continue;
+                }
+                for &(s, sp, top, r, tau) in &self.cols[(x * self.depth + z as u32) as usize] {
+                    if s == site || (dx * dx + dz * dz) as f64 > r * r {
+                        continue;
+                    }
+                    for k in 0..8 {
+                        if top > tops[k] {
+                            out[k][sp] += tau as f32;
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
 }
