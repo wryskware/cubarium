@@ -49,6 +49,9 @@
 //! - `vig,` (S2 GROUND RESPONSES): per lineage with a response, scan pauses, flights, alarm
 //!   bolts, orientations, freezes and refuge samples; strikes on frondgrazers aware and
 //!   unaware of their striker; the Veilhound's stalk, rush and stalk-freeze samples.
+//! - `gait,` (GAIT): glides and forced glides, glider climbs onto stems and vines, the
+//!   seedporter's flights and refuge samples; on the GAIT branch also sprint ticks and
+//!   windings for the Veilhound and the seedporter.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
 //! - At the end, `sum,` lines over the whole run.
 
@@ -433,6 +436,20 @@ fn vig_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
     )
 }
 
+/// **GAIT's line**, `a` → `b`: the gliders' glides (forced ones too), climbs onto a stem or a
+/// vine (refuge entries among them), and the seedporter's flights and refuge samples.
+fn gait_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let sp = Founder::Seedporter.index();
+    format!(
+        "glides={},glides_forced={},climbs={},sp_flees={},sp_refuge_samples={}",
+        b.glides - a.glides,
+        b.glides_forced - a.glides_forced,
+        b.climbs - a.climbs,
+        b.vigil.flees[sp] - a.vigil.flees[sp],
+        b.vigil.refuges[sp] - a.vigil.refuges[sp],
+    )
+}
+
 /// The Veilhound's window line, `a` → `b`.
 fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh) -> String {
     let i = VH.index();
@@ -577,6 +594,7 @@ fn run(args: &[String]) {
             println!("route,{arm},{minute},{}", route_line(&lw, &l));
             println!("vh,{arm},{minute},{}", vh_line(&sim, &params, &lw, &l, &vh_win));
             println!("vig,{arm},{minute},{}", vig_line(&lw, &l));
+            println!("gait,{arm},{minute},{}", gait_line(&lw, &l));
             vh_all.add(&vh_win);
             vh_win = Vh::default();
             meal_all.add(&meal_win);
@@ -611,6 +629,7 @@ fn run(args: &[String]) {
     vh_all.add(&vh_win);
     println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
     println!("sumvig,{arm},{},{}", minute0, vig_line(&l0, &l));
+    println!("sumgait,{arm},{},{}", minute0, gait_line(&l0, &l));
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;
