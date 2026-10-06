@@ -2163,14 +2163,21 @@ impl SpeciesConfig {
             // of litter ... then it regrows from reserves in the roots"): below available
             // water 0.1 — where the drought probe's turf began to die — for half an hour,
             // it drops 0.8 of its foliage to the litter and goes dormant on a tenth of its
-            // maintenance; it wakes at 0.25 and reflushes from the reserve; six hours
-            // dormant (three days of the 2 h clock) kills it. Drawn straw brown.
+            // maintenance; it wakes at 0.25 and reflushes from the reserve. Drawn straw
+            // brown.
+            //
+            // **Dormant, not starved** (DORMANCY, 2026-10-05, Wrysk: "grass should go
+            // dormant in drought and not starve"): the clock also runs below the wake water
+            // while the income its water allows, after the reserve's share, cannot pay its
+            // upkeep and leaf turnover (`cure_cover` 1, the break-even); and a dormant
+            // stand lives on its stores, its reserve and then its crown, with no fixed cap
+            // (the six-hour cap was shorter than the dry spells of the high ground).
             cure_water: 0.1,
             cure_after_s: 1800.0,
             cure_shed: 0.8,
             cure_upkeep: 0.1,
             cure_resume_water: 0.25,
-            cure_max_s: 21_600.0,
+            cure_max_s: 0.0,
             cure_cover: 1.0,
             cured_srgb: 0x00C2_A15A,
             seed_max_age_s: 86_400.0,
@@ -4738,7 +4745,8 @@ pub enum DeathCause {
     Overtopped,
     /// A runner rooted on its face (a ground cover, [`SpeciesConfig::runners_overtop`]).
     Displaced,
-    /// Cured past its species' `cure_max_s`: the drought outlasted the dormancy.
+    /// Died while cured: past its species' `cure_max_s`, or its reserve and wood ran out on
+    /// the dormant upkeep. The drought outlasted the dormancy.
     Drought,
 }
 

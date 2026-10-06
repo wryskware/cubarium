@@ -46,7 +46,9 @@ use crate::Flora;
 // 30: the capgnawer package — `SpeciesConfig::propagule_cap_share` (spores from caps).
 // 31: CONTEST — `Stand::place` (a face's two plants, `FaceLayer::Under`) and the
 //     ledger's `recruits`, `escapes`, `under_deaths`.
-pub const SCHEMA: u32 = 31;
+// 32: DORMANCY — `SpeciesConfig::cure_cover` (curing on the budget); a cured stand's
+//     death on its stores is `DeathCause::Drought`.
+pub const SCHEMA: u32 = 32;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

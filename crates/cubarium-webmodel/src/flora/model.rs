@@ -225,6 +225,9 @@ pub struct Counters {
     pub births_runner: [f64; NS],
     pub starved: [f64; NS],
     pub drought: [f64; NS],
+    /// Curing (DORMANCY): stands that cured, and cured stands that woke.
+    pub cures: [f64; NS],
+    pub wakes: [f64; NS],
     pub overtopped: [f64; NS],
     pub displaced: [f64; NS],
     pub browsed: [f64; NS],
@@ -1529,7 +1532,15 @@ impl Model {
                         substrate_gross: if photo { 0.0 } else { per_demand * sc.substrate_uptake_per_s * c.st.wood * mu_g * dt * sc.substrate_yield },
                     };
                     let before = c.st.material();
+                    let was_cured = c.st.cured;
                     let (fl, death) = stand::grow(sc, &mut c.st, site, clock);
+                    if c.st.cured != was_cured {
+                        if c.st.cured {
+                            self.c.cures[s] += c.n;
+                        } else {
+                            self.c.wakes[s] += c.n;
+                        }
+                    }
                     let (sent, resp) = if death.is_none() { stand::fund(sc, &mut c.st, dt) } else { (0, 0.0) };
                     self.c.respired += c.n * (fl.respired + resp);
                     self.c.seep += c.n * fl.seep;
