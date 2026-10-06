@@ -579,6 +579,40 @@ fn hunk_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
 }
 /*}HUNK*/
 
+/// **The bellwing's light line** (FINDINGS-FIX), `a` → `l`: bellwing-hours, nectar eaten
+/// (gross) per bellwing-hour, glowcap visits begun / failed / left (closed as failed when it
+/// flew away; 0 where the build has no such rule) / ended in a sip, flower visits begun /
+/// failed, and the living bellwings' mean UV and cyan expectations now.
+fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
+    let b = Founder::Bellwing.index();
+    let hours = (l.founder_ticks_by_founder[b] - a.founder_ticks_by_founder[b]) as f64 / f64::from(TICK_HZ) / 3600.0;
+    let nectar = l.eaten_by_food[cubarium_voxel_fauna::Food::Nectar.index()] - a.eaten_by_food[cubarium_voxel_fauna::Food::Nectar.index()];
+    let fauna = sim.fauna();
+    let cfg = fauna.view().config.light;
+    let now = fauna.view().tick;
+    let (mut n, mut uv, mut cyan) = (0usize, 0.0, 0.0);
+    for x in fauna.view().animals.iter().filter(|x| x.founder == Some(Founder::Bellwing)) {
+        let p = fauna.percept(x.id).copied().unwrap_or_default();
+        uv += cubarium_voxel_fauna::light::expectation(&cfg, &p, cubarium_voxel_fauna::light::BeaconKind::Flower, now);
+        cyan += cubarium_voxel_fauna::light::expectation(&cfg, &p, cubarium_voxel_fauna::light::BeaconKind::Glowcap, now);
+        n += 1;
+    }
+    let m = |s: f64| if n > 0 { s / n as f64 } else { f64::NAN };
+    format!(
+        "bw_hours={:.3},nectar_per_bwh={:.5},glowcap_visits={},glowcap_failed={},glowcap_left={},glowcap_sipped={},flower_visits={},flower_failed={},bellwings={n},uv_expect={:.3},cyan_expect={:.3}",
+        hours,
+        if hours > 0.0 { nectar / hours } else { f64::NAN },
+        l.beacon_visits[b][1] - a.beacon_visits[b][1],
+        l.failed_visits[b][1] - a.failed_visits[b][1],
+        l.left_visits[b][1] - a.left_visits[b][1],
+        l.sipped_visits[b][1] - a.sipped_visits[b][1],
+        l.beacon_visits[b][0] - a.beacon_visits[b][0],
+        l.failed_visits[b][0] - a.failed_visits[b][0],
+        m(uv),
+        m(cyan),
+    )
+}
+
 /// `ledger load=DIR` (S2b): a save's frondgrazer ledger since its founding.
 fn ledger_dump(args: &[String]) {
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
@@ -897,6 +931,8 @@ fn run(args: &[String]) {
             age_win = [0; 2];
             /*HUNK{*/
             println!("hunk,{arm},{minute},{}", hunk_line(&lw, &l));
+            println!("ffx,{arm},{minute},open_exits={},bared_entries={}", l.vigil.open_exits[GRAZER.index()] - lw.vigil.open_exits[GRAZER.index()], l.vigil.bared_entries[GRAZER.index()] - lw.vigil.bared_entries[GRAZER.index()]);
+            println!("bwl,{arm},{minute},{}", bwl_line(&sim, &lw, &l));
             /*}HUNK*/
             println!("gait,{arm},{minute},{}", gait_line(&lw, &l));
             println!("hunt,{arm},{minute},{}", hunts.win.line());
@@ -943,6 +979,8 @@ fn run(args: &[String]) {
     println!("sumage,{arm},{},vh_kills_juvenile={},vh_kills_adult={}", minute0, age_all[0] + age_win[0], age_all[1] + age_win[1]);
     /*HUNK{*/
     println!("sumhunk,{arm},{},{}", minute0, hunk_line(&l0, &l));
+    println!("sumffx,{arm},{},open_exits={},bared_entries={}", minute0, l.vigil.open_exits[GRAZER.index()] - l0.vigil.open_exits[GRAZER.index()], l.vigil.bared_entries[GRAZER.index()] - l0.vigil.bared_entries[GRAZER.index()]);
+    println!("sumbwl,{arm},{},{}", minute0, bwl_line(&sim, &l0, &l));
     /*}HUNK*/
     println!("sumgait,{arm},{},{}", minute0, gait_line(&l0, &l));
     println!("sumhunt,{arm},{},{}", minute0, hunts.all.line());
