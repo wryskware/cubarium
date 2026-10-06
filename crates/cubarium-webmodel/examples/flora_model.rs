@@ -343,6 +343,13 @@ fn run(a: &[String]) {
     let period = kv(a, "period=").map_or(60.0, |x| x.parse().unwrap()) * 60.0;
     let wseed = kv(a, "wseed=").map_or(1, |x| x.parse().unwrap());
     mp.weather = if kv(a, "weather=") == Some("frozen") { model::Weather::Frozen } else { model::Weather::Replay { period_s: period, seed: wseed } };
+    // Scenario levers (not sim knobs): `hold=SPECIES,..` holds each named species' site
+    // mineral, as its own stands read it, at the zone's start mean (no self-depletion).
+    if let Some(h) = kv(a, "hold=") {
+        for name in h.split(',') {
+            mp.hold_mineral[Species::parse(name).unwrap().index()] = true;
+        }
+    }
     if kv(a, "wrank=") == Some("0") {
         mp.water_rank = false;
     }
@@ -485,6 +492,14 @@ fn run(a: &[String]) {
     loop {
         if m.minute() + 1e-9 >= next {
             line(&m);
+            if kv(a, "zocc=") == Some("1") {
+                for (i, z) in m.zones.zones.iter().enumerate() {
+                    let occ: Vec<String> = Species::ALL.iter().map(|s| format!("{}={:.1}", s.name(), m.z[i].count(s.index()))).collect();
+                    let don: Vec<String> = Species::ALL.iter().map(|s| format!("{:.1}", m.count_at_least(i, s.index(), m.config.species(*s).donor_min))).collect();
+                    let pool: Vec<String> = (0..=Species::COUNT).map(|k| { let n = if k == Species::COUNT { (z.area - (0..Species::COUNT).filter(|&j| j != Species::Glowcap.index()).map(|j| m.z[i].count(j)).sum::<f64>()).max(0.0) } else { m.z[i].count(k) }; format!("{:.3}", if n > 0.0 { m.z[i].pool[k] / n } else { 0.0 }) }).collect();
+                    println!("zocc,{:.0},{},{},{},{},donors={},N={},litter={:.2},dead_wood={:.2}", m.minute(), i, z.key.name(), z.area, occ.join(","), don.join("/"), pool.join("/"), m.z[i].litter, m.z[i].dead_wood);
+                }
+            }
             next += every;
         }
         if m.minute() >= end - 1e-9 {
@@ -537,6 +552,27 @@ fn run(a: &[String]) {
         c.shed.iter().sum::<f64>(),
         c.substrate
     );
+    if kv(a, "prod=") == Some("1") {
+        // The producers' output per world day, per zone, over the run (no take after the
+        // log's windows): what the animal half's detritivores and capgnawers can draw.
+        let days = minutes / (m.day.day_s() / 60.0);
+        let gi = Species::Glowcap.index();
+        let mut tot = [0.0f64; 4];
+        for (i, z) in m.zones.zones.iter().enumerate() {
+            let p = m.c.prod_z[i];
+            for k in 0..4 {
+                tot[k] += p[k];
+            }
+            let caps_now: f64 = m.z[i].cohorts[gi].iter().map(|c| c.n * c.st.foliage).sum();
+            let gsc = m.config.species(Species::Glowcap);
+            let caps_cap: f64 = m.z[i].cohorts[gi].iter().map(|c| c.n * gsc.alpha * c.st.wood).sum();
+            // The most caps the stands could regrow in a day if grazed to nothing and funded:
+            // `foliage_rate · W` per stand (step.rs:3021), over the day.
+            let caps_pot: f64 = m.z[i].cohorts[gi].iter().map(|c| c.n * gsc.foliage_rate * c.st.wood).sum::<f64>() * m.day.day_s();
+            println!("prod,{},{},area={},litter_in={:.2},dead_wood_in={:.2},caps_built={:.3},foliage_built={:.1},litter_now={:.2},dead_wood_now={:.2},caps_now={:.2},caps_full={:.2},caps_potential={:.2},glowcap={:.0}", i, z.key.name(), z.area, p[0] / days, p[1] / days, p[2] / days, p[3] / days, m.z[i].litter, m.z[i].dead_wood, caps_now, caps_cap, caps_pot, m.z[i].count(gi));
+        }
+        println!("prodworld,days={days:.2},litter_in={:.1},dead_wood_in={:.1},caps_built={:.2},foliage_built={:.0},film_grown={:.3},film_upkeep={:.3},film_now={:.3},film_capacity={:.3},carrion_now={:.3}", tot[0] / days, tot[1] / days, tot[2] / days, tot[3] / days, m.c.film_grown / days, m.c.film_upkeep / days, m.film, m.film_capacity, m.carrion);
+    }
     let zd = kv(a, "zdeaths=").and_then(Species::parse);
     for (i, z) in m.zones.zones.iter().enumerate() {
         if let Some(sp) = zd {

@@ -160,6 +160,11 @@ pub struct Params {
     pub establish_phi: [f64; NS],
     /// Each cohort reads its own faces' water ([`Site::w_rel`]) rather than the zone's mean.
     pub water_rank: bool,
+    /// **Scenario lever, not a sim knob**: per species, its stands read their zone's
+    /// start-of-run site mineral mean instead of the pool now, and the pool is topped up to
+    /// that mean from outside (the counterfactual without self-depletion; the top-up is
+    /// `Counters::held_in`).
+    pub hold_mineral: [bool; NS],
     /// Numerics: the log-sd each sampled face's mineral is smoothed by.
     pub sample_sigma: f64,
 }
@@ -183,6 +188,7 @@ impl Default for Params {
             self_beta: [0.5; NS],
             establish_phi: [0.41, 0.29, 0.99, 0.19, 0.30, 1.0, 0.86, 0.33, 0.31],
             water_rank: true,
+            hold_mineral: [false; NS],
             sample_sigma: 0.1,
         }
     }
@@ -216,6 +222,14 @@ pub struct Counters {
     pub substrate: f64,
     pub decomposed: f64,
     pub taken: Supply,
+    /// Glassfilm grown (gross) and its upkeep, organic units.
+    pub film_grown: f64,
+    pub film_upkeep: f64,
+    /// Mineral the `hold_mineral` lever added (a scenario's external source).
+    pub held_in: f64,
+    /// Per zone, the producers' output: `[litter in, dead wood in, glowcap caps built,
+    /// plant foliage built]` (organic units; the animals' returns not in it).
+    pub prod_z: Vec<[f64; 4]>,
     /// Per zone: `[births (seed + runner), starved + drought]` per species.
     pub by_zone: Vec<[[f64; NS]; 2]>,
 }
@@ -241,6 +255,8 @@ pub struct Model {
     pub film: f64,
     pub film_capacity: f64,
     pub film_light: f64,
+    /// Each zone's site mineral mean per species at the start (the `hold_mineral` lever).
+    pub start_mineral: Vec<[f64; NS]>,
     /// The animals' take and returns over the next step (open loop: clamped).
     pub take: Take,
     pub returns: Returns,
@@ -351,7 +367,8 @@ pub fn crown_of(config: &FloraConfig, sp: Species, wood: f64, foliage: f64) -> (
     (area.max(1.0), t)
 }
 
-fn merge(a: &mut Cohort, b: &Cohort) {
+/// Merge cohort `b` into `a`: counts add, every state is the count-weighted mean.
+pub fn merge(a: &mut Cohort, b: &Cohort) {
     let n = a.n + b.n;
     if n <= 0.0 {
         return;
@@ -485,7 +502,7 @@ impl Model {
                 Weather::Frozen => 0,
             }),
             p,
-            c: Counters { by_zone: vec![[[0.0; NS]; 2]; nz], ..Counters::default() },
+            c: Counters { by_zone: vec![[[0.0; NS]; 2]; nz], prod_z: vec![[0.0; 4]; nz], ..Counters::default() },
             weather_ix: 0,
             frozen,
             carrion: start.iter().map(|_| 0.0).sum(),
@@ -494,7 +511,9 @@ impl Model {
             film_light: 0.0,
             take: Take::default(),
             returns: Returns::default(),
+            start_mineral: Vec::new(),
         };
+        m.start_mineral = (0..m.z.len()).map(|zi| std::array::from_fn(|s| { let c = m.z[zi].count(s); if c > 0.0 { m.z[zi].pool[s] / c } else { m.config.initial_mineral } })).collect();
         // The film's eligible faces: shallow standing water now (`film.rs`), at its
         // capacity per square metre; its light the sky under the water's extinction.
         let cell = m.config.voxel_m * m.config.voxel_m;
@@ -829,6 +848,8 @@ impl Model {
             let d = k.n * f;
             zs.dead_wood += d * k.st.wood;
             zs.litter += d * (k.st.material() - k.st.wood);
+            self.c.prod_z[zi][0] += d * (k.st.material() - k.st.wood);
+            self.c.prod_z[zi][1] += d * k.st.wood;
             material += d * k.st.material();
             k.n -= d;
         }
@@ -888,7 +909,13 @@ impl Model {
                 let available = if r.mu_held < 1.0 { sc.wilt_water + r.mu_held * (sc.full_water - sc.wilt_water) } else { r.available_held.max(sc.full_water) };
                 let saturated = sc.establish_saturated_max + r.stress_held * (1.0 - sc.establish_saturated_max);
                 let mineral = if photo {
-                    if counts[s] > 0.0 { self.z[zi].pool[s] / counts[s] } else { config.initial_mineral }
+                    if self.p.hold_mineral[s] {
+                        self.start_mineral[zi][s]
+                    } else if counts[s] > 0.0 {
+                        self.z[zi].pool[s] / counts[s]
+                    } else {
+                        config.initial_mineral
+                    }
                 } else {
                     1.0
                 };
@@ -924,6 +951,7 @@ impl Model {
                     add_litter += c.n * fl.litter;
                     add_wood += c.n * fl.dead_wood;
                     self.c.built[s] += c.n * fl.built;
+                    self.c.prod_z[zi][if photo { 3 } else { 2 }] += c.n * fl.built;
                     self.c.shed[s] += c.n * fl.litter;
                     if photo {
                         self.c.fixed += c.n * fl.income;
@@ -934,8 +962,19 @@ impl Model {
                 }
                 self.z[zi].litter += add_litter;
                 self.z[zi].dead_wood += add_wood;
+                self.c.prod_z[zi][0] += add_litter;
+                self.c.prod_z[zi][1] += add_wood;
                 if photo {
                     self.z[zi].pool[s] -= nt * d_material;
+                    if self.p.hold_mineral[s] {
+                        // The lever's external source: the pool never falls below the start
+                        // mean on the species' faces (counted in `held_in`, off the ledger).
+                        let floor = counts[s] * self.start_mineral[zi][s];
+                        if self.z[zi].pool[s] < floor {
+                            self.c.held_in += floor - self.z[zi].pool[s];
+                            self.z[zi].pool[s] = floor;
+                        }
+                    }
                 }
                 // Deaths free their faces.
                 for &(ci, d) in dead.iter().rev() {
@@ -947,6 +986,8 @@ impl Model {
                     self.c.by_zone[zi][1][s] += c.n;
                     self.z[zi].dead_wood += c.n * c.st.wood;
                     self.z[zi].litter += c.n * (c.st.material() - c.st.wood);
+                    self.c.prod_z[zi][0] += c.n * (c.st.material() - c.st.wood);
+                    self.c.prod_z[zi][1] += c.n * c.st.wood;
                     if photo {
                         let cnt = counts[s].max(c.n);
                         self.z[zi].pool[s] += nt * c.n * c.st.material();
@@ -1052,6 +1093,7 @@ impl Model {
                 let lost = seeds * kern.lost[zi];
                 if lost > 0.0 {
                     self.z[zi].litter += lost * package;
+                    self.c.prod_z[zi][0] += lost * package;
                     if s != GLOW {
                         self.spread_mineral(zi, nt * lost * package);
                     }
@@ -1072,6 +1114,7 @@ impl Model {
                     self.c.seeds_died[s] += d;
                     let pk = package_of(sc);
                     self.z[zi].litter += d * pk;
+                    self.c.prod_z[zi][0] += d * pk;
                     if s != GLOW {
                         self.spread_mineral(zi, sc.n_tissue * d * pk);
                     }
@@ -1340,6 +1383,8 @@ impl Model {
         self.film = (self.film + d).max(0.0);
         self.c.fixed += (grow * dt).max(0.0);
         self.c.respired += upkeep * dt;
+        self.c.film_grown += (grow * dt).max(0.0);
+        self.c.film_upkeep += upkeep * dt;
     }
 
     /// What the producers and the pools hold for the animals now (exchange).
