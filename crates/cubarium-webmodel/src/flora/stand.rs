@@ -173,6 +173,9 @@ pub fn grow(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (F
         out.dead_wood += f.dead_wood;
         out.seep += f.seep;
         if d.is_some() {
+            // The substrate the step drew for the sub-steps it did not live through is still
+            // gone from the pools: respired, as the step's unkept substrate is.
+            out.respired += site.substrate_taken * (n - k - 1) as f64;
             return (out, d);
         }
     }
