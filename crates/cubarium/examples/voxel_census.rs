@@ -1052,6 +1052,13 @@ fn print_header() {
             header.push_str(&format!(",died_{}_{}", c.name(), s.name()));
         }
     }
+    // The contest itself (`FaceLayer::Under`): stands holding the place beneath now,
+    // recruits that came up beside a cover, rises to the top place by crown height, and
+    // deaths beneath (starved, and every cause), cumulative.
+    for s in CONTEST_SPECIES {
+        let n = s.name();
+        header.push_str(&format!(",under_{n},recruits_{n},escapes_{n},under_starved_{n},under_died_{n}"));
+    }
     println!("{header}");
 }
 
@@ -1280,6 +1287,16 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64) {
         for c in cubarium_voxel_flora::DeathCause::ALL {
             row.push(f.ledger.deaths_by_cause[c.index()][s.index()].to_string());
         }
+    }
+    for s in CONTEST_SPECIES {
+        let k = s.index();
+        let l = f.ledger;
+        let under = f.stands.iter().filter(|st| st.species == s && st.place == cubarium_voxel_flora::FaceLayer::Under).count();
+        row.push(under.to_string());
+        row.push(l.recruits[k].to_string());
+        row.push(l.escapes[k].to_string());
+        row.push(l.under_deaths[cubarium_voxel_flora::DeathCause::Starved.index()][k].to_string());
+        row.push(l.under_deaths.iter().map(|c| c[k]).sum::<u64>().to_string());
     }
     println!("{}", row.join(","));
 }

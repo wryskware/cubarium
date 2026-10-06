@@ -256,23 +256,28 @@ fn springturf_at_zero_never_comes_up_through_velvetpad() {
     assert_eq!(armed(&flora), None);
 }
 
-/// **Woody replacement unchanged**: bloomcrown's empty list is any ground cover — it
-/// comes up through velvetpad, stonecushion and springturf alike, each counted under its
-/// own pair — and at 0 it never does.
+/// **Woody seeds come up beside every ground cover** (CONTEST, 2026-10-05): bloomcrown's
+/// empty list is any ground cover — it comes up through velvetpad, stonecushion and
+/// springturf alike, each time beside the cover, counted as a recruit and never as an
+/// overtopping — and at 0 it never does.
 #[test]
-fn bloomcrown_with_an_empty_list_comes_up_through_every_ground_cover() {
+fn bloomcrown_with_an_empty_list_comes_up_beside_every_ground_cover() {
     for cover in [PAD, STONE, TURF] {
         let mut c = config();
         c.bloomcrown.overtop_per_check = 1.0;
+        // The canopy gate, read under the cover's own shade, is not the subject.
+        c.bloomcrown.establish_light_margin = 0.0;
         assert!(c.bloomcrown.overtop_covers.is_empty(), "the woody default is the wildcard");
-        let (mut flora, mut world, _) = fixture(c, cover, BLOOM);
+        let (mut flora, mut world, id) = fixture(c, cover, BLOOM);
         to_next_check(&mut flora, &mut world);
         assert_eq!(armed(&flora), Some(BLOOM), "{cover:?}: armed");
         to_next_check(&mut flora, &mut world);
-        assert_eq!(occupant(&flora).map(|o| o.0), Some(BLOOM), "{cover:?}: came up");
+        let on: Vec<(Species, u64)> = flora.view().stands_on(SITE).iter().map(|s| (s.species, s.id)).collect();
+        assert!(on.iter().any(|o| o.0 == BLOOM), "{cover:?}: came up: {on:?}");
+        assert!(on.contains(&(cover, id)), "{cover:?}: the cover stays: {on:?}");
         let l = flora.view().ledger;
-        assert_eq!(l.overtopped[cover.index()], 1, "{cover:?}");
-        assert_eq!(l.overtop_pairs[cover.index()][BLOOM.index()], 1, "{cover:?}");
+        assert_eq!(l.overtopped[cover.index()], 0, "{cover:?}");
+        assert_eq!(l.recruits[BLOOM.index()], 1, "{cover:?}");
     }
     let mut c = config();
     c.bloomcrown.overtop_per_check = 0.0;
@@ -281,6 +286,7 @@ fn bloomcrown_with_an_empty_list_comes_up_through_every_ground_cover() {
         to_next_check(&mut flora, &mut world);
     }
     assert_eq!(occupant(&flora), Some((PAD, id)), "at 0 never");
+    assert_eq!(flora.view().stands_on(SITE).len(), 1);
 }
 
 /// The list reads and writes as species names, an unknown name is refused, and the

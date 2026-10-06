@@ -490,7 +490,8 @@ fn banked_sites_sprout_on_their_own_check_inside_a_coarse_step() {
 
 /// **The overtopping draw is per check on either clock.** Seeds banked under a springturf
 /// mat that the seedling may come up through at `overtop_per_check`: the births through
-/// the cover over the same span agree within the binomial spread of the draws.
+/// the cover over the same span (woody recruits beside it, CONTEST) agree within the
+/// binomial spread of the draws.
 #[test]
 fn seedlings_overtop_a_mat_at_the_same_rate_on_either_clock() {
     let mut c = FloraConfig::default();
@@ -499,9 +500,11 @@ fn seedlings_overtop_a_mat_at_the_same_rate_on_either_clock() {
         let sc = c.species_mut(Species::Bloomcrown);
         sc.overtop_per_check = 0.2;
         sc.overtop_covers = Vec::new();
+        // The canopy gate, read under the mat's own shade, is not the subject.
+        sc.establish_light_margin = 0.0;
     }
     assert!(c.species(Species::Springturf).ground_cover, "fixture: springturf is a ground cover");
-    let k = Species::Springturf.index();
+    let k = Species::Bloomcrown.index();
     let span = 300u64;
     let mut over = Vec::new();
     for n in [1, COARSE] {
@@ -518,12 +521,12 @@ fn seedlings_overtop_a_mat_at_the_same_rate_on_either_clock() {
             tick(&mut flora, &mut w);
         }
         closes(&flora, &format!("step_every {n}"));
-        over.push(flora.view().ledger.overtopped[k] as f64);
+        over.push(flora.view().ledger.recruits[k] as f64);
     }
     let (a, b) = (over[0], over[1]);
     assert!(a > 0.0, "fixture: seedlings came up through the mat per tick");
     let tol = 5.0 * (2.0 * a.max(b)).sqrt();
-    assert!((a - b).abs() <= tol, "overtopped: per tick {a}, coarse {b}, tolerance {tol}");
+    assert!((a - b).abs() <= tol, "recruits: per tick {a}, coarse {b}, tolerance {tol}");
 }
 
 // ------------------------------------------------------------------ decomposition

@@ -490,6 +490,11 @@ fn germinate(
         // only a seed that may come up through that cover, on its own draw, and keeps an
         // arm across checks — that is an overtopping arm; any other stand holds its place,
         // and a place that has gained such a stand clears its arm.
+        // A face holding two plants (CONTEST, `FaceLayer::Under`) takes no third.
+        if place == FaceLayer::Plant && find_stand(config, stands, site, FaceLayer::Under).is_ok() {
+            *ground[gi].arm_mut(place) = None;
+            continue;
+        }
         let cover = match find_stand(config, stands, site, place) {
             Err(_) => None,
             Ok(si) if config.species(stands[si].species).ground_cover => Some(stands[si].species),
@@ -618,19 +623,28 @@ fn germinate(
         // The place as the draw saw it, or nothing happens: a seed is never spent on a
         // birth that does not happen. Under a cover, the occupant must still be that
         // cover, and one this seedling may take.
-        let held = find_stand(config, stands, site, config.face_layer(species));
-        let same = match (held, cover) {
-            (Err(_), None) => true,
-            (Ok(si), Some(c)) => stands[si].species == c && may_overtop(config, species, c),
-            _ => false,
-        };
+        let place = config.face_layer(species);
+        let held = find_stand(config, stands, site, place);
+        let beneath_free = place != FaceLayer::Plant || find_stand(config, stands, site, FaceLayer::Under).is_err();
+        let same = beneath_free
+            && match (held, cover) {
+                (Err(_), None) => true,
+                (Ok(si), Some(c)) => stands[si].species == c && may_overtop(config, species, c),
+                _ => false,
+            };
         if !same {
             continue;
         }
+        // **CONTEST** (Wrysk 2026-10-05): a seedling that is not itself a ground cover — a
+        // woody seed — comes up *beside* the cover, a recruit in the place beneath, and
+        // the cover lives on; only a cover coming up through a cover replaces it.
+        let recruit = held.is_ok() && !sc.ground_cover;
         let Some((organic, mineral)) = spend_seed(&mut ground[gi], species, package_of(sc)) else {
             continue;
         };
-        if let Ok(si) = held {
+        if let Ok(si) = held
+            && !recruit
+        {
             let cover = stands.remove(si);
             die(config, view, &cover, ground, ledger, DeathCause::Overtopped, death_log);
             ledger.overtopped[cover.species.index()] += 1;
@@ -647,11 +661,18 @@ fn germinate(
                 r.births_bare += 1;
             }
         }
-        born.push(newborn(config, ledger, site, species, organic, mineral));
+        let mut b = newborn(config, ledger, site, species, organic, mineral);
+        if recruit {
+            b.place = FaceLayer::Under;
+            ledger.recruits[species.index()] += 1;
+        }
+        born.push(b);
         ledger.establishments += 1;
         ledger.seeds_germinated[species.index()] += 1;
     }
     crate::step::insert_sorted(config, stands, born);
+    // A recruit taller than its cover at birth (a short mat) holds the face at once.
+    crate::step::settle_places(config, stands, ledger);
 }
 
 /// The one-check arming delay, for one tested site with no stand on it — or one a ground
@@ -725,6 +746,7 @@ fn built(config: &FloraConfig, id: u64, site: Site, species: Species, organic: f
         cured: false,
         dry_s: 0.0,
         support: None,
+        place: config.face_layer(species),
     };
     // A newborn's foliage goes into its seedling profile bottom-up, like any other tissue.
     born.bin_foliage(sc, config.voxel_m);
@@ -995,6 +1017,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
         let place = config.face_layer(d.species);
         if let Ok(si) = find_stand(config, stands, d.site, place)
             && runner_may_take(config, d.species, stands[si].species)
+            && (place != FaceLayer::Plant || find_stand(config, stands, d.site, FaceLayer::Under).is_err())
         {
             let cover = stands.remove(si);
             die(config, &view, &cover, ground, ledger, DeathCause::Displaced, death_log);
@@ -1054,6 +1077,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
         });
     }
     crate::step::insert_sorted(config, stands, born);
+    crate::step::settle_places(config, stands, ledger);
 }
 
 /// Whether a runner of `species` may root on a face `cover` holds: the species roots
@@ -1111,7 +1135,10 @@ fn runner_target(
             let held = find_stand(config, stands, site, place)
                 .ok()
                 .map(|si| stands[si].species);
+            // A face holding two plants (CONTEST) takes no runner.
+            let full = place == FaceLayer::Plant && find_stand(config, stands, site, FaceLayer::Under).is_ok();
             if site == home
+                || full
                 || free.contains(&site)
                 || held.is_some_and(|cover| !runner_may_take(config, species, cover))
                 || claimed.iter().any(|d| d.site == site && config.face_layer(d.species) == place)
@@ -1721,8 +1748,13 @@ pub(crate) fn carry_burrs(flora: &mut Flora, world: &World, carriers: &[Carrier]
         if c.site == last.site || !c.grounded || !(c.coat > 0.0) || carried >= config.burr_cap {
             continue;
         }
-        // A burr is a plant's: the face's plant is the donor.
-        let Ok(si) = find_stand(config, stands, c.site, FaceLayer::Plant) else {
+        // A burr is a plant's: the face's plant is the donor — the top one, or the cover
+        // beneath a crown when it is the one bearing burrs (CONTEST).
+        let Some(si) = [FaceLayer::Plant, FaceLayer::Under]
+            .into_iter()
+            .filter_map(|p| find_stand(config, stands, c.site, p).ok())
+            .find(|&si| config.species(stands[si].species).burr_pickup > 0.0)
+        else {
             continue;
         };
         let sc = config.species(stands[si].species);
@@ -2543,18 +2575,20 @@ mod tests {
         ));
     }
 
-    /// SU 1. A woody seed banked under a **ground cover** comes up through it on a check
-    /// whose draw says so — armed at that check, sprouting at the next — and
-    /// the cover dies an "overtopped" death, booked like any other: its wood to dead
-    /// wood, its foliage and reserve to litter. One stand per site, every unit accounted
-    /// for. The arm **survives the cover** between the two checks: a site held by a
-    /// ground cover is not a site that "gained a stand".
+    /// SU 1, under CONTEST (2026-10-05). A woody seed banked under a **ground cover**
+    /// comes up through it on a check whose draw says so — armed at that check, sprouting
+    /// at the next — **beside** the cover: a recruit of its own on the face, the cover
+    /// alive and nothing overtopped. Every unit accounted for. The arm **survives the
+    /// cover** between the two checks: a site held by a ground cover is not a site that
+    /// "gained a stand".
     #[test]
-    fn a_woody_seed_comes_up_through_ground_cover_and_the_cover_is_overtopped() {
+    fn a_woody_seed_comes_up_through_ground_cover_beside_the_cover() {
         let mut config = FloraConfig::default();
         // The test's own: a certain draw, so the checks are named; no attrition, and a
         // cover that sends nothing, so the site holds exactly what the test put there.
+        // The canopy gate (now read under the cover's own shade) is not the subject.
         config.bloomcrown.overtop_per_check = 1.0;
+        config.bloomcrown.establish_light_margin = 0.0;
         config.bloomcrown.seed_attrition_per_s = 0.0;
         config.springturf.propagule_rate = 0.0;
         assert!(
@@ -2587,23 +2621,15 @@ mod tests {
         );
         flora.step(&mut world);
         let v = flora.view();
-        let now = v.stand_at(site).expect("a stand");
-        assert_eq!(
-            now.species,
-            Species::Bloomcrown,
-            "the woody seedling came up through"
-        );
-        assert_eq!(v.stands.iter().filter(|s| s.site == site).count(), 1);
-        assert_eq!(v.ledger.overtopped[Species::Springturf.index()], 1);
-        assert_eq!(v.ledger.deaths, 1, "the cover's death is booked");
+        let on: Vec<Species> = v.stands_on(site).iter().map(|s| s.species).collect();
+        assert!(on.contains(&Species::Bloomcrown), "the woody seedling came up: {on:?}");
+        assert!(on.contains(&Species::Springturf), "beside the cover: {on:?}");
+        assert_eq!(v.ledger.overtopped[Species::Springturf.index()], 0);
+        assert_eq!(v.ledger.deaths, 0, "nothing died");
+        assert_eq!(v.ledger.recruits[Species::Bloomcrown.index()], 1);
         assert_eq!(v.ledger.seeds_germinated[Species::Bloomcrown.index()], 1);
-        let g = v.ground_at(site).unwrap();
-        assert!(
-            g.dead_wood > 0.0 && g.litter > 0.0,
-            "the cover's tissue: {g:?}"
-        );
-        assert_eq!(g.sprouting, None, "the arm is spent");
-        assert_conserved(&flora, "after the overtopping");
+        assert_eq!(v.ground_at(site).unwrap().sprouting, None, "the arm is spent");
+        assert_conserved(&flora, "after the recruit");
     }
 
     /// SU × SM: an arm under a stand that is **not** a ground cover is cleared at the
@@ -2613,6 +2639,7 @@ mod tests {
     fn a_stand_that_is_not_a_cover_clears_an_arm_and_a_cover_does_not() {
         let mut config = FloraConfig::default();
         config.bloomcrown.overtop_per_check = 1.0;
+        config.bloomcrown.establish_light_margin = 0.0;
         config.bloomcrown.seed_attrition_per_s = 0.0;
         config.umbrellafrond.propagule_rate = 0.0;
         config.springturf.propagule_rate = 0.0;
@@ -2639,9 +2666,9 @@ mod tests {
         );
         assert_eq!(v.stand_at(frond).unwrap().species, Species::Umbrellafrond);
         assert!(
-            v.stand_at(cover).unwrap().species == Species::Bloomcrown
+            v.stands_on(cover).iter().any(|s| s.species == Species::Bloomcrown)
                 || v.ground_at(cover).and_then(|g| g.sprouting) == Some(Species::Bloomcrown),
-            "under the cover the arm stood, or it has sprouted through"
+            "under the cover the arm stood, or it has sprouted beside it"
         );
     }
 

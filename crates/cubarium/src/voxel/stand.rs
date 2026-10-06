@@ -532,7 +532,7 @@ impl ModelKey {
 /// has a support face at that height, preferring one with no plant of its own; with none,
 /// its own face. Placement only, with the existing glyphs and models: the look is Wrysk's.
 pub(crate) fn drawn_site(view: &VoxelView<'_>, flora: FloraView<'_>, stand: &Stand) -> Site {
-    if flora.config.face_layer(stand.species) != FaceLayer::Fungus || flora.stand_at(stand.site).is_none() {
+    if stand.place != FaceLayer::Fungus || flora.stand_at(stand.site).is_none() {
         return stand.site;
     }
     let c = view.config;
@@ -1918,6 +1918,7 @@ mod tests {
                     cured: false,
                     dry_s: 0.0,
                     support: None,
+                    place: cubarium_voxel_flora::FloraConfig::default().face_layer(sp),
                 };
                 // A hand-built stand bins its own foliage, as every stand the model
                 // makes does.
@@ -2072,6 +2073,7 @@ mod tests {
                     cured: false,
                     dry_s: 0.0,
                     support: None,
+                    place: cubarium_voxel_flora::FloraConfig::default().face_layer(species),
                 };
                 stand.bin_layers(flora.config());
                 let parts = parts_of(flora.view(), &stand, 0);
@@ -2146,6 +2148,7 @@ mod tests {
                     cured: false,
                     dry_s: 0.0,
                     support: None,
+                    place: cubarium_voxel_flora::FloraConfig::default().face_layer(species),
             };
             stand.bin_layers(flora.config());
             // **Distinct cells**, not parts: since the layers package two layers of one
@@ -2337,6 +2340,7 @@ mod tests {
                     cured: false,
                     dry_s: 0.0,
                     support: None,
+                    place: cubarium_voxel_flora::FloraConfig::default().face_layer(Species::Glowcap),
             };
             stand.bin_layers(flora.config());
             let parts = parts_of(flora.view(), &stand, 0);

@@ -31,6 +31,11 @@
 //! (a face holds one plant and one fungus, `FaceLayer`): the presenter draws it one column
 //! over, beside the stem.
 //!
+//! `--contest` puts a full-grown springturf on the face of every woody producer at every
+//! size (a face holds two plants, `FaceLayer::Under`, package CONTEST): beneath a crown
+//! that stands above it, over a seedling still under the sward. Placement only, with the
+//! existing models: the look is Wrysk's.
+//!
 //! `--rider` puts a parasite lanternjaw hatchling on the first grazer's back (its interim
 //! plain-voxel look, `design/handoffs/voxel-predation-parasite-2026-10-01.md`).
 
@@ -96,6 +101,7 @@ fn main() -> Result<()> {
     let mut lit = false;
     let mut rider = false;
     let mut shared = false;
+    let mut contest = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -103,6 +109,7 @@ fn main() -> Result<()> {
             "--lit" => lit = true,
             "--rider" => rider = true,
             "--shared" => shared = true,
+            "--contest" => contest = true,
             "--gpu" => gpu = true,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
@@ -233,6 +240,15 @@ fn main() -> Result<()> {
             let glow = flora_cfg.species(Species::Glowcap).wood_max;
             if !flora.apply(&world, FloraCommand::Seed { x, z: 1, species: Species::Glowcap, wood: glow }) {
                 bail!("could not seed a glowcap under {species:?} at x={x}");
+            }
+        }
+        // `--contest`: a sward sharing the woody producer's face.
+        let sc = flora_cfg.species(species);
+        if contest && sc.trophic == cubarium_voxel_flora::Trophic::Photo && !sc.ground_cover && sc.overtop_per_check > 0.0 {
+            let turf = flora_cfg.species(Species::Springturf).wood_max;
+            let site = cubarium_voxel_flora::Site { x: x as u32, y: 2, z: 1 };
+            if !flora.apply(&world, FloraCommand::SeedBeneath { site, species: Species::Springturf, wood: turf }) {
+                bail!("could not seed a springturf beside {species:?} at x={x}");
             }
         }
     }
