@@ -419,6 +419,197 @@ fn reach_steps(t: &Pack, cruise_m_per_s: f64, voxel_m: f64) -> u32 {
     }
 }
 
+// ------------------------------------------------------------------ the pack's senses
+
+/// **What pack `own` senses this tick** (VEILHOUND-SEARCH): every body of a lineage its
+/// hunter table lists (on the ground — not climbing, flying, perched or gliding — and not of
+/// its own pack) that one of its awake adults
+/// senses by its lineage's [`crate::SenseTable`] ([`crate::perception::sense_of`]), with the
+/// cheapest sense that has it (smell, then hearing, then sight). Read once a tick per pack.
+pub(crate) fn pack_sensed(fauna: &mut Fauna, view: &VoxelView<'_>, own: u64, h: &crate::Hunter) -> std::sync::Arc<Vec<(u64, u8)>> {
+    let tick = fauna.tick;
+    if let Some((at, list)) = fauna.pack_sensed.get(&own) {
+        if *at == tick {
+            return list.clone();
+        }
+    }
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let lineage = fauna.pack(own).map(|p| p.lineage);
+    let table = lineage.map(|f| fauna.config.founder(f).senses).unwrap_or_default();
+    let reach = table.reach_m();
+    let mut out: Vec<(u64, u8)> = Vec::new();
+    if reach > 0.0 {
+        let adults: Vec<&Animal> = fauna
+            .animals
+            .iter()
+            .filter(|b| b.pack.is_some_and(|m| m.pack == own && !m.pup) && b.state != crate::State::Asleep)
+            .collect();
+        for o in &fauna.animals {
+            // A walker takes only a body on the ground: not climbing, and not flying,
+            // perched or gliding (VEILHOUND-SEARCH: smelled bellwings overhead held the pack
+            // in chases it could not end).
+            if o.mobility.climb.is_some()
+                || o.mobility.mode != crate::MobilityMode::Ground
+                || o.pack.is_some_and(|m| m.pack == own)
+                || !o.founder.is_some_and(|f| h.hunts(f))
+            {
+                continue;
+            }
+            let mut best: Option<u8> = None;
+            for b in &adults {
+                let (dx, dz, d) = delta(b, o.pose.x, o.pose.z, ring);
+                if d > reach {
+                    continue;
+                }
+                if let Some(s) = crate::perception::sense_of(&fauna.config, view, &table, b, o, (dx, dz), d) {
+                    // The cheapest sense wins: smell (2), then hearing (1), then sight (0).
+                    best = Some(best.map_or(s, |x: u8| x.max(s)));
+                    if s == crate::perception::SMELL {
+                        break;
+                    }
+                }
+            }
+            if let Some(s) = best {
+                out.push((o.id, s));
+            }
+        }
+    }
+    let list = std::sync::Arc::new(out);
+    fauna.pack_sensed.insert(own, (tick, list.clone()));
+    list
+}
+
+/// **The pack's leader** (VEILHOUND-DIAG's leading breeder, VEILHOUND-SEARCH's draw): the
+/// breeder when it is awake and wants food or is in an emergency, else the lowest-id adult
+/// that is.
+fn pack_leader(rec: &crate::PackRecord, adults: &[Animal]) -> Option<u64> {
+    let hungry = |b: &&Animal| b.state != crate::State::Asleep && (b.eating || b.emergency);
+    rec.breeder
+        .and_then(|id| adults.iter().find(|b| b.id == id))
+        .filter(hungry)
+        .or_else(|| adults.iter().filter(hungry).min_by_key(|b| b.id))
+        .map(|b| b.id)
+}
+
+/// The leader a hungry member of pack `own` follows while its pack is drawn to a prey (a
+/// draw recorded, no target, the pack wanting food) — another body. `None` otherwise: the
+/// pack keeps main's rule.
+fn drawn_leader(fauna: &Fauna, own: u64, rec: &crate::PackRecord, adults: &[Animal], me: u64) -> Option<Animal> {
+    let p = fauna.pack(own)?;
+    if p.drawn.is_none() || p.target.is_some() || !pack_wants(adults) {
+        return None;
+    }
+    let l = pack_leader(rec, adults).filter(|&l| l != me)?;
+    adults.iter().find(|b| b.id == l).copied()
+}
+
+/// **The draw** (VEILHOUND-SEARCH) for the pack's leader at `i`: the nearest prey by route
+/// the pack senses ([`pack_sensed`]) that it takes (its window, outside every other
+/// territory, not the abandoned target) and stands on the leader's route component; the
+/// point to head for on the way — straight at it when the line is walkable, else the next
+/// node of the route. Recorded as the pack's [`crate::PackRecord::drawn`] (`before` is the
+/// draw at its last sample: a new prey counts a draw); `None` (and the record cleared) with
+/// nothing sensed on its component.
+#[allow(clippy::too_many_arguments)]
+fn draw_step(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    own: u64,
+    founder: crate::Founder,
+    t: &Pack,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    before: Option<u64>,
+) -> Option<(f64, f64)> {
+    let a = fauna.animals[i];
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let sensed = pack_sensed(fauna, view, own, h);
+    let set = |fauna: &mut Fauna, drawn: Option<(u64, u8)>| {
+        if let Some((_, s)) = drawn.filter(|d| Some(d.0) != before) {
+            fauna.ledger.pack_draws_by_sense[usize::from(s)] += 1;
+        }
+        if let Some(p) = fauna.pack_mut(own) {
+            p.drawn = drawn.map(|d| d.0);
+        }
+    };
+    if sensed.is_empty() {
+        set(fauna, None);
+        return None;
+    }
+    let graph = fauna.pack_routes(view, founder);
+    let (own_r, prey_r) = node_radii(geometry, h, v);
+    let Some(from) = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r) else {
+        set(fauna, None);
+        return None;
+    };
+    let abandoned = fauna.pack(own).and_then(|p| p.abandoned);
+    let window = window_body(fauna, i, ring);
+    let component = graph.components[from];
+    let mut goals: Vec<(usize, u64, u8, (f64, f64))> = Vec::new();
+    for &(id, s) in sensed.iter() {
+        let Some(o) = fauna.view().animal(id).copied() else { continue };
+        if abandoned == Some(id)
+            || !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window)
+            || trespass(fauna, own, o.pose.x, o.pose.z, t, v, ring)
+        {
+            continue;
+        }
+        let Some(j) = graph.node_near(o.site, (o.pose.x, o.pose.z), prey_r) else { continue };
+        if graph.components[j] == component {
+            goals.push((j, id, s, (o.pose.x, o.pose.z)));
+        }
+    }
+    if goals.is_empty() {
+        set(fauna, None);
+        return None;
+    }
+    // Route distances from the leader over its whole component — the pack's route field to
+    // the leader, which its followers walk on too ([`follow_step`]).
+    let (graph, field) = fauna.pack_path(view, founder, own, from, u32::MAX);
+    let Some((d, j, id, s, xy)) = goals
+        .into_iter()
+        .filter_map(|(j, id, s, xy)| field.get(&j).map(|&d| (d, j, id, s, xy)))
+        .min_by(|p, q| (p.0, p.2).cmp(&(q.0, q.2)))
+    else {
+        set(fauna, None);
+        return None;
+    };
+    set(fauna, Some((id, s)));
+    if d == 0 || graph.walk_line(from, (a.pose.x, a.pose.z), xy) {
+        return Some(xy);
+    }
+    // Back along the field from the prey's node to the leader's next node.
+    let mut k = j;
+    while field.get(&k).is_some_and(|&dk| dk > 1) {
+        k = graph.next_toward(&field, k)?;
+    }
+    Some(graph.centre(k))
+}
+
+/// **A follower's step** (VEILHOUND-SEARCH) toward the draw's `leader`: straight at it when
+/// the line is walkable on the route graph, else the next node of the pack's route field to
+/// the leader's node (the field [`draw_step`] builds); straight at it off the graph.
+fn follow_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, founder: crate::Founder, leader: &Animal, geometry: &crate::Body, h: &crate::Hunter) -> (f64, f64) {
+    let a = fauna.animals[i];
+    let v = view.config.voxel_m;
+    let goal_xy = (leader.pose.x, leader.pose.z);
+    let graph = fauna.pack_routes(view, founder);
+    let (own_r, _) = node_radii(geometry, h, v);
+    let (Some(from), Some(to)) = (
+        graph.node_near(a.site, (a.pose.x, a.pose.z), own_r),
+        graph.node_near(leader.site, goal_xy, own_r),
+    ) else {
+        return goal_xy;
+    };
+    if from == to || graph.walk_line(from, (a.pose.x, a.pose.z), goal_xy) {
+        return goal_xy;
+    }
+    let (graph, field) = fauna.pack_path(view, founder, own, to, u32::MAX);
+    graph.next_toward(&field, from).map_or(goal_xy, |j| graph.centre(j))
+}
+
 /// Walk to a point; stop (turning to face it) within `stop_m`.
 fn go_to(a: &Animal, x: f64, z: f64, ring: f64, stop_m: f64, feed: f64) -> Actions {
     let (dx, dz, d) = delta(a, x, z, ring);
@@ -547,12 +738,22 @@ pub(crate) fn steer(
     }
 
     let now = fauna.tick;
+    if a.eating || a.emergency {
+        fauna.ledger.pack_hungry_samples += 1;
+    }
     let adults: Vec<Animal> = fauna
         .animals
         .iter()
         .filter(|o| o.pack.is_some_and(|om| om.pack == own && !om.pup))
         .copied()
         .collect();
+    // The leader's draw stands only while it keeps drawing: cleared at each of its samples
+    // and set again by [`draw_step`] (so a leader that stops at a carcass leads no one).
+    if pack_leader(&rec, &adults) == Some(a.id) {
+        if let Some(p) = fauna.pack_mut(own) {
+            p.drawn = None;
+        }
+    }
 
     // The target: dropped when it is gone (its carcass becomes the pack's), after
     // `chase_give_up_s`, when an adult's reserve is under the floor, or when it stands in
@@ -702,29 +903,25 @@ pub(crate) fn steer(
             // route graph, at most `cruise × chase_give_up_s × route_reach_fraction` away by
             // route (bellwing-finding item 3, bellwing3 item 1: grazers on a cliff top 3 m
             // over the pack drew 74 timed-out chases in seed 1).
+            // VEILHOUND-SEARCH: what the pack senses (sight, hearing, smell; main's rule was
+            // its own 2 m cone ahead).
             let window = window_body(fauna, i, ring);
-            let sight = manifest.cone_range_m;
-            let (fx, fz) = a.pose.forward();
-            let mut candidates: Vec<(f64, u64, Site, (f64, f64))> = Vec::new();
-            for o in &fauna.animals {
-                if o.id == a.id || o.mobility.climb.is_some() {
+            let sensed = pack_sensed(fauna, view, own, &h);
+            let mut candidates: Vec<(f64, u64, Site, (f64, f64), u8)> = Vec::new();
+            for &(id, sense) in sensed.iter() {
+                let Some(o) = fauna.view().animal(id).copied() else { continue };
+                if o.id == a.id || fauna.pack(own).and_then(|p| p.abandoned) == Some(o.id) {
                     continue;
                 }
-                let (dx, dz, d) = delta(&a, o.pose.x, o.pose.z, ring);
-                if d > sight
-                    || dx * fx + dz * fz < 0.0
-                    || fauna.pack(own).and_then(|p| p.abandoned) == Some(o.id)
-                {
-                    continue;
-                }
-                if !crate::predation::is_prey_in_window(&fauna.config, &a, o, window)
+                if !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window)
                     || trespass(fauna, own, o.pose.x, o.pose.z, &t, v, ring)
                 {
                     continue;
                 }
-                candidates.push((d, o.id, o.site, (o.pose.x, o.pose.z)));
+                let d = distance(&a, o.pose.x, o.pose.z, ring);
+                candidates.push((d, o.id, o.site, (o.pose.x, o.pose.z), sense));
             }
-            let mut best: Option<(f64, u64, Site)> = None;
+            let mut best: Option<(f64, u64, Site, u8)> = None;
             if !candidates.is_empty() {
                 candidates.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
                 let routes = fauna.pack_routes(view, founder);
@@ -734,22 +931,47 @@ pub(crate) fn steer(
                     best = candidates
                         .into_iter()
                         .find(|c| routes.node_near(c.2, c.3, prey_r).is_some_and(|j| field.contains_key(&j)))
-                        .map(|c| (c.0, c.1, c.2));
+                        .map(|c| (c.0, c.1, c.2, c.4));
                 }
             }
-            if let Some((_, tid, site)) = best {
+            if let Some((_, tid, site, sense)) = best {
+                let mut drawn = false;
                 if let Some(p) = fauna.pack_mut(own) {
                     p.target = Some(tid);
                     p.chase_since_tick = now;
                     p.target_site = Some(site);
                     p.abandoned = None;
+                    drawn = p.drawn.take().is_some() || rec.drawn.is_some();
                 }
                 fauna.ledger.pack_chases += 1;
+                fauna.ledger.pack_chases_by_sense[usize::from(sense)] += 1;
+                if drawn {
+                    fauna.ledger.pack_draw_chases += 1;
+                }
                 let participants = 1 + participating as u32;
                 fauna.log_pack_event(crate::PackEvent::ChaseStart { tick: now, pack: own, participants });
                 call(fauna, i);
             }
         }
+    }
+
+    // The draw (VEILHOUND-SEARCH): a hungry pack with no target and no usable feast that
+    // senses prey it cannot take yet (beyond its chase reach, or with no packmate by the
+    // taker) on its route component goes there by route, its leader first ([`draw_step`]);
+    // in reach the target choice above takes it.
+    let draw_go = if joins
+        && !feast_usable
+        && !spent
+        && pack_wants(&adults)
+        && fauna.pack(own).is_some_and(|p| p.target.is_none())
+        && pack_leader(&rec, &adults) == Some(a.id)
+    {
+        draw_step(fauna, i, view, own, founder, &t, &geometry, &h, rec.drawn)
+    } else {
+        None
+    };
+    if draw_go.is_some() {
+        fauna.ledger.pack_draw_lead_samples += 1;
     }
 
     // Its motor was refused over the last interval (a wall, a ledge, a pocket): its own
@@ -766,7 +988,7 @@ pub(crate) fn steer(
             .and_then(|tid| fauna.view().animal(tid).copied())
             .filter(|o| joins && distance(&a, o.pose.x, o.pose.z, ring) <= 2.0 * t.pack_radius_m)
             .and_then(|o| route_step(fauna, view, founder, own, &t, manifest.cruise_m_per_s, &a, &o, &geometry, &h, (o.pose.x, o.pose.z)));
-        match on_route {
+        match on_route.or(draw_go) {
             Some((nx, nz)) => return Some(clamp(fauna, go_to(&a, nx, nz, ring, 0.0, 1.0))),
             None => return Some(clamp(fauna, held)),
         }
@@ -842,9 +1064,24 @@ pub(crate) fn steer(
         }
     }
 
+    // The draw's leader walks to the prey, feed held: a prey met in its capsule is struck.
+    if let Some((nx, nz)) = draw_go {
+        return Some(clamp(fauna, go_to(&a, nx, nz, ring, 0.0, 1.0)));
+    }
+    // While its pack is drawn, a hungry member follows the draw's leader.
+    let drawn_by = if joins { drawn_leader(fauna, own, &rec, &adults, a.id) } else { None };
+    if drawn_by.is_some() {
+        fauna.ledger.pack_draw_follow_samples += 1;
+    }
+
     // Together between hunts: an idle adult walks back to within `follow_radius_m` of the
-    // breeder.
-    if let Some(b) = rec
+    // breeder (of the draw's leader while the pack is drawn).
+    if let Some(b) = drawn_by {
+        if distance(&a, b.pose.x, b.pose.z, ring) > t.follow_radius_m {
+            let (gx, gz) = follow_step(fauna, i, view, own, founder, &b, &geometry, &h);
+            return Some(clamp(fauna, go_to(&a, gx, gz, ring, 0.0, 0.0)));
+        }
+    } else if let Some(b) = rec
         .breeder
         .filter(|&b| b != a.id)
         .and_then(|b| adults.iter().find(|o| o.id == b))
@@ -882,12 +1119,13 @@ pub(crate) fn steer(
             // a breeder that wants food too, and the breeder (or a member whose breeder is
             // fed) patrols — so the pack moves together and a member that meets prey has a
             // packmate by it.
-            let leader = rec
-                .breeder
-                .filter(|&b| b != a.id)
-                .and_then(|b| adults.iter().find(|o| o.id == b))
-                .filter(|b| b.eating || b.emergency)
-                .copied();
+            let leader = drawn_by.or_else(|| {
+                rec.breeder
+                    .filter(|&b| b != a.id)
+                    .and_then(|b| adults.iter().find(|o| o.id == b))
+                    .filter(|b| b.eating || b.emergency)
+                    .copied()
+            });
             if let Some(b) = leader {
                 return Some(clamp(fauna, go_to(&a, b.pose.x, b.pose.z, ring, t.follow_radius_m, 0.0)));
             }

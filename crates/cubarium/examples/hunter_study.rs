@@ -40,6 +40,12 @@
 //!   carrion its mouths took, their ratio (the share of the kills eaten, scavenged carrion
 //!   included), assimilated intake per lanternjaw-hour, and the **sated share**: free
 //!   lanternjaw ticks with the eating latch off over free lanternjaw ticks.
+//! - `vh,` (VEILHOUND-SEARCH) for the Veilhound (`chorister`): bodies, adults, pups, mean
+//!   adult fullness, the window's emergency and hungry shares (ticks in an emergency, or
+//!   wanting food, over alive ticks), strikes, hits, kills (all, and on frondgrazers), pack
+//!   chases and chase kills, chases and draws by the sense that found the prey
+//!   `[sight, hearing, smell]`, chases begun while drawn, and the **draw share**: hungry
+//!   pack-tactic samples spent leading or following a draw, over all hungry samples.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
 //! - At the end, `sum,` lines over the whole run.
 
@@ -236,15 +242,33 @@ fn pack_probe(args: &[String]) {
         let l = &view.ledger;
         let sec = t / u64::from(TICK_HZ);
         println!(
-            "T,{},{}s,chases={},chase_kills={},ch_strikes={},strikes_on_browser={},daylight_hint",
+            "T,{},{}s,chases={},chase_kills={},chases_by_sense={:?},draws_by_sense={:?},draw_chases={},draw_lead={},draw_follow={},ch_strikes={},strikes_on_browser={},daylight_hint",
             minute0, sec,
             l.pack_chases - l0.pack_chases,
             l.pack_chase_kills - l0.pack_chase_kills,
+            [0, 1, 2].map(|k| l.pack_chases_by_sense[k] - l0.pack_chases_by_sense[k]),
+            [0, 1, 2].map(|k| l.pack_draws_by_sense[k] - l0.pack_draws_by_sense[k]),
+            l.pack_draw_chases - l0.pack_draw_chases,
+            l.pack_draw_lead_samples - l0.pack_draw_lead_samples,
+            l.pack_draw_follow_samples - l0.pack_draw_follow_samples,
             l.strikes_by_founder[ch.index()] - l0.strikes_by_founder[ch.index()],
             l.strikes_on_by_founder[Founder::Browser.index()] - l0.strikes_on_by_founder[Founder::Browser.index()],
         );
         for r in fa.packs() {
-            println!("P,{sec},pack={},den=({},{},{}),breeder={:?},target={:?},feast={:?},abandoned={:?}", r.id, r.den.x, r.den.y, r.den.z, r.breeder, r.target, r.feast, r.abandoned);
+            let drawn_d = r.drawn.and_then(|d| view.animal(d)).zip(r.breeder.and_then(|b| view.animal(b))).map(|(o, b)| {
+                let (dx, dz) = wdelta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
+                (dx * dx + dz * dz).sqrt()
+            });
+            let target = r.target.and_then(|t| view.animal(t)).map(|o| {
+                let b = r.breeder.and_then(|b| view.animal(b));
+                let d = b.map_or(f64::NAN, |b| {
+                    let (dx, dz) = wdelta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
+                    (dx * dx + dz * dz).sqrt()
+                });
+                format!("{}@({},{},{})d={d:.1}", o.founder.map_or("?", |f| f.name()), o.site.x, o.site.y, o.site.z)
+            });
+            let drawn = r.drawn.and_then(|t| view.animal(t)).map(|o| format!("{}@({},{},{})", o.founder.map_or("?", |f| f.name()), o.site.x, o.site.y, o.site.z));
+            println!("P,{sec},pack={},den=({},{},{}),breeder={:?},target={:?},target_is={:?},feast={:?},abandoned={:?},drawn={:?},drawn_is={:?},breeder_to_drawn_m={:?}", r.id, r.den.x, r.den.y, r.den.z, r.breeder, r.target, target, r.feast, r.abandoned, r.drawn, drawn, drawn_d.map(|d| (d * 10.0).round() / 10.0));
         }
         for a in view.animals.iter().filter(|a| a.founder == Some(ch)) {
             let cap = p.core.reserve_of(a.body).max(1e-300);
@@ -357,6 +381,63 @@ fn route_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
     )
 }
 
+const VH: Founder = Founder::Chorister;
+
+/// The Veilhound's tick-integrated window measures (VEILHOUND-SEARCH).
+#[derive(Clone, Copy, Default)]
+struct Vh {
+    alive_ticks: u64,
+    emergency_ticks: u64,
+    hungry_ticks: u64,
+}
+
+impl Vh {
+    fn add(&mut self, o: &Vh) {
+        self.alive_ticks += o.alive_ticks;
+        self.emergency_ticks += o.emergency_ticks;
+        self.hungry_ticks += o.hungry_ticks;
+    }
+}
+
+/// The Veilhound's window line, `a` → `b`.
+fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh) -> String {
+    let i = VH.index();
+    let v = sim.fauna().view();
+    let p = params.fauna.founder(VH);
+    let bodies: Vec<_> = v.animals.iter().filter(|x| x.founder == Some(VH)).collect();
+    let pups = bodies.iter().filter(|x| x.pack.is_some_and(|m| m.pup)).count();
+    let adults: Vec<_> = bodies.iter().filter(|x| !x.pack.is_some_and(|m| m.pup)).collect();
+    let fullness = if adults.is_empty() {
+        f64::NAN
+    } else {
+        adults.iter().map(|x| x.reserve / p.core.reserve_of(x.body).max(1e-300)).sum::<f64>() / adults.len() as f64
+    };
+    let share = |x: u64| if w.alive_ticks > 0 { x as f64 / w.alive_ticks as f64 } else { f64::NAN };
+    let kills = |f: Founder| b.departed_founder(f, Departure::Killed { by: VH }) - a.departed_founder(f, Departure::Killed { by: VH });
+    let all_kills: u64 = Founder::ALL.iter().map(|&f| kills(f)).sum();
+    let d3 = |x: &[u64; 3], y: &[u64; 3]| format!("{}/{}/{}", y[0] - x[0], y[1] - x[1], y[2] - x[2]);
+    let hungry = b.pack_hungry_samples - a.pack_hungry_samples;
+    let lead = b.pack_draw_lead_samples - a.pack_draw_lead_samples;
+    let follow = b.pack_draw_follow_samples - a.pack_draw_follow_samples;
+    format!(
+        "n={},adults={},pups={pups},fullness={fullness:.3},emergency={:.3},hungry={:.3},strikes={},hits={},kills={all_kills},grazer_kills={},chases={},chase_kills={},chases_by_sense={},draws_by_sense={},draw_chases={},hungry_samples={hungry},draw_lead={lead},draw_follow={follow},draw_share={:.3},vh_hours={:.3}",
+        bodies.len(),
+        adults.len(),
+        share(w.emergency_ticks),
+        share(w.hungry_ticks),
+        b.strikes_by_founder[i] - a.strikes_by_founder[i],
+        b.hits_by_founder[i] - a.hits_by_founder[i],
+        kills(Founder::Browser),
+        b.pack_chases - a.pack_chases,
+        b.pack_chase_kills - a.pack_chase_kills,
+        d3(&a.pack_chases_by_sense, &b.pack_chases_by_sense),
+        d3(&a.pack_draws_by_sense, &b.pack_draws_by_sense),
+        b.pack_draw_chases - a.pack_draw_chases,
+        if hungry > 0 { (lead + follow) as f64 / hungry as f64 } else { f64::NAN },
+        w.alive_ticks as f64 / f64::from(TICK_HZ) / 3600.0,
+    )
+}
+
 fn run(args: &[String]) {
     let hours: f64 = arg(args, "hours=").map_or(2.0, |h| h.parse().unwrap());
     let every: u64 = arg(args, "every=").map_or(10, |m| m.parse().unwrap());
@@ -387,6 +468,8 @@ fn run(args: &[String]) {
     let mut total_ticks = 0u64;
     let mut meal_win = Meal::default();
     let mut meal_all = Meal::default();
+    let mut vh_win = Vh::default();
+    let mut vh_all = Vh::default();
     let preys: Vec<Founder> = Founder::ALL
         .iter()
         .copied()
@@ -415,6 +498,11 @@ fn run(args: &[String]) {
             for a in sim.fauna().view().animals {
                 if let Some(f) = a.founder {
                     win[f.index()].body_ticks += 1;
+                    if f == VH {
+                        vh_win.alive_ticks += 1;
+                        vh_win.emergency_ticks += u64::from(a.emergency);
+                        vh_win.hungry_ticks += u64::from(a.eating || a.emergency);
+                    }
                     if f == LJ && a.attached.is_none() {
                         meal_win.lj_ticks += 1;
                         if !a.eating {
@@ -444,6 +532,9 @@ fn run(args: &[String]) {
             sample(&sim, &params, &arm, minute, &lw, &l, &win, &mut track, ticks_in_window, ms);
             println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
             println!("route,{arm},{minute},{}", route_line(&lw, &l));
+            println!("vh,{arm},{minute},{}", vh_line(&sim, &params, &lw, &l, &vh_win));
+            vh_all.add(&vh_win);
+            vh_win = Vh::default();
             meal_all.add(&meal_win);
             meal_win = Meal::default();
             for i in 0..Founder::COUNT {
@@ -463,6 +554,8 @@ fn run(args: &[String]) {
     meal_all.add(&meal_win);
     println!("summeal,{arm},{},{}", minute0, meal_line(&l0, &l, &meal_all));
     println!("sumroute,{arm},{},{}", minute0, route_line(&l0, &l));
+    vh_all.add(&vh_win);
+    println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;
