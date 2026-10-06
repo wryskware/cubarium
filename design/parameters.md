@@ -364,7 +364,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (984 rows)
+**`flora.*`** (987 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1344,6 +1344,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_growth_per_s` | 0.0015 | /s | [0, inf) |  | - | placeholder | glassfilm: logistic growth rate at full light |
 | `flora.film_capacity_per_m2` | 0.4 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm: carrying capacity per square metre |
 | `flora.film_graze_refuge` | 0.1 | fraction of capacity | [0, 1] | 0–0.5 | - | placeholder | glassfilm: share of a site's capacity a grazer cannot reach (the refuge it regrows from) |
+| `flora.film_land_moisture_min` | 0.9 | pore fill 0..1 | [0, inf) |  | - | placeholder | glassfilm on wet ground: least face pore fill a dry-surfaced face grows film at (above 1: no land film) |
+| `flora.film_land_growth_per_s` | 0.0005 | /s | [0, inf) |  | - | placeholder | glassfilm on wet ground: logistic growth rate at full light |
+| `flora.film_land_capacity_per_m2` | 0.2 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm on wet ground: carrying capacity per square metre |
 | `flora.film_maintenance_per_s` | 0.0001 | /s | [0, inf) |  | - | placeholder | glassfilm: upkeep, respired |
 | `flora.film_spread_per_s` | 0.0002 | /s | [0, inf) |  | - | placeholder | glassfilm: fragments a neighbour sends per unit of its film |
 | `flora.film_dry_death_per_s` | 0.005 | /s | [0, inf) |  | - | placeholder | glassfilm: loss on a dry or too-deep site, to litter |
@@ -1353,7 +1356,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1431 rows)
+**`fauna.*`** (1449 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1446,6 +1449,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.littershredder.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.littershredder.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.littershredder.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.littershredder.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1587,6 +1592,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.frondgrazer.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.frondgrazer.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.frondgrazer.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.frondgrazer.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1728,6 +1735,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.lanternjaw.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.lanternjaw.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.lanternjaw.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.lanternjaw.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1869,6 +1878,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.capgnawer.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.capgnawer.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.capgnawer.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.capgnawer.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.capgnawer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2010,6 +2021,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.loftstrider.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.loftstrider.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.loftstrider.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.loftstrider.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.loftstrider.contact_height_fraction` | 0.15 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2151,6 +2164,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.amphibious.water_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.ripple-snail.amphibious.retract_hold_s` | 8.0 | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.ripple-snail.amphibious.retract_armour` | 0.5 | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.ripple-snail.amphibious.roam_search_m` | 1.5 | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.ripple-snail.amphibious.roam_after_rain_s` | 600.0 | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.ripple-snail.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2292,6 +2307,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.bellwing.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.bellwing.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.bellwing.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.bellwing.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.bellwing.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2433,6 +2450,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.seedporter.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.seedporter.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.seedporter.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.seedporter.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.seedporter.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2574,6 +2593,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.amphibious.water_search_m` | (absent) | m | [0, inf) |  | - | placeholder | how far its water reflex looks for standing water (a world query) |
 | `fauna.founders.chorister.amphibious.retract_hold_s` | (absent) | s | [0, inf) |  | - | decision | a threat seen or felt makes it stop and close for this (0: it flees instead) |
 | `fauna.founders.chorister.amphibious.retract_armour` | (absent) | fraction | [0, 1] |  | - | decision | a hit on it while retracted is reduced by this, on top of its armour |
+| `fauna.founders.chorister.amphibious.roam_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam) |
+| `fauna.founders.chorister.amphibious.roam_after_rain_s` | (absent) | s | [0, inf) |  | - | placeholder | the roam hours last this long after rain stops |
 | `fauna.founders.chorister.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |

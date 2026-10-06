@@ -26,7 +26,13 @@
 //!   `film_gone_fraction` of the site's capacity, all of it dies (what upkeep does not
 //!   respire goes to litter), so a dried site ends at exactly no film and leaves the film
 //!   sites rather than keeping an exponential sliver.
-//! - **Spread** (between eligible sites only, so a residue neither gives nor receives): an
+//! - **Land-wet ground** (SNAIL-FIX, [`FilmWet::Land`]): a face with no more than a residue
+//!   over it whose pore fill is at least `film_land_moisture_min` grows film at
+//!   `film_land_growth_per_s · sky light · film · (1 − film / K_land)`,
+//!   `K_land = film_land_capacity_per_m2 · cell area`; film above `K_land` there dies back
+//!   at `film_dry_death_per_s` to litter; it gives and receives spread (receiving up to
+//!   `K_land`). Drier than that it is a dry site. Film is a pool, not a cover slot.
+//! - **Spread** (between eligible and land-wet sites only, so a dry residue neither gives nor receives): an
 //!   eligible site with less film gains from each eligible 4-neighbour
 //!   `film_spread_per_s · neighbour film` (never more than half the difference, so a pair
 //!   does not overshoot and swap), paid by the neighbour at its own densities. A target
@@ -65,6 +71,66 @@ pub(crate) fn eligible(view: &VoxelView<'_>, c: &FloraConfig, x: i64, y: u32, z:
     eligible_depth(view, c, x, y, z).is_some()
 }
 
+/// **Where a site's film stands** (SNAIL-FIX): under water it is wet-eligible under
+/// ([`eligible_depth`]), on **land-wet** ground (no deeper water than a residue, and the
+/// face voxel's pore fill at least [`FloraConfig::film_land_moisture_min`]), or dry
+/// (including too deep).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FilmWet {
+    /// Wet-eligible under this much standing water, metres.
+    Under(f64),
+    /// Land-wet ground.
+    Land,
+    /// Dry or too deep: the film dies.
+    Dry,
+}
+
+/// The [`FilmWet`] class of support face `(x, y, z)`.
+pub fn film_wet(view: &VoxelView<'_>, c: &FloraConfig, x: i64, y: u32, z: u32) -> FilmWet {
+    let d = view.standing_depth_m(x, y, z);
+    if d > 0.0 && d >= c.film_wet_min_depth_m && d <= c.film_max_depth_m {
+        return FilmWet::Under(d);
+    }
+    let cfg = view.config;
+    if d > c.film_max_depth_m || z >= cfg.depth || y >= cfg.height || view.pore.is_empty() {
+        return FilmWet::Dry;
+    }
+    let m = view.pore_at(x, y, z);
+    if m.is_finite() && m >= c.film_land_moisture_min {
+        FilmWet::Land
+    } else {
+        FilmWet::Dry
+    }
+}
+
+/// **Land film census** (SNAIL-FIX readout): over every column's top support face, the
+/// number of land-wet faces ([`FilmWet::Land`]); and over every site holding film, the
+/// film on land-wet faces and the number of them holding any.
+pub fn land_census(flora: &Flora, world: &World) -> (f64, usize, usize) {
+    let view = world.view();
+    let c = &flora.config;
+    let cfg = view.config;
+    let mut wet_faces = 0usize;
+    for z in 0..cfg.depth {
+        for x in 0..i64::from(cfg.width) {
+            if let Some(y) = view.highest_support_in(x, z, 0, cfg.height.saturating_sub(1))
+                && film_wet(&view, c, x, y, z) == FilmWet::Land
+            {
+                wet_faces += 1;
+            }
+        }
+    }
+    let (mut film, mut filmed) = (0.0, 0usize);
+    for g in flora.ground.iter().filter(|g| g.film > 0.0) {
+        let s = g.site;
+        if film_wet(&view, c, i64::from(s.x), s.y, s.z) == FilmWet::Land {
+            film += g.film;
+            filmed += 1;
+        }
+    }
+    (film, filmed, wet_faces)
+}
+
 /// Every site holding film, in site order: the receivers the light phase computes sky and
 /// canopy transmission for on a film tick.
 pub(crate) fn receivers(flora: &Flora) -> Vec<Site> {
@@ -89,6 +155,7 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
     } = flora;
     let voxel_m = view.config.voxel_m;
     let cap = c.film_capacity_per_m2 * voxel_m * voxel_m;
+    let land_cap = c.film_land_capacity_per_m2 * voxel_m * voxel_m;
     let (n_t, e_t) = (c.film_n_tissue, c.film_energy_density);
 
     // The step-start film of every site holding any, and the eligible ones' sites: what
@@ -104,7 +171,12 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
         }
         let s = g.site;
         before.push((s, f));
-        let depth = eligible_depth(&view, c, i64::from(s.x), s.y, s.z);
+        let wet = film_wet(&view, c, i64::from(s.x), s.y, s.z);
+        let depth = match wet {
+            FilmWet::Under(d) => Some(d),
+            _ => None,
+        };
+        let land = wet == FilmWet::Land;
         while k < open.len() && open[k].0 < s {
             k += 1;
         }
@@ -122,16 +194,27 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
                     .max(0.0)
                     .min(cubarium_voxel::organism::tissue_funded(g.mineral, n_t))
             }
+            // Land-wet ground (SNAIL-FIX): full sky light, its own rate and capacity.
+            None if land && land_cap > 0.0 => {
+                let light = sky * daylight;
+                (c.film_land_growth_per_s * light * f * (1.0 - f / land_cap) * dt)
+                    .max(0.0)
+                    .min(cubarium_voxel::organism::tissue_funded(g.mineral, n_t))
+            }
             _ => 0.0,
         };
-        if depth.is_some() {
+        let dry = wet == FilmWet::Dry;
+        if !dry {
             sources.push((s, f));
         }
 
-        // ---- upkeep everywhere, death where dry or too deep
+        // ---- upkeep everywhere, death where dry or too deep, and on land-wet ground
+        // what stands above the land capacity
         let mut respired = c.film_maintenance_per_s * dt * f;
-        let mut died = if depth.is_none() {
+        let mut died = if dry {
             c.film_dry_death_per_s * dt * f
+        } else if land && f > land_cap {
+            (c.film_dry_death_per_s * dt * (f - land_cap)).min(f - land_cap)
         } else {
             0.0
         };
@@ -141,7 +224,7 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
         }
         // A dry film that would fall under the floor dies whole this step: a dried site
         // ends at exactly nothing, not an exponential sliver.
-        let gone = depth.is_none() && f - respired - died < c.film_gone_fraction * cap;
+        let gone = dry && f - respired - died < c.film_gone_fraction * cap;
         if gone {
             died = f - respired;
         }
@@ -211,14 +294,20 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
             else {
                 continue;
             };
-            if to == from || !eligible(&view, c, i64::from(to.x), to.y, to.z) {
+            if to == from {
                 continue;
             }
+            // Onto wet-eligible ground, or land-wet ground up to its own capacity.
+            let room = match film_wet(&view, c, i64::from(to.x), to.y, to.z) {
+                FilmWet::Under(_) => f64::INFINITY,
+                FilmWet::Land => land_cap,
+                FilmWet::Dry => continue,
+            };
             let there = before
                 .binary_search_by_key(&to, |e| e.0)
                 .map_or(0.0, |i| before[i].1);
-            if there < f {
-                let amount = (rate * f).min(0.5 * (f - there));
+            if there < f && there < room {
+                let amount = (rate * f).min(0.5 * (f - there)).min(room - there);
                 if amount > 0.0 {
                     moves.push((from, to, amount));
                 }

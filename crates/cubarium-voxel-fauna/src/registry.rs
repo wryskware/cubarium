@@ -219,6 +219,8 @@ fn founder_rows() -> Vec<Row> {
         r("amphibious.water_search_m", "m", nonneg, "how far its water reflex looks for standing water (a world query)").optional(),
         r("amphibious.retract_hold_s", "s", nonneg, "a threat seen or felt makes it stop and close for this (0: it flees instead)").optional().prov("decision"),
         r("amphibious.retract_armour", "fraction", fraction, "a hit on it while retracted is reduced by this, on top of its armour").optional().prov("decision"),
+        r("amphibious.roam_search_m", "m", nonneg, "at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam)").optional(),
+        r("amphibious.roam_after_rain_s", "s", nonneg, "the roam hours last this long after rain stops").optional(),
         r("contact_height_fraction", "x body height", nonneg, "the contact receptors' height").digest(),
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),

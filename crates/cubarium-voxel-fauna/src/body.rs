@@ -740,6 +740,25 @@ pub struct Amphibious {
     /// While retracted a hit on it is reduced by this, on top of its armour: slower to
     /// eat, not immune.
     pub retract_armour: f64,
+    /// **The roam drive** (SNAIL-FIX): at night, in rain and for `roam_after_rain_s` after
+    /// it, an awake body that is not thirsty and not feeding where it stands walks out
+    /// onto wet ground ([`step_moisture_min`](Amphibious::step_moisture_min)) within this
+    /// many metres, toward the land face with the most film in reach ([`crate::Food::Film`],
+    /// the plant layer's land-wet film), or, in water with none in reach, to the nearest
+    /// wet land face. A heuristic world query, as the water reflex is. 0: no roam.
+    #[serde(default = "default_roam_search_m")]
+    pub roam_search_m: f64,
+    /// ... and the roam hours last this long after rain stops, seconds.
+    #[serde(default = "default_roam_after_rain_s")]
+    pub roam_after_rain_s: f64,
+}
+
+fn default_roam_search_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.roam_search_m
+}
+
+fn default_roam_after_rain_s() -> f64 {
+    Amphibious::RIPPLE_SNAIL.roam_after_rain_s
 }
 
 impl Amphibious {
@@ -771,6 +790,11 @@ impl Amphibious {
         retract_hold_s: 8.0,
         // A closed shell and operculum halve a hit.
         retract_armour: 0.5,
+        // A night's crawl of a big snail is some metres; it looks over a stride of its
+        // pond's bank at a time.
+        roam_search_m: 1.5,
+        // Snails stay out a couple of real hours after rain: 10 min of world time.
+        roam_after_rain_s: 600.0,
     };
 
     /// The clock's rise per second out of water on ground of moisture `m` (0..1), before

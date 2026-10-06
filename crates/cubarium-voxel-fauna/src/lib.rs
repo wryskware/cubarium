@@ -3257,6 +3257,10 @@ pub struct Fauna {
     /// — daylight falling below [`LifeConfig::day_line`] — for the egg bank's trigger
     /// (§2.13). `None` before the first tick.
     last_daylight: Option<f64>,
+    /// The last tick rain fell (SNAIL-FIX: an amphibious body's roam hours run on for
+    /// [`Amphibious::roam_after_rain_s`] after it). `None` before any rain.
+    #[serde(default)]
+    last_rain_tick: Option<u64>,
     /// Gut-seed voids since the last [`Fauna::take_seed_voids`] (F3): a census's events,
     /// not world state, so not saved; bounded at [`SEED_VOID_LOG_MAX`] (the oldest go).
     #[serde(skip)]
@@ -3509,6 +3513,7 @@ impl Fauna {
             policy_driven: [false; Founder::COUNT],
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
+            last_rain_tick: None,
             seed_voids: Vec::new(),
             pack_events: Vec::new(),
             pack_routes: FxHashMap::default(),

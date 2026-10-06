@@ -35,15 +35,25 @@ const HUNGRY_ADULT: StartingStores = StartingStores {
 /// water standing on the face of column `x` on every `z` (a whole cell is 0.25 m; a
 /// fraction is that fraction of it).
 fn pond(width: u32, depth: u32, cells: impl Fn(u32) -> f64) -> World {
+    pond_under(
+        width,
+        depth,
+        cells,
+        cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
+    )
+}
+
+/// [`pond`] under the day clock `day`.
+fn pond_under(width: u32, depth: u32, cells: impl Fn(u32) -> f64, day: cubarium_voxel::weather::DayClock) -> World {
     let mut world = World::empty(VoxelConfig {
         width,
         height: 8,
         depth,
         voxel_m: V,
-        day: cubarium_voxel::weather::DayClock {
-            mode: cubarium_voxel::weather::DayMode::Off,
-            ..Default::default()
-        },
+        day,
         ..VoxelConfig::default()
     });
     for z in 0..depth {
@@ -877,4 +887,83 @@ fn every_other_lineages_steps_are_unchanged() {
     let dry_world = shore(0.0);
     let wet_world = shore(1.0);
     assert_eq!(walk(&dry_world), walk(&wet_world), "ground moisture does not move a shredder");
+}
+
+// ------------------------------------------------------------------ SNAIL-FIX: the roam
+
+/// A day clock at `hour` (cycle mode, the shipped length and daylight share).
+fn clock_at(hour: f64) -> cubarium_voxel::weather::DayClock {
+    cubarium_voxel::weather::DayClock {
+        mode: cubarium_voxel::weather::DayMode::Cycle,
+        start_hour: hour,
+        ..Default::default()
+    }
+}
+
+/// [`shore`] under the day clock `day`: a pond over columns `0..=5`, ground of pore fill
+/// `pore` from column 6 on.
+fn shore_under(pore: f64, day: cubarium_voxel::weather::DayClock) -> World {
+    let mut world = pond_under(24, 6, |x| if x <= 5 { 1.0 } else { 0.0 }, day);
+    wet_ground(&mut world, |x| if x >= 6 { pore } else { 0.0 });
+    world
+}
+
+/// A plant layer whose only film stands on the faces of `cols`, every `z`: grown there by
+/// [`Flora::seed_film`] on a twin world with shallow water over those columns alone, so in
+/// the run's world (no water there) it is **land film** on dry-surfaced ground.
+fn land_film(cols: std::ops::RangeInclusive<u32>) -> Flora {
+    let twin = pond(24, 6, |x| if cols.contains(&x) { 0.4 } else { 0.0 });
+    let mut flora = Flora::new(FloraConfig::default());
+    assert!(flora.seed_film(&twin) > 0, "fixture: film seeded on the twin's shallows");
+    flora
+}
+
+/// One snail under its own heuristic at column 4 in the pond (no film there), facing away
+/// from the shore, its clock empty, for `ticks`; the columns it stood on, and the world's
+/// daylight at the start.
+fn roam_run(config: FaunaConfig, world: &World, flora: &mut Flora, ticks: usize) -> (Vec<u32>, f64) {
+    let mut fauna = Fauna::new(config);
+    let id = introduce(&mut fauna, world, SNAIL, 4, 2, -EAST, HUNGRY_ADULT);
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(SNAIL, teachers)));
+    let daylight = world.life_daylight();
+    let mut cols = vec![column_of(&fauna, id)];
+    for _ in 0..ticks {
+        fauna.step(world, flora);
+        let Some(b) = fauna.view().animal(id) else { break };
+        assert!(!b.mobility.thirsty, "the fixture's snail is not thirsty");
+        if cols.last() != Some(&b.site.x) {
+            cols.push(b.site.x);
+        }
+    }
+    (cols, daylight)
+}
+
+/// **At night an awake snail that is not thirsty crawls out onto wet ground, to the land
+/// film; with `on_land` off it does not.** A pond over columns 0..=5 with no film in it,
+/// saturated ground from column 6, land film on columns 9..=10 (beyond the water margin,
+/// column 6), the clock at midnight. The snail starts in the pond facing away from the
+/// shore under its own heuristic. Amphibious, it walks out past the margin and grazes the
+/// land film (the only film there is); water-bound
+/// (main's rule, `on_land` false) it never passes the margin.
+#[test]
+fn at_night_an_awake_snail_that_is_not_thirsty_crawls_out_onto_wet_ground_to_land_film() {
+    let world = shore_under(1.0, clock_at(0.0));
+    let ticks = 600;
+    let mut config = fast_snail();
+    config.founders[SNAIL.index()].active = crate::Activity::Nocturnal;
+    let mut flora = land_film(9..=10);
+    let (out, daylight) = roam_run(config.clone(), &world, &mut flora, ticks);
+    assert!(daylight < config.life.day_line, "fixture: night ({daylight})");
+    assert!(!world.view().is_raining(), "fixture: dry weather");
+    // The ring wraps: the margin is columns 23 and 0..=6.
+    let in_margin = |c: u32| c <= 6 || c == 23;
+    assert!(out.iter().any(|&c| !in_margin(c)), "at night it crawls out past the water margin: {out:?}");
+    assert!(flora.view().ledger.film_consumed > 0.0, "and grazes the land film: {out:?}");
+
+    let mut bound = config.clone();
+    bound.founders[SNAIL.index()].amphibious.as_mut().unwrap().on_land = false;
+    let (held, _) = roam_run(bound, &world, &mut land_film(9..=10), ticks);
+    assert!(held.iter().all(|&c| in_margin(c)), "water-bound, it stays within the margin: {held:?}");
+
 }

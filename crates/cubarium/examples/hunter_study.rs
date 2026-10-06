@@ -602,8 +602,12 @@ fn snail_line(sim: &Sim, a: &FaunaLedger, b: &FaunaLedger) -> String {
     let intake = b.assimilated_by_founder[i] - a.assimilated_by_founder[i];
     let ashore = b.ashore_assimilated - a.ashore_assimilated;
     let ratio = |x: f64, y: f64| if y > 0.0 { x / y } else { f64::NAN };
+    // SNAIL-FIX: the film on land-wet ground now, the faces holding it, and the land-wet
+    // faces (column tops) it could stand on.
+    let (land_film, land_filmed, land_wet) = cubarium_voxel_flora::land_census(sim.flora(), sim.world());
+    let per_wet = if land_wet > 0 { land_film / land_wet as f64 } else { f64::NAN };
     format!(
-        "n={now},desiccated={},lj_kills={},deaths={all},land_day={:.3},land_night={:.3},snail_h={hours:.2},intake_per_h={:.6},ashore_intake_share={:.3},retracts={}",
+        "n={now},desiccated={},lj_kills={},deaths={all},land_day={:.3},land_night={:.3},snail_h={hours:.2},intake_per_h={:.6},ashore_intake_share={:.3},retracts={},land_film={land_film:.5},land_film_faces={land_filmed},land_wet_faces={land_wet},land_film_per_wet_face={per_wet:.3e}",
         dead(Departure::Desiccation),
         dead(Departure::Killed { by: LJ }),
         share(0),

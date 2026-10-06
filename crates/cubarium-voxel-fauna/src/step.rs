@@ -1283,6 +1283,16 @@ fn controllers(
                 lift = 0.0;
             }
         }
+        // SNAIL-FIX: the roam drive. At night and in or after rain, an amphibious body
+        // that is not thirsty and not feeding where it stands walks out onto wet ground,
+        // to land film where there is any.
+        if driven && fauna.controllers.flees(id) {
+            if let Some(go) = roam_reflex(fauna, i, view, &fv, sky, actions) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+            }
+        }
         // AMPHIBIOUS-SNAIL: a thirsty body out of water heads for the nearest water.
         if driven && fauna.controllers.flees(id) {
             if let Some(go) = water_reflex(fauna, i, view) {
@@ -1479,6 +1489,111 @@ fn water_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions
         }
     }
     let (_, dx, dz) = best?;
+    Some(glider::walk_toward(a, dx, dz, 0.0))
+}
+
+/// Whether `sky` and the rain record make this an amphibious body's **roam hours**
+/// (SNAIL-FIX): night (the clock on and daylight under the day line, or the clock off, as
+/// the drying clock reads it), rain falling, or within its `roam_after_rain_s` of the last
+/// rain.
+fn roam_hours(fauna: &Fauna, am: &crate::Amphibious, view: &VoxelView<'_>, sky: &Sky) -> bool {
+    let day = sky.clock_on && sky.daylight >= fauna.config.life.day_line;
+    if !day || view.is_raining() {
+        return true;
+    }
+    let after = (am.roam_after_rain_s.max(0.0) / DT).round() as u64;
+    fauna
+        .last_rain_tick
+        .is_some_and(|t| fauna.tick.saturating_sub(t) <= after)
+}
+
+/// **The roam drive** (SNAIL-FIX, [`crate::Amphibious::roam_search_m`]): in its roam hours
+/// ([`roam_hours`]) an amphibious body allowed on land, on the ground, awake, not thirsty,
+/// not retracted, and not feeding where it stands (its eating latch on and its heuristic
+/// tasting food) walks to the support face within `roam_search_m` that is out of water
+/// and wet enough to step on (`step_moisture_min`) and holds the most film per metre of
+/// distance (the plant layer's land film); in water with no such film in reach, to the
+/// nearest such face. Its own face is never the target, so a sated body moves on from a
+/// grazed patch. `None` otherwise: ashore with no land film in reach, its heuristic
+/// (film chemistry, or its wander) steers. A heuristic world query, not a sense, as the
+/// water reflex is.
+fn roam_reflex(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &cubarium_voxel_flora::FloraView<'_>,
+    sky: &Sky,
+    asked: Actions,
+) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    let am = phys.amphibious.filter(|am| am.on_land && am.roam_search_m > 0.0)?;
+    let m = &a.mobility;
+    if m.thirsty
+        || m.retract_ticks > 0
+        || m.mode != crate::MobilityMode::Ground
+        || a.attached.is_some()
+        || a.state == State::Asleep
+        || (a.eating && asked.feed > 0.5)
+        || !roam_hours(fauna, &am, view, sky)
+    {
+        return None;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let reach = am.roam_search_m;
+    let k = (reach / v).ceil() as i64;
+    let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
+    let ring = f64::from(c.width) * v;
+    // A pond's bank stands above the bed it grazes: faces up to the search reach above
+    // its own (a slope it walks up in strides; the step rule refuses what it cannot).
+    let top = (a.site.y + k.max(0) as u32).min(c.height.saturating_sub(1));
+    // (score, distance, dx, dz): the most film per metre, and the nearest bare wet face.
+    let mut film_best: Option<(f64, f64, f64)> = None;
+    let mut near: Option<(f64, f64, f64)> = None;
+    for dz in -k..=k {
+        let z = hz + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            if dx == 0 && dz == 0 {
+                continue;
+            }
+            let x = (hx + dx).rem_euclid(i64::from(c.width));
+            let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
+                continue;
+            };
+            let z = z as u32;
+            if body::water_within(view, x, y, z, phys.water_margin_m)
+                || body::ground_moisture(view, x, y, z) < am.step_moisture_min
+            {
+                continue;
+            }
+            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if d > reach || d <= 0.0 {
+                continue;
+            }
+            let film = fv.film_at(cubarium_voxel_flora::Site { x: x as u32, y, z });
+            if film > 0.0 {
+                let score = film / d;
+                if film_best.is_none_or(|(b, _, _)| score > b) {
+                    film_best = Some((score, ddx, ddz));
+                }
+            }
+            if near.is_none_or(|(b, _, _)| d < b) {
+                near = Some((d, ddx, ddz));
+            }
+        }
+    }
+    let (_, dx, dz) = match film_best {
+        Some(t) => t,
+        None if !m.ashore => near?,
+        None => return None,
+    };
     Some(glider::walk_toward(a, dx, dz, 0.0))
 }
 
@@ -3318,7 +3433,12 @@ fn lay(
         let ground = flora.view().ground_at(site);
         let fits = match fauna.config.founder(lineage).egg_site {
             crate::EggSite::Litter => ground.is_some_and(|g| g.litter > rule.litter_min),
-            crate::EggSite::Film => ground.is_some_and(|g| g.film > 0.0),
+            // Under water (SNAIL-FIX): land film is grazed, not laid on; laying above
+            // the waterline is not decided.
+            crate::EggSite::Film => {
+                ground.is_some_and(|g| g.film > 0.0)
+                    && view.standing_depth_m(i64::from(site.x), site.y, site.z) > 0.0
+            }
             crate::EggSite::Fungus => fungus_near(view, flora, site, rule.egg_fungus_radius_m),
         };
         if !fits {
@@ -3882,6 +4002,9 @@ fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Acti
 fn desiccation(fauna: &mut Fauna, view: &VoxelView<'_>, sky: &Sky) {
     let day = sky.clock_on && sky.daylight >= fauna.config.life.day_line;
     let raining = view.is_raining();
+    if raining {
+        fauna.last_rain_tick = Some(fauna.tick);
+    }
     for i in 0..fauna.animals.len() {
         let a = fauna.animals[i];
         let Some(f) = a.founder else { continue };

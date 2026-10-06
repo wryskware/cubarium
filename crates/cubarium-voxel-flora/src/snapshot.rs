@@ -48,7 +48,9 @@ use crate::Flora;
 //     ledger's `recruits`, `escapes`, `under_deaths`.
 // 32: DORMANCY — `SpeciesConfig::cure_cover` (curing on the budget); a cured stand's
 //     death on its stores is `DeathCause::Drought`.
-pub const SCHEMA: u32 = 32;
+// 33: SNAIL-FIX — glassfilm on wet ground: `FloraConfig::{film_land_moisture_min,
+//     film_land_growth_per_s, film_land_capacity_per_m2}`.
+pub const SCHEMA: u32 = 33;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -65,6 +65,7 @@ mod contest_tests;
 #[cfg(test)]
 mod canopy_establish_tests;
 mod film;
+pub use film::{FilmWet, film_wet, land_census};
 #[cfg(test)]
 mod film_tests;
 mod seeds;
@@ -3059,6 +3060,26 @@ pub struct FloraConfig {
     /// (its growth is proportional to the film standing). 0 lets a grazer strip a site.
     #[serde(default = "default_film_graze_refuge")]
     pub film_graze_refuge: f64,
+    /// **Glassfilm on wet ground** (SNAIL-FIX, 2026-10-06): a support face with no
+    /// standing water over it (or a residue under `film_wet_min_depth_m`) is **land-wet**
+    /// while its face voxel's pore fill is at least this (0..1; drained soil sits at its
+    /// field capacity, 0.65): ground soaked past field capacity, by rain, a rising water
+    /// table or seepage beside a pool. Film there grows at `film_land_growth_per_s` to
+    /// `film_land_capacity_per_m2`; drier, it dies as on any dry site. Film is a pool on
+    /// the ground beside litter, not a cover: it takes no plant's slot. Above 1 there is
+    /// no land film.
+    #[serde(default = "default_film_land_moisture_min")]
+    pub film_land_moisture_min: f64,
+    /// Glassfilm on a land-wet face: logistic growth rate per second at full light (no
+    /// water over it, so no extinction), below the underwater `film_growth_per_s`.
+    #[serde(default = "default_film_land_growth_per_s")]
+    pub film_land_growth_per_s: f64,
+    /// Glassfilm on a land-wet face: carrying capacity per square metre, below the
+    /// underwater `film_capacity_per_m2`. Film above it there (a pool's film left as the
+    /// water fell) dies back to it at `film_dry_death_per_s`, and spread fills a land-wet
+    /// face only up to it.
+    #[serde(default = "default_film_land_capacity_per_m2")]
+    pub film_land_capacity_per_m2: f64,
     /// Glassfilm: mineral per unit of film tissue, drawn from the site's pool as it grows
     /// (springturf's `n_tissue` by default).
     pub film_n_tissue: f64,
@@ -3121,6 +3142,9 @@ impl Default for FloraConfig {
             film_growth_per_s: 0.0015,
             film_capacity_per_m2: 0.4,
             film_graze_refuge: default_film_graze_refuge(),
+            film_land_moisture_min: default_film_land_moisture_min(),
+            film_land_growth_per_s: default_film_land_growth_per_s(),
+            film_land_capacity_per_m2: default_film_land_capacity_per_m2(),
             film_maintenance_per_s: 0.0001,
             film_spread_per_s: 0.0002,
             film_dry_death_per_s: 0.005,
@@ -5975,6 +5999,28 @@ impl Flora {
 /// caller books nothing.
 fn default_film_graze_refuge() -> f64 {
     FILM_GRAZE_REFUGE
+}
+
+/// The shipped [`FloraConfig::film_land_moisture_min`] (SNAIL-FIX): soaked ground, well
+/// past soil's field capacity (0.65). Plausible, untuned.
+pub const FILM_LAND_MOISTURE_MIN: f64 = 0.9;
+/// The shipped [`FloraConfig::film_land_growth_per_s`]: a third of the underwater rate (a
+/// film on soil dries at its surface between wettings). Plausible, untuned.
+pub const FILM_LAND_GROWTH_PER_S: f64 = 0.0005;
+/// The shipped [`FloraConfig::film_land_capacity_per_m2`]: half the underwater capacity.
+/// Plausible, untuned.
+pub const FILM_LAND_CAPACITY_PER_M2: f64 = 0.2;
+
+fn default_film_land_moisture_min() -> f64 {
+    FILM_LAND_MOISTURE_MIN
+}
+
+fn default_film_land_growth_per_s() -> f64 {
+    FILM_LAND_GROWTH_PER_S
+}
+
+fn default_film_land_capacity_per_m2() -> f64 {
+    FILM_LAND_CAPACITY_PER_M2
 }
 
 /// The shipped [`FloraConfig::film_graze_refuge`]: a tenth of a site's capacity, plausible
