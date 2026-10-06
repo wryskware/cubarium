@@ -49,6 +49,9 @@ pub struct Face {
     pub y: u32,
     pub z: u32,
     pub soil: bool,
+    /// Soil voxels in the column from the face's voxel down, unbroken (at most
+    /// [`SOIL_DEPTH_MAX`]): how deep a root could go before rock (the meadow lever e).
+    pub soil_depth: u32,
     /// The column's highest support face: where a dropped, blown or spore seed lands
     /// (`seeds.rs:1299`); a face under a roof gets runners and dark spores only.
     pub highest: bool,
@@ -104,6 +107,7 @@ impl Face {
             y,
             z,
             soil: true,
+            soil_depth: SOIL_DEPTH_MAX,
             highest: true,
             sky,
             water_ok: [true; 8],
@@ -132,6 +136,9 @@ impl Face {
         }
     }
 }
+
+/// The deepest soil run [`Face::soil_depth`] counts.
+pub const SOIL_DEPTH_MAX: u32 = 32;
 
 /// Read a save's world and plant layer.
 pub fn read_save(dir: &Path) -> Result<(World, Flora), String> {
@@ -230,6 +237,7 @@ pub fn census(world: &World, flora: &Flora, config: Option<&FloraConfig>) -> Vec
                     y,
                     z,
                     soil: view.material_at(x as i64, y, z) == Material::Soil,
+                    soil_depth: (0..=y.min(SOIL_DEPTH_MAX - 1)).take_while(|&d| view.material_at(x as i64, y - d, z) == Material::Soil).count() as u32,
                     highest: Some(y) == col_top,
                     sky,
                     water_ok,
