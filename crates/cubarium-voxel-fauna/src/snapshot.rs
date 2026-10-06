@@ -62,7 +62,11 @@ use crate::Fauna;
 //     tremor, smell, live, scent channel), `FaunaConfig::{perception, scent}`, the percept
 //     records (`Fauna::percepts`), `PackRecord::drawn_scent`, `ChaseEnd::Lost`, the funnel
 //     and the perception ledger lines; `pack_*_by_sense` widened to four modalities.
-pub const SCHEMA: u32 = 46;
+// 47: S2 GROUND RESPONSES — `Percept::vigil` (`Vigil`), `Track::heading`, `SenseTable::
+//     {feeding_sight_fraction, kin_tracks}`, `FounderPhysiology::vigilance`, `Pack::{stalk_margin,
+//     commit_m, stalk_freeze}`, `PredationConfig::{awareness_sensed, awareness_unaware,
+//     aware_within_s}`, `HuntConfig::patch_scent_weight`, the `vigil` ledger lines.
+pub const SCHEMA: u32 = 47;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
