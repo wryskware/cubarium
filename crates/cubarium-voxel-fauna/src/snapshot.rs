@@ -76,7 +76,11 @@ use crate::Fauna;
 //     `Glider::glide_speed_fraction` (replaces `glide_body_lengths_per_s`), the ledger's
 //     `sprint_ticks_by_founder` and `winded_by_founder`; the Veilhound's and the seedporter's
 //     cruise and motor defaults.
-pub const SCHEMA: u32 = 50;
+// 51: LIFE-HISTORY — `Reproduction::{litters_per_year, breeding_phase, breeding_window,
+//     gestation_upkeep_factor}`, `Pack::{breed_reserve_fraction, litter_by_condition}`,
+//     `ReproductionState::season` and `PackRecord::season` (`Season`), the ledger's
+//     `pups_independent` and `season_waits`; the Veilhound's season, gestation and rearing.
+pub const SCHEMA: u32 = 51;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

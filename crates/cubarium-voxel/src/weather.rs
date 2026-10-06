@@ -625,6 +625,25 @@ impl ClimatePreset {
     }
 }
 
+/// **A moment of the Cubarium year** ([`Climate::year`]): which year since the first dry
+/// season (−1 before it) and where in it, `[0, 1)`, phase 0 being a season's start.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Year {
+    pub number: i64,
+    pub phase: f64,
+}
+
+impl Year {
+    /// Whether the phase lies in the window of `width` (a share of the year) opening at
+    /// `start`, wrapping past the year's end; a width of 1 or more is the whole year, 0 none.
+    pub fn in_window(&self, start: f64, width: f64) -> bool {
+        if !(width > 0.0) {
+            return false;
+        }
+        width >= 1.0 || (self.phase - start).rem_euclid(1.0) < width
+    }
+}
+
 /// `[world.climate]`: a named preset of the keys below, any of which the table can
 /// override one by one (`[world.climate.downpour] rate_r0 = 1.2`, say). The preset sets
 /// temperature and wetness; the landform still sets how much water the world has.
@@ -1001,6 +1020,33 @@ impl Climate {
         let days = tick as f64 * DT / day.day_s();
         let since = days - self.dry_season_phase_days;
         since >= 0.0 && since.rem_euclid(self.dry_season_every_days) < self.dry_season_len_days
+    }
+
+    /// **The Cubarium year** (LIFE-HISTORY, Wrysk 2026-10-06: the dry season "makes a natural
+    /// marker for what a 'year' means"): one year is the season cycle,
+    /// `dry_season_every_days` world days ([`DayClock::day_s`]), and phase 0 is a season's
+    /// start (`dry_season_phase_days` from tick 0, then every period), so the season holds
+    /// over phases `[0, dry_season_len_days / dry_season_every_days)`. The year runs whether
+    /// or not the season is on: [`Climate::dry_season`] turns off the dryness, not the year.
+    /// Before the first season the clock reads year −1 (and earlier, for a phase longer than a
+    /// period). `None` only with no period (`dry_season_every_days` 0) or no day.
+    pub fn year(&self, day: &DayClock, tick: u64) -> Option<Year> {
+        let day_s = day.day_s();
+        if !(self.dry_season_every_days > 0.0) || !(day_s > 0.0) {
+            return None;
+        }
+        let days = tick as f64 * DT / day_s;
+        let y = (days - self.dry_season_phase_days) / self.dry_season_every_days;
+        let number = y.floor();
+        Some(Year {
+            number: number as i64,
+            phase: (y - number).clamp(0.0, 1.0 - f64::EPSILON),
+        })
+    }
+
+    /// A year's length, seconds (`dry_season_every_days` world days); 0 with no year.
+    pub fn year_s(&self, day: &DayClock) -> f64 {
+        (self.dry_season_every_days * day.day_s()).max(0.0)
     }
 
     /// The natural rain hazards' multiplier at `tick`: `dry_season_rain` inside a season,
@@ -1611,6 +1657,11 @@ impl World {
     /// The weather state: the clock, the temperature, the event running and the counts.
     pub fn weather(&self) -> &Weather {
         &self.weather
+    }
+
+    /// The Cubarium year now ([`Climate::year`]).
+    pub fn year(&self) -> Option<Year> {
+        self.config.climate.year(&self.config.day, self.tick)
     }
 
     /// Whether the climate's dry season holds now ([`Climate::in_dry_season`]).

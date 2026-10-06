@@ -160,7 +160,18 @@ founding_count = 1
 # The curiosity gate's ecology (the block at the end of this file).
 core.growth_max_per_s = 0.00032136258730417914
 core.reproduction.birth_interval_s = 1097.8253659193513
-core.reproduction.gestation_s = 109.78253659193513
+core.reproduction.gestation_s = 6000.0
+# LIFE-HISTORY (Wrysk 2026-10-06): the Veilhound litters once a pack a year, conceived in a
+# window just after the dry season (the year is the season cycle, phase 0 its start), a
+# wolf's gestation (0.17 of the year) at 1.5x upkeep; only a breeder at 0.6 of its reserve
+# cap conceives, its litter 1-4 by condition; pups stay fed at the den for 0.6 of a year.
+core.reproduction.litters_per_year = 1
+core.reproduction.breeding_phase = 0.2
+core.reproduction.breeding_window = 0.15
+core.reproduction.gestation_upkeep_factor = 1.5
+pack.breed_reserve_fraction = 0.6
+pack.litter_by_condition = true
+pack.independence_age_s = 21600.0
 core.reproduction.surplus_hold_s = 548.9126829596756
 
 # ---------------------------------------------------------------------------
