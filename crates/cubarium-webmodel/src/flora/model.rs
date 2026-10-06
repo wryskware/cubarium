@@ -221,7 +221,17 @@ pub struct Counters {
     pub taken_mineral: f64,
     pub substrate: f64,
     pub decomposed: f64,
-    pub taken: Supply,
+    pub taken: Take,
+    /// Mineral the animals' returns brought back to the site pools (closed loop).
+    pub returned_mineral: f64,
+    /// Mineral in the glowcap caps the animals ate: the fungal place keeps no mineral
+    /// inventory in this half, so it enters the plant ledger only when it comes back.
+    pub cap_mineral_taken: f64,
+    /// Organic matter of seedlings a browser took ([`Take::seedlings`]): out of the half.
+    pub browsed_organic: f64,
+    /// Per zone, what the last exchange took: `[organic, mineral]`. The returns go back where
+    /// the animals fed ([`Model::give`]).
+    pub take_z: Vec<[f64; 2]>,
     /// Glassfilm grown (gross) and its upkeep, organic units.
     pub film_grown: f64,
     pub film_upkeep: f64,
@@ -502,7 +512,7 @@ impl Model {
                 Weather::Frozen => 0,
             }),
             p,
-            c: Counters { by_zone: vec![[[0.0; NS]; 2]; nz], prod_z: vec![[0.0; 4]; nz], ..Counters::default() },
+            c: Counters { by_zone: vec![[[0.0; NS]; 2]; nz], prod_z: vec![[0.0; 4]; nz], take_z: vec![[0.0; 2]; nz], ..Counters::default() },
             weather_ix: 0,
             frozen,
             carrion: start.iter().map(|_| 0.0).sum(),
@@ -1337,7 +1347,13 @@ impl Model {
                 }
             }
             self.c.taken.foliage[s] += want.min(ed);
-            self.c.taken_mineral += sc.n_tissue * want.min(ed);
+            // The glowcap's place keeps no mineral inventory here ([`Model::mineral`]): its
+            // caps' mineral is its own line, off the plant ledger.
+            if s == GLOW {
+                self.c.cap_mineral_taken += sc.n_tissue * want.min(ed);
+            } else {
+                self.c.taken_mineral += sc.n_tissue * want.min(ed);
+            }
         }
         for (want, nectar) in [(take.nectar, true), (take.fruit, false)] {
             if want <= 0.0 {
@@ -1348,22 +1364,250 @@ impl Model {
                 continue;
             }
             let f = (want / held).min(1.0);
+            // Each stand's inventory gives up the mineral at its own species' `n_tissue`.
+            let nts: [f64; NS] = std::array::from_fn(|s| if s == GLOW { 0.0 } else { self.config.species(Species::ALL[s]).n_tissue });
             for zs in &mut self.z {
-                for c in zs.cohorts.iter_mut().flatten() {
-                    if nectar {
-                        c.st.nectar -= c.st.nectar * f;
-                    } else {
-                        c.st.fruit -= c.st.fruit * f;
+                for (s, v) in zs.cohorts.iter_mut().enumerate() {
+                    for c in v.iter_mut() {
+                        let x = if nectar { &mut c.st.nectar } else { &mut c.st.fruit };
+                        let d = *x * f;
+                        *x -= d;
+                        self.c.taken_mineral += nts[s] * c.n * d;
                     }
                 }
             }
-            self.c.taken_mineral += self.config.species(Species::Springturf).n_tissue * want.min(held);
             if nectar {
                 self.c.taken.nectar += want.min(held);
             } else {
                 self.c.taken.fruit += want.min(held);
             }
         }
+    }
+
+    // ---- The closed loop's exchange (`design/webmodel/loop.md`). In the closed loop the
+    // clamped `take` and `returns` stay empty, so [`Model::step`] runs the plants, the dead
+    // pools' decay and the film; the animals then draw on [`Model::offer`], and their take
+    // and returns come in through [`Model::take_from`] and [`Model::give`] before the next
+    // step, as the sim's withdrawals and deposits fall between plant steps
+    // (`cubarium-voxel-sim/src/lib.rs:660-662`, `cubarium-voxel-flora/src/lib.rs:5775-5782`).
+
+    /// A cohort's foliage a mouth can take: what stands above the grazing floor
+    /// (`graze_refuge · α · W`, the sum of the layers' floors). The same bound [`Model::offer`]
+    /// reports and [`Model::take_from`] draws on, so the take never exceeds the offer.
+    pub fn takeable(sc: &cubarium_voxel_flora::SpeciesConfig, st: &StandState) -> f64 {
+        (st.foliage - sc.graze_refuge * sc.alpha * st.wood).max(0.0)
+    }
+
+    /// **The offer to the animals** (closed loop): world totals of what the animals can take
+    /// now, each with the area it is spread over (m², [`crate::exchange::Areas`]), and the
+    /// seedlings a browser could take. Foliage per species is [`Model::takeable`] (the
+    /// layers' own floors summed; [`Model::supply`] reads the layers one by one, the same
+    /// above full floors and up to the floor of a layer under it otherwise).
+    pub fn offer(&self) -> Supply {
+        let cell = self.config.voxel_m * self.config.voxel_m;
+        let mut s = Supply::default();
+        s.carrion = self.carrion;
+        s.film = (self.film - self.config.film_graze_refuge * self.film_capacity).max(0.0);
+        let world: f64 = self.zones.zones.iter().map(|z| z.area).sum::<f64>() * cell;
+        s.area.litter = world;
+        s.area.carrion = world;
+        s.area.film = if self.config.film_capacity_per_m2 > 0.0 { self.film_capacity / self.config.film_capacity_per_m2 } else { 0.0 };
+        for zs in &self.z {
+            s.litter += zs.litter;
+            for k in 0..NS {
+                let sc = self.config.species(Species::ALL[k]);
+                for c in &zs.cohorts[k] {
+                    s.foliage[k] += c.n * Self::takeable(sc, &c.st);
+                    s.area.foliage[k] += c.n * cell;
+                    s.nectar += c.n * c.st.nectar;
+                    s.fruit += c.n * c.st.fruit;
+                    if c.st.nectar > 0.0 {
+                        s.area.nectar += c.n * cell;
+                    }
+                    if c.st.fruit > 0.0 {
+                        s.area.fruit += c.n * cell;
+                    }
+                    if k != GLOW && c.st.wood < sc.donor_min {
+                        s.seedlings[k] += c.n;
+                    }
+                }
+            }
+        }
+        s
+    }
+
+    /// **The animals' take, applied** (closed loop), spread over the zones pro rata to each
+    /// zone's takeable stock of the class (mass-action foraging, the parent's decision 2):
+    /// every cohort gives up the same share of its takeable foliage, every zone the same share
+    /// of its litter, every stand the same share of its nectar or fruit; the film and the
+    /// carrion are one pool each. Seedlings come off the juveniles (`W < donor_min`) in the
+    /// same way, whole stands, their tissue to the browser and their mineral to the faces
+    /// they free (the `browse=` lever's rule). Returns what was removed (never more than
+    /// offered) and the mineral that left in living tissue (foliage, nectar, fruit; the caps'
+    /// is booked apart, [`Counters::cap_mineral_taken`]).
+    pub fn take_from(&mut self, take: &Take) -> (Take, f64) {
+        let nz = self.z.len();
+        let mut got = Take::default();
+        let mut mineral = 0.0;
+        let mut tz = vec![[0.0f64; 2]; nz];
+        // Litter, per zone by its share of the pool.
+        let total: f64 = self.z.iter().map(|z| z.litter).sum();
+        let lt = take.litter.min(total).max(0.0);
+        if total > 0.0 && lt > 0.0 {
+            for (zi, zs) in self.z.iter_mut().enumerate() {
+                let d = lt * zs.litter / total;
+                zs.litter -= d;
+                tz[zi][0] += d;
+            }
+        }
+        got.litter = lt;
+        // Carrion and film: one pool each.
+        got.carrion = take.carrion.min(self.carrion).max(0.0);
+        self.carrion -= got.carrion;
+        got.film = take.film.min((self.film - self.config.film_graze_refuge * self.film_capacity).max(0.0)).max(0.0);
+        self.film -= got.film;
+        // Foliage and caps per species, every cohort the same share of its takeable foliage.
+        for s in 0..NS {
+            let want = take.foliage[s];
+            if !(want > 0.0) {
+                continue;
+            }
+            let sc = self.config.species(Species::ALL[s]).clone();
+            let ed: f64 = self.z.iter().flat_map(|z| z.cohorts[s].iter()).map(|c| c.n * Self::takeable(&sc, &c.st)).sum();
+            if !(ed > 0.0) {
+                continue;
+            }
+            let f = (want / ed).min(1.0);
+            for (zi, zs) in self.z.iter_mut().enumerate() {
+                for c in zs.cohorts[s].iter_mut() {
+                    let d = Self::takeable(&sc, &c.st) * f;
+                    c.st.foliage -= d;
+                    tz[zi][0] += c.n * d;
+                    if s != GLOW {
+                        tz[zi][1] += sc.n_tissue * c.n * d;
+                    }
+                }
+            }
+            let t = want.min(ed);
+            got.foliage[s] = t;
+            if s == GLOW {
+                self.c.cap_mineral_taken += sc.n_tissue * t;
+            } else {
+                mineral += sc.n_tissue * t;
+            }
+        }
+        // Nectar and fruit, every stand the same share, each at its own `n_tissue`.
+        let nts: [f64; NS] = std::array::from_fn(|s| if s == GLOW { 0.0 } else { self.config.species(Species::ALL[s]).n_tissue });
+        for (want, nectar) in [(take.nectar, true), (take.fruit, false)] {
+            if !(want > 0.0) {
+                continue;
+            }
+            let held: f64 = self.z.iter().flat_map(|z| z.cohorts.iter().flatten()).map(|c| c.n * if nectar { c.st.nectar } else { c.st.fruit }).sum();
+            if !(held > 0.0) {
+                continue;
+            }
+            let f = (want / held).min(1.0);
+            for (zi, zs) in self.z.iter_mut().enumerate() {
+                for (s, v) in zs.cohorts.iter_mut().enumerate() {
+                    for c in v.iter_mut() {
+                        let x = if nectar { &mut c.st.nectar } else { &mut c.st.fruit };
+                        let d = *x * f;
+                        *x -= d;
+                        tz[zi][0] += c.n * d;
+                        tz[zi][1] += nts[s] * c.n * d;
+                        mineral += nts[s] * c.n * d;
+                    }
+                }
+            }
+            if nectar {
+                got.nectar = want.min(held);
+            } else {
+                got.fruit = want.min(held);
+            }
+        }
+        // Seedlings: whole juveniles, each zone and cohort the same share.
+        for s in 0..NS {
+            let want = take.seedlings[s];
+            if s == GLOW || !(want > 0.0) {
+                continue;
+            }
+            let sc = self.config.species(Species::ALL[s]).clone();
+            let juv: f64 = self.z.iter().flat_map(|z| z.cohorts[s].iter()).filter(|c| c.st.wood < sc.donor_min).map(|c| c.n).sum();
+            if !(juv > 0.0) {
+                continue;
+            }
+            let q = (want / juv).min(1.0);
+            for zi in 0..nz {
+                let count = self.z[zi].count(s);
+                let (mut gone, mut mat) = (0.0, 0.0);
+                for c in self.z[zi].cohorts[s].iter_mut().filter(|c| c.st.wood < sc.donor_min) {
+                    let d = c.n * q;
+                    c.n -= d;
+                    gone += d;
+                    mat += d * c.st.material();
+                }
+                if gone > 0.0 {
+                    // The tissue to the browser; its mineral to the faces it frees.
+                    self.c.browsed[s] += gone;
+                    self.c.browsed_organic += mat;
+                    let zs = &mut self.z[zi];
+                    zs.pool[s] += sc.n_tissue * mat;
+                    let carried = zs.pool[s] * gone / count.max(gone);
+                    zs.pool[s] -= carried;
+                    zs.pool[VACANT] += carried;
+                    tz[zi][0] += mat;
+                }
+            }
+            for zs in &mut self.z {
+                zs.cohorts[s].retain(|c| c.n > 1e-12);
+            }
+            got.seedlings[s] = want.min(juv);
+        }
+        self.c.taken.litter += got.litter;
+        self.c.taken.carrion += got.carrion;
+        self.c.taken.film += got.film;
+        self.c.taken.nectar += got.nectar;
+        self.c.taken.fruit += got.fruit;
+        for s in 0..NS {
+            self.c.taken.foliage[s] += got.foliage[s];
+            self.c.taken.seedlings[s] += got.seedlings[s];
+        }
+        self.c.taken_mineral += mineral;
+        self.c.take_z = tz;
+        (got, mineral)
+    }
+
+    /// **The animals' returns, applied** (closed loop): dung to the litter and its mineral to
+    /// the site pools where the last take came from (by each zone's share of the organic and
+    /// of the mineral taken; by area when nothing was taken), within a zone by face count
+    /// (`spread_mineral`); corpses to the carrion pool. The sim lays each deposit on the face
+    /// the animal stands on (`Flora::deposit`, `lib.rs:5783`), and the animals stand where
+    /// they feed.
+    pub fn give(&mut self, ret: &Returns) {
+        let nz = self.z.len();
+        let area: Vec<f64> = self.zones.zones.iter().map(|z| z.area).collect();
+        let za: f64 = area.iter().sum::<f64>().max(1.0);
+        let share = |k: usize, tz: &[[f64; 2]]| -> Vec<f64> {
+            let t: f64 = tz.iter().map(|v| v[k]).sum();
+            if t > 0.0 { tz.iter().map(|v| v[k] / t).collect() } else { area.iter().map(|a| a / za).collect() }
+        };
+        let tz = self.c.take_z.clone();
+        if ret.litter > 0.0 {
+            let w = share(0, &tz);
+            for zi in 0..nz {
+                self.z[zi].litter += ret.litter * w[zi];
+            }
+        }
+        if ret.mineral > 0.0 {
+            let has_m = tz.iter().any(|v| v[1] > 0.0);
+            let w = share(if has_m { 1 } else { 0 }, &tz);
+            for zi in 0..nz {
+                self.spread_mineral(zi, ret.mineral * w[zi]);
+            }
+        }
+        self.carrion += ret.carrion.max(0.0);
+        self.c.returned += ret.litter + ret.carrion;
+        self.c.returned_mineral += ret.mineral;
     }
 
     /// The film's growth, upkeep and nothing else (`film.rs`): `rate · light · F · (1 −
