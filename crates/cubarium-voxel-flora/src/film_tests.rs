@@ -972,3 +972,76 @@ fn rain_then_drain_leaves_film_only_in_the_pond() {
     assert_closes(&flora, "rain and drain");
     assert_film_budget(&flora, "rain and drain");
 }
+
+// ---------------------------------------------------------------- land-wet ground
+
+/// **Glassfilm on wet ground** (SNAIL-FIX, [`FloraConfig::film_land_moisture_min`]): film
+/// grows on a face with no water over it only while the face's pore fill is at or above
+/// the threshold, dies below it, and stands as a ground pool beside the face's plant, not
+/// in its place. A four-column soil strip (soil `y = 1..=2`, face `y = 2`), no water: pore
+/// fill above the threshold at columns 0 and 3, below it at 1, exactly at it at 2 (read by
+/// the classifier only);
+/// springturf on column 3; a quarter of the land capacity of film on every face.
+#[test]
+fn land_film_grows_only_at_or_above_its_wetness_threshold_and_takes_no_cover_slot() {
+    let c = config();
+    let thr = c.film_land_moisture_min;
+    assert!(thr > 0.0 && thr < 1.0, "the shipped threshold is a pore fill inside 0..1");
+    let pores = [0.5 * (thr + 1.0), 0.5 * thr, thr, 0.5 * (thr + 1.0)];
+    let mut world = World::empty(VoxelConfig {
+        width: pores.len() as u32,
+        height: 6,
+        depth: 1,
+        voxel_m: VOXEL_M,
+        seed: 23,
+        day: DayClock {
+            mode: DayMode::Off,
+            ..DayClock::default()
+        },
+        ..VoxelConfig::default()
+    });
+    let cap = world.config().materials.pore_capacity(Material::Soil) * world.config().voxel_volume();
+    for (x, &p) in pores.iter().enumerate() {
+        let x = x as i64;
+        for y in 1..=2u32 {
+            world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Air });
+            world.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: p * cap });
+            world.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+        }
+    }
+    let at = |x: u32| Site { x, y: 2, z: 0 };
+    let v = world.view();
+    for (x, &p) in pores.iter().enumerate() {
+        let got = v.pore_at(x as i64, 2, 0);
+        assert!((got - p).abs() < 1e-9, "fixture: column {x} pore fill {got}, want {p}");
+        assert_eq!(v.standing_depth_m(x as i64, 2, 0), 0.0, "fixture: no water on column {x}");
+    }
+    assert_eq!(crate::film_wet(&v, &c, 0, 2, 0), crate::FilmWet::Land);
+    assert_eq!(crate::film_wet(&v, &c, 1, 2, 0), crate::FilmWet::Dry);
+    assert_eq!(crate::film_wet(&v, &c, 2, 2, 0), crate::FilmWet::Land, "at the threshold is wet");
+
+    let mut flora = Flora::in_world(&world, c.clone());
+    let wood = flora.config.species(crate::Species::Springturf).wood_max;
+    assert!(flora.apply(
+        &world,
+        crate::Command::SeedOnFace { site: at(3), species: crate::Species::Springturf, wood }
+    ));
+    let start = 0.25 * c.film_land_capacity_per_m2 * AREA_M2;
+    for x in 0..pores.len() as u32 {
+        put_film(&mut flora, at(x), start);
+    }
+    let stands_before: Vec<_> = flora.view().stands.iter().map(|s| (s.site, s.species)).collect();
+    run(&mut flora, &mut world, TICKS);
+
+    let film = |x: u32| flora.view().film_at(at(x));
+    assert!(film(0) > start, "above the threshold it grows: {} from {start}", film(0));
+    // Column 2 sits exactly at the threshold: the classifier above says it is wet; the
+    // plant layer's own water draw may take it under in the run, so its film is not read.
+    assert!(film(1) < start, "below the threshold it dies: {} from {start}", film(1));
+    assert!(film(3) > 0.0, "it stands on the springturf's face too");
+    let stands_after: Vec<_> = flora.view().stands.iter().map(|s| (s.site, s.species)).collect();
+    assert_eq!(stands_after, stands_before, "the film takes no plant's place and adds none");
+    assert_eq!(flora.view().stands_on(at(3)).len(), 1, "the springturf keeps its face");
+    assert_film_budget(&flora, "land film");
+    assert_closes(&flora, "land film");
+}

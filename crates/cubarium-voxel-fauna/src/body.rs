@@ -469,6 +469,12 @@ pub struct FounderPhysiology {
     /// have standing water within this distance (0.25 for the ripple-snail). Unread for a
     /// lineage that is not [`FounderPhysiology::aquatic`].
     pub water_margin_m: f64,
+    /// `Some` for an **amphibious** body (AMPHIBIOUS-SNAIL, Wrysk 2026-10-06, the
+    /// ripple-snail): an [`FounderPhysiology::aquatic`] body that also crawls out onto wet
+    /// ground on a drying clock ([`Amphibious`]). `None` keeps the water-bound rule
+    /// (`water_margin_m` only), as for every other lineage.
+    #[serde(default)]
+    pub amphibious: Option<Amphibious>,
     /// **Where an egg-layer's clutch goes** ([`EggSite`]): a face holding litter (the
     /// shredder, the capgnawer) or a face holding film (the ripple-snail). Not a number,
     /// so it has no registry row.
@@ -710,6 +716,125 @@ pub struct GutSeeds {
     pub seeds_per_fruit_organic: f64,
     /// Seconds from a meal until its seeds are voided at the body's current face.
     pub gut_transit_s: f64,
+}
+
+/// **An amphibious body's table** ([`FounderPhysiology::amphibious`], AMPHIBIOUS-SNAIL,
+/// Wrysk 2026-10-06): out of water it runs a **drying clock**, 0 hydrated to 1 full, and
+/// it may step onto ground wet enough. "In water" is the water-bound rule's own zone:
+/// standing water within [`FounderPhysiology::water_margin_m`] of its face. There the clock
+/// falls at `rehydrate_per_s`; out of it the clock rises at `1 / T(m)` per second, `T`
+/// running linearly from `dry_ground_s` on bone-dry ground (pore fill `m` = 0) to
+/// `wet_ground_s` on saturated ground (`m` = 1), times `day_drying_factor` while the
+/// sun is up and `rain_drying_factor` while it rains. Past 1 it is **desiccated** (it cannot
+/// feed); at `lethal_fraction` it dies ([`crate::Departure::Desiccation`]).
+///
+/// The defaults are a 19 cm apple-snail-sized body (Pomacea maculata reaches 15 cm and
+/// crawls out at night to lay; Lymnaea and land snails tolerate the loss of a third to a
+/// half of their water). Real active snails on dry substrate reach that loss in about
+/// 8 h, and on saturated ground in about 3 days; they refill in about an hour of water.
+/// The world's day is 2 h ([`DAY_S`]), so each real time is taken at the world's day:
+/// 8 h → 40 min, 72 h → 6 h, 1 h → 5 min. Plausible, untuned.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Amphibious {
+    /// The switch: `false` keeps the water-bound rule (no land, no clock), the arm the
+    /// check compares against. Not a number, so it has no registry row.
+    pub on_land: bool,
+    /// Seconds the clock takes to fill on bone-dry ground (pore fill 0), at night, dry
+    /// weather.
+    pub dry_ground_s: f64,
+    /// Seconds the clock takes to fill on saturated ground (pore fill 1, or a film of
+    /// water on the face).
+    pub wet_ground_s: f64,
+    /// Clock fraction recovered per second in water.
+    pub rehydrate_per_s: f64,
+    /// The least ground moisture (the face voxel's pore fill, 0..1; a face under any
+    /// standing water reads 1) a step onto a face out of water needs.
+    pub step_moisture_min: f64,
+    /// Its heuristic heads for water once the clock passes this, at night or in rain.
+    pub return_fraction: f64,
+    /// ... and this by day in dry weather: the activity bias that keeps it near water in
+    /// the sun.
+    pub day_return_fraction: f64,
+    /// The clock runs this many times faster while the sun is up (daylight at or above
+    /// the day line).
+    pub day_drying_factor: f64,
+    /// ... and this many times as fast while rain falls (0: no drying in rain).
+    pub rain_drying_factor: f64,
+    /// It dies of desiccation when the clock reaches this (between 1 and this it is
+    /// desiccated: no feeding, heading for water).
+    pub lethal_fraction: f64,
+    /// How far its return reflex looks for water, metres (a world query, not a sense).
+    pub water_search_m: f64,
+    /// A looming shadow or a threat's tremor makes it **retract** for this long, seconds:
+    /// it stops and closes, eating nothing.
+    pub retract_hold_s: f64,
+    /// While retracted a hit on it is reduced by this, on top of its armour: slower to
+    /// eat, not immune.
+    pub retract_armour: f64,
+    /// **The roam drive** (SNAIL-FIX): at night, in rain and for `roam_after_rain_s` after
+    /// it, an awake body that is not thirsty and not feeding where it stands walks out
+    /// onto wet ground ([`step_moisture_min`](Amphibious::step_moisture_min)) within this
+    /// many metres, toward the land face with the most film in reach ([`crate::Food::Film`],
+    /// the plant layer's land-wet film), or, in water with none in reach, to the nearest
+    /// wet land face. A heuristic world query, as the water reflex is. 0: no roam.
+    #[serde(default = "default_roam_search_m")]
+    pub roam_search_m: f64,
+    /// ... and the roam hours last this long after rain stops, seconds.
+    #[serde(default = "default_roam_after_rain_s")]
+    pub roam_after_rain_s: f64,
+}
+
+fn default_roam_search_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.roam_search_m
+}
+
+fn default_roam_after_rain_s() -> f64 {
+    Amphibious::RIPPLE_SNAIL.roam_after_rain_s
+}
+
+impl Amphibious {
+    /// The ripple-snail's table (see the type's note for the real-snail derivation).
+    pub const RIPPLE_SNAIL: Amphibious = Amphibious {
+        on_land: true,
+        // 8 h real at the 12x world day.
+        dry_ground_s: 2400.0,
+        // 72 h real at the 12x world day.
+        wet_ground_s: 21600.0,
+        // A full refill in ~1 h real: 5 min of world time.
+        rehydrate_per_s: 1.0 / 300.0,
+        // Below about field capacity a big snail's foot dries on the substrate: it keeps to
+        // damp ground (a third of pore capacity), and to water films.
+        step_moisture_min: 0.33,
+        // Real snails turn back well before damage: at half the clock.
+        return_fraction: 0.5,
+        // By day in the open it barely leaves the water.
+        day_return_fraction: 0.1,
+        // Sun and low daytime humidity roughly triple evaporation from a mantle.
+        day_drying_factor: 3.0,
+        // No net loss in rain: snails roam in it.
+        rain_drying_factor: 0.0,
+        // A quarter of the clock past full is the harm window before death.
+        lethal_fraction: 1.25,
+        // Its own short world: a few metres of a pond's margin.
+        water_search_m: 4.0,
+        // A snail stays in its shell some seconds after a shadow passes.
+        retract_hold_s: 8.0,
+        // A closed shell and operculum halve a hit.
+        retract_armour: 0.5,
+        // A night's crawl of a big snail is some metres; it looks over a stride of its
+        // pond's bank at a time.
+        roam_search_m: 1.5,
+        // Snails stay out a couple of real hours after rain: 10 min of world time.
+        roam_after_rain_s: 600.0,
+    };
+
+    /// The clock's rise per second out of water on ground of moisture `m` (0..1), before
+    /// the day and rain factors.
+    pub fn drying_per_s(&self, m: f64) -> f64 {
+        let m = if m.is_finite() { m.clamp(0.0, 1.0) } else { 0.0 };
+        let t = self.dry_ground_s + (self.wet_ground_s - self.dry_ground_s) * m;
+        if t > 0.0 { 1.0 / t } else { f64::INFINITY }
+    }
 }
 
 /// A flyer's table ([`FounderPhysiology::flight`], F1; the bellwing's numbers are
@@ -1129,6 +1254,7 @@ impl FounderPhysiology {
                 founding_count: 8,
                 aquatic: false,
                 water_margin_m: 0.0,
+                amphibious: None,
                 egg_site: EggSite::Litter,
                 flight: None,
                 glider: None,
@@ -1196,6 +1322,7 @@ impl FounderPhysiology {
                 founding_count: 8,
                 aquatic: false,
                 water_margin_m: 0.0,
+                amphibious: None,
                 egg_site: EggSite::Litter,
                 flight: None,
                 glider: None,
@@ -1283,6 +1410,7 @@ impl FounderPhysiology {
                 founding_count: 3,
                 aquatic: false,
                 water_margin_m: 0.0,
+                amphibious: None,
                 egg_site: EggSite::Litter,
                 flight: None,
                 glider: None,
@@ -1603,6 +1731,9 @@ impl FounderPhysiology {
                     // quarter metre of standing water.
                     aquatic: true,
                     water_margin_m: 0.25,
+                    // Amphibious (Wrysk, 2026-10-06): it crawls out onto wet ground at
+                    // night and after rain, on a drying clock, and goes back to water.
+                    amphibious: Some(Amphibious::RIPPLE_SNAIL),
                     // Its clutch goes on film, under water.
                     egg_site: EggSite::Film,
                     // Taste reads film against the film's own capacity per site, derived on
@@ -1782,11 +1913,12 @@ pub(crate) fn resolve_motion(
     )
 }
 
-/// [`resolve_motion`] for a body that may be **water-bound** (roster R2b): with
-/// `water_margin_m` set, a sub-step onto another support face is refused, the way a wall
-/// refuses one, unless that face has standing water within the margin
-/// ([`water_within`]). A body already stranded beyond the margin is not held: it may walk
-/// anywhere, so it can find its way back.
+/// [`resolve_motion`] for a body that may be **water-bound** (roster R2b) or
+/// **amphibious** (AMPHIBIOUS-SNAIL): with a [`WaterRule`] set, a sub-step onto another
+/// support face is refused, the way a wall refuses one, unless the rule admits that face
+/// (standing water within the margin, or for an amphibious body ground wet enough). A
+/// body already stranded on a face the rule refuses is not held: it may walk anywhere, so
+/// it can find its way back.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_motion_in(
     view: &VoxelView<'_>,
@@ -1798,14 +1930,14 @@ pub(crate) fn resolve_motion_in(
     step_limits: StepLimits,
     wall_friction: f64,
     held: Actions,
-    water_margin_m: Option<f64>,
+    water_rule: Option<WaterRule>,
 ) -> Motion {
     // A stranded body is not held to the margin (it would never move again).
-    let water_margin_m = water_margin_m.filter(|&m| {
+    let water_rule = water_rule.filter(|rule| {
         pose.column(view.config.voxel_m, view.config.depth)
             .is_some_and(|(cx, cz)| {
                 let cx = cx.rem_euclid(i64::from(view.config.width));
-                water_within(view, cx, *standing_y, cz, m)
+                rule.admits(view, cx, *standing_y, cz)
             })
     });
     let r = body.footprint_radius();
@@ -1841,7 +1973,7 @@ pub(crate) fn resolve_motion_in(
             wade_depth_m,
             headroom,
             step_limits,
-            water_margin_m,
+            water_rule,
         ) {
             Some(actual) => {
                 moved += actual;
@@ -1877,7 +2009,7 @@ pub(crate) fn resolve_motion_in(
                         wade_depth_m,
                         headroom,
                         step_limits,
-                        water_margin_m,
+                        water_rule,
                     )
                     .is_some()
                     {
@@ -1898,7 +2030,7 @@ pub(crate) fn resolve_motion_in(
                         wade_depth_m,
                         headroom,
                         step_limits,
-                        water_margin_m,
+                        water_rule,
                     )
                     .expect("the bisection's best advance is valid");
                     pose.x = nx;
@@ -1916,7 +2048,7 @@ pub(crate) fn resolve_motion_in(
                     wade_depth_m,
                     headroom,
                     step_limits,
-                    water_margin_m,
+                    water_rule,
                 );
                 break;
             }
@@ -1950,7 +2082,7 @@ fn wall_slide(
     wade_depth_m: f64,
     headroom: u32,
     step_limits: StepLimits,
-    water_margin_m: Option<f64>,
+    water_rule: Option<WaterRule>,
 ) -> f64 {
     if budget <= 1e-12 {
         return 0.0;
@@ -1978,7 +2110,7 @@ fn wall_slide(
                 wade_depth_m,
                 headroom,
                 step_limits,
-                water_margin_m,
+                water_rule,
             )
             else {
                 break;
@@ -2010,7 +2142,7 @@ fn step_advance(
     wade_depth_m: f64,
     headroom: u32,
     step_limits: StepLimits,
-    water_margin_m: Option<f64>,
+    water_rule: Option<WaterRule>,
 ) -> Option<f64> {
     let (nx, nz, actual, ny) = advance_candidate(
         view,
@@ -2023,7 +2155,7 @@ fn step_advance(
         wade_depth_m,
         headroom,
         step_limits,
-        water_margin_m,
+        water_rule,
     )?;
     pose.x = nx;
     pose.z = nz;
@@ -2036,6 +2168,45 @@ fn step_advance(
 /// `margin_m` of this one's, itself included, holding standing water
 /// ([`VoxelView::standing_depth_m`]) over it. Distances are centre to centre between
 /// support faces, in metres; `x` wraps, `z` and `y` stop at the world's ends.
+/// **Where a water-bound or amphibious body may step** ([`resolve_motion_in`]): a face with
+/// standing water within `margin_m` ([`water_within`]), or, for an amphibious body out on
+/// land (`land_moisture_min` set), a face whose [`ground_moisture`] is at least that.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WaterRule {
+    pub margin_m: f64,
+    pub land_moisture_min: Option<f64>,
+}
+
+impl WaterRule {
+    /// The rule of a lineage's physiology: `None` for a body that is not aquatic.
+    pub(crate) fn of(phys: &FounderPhysiology) -> Option<WaterRule> {
+        phys.aquatic.then(|| WaterRule {
+            margin_m: phys.water_margin_m,
+            land_moisture_min: phys.amphibious.filter(|a| a.on_land).map(|a| a.step_moisture_min),
+        })
+    }
+
+    /// Whether the face `(x, y, z)` is one the body may step onto.
+    pub(crate) fn admits(&self, view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> bool {
+        water_within(view, x, y, z, self.margin_m)
+            || self.land_moisture_min.is_some_and(|m| ground_moisture(view, x, y, z) >= m)
+    }
+}
+
+/// **The ground's moisture at a support face**, 0..1: 1 under any water on the face (a
+/// shower's film included), else the face voxel's pore fill (0 for bedrock and rock with
+/// no pores, and on a view with no water).
+pub(crate) fn ground_moisture(view: &VoxelView<'_>, x: i64, y: u32, z: u32) -> f64 {
+    let c = view.config;
+    if z >= c.depth || y >= c.height || view.pore.is_empty() {
+        return 0.0;
+    }
+    if view.water_depth_m(x, y, z) > 0.0 {
+        return 1.0;
+    }
+    view.pore_at(x, y, z).clamp(0.0, 1.0)
+}
+
 pub(crate) fn water_within(view: &VoxelView<'_>, x: i64, y: u32, z: u32, margin_m: f64) -> bool {
     let c = view.config;
     let v = c.voxel_m;
@@ -2119,7 +2290,7 @@ fn advance_candidate(
     wade_depth_m: f64,
     headroom: u32,
     step_limits: StepLimits,
-    water_margin_m: Option<f64>,
+    water_rule: Option<WaterRule>,
 ) -> Option<(f64, f64, f64, u32)> {
     let c = view.config;
     let v = c.voxel_m;
@@ -2157,11 +2328,11 @@ fn advance_candidate(
     }
     // A water-bound body (roster R2b): another face must have standing water within its
     // margin, or the step is refused as a wall's is.
-    if let Some(margin) = water_margin_m {
+    if let Some(rule) = water_rule {
         let hz = ((pz / v).floor().max(0.0) as u32).min(c.depth.saturating_sub(1));
         let hx = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
         let same_face = (hx, hz) == (cx, cz as u32) && ny == standing_y;
-        if !same_face && !water_within(view, cx, ny, cz as u32, margin) {
+        if !same_face && !rule.admits(view, cx, ny, cz as u32) {
             return None;
         }
     }
@@ -4960,7 +5131,9 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         },
         // Shadow and looming at 0.5 m by day, 0.25 m dim over 180°; a large walker felt at
         // ~1 m; film chemistry is its own field.
+        // Live (AMPHIBIOUS-SNAIL): its retraction reads the record.
         Founder::RippleSnail => SenseTable {
+            live: true,
             sight_m: 0.5,
             sight_night_m: 0.25,
             sight_still_fraction: 0.5,

@@ -205,6 +205,22 @@ fn founder_rows() -> Vec<Row> {
             .prov("decision"),
         r("water_margin_m", "m", nonneg, "an aquatic body's step needs standing water within this of its destination face")
             .prov("decision"),
+        // The amphibious table (`Amphibious`, AMPHIBIOUS-SNAIL): the ripple-snail's only,
+        // optional on the others. `on_land` is a switch: no row.
+        r("amphibious.dry_ground_s", "s", Range::positive(), "out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather").optional().log().prov("decision"),
+        r("amphibious.wet_ground_s", "s", Range::positive(), "... and in this on saturated ground (pore fill 1, or a film of water)").optional().log().prov("decision"),
+        r("amphibious.rehydrate_per_s", "clock fraction/s", nonneg, "the clock falls this fast in water (standing water within water_margin_m)").optional().prov("decision"),
+        r("amphibious.step_moisture_min", "pore fill 0..1", fraction, "the least ground moisture a step onto a face out of water needs").optional().prov("decision"),
+        r("amphibious.return_fraction", "clock fraction", nonneg, "at night or in rain its heuristic heads for water past this, and it is held to the water-bound rule until it drinks").optional().prov("decision"),
+        r("amphibious.day_return_fraction", "clock fraction", nonneg, "... and past this by day in dry weather (the activity bias)").optional().prov("decision"),
+        r("amphibious.day_drying_factor", "x", nonneg, "the clock runs this many times as fast while the sun is up").optional().prov("decision"),
+        r("amphibious.rain_drying_factor", "x", nonneg, "... and this many times as fast while rain falls (0: no drying in rain)").optional().prov("decision"),
+        r("amphibious.lethal_fraction", "clock fraction", Range::positive(), "it dies of desiccation at this (from 1 up it cannot feed)").optional().prov("decision"),
+        r("amphibious.water_search_m", "m", nonneg, "how far its water reflex looks for standing water (a world query)").optional(),
+        r("amphibious.retract_hold_s", "s", nonneg, "a threat seen or felt makes it stop and close for this (0: it flees instead)").optional().prov("decision"),
+        r("amphibious.retract_armour", "fraction", fraction, "a hit on it while retracted is reduced by this, on top of its armour").optional().prov("decision"),
+        r("amphibious.roam_search_m", "m", nonneg, "at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam)").optional(),
+        r("amphibious.roam_after_rain_s", "s", nonneg, "the roam hours last this long after rain stops").optional(),
         r("contact_height_fraction", "x body height", nonneg, "the contact receptors' height").digest(),
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),

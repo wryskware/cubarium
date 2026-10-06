@@ -66,7 +66,11 @@ use crate::Fauna;
 //     {feeding_sight_fraction, kin_tracks}`, `FounderPhysiology::vigilance`, `Pack::{stalk_margin,
 //     commit_m, stalk_freeze}`, `PredationConfig::{awareness_sensed, awareness_unaware,
 //     aware_within_s}`, `HuntConfig::patch_scent_weight`, the `vigil` ledger lines.
-pub const SCHEMA: u32 = 47;
+// 48: AMPHIBIOUS SNAIL — `FounderPhysiology::amphibious` (`Amphibious`: the water rule, the
+//     drying clock, the thirst return, retraction and the roam reflex), `Mobility::{dryness,
+//     ashore, retract_ticks, thirsty}`, `Departure::Desiccation`, `Fauna::last_rain_tick`,
+//     the ledger's `amphibious_ticks`, `retracts` and `ashore_assimilated`.
+pub const SCHEMA: u32 = 48;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
