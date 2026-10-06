@@ -1033,6 +1033,9 @@ fn only_participants_drive_flank_and_count_in_the_window() {
     // Fed adult nearest the prey; hungry A on the prey's line behind it; hungry B beside A.
     let (world, mut flora, mut fauna, adults, _prey) =
         pack_scene(&[(2.0, 1.5, true), (2.9, 1.5, false), (2.0, 2.3, true)], (3.6, 1.5));
+    // The participant rule at a walk: a sprinting rush (GAIT) would reach the prey before the
+    // sampling this case reads.
+    fauna.config.founders[Founder::Chorister.index()].sprint = crate::Sprint::default();
     let (a, fed, b) = (adults[0], adults[1], adults[2]);
     let pack = fauna.packs()[0].id;
     let set = step_until(&mut fauna, &world, &mut flora, 40, |f| f.pack(pack).is_some_and(|p| p.target.is_some()));

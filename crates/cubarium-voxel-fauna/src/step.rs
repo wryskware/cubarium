@@ -1764,6 +1764,9 @@ fn founder_act(
         }
         held.forward *= slow;
     }
+    // GAIT: a forward above cruise is a sprint, allowed on its feet while its stamina lasts.
+    let on_feet = fauna.animals[i].mobility.climb.is_none();
+    crate::gait::gate(fauna, i, founder, on_feet, &mut held);
 
     // On a wall the tick is the climb's, and nothing else: no feeding, no sweep.
     if fauna.animals[i].mobility.climb.is_some() {
@@ -4257,3 +4260,6 @@ mod ground_response_tests;
 #[cfg(test)]
 #[path = "hunker_tests.rs"]
 mod hunker_tests;
+#[cfg(test)]
+#[path = "gait_tests.rs"]
+mod gait_tests;

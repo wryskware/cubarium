@@ -303,8 +303,10 @@ fn trajectories(senses: Senses, with_prey: bool, ticks: u32) -> (Vec<(f64, f64, 
 #[test]
 fn mains_senses_by_config_leave_a_far_prey_unsensed() {
     let cruise = config(MAINS).manifest(CH).cruise_m_per_s;
-    // The nearest member starts 5 m from the far prey (round the ring); it walks under 2 m.
-    let ticks = (2.0 / cruise * f64::from(crate::TICK_HZ)).floor() as u32;
+    // The nearest member starts 5 m from the far prey (round the ring); it walks 2.5 m, still
+    // half a metre short of the 2 m cone (GAIT: at the faster cruise 2 m was too short a
+    // stretch for the long sense to show).
+    let ticks = (2.5 / cruise * f64::from(crate::TICK_HZ)).floor() as u32;
     let (with, fauna) = trajectories(MAINS, true, ticks);
     let (without, _) = trajectories(MAINS, false, ticks);
     assert_eq!(with, without, "with main's senses a far prey changes nothing");
@@ -420,6 +422,9 @@ fn a_pursuit_holds_the_last_known_point_and_gives_up() {
     let pk = c.founders[CH.index()].pack.as_mut().expect("the chorister's pack table");
     pk.route_reach_fraction = 4.0 / (cruise * pk.chase_give_up_s);
     let give_up = cubarium_voxel::ticks_at_least_one(c.perception.give_up_s) as u32;
+    // The memory at a walk: a sprinting rush (GAIT) would carry the pack past the last-known
+    // point and onto the moved prey within its sight.
+    c.founders[CH.index()].sprint = crate::Sprint::default();
     let mut fauna = Fauna::new(c);
     let mut flora = Flora::new(FloraConfig::default());
     let members = pack(&mut fauna, &world, HUNTING, true, EAST);

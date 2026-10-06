@@ -72,7 +72,11 @@ use crate::Fauna;
 //     the ledger's `amphibious_ticks`, `retracts` and `ashore_assimilated`.
 // 49: HUNKER — `FounderPhysiology::hunker` (`Hunker`), `Animal::hunkered`, `Vigil::{flee_id,
 //     flee_tick, hunkered, hunker_close, pry, opened_until}`, the `vigil` ledger's hunker lines.
-pub const SCHEMA: u32 = 49;
+// 50: GAIT — `FounderPhysiology::sprint` (`Sprint`), `FounderState::{sprint_spent, winded}`,
+//     `Glider::glide_speed_fraction` (replaces `glide_body_lengths_per_s`), the ledger's
+//     `sprint_ticks_by_founder` and `winded_by_founder`; the Veilhound's and the seedporter's
+//     cruise and motor defaults.
+pub const SCHEMA: u32 = 50;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

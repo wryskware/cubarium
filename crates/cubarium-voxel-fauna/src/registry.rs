@@ -292,6 +292,11 @@ fn founder_rows() -> Vec<Row> {
         r("hunker.ring_m", "m", nonneg, "HUNKER: kin within this is beside it (bunched; hunkered, a ring)"),
         r("hunker.ring_resist_per_kin", "x resist", nonneg, "HUNKER: each hunkered kin within ring_m adds this x the resistance"),
         r("hunker.ring_kin_max", "kin", nonneg, "HUNKER: ...counting at most this many"),
+        // GAIT's sprint (`Sprint`).
+        r("sprint.body_lengths_per_s", "BL/s", nonneg, "GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint)"),
+        r("sprint.endurance_s", "s", nonneg, "GAIT: seconds at top speed from rested to spent (0: no sprint)"),
+        r("sprint.recovery_s", "s", nonneg, "GAIT: seconds off the sprint from spent to rested"),
+        r("sprint.resume_fraction", "fraction", fraction, "GAIT: a winded body sprints again once rested to this"),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
@@ -323,7 +328,7 @@ fn founder_rows() -> Vec<Row> {
         // The glider's table (`Glider`, F3): the seedporter's only, optional on the others.
         r("glider.climb_min_stand_m", "m", nonneg, "the shortest stand whose stem it climbs (crown top over the support)").optional().prov("decision"),
         r("glider.glide_ratio", "m across per m down", Range::positive(), "a glide's horizontal metres per metre of descent").optional().prov("decision"),
-        r("glider.glide_body_lengths_per_s", "body lengths/s", Range::positive(), "a glide's speed").optional().prov("decision"),
+        r("glider.glide_speed_fraction", "x ground cruise", Range::positive(), "a glide's speed, a multiple of the lineage's cruise").optional().prov("decision"),
         r("glider.glide_cost_factor", "x basal upkeep", nonneg, "a second gliding, upkeep included").optional().prov("decision"),
         r("glider.glide_min_height_m", "m", nonneg, "a glide starts only from this height over the landing surface").optional().prov("decision"),
         r("glider.roost_search_m", "m", nonneg, "at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this").optional(),

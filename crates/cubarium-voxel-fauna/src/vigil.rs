@@ -686,9 +686,9 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
                 match crate::step::refuge_step(fauna, i, view, fv, vg.refuge_search_m) {
                     Some(go) => {
                         fauna.ledger.vigil.refuges[k] += 1;
-                        Some(go)
+                        Some(crate::gait::dash(&fauna.config, founder, v.close_tick == now, go))
                     }
-                    None => Some(away(&a, &v, ring, cornered(&fauna.config, &a, &v, now))),
+                    None => Some(crate::gait::dash(&fauna.config, founder, v.close_tick == now, away(&a, &v, ring, cornered(&fauna.config, &a, &v, now)))),
                 }
             }
             // Up the stem, and still in the crown.
@@ -863,7 +863,8 @@ pub(crate) fn stalk(fauna: &mut Fauna, a: &Animal, t: &Track, d: f64, asked: f64
     let pv = fauna.percept(prey.id).map(|p| p.vigil).unwrap_or_default();
     if d <= pk.commit_m || pv.running(now) {
         fauna.ledger.vigil.rush_samples += 1;
-        return Some(asked);
+        // GAIT: the rush is its sprint.
+        return Some(asked * crate::gait::sprint_forward(&fauna.config, a.founder?));
     }
     if pk.stalk_freeze && t.modes & SIGHT != 0 && pv.scanning(now) {
         fauna.ledger.vigil.stalk_freezes += 1;

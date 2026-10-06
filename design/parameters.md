@@ -1356,7 +1356,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1759 rows)
+**`fauna.*`** (1795 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1508,6 +1508,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.littershredder.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.littershredder.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.littershredder.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.littershredder.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.littershredder.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.littershredder.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1534,7 +1538,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.littershredder.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.littershredder.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.littershredder.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.littershredder.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.littershredder.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.littershredder.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.littershredder.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -1685,6 +1689,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.hunker.ring_m` | 1.5 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.frondgrazer.hunker.ring_resist_per_kin` | 0.5 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.frondgrazer.hunker.ring_kin_max` | 3 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.frondgrazer.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.frondgrazer.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.frondgrazer.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.frondgrazer.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1711,7 +1719,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.frondgrazer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.frondgrazer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.frondgrazer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.frondgrazer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.frondgrazer.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.frondgrazer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.frondgrazer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -1862,6 +1870,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.lanternjaw.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.lanternjaw.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.lanternjaw.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.lanternjaw.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.lanternjaw.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.lanternjaw.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1888,7 +1900,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.lanternjaw.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.lanternjaw.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.lanternjaw.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.lanternjaw.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.lanternjaw.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.lanternjaw.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.lanternjaw.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2039,6 +2051,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.capgnawer.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.capgnawer.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.capgnawer.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.capgnawer.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.capgnawer.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.capgnawer.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2065,7 +2081,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.capgnawer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.capgnawer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.capgnawer.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.capgnawer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.capgnawer.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.capgnawer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.capgnawer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2216,6 +2232,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.loftstrider.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.loftstrider.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.loftstrider.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.loftstrider.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.loftstrider.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.loftstrider.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2242,7 +2262,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.loftstrider.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.loftstrider.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.loftstrider.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.loftstrider.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.loftstrider.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.loftstrider.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.loftstrider.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2393,6 +2413,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.ripple-snail.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.ripple-snail.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.ripple-snail.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.ripple-snail.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.ripple-snail.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.ripple-snail.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2419,7 +2443,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.ripple-snail.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.ripple-snail.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.ripple-snail.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.ripple-snail.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.ripple-snail.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.ripple-snail.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.ripple-snail.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2570,6 +2594,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.bellwing.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.bellwing.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.bellwing.sprint.body_lengths_per_s` | 0.0 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.bellwing.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.bellwing.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.bellwing.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2596,7 +2624,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flight.egg_air_refresh_s` | 600.0 | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.bellwing.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.bellwing.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.bellwing.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.bellwing.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.bellwing.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.bellwing.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.bellwing.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2662,7 +2690,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.seedporter.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.seedporter.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
-| `fauna.founders.seedporter.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.seedporter.cruise_body_lengths_per_s` | 2.38 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
 | `fauna.founders.seedporter.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
 | `fauna.founders.seedporter.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
 | `fauna.founders.seedporter.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
@@ -2747,6 +2775,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.seedporter.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.seedporter.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.seedporter.sprint.body_lengths_per_s` | 5.95 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.seedporter.sprint.endurance_s` | 10.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.seedporter.sprint.recovery_s` | 60.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.seedporter.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2773,7 +2805,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.seedporter.glider.glide_body_lengths_per_s` | 3.0 | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.seedporter.glider.glide_speed_fraction` | 2.0 | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.seedporter.glider.glide_cost_factor` | 1.2 | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.seedporter.glider.glide_min_height_m` | 1.0 | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.seedporter.glider.roost_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
@@ -2839,7 +2871,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
 | `fauna.founders.chorister.wall_climb_cost_factor` | 2.0 | x walking cost | [0, inf) |  | - | derived | motor cost of a second on a wall |
 | `fauna.founders.chorister.climb_speed_fraction` | 0.5 | x cruise | (0, inf) | 0.1–1 | B | decision | pace of a wall climb, a fraction of the cruise |
-| `fauna.founders.chorister.cruise_body_lengths_per_s` | 0.6 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
+| `fauna.founders.chorister.cruise_body_lengths_per_s` | 1.0 | body lengths/s | (0, inf) | 0.3–3 | A | decision, digest | full-forward pace (cruise = this x adult length) |
 | `fauna.founders.chorister.yaw_cap_rad_per_s` | 2.0 | rad/s | (0, inf) | 1–10 | B | placeholder, digest | the turn rate of full turn effort |
 | `fauna.founders.chorister.wade_height_fraction` | 0.5 | x current height | [0, inf) | 0–1 | B | placeholder, digest | deepest water walked into |
 | `fauna.founders.chorister.drown_height_fraction` | 1.0 | x current height | [0, inf) |  | A | decision, digest | water deeper than this is over it |
@@ -2924,6 +2956,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.hunker.ring_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: kin within this is beside it (bunched; hunkered, a ring) |
 | `fauna.founders.chorister.hunker.ring_resist_per_kin` | 0.0 | x resist | [0, inf) |  | - | placeholder | HUNKER: each hunkered kin within ring_m adds this x the resistance |
 | `fauna.founders.chorister.hunker.ring_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HUNKER: ...counting at most this many |
+| `fauna.founders.chorister.sprint.body_lengths_per_s` | 2.5 | BL/s | [0, inf) |  | - | placeholder | GAIT: top speed a rush or ground flight asks for (at or below the cruise: no sprint) |
+| `fauna.founders.chorister.sprint.endurance_s` | 20.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
+| `fauna.founders.chorister.sprint.recovery_s` | 120.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
+| `fauna.founders.chorister.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2950,7 +2986,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
-| `fauna.founders.chorister.glider.glide_body_lengths_per_s` | (absent) | body lengths/s | (0, inf) |  | - | decision | a glide's speed |
+| `fauna.founders.chorister.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
 | `fauna.founders.chorister.glider.glide_cost_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second gliding, upkeep included |
 | `fauna.founders.chorister.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.chorister.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |

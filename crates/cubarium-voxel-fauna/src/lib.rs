@@ -36,6 +36,8 @@ pub mod scent;
 pub mod vigil;
 pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
+mod gait;
+pub use gait::Sprint;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
@@ -1816,6 +1818,14 @@ pub struct FounderState {
     /// every walker.
     #[serde(default)]
     pub lift: f64,
+    /// **Stamina spent** (GAIT, [`crate::Sprint`]): 0 rested, 1 spent. A sprint spends it at
+    /// `1 / endurance_s` a second at top speed, and time off the sprint rests it at
+    /// `1 / recovery_s`.
+    #[serde(default)]
+    pub sprint_spent: f64,
+    /// Sprinted out: no sprint until rested to the sprint's `resume_fraction`.
+    #[serde(default)]
+    pub winded: bool,
 }
 
 /// What one controller interval actually did, from the body's own ledger events and
@@ -2628,6 +2638,12 @@ pub struct FaunaLedger {
     pub founder_ticks_by_founder: [u64; Founder::COUNT],
     pub ledges_up_by_founder: [u64; Founder::COUNT],
     pub ledges_down_by_founder: [u64; Founder::COUNT],
+    /// GAIT: ticks spent sprinting (a forward above cruise delivered), and the times a body
+    /// sprinted itself out (winded), by lineage.
+    #[serde(default)]
+    pub sprint_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub winded_by_founder: [u64; Founder::COUNT],
     /// Predation (`design/predation-and-flight-2026-09-28.md` §2.3), by the **striker's**
     /// lineage: strikes begun, and contacts resolved as a hit or a dodge.
     pub strikes_by_founder: [u64; Founder::COUNT],

@@ -68,6 +68,9 @@
 //! - `budget` (HUNKER, the bite-collapse probe): `hunter_study budget load=DIR minutes=M
 //!   [vig=off]` prints each frondgrazer's time by what holds it, its bites and their gaps, and
 //!   its flights' lengths and what was near while it fled.
+//! - `gait,` (GAIT): glides and forced glides, glider climbs onto stems and vines, the
+//!   seedporter's flights and refuge samples; on the GAIT branch also sprint ticks and
+//!   windings for the Veilhound and the seedporter.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
 //! - At the end, `sum,` lines over the whole run.
 
@@ -452,6 +455,24 @@ fn vig_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
         y.stalk_samples - x.stalk_samples,
         y.rush_samples - x.rush_samples,
         y.stalk_freezes - x.stalk_freezes,
+    )
+}
+
+/// **GAIT's line**, `a` → `b`: the gliders' glides (forced ones too), climbs onto a stem or a
+/// vine (refuge entries among them), and the seedporter's flights and refuge samples.
+fn gait_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let sp = Founder::Seedporter.index();
+    format!(
+        "glides={},glides_forced={},climbs={},sp_flees={},sp_refuge_samples={},vh_sprint_ticks={},vh_winded={},sp_sprint_ticks={},sp_winded={}",
+        b.glides - a.glides,
+        b.glides_forced - a.glides_forced,
+        b.climbs - a.climbs,
+        b.vigil.flees[sp] - a.vigil.flees[sp],
+        b.vigil.refuges[sp] - a.vigil.refuges[sp],
+        b.sprint_ticks_by_founder[VH.index()] - a.sprint_ticks_by_founder[VH.index()],
+        b.winded_by_founder[VH.index()] - a.winded_by_founder[VH.index()],
+        b.sprint_ticks_by_founder[sp] - a.sprint_ticks_by_founder[sp],
+        b.winded_by_founder[sp] - a.winded_by_founder[sp],
     )
 }
 
@@ -874,6 +895,7 @@ fn run(args: &[String]) {
             /*HUNK{*/
             println!("hunk,{arm},{minute},{}", hunk_line(&lw, &l));
             /*}HUNK*/
+            println!("gait,{arm},{minute},{}", gait_line(&lw, &l));
             vh_all.add(&vh_win);
             vh_win = Vh::default();
             meal_all.add(&meal_win);
@@ -914,6 +936,7 @@ fn run(args: &[String]) {
     /*HUNK{*/
     println!("sumhunk,{arm},{},{}", minute0, hunk_line(&l0, &l));
     /*}HUNK*/
+    println!("sumgait,{arm},{},{}", minute0, gait_line(&l0, &l));
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
             continue;

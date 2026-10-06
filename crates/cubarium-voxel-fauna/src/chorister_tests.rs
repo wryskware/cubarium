@@ -550,7 +550,11 @@ fn a_lanternjaw_leaves_a_carcass_a_chorister_approaches() {
         if with_chorister {
             let ch = introduce(&mut fauna, &world, C, HUNTING_CHORISTER);
             place(&mut fauna, ch, STRIKER_X + 2.5, LANE_Z, WEST);
-            drive(&mut fauna, ch, 1.0, false);
+            // Coming at it at the lanternjaw's own cruise (the case as written before GAIT
+            // gave the chorister its own, faster cruise: at that it arrives and passes
+            // before the yield has carried the lanternjaw clear).
+            let pace = fauna.config.manifest(Founder::Lanternjaw).cruise_m_per_s / fauna.config.manifest(C).cruise_m_per_s;
+            drive(&mut fauna, ch, pace.min(1.0), false);
         }
         let (x0, z0) = (animal(&fauna, lj).pose.x, animal(&fauna, lj).pose.z);
         let mut furthest: f64 = 0.0;
