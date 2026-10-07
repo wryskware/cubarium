@@ -2822,6 +2822,10 @@ pub struct FaunaLedger {
     /// `eaten_organic_in` over every bite this layer took.
     pub bites_by_food: [u64; Food::COUNT],
     pub eaten_by_food: [f64; Food::COUNT],
+    /// Living fungal mycelium withdrawn by lineage, included in CapTissue intake.
+    pub eaten_mycelium_by_founder: [f64; Founder::COUNT],
+    /// Raw organic matter withdrawn by founder and food, before any bite spillage.
+    pub eaten_by_founder_food: [[f64; Food::COUNT]; Founder::COUNT],
     /// A founder body's bites by lineage **and** food class (roster R1's measure: which
     /// of its foods a lineage actually takes, when two lineages share one). Founder
     /// bites only, so each row sums to [`FaunaLedger::bites_by_founder`].

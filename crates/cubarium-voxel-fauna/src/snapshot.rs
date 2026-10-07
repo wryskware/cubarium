@@ -124,7 +124,8 @@ use crate::Fauna;
 // 64: PUP — `Pack::{regurgitate_reserve_fraction, provision_scramble, pup_starves_on_empty}`;
 //     `FaunaLedger::{pup_swallowed_organic, pup_regurgitated_surplus, pup_regurgitated_lean,
 //     pup_upkeep_organic, pups_starved, pups_lost_other, provision_withheld_ticks}`.
-pub const SCHEMA: u32 = 64;
+// 65: GLOWCAP — living mycelium intake by founder, included in CapTissue.
+pub const SCHEMA: u32 = 65;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

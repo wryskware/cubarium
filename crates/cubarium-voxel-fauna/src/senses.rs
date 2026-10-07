@@ -464,14 +464,13 @@ impl DetritusField {
                 }
             }
             CueSource::Fungal => {
-                // TASTE: a fungus emits by its edible cap tissue, above its grazing floor; one
-                // cropped to the floor is no source.
+                // Edible caps emit first; a cropped fungus still advertises exposed
+                // mycelium when the species offers it to grazers.
                 for st in fv.stands.iter().filter(|st| {
-                    st.foliage > 0.0
-                        && fv.config.species(st.species).trophic
+                    fv.config.species(st.species).trophic
                             == cubarium_voxel_flora::Trophic::Saprotroph
                 }) {
-                    let edible = fv.edible_foliage(st);
+                    let edible = fv.edible_foliage(st) + fv.edible_mycelium(st);
                     if !(edible > 0.0) {
                         continue;
                     }

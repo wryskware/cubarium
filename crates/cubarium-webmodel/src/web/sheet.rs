@@ -117,8 +117,11 @@ pub fn sheet(a: &Snap, b: &Snap, day_s: f64) -> String {
         vec![("upkeep".into(), (fb.film_upkeep - fa.film_upkeep) * per)],
         true,
     );
-    // Caps (glowcap foliage): built, shed (senescence), eaten.
-    row(&mut s, "glowcap caps", a.caps_total, b.caps_total, vec![("built".into(), (fb.built[GLOW] - fa.built[GLOW]) * per)], eaten(a, b, Food::CapTissue, per), vec![("shed".into(), (fb.shed[GLOW] - fa.shed[GLOW]) * per)], false);
+    // The animals' fungal food class includes mycelium after caps are cropped.
+    let mycelium = (fb.mycelium_taken-fa.mycelium_taken)*per;
+    let tissue = (fb.taken.foliage[GLOW]-fa.taken.foliage[GLOW])*per;
+    row(&mut s, "glowcap caps", a.caps_total, b.caps_total, vec![("built".into(), (fb.built[GLOW] - fa.built[GLOW]) * per)], vec![("all consumers".into(), (tissue-mycelium).max(0.0))], vec![("shed".into(), (fb.shed[GLOW] - fa.shed[GLOW]) * per)], false);
+    let _ = writeln!(s, "  fungal tissue taken: caps {}, mycelium {} (per day; lineage intake below includes both)", fmt((tissue-mycelium).max(0.0)), fmt(mycelium));
     // Foliage per photosynthetic species: the takeable stock; built, shed, eaten (by share).
     let _ = writeln!(s, "  foliage (takeable stock; built | eaten | shed):");
     for sp in Species::ALL {

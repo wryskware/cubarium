@@ -61,6 +61,8 @@ mod cure_budget_tests;
 #[cfg(test)]
 mod shared_face_tests;
 #[cfg(test)]
+mod glowcap_budget_tests;
+#[cfg(test)]
 mod contest_tests;
 #[cfg(test)]
 mod canopy_establish_tests;
@@ -944,6 +946,18 @@ pub struct SpeciesConfig {
     /// fungus. **Placeholder**
     /// (`design/backlog.md` §1); inert on a [`Trophic::Photo`] species.
     pub substrate_uptake_per_s: f64,
+    /// Saprotroph uptake follows its maintenance, construction and reserve demand when
+    /// true. False retains the rate-only request for comparative studies.
+    #[serde(default)]
+    pub substrate_budgeted: bool,
+    /// Require dead organic substrate for establishment and income. The dark habitat
+    /// still supplies moisture; it cannot replace a saprotroph's carbon substrate.
+    #[serde(default)]
+    pub substrate_required: bool,
+    /// Fraction of mycelium (wood) offered to a fungal grazer once edible caps are gone.
+    /// Zero disables stand grazing; the remaining wood can regrow or die below alive_min.
+    #[serde(default)]
+    pub mycelium_graze_fraction: f64,
     /// **Saprotroph only.** The fraction of the organic matter taken that becomes tissue;
     /// the rest is respired at once (`respired_out`, heat). The brief's `yield`, spelled out
     /// because `yield` is a reserved word. **Placeholder**; inert on a `Photo` species.
@@ -1729,6 +1743,9 @@ impl SpeciesConfig {
             // inheriting a rate from the base.
             trophic: Trophic::Photo,
             substrate_uptake_per_s: 0.0,
+            substrate_budgeted: false,
+            substrate_required: false,
+            mycelium_graze_fraction: 0.0,
             substrate_yield: 0.0,
             establish_substrate_min: 0.0,
             // One row up and one down, for a species that ever walks the box. Inert here:
@@ -2517,6 +2534,9 @@ impl SpeciesConfig {
             dark_founder_share: 0.5,
             trophic: Trophic::Saprotroph,
             substrate_uptake_per_s: 0.02,
+            substrate_budgeted: true,
+            substrate_required: true,
+            mycelium_graze_fraction: 0.5,
             substrate_yield: 0.4,
             establish_substrate_min: 0.02,
             // No light income at all, and no light gate (`step`'s `gates` opens `light_ok`
@@ -3559,6 +3579,14 @@ pub struct FloraLedger {
     /// leaves the system out of that uptake is the part the fungus does not keep, and that
     /// is `respired_out` like every other respiration.
     pub substrate_uptake: [f64; Species::COUNT],
+    /// Fungal consumption split into [dead wood, litter], internal diagnostic flows.
+    pub substrate_by_pool: [f64; 2],
+    /// Decomposition split into [litter, dead wood, carrion], organic matter respired.
+    pub decomposed_by_pool: [f64; 3],
+    /// Mycelium eaten by animals, a diagnostic subset of consumed_organic_out.
+    pub mycelium_taken: [f64; Species::COUNT],
+    /// Organic matter respired by each stand species (substrate loss and metabolism).
+    pub stand_respired: [f64; Species::COUNT],
     /// **Seed counts per species**, indexed by [`Species::index`], cumulative:
     /// diagnostics like the `propagule_*` arrays, in no `expected_*` total.
     ///
@@ -4417,6 +4445,15 @@ impl<'a> FloraView<'a> {
     /// The **fungus** on `site` ([`FaceLayer::Fungus`]).
     pub fn fungus_at(&self, site: Site) -> Option<&'a Stand> {
         self.stand_in(site, FaceLayer::Fungus)
+    }
+
+    /// Living mycelium exposed after a fungus's edible caps have been cropped.
+    pub fn edible_mycelium(&self, stand: &Stand) -> f64 {
+        let sc = self.config.species(stand.species);
+        if sc.trophic != Trophic::Saprotroph || self.edible_foliage(stand) > 0.0 {
+            return 0.0;
+        }
+        sc.mycelium_graze_fraction.clamp(0.0, 1.0) * stand.wood.max(0.0)
     }
 
     /// The **plant beneath** the top one on `site` ([`FaceLayer::Under`]): a woody recruit
@@ -5577,6 +5614,22 @@ impl Flora {
         layers: &std::ops::RangeInclusive<i64>,
     ) -> Option<TakenFoliage> {
         self.withdraw_foliage(site, place, want, Some(layers))
+    }
+
+    /// Take exposed living mycelium from the fungal place, with mineral pro rata.
+    pub fn take_mycelium(&mut self, site: Site, want: f64) -> Option<Taken> {
+        if !(want > 0.0) || !want.is_finite() { return None; }
+        let i = find_stand(&self.config, &self.stands, site, FaceLayer::Fungus).ok()?;
+        let organic = want.min(self.view().edible_mycelium(&self.stands[i]));
+        if !(organic > 0.0) { return None; }
+        let sp = self.stands[i].species;
+        let before = self.stands[i].material();
+        self.stands[i].wood -= organic;
+        let mineral = step::pull_mineral(&mut self.stands[i], before, organic);
+        self.stands[i].resync_layers(self.config.species(sp));
+        self.ledger.mycelium_taken[sp.index()] += organic;
+        Some(self.book_consumed(Taken { organic, mineral,
+            energy: self.config.species(sp).energy_density * organic }))
     }
 
     /// The one foliage withdrawal: lowest layer first, each layer giving at most its

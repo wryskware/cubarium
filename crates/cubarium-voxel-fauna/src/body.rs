@@ -3448,6 +3448,8 @@ pub(crate) enum Meal {
     /// plant, a fungus and a plant beneath the first (a woody recruit in its sward,
     /// `FaceLayer::Under`), and the bite takes the one the mouth chose.
     Stand { root: Site, place: cubarium_voxel_flora::FaceLayer, food: crate::Food },
+    /// Exposed living mycelium on a mouth column, after its edible caps are cropped.
+    Mycelium { root: Site },
 }
 
 impl Meal {
@@ -3455,6 +3457,7 @@ impl Meal {
     pub(crate) fn food(self) -> crate::Food {
         match self {
             Meal::Pool { food, .. } | Meal::Stand { food, .. } => food,
+            Meal::Mycelium { .. } => crate::Food::CapTissue,
         }
     }
 }
@@ -3489,7 +3492,35 @@ pub(crate) fn mouth_meal(
                 .map(|(site, stock)| (Meal::Pool { site, food }, stock, stock))
         } else {
             mouth_foliage_offer(fv, view, cols, standing_y, body, crate::Diet::only(food))
-                .map(|(root, place, stock, offer)| (Meal::Stand { root, place, food }, stock, offer))
+                .map(|(root, place, stock, offer)| {
+                    // A bite may finish the caps and continue into the exposed root
+                    // tissue. Include that food in its diminishing-stock budget, or
+                    // tiny regrown caps can prevent it ever reaching the mycelium.
+                    let mycelium = if food == crate::Food::CapTissue
+                        && root.y == standing_y
+                        && mouth_crown_layers(standing_y, body, view.config.voxel_m).contains(&(i64::from(standing_y)+1)) {
+                        fv.stand_in(root, place).filter(|s| fv.edible_foliage(s) <= stock).map_or(0.0, |s|
+                            fv.config.species(s.species).mycelium_graze_fraction.clamp(0.0,1.0)*s.wood.max(0.0))
+                    } else { 0.0 };
+                    (Meal::Stand { root, place, food }, stock+mycelium, offer+mycelium)
+                })
+                .or_else(|| {
+                    if food != crate::Food::CapTissue
+                        || !mouth_crown_layers(standing_y, body, view.config.voxel_m).contains(&(i64::from(standing_y) + 1)) {
+                        return None;
+                    }
+                    // Mycelium is at its root face, rather than in a crown. A mouth
+                    // cannot eat the stand on another ledge just because it smells it.
+                    cols.iter().filter_map(|&(x,z)| {
+                        let root = Site { x: x.rem_euclid(i64::from(view.config.width)) as u32, y: standing_y, z };
+                        let s = fv.fungus_at(root)?;
+                        let stock = fv.edible_mycelium(s);
+                        (stock > 0.0).then_some((Meal::Mycelium { root }, stock, stock))
+                    }).max_by(|a,b| a.2.total_cmp(&b.2).then_with(|| {
+                        let root = |m: Meal| match m { Meal::Mycelium { root } => root, _ => unreachable!() };
+                        root(b.0).cmp(&root(a.0))
+                    }))
+                })
         };
         if let Some((meal, stock, offer)) = found
             && stock > 0.0

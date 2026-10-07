@@ -293,13 +293,15 @@ fn a_glowcap_on_a_log_earns_and_one_on_a_bare_face_earns_nothing() {
 #[test]
 fn the_uptake_never_exceeds_the_pool_and_stops_when_it_is_empty() {
     let mut world = pillars(4, &[1], 0.5);
-    let mut flora = Flora::new(config());
+    let mut uncapped = config();
+    uncapped.glowcap.substrate_budgeted = false;
+    let mut flora = Flora::new(uncapped);
     let site = plant_glowcap(&mut flora, &world, 1);
     let sc = flora.config().species(Species::Glowcap).clone();
 
     // What the rate alone would ask for on the first tick, at full moisture.
     let want = sc.substrate_uptake_per_s * 0.5 * sc.wood_max * DT;
-    assert!((want - 5e-5).abs() < 1e-18, "the fixture's premise: {want}");
+    assert!(want > 0.0, "fixture: a positive uptake rate");
     let (organic, mineral, energy) = log_on(&mut flora, site, 0.5 * want);
     assert!(
         organic < want,
@@ -1086,6 +1088,7 @@ fn log_with(flora: &mut Flora, site: Site, organic: f64, mineral: f64) -> (f64, 
 /// them is a preset change.
 fn budget_config() -> FloraConfig {
     let mut config = config();
+    config.glowcap.substrate_budgeted = false;
     config.initial_mineral = 0.0;
     config.decomposition = 0.0;
     config.wood_decomposition = 0.0;
@@ -1114,10 +1117,9 @@ fn a_mineral_free_log_pays_the_upkeep_and_builds_nothing() {
     let (organic, _, energy) = log_with(&mut flora, site, 1.0, 0.0);
     let sc = flora.config().species(Species::Glowcap).clone();
     let before = flora.view().fungus_at(site).expect("the founder").clone();
-    assert_eq!(
-        (before.wood, before.foliage, before.reserve),
-        (0.05, 0.1, 0.025)
-    );
+    let founder_wood = 0.5 * sc.wood_max;
+    assert_eq!((before.wood, before.foliage, before.reserve),
+        (founder_wood, sc.alpha * founder_wood, sc.reserve_cap * founder_wood));
     assert!(
         before.mineral > 0.0,
         "a founder arrives with its own tissue mineral"
@@ -1204,12 +1206,11 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
         )
     }
 
-    let sc = FloraConfig::default().species(Species::Glowcap).clone();
-    let d_w = (sc.wood_rate * 0.05 * DT).min(sc.wood_max - 0.05);
-    assert!(
-        (d_w - 5e-6).abs() <= 1e-15 * 5e-6,
-        "the tick's wood demand is {d_w}"
-    );
+    let sc = budget_config().species(Species::Glowcap).clone();
+    let founder_wood = 0.5 * sc.wood_max;
+    let uptake = sc.substrate_uptake_per_s * founder_wood * DT;
+    let d_w = (sc.wood_rate * founder_wood * DT).min(sc.wood_max - founder_wood);
+    assert!(uptake > 0.0 && d_w > 0.0, "fixture: positive uptake and wood demand");
 
     // Over-funded: a dead trunk's own density. The wood is the rate's own demand, and the
     // mineral the tissue did not need went to the site's pool.
@@ -1221,7 +1222,7 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
         "the full log built {dw_full} of {d_w}"
     );
     assert!(
-        (arrived_full - 1e-6).abs() <= 1e-9 * 1e-6,
+        (arrived_full - sc.n_tissue * uptake).abs() <= 1e-9 * sc.n_tissue * uptake,
         "arrived {arrived_full}"
     );
     let need_full = sc.n_tissue * dw_full;
@@ -1232,11 +1233,11 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
         pool_full
     );
 
-    // Half-funded: a log at 0.001 of mineral per unit, a twentieth of a trunk's density,
-    // so the tick's arrival is 5e-8 and pays for 2.5e-6 of wood exactly.
-    let (dw_half, pool_half, arrived_half) = one_tick(0.001);
+    // Half-funded: choose the log's density to fund half the configured wood demand.
+    let half_mineral = sc.n_tissue * d_w * 0.5;
+    let (dw_half, pool_half, arrived_half) = one_tick(half_mineral / uptake);
     assert!(
-        (arrived_half - 5e-8).abs() <= 1e-9 * 5e-8,
+        (arrived_half - half_mineral).abs() <= 1e-9 * half_mineral,
         "arrived {arrived_half}"
     );
     assert!(
@@ -1489,7 +1490,9 @@ fn the_draw_splits_pro_rata_between_the_two_pools_and_sums_to_the_rate_bound() {
         &[1],
         cubarium_voxel::Materials::DEFAULT.field_capacity(Material::Soil),
     );
-    let mut flora = Flora::new(isolating());
+    let mut uncapped = isolating();
+    uncapped.glowcap.substrate_budgeted = false;
+    let mut flora = Flora::new(uncapped);
     let site = plant_glowcap(&mut flora, &world, 1);
     let sc = flora.config().species(Species::Glowcap).clone();
     let (wood, litter) = (0.03, 0.01);
@@ -1498,7 +1501,7 @@ fn the_draw_splits_pro_rata_between_the_two_pools_and_sums_to_the_rate_bound() {
 
     // Full moisture on this fixture, so the bound is the rate's own.
     let want = sc.substrate_uptake_per_s * 0.5 * sc.wood_max * DT;
-    assert!((want - 5e-5).abs() < 1e-18, "the fixture's premise: {want}");
+    assert!(want > 0.0, "fixture: a positive uptake rate");
     assert!(
         want < 0.1 * litter.min(wood),
         "the demand has to be far below both pools"

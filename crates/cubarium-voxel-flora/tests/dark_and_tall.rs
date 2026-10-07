@@ -97,13 +97,14 @@ fn darkness_is_one_at_and_below_full_half_at_the_midpoint_and_zero_from_max() {
 fn a_roofed_rock_face_with_nothing_on_it_passes_the_glowcap_gates_only_with_the_dark_knobs() {
     let cellar = rock_cellar(true);
     let view = cellar.view();
-    let sc = SpeciesConfig::glowcap();
+    let mut sc = SpeciesConfig::glowcap();
+    sc.substrate_required = false;
     let g = establishment_gates(&view, CELLAR, &sc);
     assert_eq!(g.soil_voxels, 0, "fixture: a rock face, no soil in the box");
     assert!(g.sky_visibility <= sc.dark_sky_full, "fixture: the roof leaks: {g:?}");
     assert!(g.passes(), "a fully dark rock face refused the glowcap: {g:?}");
 
-    let off = undarkened(SpeciesConfig::glowcap());
+    let off = undarkened(sc.clone());
     let g = establishment_gates(&view, CELLAR, &off);
     assert!(!g.passes(), "today's glowcap took a bare dark rock face: {g:?}");
 
@@ -135,7 +136,9 @@ fn dark_glowcap(sc: SpeciesConfig) -> (Flora, World, f64) {
 
 #[test]
 fn a_dark_glowcap_with_no_substrate_grows_on_the_seep_and_the_ledgers_close() {
-    let (mut flora, mut world, wood) = dark_glowcap(SpeciesConfig::glowcap());
+    let mut seep = SpeciesConfig::glowcap();
+    seep.substrate_required = false;
+    let (mut flora, mut world, wood) = dark_glowcap(seep.clone());
     for t in 0..300 {
         flora.step(&mut world);
         if t % 50 == 0 {
@@ -153,7 +156,7 @@ fn a_dark_glowcap_with_no_substrate_grows_on_the_seep_and_the_ledgers_close() {
     assert_eq!(l.fixed_in, 0.0, "a saprotroph fixes nothing from light");
 
     // The same stand with the knobs zeroed earns nothing and does not grow.
-    let (mut flora, mut world, wood) = dark_glowcap(undarkened(SpeciesConfig::glowcap()));
+    let (mut flora, mut world, wood) = dark_glowcap(undarkened(seep));
     for _ in 0..300 {
         flora.step(&mut world);
     }

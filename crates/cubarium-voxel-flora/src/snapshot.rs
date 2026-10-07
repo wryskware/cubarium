@@ -52,7 +52,9 @@ use crate::Flora;
 //     film_land_growth_per_s, film_land_capacity_per_m2}`.
 // 34: SNAIL-LAND — the shore band and the wet capacity: `FloraConfig::{film_shore_band_m,
 //     film_shore_moisture_min, film_land_capacity_wet_per_m2}`.
-pub const SCHEMA: u32 = 34;
+// 35: GLOWCAP — demand-bound substrate, required carbon substrate, mycelium grazing,
+//     and pool-specific intake/decomposition diagnostics.
+pub const SCHEMA: u32 = 35;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
