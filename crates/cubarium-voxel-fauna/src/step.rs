@@ -1299,7 +1299,8 @@ fn controllers(
             }
         }
         // SNAIL-LAND-2: the giving-up density. A grazer wanting food on a grazed face (its
-        // film under `graze_give_up` of a site's capacity) walks to a richer face in reach.
+        // edible film under `graze_give_up` of a site's capacity) walks to a richer face in
+        // reach.
         if driven && fauna.controllers.flees(id) {
             if let Some(go) = graze_reflex(fauna, i, view, &fv, sky) {
                 actions = go;
@@ -1620,8 +1621,9 @@ pub(crate) fn trip_ready(rule: &crate::Reproduction, st: &crate::ReproductionSta
 
 /// **The giving-up density** (SNAIL-LAND-2, [`crate::Amphibious::graze_give_up`]): an
 /// amphibious grazer driven by its own heuristic, on the ground, awake, free, not
-/// retracted and not thirsty, wanting food (its eating latch on), on a face whose film is
-/// under `graze_give_up` of one site's underwater capacity, walks to the face
+/// retracted and not thirsty, wanting food (its eating latch on), on a face whose edible
+/// film (above the grazing refuge, TASTE) is under `graze_give_up` of one site's
+/// underwater capacity, walks to the face
 /// [`graze_target`] picks, feeding as it goes. `None` otherwise (its heuristic stays on
 /// the film it tastes). A heuristic world query over the plant layer, as the roam is.
 fn graze_reflex(
@@ -1647,7 +1649,8 @@ fn graze_reflex(
     }
     let v = view.config.voxel_m;
     let k_site = fv.config.film_capacity_per_m2 * v * v;
-    if !(k_site > 0.0) || fv.film_at(a.site) >= am.graze_give_up * k_site {
+    // TASTE: the edible film, above the grazing refuge, as its mouth tastes it.
+    if !(k_site > 0.0) || fv.edible_film_at(a.site) >= am.graze_give_up * k_site {
         return None;
     }
     let roam = am.on_land && roam_hours(fauna, &am, view, sky);
@@ -1657,7 +1660,7 @@ fn graze_reflex(
         .filter(|b| b.id != a.id && b.founder == Some(founder))
         .map(|b| b.site)
         .collect();
-    let (dx, dz) = graze_target(view, &am, a, roam, k_site, &|s| fv.film_at(s), &others)?;
+    let (dx, dz) = graze_target(view, &am, a, roam, k_site, &|s| fv.edible_film_at(s), &others)?;
     Some(glider::walk_toward(a, dx, dz, 1.0))
 }
 
@@ -1924,7 +1927,8 @@ fn roam_reflex(
             if d > reach || d <= 0.0 {
                 continue;
             }
-            let film = fv.film_at(cubarium_voxel_flora::Site { x: x as u32, y, z });
+            // TASTE: the edible film, above the grazing refuge.
+            let film = fv.edible_film_at(cubarium_voxel_flora::Site { x: x as u32, y, z });
             if film > 0.0 {
                 let score = film / d;
                 if film_best.is_none_or(|(b, _, _)| score > b) {
@@ -4645,6 +4649,9 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
 #[cfg(test)]
 #[path = "capgnawer_tests.rs"]
 mod capgnawer_tests;
+#[cfg(test)]
+#[path = "taste_tests.rs"]
+mod taste_tests;
 #[cfg(test)]
 #[path = "circadian_tests.rs"]
 mod circadian_tests;

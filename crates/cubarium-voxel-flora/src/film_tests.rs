@@ -1175,3 +1175,34 @@ fn the_shore_knobs_survive_a_snapshot() {
     assert_eq!(back.config.film_shore_moisture_min, c.film_shore_moisture_min);
     assert_eq!(back.config.film_land_capacity_wet_per_m2, c.film_land_capacity_wet_per_m2);
 }
+
+/// **TASTE** (Wrysk 2026-10-06: "why does empty face still taste like algae?"): what a
+/// grazer perceives of a face's film is what [`Flora::take_film`] would give it, the film
+/// above the grazing refuge (`film_graze_refuge` of a site's capacity), read through the one
+/// accessor ([`crate::FloraView::edible_film_at`], [`crate::FloraView::edible_film`]). On
+/// either side of the refuge, at it, and with no film, the reading equals the whole take,
+/// and a face at or under its refuge reads 0.
+#[test]
+fn the_edible_film_a_view_reads_is_what_take_film_gives() {
+    let world = strip(&[1; 4]);
+    let c = config();
+    let refuge = c.film_graze_refuge * c.film_capacity_per_m2 * c.voxel_m * c.voxel_m;
+    assert!(refuge > 0.0, "fixture: a refuge");
+    for stock in [0.0, 0.5 * refuge, refuge, 1.5 * refuge, 10.0 * refuge] {
+        let mut flora = Flora::in_world(&world, c.clone());
+        let site = face(1);
+        if stock > 0.0 {
+            put_film(&mut flora, site, stock);
+        }
+        let at = flora.view().edible_film_at(site);
+        let of_ground = flora.view().edible_film(&ground(&flora, site));
+        let took = flora.take_film(site, 1.0e9).map_or(0.0, |t| t.organic);
+        assert_eq!(at, took, "film {stock}: the view reads {at}, a mouth takes {took}");
+        assert_eq!(of_ground, took, "film {stock}: per ground entry {of_ground}, a mouth takes {took}");
+        if stock <= refuge {
+            assert_eq!(at, 0.0, "film {stock} at or under the refuge {refuge} is not food");
+        } else {
+            assert!(at > 0.0, "film {stock} above the refuge {refuge} is food");
+        }
+    }
+}

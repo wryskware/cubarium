@@ -303,24 +303,25 @@ pub(crate) fn head(heading: f64, want: f64, forward: f64, feed: f64) -> Actions 
 }
 
 /// How strongly one ground entry or stand offers `food`, `[0, 1]`: the detritus field's
-/// emission curve for litter and carrion, the film's against its capacity, and presence
-/// for stand tissue, nectar and fruit.
-fn ground_cue(fv: &FloraView<'_>, fauna: &Fauna, g: &cubarium_voxel_flora::Ground, food: Food, cell_m2: f64) -> f64 {
+/// emission curve for litter and carrion, the edible film's against its capacity, and
+/// presence for stand tissue above its grazing floor, nectar and fruit (TASTE: only what
+/// the prey can eat, [`FloraView::edible_film`], [`FloraView::edible_foliage`]).
+pub(crate) fn ground_cue(fv: &FloraView<'_>, fauna: &Fauna, g: &cubarium_voxel_flora::Ground, food: Food, cell_m2: f64) -> f64 {
     let reference = fauna.config.cue.emit_reference;
     let sat = |x: f64, r: f64| if r > 0.0 && x > 0.0 { (x / r).min(1.0) } else { 0.0 };
     match food {
         Food::Litter => sat(g.litter, reference),
         Food::Carrion => sat(g.carrion, reference),
-        Food::Film => sat(g.film, fv.config.film_capacity_per_m2 * cell_m2),
+        Food::Film => sat(fv.edible_film(g), fv.config.film_capacity_per_m2 * cell_m2),
         _ => 0.0,
     }
 }
 
-fn stand_cue(fv: &FloraView<'_>, st: &cubarium_voxel_flora::Stand, food: Food) -> f64 {
+pub(crate) fn stand_cue(fv: &FloraView<'_>, st: &cubarium_voxel_flora::Stand, food: Food) -> f64 {
     let trophic = fv.config.species(st.species).trophic;
     let on = match food {
-        Food::CapTissue => trophic == Trophic::Saprotroph && st.foliage > 0.0,
-        Food::Foliage => trophic != Trophic::Saprotroph && st.foliage > 0.0,
+        Food::CapTissue => trophic == Trophic::Saprotroph && fv.edible_foliage(st) > 0.0,
+        Food::Foliage => trophic != Trophic::Saprotroph && fv.edible_foliage(st) > 0.0,
         Food::Nectar => st.nectar > 0.0,
         Food::Fruit => st.fruit > 0.0,
         _ => false,

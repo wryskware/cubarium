@@ -450,28 +450,36 @@ impl DetritusField {
                 // against `emit_reference` a full film emitted about 0.1 (roster R2b).
                 let voxel_m = view.config.voxel_m;
                 let capacity = fv.config.film_capacity_per_m2 * voxel_m * voxel_m;
-                for g in fv.ground.iter().filter(|g| g.film > 0.0) {
+                // TASTE: by its edible film, above the grazing refuge; a face grazed to the
+                // refuge is no source.
+                for g in fv.ground.iter().filter(|g| g.film > 0.0 && fv.edible_film(g) > 0.0) {
                     let Some(n) = graph.node(i64::from(g.site.x), g.site.y, g.site.z) else {
                         continue;
                     };
                     let n = n as usize;
                     // Ground is one entry per site, so a face is a source once.
-                    self.emit[n] = film_strength(g.film, capacity) * UPDATE_S;
+                    self.emit[n] = film_strength(fv.edible_film(g), capacity) * UPDATE_S;
                     self.seen[n] = epoch;
                     self.work.push(n as u32);
                 }
             }
             CueSource::Fungal => {
+                // TASTE: a fungus emits by its edible cap tissue, above its grazing floor; one
+                // cropped to the floor is no source.
                 for st in fv.stands.iter().filter(|st| {
                     st.foliage > 0.0
                         && fv.config.species(st.species).trophic
                             == cubarium_voxel_flora::Trophic::Saprotroph
                 }) {
+                    let edible = fv.edible_foliage(st);
+                    if !(edible > 0.0) {
+                        continue;
+                    }
                     let Some(n) = graph.node(i64::from(st.site.x), st.site.y, st.site.z) else {
                         continue;
                     };
                     let n = n as usize;
-                    let add = st.foliage / self.cue.emit_reference * UPDATE_S;
+                    let add = edible / self.cue.emit_reference * UPDATE_S;
                     if self.seen[n] == epoch {
                         // Two stands on one face emit as their summed stock would.
                         self.emit[n] = (self.emit[n] + add).min(UPDATE_S);
@@ -2958,7 +2966,7 @@ fn film_strength(film: f64, capacity: f64) -> f64 {
 /// site holds no film.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn film_emission(view: &VoxelView<'_>, fv: &FloraView<'_>, site: Site) -> Option<f64> {
-    let g = fv.ground_at(site).filter(|g| g.film > 0.0)?;
+    let g = fv.ground_at(site).filter(|g| fv.edible_film(g) > 0.0)?;
     let v = view.config.voxel_m;
-    Some(film_strength(g.film, fv.config.film_capacity_per_m2 * v * v))
+    Some(film_strength(fv.edible_film(g), fv.config.film_capacity_per_m2 * v * v))
 }

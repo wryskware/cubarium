@@ -1037,8 +1037,15 @@ fn snail_line(sim: &Sim, a: &FaunaLedger, b: &FaunaLedger) -> String {
     let per_wet = if land_wet > 0 { land_film / land_wet as f64 } else { f64::NAN };
     // SNAIL-LAND: the snail's clutches lying now.
     let clutches_now = sim.fauna().view().clutches.iter().filter(|c| c.lineage == f).count();
+    // TASTE: the share of the snails now on a face whose film is all refuge (film there,
+    // none of it edible): the food trap SNAIL-LAND-2's probes found.
+    let fv = sim.flora().view();
+    let at_refuge = {
+        let on = sim.fauna().view().animals.iter().filter(|x| x.founder == Some(f)).filter(|x| fv.film_at(x.site) > 0.0 && fv.edible_film_at(x.site) == 0.0).count();
+        if now > 0 { on as f64 / now as f64 } else { f64::NAN }
+    };
     format!(
-        "n={now},desiccated={},lj_kills={},deaths={all},land_day={:.3},land_night={:.3},snail_h={hours:.2},intake_per_h={:.6},ashore_intake_share={:.3},retracts={},land_film={land_film:.5},land_film_faces={land_filmed},land_wet_faces={land_wet},land_film_per_wet_face={per_wet:.3e},eggs_laid={},eggs_hatched={},eggs_drowned={},eggs_dried={},eggs_lost={},clutches_now={clutches_now}",
+        "n={now},desiccated={},lj_kills={},deaths={all},land_day={:.3},land_night={:.3},snail_h={hours:.2},intake_per_h={:.6},ashore_intake_share={:.3},retracts={},land_film={land_film:.5},land_film_faces={land_filmed},land_wet_faces={land_wet},land_film_per_wet_face={per_wet:.3e},eggs_laid={},eggs_hatched={},eggs_drowned={},eggs_dried={},eggs_lost={},clutches_now={clutches_now},at_refuge={at_refuge:.3}",
         dead(Departure::Desiccation),
         dead(Departure::Killed { by: LJ }),
         share(0),
