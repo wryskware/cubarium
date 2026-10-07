@@ -98,7 +98,7 @@ pub(crate) use cubarium_voxel::KeyedRng as Rng;
 
 #[path = "glider.rs"]
 mod glider;
-pub(crate) use glider::glider_fruit_in_reach;
+pub(crate) use glider::{OffGraph, glider_fruit_in_reach, off_graph_exit};
 
 /// The tick's sky, read once (F1): what a flyer's act needs of the weather and the clock.
 #[derive(Clone, Copy, Debug)]

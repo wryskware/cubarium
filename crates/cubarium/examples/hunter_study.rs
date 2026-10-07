@@ -3188,6 +3188,19 @@ fn edge_probe(args: &[String]) {
     let mut refused_by = [[0u64; STEERS]; 9];
     // per lineage, per mobility mode (debug name): [awake samples, refused samples]
     let mut modes: std::collections::BTreeMap<(usize, String), [u64; 2]> = Default::default();
+    // EDGE-2: refused samples of the gliders and the loftstrider by where the body stands
+    // (its pose clear or caught in solid; on its route graph, off it with or without a way
+    // back on) and whether its motor would take a step in any of 16 headings, by layer; and by body.
+    let mut pclass: std::collections::BTreeMap<(usize, String), u64> = Default::default();
+    let mut pbody: std::collections::BTreeMap<(usize, u64), u64> = Default::default();
+    let mut graphs: rustc_hash::FxHashMap<usize, (u64, cubarium_voxel_fauna::RouteGraph)> = Default::default();
+    // EDGE-2: the seedporter's intake over the probe: its ledger's swallowed and alive ticks,
+    // and its bodies' summed mass each second (body-seconds), adults (body at least 0.25) apart.
+    let life0 = sim.fauna().view().ledger.clone();
+    let mut mass_s = [0.0f64; 9];
+    let mut adult_s = [0u64; 9];
+    let mut all_s = [0u64; 9];
+    let mut walk_s: std::collections::BTreeMap<(usize, String), u64> = Default::default();
     let total = minutes * 60 * hz;
     for t in 0..=total {
         if t > 0 {
@@ -3198,6 +3211,23 @@ fn edge_probe(args: &[String]) {
             let Some(f) = b.founder else { continue };
             if only.as_ref().is_some_and(|o| !o.iter().any(|n| n == f.name())) {
                 continue;
+            }
+            if t % hz == 0 {
+                let k = f.index();
+                mass_s[k] += b.body;
+                all_s[k] += 1;
+                adult_s[k] += u64::from(b.body >= 0.25);
+                if f.name() == "seedporter" && b.state != State::Asleep {
+                    let src = sim.fauna().steer_of(b.id).map_or("none", |s| s.name());
+                    let key = format!("{:?}/{}/{}", b.mobility.mode, if b.eating { "eating" } else { "fed" }, src);
+                    *walk_s.entry((k, key)).or_default() += 1;
+                }
+            }
+            if t == 0 && f.name() == "seedporter" {
+                let p = params.fauna.founder(f);
+                let body = p.body_at(b.body);
+                let (_, clear) = cubarium_voxel_fauna::motor_probe(&sim.world().view(), b.pose.x, b.pose.z, (0.0, 1.0), b.site.y, 0.0, &body, p.wade_depth_m(&body), p.step_limits(v));
+                println!("edgeinit,{}{},mode={:?},state={:?},age_s={},body={:.3},r={:.3},at=({:.3},{:.3}) cols=({:.2},{:.2}),site={:?},pose_clear={clear}", f.name(), b.id, b.mobility.mode, b.state, b.age_ticks / hz, b.body, body.footprint_radius(), b.pose.x, b.pose.z, b.pose.x / v, b.pose.z / v, b.site);
             }
             let cadence = params.fauna.manifest(f).cadence_ticks().max(1);
             if b.age_ticks % cadence != 0 || b.state == State::Asleep {
@@ -3222,6 +3252,37 @@ fn edge_probe(args: &[String]) {
             if refused {
                 let src = sim.fauna().steer_of(b.id).unwrap_or(Steer::Rest);
                 refused_by[k][Steer::ALL.iter().position(|&x| x == src).unwrap_or(0)] += 1;
+                if matches!(f.name(), "seedporter" | "loftstrider") {
+                    let p = params.fauna.founder(f);
+                    let wv = sim.world().view();
+                    let fresh = graphs.get(&k).is_some_and(|(t0, _)| fv.tick.saturating_sub(*t0) < 60 * hz);
+                    if !fresh {
+                        graphs.insert(k, (fv.tick, cubarium_voxel_fauna::RouteGraph::for_founder(&wv, p, params.fauna.founding.clearance_margin_m)));
+                    }
+                    let g = &graphs[&k].1;
+                    let body = p.body_at(b.body);
+                    let r = body.footprint_radius();
+                    let own = (r / v).ceil() as u32;
+                    let mut any = false;
+                    let mut clear = true;
+                    for q in 0..16 {
+                        let h = f64::from(q) * std::f64::consts::TAU / 16.0;
+                        let (ok, c) = cubarium_voxel_fauna::motor_probe(&wv, b.pose.x, b.pose.z, (h.sin(), h.cos()), b.site.y, 0.25 * r, &body, p.wade_depth_m(&body), p.step_limits(v));
+                        any |= ok;
+                        clear = c;
+                    }
+                    let place = if !clear {
+                        "embedded"
+                    } else if g.node_near(b.site, (b.pose.x, b.pose.z), own).is_some() {
+                        "on_graph"
+                    } else if g.way_on(&wv, b.site, r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 32).is_some() {
+                        "off_graph_way"
+                    } else {
+                        "off_graph_pocket"
+                    };
+                    *pclass.entry((k, format!("{place}/{}/{}", if any { "free_dir" } else { "no_dir" }, src.name()))).or_default() += 1;
+                    *pbody.entry((k, b.id)).or_default() += 1;
+                }
                 if *r == 1 && b.id % 3 == 0 && fv.tick % 7 == 0 {
                     let (fx, fz) = b.pose.forward();
                     println!("edgeshort,{},{}{},at=({:.2},{:.2},y{}),head=({fx:.2},{fz:.2}),steer={},held=({:.2},{:.2}),press={:?}", fv.tick, f.name(), b.id, b.pose.x, b.pose.z, b.site.y, src.name(), b.founder_state.held.forward, b.founder_state.held.turn, sim.fauna().press_of(b.id));
@@ -3325,6 +3386,40 @@ fn edge_probe(args: &[String]) {
                     let (dx, dz) = wdelta(b.pose.x, b.pose.z, t.x, t.z, ring);
                     format!("({:.2},{:.2})d{:.2}age{}", t.x, t.z, (dx * dx + dz * dz).sqrt(), (fv.tick.saturating_sub(t.tick)) / hz)
                 });
+                if *r == long && arg(args, "detail=").is_some_and(|d| d == "1") {
+                    // EDGE-2: where a wedged body stands against its lineage's route graph,
+                    // its step, its glide height, and the support layers round it.
+                    let p = params.fauna.founder(f);
+                    let g = cubarium_voxel_fauna::RouteGraph::for_founder(&sim.world().view(), p, params.fauna.founding.clearance_margin_m);
+                    let body = p.body_at(b.body);
+                    let r = body.footprint_radius();
+                    let own = (r / v).ceil() as u32;
+                    let near = g.node_near(b.site, (b.pose.x, b.pose.z), own).map(|j| g.faces[j]);
+                    let wv = sim.world().view();
+                    let way = g.way_on(&wv, b.site, r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 32);
+                    println!(
+                        "  wdetail,{}{},site={:?},near={near:?},way={way:?},step={:?},glide_min={:?},r={r:.3},attached={:?},mode={:?}",
+                        f.name(), b.id, b.site, p.step_limits(v), p.glider.map(|gl| gl.glide_min_height_m), b.attached, b.mobility.mode
+                    );
+                    let mut dirs = String::new();
+                    let mut clear_here = true;
+                    for k in 0..16 {
+                        let h = f64::from(k) * std::f64::consts::TAU / 16.0;
+                        let (ok, clear) = cubarium_voxel_fauna::motor_probe(&wv, b.pose.x, b.pose.z, (h.sin(), h.cos()), b.site.y, 0.25 * r, &body, p.wade_depth_m(&body), p.step_limits(v));
+                        clear_here = clear;
+                        dirs.push(if ok { 'o' } else { 'x' });
+                    }
+                    println!("  wmotor,pose_clear={clear_here},dirs(N=+z clockwise via +x)={dirs},pose=({:.3},{:.3}) cols=({:.2},{:.2})", b.pose.x, b.pose.z, b.pose.x / v, b.pose.z / v);
+                    for z in b.site.z.saturating_sub(4)..=(b.site.z + 4).min(depth - 1) {
+                        let mut row = String::new();
+                        for dx in -6i64..=6 {
+                            let x = (i64::from(b.site.x) + dx).rem_euclid(i64::from(width));
+                            let sup = wv.highest_support_in(x, z, 0, b.site.y + 12);
+                            row.push_str(&format!(" {:>3}", sup.map_or("-".into(), |y| format!("{}", i64::from(y) - i64::from(b.site.y)))));
+                        }
+                        println!("  wcol,z{z}{}:{row}", if z == b.site.z { "*" } else { " " });
+                    }
+                }
                 let (fx, fz) = b.pose.forward();
                 let held = b.founder_state.held;
                 println!(
@@ -3345,6 +3440,32 @@ fn edge_probe(args: &[String]) {
             let parts: Vec<String> = Steer::ALL.iter().enumerate().filter(|(j, _)| refused_by[k][*j] > 0).map(|(j, st)| format!("{}:{:.2}", st.name(), refused_by[k][j] as f64 / n as f64)).collect();
             println!("refusedby,{},samples={n},{}", Founder::ALL[k].name(), parts.join("/"));
         }
+    }
+    {
+        let l = sim.fauna().view().ledger.clone();
+        for f in Founder::ALL {
+            let k = f.index();
+            if all_s[k] == 0 {
+                continue;
+            }
+            let h = (l.alive_ticks_by_founder[k] - life0.alive_ticks_by_founder[k]) as f64 / f64::from(TICK_HZ) / 3600.0;
+            let eat = l.swallowed_by_founder[k] - life0.swallowed_by_founder[k];
+            let mass_h = mass_s[k] / 3600.0;
+            println!(
+                "edgelife,{},alive_h={h:.3},intake_per_h={:.5},mean_body={:.3},intake_per_body_h={:.5},adult_share={:.2}",
+                f.name(), if h > 0.0 { eat / h } else { f64::NAN }, mass_s[k] / all_s[k] as f64, if mass_h > 0.0 { eat / mass_h } else { f64::NAN }, adult_s[k] as f64 / all_s[k] as f64
+            );
+        }
+        let n: u64 = walk_s.values().sum();
+        for ((_, key), m) in &walk_s {
+            println!("edgetime,seedporter,{key},{:.3}", *m as f64 / n.max(1) as f64);
+        }
+    }
+    for ((k, class), n) in &pclass {
+        println!("pressclass,{},{class},{n}", Founder::ALL[*k].name());
+    }
+    for ((k, id), n) in &pbody {
+        println!("pressbody,{},{id},{n}", Founder::ALL[*k].name());
     }
     for ((k, mode), [n, refused]) in &modes {
         println!("mode,{},{mode},awake={n},refused={:.3}", Founder::ALL[*k].name(), *refused as f64 / (*n).max(1) as f64);

@@ -477,3 +477,237 @@ fn a_seedporter_in_a_stream_walks_out_up_a_surface_that_slopes_by_millimetres() 
     let bound = replan_bound_s(&c, SP);
     assert!(press.longest_s(&fauna, SP) <= bound, "pressed {:.2} s at a time, bound {bound:.2} s", press.longest_s(&fauna, SP));
 }
+
+// ------------------------------------------------------------------ EDGE-2
+
+// EDGE-2's probe (`hunter_study edge detail=1` on EDGE's seed 2 and 4 saves at 310 and 360
+// min): of the seedporter's refused samples, 95 % (seed 2) and 100 % (seed 4) were bodies
+// whose disc already overlapped solid (`motor_probe`: pose not clear), every heading
+// refused: a body caught in a wall could not step out of it. The rest (seed 2, 5 %) stood on
+// a face off its route graph with no walking way back on and no glide: its fruit and roost
+// walks went straight at the stem, over a drop it does not step.
+
+/// One forward action held whatever happens (a scripted push).
+fn push(fauna: &mut Fauna, id: u64) {
+    fauna.controllers.set(id, Box::new(crate::Scripted::new(vec![Actions { forward: 1.0, turn: 0.0, feed: 0.0 }])));
+}
+
+/// Whether body `id`'s pose is clear of solid (the motor's own rule).
+fn pose_clear_of(fauna: &Fauna, world: &World, id: u64) -> bool {
+    let a = animal(fauna, id);
+    let f = a.founder.expect("a founder");
+    let p = fauna.config.founder(f);
+    let body = p.body_at(a.body);
+    crate::motor_probe(&world.view(), a.pose.x, a.pose.z, (0.0, 1.0), a.site.y, 0.0, &body, p.wade_depth_m(&body), p.step_limits(V)).1
+}
+
+/// **A body caught in a wall steps out of it, and never deeper.** A seedporter and a
+/// frondgrazer each stand with their disc half a radius into a rock wall at their east (as a
+/// body grows against a wall, or comes down a stem or a vine beside one). Pushed east, into
+/// the wall, neither moves deeper; pushed west, each walks out, its pose clear, within the
+/// time its cruise takes over its radius and two controller periods.
+#[test]
+fn a_body_caught_in_a_wall_steps_out_of_it_and_never_deeper() {
+    let (width, depth) = (32u32, 16u32);
+    let mut world = plain(width, depth, 12);
+    rock(&mut world, 16..=19, 0..=depth - 1, FLOOR + 1..=FLOOR + 6);
+    let c = config();
+    for f in [SP, GRAZER] {
+        let r = c.founder(f).adult_body().footprint_radius();
+        let start = (16.0 * V - 0.5 * r, 8.0 * V + 0.5 * V);
+        // Into the wall.
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(c.clone());
+        fauna.set_births_enabled(false);
+        let id = put(&mut fauna, &world, f, start, EAST, StartingStores::FULL);
+        push(&mut fauna, id);
+        assert!(!pose_clear_of(&fauna, &world, id), "fixture: the {} is caught in the wall", f.name());
+        for _ in 0..ticks(1.0) {
+            fauna.step(&world, &mut flora);
+        }
+        assert!(animal(&fauna, id).pose.x <= start.0 + 1e-9, "pushed into the wall, the {} goes no deeper", f.name());
+        // Out of it.
+        let mut fauna = Fauna::new(c.clone());
+        fauna.set_births_enabled(false);
+        let id = put(&mut fauna, &world, f, start, WEST, StartingStores::FULL);
+        push(&mut fauna, id);
+        let period = c.manifest(f).cadence_ticks().max(1) as f64 / f64::from(TICK_HZ);
+        let bound = r / c.manifest(f).cruise_m_per_s + 2.0 * period;
+        let mut out = false;
+        for _ in 0..ticks(bound).max(1) {
+            fauna.step(&world, &mut flora);
+            if pose_clear_of(&fauna, &world, id) {
+                out = true;
+                break;
+            }
+        }
+        assert!(out, "pushed away from the wall, the {} is out of it within {bound:.2} s (x {:.3} from {:.3})", f.name(), animal(&fauna, id).pose.x, start.0);
+    }
+}
+
+/// A young seedporter's stores: a third of the adult's structure, hungry.
+const YOUNG: StartingStores = StartingStores { body: 0.3, reserve: 0.3 };
+
+/// **The ledge**: a face `p` at `(20, 8)` whose east and north (and the corners beside them)
+/// are rock walls high over it, so the adult disc its lineage's route graph is built for does
+/// not stand on it; west, south and south-west lie `drop_ws` layers below and, when `deep_s`,
+/// the south column falls to the floor. Its layer.
+fn ledge(world: &mut World, h: u32, drop_ws: u32, deep_s: bool) -> u32 {
+    let top = FLOOR + h;
+    let low = top - drop_ws;
+    // The platform west and south of it, and its own column.
+    rock(world, 14..=19, 4..=8, FLOOR + 1..=low);
+    if !deep_s {
+        rock(world, 14..=20, 4..=7, FLOOR + 1..=low);
+    }
+    rock(world, 20..=20, 8..=8, FLOOR + 1..=top);
+    // The walls.
+    rock(world, 21..=23, 4..=12, FLOOR + 1..=top + 6);
+    rock(world, 14..=23, 9..=11, FLOOR + 1..=top + 6);
+    top
+}
+
+/// A young seedporter on the ledge, centred on it; its id.
+fn on_ledge(fauna: &mut Fauna, world: &World, top: u32) -> u64 {
+    let sp = put(fauna, world, SP, centre(4, 2), WEST, YOUNG);
+    let a = animal_mut(fauna, sp);
+    let (x, z) = centre(20, 8);
+    a.pose.x = x;
+    a.pose.z = z;
+    a.site = Site { x: 20, y: top, z: 8 };
+    a.pose.y_m = crate::surface_m(top, V);
+    sp
+}
+
+/// The fixture's claims about the ledge: the young body stands clear on it, off its route
+/// graph, and its own body has no walking way back onto it.
+fn assert_off_graph_pocket(fauna: &mut Fauna, world: &World, sp: u64) {
+    assert!(pose_clear_of(fauna, world, sp), "fixture: the young seedporter stands clear on the ledge");
+    let a = animal(fauna, sp);
+    let p = *fauna.config.founder(SP);
+    let body = p.body_at(a.body);
+    let r = body.footprint_radius();
+    let own = (r / V).ceil() as u32;
+    let wv = world.view();
+    let g = fauna.routes(&wv, SP, 1e6);
+    assert!(g.node_near(a.site, (a.pose.x, a.pose.z), own).is_none(), "fixture: the ledge is off the route graph");
+    assert!(g.way_on(&wv, a.site, r, body.headroom_voxels(V), p.step_limits(V), p.wade_depth_m(&body), own, 64).is_none(), "fixture: no walking way back on");
+}
+
+/// **A seedporter on a ledge it can neither walk nor glide off does not press.** A young
+/// seedporter stands on a ledge off its route graph: walls east and north, and west and south
+/// a drop one layer beyond its step and short of its glide height. Hungry, remembering a
+/// fruiting stand west on the ground, its fruit walk does not hold it forward into the drop
+/// (no pressed sample whose layer is the fruit search); in flight from a Veilhound walking
+/// on the platform below, its response holds still at once, whatever its heading. Re-plans are
+/// set out of reach,
+/// so only the ledge's own rule can answer.
+#[test]
+fn a_seedporter_on_a_ledge_it_cannot_walk_or_glide_off_does_not_press() {
+    let (width, depth) = (48u32, 16u32);
+    let mut world = plain(width, depth, 24);
+    let mut c = config();
+    c.teachers.press_replan_s = 1e6;
+    c.teachers.route_refresh_s = 1e6;
+    c.perception.remote_hz = f64::from(TICK_HZ);
+    let down = c.founder(SP).step_limits(V).down;
+    let glide = c.founder(SP).glider.expect("a glider").glide_min_height_m;
+    let drop = down + 1;
+    assert!(f64::from(drop) * V < glide, "fixture: the drop is short of a glide");
+    let top = ledge(&mut world, drop + 2, drop, false);
+    let mut flora = Flora::new(fruit_flora());
+    let site = stand(&mut flora, &world, 6, 6);
+    for _ in 0..60 {
+        flora.step(&mut world);
+    }
+    assert!(flora.view().stand_at(site).expect("stand").fruit > 0.0, "fixture: fruit hangs");
+    // Hungry.
+    let mut fauna = Fauna::new(c.clone());
+    fauna.set_births_enabled(false);
+    let sp = on_ledge(&mut fauna, &world, top);
+    heuristic(&mut fauna, sp);
+    assert_off_graph_pocket(&mut fauna, &world, sp);
+    let mut fruit_pressed = 0;
+    let mut fruit_walks = 0;
+    for _ in 0..ticks(10.0) {
+        remember_fruit(&mut fauna, sp, &flora, site);
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, sp);
+        let cadence = c.manifest(SP).cadence_ticks().max(1);
+        if a.age_ticks % cadence != 0 || a.mobility.mode != MobilityMode::Ground {
+            continue;
+        }
+        if fauna.steer_of(sp) == Some(crate::Steer::Fruit) {
+            fruit_walks += 1;
+            let fb = a.founder_state.feedback;
+            if a.founder_state.held.forward > 0.0 && fb.attempted_equivalent > 1e-12 && fb.delivered_equivalent / fb.attempted_equivalent < 0.05 {
+                fruit_pressed += 1;
+            }
+        }
+    }
+    assert_eq!(fruit_pressed, 0, "its fruit walk presses the drop ({fruit_walks} fruit samples)");
+    // In flight.
+    let mut fauna = Fauna::new(c.clone());
+    fauna.set_births_enabled(false);
+    let sp = on_ledge(&mut fauna, &world, top);
+    heuristic(&mut fauna, sp);
+    let vh = put(&mut fauna, &world, VH, centre(16, 5), EAST, StartingStores::FULL);
+    still(&mut fauna, vh);
+    animal_mut(&mut fauna, vh).speed_m_s = 1.0;
+    animal_mut(&mut fauna, vh).still_ticks = 0;
+    let i = fauna.animals.iter().position(|a| a.id == sp).unwrap();
+    fauna.tick += 1;
+    perception::sense_pass(&mut fauna, &world.view(), false, 1.0, 1);
+    perception::refresh(&mut fauna, i, &world.view(), &flora.view(), None, perception::Want::default());
+    let _ = crate::vigil::respond(&mut fauna, i, &world.view(), &flora.view(), Actions::REST);
+    assert!(fauna.percept(sp).is_some_and(|p| p.vigil.fleeing), "fixture: the seedporter flees the Veilhound");
+    for heading in [WEST, SOUTH, EAST, NORTH, WEST + 0.3] {
+        animal_mut(&mut fauna, sp).pose.heading_rad = heading;
+        let act = crate::vigil::respond(&mut fauna, i, &world.view(), &flora.view(), Actions::REST).expect("in flight");
+        assert_eq!(act.forward, 0.0, "facing {heading:.2} on the ledge, it holds still ({act:?})");
+    }
+}
+
+/// **A seedporter on a ledge glides off where it can.** The same ledge, but its south column
+/// falls to the floor, more than its glide height; west is still the short drop. Hungry,
+/// remembering a fruiting stand west, it leaves the ledge by gliding south within the time it
+/// takes to turn half round at its yaw cap, walk to the edge at cruise, and two controller
+/// periods. Re-plans are out of reach: walking west it would press for good.
+#[test]
+fn a_seedporter_on_a_ledge_glides_off_where_it_can() {
+    let (width, depth) = (48u32, 16u32);
+    let mut world = plain(width, depth, 24);
+    let mut c = config();
+    c.teachers.press_replan_s = 1e6;
+    c.teachers.route_refresh_s = 1e6;
+    let down = c.founder(SP).step_limits(V).down;
+    let glide = c.founder(SP).glider.expect("a glider").glide_min_height_m;
+    let drop = down + 1;
+    let h = (glide / V).ceil() as u32 + 1;
+    assert!(f64::from(drop) * V < glide && f64::from(h) * V >= glide, "fixture: west short of a glide, south past one");
+    let top = ledge(&mut world, h, drop, true);
+    let mut flora = Flora::new(fruit_flora());
+    let site = stand(&mut flora, &world, 6, 6);
+    for _ in 0..60 {
+        flora.step(&mut world);
+    }
+    let mut fauna = Fauna::new(c.clone());
+    fauna.set_births_enabled(false);
+    let sp = on_ledge(&mut fauna, &world, top);
+    heuristic(&mut fauna, sp);
+    assert_off_graph_pocket(&mut fauna, &world, sp);
+    let m = c.manifest(SP);
+    let period = m.cadence_ticks().max(1) as f64 / f64::from(TICK_HZ);
+    let bound = PI / m.yaw_cap_rad_per_s + V / m.cruise_m_per_s + 2.0 * period;
+    let mut left = false;
+    for _ in 0..ticks(bound) {
+        remember_fruit(&mut fauna, sp, &flora, site);
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, sp);
+        if a.mobility.mode != MobilityMode::Ground || a.site != (Site { x: 20, y: top, z: 8 }) {
+            left = a.mobility.mode == MobilityMode::Glide || a.site.y < top;
+            break;
+        }
+    }
+    assert!(left, "it glides off the ledge within {bound:.2} s");
+}

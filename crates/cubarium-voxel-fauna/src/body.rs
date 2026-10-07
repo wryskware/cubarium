@@ -2529,12 +2529,22 @@ fn advance_candidate(
     let cells = disc_box(v, nx, nz, r);
     let clearance = disc_ground_layer(view, cells, nx, nz, r, standing_y, step_limits)
         .max(standing_y.max(ny));
-    if headroom > 0 && disc_hits_solid(view, cells, nx, nz, clearance + 1, clearance + headroom, r)
-    {
-        return None;
-    }
-    if ny < standing_y && !pose_clear(view, nx, nz, ny, r, headroom, step_limits) {
-        return None;
+    let hits = headroom > 0 && disc_hits_solid(view, cells, nx, nz, clearance + 1, clearance + headroom, r);
+    if hits || (ny < standing_y && !pose_clear(view, nx, nz, ny, r, headroom, step_limits)) {
+        // EDGE-2, out of a wall: a body whose disc is already caught in solid where it
+        // stands (it grew against a wall, or came down a stem or a vine beside one) may take
+        // a step that leaves it less deep in it, and none deeper; a clear body never enters.
+        let here = pose_penetration(view, px, pz, standing_y, r, headroom, step_limits);
+        if !(here > 0.0) {
+            return None;
+        }
+        let mut there = if hits { disc_penetration(view, cells, nx, nz, clearance + 1, clearance + headroom, r) } else { 0.0 };
+        if ny < standing_y {
+            there = there.max(pose_penetration(view, nx, nz, ny, r, headroom, step_limits));
+        }
+        if !(there < here - PENETRATION_EPS_M) {
+            return None;
+        }
     }
     // A water-bound body (roster R2b): another face must have standing water within its
     // margin, or the step is refused as a wall's is.
@@ -2569,6 +2579,72 @@ fn advance_candidate(
         dx += width_m;
     }
     Some((nx, nz, (dx * fx + (nz - pz) * fz).max(0.0), ny))
+}
+
+/// How much less deep in solid a step out of a wall must leave a body ([`advance_candidate`]),
+/// metres: a float tolerance, not a knob.
+const PENETRATION_EPS_M: f64 = 1e-9;
+
+/// How deep the disc of radius `r` at `(cx, cz)`, standing on `standing_y`, is in solid over
+/// its `headroom` layers above the highest within-step ground under it ([`pose_clear`]'s
+/// rows): the most by which any solid voxel's square reaches inside the disc, metres; 0 when
+/// the pose is clear.
+fn pose_penetration(view: &VoxelView<'_>, cx: f64, cz: f64, standing_y: u32, r: f64, headroom: u32, step: StepLimits) -> f64 {
+    if headroom == 0 {
+        return 0.0;
+    }
+    let cells = disc_box(view.config.voxel_m, cx, cz, r);
+    let ground = disc_ground_layer(view, cells, cx, cz, r, standing_y, step).max(standing_y);
+    disc_penetration(view, cells, cx, cz, ground + 1, ground + headroom, r)
+}
+
+/// [`disc_hits_solid`]'s overlap as a depth: over the voxels of layers `lo..=hi` in `cells`,
+/// the most by which a solid one's square reaches inside the disc, `r` less its distance from
+/// the centre, metres; 0 when none does.
+fn disc_penetration(view: &VoxelView<'_>, (x0, x1, z0, z1): (i64, i64, i64, i64), cx: f64, cz: f64, lo: u32, hi: u32, r: f64) -> f64 {
+    let c = view.config;
+    let v = c.voxel_m;
+    if lo >= c.height || lo > hi {
+        return 0.0;
+    }
+    let mut deepest: f64 = 0.0;
+    for x in x0..=x1 {
+        for z in z0..=z1 {
+            if z < 0 || z >= i64::from(c.depth) || !view.solid_in(x, z as u32, lo, hi) {
+                continue;
+            }
+            let qx = cx.clamp(x as f64 * v, (x as f64 + 1.0) * v);
+            let qz = cz.clamp(z as f64 * v, (z as f64 + 1.0) * v);
+            let d = ((cx - qx).powi(2) + (cz - qz).powi(2)).sqrt();
+            if d < r {
+                deepest = deepest.max(r - d);
+            }
+        }
+    }
+    deepest
+}
+
+/// A probe's readout (EDGE-2): whether the motor would take a sub-step of `step` metres
+/// along `dir` from `(px, pz)` on `standing_y` for `body` ([`advance_candidate`], no water
+/// rule), and whether the pose it stands in now is clear ([`pose_clear`]).
+#[allow(clippy::too_many_arguments)]
+pub fn motor_probe(
+    view: &VoxelView<'_>,
+    px: f64,
+    pz: f64,
+    dir: (f64, f64),
+    standing_y: u32,
+    step: f64,
+    body: &Body,
+    wade_depth_m: f64,
+    step_limits: StepLimits,
+) -> (bool, bool) {
+    let v = view.config.voxel_m;
+    let (r, headroom) = (body.footprint_radius(), body.headroom_voxels(v));
+    (
+        advance_candidate(view, px, pz, dir, standing_y, step, r, wade_depth_m, headroom, step_limits, None).is_some(),
+        pose_clear(view, px, pz, standing_y, r, headroom, step_limits),
+    )
 }
 
 /// Whether a disc of radius `r` centred at `(cx, cz)`, standing on `standing_y`, is clear

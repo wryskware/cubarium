@@ -718,6 +718,11 @@ fn the_sweep_on_the_lookup_moves_every_body_as_the_walk_did() {
                             heading_rad: std::f64::consts::TAU * (f + k) as f64 / 7.0,
                             y_m: 0.0,
                         };
+                        // EDGE-2: a start caught in solid takes the motor's step out of a
+                        // wall, which the reference sweep predates (`edge_tests` covers it).
+                        if !crate::body::pose_clear(&view, start.x, start.z, face.y, body.footprint_radius(), body.headroom_voxels(V), limits) {
+                            continue;
+                        }
                         let (mut a, mut b) = (start, start);
                         let (mut ya, mut yb) = (face.y, face.y);
                         for t in 0..30 {

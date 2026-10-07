@@ -1429,6 +1429,70 @@ fn stands_within(
 /// The nodes ahead on a route a walk's waypoint looks along: a cost bound, not a knob.
 const ROUTE_LOOKAHEAD: usize = 12;
 
+/// The headings a body off its route graph tries for a glide off its ledge
+/// ([`off_graph_exit`]): a resolution, not a knob.
+const GLIDE_HEADINGS: u32 = 16;
+
+/// **EDGE-2: the way off a face off the route graph**, for a grounded body standing where its
+/// lineage's route graph has no node within its own reach:
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum OffGraph {
+    /// It is on its graph.
+    On,
+    /// The first face of its own body's walking way back onto it ([`crate::RouteGraph::way_on`],
+    /// out to `teachers.way_on_m`).
+    Way(Site),
+    /// With no walking way, a glider's heading off its ledge: walking that way, the edge
+    /// starts a glide ([`glide_off_edge`]); of those, the nearest to the direction it wants.
+    Glide(f64),
+    /// Neither: it is cornered, and holds still.
+    Cornered,
+}
+
+/// [`OffGraph`] for body `a`, wanting to go along `(want_x, want_z)` (any length; zero for
+/// no preference).
+pub(crate) fn off_graph_exit(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, want: (f64, f64)) -> OffGraph {
+    let Some(founder) = a.founder else { return OffGraph::On };
+    let tc = fauna.config.teachers;
+    let phys = *fauna.config.founder(founder);
+    let graph = fauna.routes(view, founder, tc.route_refresh_s);
+    let v = view.config.voxel_m;
+    let body = phys.body_at(a.body);
+    let r = body.footprint_radius();
+    let own = (r / v).ceil().max(0.0) as u32;
+    if graph.node_near(a.site, (a.pose.x, a.pose.z), own).is_some() {
+        return OffGraph::On;
+    }
+    let cols = if tc.way_on_m.is_finite() && tc.way_on_m > 0.0 { (tc.way_on_m / v).ceil() as u32 } else { 0 };
+    if let Some(f) = graph.way_on(view, a.site, r, body.headroom_voxels(v), phys.step_limits(v), phys.wade_depth_m(&body), own, cols) {
+        return OffGraph::Way(f);
+    }
+    if let Some(glider) = phys.glider {
+        let s = shape(&phys, a.body);
+        let want_h = if want.0 * want.0 + want.1 * want.1 > 0.0 { Some(want.0.atan2(want.1)) } else { None };
+        let mut best: Option<(f64, f64)> = None;
+        for k in 0..GLIDE_HEADINGS {
+            let h = f64::from(k) * std::f64::consts::TAU / f64::from(GLIDE_HEADINGS);
+            let mut b = *a;
+            b.pose.heading_rad = h;
+            if glide_off_edge(view, fv, &b, s, &glider, &phys).is_none() {
+                continue;
+            }
+            let off = want_h.map_or(0.0, |w| {
+                let d = (h - w).rem_euclid(std::f64::consts::TAU);
+                d.min(std::f64::consts::TAU - d)
+            });
+            if best.is_none_or(|(o, _)| off < o) {
+                best = Some((off, h));
+            }
+        }
+        if let Some((_, h)) = best {
+            return OffGraph::Glide(h);
+        }
+    }
+    OffGraph::Cornered
+}
+
 /// **EDGE: a reflex's walk to a stand** (the refuge, the roost, the fruit search): of
 /// `cands` (`(distance, id, site)`, nearest first), the first the body can walk to on its
 /// lineage's route graph — a node within its stem reach (its radius and half a voxel) of the
@@ -1466,6 +1530,22 @@ fn walk_to_stand(
     let r = phys.body_at(a.body).footprint_radius();
     let own = (r / v).ceil().max(0.0) as u32;
     let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own);
+    // EDGE-2: off its graph, it does not walk straight at a stem over a drop or into a wall:
+    // it takes its own way back on, else glides off its ledge, else it can reach none.
+    if from.is_none() {
+        let &(_, id, site) = cands.iter().find(|c| !shunned.contains(&c.1))?;
+        let stem = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
+        let (sx, sz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, stem.0, stem.1, ring);
+        let (dx, dz) = match off_graph_exit(fauna, view, _fv, &a, (sx, sz)) {
+            OffGraph::On => (sx, sz),
+            OffGraph::Way(f) => crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, ring),
+            OffGraph::Glide(h) => (h.sin(), h.cos()),
+            OffGraph::Cornered => return None,
+        };
+        let k = cands.iter().position(|c| c.1 == id).expect("a candidate");
+        fauna.walking_to(a.id, id, kind);
+        return Some((walk_toward(&a, dx, dz, feed), k));
+    }
     let reach = ((r + 0.5 * v) / v).floor().max(1.0) as u32;
     let steps = tc.route_detour.max(0.0) * search_m / v;
     let max_steps = if steps.is_finite() { steps.ceil().min(f64::from(u32::MAX)) as u32 } else { u32::MAX };
@@ -1475,7 +1555,7 @@ fn walk_to_stand(
         }
         let stem = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
         let aim = match from {
-            None => Some(stem),
+            None => unreachable!("handled above"),
             Some(from) => {
                 let Some(goal) = graph.node_near_where(site, stem, reach, |f| f.y.abs_diff(site.y) <= 1) else {
                     continue;

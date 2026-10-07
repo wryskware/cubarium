@@ -76,7 +76,7 @@ use serde::{Deserialize, Serialize};
 
 pub use body::{
     Amphibious, BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
-    disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
+    disc_clear_on_face, effective_config, has_headroom, motor_probe, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
