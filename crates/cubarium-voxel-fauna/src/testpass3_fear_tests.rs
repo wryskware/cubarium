@@ -153,6 +153,7 @@ fn calm_margin_boundary_uses_height_and_walks_without_food() {
     a.pose.heading_rad = -FRAC_PI_2;
     let margin = vg(&f).calm_margin_m;
     let t = Threat {
+        gait: 0.0,
         d: 1.0,
         d3: margin,
         x: a.pose.x + 1.0,
@@ -191,6 +192,7 @@ fn refused_calm_walk_stops_at_replan_boundary() {
     let (w, _, mut f) = fixture();
     let a = f.animals[0];
     let t = Threat {
+        gait: 0.0,
         d: 1.0,
         d3: 1.0,
         x: a.pose.x + 1.0,
@@ -256,6 +258,7 @@ fn a_reappearing_hunter_restarts_the_lost_clock() {
     let a = f.animals[0];
     let mut v = fleeing(&a);
     let t = Threat {
+        gait: 0.0,
         d: vg(&f).flee_stop_m,
         d3: vg(&f).flee_stop_m,
         x: v.from_x,
