@@ -1363,7 +1363,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2188 rows)
+**`fauna.*`** (2197 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1606,6 +1606,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.littershredder.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.littershredder.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.littershredder.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.littershredder.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.littershredder.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1827,6 +1828,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.frondgrazer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.frondgrazer.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.frondgrazer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.frondgrazer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.frondgrazer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2048,6 +2050,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.lanternjaw.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.lanternjaw.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.lanternjaw.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.lanternjaw.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.lanternjaw.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2269,6 +2272,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.capgnawer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.capgnawer.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.capgnawer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.capgnawer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.capgnawer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2490,6 +2494,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.loftstrider.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.loftstrider.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.loftstrider.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.loftstrider.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.loftstrider.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2711,6 +2716,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.ripple-snail.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.ripple-snail.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.ripple-snail.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.ripple-snail.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.ripple-snail.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2932,6 +2938,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.bellwing.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.bellwing.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.bellwing.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.bellwing.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.bellwing.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3153,6 +3160,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.seedporter.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.seedporter.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.seedporter.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.seedporter.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.seedporter.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3374,6 +3382,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.chorister.pack.breed_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.chorister.pack.regurgitate_reserve_fraction` | 0.5 | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.chorister.pack.commit_m` | 2.5 | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.chorister.pack.select_kin_m` | 3.0 | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.chorister.pack.select_kin_factor` | 0.8 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |

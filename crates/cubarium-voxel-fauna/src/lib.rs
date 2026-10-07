@@ -3012,6 +3012,29 @@ pub struct FaunaLedger {
     /// used), counted once per refused tick a ready body waited (LIFE-HISTORY).
     #[serde(default)]
     pub season_waits: u64,
+    /// **A pup's income by source** (PUP), organic units: raw food pups swallowed by their own
+    /// bites (a feast at the den), and raw food regurgitated into pups by a giver at or above
+    /// its lineage's `provision_reserve_fraction` (`_surplus`) or below it (`_lean`). The
+    /// reserve fallback is `provision_received_organic`; the birth stores are the litters'
+    /// parcels (`pups_born` × the package).
+    #[serde(default)]
+    pub pup_swallowed_organic: f64,
+    #[serde(default)]
+    pub pup_regurgitated_surplus: f64,
+    #[serde(default)]
+    pub pup_regurgitated_lean: f64,
+    /// Basal upkeep the pups paid (PUP), organic units.
+    #[serde(default)]
+    pub pup_upkeep_organic: f64,
+    /// Pups that died as pups (PUP): starved, and by any other cause.
+    #[serde(default)]
+    pub pups_starved: u64,
+    #[serde(default)]
+    pub pups_lost_other: u64,
+    /// Ticks an adult at the den held raw food and a pup there begged, but its condition kept
+    /// the meal (PUP, [`Pack::regurgitate_reserve_fraction`]).
+    #[serde(default)]
+    pub provision_withheld_ticks: u64,
     /// **The minimal gut's books** (repair 2 item 10). Raw food into stomachs (every bite,
     /// after any spill), out of them by digestion (into assimilation, egesta and the
     /// unfunded share's respiration), moved stomach to stomach by regurgitation (inside
@@ -4189,6 +4212,46 @@ impl Fauna {
 
     pub(crate) fn packs_mut(&mut self) -> &mut Vec<PackRecord> {
         &mut self.packs
+    }
+
+    /// **A litter born now** (PUP, a scenario control): pack `pack`'s breeder pays the
+    /// lineage's package for `young` pups out of its reserve, exactly as a gestation would
+    /// have paid it, and they are born at the den, each with an even share; the litter counts
+    /// against the breeder's interval and the year's season as a born litter would. Refused
+    /// (`Err`) for a pack with no breeder, or a breeder whose reserve cannot pay. Returns the
+    /// pups' ids.
+    pub fn whelp(&mut self, view: &VoxelView<'_>, pack: u64, young: u32) -> Result<Vec<u64>, String> {
+        step::whelp(self, view, pack, young)
+    }
+
+    /// **A body's reserve set to `fraction` of its cap** (PUP, a scenario control: a lean year's
+    /// thin adults). Organic matter, mineral and energy move pro rata with the reserve's own
+    /// composition (the body's, for a body with none); a cut is booked `removed_*_out` and a
+    /// rise `introduced_*_in`, so the books close. `false` for no such body.
+    pub fn set_reserve_fraction(&mut self, id: u64, fraction: f64) -> bool {
+        let Some(i) = self.animals.iter().position(|a| a.id == id) else {
+            return false;
+        };
+        let sc = body::effective_config(&self.config, &self.animals[i]);
+        let a = &mut self.animals[i];
+        let want = fraction.max(0.0) * sc.reserve_of(a.body);
+        let held = a.organic();
+        let d = want - a.reserve;
+        let (dm, de) = if held > 0.0 { (a.mineral * d / held, a.energy * d / held) } else { (0.0, 0.0) };
+        a.reserve = want;
+        a.mineral += dm;
+        a.energy += de;
+        let l = &mut self.ledger;
+        if d >= 0.0 {
+            l.introduced_organic_in += d;
+            l.introduced_mineral_in += dm;
+            l.introduced_energy_in += de;
+        } else {
+            l.removed_organic_out -= d;
+            l.removed_mineral_out -= dm;
+            l.removed_energy_out -= de;
+        }
+        true
     }
 
     /// The breeder's den pick (the habitat seeder's founding search): the pack's den, and

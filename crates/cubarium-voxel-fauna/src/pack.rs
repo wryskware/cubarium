@@ -6,7 +6,7 @@
 //! What lives here and where the tick calls it:
 //! - [`upkeep`] (after maintenance): calls count down, pups come of age, a dead breeder's
 //!   place goes to the oldest adult, empty packs are dropped, and adults at the den
-//!   provision the hungriest pup there.
+//!   provision a pup there (the hungriest, or with PUP's scramble the strongest beggar).
 //! - [`must_walk_home`] (the circadian stage): a pack adult under its heuristic rests and
 //!   sleeps only within `den_radius_m` of its den, or once `home_give_up_s` has passed.
 //! - [`steer`] (the controller stage, for a body whose controller opts in): the tactic —
@@ -171,13 +171,21 @@ pub(crate) fn upkeep(fauna: &mut Fauna, view: &VoxelView<'_>) {
 ///    stomach room (lowest reserve fraction,
 ///    lowest id on a tie), capped by the pup's room `K − S`. Every food class moves by the
 ///    same fraction, so the food keeps its composition and its yield applies once, at the
-///    pup's digestion. The giver's reserve floor does not apply. Booked `regurgitated`.
+///    pup's digestion. PUP: the giver feeds itself first — under
+///    `regurgitate_reserve_fraction` of its cap it keeps the meal (booked
+///    `provision_withheld_ticks`); the reserve fallback's floor does not apply. Booked
+///    `regurgitated` (and `pup_regurgitated_surplus` / `_lean` by the giver's condition
+///    against `provision_reserve_fraction`).
 /// 2. **The reserve fallback**: with an empty stomach, an adult whose reserve is above
 ///    `provision_reserve_fraction` of its cap passes reserve to the hungriest pup with
 ///    reserve room (the old transfer, unchanged: no eating latch needed, repair 3 item 6), never below the fraction and never more than the pup can take.
 ///    The pup receives `provision_efficiency` of it — organic matter, mineral and energy
 ///    alike — and the rest is respired: its organic matter booked respired, its energy as
 ///    heat, its mineral shed to the giver's gut, as every respiration sheds it.
+///
+/// PUP, **the scramble** (`provision_scramble`): in both, the pup fed is the strongest begging
+/// one — the largest body, then the fullest reserve, then the lowest id — instead of the
+/// hungriest, so a short ration feeds the strong and the runt goes without.
 fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
@@ -199,7 +207,7 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
         let rate = t.provision_rate_per_s * giver.body * DT;
         // The hungriest pup of its pack at the den that wants food, with room by `room`.
         let hungriest = |fauna: &Fauna, room: &dyn Fn(&Fauna, &Animal) -> f64, wanting: bool| -> Option<usize> {
-            let mut best: Option<(f64, usize)> = None;
+            let mut best: Option<((f64, f64), usize)> = None;
             for (k, p) in fauna.animals.iter().enumerate() {
                 if !p.pack.is_some_and(|pm| pm.pack == m.pack && pm.pup)
                     || (wanting && !p.eating)
@@ -208,9 +216,16 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
                 {
                     continue;
                 }
-                let f = reserve_fraction(fauna, p);
-                if best.is_none_or(|(bf, _)| f < bf) {
-                    best = Some((f, k));
+                // PUP, the scramble: the strongest beggar first — the largest body, then the
+                // fullest reserve (lowest id on a tie); else the hungriest, the lowest reserve
+                // fraction (lowest id on a tie).
+                let key = if t.provision_scramble {
+                    (-p.body, -reserve_fraction(fauna, p))
+                } else {
+                    (reserve_fraction(fauna, p), 0.0)
+                };
+                if best.is_none_or(|(bk, _)| key < bk) {
+                    best = Some((key, k));
                 }
             }
             best.map(|(_, k)| k)
@@ -224,6 +239,14 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
             let Some(k) = hungriest(fauna, &stomach_room, true) else {
                 continue;
             };
+            // PUP: the giver's condition. Below `regurgitate_reserve_fraction` of its cap it
+            // feeds itself first and keeps the meal.
+            let condition = reserve_fraction(fauna, &giver);
+            let surplus = condition >= t.provision_reserve_fraction;
+            if condition < t.regurgitate_reserve_fraction {
+                fauna.ledger.provision_withheld_ticks += 1;
+                continue;
+            }
             let amount = rate.min(held).min(stomach_room(fauna, &fauna.animals[k]));
             if !(amount > 0.0) {
                 continue;
@@ -243,6 +266,11 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
                 moved.energy += part.energy;
             }
             let l = &mut fauna.ledger;
+            if surplus {
+                l.pup_regurgitated_surplus += moved.organic;
+            } else {
+                l.pup_regurgitated_lean += moved.organic;
+            }
             l.regurgitated.organic += moved.organic;
             l.regurgitated.mineral += moved.mineral;
             l.regurgitated.energy += moved.energy;
