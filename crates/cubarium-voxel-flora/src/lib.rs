@@ -983,6 +983,13 @@ pub struct SpeciesConfig {
     /// regrowth the stand dies ([`DeathCause::Desiccated`]). /s; 0 is off.
     #[serde(default)]
     pub sun_mycelium_loss_per_s: f64,
+    /// **Saprotroph only.** How far its own dark habitat shelters it from the sun: the drying
+    /// is multiplied by `1 − sun_dark_shelter · darkness` ([`SpeciesConfig::darkness`] of its
+    /// terrain sky), so a cave mouth or overhang it counts as dark keeps its stands while an
+    /// open face under plants, which only the plant shades, still dries. Fraction; 0 is off
+    /// (the exposure alone decides).
+    #[serde(default)]
+    pub sun_dark_shelter: f64,
     /// **Saprotroph only.** The fraction of the organic matter taken that becomes tissue;
     /// the rest is respired at once (`respired_out`, heat). The brief's `yield`, spelled out
     /// because `yield` is a reserved word. **Placeholder**; inert on a `Photo` species.
@@ -1774,6 +1781,7 @@ impl SpeciesConfig {
             sun_shade_max: 0.0,
             sun_cap_loss_per_s: 0.0,
             sun_mycelium_loss_per_s: 0.0,
+            sun_dark_shelter: 0.0,
             substrate_yield: 0.0,
             establish_substrate_min: 0.0,
             // One row up and one down, for a species that ever walks the box. Inert here:
@@ -2589,6 +2597,10 @@ impl SpeciesConfig {
             sun_shade_max: 0.2,
             sun_cap_loss_per_s: 0.0006,
             sun_mycelium_loss_per_s: 0.01,
+            // Its own dark habitat shelters it fully: BASELINE-2 (2026-10-07) found the
+            // exposure threshold alone dried half the dark-face stands (sky 0.2-0.45) or, at
+            // 0.45, spared the understorey on lit faces.
+            sun_dark_shelter: 1.0,
             substrate_yield: 0.4,
             establish_substrate_min: 0.02,
             // No light income at all, and no light gate (`step`'s `gates` opens `light_ok`

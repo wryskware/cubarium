@@ -323,3 +323,40 @@ fn the_sun_loss_conserves_every_currency_into_the_litter() {
     assert_eq!(g.dead_wood, 0.0, "mycelium does not become a log");
     close(&f);
 }
+
+/// One tick of sun for `c` on a face whose neighbours on one side are roofed, so its sky is
+/// part open; returns the mycelium lost.
+fn part_roofed_loss(c: FloraConfig) -> f64 {
+    let mut w = world(false);
+    for x in 0..2 {
+        w.apply(WorldCommand::SetMaterial { x, y: 4, z: 0, material: Material::Rock });
+    }
+    let mut f = seed(c, &w);
+    let before = f.view().fungus_at(site()).unwrap().wood;
+    f.step(&mut w);
+    close(&f);
+    before - f.view().fungus_at(site()).unwrap().wood
+}
+
+/// **SUN-SHELTER**: its own dark habitat shelters a glowcap from the drying in proportion to
+/// its darkness, `drying × (1 − sun_dark_shelter · darkness)`. With no dark habitat
+/// (`dark_sky_max` 0, darkness 0) the shelter changes nothing. With the face inside it
+/// (`dark_sky_max` 1, `dark_sky_full` 0: darkness = 1 − sky), the loss falls linearly in the
+/// knob, and 0 is the exposure-only rule.
+#[test]
+fn its_dark_habitat_shelters_a_glowcap_from_the_sun_in_proportion() {
+    let with = |shelter: f64, dark_sky_max: f64| {
+        let mut c = config(0.0, 0.01, 0.0);
+        c.glowcap.dark_sky_full = 0.0;
+        c.glowcap.dark_sky_max = dark_sky_max;
+        c.glowcap.sun_dark_shelter = shelter;
+        part_roofed_loss(c)
+    };
+    let open = with(0.0, 0.0);
+    assert!(open > 0.0, "fixture: the part-open face dries");
+    assert_eq!(with(1.0, 0.0), open, "no darkness, no shelter");
+    let (none, half, full) = (with(0.0, 1.0), with(0.5, 1.0), with(1.0, 1.0));
+    assert_eq!(none, open, "shelter 0 is the exposure-only rule");
+    assert!(full > 0.0 && full < none, "partly dark: sheltered, not spared ({full} vs {none})");
+    assert!((half - 0.5 * (none + full)).abs() < 1e-12 * none, "linear in the knob");
+}

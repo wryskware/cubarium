@@ -233,6 +233,8 @@ mycelium_graze_fraction = 0.5
 sun_shade_max = 0.2
 sun_cap_loss_per_s = 0.0006
 sun_mycelium_loss_per_s = 0.01
+# Its own dark habitat (darkness of its sky) shelters it from that drying, in proportion.
+sun_dark_shelter = 1.0
 defence_half_life_s = 731.8835772795675
 foliage_rate = 0.00024
 maintenance = 0.0003279210074532441
