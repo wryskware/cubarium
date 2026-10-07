@@ -805,6 +805,9 @@ fn an_adult_at_the_den_feeds_the_hungriest_pup_at_seventy_percent() {
             p.pack_size = 1;
             p.provision_reserve_fraction = 0.6;
             p.provision_efficiency = 0.7;
+            // PUP: this case weighs the hungriest-first rule and a pup on an empty reserve.
+            p.provision_scramble = false;
+            p.pup_starves_on_empty = false;
         });
         config.founders[C.index()].gut.s0 = 0.0;
         let mut fauna = Fauna::new(config);

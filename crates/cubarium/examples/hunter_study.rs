@@ -83,6 +83,14 @@
 //!   denominators), Veilhound kills at death: sheltered/exposed juvenile, hunkered/running/
 //!   other adult. Shelter/kill classes are derived at contact, not at hunt commitment.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
+//! - `pup,` (PUP): the Veilhound's pups alive with body and reserve fraction (min / mean); since
+//!   the run's start, pups born, independent, starved and lost otherwise, and the pups' income
+//!   by source (own bites, regurgitation from givers above and below
+//!   `provision_reserve_fraction`, the reserve fallback), their upkeep, and ticks a giver kept
+//!   its meal. `run ... litter=N [keep_grazers=K] [pack_reserve=F]` is PUP's scenario: on the
+//!   loaded save, every frondgrazer but K is taken off, every pack's breeder whelps N pups at
+//!   its den, and the pack adults' reserves are cut to at most F of their caps (a lean year),
+//!   before the run.
 //! - At the end, `sum,` lines over the whole run.
 
 use std::path::Path;
@@ -119,7 +127,7 @@ fn resolve(args: &[String]) -> Params {
         .unwrap_or_else(|e| panic!("the parameter set: {e}"))
 }
 
-const FOUNDING_ONLY: &[&str] = &["seed=", "minutes=", "save=", "lanternjaws="];
+const FOUNDING_ONLY: &[&str] = &["seed=", "minutes=", "save=", "lanternjaws=", "litter=", "keep_grazers=", "pack_reserve="];
 
 fn main() {
     let raw: Vec<String> = std::env::args().collect();
@@ -524,6 +532,47 @@ fn drop_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
 }
 
 /// The Veilhound's window line, `a` → `b`.
+/// **PUP's readout**, cumulative since the run's start (`a`): the Veilhound's pups alive now with
+/// their body and reserve fraction (min / mean), the litters' fates (born, independent,
+/// starved, lost otherwise; adults starved), the pups' income by source in organic units (their own bites,
+/// regurgitation by givers at or above `provision_reserve_fraction` and below it, the reserve
+/// fallback received), the upkeep the pups paid, ticks a giver withheld its meal, and the
+/// adults' mean reserve fraction now.
+fn pup_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let ch = Founder::Chorister;
+    let p = params.fauna.founder(ch);
+    let v = sim.fauna().view();
+    let frac = |x: &cubarium_voxel_fauna::Animal| x.reserve / p.core.reserve_of(x.body).max(1e-300);
+    let pups: Vec<_> = v.animals.iter().filter(|x| x.founder == Some(ch) && x.pack.is_some_and(|m| m.pup)).collect();
+    let adults: Vec<_> = v.animals.iter().filter(|x| x.founder == Some(ch) && !x.pack.is_some_and(|m| m.pup)).collect();
+    let mean = |xs: &[f64]| if xs.is_empty() { f64::NAN } else { xs.iter().sum::<f64>() / xs.len() as f64 };
+    let pb: Vec<f64> = pups.iter().map(|x| x.body).collect();
+    let pr: Vec<f64> = pups.iter().map(|x| frac(x)).collect();
+    let ar: Vec<f64> = adults.iter().map(|x| frac(x)).collect();
+    let min = |xs: &[f64]| xs.iter().copied().fold(f64::NAN, f64::min);
+    format!(
+        "pups={},pup_body={:.3}/{:.3},pup_reserve={:.3}/{:.3},adults={},adult_reserve={:.3},adults_starved={},born={},independent={},starved={},lost_other={},in_bites={:.4},in_regurg_surplus={:.4},in_regurg_lean={:.4},in_fallback={:.4},pup_upkeep={:.4},withheld_ticks={}",
+        pups.len(),
+        min(&pb),
+        mean(&pb),
+        min(&pr),
+        mean(&pr),
+        adults.len(),
+        mean(&ar),
+        (b.departed_founder(ch, Departure::Starved) - a.departed_founder(ch, Departure::Starved)).saturating_sub(b.pups_starved - a.pups_starved),
+        b.pups_born - a.pups_born,
+        b.pups_independent - a.pups_independent,
+        b.pups_starved - a.pups_starved,
+        b.pups_lost_other - a.pups_lost_other,
+        b.pup_swallowed_organic - a.pup_swallowed_organic,
+        b.pup_regurgitated_surplus - a.pup_regurgitated_surplus,
+        b.pup_regurgitated_lean - a.pup_regurgitated_lean,
+        b.provision_received_organic - a.provision_received_organic,
+        b.pup_upkeep_organic - a.pup_upkeep_organic,
+        b.provision_withheld_ticks - a.provision_withheld_ticks,
+    )
+}
+
 fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh) -> String {
     let i = VH.index();
     let v = sim.fauna().view();
@@ -1067,6 +1116,35 @@ fn run(args: &[String]) {
     fauna.replace_config(params.fauna.clone()).expect("the arm's animal config validates");
     cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("the heuristics go back on");
     eprintln!("{arm}: loaded {} at minute {minute0}: {}", dir.display(), counts(&fauna));
+    // PUP's scenario, on the loaded save before the run (dropped on a resume: the checkpoint
+    // carries it): `keep_grazers=N` takes every frondgrazer but the first N off the world
+    // (`Command::Remove` at its column: a lean world), and `litter=N` has every pack's breeder
+    // whelp N pups at its den now (`Fauna::whelp`).
+    if let Some(keep) = arg(args, "keep_grazers=").and_then(|n| n.parse::<usize>().ok()) {
+        let cols: Vec<(i64, u32)> = fauna.view().animals.iter().filter(|a| a.founder == Some(GRAZER)).skip(keep).map(|a| (i64::from(a.site.x), a.site.z)).collect();
+        for (x, z) in cols {
+            fauna.apply(&world, cubarium_voxel_fauna::Command::Remove { x, z });
+        }
+        eprintln!("{arm}: kept {keep} frondgrazers: {}", counts(&fauna));
+    }
+    if let Some(n) = arg(args, "litter=").and_then(|n| n.parse::<u32>().ok()).filter(|&n| n > 0) {
+        let packs: Vec<u64> = fauna.packs().iter().map(|p| p.id).collect();
+        for pack in packs {
+            match fauna.whelp(&world.view(), pack, n) {
+                Ok(ids) => eprintln!("{arm}: pack {pack}: a litter of {} whelped at minute {minute0}: {ids:?}", ids.len()),
+                Err(e) => eprintln!("{arm}: pack {pack}: no litter: {e}"),
+            }
+        }
+    }
+    if let Some(f) = arg(args, "pack_reserve=").and_then(|n| n.parse::<f64>().ok()) {
+        // Cuts only: a breeder already thinner from whelping stays so.
+        let p = params.fauna.founder(Founder::Chorister).core;
+        let ids: Vec<(u64, f64)> = fauna.view().animals.iter().filter(|a| a.pack.is_some_and(|m| !m.pup)).map(|a| (a.id, a.reserve / p.reserve_of(a.body).max(1e-300))).collect();
+        for (id, now) in ids {
+            fauna.set_reserve_fraction(id, f.min(now));
+        }
+        eprintln!("{arm}: pack adults' reserve cut to at most {f} of their caps");
+    }
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     let per_min = 60 * u64::from(TICK_HZ);
     let mut runner = stage(args, &mut sim, minute0, minute0 + (hours * 60.0).round() as u64);
@@ -1173,6 +1251,7 @@ fn run(args: &[String]) {
             println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
             println!("route,{arm},{minute},{}", route_line(&lw, &l));
             println!("vh,{arm},{minute},{}", vh_line(&sim, &params, &lw, &l, &vh_win));
+            println!("pup,{arm},{minute},{}", pup_line(&sim, &params, &l0, &l));
             println!("snail,{arm},{minute},{}", snail_line(&sim, &lw, &l));
             // SNAIL-LAND: the shore census (land faces by distance to standing water).
             println!("shore,{arm},{minute},{}", shore_line(&sim));
@@ -1271,6 +1350,7 @@ fn run(args: &[String]) {
     }
     vh_all.add(&vh_win);
     println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
+    println!("sumpup,{arm},{},{}", minute0, pup_line(&sim, &params, &l0, &l));
     println!("sumsnail,{arm},{},{}", minute0, snail_line(&sim, &l0, &l));
     println!("sumvig,{arm},{},{}", minute0, vig_line(&l0, &l));
     println!("sumgraz,{arm},{},{}", minute0, graz_line(&l0, &l, grazers0, grazers(&sim), track[GRAZER.index()].body_ticks));

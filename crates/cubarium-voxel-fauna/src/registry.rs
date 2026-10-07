@@ -403,6 +403,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.home_give_up_s", "s", nonneg, "an adult wanting rest walks home this long, then rests where it is").optional(),
         r("pack.stalk_margin", "fraction of the prey's hearing floor", nonneg, "S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk)").optional(),
         r("pack.breed_reserve_fraction", "fraction of reserve cap", fraction, "the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone)").optional(),
+        r("pack.regurgitate_reserve_fraction", "fraction of reserve cap", fraction, "PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters)").optional(),
         r("pack.commit_m", "m", nonneg, "S2: ...and rushes within this of its prey").optional(),
         r("pack.select_kin_m", "m", nonneg, "PACK-TUNE: kin of a target's lineage within this lower its prospect").optional(),
         r("pack.select_kin_factor", "factor", fraction, "PACK-TUNE: each such kin multiplies the prospect by this").optional(),

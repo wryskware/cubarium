@@ -806,6 +806,9 @@ pub(crate) fn swallow(fauna: &mut Fauna, i: usize, food: Food, t: Taken) {
     l.swallowed.organic += t.organic;
     l.swallowed.mineral += t.mineral;
     l.swallowed.energy += t.energy;
+    if fauna.animals[i].pack.is_some_and(|m| m.pup) {
+        l.pup_swallowed_organic += t.organic;
+    }
     if let Some(f) = fauna.animals[i].founder {
         l.swallowed_by_founder[f.index()] += t.organic;
         // A bite covers its controller interval: the balance measures' eating ticks.
@@ -944,8 +947,12 @@ fn maintenance(fauna: &mut Fauna) {
         } else {
             1.0
         };
+        let pup = a.pack.is_some_and(|m| m.pup);
         let want = sc.maintenance_per_s * rest * pregnant * a.body * DT;
-        let (_, from_body) = respire(fauna, i, want, Respiration::Maintenance);
+        let (paid, from_body) = respire(fauna, i, want, Respiration::Maintenance);
+        if pup {
+            fauna.ledger.pup_upkeep_organic += paid;
+        }
         if is_founder && from_body > 0.0 {
             fauna.animals[i].founder_state.feedback.structural_loss += from_body;
         }
@@ -2918,6 +2925,9 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
 fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     let rule = body::effective_config(&fauna.config, &fauna.animals[j]).reproduction;
     fail_gestation(fauna, j, &rule);
+    if fauna.animals[j].pack.is_some_and(|m| m.pup) {
+        fauna.ledger.pups_lost_other += 1;
+    }
     // S3: a kill of a prey drawn to a lure.
     if let (Departure::Killed { by }, Some(f)) = (cause, fauna.animals[j].founder) {
         if crate::light::drawn_to_lure(fauna, fauna.animals[j].id) {
@@ -3752,6 +3762,61 @@ fn gestate(
         fauna.ledger.litters += 1;
         fauna.ledger.pups_born += u64::from(young);
     }
+}
+
+/// [`Fauna::whelp`] (PUP's scenario control): a litter of `young` born now at pack `pack`'s den,
+/// paid out of its breeder's reserve at the lineage's package per pup.
+pub(crate) fn whelp(fauna: &mut Fauna, view: &VoxelView<'_>, pack: u64, young: u32) -> Result<Vec<u64>, String> {
+    let rec = fauna.pack(pack).ok_or_else(|| format!("no pack {pack}"))?;
+    let (den, breeder) = (rec.den, rec.breeder.ok_or("the pack has no breeder")?);
+    let i = fauna.animals.iter().position(|a| a.id == breeder).ok_or("the breeder is gone")?;
+    let young = young.max(1);
+    let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
+    let rule = sc.reproduction;
+    let cost = rule.package_cost(&sc) * f64::from(young);
+    if !(cost > sc.body_min) || fauna.animals[i].reserve < cost {
+        return Err(format!("the breeder's reserve {:.3} cannot pay {cost:.3}", fauna.animals[i].reserve));
+    }
+    let paid = take_from_reserve(&mut fauna.animals[i], cost);
+    if let Some(f) = fauna.animals[i].founder {
+        fauna.ledger.reproduction_by_founder[f.index()] += paid.organic;
+    }
+    if let Some(y) = view.year().filter(|_| rule.litters_per_year > 0) {
+        count_season(fauna, i, y.number);
+    }
+    let a = &mut fauna.animals[i];
+    a.reproduction.refractory_ticks = rule.interval_ticks();
+    a.reproduction.surplus_ticks = 0;
+    a.reproduction.window.reset();
+    a.reproduction.given += paid.organic;
+    let (species, founder, mut pose) = (a.species, a.founder, a.pose);
+    let v = view.config.voxel_m;
+    let (x, z) = crate::pack::centre(den, v);
+    pose.x = x;
+    pose.z = z;
+    pose.y_m = crate::surface_m(den.y, v);
+    let mut ids = Vec::new();
+    let f = 1.0 / f64::from(young);
+    for _ in 0..young {
+        let share = Taken { organic: paid.organic * f, mineral: paid.mineral * f, energy: paid.energy * f };
+        let mut n = newborn(fauna, (species, founder), (den, pose), sc.body_min, share, sc.lifespan_median_s);
+        n.pack = Some(crate::PackMember { pack, pup: true, calling_ticks: 0 });
+        ids.push(n.id);
+        let fd = n.founder;
+        fauna.insert(n);
+        if let Some(fd) = fd {
+            if let Some(c) = fauna.factories.make(fd) {
+                fauna.controllers.set(ids[ids.len() - 1], c);
+            }
+        }
+    }
+    let tick = fauna.tick;
+    if let Some(p) = fauna.pack_mut(pack) {
+        p.last_litter_tick = Some(tick);
+    }
+    fauna.ledger.litters += 1;
+    fauna.ledger.pups_born += u64::from(young);
+    Ok(ids)
 }
 
 /// The breeding season a body's conceptions count against (LIFE-HISTORY): its pack's for a
@@ -4775,7 +4840,13 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         .enumerate()
         .filter_map(|(i, a)| {
             let sc = body::effective_config(&fauna.config, a);
-            if a.body < sc.body_min {
+            // PUP: a pup of a lineage whose pups live on their reserve starves when it is
+            // spent and its stomach is empty.
+            let pup_spent = a.pack.is_some_and(|m| m.pup)
+                && a.founder.and_then(|f| fauna.config.founder(f).pack).is_some_and(|t| t.pup_starves_on_empty)
+                && !(a.reserve > 0.0)
+                && !(a.stomach.organic() > 0.0);
+            if a.body < sc.body_min || pup_spent {
                 Some((i, Departure::Starved))
             } else if drowning[i] {
                 Some((i, Departure::Drowned))
@@ -4816,6 +4887,13 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.drop_plans.remove(id);
     }
     for (a, cause) in &dead {
+        if a.pack.is_some_and(|m| m.pup) {
+            if *cause == Departure::Starved {
+                fauna.ledger.pups_starved += 1;
+            } else {
+                fauna.ledger.pups_lost_other += 1;
+            }
+        }
         bury_corpse(fauna, flora, a, *cause);
     }
     // A host's riders are freed where it fell, whatever their size (parasite §5).
@@ -4863,6 +4941,9 @@ mod chorister_tests;
 #[cfg(test)]
 #[path = "life_history_tests.rs"]
 mod life_history_tests;
+#[cfg(test)]
+#[path = "pup_tests.rs"]
+mod pup_tests;
 #[cfg(test)]
 #[path = "night_survival_tests.rs"]
 mod night_survival_tests;

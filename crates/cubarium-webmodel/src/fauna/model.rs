@@ -65,6 +65,11 @@ pub struct Cohort {
     pub litter: f64,
     /// A pack breeder carrying its pack's litter: the pack's index ([`FaunaModel::packs`]).
     pub breeder_of: Option<usize>,
+    /// **A pup's place in its litter** (PUP, the scramble): 1 for the strongest, counting up;
+    /// 0 for a body outside a ranked litter. A ranked litter is born as one cohort per place
+    /// (its bodies are the litters' pups of that place), fed in place order, and kept apart
+    /// from the other places until independence, when the rank is cleared.
+    pub rank: u32,
     pub response: super::behavior::ResponseState,
     /// Edible local film as a fraction of one underwater site's capacity.
     pub film_patch: Option<f64>,
@@ -91,6 +96,7 @@ impl Cohort {
             carcass: 0.0,
             litter: 1.0,
             breeder_of: None,
+            rank: 0,
             response: Default::default(),
             film_patch: None,
             film_travel_s: 0.0,
@@ -173,6 +179,9 @@ pub struct LineageLedger {
     pub litters: f64,
     /// Pups that reached `independence_age_s` alive (LIFE-HISTORY).
     pub pups_independent: f64,
+    /// Pups that starved as pups on a spent reserve (PUP, `pup_starves_on_empty`; also in
+    /// `starved`).
+    pub pups_starved: f64,
     /// Litters conceived (LIFE-HISTORY), and the young they carry.
     pub conceived: f64,
     pub conceived_young: f64,
@@ -549,6 +558,7 @@ impl FaunaModel {
                 if let Some(ind) = independence {
                     if c.native && c.host.is_none() && c.age_s < ind && c.age_s + dt >= ind {
                         came_of_age += c.n;
+                        c.rank = 0;
                     }
                 }
                 c.age_s += dt;
@@ -955,7 +965,10 @@ impl FaunaModel {
     /// `provision_rate_per_s × its body` per second, of which the pups get
     /// `provision_efficiency` and the rest is respired; never more than the pups' reserve
     /// room. Loses: which pup is the hungriest (the gift is spread over the pups' room) and
-    /// adults resting at the den by day.
+    /// adults resting at the den by day. PUP: with `provision_scramble` a ranked litter's places
+    /// are fed in order, the strongest first, each to its room (brood reduction); the model's
+    /// giver already keeps its meal in poor condition (it gives only reserve above
+    /// `provision_reserve_fraction`, at or above `regurgitate_reserve_fraction`).
     fn provision(&mut self, dt: f64, awake_of: &[Vec<f64>]) {
         for f in Founder::ALL {
             let Some(t) = self.phys(f).pack else { continue };
@@ -995,9 +1008,28 @@ impl FaunaModel {
                     c.b.brood = c.b.brood.min(c.b.reserve);
                 }
             }
-            for (c, r) in self.pops[f.index()].iter_mut().zip(&room) {
-                if *r > 0.0 {
-                    c.b.reserve += received * r / room_total / c.n.max(1e-12);
+            // PUP, the scramble: the places of a ranked litter are filled in order, the
+            // strongest's room first; else (and for unranked pups) pro rata to the room.
+            let share: Vec<f64> = if t.provision_scramble {
+                let mut order: Vec<usize> = (0..room.len()).filter(|&k| room[k] > 0.0).collect();
+                order.sort_by_key(|&k| {
+                    let r = self.pops[f.index()][k].rank;
+                    (r == 0, r)
+                });
+                let mut left = received;
+                let mut out = vec![0.0; room.len()];
+                for k in order {
+                    let g = left.min(room[k]);
+                    out[k] = g;
+                    left -= g;
+                }
+                out
+            } else {
+                room.iter().map(|r| received * r / room_total).collect()
+            };
+            for (c, g) in self.pops[f.index()].iter_mut().zip(&share) {
+                if *g > 0.0 {
+                    c.b.reserve += g / c.n.max(1e-12);
                 }
             }
             let l = &mut self.ledger[f.index()];
@@ -1167,6 +1199,9 @@ impl FaunaModel {
                         // A litter's parcel split evenly over its young (`gestate`, step.rs:2950-2975).
                         let mut young = Cohort::new(c.n * litter, sc.body_min, (esc / litter - sc.body_min).max(0.0));
                         young.native = true;
+                        // PUP, the scramble: one cohort per place in the litter, the strongest
+                        // first; the last place holds the litter's fraction past a whole pup.
+                        let ranked = c.breeder_of.is_some() && phys.pack.is_some_and(|t| t.provision_scramble);
                         if let Some(k) = c.breeder_of.take() {
                             if let Some(p) = self.packs[f.index()].get_mut(k) {
                                 p.last_litter_s = self.t_s;
@@ -1183,7 +1218,21 @@ impl FaunaModel {
                             l.first_clutch_age_s += c.n * c.age_s;
                         }
                         c.bred = true;
-                        hatchlings.push((f, young));
+                        if ranked && litter > 1.0 {
+                            let places = litter.ceil() as u32;
+                            for k in 0..places {
+                                let share = (litter - f64::from(k)).min(1.0);
+                                if !(share > 0.0) {
+                                    continue;
+                                }
+                                let mut y = young.clone();
+                                y.n = c.n * share;
+                                y.rank = k + 1;
+                                hatchlings.push((f, y));
+                            }
+                        } else {
+                            hatchlings.push((f, young));
+                        }
                     }
                     BirthMode::Eggs => {
                         if rule.clutch_max > 0 {
@@ -1399,7 +1448,14 @@ impl FaunaModel {
                     continue;
                 }
                 let (esc_body, esc_loss) = escrow_split(c, sc.reproduction.gestation_loss_fraction);
-                if c.b.body < sc.body_min {
+                // PUP: a pup of a lineage whose pups live on their reserve starves when it is
+                // spent and its stomach empty (`pup_starves_on_empty`).
+                let pup = self.phys(f).pack.is_some_and(|t| t.pup_starves_on_empty && c.native && c.host.is_none() && c.age_s < t.independence_age_s);
+                let spent = pup && !(c.b.reserve > 0.0) && !(c.b.stomach_total() > 0.0);
+                if spent {
+                    self.ledger[f.index()].pups_starved += c.n;
+                }
+                if c.b.body < sc.body_min || spent {
                     self.ledger[f.index()].gestation_loss += c.n * esc_loss;
                     ret.carrion += c.n * (c.b.organic() + esc_body) + c.carcass;
                     self.carcass_left += c.carcass;
@@ -1550,6 +1606,7 @@ pub fn cohort_distance(phys: &FounderPhysiology, a: &Cohort, b: &Cohort) -> f64 
         || a.bred != b.bred
         || a.escrow.is_some()
         || b.escrow.is_some()
+        || a.rank != b.rank
     {
         return f64::INFINITY;
     }
