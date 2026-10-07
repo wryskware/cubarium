@@ -561,8 +561,67 @@ pub struct Pack {
     /// Flankers go to points this far either side of the pack target, metres. A
     /// placeholder.
     pub flank_offset_m: f64,
-    /// A chase is dropped after this, seconds. 20.
+    /// A chase is dropped after this long without progress, seconds (CHURN: the pack closed
+    /// on its target by `chase_progress_m`, or worked it — a wound or pry gained). 20.
     pub chase_give_up_s: f64,
+    /// **CHURN, the progress**: a chase's give-up clock restarts when the pack's nearest
+    /// member has come this much closer to the target than its nearest so far, metres.
+    #[serde(default = "pack_chase_progress_m")]
+    pub chase_progress_m: f64,
+    /// **CHURN, the commitment**: in a stalled chase ([`Pack::switch_stall_s`]), another
+    /// target takes the hunt only when it is worth at least this many times the current
+    /// target (CHURN2: prospect × body, both weighed with the pack's participants and no
+    /// awareness; hysteresis: an equal or slightly better prey never steals it).
+    #[serde(default = "pack_switch_margin")]
+    pub switch_margin: f64,
+    /// **CHURN2, the stall**: a chase is open to a switch only after this long without
+    /// progress (the give-up's progress: closing in, or working the target), seconds; below
+    /// `chase_give_up_s`. A pack closing on or working its target never switches (MacNulty
+    /// et al. 2007: wolves test, then commit and stay on that animal).
+    #[serde(default = "pack_switch_stall_s")]
+    pub switch_stall_s: f64,
+    /// **STRIKE, the last metres**: within this of its target (centre to centre), with the
+    /// target in its jaw band from where it stands and a straight walk to it, a member leaves
+    /// its route and its flank point and steers to its **stand-off**, facing the prey: it turns
+    /// in place to a prey to its side or behind it, steps off from one inside its outline, and
+    /// never presses into it ([`crate::pack`]'s close-in). Metres; 0 turns it off.
+    #[serde(default = "pack_close_in_m")]
+    pub close_in_m: f64,
+    /// ...the stand-off: the jaw's reach ahead of its centre (`jaw_forward_length_fraction`)
+    /// plus this share of the strike's reach (`strike_reach_length_fraction`), from the prey's
+    /// centre; 0 stands it at the jaw (where a lunge that cannot move still meets it), 0.5 in
+    /// the middle of the strike capsule.
+    #[serde(default = "pack_stand_off_reach_fraction")]
+    pub stand_off_reach_fraction: f64,
+    /// **STRIKE-2, leaving the herd**: a pack that drops an armoured target alive (hunkered,
+    /// not turned over: given up late, or broken off) also shuns, for `shun_s`, its armoured
+    /// kin within this of it — hunkered, not turned over, and more than one member's work to
+    /// open — the herd that stood against it, nearest first, as many as the record holds
+    /// beside the target; so it leaves the herd rather than cycling through it (musk oxen in
+    /// a ring are left by wolves that cannot break it). Metres; 0 shuns the target alone.
+    #[serde(default = "pack_herd_shun_m")]
+    pub herd_shun_m: f64,
+    /// **PIT, the way out**: a member standing off its route graph (no node within its
+    /// footprint of where it stands: a stream channel, a slope ledge, a pocket its disc fits
+    /// but the graph's margin does not) walks back onto it by the shortest way its own body can
+    /// step — its own disc, step and wade depth, face by face — searched this far round it,
+    /// metres, rather than pressing on straight at its goal into a riser. 0: off.
+    #[serde(default = "pack_pit_search_m")]
+    pub pit_search_m: f64,
+    /// **PIT-2, the turn onto a route's next leg**: a member walking its route (home, to a
+    /// strike face, behind the draw's leader, or onto the graph) steers at the farthest node
+    /// its line reaches on the graph within a controller period's walk, slows to land on it
+    /// within the period, and while turning walks no faster than carries it this many voxels
+    /// across its line in a period. (At its full pace it ran two or three columns past the
+    /// next node at a bend, off the graph onto a ledge it could not leave.) 0: no limit on
+    /// the turn.
+    #[serde(default = "pack_route_swing_voxels")]
+    pub route_swing_voxels: f64,
+    /// **PIT-2, the litter at the den**: the breeder carrying a litter goes home and stays
+    /// within half the den radius until it gives birth (not in an emergency), so its pups are
+    /// born where they live. False: it gives birth wherever it is.
+    #[serde(default = "pack_whelp_at_den")]
+    pub whelp_at_den: bool,
     /// A pack takes only prey standing in its own walking route component; the
     /// lineage's components are rebuilt from the terrain at most this often, seconds (a
     /// placeholder: the terrain and its water change slowly). 60.
@@ -600,6 +659,18 @@ pub struct Pack {
     /// row).
     #[serde(default = "pack_stalk_freeze")]
     pub stalk_freeze: bool,
+    /// **The breeding reserve** (LIFE-HISTORY): the breeder conceives only with its reserve at
+    /// or above this fraction of its reserve cap. 0: no threshold beyond the ordinary surplus.
+    #[serde(default)]
+    pub breed_reserve_fraction: f64,
+    /// **A litter by condition** (LIFE-HISTORY; a switch, no registry row): the litter is
+    /// `1 + floor(c × litter_size_max)`, at most `litter_size_max`, where `c` is the breeder's
+    /// reserve fraction above `breed_reserve_fraction` as a share of the rest of the cap
+    /// (`(r − f) / (1 − f)`), so a breeder in poor condition has one pup and a full one the
+    /// most. Off: the old uniform draw on 2..=`litter_size_max`. Either way never more young
+    /// than its reserve above the surplus floor funds.
+    #[serde(default)]
+    pub litter_by_condition: bool,
     /// **The prey choice** (PACK-TUNE, [`crate::pack::prospect`]): a pack weighs each target
     /// it could take by its prospect — the chance-like share of a hunt on it that ends in a
     /// kill, from what it can see — times its meat, over its distance, and commits to the best.
@@ -670,6 +741,33 @@ fn pack_break_off_below() -> f64 {
 fn pack_shun_s() -> f64 {
     Pack::CHORISTER.shun_s
 }
+fn pack_chase_progress_m() -> f64 {
+    Pack::CHORISTER.chase_progress_m
+}
+fn pack_switch_margin() -> f64 {
+    Pack::CHORISTER.switch_margin
+}
+fn pack_switch_stall_s() -> f64 {
+    Pack::CHORISTER.switch_stall_s
+}
+fn pack_close_in_m() -> f64 {
+    Pack::CHORISTER.close_in_m
+}
+fn pack_stand_off_reach_fraction() -> f64 {
+    Pack::CHORISTER.stand_off_reach_fraction
+}
+fn pack_herd_shun_m() -> f64 {
+    Pack::CHORISTER.herd_shun_m
+}
+fn pack_pit_search_m() -> f64 {
+    Pack::CHORISTER.pit_search_m
+}
+fn pack_route_swing_voxels() -> f64 {
+    Pack::CHORISTER.route_swing_voxels
+}
+fn pack_whelp_at_den() -> bool {
+    Pack::CHORISTER.whelp_at_den
+}
 
 fn pack_stalk_margin() -> f64 {
     Pack::CHORISTER.stalk_margin
@@ -692,6 +790,17 @@ fn pack_route_reach_fraction() -> f64 {
 }
 
 impl Pack {
+    /// **A litter by condition** (LIFE-HISTORY, [`Pack::litter_by_condition`]): a breeder at
+    /// reserve fraction `r` has `1 + floor(c × litter_size_max)` young, at most
+    /// `litter_size_max`, with `c = (r − f) / (1 − f)` clamped to `[0, 1]` and `f` the
+    /// [`Pack::breed_reserve_fraction`].
+    pub fn condition_litter(&self, r: f64) -> u32 {
+        let hi = self.litter_size_max.max(1);
+        let f = self.breed_reserve_fraction.clamp(0.0, 1.0);
+        let c = if f < 1.0 { ((r - f) / (1.0 - f)).clamp(0.0, 1.0) } else { 1.0 };
+        (1 + (c * f64::from(hi)).floor() as u32).min(hi)
+    }
+
     /// The chorister's table (Brief R3).
     pub const CHORISTER: Pack = Pack {
         pack_radius_m: 6.0,
@@ -700,13 +809,33 @@ impl Pack {
         den_radius_m: 4.0,
         litter_size_max: 4,
         litter_interval_s: 3.0 * 7200.0,
-        independence_age_s: 7200.0,
+        independence_age_s: CHORISTER_INDEPENDENCE_S,
         provision_reserve_fraction: 0.6,
         provision_rate_per_s: 0.01,
         provision_efficiency: 0.7,
         territory_radius_m: 10.0,
         flank_offset_m: 1.5,
         chase_give_up_s: 20.0,
+        chase_progress_m: 0.5,
+        switch_margin: 1.5,
+        switch_stall_s: 10.0,
+        // STRIKE: the commit distance (`commit_m`, where the rush begins) is where a wolf or a
+        // lion leaves its line of approach for the animal itself (MacNulty et al. 2007's
+        // attack stage); the stand-off is at the jaw's reach (the probe: from the capsule's
+        // middle, a lunge blocked by a ledge or a stem swept short of the prey, 45 of 50
+        // strikes on perched bellwings missing by geometry).
+        close_in_m: 2.5,
+        stand_off_reach_fraction: 0.0,
+        // STRIKE-2: the herd a pack leaves, twice the frondgrazer's ring (`Hunker::ring_m`,
+        // the kin beside it that stiffen it): a placeholder.
+        herd_shun_m: 3.0,
+        // PIT: the way out of a pit is looked for within about twice the den radius (a
+        // placeholder; the probe's pits were a few metres from the graph).
+        pit_search_m: 4.0,
+        // PIT-2: a quarter voxel across its line a period while it turns (a placeholder: the
+        // bend case's ledge a column off the route held a half voxel's swing, not a quarter's).
+        route_swing_voxels: 0.25,
+        whelp_at_den: true,
         route_refresh_s: 60.0,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,
@@ -717,6 +846,8 @@ impl Pack {
         stalk_margin: 0.7,
         commit_m: 2.5,
         stalk_freeze: true,
+        breed_reserve_fraction: 0.6,
+        litter_by_condition: true,
         // PACK-TUNE's prey choice, placeholders at the terrarium's scale. Wolves and lions
         // test prey and quit fast on healthy, defended animals; they take the young, the
         // isolated, the wounded and the unaware far more often than their share (Mech 1970,
@@ -741,6 +872,36 @@ impl Pack {
         shun_s: 120.0,
     };
 }
+
+/// **The Veilhound's life history** (LIFE-HISTORY, Wrysk 2026-10-06: "veilhound cubs should
+/// be very expensive to birth and to rear. like lions and wolves only have one litter a year").
+/// The Cubarium year is the dry-season cycle (5 world days, 10 h at 1×; phase 0 a season's
+/// start, the season over phases 0–0.2). Read from wolves and lions:
+///
+/// - **One litter a year, conceived just after the dry season.** Wolves breed once a year in
+///   a short late-winter season and pup in spring, when the ungulates calve (Mech & Boitani
+///   2003, *Wolves: Behavior, Ecology, and Conservation*, ch. 2 and 6). The window opens at
+///   phase 0.2, as the rains return and the grazers recover, and lasts 0.15 of the year
+///   (wolves' oestrus season is about two months).
+/// - **Gestation** 0.167 of the year, 6,000 s: the wolf's 63 days of 365 (lions 110).
+///   Pregnancy raises upkeep by half ([`CHORISTER_PREGNANCY_UPKEEP`]): late gestation costs
+///   a mammal roughly a quarter to a half above maintenance (Robbins 1993, *Wildlife Feeding
+///   and Nutrition*).
+/// - **Only a breeder in condition conceives**, at 60 % of its reserve cap (the same line it
+///   provisions above), and its litter follows that condition, 1 to 4 (wolf and lion litter
+///   size and pup survival track prey per adult: Fuller, Mech & Cochrane 2003; Packer et al.
+///   1988, "Reproductive success of lions"). A pup's package stays two `body_min` (a litter of
+///   four is three quarters of its mother's body).
+/// - **Rearing**: a pup stays at the den, fed only by the pack, for 0.6 of the year
+///   ([`CHORISTER_INDEPENDENCE_S`], 3 world days): wolf pups travel with the pack from about
+///   six months and lion cubs depend on the pride for well over a year. A pup the pack cannot
+///   feed starves; wild wolves and lions lose a third to two thirds of their young in a lean
+///   year, the provisioning's real cost.
+pub const CHORISTER_INDEPENDENCE_S: f64 = 3.0 * 7200.0;
+/// The Veilhound's gestation, seconds (0.167 of the 5-day year; see [`CHORISTER_INDEPENDENCE_S`]).
+pub const CHORISTER_GESTATION_S: f64 = 6000.0;
+/// The Veilhound's pregnancy upkeep factor (see [`CHORISTER_INDEPENDENCE_S`]).
+pub const CHORISTER_PREGNANCY_UPKEEP: f64 = 1.5;
 
 /// A glider's table ([`FounderPhysiology::glider`], F3; the seedporter's numbers are
 /// predation-and-flight §3.5, §3.9 and the roster brief's Brief F3, placeholders).
@@ -1814,6 +1975,13 @@ impl FounderPhysiology {
                 core.reserve_cap = 1.0;
                 core.scale_mass(CHORISTER_VOLUME_RATIO);
                 core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
+                // LIFE-HISTORY: one litter a pack a year, conceived just after the dry season,
+                // a wolf's gestation at a raised upkeep ([`CHORISTER_INDEPENDENCE_S`]).
+                core.reproduction.gestation_s = CHORISTER_GESTATION_S;
+                core.reproduction.litters_per_year = 1;
+                core.reproduction.breeding_phase = 0.2;
+                core.reproduction.breeding_window = 0.15;
+                core.reproduction.gestation_upkeep_factor = CHORISTER_PREGNANCY_UPKEEP;
                 FounderPhysiology {
                     core,
                     // GAIT: its own cruise, 1 BL/s (1.4 m/s; the standing pace rule), no

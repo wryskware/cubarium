@@ -918,7 +918,13 @@ fn maintenance(fauna: &mut Fauna) {
         };
         let a = &mut fauna.animals[i];
         a.age_ticks = a.age_ticks.saturating_add(1);
-        let want = sc.maintenance_per_s * rest * a.body * DT;
+        // LIFE-HISTORY: a gestating body pays its lineage's pregnancy upkeep factor.
+        let pregnant = if a.reproduction.escrow.is_some() {
+            sc.reproduction.gestation_upkeep_factor.max(0.0)
+        } else {
+            1.0
+        };
+        let want = sc.maintenance_per_s * rest * pregnant * a.body * DT;
         let (_, from_body) = respire(fauna, i, want, Respiration::Maintenance);
         if is_founder && from_body > 0.0 {
             fauna.animals[i].founder_state.feedback.structural_loss += from_body;
@@ -3176,13 +3182,15 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
     clutch_fate(fauna, view, flora);
     let parents = fauna.animals.len();
     let mut newborns: Vec<Animal> = Vec::new();
+    // LIFE-HISTORY: the Cubarium year, for the lineages with a breeding season.
+    let year = view.year();
     for i in 0..parents {
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let rule = sc.reproduction;
         advance_eligibility(fauna, i, &sc, &rule);
         match rule.mode {
             crate::BirthMode::Gestation => {
-                gestate(fauna, i, &sc, &rule, view.config.seed, &mut newborns);
+                gestate(fauna, i, &sc, &rule, (view.config.seed, year), &mut newborns);
             }
             crate::BirthMode::Eggs => lay(fauna, i, view, flora, &sc, &rule),
         }
@@ -3245,7 +3253,7 @@ fn gestate(
     i: usize,
     sc: &SpeciesConfig,
     rule: &crate::Reproduction,
-    seed: u64,
+    (seed, year): (u64, Option<cubarium_voxel::weather::Year>),
     newborns: &mut Vec<Animal>,
 ) {
     let a = &fauna.animals[i];
@@ -3263,6 +3271,15 @@ fn gestate(
             Litter::Of(n) => n,
             Litter::Not => return,
         };
+        // LIFE-HISTORY: a breeding season conceives only inside its window, and no more
+        // than `litters_per_year` times a year (a pack's count is the pack's).
+        if !rule.season_allows(year, season_of(fauna, i)) {
+            fauna.ledger.season_waits += 1;
+            return;
+        }
+        if let Some(y) = year.filter(|_| rule.litters_per_year > 0) {
+            count_season(fauna, i, y.number);
+        }
         fauna.animals[i].reproduction.escrow = Some(crate::Escrow {
             young,
             ..crate::Escrow::default()
@@ -3377,6 +3394,28 @@ fn gestate(
     }
 }
 
+/// The breeding season a body's conceptions count against (LIFE-HISTORY): its pack's for a
+/// pack member, its own otherwise.
+fn season_of(fauna: &Fauna, i: usize) -> crate::Season {
+    let a = &fauna.animals[i];
+    match a.pack.and_then(|m| fauna.pack(m.pack)) {
+        Some(p) => p.season,
+        None => a.reproduction.season,
+    }
+}
+
+/// Count one conception in `year` against [`season_of`]'s season.
+fn count_season(fauna: &mut Fauna, i: usize, year: i64) {
+    match fauna.animals[i].pack.map(|m| m.pack) {
+        Some(pack) if fauna.pack(pack).is_some() => {
+            if let Some(p) = fauna.pack_mut(pack) {
+                p.season.count(year);
+            }
+        }
+        _ => fauna.animals[i].reproduction.season.count(year),
+    }
+}
+
 /// What a gestating lineage's next conception carries (roster R3).
 enum Litter {
     /// Not a pack lineage: one young, the ordinary rule.
@@ -3396,6 +3435,11 @@ const DOMAIN_LITTER: u64 = 0x11_77E2;
 /// 2..=`litter_size_max` (keyed by the world seed, the breeder and the tick), and is
 /// never more young than its reserve above the surplus floor funds; with too little for
 /// two, it waits.
+///
+/// LIFE-HISTORY: the breeder conceives only with its reserve at `breed_reserve_fraction` of
+/// its cap or more, and with `litter_by_condition` the litter is not drawn but follows that
+/// condition, 1 to `litter_size_max` ([`Pack::litter_by_condition`]); with funds for none,
+/// it waits.
 fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reproduction, seed: u64) -> Litter {
     let a = &fauna.animals[i];
     let Some(t) = a.founder.and_then(|f| fauna.config.founder(f).pack) else {
@@ -3416,9 +3460,19 @@ fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reprod
         }
     }
     let hi = t.litter_size_max.max(1);
-    let lo = hi.min(2);
-    let mut rng = Rng::keyed(DOMAIN_LITTER, seed, a.id, fauna.tick);
-    let drawn = lo + (rng.unit() * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo)) as u32;
+    let cap = sc.reserve_of(a.body);
+    let r = if cap > 0.0 { a.reserve / cap } else { 0.0 };
+    let f = t.breed_reserve_fraction.clamp(0.0, 1.0);
+    if f > 0.0 && r < f {
+        return Litter::Not;
+    }
+    let (lo, drawn) = if t.litter_by_condition {
+        (1, t.condition_litter(r))
+    } else {
+        let lo = hi.min(2);
+        let mut rng = Rng::keyed(DOMAIN_LITTER, seed, a.id, fauna.tick);
+        (lo, lo + (rng.unit() * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo)) as u32)
+    };
     let package = rule.package_cost(sc);
     let funds = if package > 0.0 {
         ((a.reserve - rule.surplus_floor) / package).floor().max(0.0)
@@ -3614,6 +3668,16 @@ fn lay(
         fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
         fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
         return;
+    }
+    // LIFE-HISTORY: a layer with a breeding season lays only inside its window, and no more
+    // than `litters_per_year` clutches a year.
+    let year = view.year();
+    if !rule.season_allows(year, season_of(fauna, i)) {
+        fauna.ledger.season_waits += 1;
+        return;
+    }
+    if let Some(y) = year.filter(|_| rule.litters_per_year > 0) {
+        count_season(fauna, i, y.number);
     }
     book_first_young(fauna, i);
     let a = &mut fauna.animals[i];
@@ -4299,6 +4363,9 @@ mod parasite_tests;
 #[path = "chorister_tests.rs"]
 mod chorister_tests;
 #[cfg(test)]
+#[path = "life_history_tests.rs"]
+mod life_history_tests;
+#[cfg(test)]
 #[path = "night_survival_tests.rs"]
 mod night_survival_tests;
 #[cfg(test)]
@@ -4341,6 +4408,12 @@ mod testpass_vigil_tests;
 #[cfg(test)]
 #[path = "testpass_pack_tests.rs"]
 mod testpass_pack_tests;
+#[cfg(test)]
+#[path = "churn_tests.rs"]
+mod churn_tests;
+#[cfg(test)]
+#[path = "strike_tests.rs"]
+mod strike_tests;
 #[cfg(test)]
 #[path = "testpass_light_tests.rs"]
 mod testpass_light_tests;

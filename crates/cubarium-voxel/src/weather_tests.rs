@@ -884,3 +884,53 @@ fn the_season_knobs_flow_from_toml_and_through_a_snapshot() {
     let back: Config = postcard::from_bytes(&bytes).expect("round trips");
     assert_eq!(back.climate, c.climate);
 }
+
+/// LIFE-HISTORY: the year is the season cycle on its knobs — `every` world days long, phase 0
+/// at a season's start (`phase` days in), year −1 before it — and it runs with the dry season
+/// switched off.
+#[test]
+fn the_year_follows_the_season_knobs_and_runs_with_the_season_off() {
+    for (every, len, phase) in [(5.0, 1.0, 5.0), (3.0, 0.5, 2.0), (2.0, 0.25, 0.0)] {
+        for on in [true, false] {
+            let mut c = seasonal(every, len, phase, 0.0);
+            c.dry_season = on;
+            for clock in [DayClock::default(), DayClock { length_min: 45.0, ..DayClock::default() }] {
+                let at = |d: f64| c.year(&clock, tick_at(&clock, d)).expect("a year with a period");
+                for d in [0.0, 0.3, phase, phase + 0.1, phase + every * 1.5, phase + every * 7.25] {
+                    let y = at(d);
+                    let want = (d - phase) / every;
+                    assert_eq!(y.number, want.floor() as i64, "on {on} every {every} phase {phase} day {d}");
+                    assert!((y.phase - (want - want.floor())).abs() < 1e-6, "{y:?} at day {d}");
+                    assert!((0.0..1.0).contains(&y.phase));
+                }
+                assert_eq!(at(phase).number, 0, "year 0 opens at the first season's start");
+                assert!(at(phase).phase < 1e-6);
+                if phase > 0.0 {
+                    assert_eq!(at(phase - 0.01).number, -1, "year -1 before the first season");
+                }
+                // The season holds over phases [0, len / every) of every year from year 0.
+                if on {
+                    for k in 0..3 {
+                        let d = phase + f64::from(k) * every + 0.5 * len;
+                        assert!(c.in_dry_season(&clock, tick_at(&clock, d)));
+                        assert!(at(d).phase < len / every);
+                    }
+                }
+                assert!((c.year_s(&clock) - every * clock.day_s()).abs() < 1e-9);
+            }
+        }
+    }
+    // No period: no year.
+    let c = seasonal(0.0, 1.0, 5.0, 0.0);
+    assert!(c.year(&DayClock::default(), 1000).is_none());
+}
+
+/// The window test wraps the year's end, and a width of 0 is no window.
+#[test]
+fn a_year_window_wraps_and_a_zero_width_is_none() {
+    let y = |phase| crate::weather::Year { number: 0, phase };
+    assert!(y(0.25).in_window(0.2, 0.1) && !y(0.31).in_window(0.2, 0.1) && !y(0.19).in_window(0.2, 0.1));
+    assert!(y(0.95).in_window(0.9, 0.2) && y(0.05).in_window(0.9, 0.2) && !y(0.11).in_window(0.9, 0.2));
+    assert!(!y(0.2).in_window(0.2, 0.0));
+    assert!(y(0.7).in_window(0.2, 1.0));
+}

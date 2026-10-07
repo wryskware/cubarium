@@ -1036,6 +1036,11 @@ pub enum DenChoice {
     FoundingPoint,
 }
 
+/// An unbounded distance (a serde default).
+fn far() -> f64 {
+    f64::INFINITY
+}
+
 /// A pack (roster R3): its den, its breeder, and the scripted pack tactic's state (its
 /// target, its chase clock, its carcass). Saved with the layer.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1061,9 +1066,18 @@ pub struct PackRecord {
     /// **The pack target**: the prey every adult member is driving or flanking now.
     #[serde(default)]
     pub target: Option<u64>,
-    /// The tick the chase on `target` began ([`Pack::chase_give_up_s`]).
+    /// The tick the chase on `target` began.
     #[serde(default)]
     pub chase_since_tick: u64,
+    /// **CHURN, the chase's progress** ([`Pack::chase_give_up_s`]): the last tick the pack
+    /// made progress on `target`, its nearest member's distance to it so far, and the work
+    /// done on it (its wound plus its pry, plus 1 while it is turned over) last read.
+    #[serde(default)]
+    pub chase_progress_tick: u64,
+    #[serde(default = "far")]
+    pub chase_best_m: f64,
+    #[serde(default)]
+    pub chase_work: f64,
     /// The target's face when last seen: where its carcass lies if it was killed.
     #[serde(default)]
     pub target_site: Option<Site>,
@@ -1096,6 +1110,10 @@ pub struct PackRecord {
     /// [`PackRecord::drawn`] is.
     #[serde(default)]
     pub drawn_scent: bool,
+    /// **The pack's breeding season** (LIFE-HISTORY): the year of its last litter's
+    /// conception and the conceptions in it ([`Reproduction::litters_per_year`] per pack).
+    #[serde(default)]
+    pub season: Season,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -1325,6 +1343,32 @@ pub struct ReproductionState {
     /// ([`ReproductionState::brood_held`]).
     #[serde(default)]
     pub brood: f64,
+    /// **This body's breeding season** (LIFE-HISTORY, [`Reproduction::litters_per_year`]):
+    /// the year of its last conception and how many it has had in it. A pack lineage counts
+    /// on its [`PackRecord::season`] instead.
+    #[serde(default)]
+    pub season: Season,
+}
+
+/// **A breeding season's count** (LIFE-HISTORY): the Cubarium year of the last conception and
+/// the conceptions in it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Season {
+    pub year: i64,
+    pub litters: u32,
+}
+
+impl Season {
+    /// The conceptions already had in `year`.
+    pub fn used_in(&self, year: i64) -> u32 {
+        if self.year == year { self.litters } else { 0 }
+    }
+
+    /// Count one conception in `year`.
+    pub fn count(&mut self, year: i64) {
+        let used = self.used_in(year);
+        *self = Season { year, litters: used + 1 };
+    }
 }
 
 impl ReproductionState {
@@ -1503,6 +1547,31 @@ pub struct Reproduction {
     /// brood also does not sate: hunger counts only the reserve above it. 0 turns it off.
     #[serde(default)]
     pub brood_share: f64,
+    /// **Breeding seasons** (LIFE-HISTORY, Wrysk 2026-10-06): at most this many conceptions —
+    /// a gestation opened, or a clutch laid — per Cubarium year
+    /// ([`cubarium_voxel::weather::Climate::year`], the dry-season cycle), each inside the
+    /// window [`Reproduction::breeding_phase`] + [`Reproduction::breeding_window`]. A pack
+    /// lineage counts them per pack (the pack breeds, whoever its breeder is). **0: no season**
+    /// — the lineage breeds exactly as without these knobs; so does a seasonal lineage in a
+    /// world with no year (no season period).
+    #[serde(default)]
+    pub litters_per_year: u32,
+    /// The year phase, `[0, 1)`, at which the breeding window opens (phase 0 is a dry
+    /// season's start).
+    #[serde(default)]
+    pub breeding_phase: f64,
+    /// The breeding window's width, a share of the year (wrapping past its end; 1 or more is
+    /// the whole year).
+    #[serde(default)]
+    pub breeding_window: f64,
+    /// **Pregnancy upkeep**: a gestating body's basal upkeep is multiplied by this while its
+    /// escrow is open. 1 is no raise.
+    #[serde(default = "default_gestation_upkeep_factor")]
+    pub gestation_upkeep_factor: f64,
+}
+
+fn default_gestation_upkeep_factor() -> f64 {
+    1.0
 }
 
 fn default_surplus_share() -> f64 {
@@ -1631,6 +1700,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// The littershredder's egg placeholders.
@@ -1668,6 +1741,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13), revised with its metabolism in the
@@ -1698,6 +1775,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// What the **smallest** offspring package costs the parent's reserve, the price
@@ -1803,6 +1884,20 @@ impl Reproduction {
 
     pub fn incubation_ticks(&self) -> u64 {
         cubarium_voxel::ticks_at_least_one(self.incubation_s)
+    }
+
+    /// **The breeding season's gate** (LIFE-HISTORY): whether a conception may happen at
+    /// `year` with `season` counted so far — always, for a lineage with no season
+    /// (`litters_per_year` 0) or in a world with no year; else only inside the window and
+    /// while the year's conceptions are under `litters_per_year`.
+    pub fn season_allows(&self, year: Option<cubarium_voxel::weather::Year>, season: Season) -> bool {
+        if self.litters_per_year == 0 {
+            return true;
+        }
+        let Some(y) = year else {
+            return true;
+        };
+        y.in_window(self.breeding_phase, self.breeding_window) && season.used_in(y.number) < self.litters_per_year
     }
 }
 
@@ -2815,6 +2910,20 @@ pub struct FaunaLedger {
     pub pack_break_offs: u64,
     #[serde(default)]
     pub pack_declined: u64,
+    /// **CHURN**: pack targets given up for a better one (past `Pack::switch_margin`).
+    #[serde(default)]
+    pub pack_switches: u64,
+    /// **STRIKE**: member samples steered by the close-in ([`Pack::close_in_m`]); of them,
+    /// steps off from a prey inside the outline and pivots to face one; and chases broken off
+    /// as out of reach (no face beside the target puts it in the jaw band).
+    #[serde(default)]
+    pub pack_close_in_samples: u64,
+    #[serde(default)]
+    pub pack_step_offs: u64,
+    #[serde(default)]
+    pub pack_pivots: u64,
+    #[serde(default)]
+    pub pack_out_of_reach: u64,
     /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
     #[serde(default)]
     pub vigil: VigilLedger,
@@ -2871,6 +2980,14 @@ pub struct FaunaLedger {
     pub litters: u64,
     #[serde(default)]
     pub pups_born: u64,
+    /// Pups that came of age (reached [`Pack::independence_age_s`] alive) and joined their
+    /// pack (LIFE-HISTORY).
+    #[serde(default)]
+    pub pups_independent: u64,
+    /// Conceptions a breeding season refused (outside the window, or the year's litters
+    /// used), counted once per refused tick a ready body waited (LIFE-HISTORY).
+    #[serde(default)]
+    pub season_waits: u64,
     /// **The minimal gut's books** (repair 2 item 10). Raw food into stomachs (every bite,
     /// after any spill), out of them by digestion (into assimilation, egesta and the
     /// unfunded share's respiration), moved stomach to stomach by regurgitation (inside
@@ -3367,6 +3484,10 @@ pub struct Fauna {
     /// target changes face. Not saved.
     #[serde(skip)]
     pack_paths: FxHashMap<u64, PackPath>,
+    /// Per pack id (PIT): the route field to its den's node, as `pack_paths` (a member walks
+    /// home on it, not straight at the den). Not saved.
+    #[serde(skip)]
+    den_paths: FxHashMap<u64, PackPath>,
     /// Per hunter id (HUNTER-MEAL): the route field to the face it walks to, as
     /// `pack_paths`. Not saved.
     #[serde(skip)]
@@ -3419,9 +3540,12 @@ pub(crate) struct PackPath {
 pub enum PackEvent {
     /// A pack took a target, with this many participants (the taker and its
     /// participating mates within `pack_radius_m`).
-    ChaseStart { tick: u64, pack: u64, participants: u32 },
-    /// A pack's target was dropped, and why.
-    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd },
+    /// `taker` is the member that chose `target` and `score` its choice score; `prev` is the
+    /// pack's last target dropped alive with the score the taker gave it now (`None` when it
+    /// does not sense it), the re-target's comparison (CHURN's readout).
+    ChaseStart { tick: u64, pack: u64, participants: u32, taker: u64, target: u64, score: f64, prev: Option<u64>, prev_score: Option<f64> },
+    /// A pack's target was dropped, and why; `by` is the member whose sampling dropped it.
+    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd, target: u64, by: u64 },
     /// A pack's feast ended, with the carrion its members ate there, and why.
     FeastEnd { tick: u64, pack: u64, site: Site, eaten: f64, why: FeastEnd },
 }
@@ -3444,6 +3568,8 @@ pub enum ChaseEnd {
     Lost,
     /// Its prospect fell under `Pack::break_off_below` (PACK-TUNE: the test went badly).
     BrokeOff,
+    /// Another target scored past `Pack::switch_margin` of it and took the hunt (CHURN).
+    Switched,
 }
 
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
@@ -3562,6 +3688,26 @@ impl Fauna {
         (graph, field)
     }
 
+    /// Pack `pack`'s route field to its den's node `goal` on lineage `founder`'s graph (PIT),
+    /// over the whole graph: cached until the graph is rebuilt or the node changes.
+    pub(crate) fn den_path(
+        &mut self,
+        view: &VoxelView<'_>,
+        founder: Founder,
+        pack: u64,
+        goal: usize,
+    ) -> (std::sync::Arc<encounter::RouteGraph>, std::sync::Arc<FxHashMap<usize, u32>>) {
+        let graph = self.pack_routes(view, founder);
+        if let Some(p) = self.den_paths.get(&pack) {
+            if std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal {
+                return (graph, p.field.clone());
+            }
+        }
+        let field = std::sync::Arc::new(graph.distances(goal, u32::MAX));
+        self.den_paths.insert(pack, PackPath { graph: graph.clone(), goal, steps: u32::MAX, field: field.clone() });
+        (graph, field)
+    }
+
     /// The open air under `flight`'s band, rebuilt from `view` when older than its
     /// `egg_air_refresh_s` (or never built).
     pub(crate) fn open_air(&mut self, view: &VoxelView<'_>, flight: &Flight) -> std::sync::Arc<flight::OpenAir> {
@@ -3609,6 +3755,7 @@ impl Fauna {
             pack_routes: FxHashMap::default(),
             open_air: None,
             pack_paths: FxHashMap::default(),
+            den_paths: FxHashMap::default(),
             percepts: FxHashMap::default(),
             scent: scent::ScentField::default(),
             beacons: light::Beacons::default(),
@@ -3764,6 +3911,7 @@ impl Fauna {
         self.config = config;
         self.pack_routes.clear();
         self.pack_paths.clear();
+        self.den_paths.clear();
         self.open_air = None;
         Ok(())
     }
@@ -3876,6 +4024,9 @@ impl Fauna {
             last_litter_tick: None,
             target: None,
             chase_since_tick: 0,
+            chase_progress_tick: 0,
+            chase_best_m: f64::INFINITY,
+            chase_work: 0.0,
             target_site: None,
             feast: None,
             feast_eaten: 0.0,
@@ -3883,6 +4034,7 @@ impl Fauna {
             shunned: [(0, 0); 4],
             drawn: None,
             drawn_scent: false,
+            season: Season::default(),
         });
         Some(id)
     }

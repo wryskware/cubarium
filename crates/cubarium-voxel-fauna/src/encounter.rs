@@ -511,8 +511,14 @@ impl RouteGraph {
     /// The node nearest `(x, z)` within `radius` columns of `site`'s column, within the
     /// step of its layer: where a body standing (or a prey caught) at `site` is on the
     /// graph when the disc does not stand clear on its own face.
-    pub fn node_near(&self, site: Site, (x, z): (f64, f64), radius: u32) -> Option<usize> {
-        if let Some(i) = self.face(site) {
+    pub fn node_near(&self, site: Site, xz: (f64, f64), radius: u32) -> Option<usize> {
+        self.node_near_where(site, xz, radius, |_| true)
+    }
+
+    /// [`RouteGraph::node_near`] among the nodes whose face `keep` accepts (STRIKE: a face
+    /// from which a hunter's jaw band meets the prey's body).
+    pub fn node_near_where(&self, site: Site, (x, z): (f64, f64), radius: u32, keep: impl Fn(Site) -> bool) -> Option<usize> {
+        if let Some(i) = self.face(site).filter(|&i| keep(self.faces[i])) {
             return Some(i);
         }
         let v = self.voxel_m;
@@ -531,7 +537,7 @@ impl RouteGraph {
                     if ny < 0 {
                         continue;
                     }
-                    let Some(j) = self.face(Site { x: nx, y: ny as u32, z: nz as u32 }) else {
+                    let Some(j) = self.face(Site { x: nx, y: ny as u32, z: nz as u32 }).filter(|&j| keep(self.faces[j])) else {
                         continue;
                     };
                     let (cx, cz) = self.centre(j);
@@ -579,6 +585,107 @@ impl RouteGraph {
             .filter(|&(dj, _)| dj < d)
             .min()
             .map(|(_, j)| j)
+    }
+
+    /// The voxel's size the graph was built at, metres.
+    pub fn voxel_m(&self) -> f64 {
+        self.voxel_m
+    }
+
+    /// **PIT-2, the point it steers at on its route**: from node `i` (where a body standing at
+    /// `(x, z)` is on the graph), the farthest node of `field`'s route within `max_steps`
+    /// steps of `i` to which the straight line from `(x, z)` is walkable on the graph
+    /// ([`RouteGraph::walk_line`]), else the route's next node. A body steering at the next
+    /// node, one column ahead, ran past it at its pace (two or three columns a controller
+    /// period) and off the graph at a bend; steering further along a straight stretch, it has
+    /// graph under its line the whole way. `None` at the goal or off the field.
+    pub fn pursue(&self, field: &FxHashMap<usize, u32>, i: usize, (x, z): (f64, f64), max_steps: u32) -> Option<usize> {
+        let mut at = self.next_toward(field, i)?;
+        for _ in 1..max_steps {
+            let Some(j) = self.next_toward(field, at) else { break };
+            if !self.walk_line(i, (x, z), self.centre(j)) {
+                break;
+            }
+            at = j;
+        }
+        Some(at)
+    }
+
+    /// **PIT, the way out**: for a body standing on `site` off the graph, the first face of
+    /// the shortest way **its own body** can step back onto it — its own disc of radius `r`
+    /// clear over `headroom` layers at each face's centre and at the midpoint of each step
+    /// ([`crate::body::pose_clear`], the graph's own rule without the margin), each step to the
+    /// neighbouring column's support face nearest its layer within `step`
+    /// ([`VoxelView::nearest_support`], the motor's rule), into water no deeper than
+    /// `wade_m` or than the water it steps from — out to `max_cols` columns round `site`. The
+    /// way ends on a face from which the graph is reached ([`RouteGraph::node_near`] within
+    /// `own_cols`). `None` when `site` is already on the graph or no such way exists in reach.
+    #[allow(clippy::too_many_arguments)]
+    pub fn way_on(
+        &self,
+        view: &VoxelView<'_>,
+        site: Site,
+        r: f64,
+        headroom: u32,
+        step: crate::StepLimits,
+        wade_m: f64,
+        own_cols: u32,
+        max_cols: u32,
+    ) -> Option<Site> {
+        let v = self.voxel_m;
+        let centre = |f: Site| ((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v);
+        let on = |f: Site| self.node_near(f, centre(f), own_cols).is_some();
+        if on(site) || max_cols == 0 {
+            return None;
+        }
+        let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, headroom, step);
+        let water = |f: Site| view.water_depth_m(i64::from(f.x), f.y, f.z);
+        let w = i64::from(self.width);
+        let span = |a: i64, b: i64| {
+            let d = (a - b).rem_euclid(w);
+            d.min(w - d)
+        };
+        // Breadth first from `site`; each face remembers the first step of the way to it.
+        let mut first: FxHashMap<Site, Site> = FxHashMap::default();
+        let mut queue = std::collections::VecDeque::new();
+        first.insert(site, site);
+        queue.push_back(site);
+        while let Some(f) = queue.pop_front() {
+            let (fx, fz) = centre(f);
+            for (dx, dz) in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+                let nz = i64::from(f.z) + dz;
+                if nz < 0 || nz >= i64::from(self.depth) {
+                    continue;
+                }
+                let nx = (i64::from(f.x) + dx).rem_euclid(w);
+                if span(nx, i64::from(site.x)) > i64::from(max_cols) || (nz - i64::from(site.z)).abs() > i64::from(max_cols) {
+                    continue;
+                }
+                let Some(ny) = view.nearest_support(nx, nz as u32, f.y, step.down, step.up) else {
+                    continue;
+                };
+                let n = Site { x: nx as u32, y: ny, z: nz as u32 };
+                if first.contains_key(&n) {
+                    continue;
+                }
+                let deep = water(n);
+                if deep > wade_m && deep > water(f) {
+                    continue;
+                }
+                let (cx, cz) = centre(n);
+                let (mx, mz) = (fx + 0.5 * dx as f64 * v, fz + 0.5 * dz as f64 * v);
+                if !(clear(cx, cz, ny) && clear(mx, mz, f.y) && clear(mx, mz, ny)) {
+                    continue;
+                }
+                let way = if f == site { n } else { first[&f] };
+                if on(n) {
+                    return Some(way);
+                }
+                first.insert(n, way);
+                queue.push_back(n);
+            }
+        }
+        None
     }
 
     /// The centre of node `i`, metres `(x, z)`.
