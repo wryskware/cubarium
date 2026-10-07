@@ -4497,6 +4497,9 @@ mod edge_tests;
 #[path = "fear_tests.rs"]
 mod fear_tests;
 #[cfg(test)]
+#[path = "fear2_tests.rs"]
+mod fear2_tests;
+#[cfg(test)]
 #[path = "drop_tests.rs"]
 mod drop_tests;
 #[cfg(test)]

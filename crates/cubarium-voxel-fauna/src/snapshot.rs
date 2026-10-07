@@ -112,8 +112,9 @@ use crate::Fauna;
 // 60: DROP — `FounderPhysiology::drop` (`DropRule`), `Departure::Fell`, the ledger's
 //     `drops_by_founder`, `drop_m_by_founder` and `drop_wound_by_founder`; a trapped body jumps
 //     down past its step at a wound.
-// 61: FEAR and FEAR-2 — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg}`,
-//     `Vigil::calm_walk`, `Track::posture`; prey watch a sleeping or resting Veilhound.
+// 61: FEAR and FEAR-2 — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg, lost_calm_s}`,
+//     `Vigil::{calm_walk, refuge}`, `Track::posture`; prey watch a sleeping or still Veilhound
+//     facing away, a flight ends in a perch or once its hunter is lost.
 pub const SCHEMA: u32 = 61;
 
 #[derive(Serialize, Deserialize)]

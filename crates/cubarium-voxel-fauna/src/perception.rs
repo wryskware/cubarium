@@ -149,21 +149,24 @@ pub struct Track {
 pub mod posture {
     /// Up and about, or not seen: whatever it is doing, it may come.
     pub const ACTIVE: u8 = 0;
-    /// Awake, lying still: no strike, not moving within the still window, not feeding.
+    /// Awake and still: no strike, not moving within the still window, not feeding (lying
+    /// or standing, whatever its state: FEAR-2).
     pub const REST: u8 = 1;
     /// Asleep.
     pub const ASLEEP: u8 = 2;
 }
 
-/// **FEAR**: `o`'s posture ([`posture`]): asleep; resting (awake, its state
-/// [`crate::State::Resting`], no strike under way, still for the predation table's
-/// `still_after_s`); else active. A body feeding ([`crate::State::Cropping`], a hunter at a
-/// carcass) is active: FEAR's probe found prey fleeing a feeding Veilhound in at most 1 % of
-/// the seedporter's flight ticks (0–8 % of the loftstrider's), too little to rule on.
+/// **FEAR**: `o`'s posture ([`posture`]): asleep; still (awake, no strike under way, not
+/// feeding, still for the predation table's `still_after_s`); else active. **FEAR-2**: still in
+/// any awake state, not only [`crate::State::Resting`]: a Veilhound standing idle (its state
+/// `Walking`, not due a step) reads the same to an eye as one lying awake, and FEAR's
+/// `Resting` test left those idle hunters active. A body feeding ([`crate::State::Cropping`],
+/// a hunter at a carcass) is active: FEAR's probe found prey fleeing a feeding Veilhound in at
+/// most 1 % of the seedporter's flight ticks (0–8 % of the loftstrider's), too little to rule on.
 pub fn posture_of(config: &FaunaConfig, o: &Animal) -> u8 {
     if o.state == crate::State::Asleep {
         posture::ASLEEP
-    } else if o.state == crate::State::Resting && o.strike.is_none() && !crate::moved_recently(&config.predation, o) {
+    } else if o.state != crate::State::Cropping && o.strike.is_none() && !crate::moved_recently(&config.predation, o) {
         posture::REST
     } else {
         posture::ACTIVE

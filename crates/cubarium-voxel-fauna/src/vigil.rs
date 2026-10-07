@@ -40,6 +40,24 @@
 //! 1990, Anim. Behav. 40:837; Caro 2005, *Antipredator Defenses in Birds and Mammals*, ch. 4–5
 //! on predator monitoring and flight-initiation distance).
 //!
+//! **FEAR-2** (FEAR's check: seedporters still in flight 75 % of their awake time). Three
+//! holds kept a flight going after the prey was safe, and the fix ends each by behaviour:
+//! - **the refuge**: a seedporter's flight stayed on through its whole perch (FEAR-2's probe:
+//!   0.48–1.0 of its flight ticks perched, mostly not eating). A flight now **ends on reaching
+//!   a perch**; the **refuge watch** ([`Vigil::refuge`]) keeps it up there — no step down, no
+//!   glide, turning and feeding as it asks — while a hunter it does not watch is within
+//!   `flee_start_m` (then `flee_stop_m`), and `lost_calm_s` (at least `calm_s`) after the last;
+//! - **the lost hunter**: a flight held while its hunter was out of every sense and the body
+//!   within `flee_stop_m` of where it last knew it (a perched or stuck body never gets beyond;
+//!   0.83–1.0 of the probe's flight ticks). No hunter known within `flee_stop_m` for
+//!   `lost_calm_s` ends it where it is;
+//! - **the idle hunter**: FEAR's watch read only a hunter in [`State::Resting`]; one standing
+//!   idle (awake and still in another state) stayed a threat at any heading. Still and facing
+//!   away, it is watched in any awake state ([`crate::perception::posture_of`]); still and
+//!   facing the prey (a stalk's freeze) it stays a threat; awake within the predation table's
+//!   `still_threat_near_m` (in contact: a hunter working at a hunkered grazer) it is a threat
+//!   whichever way it faces.
+//!
 //! The awareness the strike's dodge reads ([`awareness`], D5) and the Veilhound's stalk
 //! ([`stalk`]) are here too: both read the prey's record.
 //!
@@ -139,6 +157,9 @@ pub struct Vigilance {
     /// A resting hunter whose heading is within this of the bearing to it faces it: a
     /// threat, degrees.
     pub calm_facing_deg: f64,
+    /// **FEAR-2** (module note): a flight, or a refuge watch, whose hunter it has not known
+    /// within `flee_stop_m` for this long ends where it is, seconds; 0 never (S2's hold).
+    pub lost_calm_s: f64,
 }
 
 impl Default for Vigilance {
@@ -164,6 +185,7 @@ impl Default for Vigilance {
             watch_calm: false,
             calm_margin_m: 0.0,
             calm_facing_deg: 0.0,
+            lost_calm_s: 0.0,
         }
     }
 }
@@ -174,8 +196,10 @@ impl Default for Vigilance {
 /// where its rush begins: a hunter that rises from beyond it is seen moving before it can
 /// rush), about two of its body lengths; a resting hunter faces a prey whose bearing lies within
 /// 30° of its heading (about a third of a predator's binocular field: looking at it, not past
-/// it).
-const WATCH: Vigilance = Vigilance { watch_calm: true, calm_margin_m: 3.0, calm_facing_deg: 30.0, ..NONE };
+/// it). **FEAR-2**: a hunter not known within the stop distance for 30 s (three calms: a
+/// hunter that slips from view may still be near, so it waits longer than for one it saw go)
+/// ends a flight or a refuge watch; a placeholder, untuned.
+const WATCH: Vigilance = Vigilance { watch_calm: true, calm_margin_m: 3.0, calm_facing_deg: 30.0, lost_calm_s: 30.0, ..NONE };
 
 /// [`Vigilance::default`] as a constant.
 const NONE: Vigilance = Vigilance {
@@ -198,6 +222,7 @@ const NONE: Vigilance = Vigilance {
     watch_calm: false,
     calm_margin_m: 0.0,
     calm_facing_deg: 0.0,
+    lost_calm_s: 0.0,
 };
 
 /// **A lineage's hunker** (module note, HUNKER): its knobs. Inert unless `enabled` and its
@@ -451,6 +476,9 @@ pub struct Vigil {
     pub withdraw_turn: f64,
     /// **FEAR**: at its last sample it was walking off a watched hunter inside its margin.
     pub calm_walk: bool,
+    /// **FEAR-2**: at its last sample it held its perch under a hunter (the refuge watch: in
+    /// refuge, not in flight).
+    pub refuge: bool,
 }
 
 impl Vigil {
@@ -504,7 +532,7 @@ struct Threat {
 /// **FEAR's judgement** of track `t` by the body at `a` with response `vg` (module note):
 /// seen (only sight reads a posture), neither heard nor felt nor moving, and asleep, or
 /// resting with its heading more than `calm_facing_deg` off the bearing to `a`.
-fn calm_of(vg: &Vigilance, a: &Animal, t: &Track, ring: f64) -> bool {
+fn calm_of(config: &FaunaConfig, vg: &Vigilance, a: &Animal, t: &Track, ring: f64) -> bool {
     use crate::perception::posture;
     if !vg.watch_calm || t.modes & SIGHT == 0 || t.modes & (HEARING | TREMOR) != 0 || t.moving {
         return false;
@@ -513,7 +541,9 @@ fn calm_of(vg: &Vigilance, a: &Animal, t: &Track, ring: f64) -> bool {
         posture::ASLEEP => true,
         posture::REST => {
             let (dx, dz) = crate::pose::wrapped_delta(t.x, t.z, a.pose.x, a.pose.z, ring);
-            if dx == 0.0 && dz == 0.0 {
+            // FEAR-2: awake in contact (within the predation table's `still_threat_near_m`),
+            // it is a threat whichever way it faces: a hunter working at a hunkered grazer.
+            if dx == 0.0 && dz == 0.0 || (dx * dx + dz * dz).sqrt() <= config.predation.still_threat_near_m {
                 return false;
             }
             let d = (dx.atan2(dz) - t.heading).rem_euclid(std::f64::consts::TAU);
@@ -536,7 +566,7 @@ fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, v
             let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
             let d = (dx * dx + dz * dz).sqrt();
             let seen_pressing = t.modes & SIGHT != 0 && (t.moving || d <= config.predation.still_threat_near_m);
-            let calm = calm_of(&vg, a, t, ring);
+            let calm = calm_of(config, &vg, a, t, ring);
             let dy = t.y_m - base;
             Threat {
                 d,
@@ -551,6 +581,13 @@ fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, v
         .collect();
     out.sort_by(|p, q| p.d.total_cmp(&q.d).then(p.id.cmp(&q.id)));
     out
+}
+
+/// **A readout** (FEAR-2's probe; no rule reads it): the threats the body `a` knows from its
+/// record `p` at `now`, nearest first, each as `(id, distance on the ring, pressing as the herd
+/// reads it, watched)`. The arboreal rule counts every unwatched one as pressing.
+pub fn threat_readout(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, vm: f64) -> Vec<(u64, f64, bool, bool)> {
+    threats(config, a, p, now, ring, vm).into_iter().map(|t| (t.id, t.d, t.pressing, t.calm)).collect()
 }
 
 /// The flight's hysteresis, shared by the herd and the arboreal: starts at `need` pressing
@@ -583,7 +620,11 @@ fn flight(v: &mut Vigil, vg: &Vigilance, a: &Animal, th: &[Threat], need: usize,
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, v.from_x, v.from_z, ring);
         let beyond = (dx * dx + dz * dz).sqrt() > stop;
         let seen_still = th.iter().any(|t| t.id == v.flee_id && !t.pressing);
-        if (beyond || seen_still) && now.saturating_sub(v.close_tick) >= ticks(vg.calm_s) {
+        // FEAR-2: no hunter known within `flee_stop_m` for `lost_calm_s` (out of sight, a
+        // body that cannot get beyond the stop distance of where it last saw it): over.
+        let since = now.saturating_sub(v.close_tick);
+        let lost = vg.lost_calm_s > 0.0 && since >= ticks(vg.lost_calm_s);
+        if (beyond || seen_still || lost) && since >= ticks(vg.calm_s) {
             v.fleeing = false;
         }
     }
@@ -931,6 +972,26 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
     // one it watches (asleep, or resting and not facing it).
     let sensed: Vec<Threat> = th.iter().map(|t| Threat { pressing: !t.calm, ..*t }).collect();
     let grounded = a.mobility.mode == MobilityMode::Ground;
+    // FEAR-2: a perch is its refuge. A flight ends on reaching one, and the refuge watch keeps
+    // it there (no step down, no glide; it turns and feeds as it asks) while a hunter it does
+    // not watch is within `flee_start_m`, then within `flee_stop_m`, and `lost_calm_s` (at
+    // least `calm_s`) after the last.
+    if a.mobility.mode == MobilityMode::Perched {
+        v.fleeing = false;
+        let (start, stop) = (vg.flee_start_m.max(0.0), vg.flee_stop_m.max(vg.flee_start_m.max(0.0)));
+        let reach = if v.refuge { stop } else { start };
+        if sensed.iter().any(|t| t.pressing && t.d <= reach) {
+            v.refuge = true;
+            v.close_tick = now;
+        }
+        if v.refuge && now.saturating_sub(v.close_tick) >= ticks(vg.lost_calm_s.max(vg.calm_s)) {
+            v.refuge = false;
+        }
+        let out = v.refuge.then_some(Actions { forward: 0.0, turn: held.turn, feed: held.feed });
+        fauna.percepts.entry(a.id).or_default().vigil = v;
+        return out;
+    }
+    v.refuge = false;
     if flight(&mut v, &vg, &a, &sensed, 1, now, ring) && grounded {
         fauna.ledger.vigil.flees[k] += 1;
     }
@@ -950,9 +1011,8 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
                     }
                 }
             }
-            // Up the stem, and still in the crown.
+            // Up the stem (in the crown, the refuge watch above).
             MobilityMode::Climb if !a.mobility.falling => Some(Actions { forward: 1.0, turn: 0.0, feed: 0.0 }),
-            MobilityMode::Perched => Some(Actions { forward: 0.0, turn: 0.0, feed: held.feed }),
             _ => None,
         };
     } else if let Some(act) = calm_walk(fauna, view, &a, &vg, &th, ring) {

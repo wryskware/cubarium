@@ -286,7 +286,8 @@ fn founder_rows() -> Vec<Row> {
         r("vigilance.refuge_search_m", "m", nonneg, "S2: an arboreal body in flight runs to a stand it climbs within this"),
         // FEAR (`vigilance.watch_calm` is a switch: no row).
         r("vigilance.calm_margin_m", "m", nonneg, "FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never)"),
-        r("vigilance.calm_facing_deg", "deg", nonneg, "FEAR: a resting hunter heading within this of the bearing to it faces it (a threat)"),
+        r("vigilance.calm_facing_deg", "deg", nonneg, "FEAR: a still hunter heading within this of the bearing to it faces it (a threat)"),
+        r("vigilance.lost_calm_s", "s", nonneg, "FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never)"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.enter_m", "m", nonneg, "HUNKER: it clamps down under its shield at an approaching threat within this"),
         r("hunker.leave_m", "m", nonneg, "HUNKER: ...and comes out once none has been within this for the calm"),

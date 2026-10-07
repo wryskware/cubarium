@@ -135,6 +135,7 @@ fn main() {
         Some("pit") => pit_probe(&args),
         Some("edge") => edge_probe(&args),
         Some("fear") => fear_probe(&args),
+        Some("fear2") => fear2_probe(&args),
         Some("drop") => drop_probe(&args),
         Some("pit2") => pit2_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
@@ -3817,13 +3818,18 @@ const FEAR_FROM: [&str; 6] = ["asleep", "feeding", "moving", "still_sated", "sti
 struct FearTally {
     awake: u64,
     flee: u64,
+    /// FEAR-2: in flight as the vigil's `fleeing` flag counts it, perched included (FEAR's readout).
+    flee_raw: u64,
+    /// FEAR-2: perched under a hunter: the refuge watch, or (before FEAR-2) a flight held in a perch.
+    refuge: u64,
     calm: u64,
     hunker: u64,
     from: [u64; 6],
 }
 
 /// **FEAR's readout**: per prey lineage, awake ticks, ticks in flight (a ground response's
-/// flight, else the flee rule steering), ticks moving off a calm hunter (FEAR's margin walk),
+/// flight, else the flee rule steering; FEAR-2: not perched, with `flee_raw` the flag as FEAR
+/// counted it and `refuge` the ticks perched under a hunter), ticks moving off a calm hunter (FEAR's margin walk),
 /// hunkered ticks, and the flight ticks by what the hunter it fled (its `flee_id`, else the
 /// nearest body that hunts it) was doing.
 #[derive(Default)]
@@ -3861,11 +3867,17 @@ impl Fear {
             }
             let vg = fa.percept(a.id).map(|p| p.vigil).unwrap_or_default();
             let vigil = params.fauna.founder(f).vigilance.mode != cubarium_voxel_fauna::VigilMode::None && params.fauna.founder(f).senses.live;
-            let fleeing = if vigil { vg.fleeing } else { fa.steer_of(a.id) == Some(cubarium_voxel_fauna::Steer::Flee) };
+            let raw = if vigil { vg.fleeing } else { fa.steer_of(a.id) == Some(cubarium_voxel_fauna::Steer::Flee) };
+            // FEAR-2's correction: a body perched in its refuge is not fleeing, whatever its flag.
+            let perched = a.mobility.mode == cubarium_voxel_fauna::MobilityMode::Perched;
+            let fleeing = raw && !perched;
+            let refuge = vigil && (vg.refuge || (vg.fleeing && perched));
             let calm = vg.calm_walk;
-            let mut add = |t: &mut FearTally| {
+            let add = |t: &mut FearTally| {
                 t.awake += 1;
                 t.flee += u64::from(fleeing);
+                t.flee_raw += u64::from(raw);
+                t.refuge += u64::from(refuge);
                 t.calm += u64::from(calm);
                 t.hunker += u64::from(a.hunkered);
             };
@@ -3900,10 +3912,12 @@ impl Fear {
                 let sh = |n: u64| n as f64 / x.awake.max(1) as f64;
                 let from = (0..6).map(|c| format!("{:.3}", x.from[c] as f64 / x.flee.max(1) as f64)).collect::<Vec<_>>().join(":");
                 format!(
-                    "{}=awake_h:{:.2}/flee:{:.3}/calm:{:.3}/hunker:{:.3}/from:{from}",
+                    "{}=awake_h:{:.2}/flee:{:.3}/flee_raw:{:.3}/refuge:{:.3}/calm:{:.3}/hunker:{:.3}/from:{from}",
                     f.name(),
                     x.awake as f64 / f64::from(TICK_HZ) / 3600.0,
                     sh(x.flee),
+                    sh(x.flee_raw),
+                    sh(x.refuge),
                     sh(x.calm),
                     sh(x.hunker)
                 )
@@ -3932,6 +3946,208 @@ fn fear_probe(args: &[String]) {
         fear.tick(&sim, &params);
     }
     println!("sumfear,{},{minute0},{}", dir.display(), fear.line(true));
+}
+
+/// **FEAR-2's probe** (`hunter_study fear2 load=DIR minutes=M [save=DIR] [config=...] [set=...]`): runs a
+/// save and decomposes the seedporter's flight ticks (its vigil's `fleeing`) by mode (ground,
+/// climbing, perched and eating, perched otherwise), by what holds the flight (its start tick;
+/// an unwatched threat within `flee_stop_m`, the one it flees or another; the calm timer; the
+/// hunter it flees unknown and the body within `flee_stop_m` of where it last knew it), by the
+/// hunter it fled at the flight's start (asleep, feeding, moving, still and sated, still and
+/// hungry; still split by its state, whether its pack targets this body, and whether it faces
+/// it), and by the flight's duration; the still-and-hungry hunters held over flight ticks by
+/// what their pack is doing; and the frondgrazer's hunker by the nearest Veilhound within its
+/// hunker's `enter_m`.
+fn fear2_probe(args: &[String]) {
+    use cubarium_voxel_fauna::{MobilityMode, State};
+    use std::collections::HashMap;
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(10, |m| m.parse().unwrap());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let sp = Founder::Seedporter;
+    let vg = params.fauna.founder(sp).vigilance;
+    let stop = vg.flee_stop_m.max(vg.flee_start_m);
+    let calm_t = if vg.calm_s > 0.0 { cubarium_voxel::ticks_at_least_one(vg.calm_s) } else { 0 };
+    let hz = u64::from(TICK_HZ);
+    let enter = params.fauna.founder(Founder::Browser).hunker.enter_m;
+    let facing = |h: &cubarium_voxel_fauna::Animal, a: &cubarium_voxel_fauna::Animal, ring: f64| {
+        let (dx, dz) = wdelta(h.pose.x, h.pose.z, a.pose.x, a.pose.z, ring);
+        let d = (dx.atan2(dz) - h.pose.heading_rad).rem_euclid(std::f64::consts::TAU);
+        let off = if d > std::f64::consts::PI { std::f64::consts::TAU - d } else { d };
+        off <= 30f64.to_radians()
+    };
+    // The class of hunter `h` to prey `a`: FEAR_FROM, still split by state, target, facing.
+    let class_of = |sim: &Sim, h: Option<&cubarium_voxel_fauna::Animal>, a: &cubarium_voxel_fauna::Animal, ring: f64| -> String {
+        let Some(h) = h else { return "none".into() };
+        let c = fear_from(&params, h);
+        let base = FEAR_FROM[c];
+        if c < 3 {
+            return base.into();
+        }
+        let fa = sim.fauna();
+        let pk = h.pack.and_then(|m| fa.pack(m.pack));
+        let tgt = match pk {
+            Some(r) if r.target == Some(a.id) => "tgt_me",
+            Some(r) if r.drawn == Some(a.id) => "drawn_me",
+            Some(r) if r.target.is_some() => "tgt_other",
+            Some(r) if r.feast.is_some() => "feast",
+            _ => "no_tgt",
+        };
+        let st = match h.state {
+            State::Resting => "rest",
+            State::Walking => "walk",
+            _ => "other",
+        };
+        let pup = if h.pack.is_some_and(|m| m.pup) { "pup" } else { "adult" };
+        format!("{base}/{st}/{tgt}/{}/{pup}", if facing(h, a, ring) { "facing" } else { "away" })
+    };
+    struct Ep {
+        flee_tick: u64,
+        start: u64,
+        class: String,
+    }
+    let mut eps: HashMap<u64, Ep> = HashMap::new();
+    let (mut awake, mut flee, mut refuge) = (0u64, 0u64, 0u64);
+    let mut mode = [0u64; 5];
+    let mut hold: HashMap<String, u64> = HashMap::new();
+    let mut trig: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut held_by: HashMap<String, u64> = HashMap::new();
+    let bins = [10u64, 60, 300, 1800, u64::MAX];
+    let mut dur = [(0u64, 0u64); 5];
+    let mut hunker: HashMap<String, (u64, u64)> = HashMap::new();
+    let close = |e: &Ep, end: u64, trig: &mut HashMap<String, (u64, u64)>, dur: &mut [(u64, u64); 5]| {
+        let n = end.saturating_sub(e.start);
+        let b = bins.iter().position(|&x| n < x * hz).unwrap_or(4);
+        dur[b].0 += 1;
+        dur[b].1 += n;
+        let t = trig.entry(e.class.clone()).or_default();
+        t.0 += 1;
+        t.1 += n;
+    };
+    for _ in 0..minutes * 60 * hz {
+        sim.step();
+        let fa = sim.fauna();
+        let v = fa.view();
+        let now = fa.tick();
+        let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+        let vm = sim.world().config().voxel_m;
+        let mut seen = std::collections::HashSet::new();
+        for a in v.animals.iter() {
+            if a.founder == Some(Founder::Browser) && a.state != State::Asleep {
+                let near = v
+                    .animals
+                    .iter()
+                    .filter(|o| o.founder == Some(VH))
+                    .map(|o| {
+                        let (dx, dz) = wdelta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+                        ((dx * dx + dz * dz).sqrt(), o)
+                    })
+                    .filter(|&(d, _)| d <= enter)
+                    .min_by(|p, q| p.0.total_cmp(&q.0));
+                let c = near.map_or("none".to_string(), |(_, o)| FEAR_FROM[fear_from(&params, o)].to_string());
+                let t = hunker.entry(c).or_default();
+                t.0 += 1;
+                t.1 += u64::from(a.hunkered);
+            }
+            if a.founder != Some(sp) || a.state == State::Asleep {
+                continue;
+            }
+            awake += 1;
+            let Some(p) = fa.percept(a.id) else { continue };
+            let vi = p.vigil;
+            refuge += u64::from(vi.refuge);
+            if !vi.fleeing {
+                continue;
+            }
+            seen.insert(a.id);
+            flee += 1;
+            let m = match a.mobility.mode {
+                MobilityMode::Ground => 0,
+                MobilityMode::Climb => 1,
+                MobilityMode::Perched if a.state == State::Cropping => 2,
+                MobilityMode::Perched => 3,
+                _ => 4,
+            };
+            mode[m] += 1;
+            let th = cubarium_voxel_fauna::vigil::threat_readout(&params.fauna, a, p, now, ring, vm);
+            let h = if now == vi.flee_tick {
+                "start"
+            } else if let Some(t) = th.iter().find(|t| !t.3 && t.1 <= stop) {
+                if t.0 == vi.flee_id { "near_same" } else { "near_other" }
+            } else if now.saturating_sub(vi.close_tick) < calm_t {
+                "calm_timer"
+            } else if th.iter().any(|t| t.0 == vi.flee_id) {
+                "seen_far"
+            } else {
+                "unseen"
+            };
+            *hold.entry(format!("{h}/{}", if m >= 2 { "perched" } else { "ground" })).or_default() += 1;
+            if h == "near_same" || h == "near_other" {
+                let t = th.iter().find(|t| !t.3 && t.1 <= stop).unwrap();
+                let c = class_of(&sim, v.animal(t.0), a, ring);
+                *held_by.entry(c).or_default() += 1;
+            }
+            let new = eps.get(&a.id).is_none_or(|e| e.flee_tick != vi.flee_tick);
+            if new {
+                if let Some(e) = eps.remove(&a.id) {
+                    close(&e, now, &mut trig, &mut dur);
+                }
+                let class = class_of(&sim, v.animal(vi.flee_id), a, ring);
+                eps.insert(a.id, Ep { flee_tick: vi.flee_tick, start: now, class });
+            }
+        }
+        let ended: Vec<u64> = eps.keys().copied().filter(|id| !seen.contains(id)).collect();
+        for id in ended {
+            let e = eps.remove(&id).unwrap();
+            close(&e, now, &mut trig, &mut dur);
+        }
+    }
+    let now = sim.fauna().tick();
+    for (_, e) in eps.drain() {
+        close(&e, now, &mut trig, &mut dur);
+    }
+    let fl = flee.max(1) as f64;
+    println!(
+        "f2mode,{},{minute0},awake_h={:.2},refuge_watch={:.3},flee_raw={:.3},ground={:.3},climb={:.3},perch_eat={:.3},perch_other={:.3},other={:.3}",
+        dir.display(),
+        awake as f64 / hz as f64 / 3600.0,
+        refuge as f64 / awake.max(1) as f64,
+        flee as f64 / awake.max(1) as f64,
+        mode[0] as f64 / fl,
+        mode[1] as f64 / fl,
+        mode[2] as f64 / fl,
+        mode[3] as f64 / fl,
+        mode[4] as f64 / fl
+    );
+    let sorted = |m: &HashMap<String, u64>| {
+        let mut v: Vec<_> = m.iter().map(|(k, n)| (k.clone(), *n)).collect();
+        v.sort_by(|p, q| q.1.cmp(&p.1));
+        v
+    };
+    println!("f2hold,{}", sorted(&hold).iter().map(|(k, n)| format!("{k}={:.3}", *n as f64 / fl)).collect::<Vec<_>>().join(","));
+    let hb: u64 = held_by.values().sum();
+    println!("f2heldby,{}", sorted(&held_by).iter().map(|(k, n)| format!("{k}={:.3}", *n as f64 / hb.max(1) as f64)).collect::<Vec<_>>().join(","));
+    let tt: u64 = trig.values().map(|t| t.1).sum();
+    let mut tv: Vec<_> = trig.iter().collect();
+    tv.sort_by(|p, q| q.1.1.cmp(&p.1.1));
+    println!("f2trig,{}", tv.iter().map(|(k, t)| format!("{k}=n{}:t{:.3}", t.0, t.1 as f64 / tt.max(1) as f64)).collect::<Vec<_>>().join(","));
+    let names = ["<10s", "10-60s", "60-300s", "300-1800s", ">1800s"];
+    println!("f2dur,{}", (0..5).map(|b| format!("{}=n{}:t{:.3}", names[b], dur[b].0, dur[b].1 as f64 / tt.max(1) as f64)).collect::<Vec<_>>().join(","));
+    let mut hv: Vec<_> = hunker.iter().collect();
+    hv.sort();
+    println!("f2hunker,{}", hv.iter().map(|(k, t)| format!("{k}=awake{}:hunk{:.3}", t.0, t.1 as f64 / t.0.max(1) as f64)).collect::<Vec<_>>().join(","));
+    if let Some(out) = arg(args, "save=") {
+        let at = Path::new(out).join(format!("m{}", minute0 + minutes));
+        let (w, fl, fa) = sim.layers();
+        cubarium_voxel_sim::saved::save(&at, w, fl, fa, minute0 + minutes).unwrap_or_else(|e| panic!("save: {e}"));
+        println!("saved,{}", at.display());
+    }
 }
 
 /// The pack tactic's return for body `id` (PIT-2's probe): the source line of `pack.rs`'s
