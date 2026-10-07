@@ -40,6 +40,7 @@ pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
 mod gait;
 pub use gait::Sprint;
+pub use step::jump::DropRule;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
@@ -88,7 +89,7 @@ pub use predation::{
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use encounter::{
-    HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
+    DropWay, HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
     mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
     reachable_layers_of, route_components, standable_faces, surface_m, walkable_components,
@@ -1110,6 +1111,10 @@ pub struct PackRecord {
     /// [`PackRecord::drawn`] is.
     #[serde(default)]
     pub drawn_scent: bool,
+    /// **The pack's breeding season** (LIFE-HISTORY): the year of its last litter's
+    /// conception and the conceptions in it ([`Reproduction::litters_per_year`] per pack).
+    #[serde(default)]
+    pub season: Season,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -1339,6 +1344,32 @@ pub struct ReproductionState {
     /// ([`ReproductionState::brood_held`]).
     #[serde(default)]
     pub brood: f64,
+    /// **This body's breeding season** (LIFE-HISTORY, [`Reproduction::litters_per_year`]):
+    /// the year of its last conception and how many it has had in it. A pack lineage counts
+    /// on its [`PackRecord::season`] instead.
+    #[serde(default)]
+    pub season: Season,
+}
+
+/// **A breeding season's count** (LIFE-HISTORY): the Cubarium year of the last conception and
+/// the conceptions in it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Season {
+    pub year: i64,
+    pub litters: u32,
+}
+
+impl Season {
+    /// The conceptions already had in `year`.
+    pub fn used_in(&self, year: i64) -> u32 {
+        if self.year == year { self.litters } else { 0 }
+    }
+
+    /// Count one conception in `year`.
+    pub fn count(&mut self, year: i64) {
+        let used = self.used_in(year);
+        *self = Season { year, litters: used + 1 };
+    }
 }
 
 impl ReproductionState {
@@ -1517,6 +1548,31 @@ pub struct Reproduction {
     /// brood also does not sate: hunger counts only the reserve above it. 0 turns it off.
     #[serde(default)]
     pub brood_share: f64,
+    /// **Breeding seasons** (LIFE-HISTORY, Wrysk 2026-10-06): at most this many conceptions —
+    /// a gestation opened, or a clutch laid — per Cubarium year
+    /// ([`cubarium_voxel::weather::Climate::year`], the dry-season cycle), each inside the
+    /// window [`Reproduction::breeding_phase`] + [`Reproduction::breeding_window`]. A pack
+    /// lineage counts them per pack (the pack breeds, whoever its breeder is). **0: no season**
+    /// — the lineage breeds exactly as without these knobs; so does a seasonal lineage in a
+    /// world with no year (no season period).
+    #[serde(default)]
+    pub litters_per_year: u32,
+    /// The year phase, `[0, 1)`, at which the breeding window opens (phase 0 is a dry
+    /// season's start).
+    #[serde(default)]
+    pub breeding_phase: f64,
+    /// The breeding window's width, a share of the year (wrapping past its end; 1 or more is
+    /// the whole year).
+    #[serde(default)]
+    pub breeding_window: f64,
+    /// **Pregnancy upkeep**: a gestating body's basal upkeep is multiplied by this while its
+    /// escrow is open. 1 is no raise.
+    #[serde(default = "default_gestation_upkeep_factor")]
+    pub gestation_upkeep_factor: f64,
+}
+
+fn default_gestation_upkeep_factor() -> f64 {
+    1.0
 }
 
 fn default_surplus_share() -> f64 {
@@ -1645,6 +1701,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// The littershredder's egg placeholders.
@@ -1682,6 +1742,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13), revised with its metabolism in the
@@ -1712,6 +1776,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// What the **smallest** offspring package costs the parent's reserve, the price
@@ -1817,6 +1885,20 @@ impl Reproduction {
 
     pub fn incubation_ticks(&self) -> u64 {
         cubarium_voxel::ticks_at_least_one(self.incubation_s)
+    }
+
+    /// **The breeding season's gate** (LIFE-HISTORY): whether a conception may happen at
+    /// `year` with `season` counted so far — always, for a lineage with no season
+    /// (`litters_per_year` 0) or in a world with no year; else only inside the window and
+    /// while the year's conceptions are under `litters_per_year`.
+    pub fn season_allows(&self, year: Option<cubarium_voxel::weather::Year>, season: Season) -> bool {
+        if self.litters_per_year == 0 {
+            return true;
+        }
+        let Some(y) = year else {
+            return true;
+        };
+        y.in_window(self.breeding_phase, self.breeding_window) && season.used_in(y.number) < self.litters_per_year
     }
 }
 
@@ -2231,12 +2313,15 @@ pub enum Departure {
     /// An amphibious body's drying clock reached its lineage's `lethal_fraction`
     /// ([`crate::Amphibious`], AMPHIBIOUS-SNAIL). A corpse.
     Desiccation,
+    /// DROP: its wound reached 1 on a jump down ([`crate::DropRule`]). A corpse.
+    Fell,
 }
 
 impl Departure {
-    pub const ALL: [Departure; 5 + Founder::COUNT] = {
-        let mut all = [Departure::Starved; 5 + Founder::COUNT];
+    pub const ALL: [Departure; 6 + Founder::COUNT] = {
+        let mut all = [Departure::Starved; 6 + Founder::COUNT];
         all[4 + Founder::COUNT] = Departure::Desiccation;
+        all[5 + Founder::COUNT] = Departure::Fell;
         all[1] = Departure::Drowned;
         all[2] = Departure::Aged;
         all[3] = Departure::Removed;
@@ -2258,6 +2343,7 @@ impl Departure {
             Departure::Removed => 3,
             Departure::Killed { by } => 4 + by.index(),
             Departure::Desiccation => 4 + Founder::COUNT,
+            Departure::Fell => 5 + Founder::COUNT,
         }
     }
 
@@ -2273,6 +2359,7 @@ impl Departure {
             Departure::Aged => "aged",
             Departure::Removed => "removed",
             Departure::Desiccation => "desiccated",
+            Departure::Fell => "fell",
             Departure::Killed { by } => {
                 static NAMES: std::sync::OnceLock<[&'static str; Founder::COUNT]> =
                     std::sync::OnceLock::new();
@@ -2670,6 +2757,14 @@ pub struct FaunaLedger {
     pub sprint_ticks_by_founder: [u64; Founder::COUNT],
     #[serde(default)]
     pub winded_by_founder: [u64; Founder::COUNT],
+    /// DROP: jumps down past the step by a trapped body, their metres summed, and the wound
+    /// they added summed, by lineage.
+    #[serde(default)]
+    pub drops_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub drop_m_by_founder: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub drop_wound_by_founder: [f64; Founder::COUNT],
     /// Predation (`design/predation-and-flight-2026-09-28.md` §2.3), by the **striker's**
     /// lineage: strikes begun, and contacts resolved as a hit or a dodge.
     pub strikes_by_founder: [u64; Founder::COUNT],
@@ -2899,6 +2994,14 @@ pub struct FaunaLedger {
     pub litters: u64,
     #[serde(default)]
     pub pups_born: u64,
+    /// Pups that came of age (reached [`Pack::independence_age_s`] alive) and joined their
+    /// pack (LIFE-HISTORY).
+    #[serde(default)]
+    pub pups_independent: u64,
+    /// Conceptions a breeding season refused (outside the window, or the year's litters
+    /// used), counted once per refused tick a ready body waited (LIFE-HISTORY).
+    #[serde(default)]
+    pub season_waits: u64,
     /// **The minimal gut's books** (repair 2 item 10). Raw food into stomachs (every bite,
     /// after any spill), out of them by digestion (into assimilation, egesta and the
     /// unfunded share's respiration), moved stomach to stomach by regurgitation (inside
@@ -3458,6 +3561,14 @@ pub struct Fauna {
     /// of that flight goes by its route graph. Session state: not saved.
     #[serde(skip)]
     pub(crate) route_flee: FxHashMap<u64, u64>,
+    /// DROP: per grounded body, its trapped clock (`step::jump::Trapped`). Session state:
+    /// not saved.
+    #[serde(skip)]
+    pub(crate) trapped: FxHashMap<u64, step::jump::Trapped>,
+    /// DROP: per trapped body, the jump down it is taking (`step::jump::DropPlan`). Session
+    /// state: not saved.
+    #[serde(skip)]
+    pub(crate) drop_plans: FxHashMap<u64, step::jump::DropPlan>,
 }
 
 /// **Which layer set a founder's held actions** on its last controller sample (EDGE's
@@ -3488,11 +3599,13 @@ pub enum Steer {
     Pack,
     /// The light, loom or glow steering.
     Light,
+    /// DROP: a trapped body's jump down.
+    Drop,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 12] = [
+    pub const ALL: [Steer; 13] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -3505,6 +3618,7 @@ impl Steer {
         Steer::Yield,
         Steer::Pack,
         Steer::Light,
+        Steer::Drop,
     ];
 
     /// A short name for tables.
@@ -3522,6 +3636,7 @@ impl Steer {
             Steer::Yield => "yield",
             Steer::Pack => "pack",
             Steer::Light => "light",
+            Steer::Drop => "drop",
         }
     }
 }
@@ -3776,6 +3891,8 @@ impl Fauna {
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
             pressed: FxHashMap::default(),
+            trapped: FxHashMap::default(),
+            drop_plans: FxHashMap::default(),
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
         })
@@ -4010,6 +4127,31 @@ impl Fauna {
         self.births_enabled = enabled;
     }
 
+    /// DROP's readout for body `id`: the tick its trapped clock started (if it is cornered now),
+    /// and the jump it is taking (`from`, `land`).
+    pub fn drop_state(&self, id: u64) -> (Option<u64>, Option<(Site, Site)>) {
+        (
+            self.trapped.get(&id).filter(|t| t.cornered).map(|t| t.since),
+            self.drop_plans.get(&id).map(|p| (p.from, p.land)),
+        )
+    }
+
+    /// **A probe's placement** (DROP's `hunter_study drop`): the grounded body `id` stands on
+    /// `site`, centred on its column, its trapped clock and jump cleared. No check of the face:
+    /// the probe picks it. `false` when there is no such body.
+    pub fn probe_place(&mut self, id: u64, site: Site, voxel_m: f64) -> bool {
+        let Ok(i) = self.animals.binary_search_by_key(&id, |a| a.id) else { return false };
+        let a = &mut self.animals[i];
+        a.site = site;
+        a.pose.x = (f64::from(site.x) + 0.5) * voxel_m;
+        a.pose.z = (f64::from(site.z) + 0.5) * voxel_m;
+        a.pose.y_m = surface_m(site.y, voxel_m);
+        a.mobility = Mobility::default();
+        self.trapped.remove(&id);
+        self.drop_plans.remove(&id);
+        true
+    }
+
     pub fn tick(&self) -> u64 {
         self.tick
     }
@@ -4119,6 +4261,7 @@ impl Fauna {
             shunned: [(0, 0); 4],
             drawn: None,
             drawn_scent: false,
+            season: Season::default(),
         });
         Some(id)
     }
@@ -4641,8 +4784,9 @@ mod starting_stores_tests {
             // the grazing lineages' reserve cap of 0.5; the lanternjaw's is 1.0).
             let full = sc.body_max + sc.reserve_of(sc.body_max);
             assert!(
-                // The chorister (roster R3) keeps the lanternjaw's reserve cap.
-                matches!(founder, Founder::Lanternjaw | Founder::Chorister) ||
+                // The chorister (roster R3) keeps the lanternjaw's reserve cap; the bellwing
+                // (BELLWING) carries an egg load.
+                matches!(founder, Founder::Lanternjaw | Founder::Chorister | Founder::Bellwing) ||
                 ((full - body) - sc.body_max).abs() < 1e-15,
                 "{founder:?}: headroom {} is not one body_max",
                 full - body

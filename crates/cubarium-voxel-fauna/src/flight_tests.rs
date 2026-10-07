@@ -1384,3 +1384,62 @@ fn a_grounded_bellwing_picks_up_burrs_and_one_in_flight_does_not() {
         assert_eq!(picked > 0, expect, "grounded {}", c.grounded);
     }
 }
+
+/// **BELLWING: a clutch from surplus** — three hovering bellwings over open litter, their
+/// reserves one and a half, two and a half and six and a half eggs above the floor, with
+/// `clutch_max` 3 (a test value) and no wait: each lays once, and the more surplus the more
+/// eggs, up to `clutch_max` — the first lays fewer than the second, the third exactly
+/// `clutch_max` though it could pay for more. Control: with `clutch_max` 0 each lays the
+/// fixed `clutch_size`, whatever its surplus.
+#[test]
+fn a_clutch_from_surplus_lays_more_eggs_the_more_surplus_up_to_clutch_max() {
+    let world = plain_with(config(40, 20, 9, clock_at(12.0)));
+    let sites = [Site { x: 8, y: 2, z: 4 }, Site { x: 20, y: 2, z: 4 }, Site { x: 32, y: 2, z: 4 }];
+    let lay = |clutch_max: u32| -> Vec<u32> {
+        let mut flora = Flora::new(FloraConfig::default());
+        for s in sites {
+            assert!(flora.deposit(
+                s,
+                cubarium_voxel_flora::Deposit { kind: cubarium_voxel_flora::DepositKind::Litter, organic: 0.2, mineral: 0.004, energy: 0.4 }
+            ));
+        }
+        let mut config = FaunaConfig::default();
+        let (egg, floor, cap) = {
+            let core = &mut config.founders[BW.index()].core;
+            core.reserve_cap = 4.0;
+            core.reproduction = crate::Reproduction {
+                surplus_floor: 0.001,
+                surplus_hold_s: DT,
+                birth_interval_s: 1e6,
+                clutch_size: 1,
+                clutch_max,
+                clutch_hold_max_s: 0.0,
+                egg_organic: core.body_min,
+                incubation_s: 1e6,
+                litter_min: 0.0,
+                brood_share: 0.0,
+                ..core.reproduction
+            };
+            (core.body_min, 0.001, core.reserve_of(core.body_max))
+        };
+        let mut fauna = Fauna::new(config);
+        let mut ids = Vec::new();
+        for (s, eggs_above) in sites.iter().zip([1.5, 2.5, 6.5]) {
+            let (x, z) = centre(s.x, s.z);
+            let reserve = (floor + eggs_above * egg) / cap;
+            assert!(reserve < 1.0, "fixture: the reserve fits the cap");
+            let id = aloft(&mut fauna, &world, x, z, SURFACE + 0.5, EAST, StartingStores { body: 1.0, reserve });
+            fly(&mut fauna, id, 0.0, 0.0, 0.0);
+            ids.push(id);
+        }
+        steps(&mut fauna, &world, &mut flora, 40);
+        sites.iter().map(|s| fauna.view().clutches.iter().filter(|c| c.lineage == BW && c.site == *s).map(|c| c.count).sum()).collect()
+    };
+    let max = 3;
+    let eggs = lay(max);
+    assert!(eggs[0] >= 1, "the least surplus still lays: {eggs:?}");
+    assert!(eggs[0] < eggs[1], "more surplus, more eggs: {eggs:?}");
+    assert_eq!(eggs[2], max, "capped at clutch_max: {eggs:?}");
+    let fixed = lay(0);
+    assert_eq!(fixed, vec![1, 1, 1], "control: the fixed clutch_size whatever the surplus");
+}
