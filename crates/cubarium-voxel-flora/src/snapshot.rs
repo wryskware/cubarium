@@ -57,7 +57,8 @@ use crate::Flora;
 // 36: GLOWCAP-2 — the sun on a saprotroph: `SpeciesConfig::{sun_shade_max,
 //     sun_cap_loss_per_s, sun_mycelium_loss_per_s}`, `FloraLedger::sun_dried` and
 //     `DeathCause::Desiccated`.
-pub const SCHEMA: u32 = 36;
+// 37: SUN-SHELTER — `SpeciesConfig::sun_dark_shelter`: its dark habitat shelters it from the sun.
+pub const SCHEMA: u32 = 37;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

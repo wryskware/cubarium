@@ -3476,7 +3476,9 @@ pub(crate) fn grow_stand_cause(
     if sc.trophic == Trophic::Saprotroph
         && (sc.sun_cap_loss_per_s > 0.0 || sc.sun_mycelium_loss_per_s > 0.0)
     {
-        let sun = sun_share(sc, l_eff) * daylight.max(0.0);
+        // Its own dark habitat shelters it in proportion (SUN-SHELTER).
+        let shelter = (1.0 - sc.sun_dark_shelter.clamp(0.0, 1.0) * drink.darkness.clamp(0.0, 1.0)).max(0.0);
+        let sun = sun_share(sc, l_eff) * daylight.max(0.0) * shelter;
         if sun > 0.0 {
             let cap = (sc.sun_cap_loss_per_s * sun * dt).clamp(0.0, 1.0) * stand.foliage.max(0.0);
             let myc = (sc.sun_mycelium_loss_per_s * sun * dt).clamp(0.0, 1.0) * stand.wood.max(0.0);
