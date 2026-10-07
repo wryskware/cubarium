@@ -243,6 +243,9 @@ fn founder_rows() -> Vec<Row> {
         r("yield_by_food.*", "fraction", fraction, "assimilation yield of one food class").search(0.05, 0.9),
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
+        r("flower_ambush_m", "m", nonneg, "MIMIC: holds an ambush this close to a flower"),
+        r("catch_ceiling_m", "m above hunter base", nonneg, "MIMIC: highest bellwing base a catch can reach"),
+        r("catch_gain_min", "organic units", nonneg, "MIMIC: minimum yield less expected strike upkeep cost"),
         r("active_window.before_rise_h", "h on the 24-h day clock", nonneg, "it wakes this long before sunrise on top of its rhythm (LURE: dawn flight)").prov("decision"),
         r("active_window.after_set_h", "h on the 24-h day clock", nonneg, "it stays awake this long after sunset on top of its rhythm (LURE: dusk flight)").prov("decision"),
         r("sleep_upkeep", "x basal upkeep", fraction, "upkeep while asleep").search(0.1, 1.0).prov("decision"),

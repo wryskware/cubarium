@@ -467,3 +467,75 @@ fn a_seasonal_pack_conceives_inside_its_window_once_a_year() {
     assert!(fed.len() >= 2, "a conception in each of the years: {fed:?}");
     assert!(run(0.3).is_empty(), "a breeder under the breeding reserve does not conceive");
 }
+// MIMIC: written before the daytime phase and optional seedporter hunting change.
+#[test]
+fn daytime_mimic_phase_follows_its_switch() {
+    let mut p = Params::defaults();
+    p.world.day.mode = DayMode::Cycle;
+    let lj = Founder::Lanternjaw;
+    p.fauna.founders[lj.index()].lure_daylight = false;
+    let off = FaunaModel::new(&p, Fits::unfitted(), 1.0);
+    let old = off.on_phase(lj, 1.0);
+    p.fauna.founders[lj.index()].lure_daylight = true;
+    let on = FaunaModel::new(&p, Fits::unfitted(), 1.0);
+    assert!(old < 1.0);
+    assert_eq!(on.on_phase(lj, 1.0), 1.0);
+}
+
+#[test]
+fn seedporter_model_catches_only_when_enabled_and_profitable() {
+    let run = |enabled: bool, gain: f64| {
+        let mut p = clock_off();
+        let sp = Founder::Seedporter;
+        let bw = Founder::Bellwing;
+        p.fauna.founders[sp.index()].catch_bellwings = enabled;
+        p.fauna.founders[sp.index()].catch_gain_min = gain;
+        let mut h = p.fauna.founder(Founder::Lanternjaw).hunter.unwrap();
+        h.prey = [false; Founder::COUNT];
+        h.prey[bw.index()] = true;
+        h.prey_max_ratio = 10.0;
+        h.strike_power = 10.0;
+        h.strike_cost_s = 0.0;
+        p.fauna.founders[sp.index()].hunter = Some(h);
+        let mut fits = Fits::unfitted();
+        let mut row = HunterFit::NONE;
+        row.kill[bw.index()] = 0.1;
+        fits.hunters[sp.index()] = Some(row);
+        let mut m = FaunaModel::new(&p, fits, 1.0);
+        only(&mut m, &[sp, bw]);
+        let body = p.fauna.founder(sp).core.body_max;
+        let mut c = Cohort::new(1.0, body, 0.0);
+        c.b.eating = true;
+        m.add(sp, c);
+        m.add(bw, Cohort::new(10.0, 0.5 * body, 0.0));
+        m.step(&Supply::default());
+        m.ledger[bw.index()].killed_by[sp.index()]
+    };
+    assert!(run(true, 0.0) > 0.0);
+    assert_eq!(run(false, 0.0), 0.0);
+    assert_eq!(run(true, 100.0), 0.0);
+}
+
+#[test]
+fn seedporter_model_switch_off_keeps_fruit_and_refuses_carrion() {
+    let run = |enabled: bool, food: Food| {
+        let mut p = clock_off();
+        let sp = Founder::Seedporter;
+        p.fauna.founders[sp.index()].catch_bellwings = enabled;
+        p.fauna.founders[sp.index()].diet = cubarium_voxel_fauna::Diet::of(&[Food::Fruit, Food::Carrion]);
+        let mut fits = Fits::unfitted();
+        fits.of_mut(sp).response[food.index()] = Some(Response::holling(1.0, 0.0));
+        let mut m = FaunaModel::new(&p, fits, 1.0);
+        only(&mut m, &[sp]);
+        let mut c = Cohort::new(1.0, p.fauna.founder(sp).core.body_max, 0.0);
+        c.b.eating = true;
+        m.add(sp, c);
+        let mut s = Supply::default();
+        if food == Food::Fruit { s.fruit = 1.0 } else { s.carrion = 1.0 }
+        m.step(&s);
+        m.ledger[sp.index()].swallowed[food.index()]
+    };
+    assert_eq!(run(false, Food::Carrion), 0.0);
+    assert!(run(true, Food::Carrion) > 0.0);
+    assert!(run(false, Food::Fruit) > 0.0 && run(true, Food::Fruit) > 0.0);
+}

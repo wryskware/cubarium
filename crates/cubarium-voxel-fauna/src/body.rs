@@ -400,6 +400,21 @@ pub struct FounderPhysiology {
     /// but the bellwing (1 h each side: dusk and dawn flights).
     #[serde(default)]
     pub active_window: crate::ActiveWindow,
+    /// Switch: hunt and light the flower mimic in daylight as well as darkness.
+    #[serde(default)]
+    pub lure_daylight: bool,
+    /// Metres from a flower at which a daytime mimic holds its ambush.
+    #[serde(default)]
+    pub flower_ambush_m: f64,
+    /// Switch: an opportunistic fruit eater also catches bellwings within reach.
+    #[serde(default)]
+    pub catch_bellwings: bool,
+    /// Metres above the hunter's base: maximum bellwing base height for a catch.
+    #[serde(default)]
+    pub catch_ceiling_m: f64,
+    /// Organic units: minimum carrion yield less the expected strikes' upkeep cost.
+    #[serde(default)]
+    pub catch_gain_min: f64,
     /// What upkeep costs while it sleeps, **× its basal upkeep**: 0.5 for endotherm-like
     /// lineages, 0.3 for the ectotherm-like shredder, ripple-snail, capgnawer and
     /// lanternjaw (`design/ecology-timescales-2026-10-02.md` 1a; provisional).
@@ -1624,6 +1639,11 @@ impl FounderPhysiology {
                 organ_structure_fraction: 0.05,
                 active: crate::Activity::Nocturnal,
                 active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
+                lure_daylight: false,
+                flower_ambush_m: 1.0,
+                catch_bellwings: false,
+                catch_ceiling_m: 0.4,
+                catch_gain_min: 0.0,
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -1698,6 +1718,11 @@ impl FounderPhysiology {
                 organ_structure_fraction: 0.10,
                 active: crate::Activity::Diurnal,
                 active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
+                lure_daylight: false,
+                flower_ambush_m: 1.0,
+                catch_bellwings: false,
+                catch_ceiling_m: 0.4,
+                catch_gain_min: 0.0,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -1789,10 +1814,15 @@ impl FounderPhysiology {
                 yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
                 // S3 (D1, Wrysk 2026-10-06): active wherever it is dark — at night, and by
-                // day in caves and deep shade, its lure lit — so it meets bellwings at dusk
-                // and in shade, like the dark-active prey it mostly eats.
+                // day in caves and deep shade with the daylight-mimic switch off.
+                // MIMIC turns that switch on for flower-side daytime ambushes.
                 active: crate::Activity::DarkActive,
                 active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
+                lure_daylight: true,
+                flower_ambush_m: 1.0,
+                catch_bellwings: false,
+                catch_ceiling_m: 0.4,
+                catch_gain_min: 0.0,
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -2072,7 +2102,21 @@ impl FounderPhysiology {
                         y
                     },
                     active: crate::Activity::Diurnal,
-                    diet: crate::Diet::only(crate::Food::Fruit),
+                    diet: crate::Diet::of(&[crate::Food::Fruit, crate::Food::Carrion]),
+                    catch_bellwings: true,
+                    hunter: Some(Hunter {
+                        prey: [false, false, false, false, false, false, true, false, false],
+                        strike_power: 4.0,
+                        prey_max_ratio: 4.0,
+                        strike_reach_length_fraction: 0.8,
+                        jaw_band_height_fraction: 2.0,
+                        jaw_forward_length_fraction: 0.5,
+                        windup_s: 0.1,
+                        lunge_s: 0.15,
+                        recovery_s: 1.0,
+                        strike_cost_s: 2.0,
+                        lure_power: 0.0,
+                    }),
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
@@ -2136,8 +2180,9 @@ impl FounderPhysiology {
                     adult_length_m: 1.4,
                     adult_width_m: 0.35,
                     adult_height_m: 0.6,
-                    // The lanternjaw keeps the night.
+                    // With its daylight switch off, the lanternjaw keeps the night.
                     active: crate::Activity::Diurnal,
+                    lure_daylight: false,
                     // The lanternjaw's strike table, no lure, its own list (§2.14): the
                     // frondgrazer, the loftstrider (only a pack's window takes an adult),
                     // the lanternjaw, a grounded seedporter, and (the detritus web D2) a

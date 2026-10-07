@@ -137,6 +137,7 @@ fn main() {
         Some("snailprobe") => snail_probe(&args),
         Some("filmhist") => film_hist(&args),
         Some("pop") => pop_probe(&args),
+        Some("mimicprobe") => mimic_probe(&args),
         Some("churn") => churn_probe(&args),
         Some("approach") => approach_probe(&args),
         Some("trace") => trace_probe(&args),
@@ -643,6 +644,8 @@ struct LureMeet {
     near: [u64; 3],
     bw_body_s: u64,
     bw_up_s: u64,
+    lj_day_s: u64,
+    lj_exposed_s: u64,
 }
 
 impl LureMeet {
@@ -653,6 +656,21 @@ impl LureMeet {
         }
         let v = sim.world().config().voxel_m;
         let ring = f64::from(sim.world().config().width) * v;
+        let day = sim.world().life_daylight();
+        if day >= f.config.life.day_line {
+            let wv = sim.world().view();
+            for a in f
+                .animals
+                .iter()
+                .filter(|a| a.founder == Some(LJ) && a.attached.is_none())
+            {
+                self.lj_day_s += 1;
+                self.lj_exposed_s += u64::from(
+                    wv.sky_visibility(a.site.x as i64, a.sense_layer(v), a.site.z) * day
+                        >= f.config.life.day_line,
+                );
+            }
+        }
         let lures: Vec<(f64, f64, f64)> = f
             .animals
             .iter()
@@ -691,8 +709,10 @@ impl LureMeet {
 
     fn line(&self) -> String {
         format!(
-            "lit_s={},bw_awake_s={},both_s={},near4_s={},near10_s={},near20_s={},bw_body_s={},bw_up_s={}",
-            self.lit_s, self.bw_s, self.both_s, self.near[0], self.near[1], self.near[2], self.bw_body_s, self.bw_up_s
+            "lit_s={},bw_awake_s={},both_s={},near4_s={},near10_s={},near20_s={},bw_body_s={},bw_up_s={},lj_day_s={},lj_exposed_s={}",
+            self.lit_s, self.bw_s, self.both_s, self.near[0], self.near[1], self.near[2], self.bw_body_s, self.bw_up_s,
+            self.lj_day_s,
+            self.lj_exposed_s
         )
     }
 }
@@ -717,10 +737,23 @@ fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
     let killed = |by: Founder| l.departed_founder(Founder::Bellwing, Departure::Killed { by }) - a.departed_founder(Founder::Bellwing, Departure::Killed { by });
     let lj = LJ.index();
     let lj_hours = (l.alive_ticks_by_founder[lj] - a.alive_ticks_by_founder[lj]) as f64 / f64::from(TICK_HZ) / 3600.0;
-    let budget = |m: cubarium_voxel_fauna::light::LightMode| l.light_budget[b][m as usize] - a.light_budget[b][m as usize];
+    let sp = Founder::Seedporter.index();
+    let sp_hours = (l.alive_ticks_by_founder[sp] - a.alive_ticks_by_founder[sp]) as f64
+        / f64::from(TICK_HZ)
+        / 3600.0;
+    let sp_intake = l.swallowed_by_founder[sp] - a.swallowed_by_founder[sp];
+    let lj_intake = l.swallowed_by_founder[lj] - a.swallowed_by_founder[lj];
+    let bw_fell = l.departed_founder(Founder::Bellwing, Departure::Fell)
+        - a.departed_founder(Founder::Bellwing, Departure::Fell);
+    let bw_drowned = l.departed_founder(Founder::Bellwing, Departure::Drowned)
+        - a.departed_founder(Founder::Bellwing, Departure::Drowned);
+    let bw_dry = l.departed_founder(Founder::Bellwing, Departure::Desiccation)
+        - a.departed_founder(Founder::Bellwing, Departure::Desiccation);
+    let budget = |m: cubarium_voxel_fauna::light::LightMode| {
+        l.light_budget[b][m as usize] - a.light_budget[b][m as usize]};
     let eggs_now: u32 = fauna.view().clutches.iter().filter(|c| c.lineage == Founder::Bellwing).map(|c| c.count).sum();
     format!(
-        "bw_hours={:.3},nectar_per_bwh={:.5},glowcap_visits={},glowcap_failed={},glowcap_left={},glowcap_sipped={},flower_visits={},flower_failed={},bellwings={n},uv_expect={:.3},cyan_expect={:.3},lure_visits={},lure_failed={},lure_kills={},bw_laid={},bw_hatched={},bw_clutches={},bw_eggs_now={eggs_now},bw_nest_refusals={},bw_ceiling_refusals={},bw_killed_lj={},bw_killed_vh={},bw_killed_sp={},bw_starved={},bw_aged={},lj_hours={:.3},bw_killed_lj_per_ljh={:.4},approach_lure={},inspect_lure={},repel={},light_samples={}",
+        "bw_hours={:.3},nectar_per_bwh={:.5},glowcap_visits={},glowcap_failed={},glowcap_left={},glowcap_sipped={},flower_visits={},flower_failed={},bellwings={n},uv_expect={:.3},cyan_expect={:.3},lure_visits={},lure_failed={},lure_kills={},bw_laid={},bw_hatched={},bw_clutches={},bw_eggs_now={eggs_now},bw_nest_refusals={},bw_ceiling_refusals={},bw_killed_lj={},bw_killed_vh={},bw_killed_sp={},bw_starved={},bw_aged={},lj_hours={:.3},bw_killed_lj_per_ljh={:.4},approach_lure={},inspect_lure={},repel={},light_samples={},sp_hours={sp_hours:.6},sp_intake={sp_intake:.6},lj_intake={lj_intake:.6},bw_fell={bw_fell},bw_drowned={bw_drowned},bw_dry={bw_dry}",
         hours,
         if hours > 0.0 { nectar / hours } else { f64::NAN },
         l.beacon_visits[b][1] - a.beacon_visits[b][1],
@@ -761,6 +794,18 @@ fn pop_probe(args: &[String]) {
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
     let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
     let v = s.fauna.view();
+    if arg(args, "census=") == Some("1") {
+        println!("tick,{}", v.tick);
+        for a in v.animals {
+            if let Some(f) = a.founder {
+                let host = a.attached.and_then(|r| v.animals.iter().find(|h| h.id == r.host))
+                    .and_then(|h| h.founder).map_or("", |h| h.name());
+                println!("animal,{},{},{},{},{host}", f.name(), a.body, a.reserve, a.age_ticks);
+            }
+        }
+        for c in v.clutches { println!("clutch,{},{},{},{},{}", c.lineage.name(), c.count, c.organic, c.laid_tick, c.dormancy.is_some()); }
+        return;
+    }
     let fv = s.flora.view();
     let l = &v.ledger;
     let per = Founder::ALL
@@ -1126,6 +1171,8 @@ fn run(args: &[String]) {
                 (&mut meet_all.both_s, meet_win.both_s),
                 (&mut meet_all.bw_body_s, meet_win.bw_body_s),
                 (&mut meet_all.bw_up_s, meet_win.bw_up_s),
+                (&mut meet_all.lj_day_s, meet_win.lj_day_s),
+                (&mut meet_all.lj_exposed_s, meet_win.lj_exposed_s),
             ] {
                 *x += y;
             }
@@ -4406,5 +4453,136 @@ fn film_hist(args: &[String]) {
     }
     for (ci, name) in ["water", "shore", "inland"].iter().enumerate() {
         println!("film,{name},total={:.4},faces<0.05={},<0.1={},<0.25={},<0.5={},>=0.5={}", tot[ci], h[ci][0], h[ci][1], h[ci][2], h[ci][3], h[ci][4]);
+    }
+}
+/// MIMIC spatial probe: daytime habitats and separation, sampled once per simulated second.
+fn mimic_probe(args: &[String]) {
+    let params = resolve(args);
+    let s = cubarium_voxel_sim::saved::load(Path::new(arg(args, "load=").expect("load=")), &[])
+        .expect("load");
+    let (world, flora, mut fauna) = (s.world, s.flora, s.fauna);
+    fauna.replace_config(params.fauna.clone()).expect("config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("controllers");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let seconds: u64 = arg(args, "seconds=").map_or(300, |s| s.parse().unwrap());
+    let mut samples: [Vec<f64>; 6] = Default::default();
+    let mut counts = [0u64; 4];
+    for _ in 0..seconds {
+        for _ in 0..TICK_HZ {
+            sim.step();
+        }
+        let view = sim.world().view();
+        let f = sim.fauna().view();
+        let fv = sim.flora().view();
+        let v = view.config.voxel_m;
+        let ring = f64::from(view.config.width) * v;
+        let day = sim.world().life_daylight();
+        if day < f.config.life.day_line {
+            continue;
+        }
+        let distance = |a: &cubarium_voxel_fauna::Animal, b: &cubarium_voxel_fauna::Animal| {
+            let (dx, dz) = wdelta(a.pose.x, a.pose.z, b.pose.x, b.pose.z, ring);
+            (dx * dx + dz * dz + (a.pose.y_m - b.pose.y_m).powi(2)).sqrt()
+        };
+        let bws: Vec<_> = f
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(Founder::Bellwing))
+            .collect();
+        let ljs: Vec<_> = f
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(LJ) && a.attached.is_none())
+            .collect();
+        let flowers: Vec<_> = fv
+            .stands
+            .iter()
+            .filter(|st| st.nectar > 0.0)
+            .map(|st| ((st.site.x as f64 + 0.5) * v, (st.site.z as f64 + 0.5) * v))
+            .collect();
+        for a in &ljs {
+            let sky = view.sky_visibility(a.site.x as i64, a.sense_layer(v), a.site.z);
+            samples[0].push(sky * day);
+            counts[0] += 1;
+            counts[1] += u64::from(sky * day >= f.config.life.day_line);
+            counts[2] += u64::from(a.founder_state.lure > 0.0);
+            if let Some(d) = bws.iter().map(|b| distance(a, b)).min_by(f64::total_cmp) {
+                samples[2].push(d);
+            }
+            if let Some(d) = flowers
+                .iter()
+                .map(|&(x, z)| {
+                    let (dx, dz) = wdelta(a.pose.x, a.pose.z, x, z, ring);
+                    dx.hypot(dz)
+                })
+                .min_by(f64::total_cmp)
+            {
+                samples[4].push(d);
+            }
+        }
+        for a in &bws {
+            samples[1].push(view.sky_visibility(a.site.x as i64, a.sense_layer(v), a.site.z) * day);
+            if let Some(d) = flowers
+                .iter()
+                .map(|&(x, z)| {
+                    let (dx, dz) = wdelta(a.pose.x, a.pose.z, x, z, ring);
+                    dx.hypot(dz)
+                })
+                .min_by(f64::total_cmp)
+            {
+                samples[5].push(d);
+            }
+        }
+        for a in f
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(Founder::Seedporter))
+        {
+            counts[3] += 1;
+            if let Some(d) = bws.iter().map(|b| distance(a, b)).min_by(f64::total_cmp) {
+                samples[3].push(d);
+            }
+        }
+    }
+    for (name, mut values) in [
+        "lj_face_light",
+        "bw_face_light",
+        "lj_nearest_bw_m",
+        "sp_nearest_bw_m",
+        "lj_nearest_flower_xz_m",
+        "bw_nearest_flower_xz_m",
+    ]
+    .into_iter()
+    .zip(samples)
+    {
+        values.sort_by(f64::total_cmp);
+        if !values.is_empty() {
+            println!(
+                "spatial,{name},n={},p10={:.3},p50={:.3},p90={:.3}",
+                values.len(),
+                values[values.len() / 10],
+                values[values.len() / 2],
+                values[values.len() * 9 / 10]
+            );
+        }
+    }
+    println!(
+        "spatial,lj_day_seconds={},lj_exposed_seconds={},lj_lit_seconds={},sp_day_seconds={}",
+        counts[0], counts[1], counts[2], counts[3]
+    );
+    println!(
+        "{}",
+        bwl_line(&sim, &FaunaLedger::default(), &sim.fauna().view().ledger)
+    );
+    for f in [LJ, Founder::Seedporter] {
+        let l = &sim.fauna().view().ledger;
+        println!(
+            "spatial,{},intake={},bites={},carrion={},kills_bw={}",
+            f.name(),
+            l.assimilated_by_founder[f.index()],
+            l.bites_by_founder[f.index()],
+            l.eaten_carrion_by_founder[f.index()],
+            l.departed_founder(Founder::Bellwing, Departure::Killed { by: f })
+        );
     }
 }

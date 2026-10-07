@@ -193,10 +193,20 @@ fn world_of(args: &[String]) -> Web {
         eprintln!("gut sets: {}", extra.join(" "));
         sets.extend(extra);
     }
-    let mut w = match map {
+    // A fresh matched founding can provide the plant snapshot and exact fauna census;
+    // this avoids using a grown-world calibration as if it were a new-world prediction.
+    let mut w = if let Some(dir) = arg(args, "start=") {
+        let p = start::params(&cfg, &sets).unwrap_or_else(|e| panic!("{e}"));
+        let flora = start::flora(&p, Path::new(dir), &[], wseed).unwrap_or_else(|e| panic!("{e}"));
+        let census = FaunaCensus::read(Path::new(arg(args, "census=").expect("start= requires census=")))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let mut fauna = start::fauna(&p, start::closed_fits(), &census, &STEPPED, 1.0);
+        scale(&mut fauna, faces(&flora));
+        Web::new(flora, fauna)
+    } else { match map {
         "patch" => patch_world(&d, seed, &cfg, &sets, wseed),
         _ => terrarium(&d, seed, &start::params(&cfg, &sets).unwrap_or_else(|e| panic!("{e}")), wseed),
-    };
+    }};
     if let Some(b) = arg(args, "browse=") {
         let per_day: f64 = b.parse().unwrap();
         for sp in [Species::Bloomcrown, Species::Lanternberry, Species::Vaulttree] {
@@ -207,7 +217,7 @@ fn world_of(args: &[String]) -> Web {
         set_hunters(&mut w, n.parse().unwrap());
     }
     // BELLWING: the bellwing's nectar response `psi_max:half:hill` (interference kept) and the
-    // kill rates on it `lj:vh` (per hunting body-second per prey body, the hunters' units), to
+    // kill rates on it `lj:vh[:sp]` (per hunting body-second per prey body, the hunters' units), to
     // run the loop against the sim's measured intake and losses.
     if let Some(v) = arg(args, "bwnectar=") {
         let p: Vec<f64> = v.split(':').map(|x| x.parse().unwrap()).collect();
@@ -224,6 +234,13 @@ fn world_of(args: &[String]) -> Web {
             if let Some(hf) = w.fauna.fits.hunters[h.index()].as_mut() {
                 hf.kill[Founder::Bellwing.index()] = rate;
             }
+        }
+        if let Some(&rate) = p.get(2) {
+            let sp = Founder::Seedporter;
+            let mut hf = cubarium_webmodel::fauna::fits::HunterFit::NONE;
+            hf.kill[Founder::Bellwing.index()] = rate;
+            hf.encounter = cubarium_webmodel::fauna::fits::Encounter::PreyHabitat;
+            w.fauna.fits.hunters[sp.index()] = Some(hf);
         }
     }
     if let Some(list) = arg(args, "fresh=") {
@@ -514,6 +531,20 @@ fn scenario(args: &[String]) {
         println!("  day {d:.0} {}", census_line(&w));
     }
     let b = w.snap();
+    if arg(args, "forecast=") == Some("1") {
+        let bw = &w.fauna.ledger[Founder::Bellwing.index()];
+        println!("forecast,bellwing,starved={:.6},aged={:.6},drowned={:.6},killed_lj={:.6},killed_vh={:.6},killed_sp={:.6},nectar_per_bwh={:.8}",
+            bw.starved, bw.aged, bw.drowned, bw.killed_by[Founder::Lanternjaw.index()],
+            bw.killed_by[Founder::Chorister.index()], bw.killed_by[Founder::Seedporter.index()],
+            bw.swallowed[Food::Nectar.index()] / (bw.alive_s / 3600.0).max(f64::MIN_POSITIVE));
+        for f in [Founder::Lanternjaw, Founder::Seedporter] {
+            let l = &w.fauna.ledger[f.index()];
+            let hours = l.alive_s / 3600.0;
+            println!("forecast,{},n={:.6},hours={hours:.6},bw_kills_per_h={:.6},intake_per_h={:.6}",
+                f.name(), w.fauna.census(f).n, bw.killed_by[f.index()] / hours.max(f64::MIN_POSITIVE),
+                l.swallowed.iter().sum::<f64>() / hours.max(f64::MIN_POSITIVE));
+        }
+    }
     println!("\nmean-field run {:.1} s", t.elapsed().as_secs_f64());
     println!("{}", sheet(&last_day_start, &b, w.day_s()));
     println!("{}", sheet(&a, &b, w.day_s()));

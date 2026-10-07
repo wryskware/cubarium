@@ -3233,6 +3233,8 @@ mod tests {
             founding_count = 0
             [fauna.founders.seedporter]
             founding_count = 4
+            catch_bellwings = false
+            diet = ["fruit"]
         "#
         .parse()
         .unwrap();

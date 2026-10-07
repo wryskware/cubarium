@@ -1363,7 +1363,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2206 rows)
+**`fauna.*`** (2233 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1480,6 +1480,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.littershredder.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.littershredder.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.littershredder.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.littershredder.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.littershredder.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.littershredder.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.littershredder.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -1703,6 +1706,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.frondgrazer.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.frondgrazer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.frondgrazer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.frondgrazer.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.frondgrazer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.frondgrazer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -1926,6 +1932,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.lanternjaw.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.lanternjaw.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.lanternjaw.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.lanternjaw.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.lanternjaw.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.lanternjaw.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -2149,6 +2158,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.capgnawer.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.capgnawer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.capgnawer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.capgnawer.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.capgnawer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.capgnawer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.capgnawer.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -2372,6 +2384,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.loftstrider.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.loftstrider.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.loftstrider.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.loftstrider.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.loftstrider.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.loftstrider.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.loftstrider.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -2595,6 +2610,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.ripple-snail.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.ripple-snail.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.ripple-snail.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.ripple-snail.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.ripple-snail.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.ripple-snail.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.ripple-snail.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -2818,6 +2836,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.bellwing.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.bellwing.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.bellwing.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.bellwing.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.bellwing.active_window.before_rise_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.bellwing.active_window.after_set_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.bellwing.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -3041,6 +3062,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.seedporter.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.seedporter.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.seedporter.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.seedporter.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.seedporter.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.seedporter.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.seedporter.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -3109,16 +3133,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
-| `fauna.founders.seedporter.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
-| `fauna.founders.seedporter.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
-| `fauna.founders.seedporter.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
-| `fauna.founders.seedporter.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
-| `fauna.founders.seedporter.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
-| `fauna.founders.seedporter.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
-| `fauna.founders.seedporter.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
-| `fauna.founders.seedporter.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
-| `fauna.founders.seedporter.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
-| `fauna.founders.seedporter.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.seedporter.hunter.strike_power` | 4.0 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
+| `fauna.founders.seedporter.hunter.prey_max_ratio` | 4.0 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
+| `fauna.founders.seedporter.hunter.strike_reach_length_fraction` | 0.8 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
+| `fauna.founders.seedporter.hunter.jaw_band_height_fraction` | 2.0 | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
+| `fauna.founders.seedporter.hunter.jaw_forward_length_fraction` | 0.5 | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
+| `fauna.founders.seedporter.hunter.windup_s` | 0.1 | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.seedporter.hunter.lunge_s` | 0.15 | s | [0, inf) |  | - | placeholder | the lunge |
+| `fauna.founders.seedporter.hunter.recovery_s` | 1.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
+| `fauna.founders.seedporter.hunter.strike_cost_s` | 2.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
+| `fauna.founders.seedporter.hunter.lure_power` | 0.0 | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
 | `fauna.founders.seedporter.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.seedporter.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.seedporter.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -3264,6 +3288,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.chorister.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.chorister.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
+| `fauna.founders.chorister.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
+| `fauna.founders.chorister.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
 | `fauna.founders.chorister.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.chorister.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
