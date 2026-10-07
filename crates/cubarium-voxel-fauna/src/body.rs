@@ -409,6 +409,14 @@ pub struct FounderPhysiology {
     /// Switch: an opportunistic fruit eater also catches bellwings within reach.
     #[serde(default)]
     pub catch_bellwings: bool,
+    /// Switch: its [`FounderPhysiology::hunter`] table is the **opportunistic catch's**
+    /// (the seedporter's, MIMIC), so it exists only while [`FounderPhysiology::catch_bellwings`]
+    /// is on, and carrion is food only then. A dedicated predator (lanternjaw, Veilhound)
+    /// leaves this off: its table has no switch. Behaviour reads the table through
+    /// [`FounderPhysiology::active_hunter`] and the mouth's diet through
+    /// [`FounderPhysiology::eating_diet`].
+    #[serde(default)]
+    pub opportunist: bool,
     /// Metres above the hunter's base: maximum bellwing base height for a catch.
     #[serde(default)]
     pub catch_ceiling_m: f64,
@@ -1576,6 +1584,28 @@ fn one() -> f64 {
 }
 
 impl FounderPhysiology {
+    /// **The hunter table behaviour reads**: [`FounderPhysiology::hunter`], except that an
+    /// [`opportunist`](FounderPhysiology::opportunist)'s table is there only while its
+    /// [`catch_bellwings`](FounderPhysiology::catch_bellwings) switch is on. Every
+    /// behavioural and classification read (who hunts whom, who flees whom, the senses'
+    /// prey/threat classes, the strike) goes through this; only the config's own
+    /// serialisation and reports read the raw field. With the switch off an opportunist
+    /// is the plain forager it was before it learned the catch.
+    pub fn active_hunter(&self) -> Option<Hunter> {
+        self.hunter.filter(|_| !self.opportunist || self.catch_bellwings)
+    }
+
+    /// **The diet at its mouth**: [`FounderPhysiology::diet`], less carrion for an
+    /// [`opportunist`](FounderPhysiology::opportunist) whose catch is switched off
+    /// (carrion is the catch's food, on the same rule as [`FounderPhysiology::active_hunter`]).
+    pub fn eating_diet(&self) -> crate::Diet {
+        if self.opportunist && !self.catch_bellwings {
+            crate::Diet::of(&self.diet.foods().filter(|&f| f != crate::Food::Carrion).collect::<Vec<_>>())
+        } else {
+            self.diet
+        }
+    }
+
     /// Make this lineage `k` times heavier in org-units: the seven absolute quantities of
     /// its core ([`crate::SpeciesConfig::scale_mass`]) times `k`, and the recorded
     /// [`FounderPhysiology::mass_scale`] with them. Per-unit rates, clocks and metres stay.
@@ -1690,6 +1720,7 @@ impl FounderPhysiology {
                 lure_daylight: false,
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
+                opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
                 catch_foray_m: 0.0,
@@ -1772,6 +1803,7 @@ impl FounderPhysiology {
                 lure_daylight: false,
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
+                opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
                 catch_foray_m: 0.0,
@@ -1875,6 +1907,7 @@ impl FounderPhysiology {
                 lure_daylight: true,
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
+                opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
                 catch_foray_m: 0.0,
@@ -2161,6 +2194,7 @@ impl FounderPhysiology {
                     active: crate::Activity::Diurnal,
                     diet: crate::Diet::of(&[crate::Food::Fruit, crate::Food::Carrion]),
                     catch_bellwings: true,
+                    opportunist: true,
                     catch_foray_m: 5.0,
                     hunter: Some(Hunter {
                         prey: [false, false, false, false, false, false, true, false, false],

@@ -134,7 +134,6 @@ fn a_catch_worth_exactly_its_minimum_gain_is_declined_and_a_hair_more_is_taken()
 }
 
 #[test]
-#[ignore = "FINDING: catch_bellwings=false leaves the seedporter's hunter table on, so a bellwing still classes it a threat"]
 fn with_catching_off_a_seedporter_is_no_predator_of_bellwings() {
     let mut c = config();
     c.founders[SP.index()].catch_bellwings = false;
@@ -143,6 +142,47 @@ fn with_catching_off_a_seedporter_is_no_predator_of_bellwings() {
     assert!(!crate::is_prey_of(&fauna.config, &s, &b), "no catch with the switch off");
     assert_eq!(crate::perception::class_of(&fauna.config, &s, &b), None, "the seedporter sees no prey in a bellwing");
     assert_eq!(crate::perception::class_of(&fauna.config, &b, &s), None, "a bellwing sees no threat in a seedporter");
+}
+
+/// CATCH-SWITCH: the switch governs the whole predator role. No other lineage hunts
+/// bellwings here, so with the catch off nothing makes a bellwing a quarry: it does not
+/// flee the seedporter beside it, and neither body's remote senses class the other (prey,
+/// threat). With it on, all three happen.
+#[test]
+fn with_catching_off_a_bellwing_does_not_flee_a_seedporter_nor_does_it_sense_one_as_prey() {
+    for on in [true, false] {
+        let mut c = config();
+        for f in Founder::ALL {
+            if f != SP {
+                if let Some(h) = c.founders[f.index()].hunter.as_mut() {
+                    h.prey[BW.index()] = false;
+                }
+            }
+        }
+        for f in [SP, BW] {
+            c.founders[f.index()].senses.live = true;
+        }
+        // The bellwing sees the body beside it and runs the S1 flee rule on its record.
+        c.founders[BW.index()].senses.sight_m = 4.0;
+        c.founders[BW.index()].vigilance.mode = crate::VigilMode::None;
+        c.founders[SP.index()].catch_bellwings = on;
+        let world = noon(604);
+        let flora = Flora::new(FloraConfig::default());
+        let (mut fauna, sp, bw) = pair(c, 0.0);
+        fauna.tick += 1;
+        crate::perception::sense_pass(&mut fauna, &world.view(), false, 1.0, 1);
+        let tracked = |who: u64, of: u64, class: u8| {
+            fauna.percept(who).is_some_and(|p| p.tracks[..usize::from(p.n)].iter().any(|t| t.id == of && t.class == class))
+        };
+        assert_eq!(tracked(sp, bw, crate::perception::class::PREY), on, "catch on={on}: the seedporter tracks the bellwing as prey");
+        assert_eq!(tracked(bw, sp, crate::perception::class::THREAT), on, "catch on={on}: the bellwing tracks the seedporter as a threat");
+        let i = fauna.animals.iter().position(|a| a.id == bw).unwrap();
+        let mut grid = crate::senses::LiveGrid::default();
+        grid.refresh(&world.view(), &flora.view(), &fauna.view(), 1, (false, true));
+        let occ = crate::senses::Occ::Live(grid.view(&world.view(), crate::senses::Flavour::Volume));
+        let fled = super::flee(&mut fauna, i, &world.view(), &flora.view(), Some(occ), Actions::default());
+        assert_eq!(fled.is_some(), on, "catch on={on}: the bellwing flees the seedporter beside it");
+    }
 }
 
 #[test]

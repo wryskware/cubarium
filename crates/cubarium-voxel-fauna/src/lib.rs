@@ -3896,7 +3896,7 @@ impl Fauna {
         let patrol_smells = self.config.hunt.patrol && self.config.hunt.patch_scent_weight > 0.0;
         self.animals.iter().any(|a| a.founder.is_some_and(|f| {
             let t = self.config.founder(f).senses;
-            (t.live && t.smell_min > 0.0) || (patrol_smells && self.config.founder(f).hunter.is_some() && self.config.founder(f).pack.is_none())
+            (t.live && t.smell_min > 0.0) || (patrol_smells && self.config.founder(f).active_hunter().is_some() && self.config.founder(f).pack.is_none())
         }))
     }
 

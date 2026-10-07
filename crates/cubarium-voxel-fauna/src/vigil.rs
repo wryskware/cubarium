@@ -1333,7 +1333,7 @@ pub(crate) fn pry(fauna: &mut Fauna, ring: f64) {
                 }
                 continue;
             }
-            let hunts = fauna.config.founder(of).hunter.is_some_and(|h| h.hunts(f));
+            let hunts = fauna.config.founder(of).active_hunter().is_some_and(|h| h.hunts(f));
             if !hunts || o.pack.is_some_and(|m| m.pup) || (hk.herd_enabled && !(o.eating || o.emergency)) {
                 continue;
             }

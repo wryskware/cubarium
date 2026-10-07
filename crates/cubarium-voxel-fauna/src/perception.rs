@@ -347,10 +347,10 @@ pub(crate) fn class_of(config: &FaunaConfig, observer: &Animal, o: &Animal) -> O
     if bf == of {
         return Some(class::KIN);
     }
-    if config.founder(bf).hunter.is_some_and(|h| h.hunts(of)) {
+    if config.founder(bf).active_hunter().is_some_and(|h| h.hunts(of)) {
         return Some(class::PREY);
     }
-    if config.founder(of).hunter.is_some_and(|h| h.hunts(bf)) {
+    if config.founder(of).active_hunter().is_some_and(|h| h.hunts(bf)) {
         return Some(class::THREAT);
     }
     None
@@ -1053,7 +1053,7 @@ pub fn in_reach(config: &FaunaConfig, h: &Animal, t: &Track) -> bool {
     if t.grounded || t.lift_m <= 0.0 {
         return true;
     }
-    let (Some(geometry), Some(table)) = (crate::body_of(config, h), h.founder.and_then(|f| config.founder(f).hunter)) else {
+    let (Some(geometry), Some(table)) = (crate::body_of(config, h), h.founder.and_then(|f| config.founder(f).active_hunter())) else {
         return false;
     };
     t.lift_m <= table.jaw_band_height_fraction * geometry.height_m
@@ -1063,7 +1063,7 @@ pub fn in_reach(config: &FaunaConfig, h: &Animal, t: &Track) -> bool {
 /// channel whose layers are all on its list, and which its own lineage does not lay.
 pub fn prey_channels(config: &FaunaConfig, f: Founder) -> [bool; ScentChannel::COUNT] {
     let mut out = [false; ScentChannel::COUNT];
-    let Some(h) = config.founder(f).hunter else { return out };
+    let Some(h) = config.founder(f).active_hunter() else { return out };
     let own = config.founder(f).senses.scent;
     for ch in ScentChannel::ALL {
         if ch == ScentChannel::Carrion || own == Some(ch) {

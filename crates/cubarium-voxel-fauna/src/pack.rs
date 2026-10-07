@@ -773,7 +773,7 @@ fn prospect_of(fauna: &Fauna, i: usize, o: &Animal, t: &Track, n: u32, ring: f64
     // A flyer counts only where the strike could take it now (S3's `is_prey_of` rule: in
     // flight, its body inside the member's jaw band over the member's own base), so the
     // `select_airborne_factor` below weighs only a bellwing in reach.
-    if let Some(h) = a.founder.and_then(|f| fauna.config.founder(f).hunter) {
+    if let Some(h) = a.founder.and_then(|f| fauna.config.founder(f).active_hunter()) {
         if !crate::predation::flyer_takeable(&fauna.config, a, &h, of, o) {
             return 0.0;
         }
@@ -1282,7 +1282,7 @@ fn out_of_pit(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, act: Actions) -
     let a = fauna.animals[i];
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
-    let (t, h) = (phys.pack?, phys.hunter?);
+    let (t, h) = (phys.pack?, phys.active_hunter()?);
     if !(t.pit_search_m > 0.0) || a.mobility.climb.is_some() || a.mobility.mode != crate::MobilityMode::Ground {
         return None;
     }
@@ -1372,7 +1372,7 @@ fn tactic(
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
     let t = phys.pack?;
-    let h = phys.hunter?;
+    let h = phys.active_hunter()?;
     let rec = *fauna.pack(m.pack)?;
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
