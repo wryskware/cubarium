@@ -335,7 +335,6 @@ fn perched_watch_uses_start_then_stop_and_releases_at_lost_boundary() {
 }
 
 #[test]
-#[ignore = "FINDING: zero lost_calm_s releases an unseen refuge instead of disabling release"]
 fn zero_lost_calm_preserves_unseen_refuge_hold() {
     let (w, flora, mut f) = fixture();
     f.config.founders[SP.index()].vigilance.lost_calm_s = 0.0;

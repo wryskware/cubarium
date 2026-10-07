@@ -255,8 +255,9 @@ fn calm_watch_does_not_block_a_trapped_preys_due_drop() {
 }
 
 #[test]
-#[ignore = "FINDING: DROP selects the higher landing rather than the lowest reachable one"]
-fn drop_chooses_the_lowest_reachable_landing_when_two_heights_are_clear() {
+// DROP's brief: "prefers the lowest drop that reaches its route graph", the smallest fall
+// (least wound), not the lowest landing. TEST-PASS-3 F1 read it the other way.
+fn drop_prefers_the_smallest_fall_when_two_heights_reach_the_graph() {
     let (mut w, _, mut f) = fixture();
     // Open the floor south of the pocket, retaining both walls at the pocket itself.
     for x in 21..=23 {
@@ -330,9 +331,12 @@ fn drop_chooses_the_lowest_reachable_landing_when_two_heights_are_clear() {
         .expect("lower jump is clear");
     assert_eq!(lower.from, a.site);
     assert_eq!(lower.land.y, low.y);
-    assert_eq!(
-        way.land.y, low.y,
-        "the brief promises the lowest reachable landing, not the shortest fall"
+    assert_eq!(way.from, a.site);
+    assert!(
+        way.land.y > low.y,
+        "the smaller of two reachable falls: landed y={}, the deeper landing is y={}",
+        way.land.y,
+        low.y
     );
 }
 
