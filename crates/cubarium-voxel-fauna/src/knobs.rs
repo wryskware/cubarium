@@ -774,6 +774,11 @@ pub struct ScentConfig {
     /// metres, with open air over the lower face up to the higher (a ledge connects, a
     /// wall does not). 0.5 m.
     pub step_m: f64,
+    /// **The nectar channel** (S3): a flower holding nectar (a bloomcrown's head, a
+    /// latticevine face in flower) lays this much a second on the surface under it, whatever
+    /// its stock: a flower smells while it holds nectar. 2.25 (an adult frondgrazer's
+    /// organic matter at `deposit_per_s`, so the smell floors' calibration reads in metres).
+    pub nectar_per_s: f64,
 }
 
 impl Default for ScentConfig {
@@ -786,6 +791,114 @@ impl Default for ScentConfig {
             deposit_per_s: 1.0,
             carrion_per_s: 1.0,
             step_m: 0.5,
+            nectar_per_s: 2.25,
+        }
+    }
+}
+
+/// **Light and the bright things** (S3 LIGHT AND FLIGHT; `design/7_Research/senses-review-2026-10-06.md`
+/// §1, §2 and §5 S3, [`crate::light`]): the beacons' brightness, the photoreceptor's falloff,
+/// the lanternjaw's lure point, the inspection of a beacon and the failed-visit mark. Ranges
+/// and floors are each lineage's [`crate::SenseTable`]. Every number a plausible start, untuned.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LightConfig {
+    /// A nectar flower's brightness (its UV) per unit of the light falling on it (`sky ×
+    /// daylight` at its head): a reflector, dark at night. 1.
+    pub flower_reflectance: f64,
+    /// A glowcap's own light, in the same units (it needs no light to be seen). 0.3.
+    pub glowcap_emission: f64,
+    /// A fully lit lure's own light. 1.
+    pub lure_emission: f64,
+    /// A beacon is seen by its **contrast**: its brightness over the light around it (`sky ×
+    /// daylight` where it is) plus this floor, the darkest background. 0.05.
+    pub background_floor: f64,
+    /// The received level is the contrast × `1 / (1 + (d / half_m)²)`, metres. 1 m.
+    pub half_m: f64,
+    /// The lure hangs this far over the lanternjaw's standing surface, × its body height —
+    /// inside its jaw band — at the middle of its strike capsule. 0.4.
+    pub lure_height_fraction: f64,
+    /// A body this close (horizontally, metres) to a beacon is **inspecting** it. 0.25 m.
+    pub visit_m: f64,
+    /// An inspection that brings no meal within this long fails, seconds. 3 s.
+    pub visit_s: f64,
+    /// **The left visit** (FINDINGS-FIX): an open inspection whose body has flown farther
+    /// than `visit_m` + this (horizontally, metres) from its beacon is closed as failed
+    /// (marked, counted, its class taught 0), so a later sip elsewhere cannot credit it.
+    /// 0.5 m.
+    pub visit_leave_m: f64,
+    /// **The failed-visit mark**: a failed inspection marks the place "no reward here" for
+    /// this long, seconds; a marked beacon is not approached until it decays. 120 s.
+    pub mark_s: f64,
+    /// A mark covers beacons within this of its centre, metres. 0.5 m.
+    pub mark_radius_m: f64,
+    /// A flyer approaching a beacon climbs or drops toward its height at this lift per metre
+    /// of difference (clamped to ±1). 4 per m.
+    pub lift_per_m: f64,
+    /// Inside this (horizontally, metres) of the beacon, a flyer slows to `near_forward`. 1 m.
+    pub near_m: f64,
+    /// A flyer's forward effort near a beacon. 0.3.
+    pub near_forward: f64,
+    /// **The glow's pull without scent** (D2): a hungry ground body with a light sense is
+    /// drawn to a still cyan light only while its food chemistry — the response its `Chem`
+    /// reads, `cue / (cue + chem_saturation)`, of the capgnawer's fungal field at its receptor
+    /// — is below this. 0.05.
+    pub glow_scent_gate: f64,
+    /// **Which light pays** (S3b, [`crate::light`] "Learning"): a flyer with a light sense
+    /// keeps a reward expectation per beacon class — UV (flowers) and cyan (glowcaps, lures)
+    /// — and is drawn to a still beacon by its level × its class's expectation. Off: by its
+    /// level alone (S3). A switch, no registry row. On.
+    pub learn: bool,
+    /// The **innate** expectation (a probability of reward, `0..=1`) of a UV reflector: what
+    /// a naive body expects, and what a learned one relaxes back to. 0.5: either colour may pay
+    /// (pollinators come with a colour bias but are drawn to both; Giurfa et al. 1995).
+    pub uv_innate: f64,
+    /// The innate expectation of a cyan emitter. 0.5, like UV: a naive bellwing is drawn to
+    /// any bright thing, so the still lure works on the young and the inexperienced.
+    pub cyan_innate: f64,
+    /// Each outcome moves its class's expectation this fraction of the way to it: 1 after a
+    /// sip, 0 after a failed visit (Rescorla–Wagner). 0.3: bees and bumblebees learn a
+    /// colour–reward pairing within a few visits (Menzel 1985; Dukas & Real 1991).
+    pub learn_rate: f64,
+    /// A learned expectation relaxes back toward innate with this time constant, seconds
+    /// (the offset shrinks by e each `forget_s`). 3600 s: half the 2 h world day — a colour
+    /// memory that lasts days at life scale (Menzel 1999), compressed like the day.
+    pub forget_s: f64,
+    /// A still beacon whose class is expected to pay less than this is not approached at all.
+    /// 0.1.
+    pub expect_min: f64,
+    /// **Looming is an approach** (S3b): a moving body within `loom_m` looms only while it
+    /// closes in fast enough to reach the eye within this, seconds — distance over closing
+    /// speed, the time-to-contact an insect's looming detector reads (Gabbiani et al. 1999;
+    /// Card & Dickinson 2008). 0: any moving body within `loom_m` looms (S3). 1 s.
+    pub loom_tau_s: f64,
+}
+
+impl Default for LightConfig {
+    fn default() -> LightConfig {
+        LightConfig {
+            flower_reflectance: 1.0,
+            glowcap_emission: 0.3,
+            lure_emission: 1.0,
+            background_floor: 0.05,
+            half_m: 1.0,
+            lure_height_fraction: 0.4,
+            visit_m: 0.25,
+            visit_s: 3.0,
+            visit_leave_m: 0.5,
+            mark_s: 120.0,
+            mark_radius_m: 0.5,
+            lift_per_m: 4.0,
+            near_m: 1.0,
+            near_forward: 0.3,
+            glow_scent_gate: 0.05,
+            learn: true,
+            uv_innate: 0.5,
+            cyan_innate: 0.5,
+            learn_rate: 0.3,
+            forget_s: 3600.0,
+            expect_min: 0.1,
+            loom_tau_s: 1.0,
         }
     }
 }

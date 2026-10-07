@@ -60,7 +60,8 @@ preset = "tropical_jungle"
 # dries to about half its root water, the turf cures brown and woody seedlings starve
 # back. The forced downpour at rh_max waits for the season to end. `dry_season = false`
 # turns it off.
-dry_season = true
+# Wrysk 2026-10-06: off by default; on only in his desktop display (config/desktop/terrarium.toml).
+dry_season = false
 dry_season_every_days = 5.0   # world days (the day clock's, as the plants count)
 dry_season_len_days = 1.0
 dry_season_phase_days = 5.0

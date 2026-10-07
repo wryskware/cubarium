@@ -565,6 +565,13 @@ impl Cover {
         }
     }
 
+    /// **The flowers** (the beacon export, S3 of the senses pass): every covered face in
+    /// flower holding nectar, in no particular order — what a flyer's light sense and its
+    /// floral smell read, without the copy and sort of [`Cover::faces`].
+    pub fn flowers(&self) -> impl Iterator<Item = &CoveredFace> + '_ {
+        self.faces.iter().filter(|c| c.spur == SpurPhase::Flower && c.nectar > 0.0)
+    }
+
     /// How many faces are covered.
     pub fn face_count(&self) -> usize {
         self.faces.len()

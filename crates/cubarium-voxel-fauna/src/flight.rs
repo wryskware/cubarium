@@ -524,7 +524,9 @@ pub(crate) fn move_through_air(
         pose.y_m = y;
     } else if dy > 0.0 {
         let site = support_below(view, pose.x, pose.z, y0);
-        let ceiling = site.map_or(y0, |s| surface_m(s.y, v) + band_max_m).max(y0);
+        // S3b: never over the world's top (a body above it is blocked everywhere).
+        let top = f64::from(c.height) * v - shape.h;
+        let ceiling = site.map_or(y0, |s| surface_m(s.y, v) + band_max_m).min(top).max(y0);
         let top0 = y0 + shape.h;
         let mut y = (y0 + dy).min(ceiling);
         let roof = roof_over(view, shape, pose.x, pose.z, top0, dy + shape.h + v);

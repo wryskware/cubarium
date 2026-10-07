@@ -1813,3 +1813,7 @@ impl World {
 #[cfg(test)]
 #[path = "weather_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "dry_season_testpass_tests.rs"]
+mod dry_season_testpass_tests;

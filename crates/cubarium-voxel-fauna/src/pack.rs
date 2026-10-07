@@ -381,6 +381,106 @@ fn node_radii(geometry: &crate::Body, h: &crate::Hunter, v: f64) -> (u32, u32) {
     (cols(r), cols(r + reach))
 }
 
+/// **STRIKE, the height band**: whether a hunter of `geometry` standing on a surface at `s0`
+/// meets, with its jaw band (`[s0, s0 + jaw_band_height_fraction × height]`, the strike
+/// capsule's band), a body whose base is at `base` and which is `height` tall.
+fn band_meets(geometry: &crate::Body, h: &crate::Hunter, s0: f64, base: f64, height: f64) -> bool {
+    base < s0 + h.jaw_band_height_fraction * geometry.height_m && s0 < base + height
+}
+
+/// The height of body `id` as it is now; 0 when it is gone.
+fn height_of(fauna: &Fauna, id: u64) -> f64 {
+    fauna.view().animal(id).and_then(|o| crate::body_of(&fauna.config, o)).map_or(0.0, |g| g.height_m)
+}
+
+/// **The node a member takes body `o` from** (STRIKE): on its graph within the strike's
+/// radius of where it was known ([`node_radii`]), on a face whose jaw band meets its body
+/// ([`band_meets`], `height` tall). `None` when there is none: a perched or ledged prey above
+/// (or below) every face a member could stand on beside it is out of reach.
+fn strike_node(graph: &crate::encounter::RouteGraph, o: &Track, height: f64, geometry: &crate::Body, h: &crate::Hunter, v: f64) -> Option<usize> {
+    let (_, prey_r) = node_radii(geometry, h, v);
+    graph.node_near_where(o.face(), (o.x, o.z), prey_r, |f| band_meets(geometry, h, crate::surface_m(f.y, v), o.y_m, height))
+}
+
+/// **STRIKE, the last metres** for the member `a` at `i` on its target `o` (as it knows it):
+/// within `close_in_m` of it, with the prey in its jaw band from where it stands and a
+/// straight walk to it on the disc's graph, it leaves its route and its flank point and
+/// steers to its **stand-off** — the jaw's reach plus `stand_off_reach_fraction` of the
+/// strike's reach from the prey's centre — facing it, as a wolf or a lion ends its approach
+/// in reach and facing its prey:
+/// - inside its outline (the prey's centre nearer than where a capsule facing it begins,
+///   the jaw's reach less both radii) it steps off, straight away from the prey, to the
+///   stand-off;
+/// - else, not facing it (its centre outside the capsule's half-width), it turns in place,
+///   paying the rotation as any turn;
+/// - facing it, it walks on to the stand-off, never past it: no step outruns the distance
+///   left (`cruise × controller period` is one sampling's walk), and the rush's sprint is the
+///   most it asks.
+///
+/// Feed is held throughout: a prey in the capsule is struck. `None` when the rule does not
+/// apply (off, out of range, the target gone, out of band, or a wall or a ledge between).
+#[allow(clippy::too_many_arguments)]
+fn close_in(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    founder: crate::Founder,
+    a: &Animal,
+    o: &Track,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    t: &Pack,
+    ring: f64,
+) -> Option<Actions> {
+    if !(t.close_in_m > 0.0) {
+        return None;
+    }
+    let (dx, dz, d) = delta(a, o.x, o.z, ring);
+    if d > t.close_in_m {
+        return None;
+    }
+    let prey = fauna.view().animal(o.id).copied()?;
+    let pg = crate::body_of(&fauna.config, &prey)?;
+    let v = view.config.voxel_m;
+    if a.mobility.climb.is_some() || !band_meets(geometry, h, crate::perception::base_m(a, v), o.y_m, pg.height_m) {
+        return None;
+    }
+    let (own_r, _) = node_radii(geometry, h, v);
+    let graph = fauna.pack_routes(view, founder);
+    if let Some(from) = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r) {
+        if !graph.walk_line(from, (a.pose.x, a.pose.z), (o.x, o.z)) {
+            return None;
+        }
+    }
+    let manifest = fauna.config.manifest(founder);
+    let length = geometry.length_m;
+    let jaw = h.jaw_forward_length_fraction * length;
+    let reach = h.strike_reach_length_fraction * length;
+    let radii = geometry.footprint_radius() + pg.footprint_radius();
+    let stand = jaw + t.stand_off_reach_fraction * reach;
+    let near = (jaw - radii).max(0.0);
+    let step = (manifest.cruise_m_per_s * manifest.controller_period_s).max(1e-9);
+    fauna.ledger.pack_close_in_samples += 1;
+    if d < near {
+        fauna.ledger.pack_step_offs += 1;
+        let away = if d > 1e-9 { (-dx).atan2(-dz) } else { a.pose.heading_rad };
+        return Some(head(a, away, ((stand - d) / step).min(1.0), 1.0));
+    }
+    let diff = angle_to(a.pose.heading_rad, dx.atan2(dz));
+    let aligned = diff.abs() <= (radii / d.max(radii)).asin();
+    let forward = if aligned {
+        let most = crate::vigil::stalk(fauna, a, o, d, 1.0).unwrap_or(1.0);
+        ((d - stand) / step).clamp(0.0, most.max(0.0))
+    } else {
+        fauna.ledger.pack_pivots += 1;
+        0.0
+    };
+    Some(Actions {
+        forward,
+        turn: (diff / FRAC_PI_4).clamp(-1.0, 1.0),
+        feed: 1.0,
+    })
+}
+
 /// **The next step on the route** (bellwing3 item 1, bellwing4): `None` when the member
 /// can walk straight to `goal` on the disc's graph (or is off the graph); else the centre
 /// of the next node on its route to the node it would strike the target from — the
@@ -400,13 +500,14 @@ fn route_step(
     goal: (f64, f64),
 ) -> Option<(f64, f64)> {
     let v = view.config.voxel_m;
-    let (own_r, prey_r) = node_radii(geometry, h, v);
+    let (own_r, _) = node_radii(geometry, h, v);
     let graph = fauna.pack_routes(view, founder);
     let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r)?;
     if graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
         return None;
     }
-    let target = graph.node_near(o.face(), (o.x, o.z), prey_r)?;
+    // STRIKE: the node it would strike from, on a face whose jaw band meets the prey.
+    let target = strike_node(&graph, o, height_of(fauna, o.id), geometry, h, v)?;
     let (graph, field) = fauna.pack_path(view, founder, own, target, reach_steps(t, cruise_m_per_s, v));
     graph.next_toward(&field, from).map(|j| graph.centre(j))
 }
@@ -483,6 +584,96 @@ fn knows_of(fauna: &Fauna, i: usize, tid: u64, ring: f64) -> Option<Track> {
         }
     }
     best.filter(|t| t.age(fauna.tick) <= give_up_ticks(fauna))
+}
+
+// ------------------------------------------------------------------ PACK-TUNE: the prey choice
+
+/// **The pack's prospect on body `o`** (PACK-TUNE, [`crate::Pack`]'s `select_*`), sensed as
+/// `t`, with `n` of its members at hand, in [0, 1]: 0 when the member at `i` could not take
+/// it there ([`takeable`]) or, for a hunkering lineage, when `n` cannot open it with the kin
+/// beside it ([`crate::Hunker::members_to_open`]; it is assumed to clamp down when the pack
+/// comes, as a musk ox stands); else the share of their pry left over its resistance, × the
+/// kin, awareness, wound and flight factors. Every factor reads the body as it is now.
+pub(crate) fn prospect(fauna: &Fauna, i: usize, o: &Animal, t: &Track, n: u32, ring: f64) -> f64 {
+    prospect_of(fauna, i, o, t, n, ring, true)
+}
+
+/// [`prospect`], with the awareness factor only when `awareness` (CHURN's switch leaves it
+/// out on both sides: a hunt alerts its target, and would alert any prey it turned to).
+fn prospect_of(fauna: &Fauna, i: usize, o: &Animal, t: &Track, n: u32, ring: f64, awareness: bool) -> f64 {
+    let a = &fauna.animals[i];
+    let (Some(of), Some(m), Some(pk)) = (o.founder, a.pack, a.founder.and_then(|f| fauna.config.founder(f).pack)) else {
+        return 0.0;
+    };
+    if !takeable(fauna, i, t) {
+        return 0.0;
+    }
+    // A flyer counts only where the strike could take it now (S3's `is_prey_of` rule: in
+    // flight, its body inside the member's jaw band over the member's own base), so the
+    // `select_airborne_factor` below weighs only a bellwing in reach.
+    if let Some(h) = a.founder.and_then(|f| fauna.config.founder(f).hunter) {
+        if !crate::predation::flyer_takeable(&fauna.config, a, &h, of, o) {
+            return 0.0;
+        }
+    }
+    let near = |r: f64| -> u32 {
+        fauna
+            .animals
+            .iter()
+            .filter(|k| k.id != o.id && k.founder == Some(of) && k.state != crate::State::Asleep && distance(o, k.pose.x, k.pose.z, ring) <= r)
+            .count() as u32
+    };
+    let mut p = 1.0;
+    let hk = fauna.config.founder(of).hunker;
+    let opened = fauna.percept(o.id).is_some_and(|r| fauna.tick < r.vigil.opened_until);
+    if hk.enabled && !opened {
+        let adult = fauna.config.founder(of).core.birth_body;
+        let ringed = near(hk.ring_m);
+        match hk.members_to_open(o.body, adult, ringed) {
+            Some(need) if need <= n => p *= 1.0 - hk.resist_of(o.body, adult, ringed) / (f64::from(n) * hk.pry_per_member_s),
+            _ => return 0.0,
+        }
+    }
+    p *= pk.select_kin_factor.powi(near(pk.select_kin_m).min(pk.select_kin_max) as i32);
+    let now = fauna.tick;
+    let record = fauna.percept(o.id);
+    let aware = fauna
+        .animals
+        .iter()
+        .filter(|b| b.pack.is_some_and(|bm| bm.pack == m.pack && !bm.pup))
+        .any(|b| crate::vigil::aware_of(&fauna.config, record, b.id, now));
+    if aware && awareness {
+        p *= pk.select_aware_factor;
+    }
+    p *= 1.0 + pk.select_wound_gain * o.wound.max(0.0);
+    if o.mobility.mode == crate::MobilityMode::Fly {
+        p *= pk.select_airborne_factor;
+    }
+    p.clamp(0.0, 1.0)
+}
+
+/// The members of pack `own` at hand at `(x, z)`: awake adults that take part (or are the
+/// member `me`) within `radius`.
+fn at_hand(fauna: &Fauna, own: u64, me: u64, x: f64, z: f64, radius: f64, ring: f64) -> u32 {
+    fauna
+        .animals
+        .iter()
+        .filter(|b| b.pack.is_some_and(|m| m.pack == own && !m.pup) && (b.id == me || participates(b, own)) && distance(b, x, z, ring) <= radius)
+        .count() as u32
+}
+
+/// Whether pack `own` shuns body `id` now (PACK-TUNE: dropped alive within `shun_s`).
+fn shuns(fauna: &Fauna, own: u64, id: u64) -> bool {
+    fauna.pack(own).is_some_and(|p| p.shunned.iter().any(|&(s, until)| s == id && fauna.tick < until))
+}
+
+/// Pack `own` shuns body `id` for `shun_s` (the slot ending soonest is reused).
+fn shun(fauna: &mut Fauna, own: u64, id: u64, shun_s: f64) {
+    let until = fauna.tick + cubarium_voxel::ticks_at_least_one(shun_s);
+    if let Some(p) = fauna.pack_mut(own) {
+        let k = (0..p.shunned.len()).min_by_key(|&k| if p.shunned[k].0 == id { 0 } else { p.shunned[k].1.max(1) }).unwrap_or(0);
+        p.shunned[k] = (id, until);
+    }
 }
 
 /// Whether any awake adult of pack `own` knows of `tid` within the pursuit's memory.
@@ -700,6 +891,198 @@ fn keep_out(fauna: &Fauna, i: usize, own: u64, act: Actions, t: &Pack, guard_m: 
     act
 }
 
+/// Work under [`WORK_EPS`] is no progress (a float tolerance).
+const WORK_EPS: f64 = 1e-9;
+
+/// **The work done on body `o`** (CHURN, the chase's progress): its wound, plus the pack's pry
+/// on it, plus 1 while it is turned over (a pry completed resets to 0 as it opens).
+fn work_on(fauna: &Fauna, o: &Animal) -> f64 {
+    let (pry, open) = fauna.percept(o.id).map_or((0.0, false), |p| (p.vigil.pry, fauna.tick < p.vigil.opened_until));
+    o.wound.max(0.0) + pry + if open { 1.0 } else { 0.0 }
+}
+
+/// The distance from `(x, z)` to the nearest member of pack `own` taking part (or `me`).
+fn nearest_member(fauna: &Fauna, own: u64, me: u64, x: f64, z: f64, ring: f64) -> f64 {
+    fauna
+        .animals
+        .iter()
+        .filter(|b| b.pack.is_some_and(|m| m.pack == own && !m.pup) && (b.id == me || participates(b, own)))
+        .map(|b| distance(b, x, z, ring))
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// **The choice score** (PACK-TUNE) of body `o`, known as `k`, to the member at `i` with `n`
+/// members at hand: prospect × body^`select_body_exp` / (1 + distance / `select_judge_m`),
+/// the member's own distance.
+#[allow(clippy::too_many_arguments)]
+fn score(fauna: &Fauna, i: usize, o: &Animal, k: &Track, n: u32, t: &Pack, ring: f64) -> f64 {
+    let a = &fauna.animals[i];
+    let d = distance(a, k.x, k.z, ring);
+    prospect(fauna, i, o, k, n, ring) * o.body.max(0.0).powf(t.select_body_exp) / (1.0 + d / t.select_judge_m.max(1e-9))
+}
+
+/// **The switch's worth** (CHURN2) of body `o`, known as `k`, to the pack: prospect ×
+/// body^`select_body_exp`, the prospect with the pack's `n` participants (the same count for
+/// the target and every other prey, so no member weighs a pair differently from another)
+/// and no awareness factor (a hunt alerts its target, and would alert any it turned to). No
+/// distance: which prey is nearest a member does not steal a hunt; distance only gates it.
+#[allow(clippy::too_many_arguments)]
+fn worth(fauna: &Fauna, i: usize, o: &Animal, k: &Track, n: u32, t: &Pack, ring: f64) -> f64 {
+    prospect_of(fauna, i, o, k, n, ring, false) * o.body.max(0.0).powf(t.select_body_exp)
+}
+
+/// CHURN2: how a [`choose`] weighs its candidates. `Choice` is the hunt start's score; a
+/// `Switch` weighs [`worth`] and takes only a prey whose pack distance (its nearest member
+/// taking part) is at most `within_m`.
+#[derive(Clone, Copy)]
+enum Weigh {
+    Choice,
+    Switch { within_m: f64 },
+}
+
+/// A target chosen: its score, id, face and the senses that had it.
+#[derive(Clone, Copy)]
+struct Choice {
+    score: f64,
+    id: u64,
+    site: Site,
+    modes: u8,
+}
+
+/// **The prey choice** (PACK-TUNE) of the member at `i` with `n` members at hand: of the
+/// prey it knows of (its own record and its packmates' in hearing, [`known`]), where last
+/// sensed, takeable there, in its window, outside every other territory, not `exclude`, the
+/// pack's abandoned target or a shunned one, with a prospect of at least
+/// `select_min_prospect` and a score of at least `floor` (`weigh`: the choice's [`score`], or
+/// a switch's [`worth`] gated by the pack's distance, a low prospect then not counted
+/// declined): the best it can reach on foot within the chase — on the taker's walking
+/// route graph, at most `cruise × chase_give_up_s × route_reach_fraction` away by route
+/// (bellwing-finding item 3, bellwing3 item 1: grazers on a cliff top 3 m over the pack drew
+/// 74 timed-out chases in seed 1). Also the pack's abandoned target's score as it sees it now
+/// (`None` unsensed), CHURN's readout.
+#[allow(clippy::too_many_arguments)]
+fn choose(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    own: u64,
+    founder: crate::Founder,
+    t: &Pack,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    cruise_m_per_s: f64,
+    n: u32,
+    ring: f64,
+    exclude: Option<u64>,
+    floor: f64,
+    weigh: Weigh,
+) -> (Option<Choice>, Option<f64>) {
+    let switching = matches!(weigh, Weigh::Switch { .. });
+    let weigh_of = |fauna: &Fauna, o: &Animal, k: &Track| match weigh {
+        Weigh::Choice => score(fauna, i, o, k, n, t, ring),
+        Weigh::Switch { .. } => worth(fauna, i, o, k, n, t, ring),
+    };
+    let a = fauna.animals[i];
+    let v = view.config.voxel_m;
+    let window = window_body(fauna, i, ring);
+    let sensed: Vec<Track> = known(fauna, i, ring).into_iter().filter(|k| takeable(fauna, i, k)).collect();
+    let abandoned = fauna.pack(own).and_then(|p| p.abandoned);
+    let mut prev_score = None;
+    let mut candidates: Vec<(f64, u64, Site, (f64, f64), u8, Track)> = Vec::new();
+    for k in &sensed {
+        let Some(o) = fauna.view().animal(k.id).copied() else { continue };
+        if abandoned == Some(o.id) {
+            prev_score = Some(weigh_of(fauna, &o, k));
+        }
+        if o.id == a.id || Some(o.id) == exclude || abandoned == Some(o.id) || shuns(fauna, own, o.id) {
+            continue;
+        }
+        if !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window) || trespass(fauna, own, k.x, k.z, t, v, ring) {
+            continue;
+        }
+        let pr = if switching { prospect_of(fauna, i, &o, k, n, ring, false) } else { prospect(fauna, i, &o, k, n, ring) };
+        if pr < t.select_min_prospect || !(pr > 0.0) {
+            if !switching {
+                fauna.ledger.pack_declined += 1;
+            }
+            continue;
+        }
+        if let (Weigh::Switch { within_m }, Some(m)) = (weigh, a.pack) {
+            if nearest_member(fauna, m.pack, a.id, k.x, k.z, ring) > within_m {
+                continue;
+            }
+        }
+        let s = weigh_of(fauna, &o, k);
+        if s >= floor {
+            candidates.push((-s, o.id, k.face(), (k.x, k.z), k.modes, *k));
+        }
+    }
+    if candidates.is_empty() {
+        return (None, prev_score);
+    }
+    candidates.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+    let routes = fauna.pack_routes(view, founder);
+    let (own_r, _) = node_radii(geometry, h, v);
+    let Some(from) = routes.node_near(a.site, (a.pose.x, a.pose.z), own_r) else {
+        return (None, prev_score);
+    };
+    let field = routes.distances(from, reach_steps(t, cruise_m_per_s, v));
+    // STRIKE: reached at a node it could strike it from (its jaw band meeting the body): a
+    // prey perched or ledged out of every such face is out of reach.
+    let best = candidates
+        .into_iter()
+        .find(|c| strike_node(&routes, &c.5, height_of(fauna, c.1), geometry, h, v).is_some_and(|j| field.contains_key(&j)))
+        .map(|c| Choice { score: -c.0, id: c.1, site: c.2, modes: c.4 });
+    (best, prev_score)
+}
+
+/// **The commitment** of pack `own` to `c`, taken by the member at `i` with `n` members at
+/// hand: the target, its chase and progress clocks, the counters by sense (and the draw's when
+/// `was_drawn` or the pack's draw stands), the taker's focus and call, and the event (`prev`
+/// the target it replaces, scored `prev_score`).
+#[allow(clippy::too_many_arguments)]
+fn commit(fauna: &mut Fauna, i: usize, own: u64, c: Choice, was_drawn: bool, n: u32, prev: Option<u64>, prev_score: Option<f64>, ring: f64) {
+    let a = fauna.animals[i];
+    let now = fauna.tick;
+    let (best_m, work) = match fauna.view().animal(c.id).copied() {
+        Some(o) => (nearest_member(fauna, own, a.id, o.pose.x, o.pose.z, ring), work_on(fauna, &o)),
+        None => (f64::INFINITY, 0.0),
+    };
+    let mut drawn = false;
+    if let Some(p) = fauna.pack_mut(own) {
+        p.target = Some(c.id);
+        p.chase_since_tick = now;
+        p.chase_progress_tick = now;
+        p.chase_best_m = best_m;
+        p.chase_work = work;
+        p.target_site = Some(c.site);
+        p.abandoned = None;
+        drawn = p.drawn.take().is_some() || was_drawn;
+    }
+    fauna.ledger.pack_chases += 1;
+    for (k, bit) in crate::perception::MODALITIES.iter().enumerate() {
+        if c.modes & bit != 0 {
+            fauna.ledger.pack_chases_by_sense[k] += 1;
+        }
+    }
+    if drawn {
+        fauna.ledger.pack_draw_chases += 1;
+    }
+    crate::perception::approach(fauna, a.id, c.id);
+    fauna.percepts.entry(a.id).or_default().set_focus(c.id, now);
+    fauna.log_pack_event(crate::PackEvent::ChaseStart {
+        tick: now,
+        pack: own,
+        participants: n,
+        taker: a.id,
+        target: c.id,
+        score: c.score,
+        prev,
+        prev_score,
+    });
+    call(fauna, i);
+}
+
 /// **The scripted pack tactic** for body `i` (a pack member whose controller opts in),
 /// over the actions its own heuristic just answered (`held`). `None` leaves them as they
 /// are (a body with no pack, or no pack table).
@@ -806,8 +1189,9 @@ pub(crate) fn steer(
     }
 
     // The target: dropped when it is gone (its carcass becomes the pack's), after
-    // `chase_give_up_s`, when an adult's reserve is under the floor, or when it stands in
-    // another pack's territory.
+    // `chase_give_up_s` without progress, when an adult's reserve is under the floor, when
+    // it stands in another pack's territory, when no member has sensed it within the
+    // pursuit's memory, or when the test goes badly (the break-off).
     if let Some(tid) = rec.target {
         let target = fauna.view().animal(tid).copied();
         let mut keep = false;
@@ -840,11 +1224,34 @@ pub(crate) fn steer(
                     tick: now,
                     pack: own,
                     why: if killed { crate::ChaseEnd::Killed } else { crate::ChaseEnd::Gone },
+                    target: tid,
+                    by: a.id,
                 });
             }
             Some(o) => {
-                let late = now.saturating_sub(rec.chase_since_tick)
-                    >= cubarium_voxel::ticks_at_least_one(t.chase_give_up_s);
+                let o_height = crate::body_of(&fauna.config, &o).map_or(0.0, |g| g.height_m);
+                // CHURN, the give-up: `chase_give_up_s` without progress — the pack's nearest
+                // member closing on the target by `chase_progress_m` past its nearest so far,
+                // or work done on it (a wound or a pry gained, or turned over). A pack at a
+                // hunkered body it is prying open, or closing on a fleeing one, keeps it.
+                let (mut best_m, mut since) = (rec.chase_best_m, rec.chase_progress_tick);
+                if let Some(k) = knows_of(fauna, i, tid, ring) {
+                    let d = nearest_member(fauna, own, a.id, k.x, k.z, ring);
+                    if d <= best_m - t.chase_progress_m {
+                        best_m = d;
+                        since = now;
+                    }
+                }
+                let w = work_on(fauna, &o);
+                if w > rec.chase_work + WORK_EPS {
+                    since = now;
+                }
+                if let Some(p) = fauna.pack_mut(own) {
+                    p.chase_best_m = best_m;
+                    p.chase_progress_tick = since;
+                    p.chase_work = w;
+                }
+                let late = now.saturating_sub(since) >= cubarium_voxel::ticks_at_least_one(t.chase_give_up_s);
                 let spent = adults.iter().any(|b| spent(fauna, b, &t));
                 // SENSES-CORE: the member's own focus follows what it and its packmates in
                 // hearing know of the target; the pack gives it up when no awake adult has
@@ -857,14 +1264,61 @@ pub(crate) fn steer(
                 }
                 let lost = !pack_knows(fauna, own, tid, ring);
                 let out = knows_of(fauna, i, tid, ring).is_some_and(|k| trespass(fauna, own, k.x, k.z, &t, v, ring));
-                keep = !(late || spent || out || lost);
+                // PACK-TUNE, the test: the target as this member knows it, weighed with the
+                // members at hand around it; a prospect under `break_off_below` ends it.
+                // FINDINGS-FIX: a test goes badly only once it has begun (approach, watch,
+                // attack: MacNulty et al. 2007). Until a member is within the strike-test
+                // distance (`2 × pack_radius_m`) of the target, the pack is still closing in
+                // and is weighed as the commit weighed it: the members at hand around this
+                // member (itself and the participants within `pack_radius_m`).
+                // STRIKE, the height band: a target no member could strike from any face
+                // beside it (perched or ledged out of its jaw band) is out of reach: its
+                // prospect is 0, and the test breaks it off.
+                // So is one, in a chase stalled `switch_stall_s`, that none of the pack's members
+                // taking part can walk to within the chase's reach (`reach_steps`, the choice's
+                // own bound): the probe's stuck-short chases had the prey on a ledge 1.5 m up or
+                // 4-5 m down a cliff, the members walking straight into the face for the whole
+                // give-up.
+                let stalled_now = now.saturating_sub(since) >= cubarium_voxel::ticks_at_least_one(t.switch_stall_s);
+                let unreachable = !(late || spent || out || lost)
+                    && knows_of(fauna, i, tid, ring).is_some_and(|k| {
+                        let graph = fauna.pack_routes(view, founder);
+                        let Some(goal) = strike_node(&graph, &k, o_height, &geometry, &h, v) else {
+                            return true;
+                        };
+                        if !stalled_now {
+                            return false;
+                        }
+                        let (_, field) = fauna.pack_path(view, founder, own, goal, reach_steps(&t, manifest.cruise_m_per_s, v));
+                        !adults.iter().filter(|b| b.id == a.id || participates(b, own)).any(|b| {
+                            let (br, _) = node_radii(&phys.body_at(b.body), &h, v);
+                            graph.node_near(b.site, (b.pose.x, b.pose.z), br).is_some_and(|j| field.contains_key(&j))
+                        })
+                    });
+                let broke = !(late || spent || out || lost)
+                    && (unreachable || knows_of(fauna, i, tid, ring).is_some_and(|k| {
+                        let arrived = at_hand(fauna, own, a.id, k.x, k.z, 2.0 * t.pack_radius_m, ring);
+                        let n = if arrived > 0 {
+                            arrived
+                        } else {
+                            at_hand(fauna, own, a.id, a.pose.x, a.pose.z, t.pack_radius_m, ring)
+                        };
+                        prospect(fauna, i, &o, &k, n, ring) < t.break_off_below
+                    }));
+                if unreachable {
+                    fauna.ledger.pack_out_of_reach += 1;
+                }
+                keep = !(late || spent || out || lost || broke);
                 if keep {
                     // The kill's bookkeeping: where the carcass will lie if a member kills it.
                     if let Some(p) = fauna.pack_mut(own) {
                         p.target_site = Some(o.site);
                     }
                 } else {
-                    let why = if late {
+                    let why = if broke {
+                        fauna.ledger.pack_break_offs += 1;
+                        crate::ChaseEnd::BrokeOff
+                    } else if late {
                         crate::ChaseEnd::Late
                     } else if spent {
                         crate::ChaseEnd::Spent
@@ -874,7 +1328,7 @@ pub(crate) fn steer(
                     } else {
                         crate::ChaseEnd::Trespass
                     };
-                    fauna.log_pack_event(crate::PackEvent::ChaseEnd { tick: now, pack: own, why });
+                    fauna.log_pack_event(crate::PackEvent::ChaseEnd { tick: now, pack: own, why, target: tid, by: a.id });
                 }
             }
         }
@@ -885,6 +1339,43 @@ pub(crate) fn steer(
                 p.target_site = None;
                 if alive {
                     p.abandoned = Some(tid);
+                }
+            }
+            if alive {
+                shun(fauna, own, tid, t.shun_s);
+            }
+        }
+    }
+
+    // CHURN, the commitment; CHURN2, only once stalled: a hungry member in a chase that has
+    // gone `switch_stall_s` without progress (the give-up's progress above: no member closing
+    // in, no work done on the target) weighs the other prey it knows of against the target
+    // by what each is worth and how open it is ([`worth`]: prospect × body, with the pack's
+    // participants for every one and no awareness factor), never by which is nearest a
+    // member; distance only gates a candidate: no farther from the pack (its nearest member
+    // taking part) than the target is. One worth at least `switch_margin` times the target
+    // takes the hunt (the old one is not shunned). A pack closing on or working its target
+    // never switches (MacNulty et al. 2007: wolves test,
+    // then commit and stay on that animal; opportunism belongs to the choice, not to
+    // abandoning one). The commit restarts the progress clock, so a pack switches at most
+    // once per `switch_stall_s`.
+    let stalled = fauna
+        .pack(own)
+        .is_some_and(|p| p.target.is_some() && now.saturating_sub(p.chase_progress_tick) >= cubarium_voxel::ticks_at_least_one(t.switch_stall_s));
+    if stalled && (a.eating || a.emergency) && !adults.iter().any(|b| spent(fauna, b, &t)) {
+        if let Some(tid) = fauna.pack(own).and_then(|p| p.target) {
+            if let (Some(k), Some(o)) = (knows_of(fauna, i, tid, ring), fauna.view().animal(tid).copied()) {
+                let n = adults.iter().filter(|b| b.id == a.id || participates(b, own)).count().max(1) as u32;
+                let current = worth(fauna, i, &o, &k, n, &t, ring);
+                let floor = t.switch_margin * current;
+                let within_m = nearest_member(fauna, own, a.id, k.x, k.z, ring);
+                if floor.is_finite() {
+                    let (better, _) = choose(fauna, i, view, own, founder, &t, &geometry, &h, manifest.cruise_m_per_s, n, ring, Some(tid), floor, Weigh::Switch { within_m });
+                    if let Some(c) = better {
+                        fauna.ledger.pack_switches += 1;
+                        fauna.log_pack_event(crate::PackEvent::ChaseEnd { tick: now, pack: own, why: crate::ChaseEnd::Switched, target: tid, by: a.id });
+                        commit(fauna, i, own, c, false, n, Some(tid), Some(current), ring);
+                    }
                 }
             }
         }
@@ -970,59 +1461,13 @@ pub(crate) fn steer(
             // VEILHOUND-SEARCH, SENSES-CORE: what the member knows of (its own record and its
             // packmates' in hearing, [`known`]), where it was last sensed, takeable there
             // (main's rule was its own 2 m cone ahead).
-            let window = window_body(fauna, i, ring);
-            let sensed: Vec<Track> = known(fauna, i, ring).into_iter().filter(|k| takeable(fauna, i, k)).collect();
-            let mut candidates: Vec<(f64, u64, Site, (f64, f64), u8)> = Vec::new();
-            for k in &sensed {
-                let Some(o) = fauna.view().animal(k.id).copied() else { continue };
-                if o.id == a.id || fauna.pack(own).and_then(|p| p.abandoned) == Some(o.id) {
-                    continue;
-                }
-                if !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window)
-                    || trespass(fauna, own, k.x, k.z, &t, v, ring)
-                {
-                    continue;
-                }
-                let d = distance(&a, k.x, k.z, ring);
-                candidates.push((d, o.id, k.face(), (k.x, k.z), k.modes));
-            }
-            let mut best: Option<(f64, u64, Site, u8)> = None;
-            if !candidates.is_empty() {
-                candidates.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
-                let routes = fauna.pack_routes(view, founder);
-                let (own_r, prey_r) = node_radii(&geometry, &h, v);
-                if let Some(from) = routes.node_near(a.site, (a.pose.x, a.pose.z), own_r) {
-                    let field = routes.distances(from, reach_steps(&t, manifest.cruise_m_per_s, v));
-                    best = candidates
-                        .into_iter()
-                        .find(|c| routes.node_near(c.2, c.3, prey_r).is_some_and(|j| field.contains_key(&j)))
-                        .map(|c| (c.0, c.1, c.2, c.4));
-                }
-            }
-            if let Some((_, tid, site, sense)) = best {
-                let mut drawn = false;
-                if let Some(p) = fauna.pack_mut(own) {
-                    p.target = Some(tid);
-                    p.chase_since_tick = now;
-                    p.target_site = Some(site);
-                    p.abandoned = None;
-                    drawn = p.drawn.take().is_some() || rec.drawn.is_some();
-                }
-                fauna.ledger.pack_chases += 1;
-                for (k, bit) in crate::perception::MODALITIES.iter().enumerate() {
-                    if sense & bit != 0 {
-                        fauna.ledger.pack_chases_by_sense[k] += 1;
-                    }
-                }
-                if drawn {
-                    fauna.ledger.pack_draw_chases += 1;
-                }
-                crate::perception::approach(fauna, a.id, tid);
-                let now_tick = fauna.tick;
-                fauna.percepts.entry(a.id).or_default().set_focus(tid, now_tick);
-                let participants = 1 + participating as u32;
-                fauna.log_pack_event(crate::PackEvent::ChaseStart { tick: now, pack: own, participants });
-                call(fauna, i);
+            // PACK-TUNE, the prey choice: each weighed by its prospect with the members at
+            // hand, its meat and its distance; the best first, none under the floor.
+            let n = 1 + participating as u32;
+            let (best, prev_score) = choose(fauna, i, view, own, founder, &t, &geometry, &h, manifest.cruise_m_per_s, n, ring, None, 0.0, Weigh::Choice);
+            if let Some(c) = best {
+                let prev = fauna.pack(own).and_then(|p| p.abandoned);
+                commit(fauna, i, own, c, rec.drawn.is_some(), n, prev, prev_score, ring);
             }
         }
     }
@@ -1044,6 +1489,18 @@ pub(crate) fn steer(
     };
     if draw_go.is_some() {
         fauna.ledger.pack_draw_lead_samples += 1;
+    }
+
+    // STRIKE, the last metres ([`close_in`]): close in on its target, on its level, a member
+    // steers to its stand-off facing the prey — before the escape below, whose route step
+    // walked members beside a prey into a wall toward the next node (CHURN-2: two members 20 s
+    // at 0.25 m from a juvenile seedporter).
+    if joins {
+        if let Some(o) = fauna.pack(own).and_then(|p| p.target).and_then(|tid| knows_of(fauna, i, tid, ring)) {
+            if let Some(act) = close_in(fauna, view, founder, &a, &o, &geometry, &h, &t, ring) {
+                return Some(clamp(fauna, act));
+            }
+        }
     }
 
     // Its motor was refused over the last interval (a wall, a ledge, a pocket): its own

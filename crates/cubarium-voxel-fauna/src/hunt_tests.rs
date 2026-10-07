@@ -264,10 +264,10 @@ fn strikes_on_bellwing(hunter_lineage: Founder, lift_m: f64, ahead_m: f64) -> (u
 }
 
 /// A bellwing perched on the ground in the capsule is struck by the lanternjaw and by the
-/// Veilhound (`chorister`); one flying just over the ground at the same place, inside the
-/// jaw band, is not.
+/// Veilhound (`chorister`); S3 (`is_prey_of`): one **hovering** just over the ground at the
+/// same place, inside the jaw band, is struck too; one hovering above the band is not.
 #[test]
-fn a_grounded_or_perched_bellwing_in_reach_is_struck_and_a_flying_one_is_not() {
+fn a_grounded_perched_or_low_hovering_bellwing_in_reach_is_struck_and_a_higher_one_is_not() {
     let c = FaunaConfig::default();
     for hunter_lineage in [LJ, Founder::Chorister] {
         let phys = c.founder(hunter_lineage);
@@ -278,11 +278,15 @@ fn a_grounded_or_perched_bellwing_in_reach_is_struck_and_a_flying_one_is_not() {
         let (n, mode) = strikes_on_bellwing(hunter_lineage, 0.0, ahead);
         assert_eq!(mode, MobilityMode::Perched, "the fixture perches it on the ground");
         assert!(n > 0, "{}: a perched bellwing in reach is struck", hunter_lineage.name());
-        // Flying inside the jaw band: half the band's height up.
-        let lift = 0.25 * h.jaw_band_height_fraction * geometry.height_m;
-        let (n, mode) = strikes_on_bellwing(hunter_lineage, lift, ahead);
-        assert_eq!(mode, MobilityMode::Fly, "the fixture has it flying, {lift} m up");
-        assert_eq!(n, 0, "{}: a flying bellwing is never struck", hunter_lineage.name());
+        let band = h.jaw_band_height_fraction * geometry.height_m;
+        // Hovering inside the jaw band: a quarter of the band's height up.
+        let (n, mode) = strikes_on_bellwing(hunter_lineage, 0.25 * band, ahead);
+        assert_eq!(mode, MobilityMode::Fly, "the fixture has it flying, {} m up", 0.25 * band);
+        assert!(n > 0, "{}: a bellwing hovering in the jaw band is struck", hunter_lineage.name());
+        // Hovering a band's height over the band's top.
+        let (n, mode) = strikes_on_bellwing(hunter_lineage, 2.0 * band, ahead);
+        assert_eq!(mode, MobilityMode::Fly, "the fixture has it flying, {} m up", 2.0 * band);
+        assert_eq!(n, 0, "{}: a bellwing hovering over the jaw band is not struck", hunter_lineage.name());
     }
 }
 

@@ -105,16 +105,48 @@ pub(crate) fn is_prey_in_window(
     if config.founder(pf).glider.is_some() && prey.mobility.mode != crate::MobilityMode::Ground {
         return false;
     }
-    // A flyer (the bellwing, the detritus web D2) is prey only at rest — perched or on the
-    // ground, never in flight or dropping; whether it is in reach is the strike capsule's
-    // geometry, against its base where it rests.
-    if config.founder(pf).flight.is_some()
-        && (prey.mobility.falling
-            || !matches!(prey.mobility.mode, crate::MobilityMode::Perched | crate::MobilityMode::Ground))
-    {
+    if !flyer_takeable(config, hunter, &h, pf, prey) {
         return false;
     }
     h.hunts(pf) && prey.body <= h.prey_max_ratio * window_body
+}
+
+/// A flyer (the bellwing) is prey at rest — perched or on the ground — and, since S3 of
+/// the senses pass, **hovering within reach**: in flight with its body inside the hunter's
+/// jaw band over the hunter's standing surface (the strike capsule's band). One higher up
+/// is not, and one dropping never is. Whether a body in reach is struck is the capsule's
+/// geometry, against its base. True for any prey that does not fly. The pack's prospect
+/// ([`crate::pack`], PACK-TUNE) asks the same, so a pack commits only to a flyer it can take.
+pub(crate) fn flyer_takeable(config: &FaunaConfig, hunter: &Animal, h: &crate::Hunter, pf: crate::Founder, prey: &Animal) -> bool {
+    if config.founder(pf).flight.is_none() {
+        return true;
+    }
+    if prey.mobility.falling {
+        return false;
+    }
+    match prey.mobility.mode {
+        crate::MobilityMode::Perched | crate::MobilityMode::Ground => true,
+        crate::MobilityMode::Fly => hovers_in_reach(config, hunter, h, prey),
+        _ => false,
+    }
+}
+
+/// Whether a flyer's body (its base at `pose.y_m`, its current height tall) meets the
+/// hunter's **jaw band** — `[s0, s0 + jaw_band_height_fraction × height]` over the hunter's
+/// standing surface `s0` — the strike capsule's band (S3: "a bellwing hovering low … within a
+/// hunter's reach is takeable; one higher up is not"). `s0` is the hunter's base, its pose's
+/// `y_m` (a walker's is its support face's top, set each act); a climbing hunter reaches none.
+fn hovers_in_reach(config: &FaunaConfig, hunter: &Animal, h: &crate::Hunter, prey: &Animal) -> bool {
+    let (Some(hg), Some(pg)) = (crate::body_of(config, hunter), crate::body_of(config, prey)) else {
+        return false;
+    };
+    if !prey.pose.y_m.is_finite() || !hunter.pose.y_m.is_finite() || hunter.mobility.climb.is_some() {
+        return false;
+    }
+    let s0 = hunter.pose.y_m;
+    let band = (s0, s0 + h.jaw_band_height_fraction * hg.height_m);
+    let body = (prey.pose.y_m, prey.pose.y_m + pg.height_m);
+    body.0 < band.1 && band.0 < body.1
 }
 
 /// Whether a body has moved faster than `still_speed_bl_per_s` within the last

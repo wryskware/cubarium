@@ -477,3 +477,112 @@ fn a_hungry_pack_walks_up_its_preys_scent() {
     let (draws, _, _) = run(0.0);
     assert_eq!(draws, 0, "no smell: no scent draw");
 }
+
+// ------------------------------------------------------------------ PACK-TUNE: prey choice
+
+/// The case for the prey choice: sight all around to 7 m, a chase reach of 4 m by route, the
+/// pack (four hungry adults about x = 2.25 m) and its world. `(fauna, world, members)`.
+fn choice_case(seed: u64) -> (Fauna, World, Vec<u64>) {
+    let world = plain(cubarium_voxel::weather::DayClock { mode: cubarium_voxel::weather::DayMode::Off, ..Default::default() }, seed);
+    let mut c = config(AROUND);
+    let cruise = c.manifest(CH).cruise_m_per_s;
+    let pk = c.founders[CH.index()].pack.as_mut().expect("the chorister's pack table");
+    pk.route_reach_fraction = 4.0 / (cruise * pk.chase_give_up_s);
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let members = pack(&mut fauna, &world, HUNTING, true, EAST);
+    (fauna, world, members)
+}
+
+/// A grazer of `fraction` × the adult body at `(x, z)`, still; `hunkered` sets it under its
+/// shield.
+fn grazer(fauna: &mut Fauna, world: &World, x: f64, z: f64, fraction: f64, hunkered: bool) -> u64 {
+    let id = introduce(fauna, world, PREY, StartingStores::FULL);
+    place(fauna, id, x, z, WEST);
+    let birth = fauna.config.founder(PREY).core.birth_body;
+    animal_mut(fauna, id).body = fraction * birth;
+    drive(fauna, id, 0.0, false);
+    if hunkered {
+        animal_mut(fauna, id).hunkered = true;
+        fauna.percepts.entry(id).or_default().vigil.hunkered = true;
+    }
+    id
+}
+
+/// An adult grazer hunkered at `(x, LANE_Z)` with two hunkered kin beside it (the ring):
+/// the adult's id.
+fn ring_at(fauna: &mut Fauna, world: &World, x: f64) -> u64 {
+    let adult = grazer(fauna, world, x, LANE_Z, 1.0, true);
+    grazer(fauna, world, x + 0.4, LANE_Z - 0.8, 1.0, true);
+    grazer(fauna, world, x + 0.4, LANE_Z + 0.8, 1.0, true);
+    adult
+}
+
+/// **A pack picks the soft or the isolated target over a hunkered adult in a ring** (PACK-TUNE,
+/// prey choice: wolves and lions favour the young and the isolated and leave a standing herd,
+/// Mech 1970; MacNulty et al. 2007; Packer & Ruttan 1988). All else equal, and the ring a
+/// little nearer: a half-grown juvenile on the other side, then a lone unhunkered adult there.
+#[test]
+fn a_pack_picks_a_juvenile_or_an_isolated_grazer_over_a_hunkered_adult_in_a_ring() {
+    for (fraction, what) in [(0.5, "a juvenile"), (1.0, "an isolated adult")] {
+        let (mut fauna, world, _) = choice_case(61);
+        let mut flora = Flora::new(FloraConfig::default());
+        // The pack stands at x = 2 to 2.5 m: the ring 2.75 m east of x = 2, the other 3.25 m
+        // west of it (round the ring), both within the chase's reach.
+        let ringed = ring_at(&mut fauna, &world, 4.75);
+        let other = grazer(&mut fauna, &world, (2.0 - 3.25f64).rem_euclid(RING), LANE_Z, fraction, false);
+        let took = step_until(&mut fauna, &world, &mut flora, 300, |f| f.packs()[0].target.is_some());
+        assert!(took.is_some(), "the pack takes a target");
+        let target = fauna.packs()[0].target;
+        assert_eq!(target, Some(other), "it takes {what} ({other}), not the ringed adult ({ringed}): took {target:?}");
+    }
+}
+
+/// **A pack breaks off a test on a defended target**: it takes a lone adult it can open; two
+/// kin then hunker beside it, so the members present can no longer open it. The pack drops it
+/// well before the chase's give-up, as a break-off, and does not take it again at once.
+#[test]
+fn a_pack_breaks_off_a_test_on_a_defended_target() {
+    let (mut fauna, world, _) = choice_case(62);
+    let mut flora = Flora::new(FloraConfig::default());
+    let prey = grazer(&mut fauna, &world, 5.25, LANE_Z, 1.0, false);
+    step_until(&mut fauna, &world, &mut flora, 300, |f| f.packs()[0].target == Some(prey)).expect("the pack takes the lone adult");
+    let give_up = cubarium_voxel::ticks_at_least_one(fauna.config.founder(CH).pack.unwrap().chase_give_up_s) as u32;
+    // Kin close in and the herd stands: the ring.
+    let x = animal(&fauna, prey).pose.x;
+    grazer(&mut fauna, &world, x + 0.4, LANE_Z - 0.8, 1.0, true);
+    grazer(&mut fauna, &world, x + 0.4, LANE_Z + 0.8, 1.0, true);
+    animal_mut(&mut fauna, prey).hunkered = true;
+    fauna.percepts.entry(prey).or_default().vigil.hunkered = true;
+    let before = fauna.ledger.pack_break_offs;
+    let dropped = step_until(&mut fauna, &world, &mut flora, give_up, |f| f.packs()[0].target != Some(prey));
+    assert!(dropped.is_some_and(|t| t < give_up / 2), "dropped in {dropped:?} ticks (give-up {give_up})");
+    assert!(fauna.ledger.pack_break_offs > before, "counted as a break-off");
+    let retaken = step_until(&mut fauna, &world, &mut flora, give_up, |f| f.packs()[0].target == Some(prey));
+    assert!(retaken.is_none(), "taken again at once ({retaken:?} ticks)");
+}
+
+/// **A hovering bellwing above reach is never committed to**: a bellwing in flight held over
+/// the pack's jaw band, in plain sight of a hungry pack, is never its target.
+#[test]
+fn a_hovering_bellwing_above_reach_is_never_committed_to() {
+    let (mut fauna, world, members) = choice_case(63);
+    let mut flora = Flora::new(FloraConfig::default());
+    let band = {
+        let h = fauna.config.founder(CH).hunter.expect("a hunter");
+        let g = crate::body_of(&fauna.config, &animal(&fauna, members[0])).expect("a body");
+        h.jaw_band_height_fraction * g.height_m
+    };
+    let bw = introduce(&mut fauna, &world, crate::Founder::Bellwing, StartingStores::FULL);
+    drive(&mut fauna, bw, 0.0, false);
+    for _ in 0..400 {
+        place(&mut fauna, bw, 4.5, LANE_Z, WEST);
+        {
+            let a = animal_mut(&mut fauna, bw);
+            a.mobility.mode = crate::MobilityMode::Fly;
+            a.pose.y_m = SURFACE_M + band + 0.5;
+        }
+        fauna.step_with(&world, &mut flora, 1);
+        assert_ne!(fauna.packs()[0].target, Some(bw), "the pack committed to a bellwing above its reach");
+    }
+}

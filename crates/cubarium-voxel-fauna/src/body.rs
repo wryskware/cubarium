@@ -561,8 +561,38 @@ pub struct Pack {
     /// Flankers go to points this far either side of the pack target, metres. A
     /// placeholder.
     pub flank_offset_m: f64,
-    /// A chase is dropped after this, seconds. 20.
+    /// A chase is dropped after this long without progress, seconds (CHURN: the pack closed
+    /// on its target by `chase_progress_m`, or worked it — a wound or pry gained). 20.
     pub chase_give_up_s: f64,
+    /// **CHURN, the progress**: a chase's give-up clock restarts when the pack's nearest
+    /// member has come this much closer to the target than its nearest so far, metres.
+    #[serde(default = "pack_chase_progress_m")]
+    pub chase_progress_m: f64,
+    /// **CHURN, the commitment**: in a stalled chase ([`Pack::switch_stall_s`]), another
+    /// target takes the hunt only when it is worth at least this many times the current
+    /// target (CHURN2: prospect × body, both weighed with the pack's participants and no
+    /// awareness; hysteresis: an equal or slightly better prey never steals it).
+    #[serde(default = "pack_switch_margin")]
+    pub switch_margin: f64,
+    /// **CHURN2, the stall**: a chase is open to a switch only after this long without
+    /// progress (the give-up's progress: closing in, or working the target), seconds; below
+    /// `chase_give_up_s`. A pack closing on or working its target never switches (MacNulty
+    /// et al. 2007: wolves test, then commit and stay on that animal).
+    #[serde(default = "pack_switch_stall_s")]
+    pub switch_stall_s: f64,
+    /// **STRIKE, the last metres**: within this of its target (centre to centre), with the
+    /// target in its jaw band from where it stands and a straight walk to it, a member leaves
+    /// its route and its flank point and steers to its **stand-off**, facing the prey: it turns
+    /// in place to a prey to its side or behind it, steps off from one inside its outline, and
+    /// never presses into it ([`crate::pack`]'s close-in). Metres; 0 turns it off.
+    #[serde(default = "pack_close_in_m")]
+    pub close_in_m: f64,
+    /// ...the stand-off: the jaw's reach ahead of its centre (`jaw_forward_length_fraction`)
+    /// plus this share of the strike's reach (`strike_reach_length_fraction`), from the prey's
+    /// centre; 0 stands it at the jaw (where a lunge that cannot move still meets it), 0.5 in
+    /// the middle of the strike capsule.
+    #[serde(default = "pack_stand_off_reach_fraction")]
+    pub stand_off_reach_fraction: f64,
     /// A pack takes only prey standing in its own walking route component; the
     /// lineage's components are rebuilt from the terrain at most this often, seconds (a
     /// placeholder: the terrain and its water change slowly). 60.
@@ -612,6 +642,90 @@ pub struct Pack {
     /// than its reserve above the surplus floor funds.
     #[serde(default)]
     pub litter_by_condition: bool,
+    /// **The prey choice** (PACK-TUNE, [`crate::pack::prospect`]): a pack weighs each target
+    /// it could take by its prospect — the chance-like share of a hunt on it that ends in a
+    /// kill, from what it can see — times its meat, over its distance, and commits to the best.
+    /// The prospect: 0 for a hunkering lineage's body the members present cannot open (its
+    /// [`crate::Hunker::members_to_open`] with the kin within its ring), else the share of
+    /// their pry left over its resistance; × `select_kin_factor` per kin of its lineage within
+    /// `select_kin_m` (at most `select_kin_max`); × `select_aware_factor` when it is aware of
+    /// a member; × (1 + `select_wound_gain` × its wound); × `select_airborne_factor` in flight
+    /// (in reach). 1 for an isolated, unaware, unarmoured body on the ground.
+    #[serde(default = "pack_select_kin_m")]
+    pub select_kin_m: f64,
+    #[serde(default = "pack_select_kin_factor")]
+    pub select_kin_factor: f64,
+    #[serde(default = "pack_select_kin_max")]
+    pub select_kin_max: u32,
+    #[serde(default = "pack_select_aware_factor")]
+    pub select_aware_factor: f64,
+    #[serde(default = "pack_select_wound_gain")]
+    pub select_wound_gain: f64,
+    #[serde(default = "pack_select_airborne_factor")]
+    pub select_airborne_factor: f64,
+    /// The score is prospect × body^`select_body_exp` / (1 + distance / `select_judge_m`).
+    #[serde(default = "pack_select_body_exp")]
+    pub select_body_exp: f64,
+    #[serde(default = "pack_select_judge_m")]
+    pub select_judge_m: f64,
+    /// It commits only to a prospect of at least this.
+    #[serde(default = "pack_select_min_prospect")]
+    pub select_min_prospect: f64,
+    /// **The test**: in a chase, a target whose prospect falls under this is broken off.
+    #[serde(default = "pack_break_off_below")]
+    pub break_off_below: f64,
+    /// A target dropped alive (broken off, late or lost) is not taken again for this, seconds.
+    #[serde(default = "pack_shun_s")]
+    pub shun_s: f64,
+}
+
+fn pack_select_kin_m() -> f64 {
+    Pack::CHORISTER.select_kin_m
+}
+fn pack_select_kin_factor() -> f64 {
+    Pack::CHORISTER.select_kin_factor
+}
+fn pack_select_kin_max() -> u32 {
+    Pack::CHORISTER.select_kin_max
+}
+fn pack_select_aware_factor() -> f64 {
+    Pack::CHORISTER.select_aware_factor
+}
+fn pack_select_wound_gain() -> f64 {
+    Pack::CHORISTER.select_wound_gain
+}
+fn pack_select_airborne_factor() -> f64 {
+    Pack::CHORISTER.select_airborne_factor
+}
+fn pack_select_body_exp() -> f64 {
+    Pack::CHORISTER.select_body_exp
+}
+fn pack_select_judge_m() -> f64 {
+    Pack::CHORISTER.select_judge_m
+}
+fn pack_select_min_prospect() -> f64 {
+    Pack::CHORISTER.select_min_prospect
+}
+fn pack_break_off_below() -> f64 {
+    Pack::CHORISTER.break_off_below
+}
+fn pack_shun_s() -> f64 {
+    Pack::CHORISTER.shun_s
+}
+fn pack_chase_progress_m() -> f64 {
+    Pack::CHORISTER.chase_progress_m
+}
+fn pack_switch_margin() -> f64 {
+    Pack::CHORISTER.switch_margin
+}
+fn pack_switch_stall_s() -> f64 {
+    Pack::CHORISTER.switch_stall_s
+}
+fn pack_close_in_m() -> f64 {
+    Pack::CHORISTER.close_in_m
+}
+fn pack_stand_off_reach_fraction() -> f64 {
+    Pack::CHORISTER.stand_off_reach_fraction
 }
 
 fn pack_stalk_margin() -> f64 {
@@ -661,6 +775,16 @@ impl Pack {
         territory_radius_m: 10.0,
         flank_offset_m: 1.5,
         chase_give_up_s: 20.0,
+        chase_progress_m: 0.5,
+        switch_margin: 1.5,
+        switch_stall_s: 10.0,
+        // STRIKE: the commit distance (`commit_m`, where the rush begins) is where a wolf or a
+        // lion leaves its line of approach for the animal itself (MacNulty et al. 2007's
+        // attack stage); the stand-off is at the jaw's reach (the probe: from the capsule's
+        // middle, a lunge blocked by a ledge or a stem swept short of the prey, 45 of 50
+        // strikes on perched bellwings missing by geometry).
+        close_in_m: 2.5,
+        stand_off_reach_fraction: 0.0,
         route_refresh_s: 60.0,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,
@@ -673,6 +797,28 @@ impl Pack {
         stalk_freeze: true,
         breed_reserve_fraction: 0.6,
         litter_by_condition: true,
+        // PACK-TUNE's prey choice, placeholders at the terrarium's scale. Wolves and lions
+        // test prey and quit fast on healthy, defended animals; they take the young, the
+        // isolated, the wounded and the unaware far more often than their share (Mech 1970,
+        // *The Wolf*; MacNulty, Mech & Smith 2007, J. Mammal. 88:595, wolf hunting stages:
+        // most encounters end at the approach or the watch; Packer & Ruttan 1988, Am. Nat.
+        // 132:159). Kin within 3 m (about two grazer lengths) each take a fifth off, counting
+        // four; an aware target half; a wound of w adds 2w; a body in flight in reach is a
+        // quarter of one on the ground. Meat counts as the square root of the body (a big
+        // carcass feeds the pack longer, not proportionally better); distance halves the
+        // score at 6 m (the pack radius). Committed at 0.1 and broken off under 0.05; a
+        // target dropped alive is left for 2 min.
+        select_kin_m: 3.0,
+        select_kin_factor: 0.8,
+        select_kin_max: 4,
+        select_aware_factor: 0.5,
+        select_wound_gain: 2.0,
+        select_airborne_factor: 0.25,
+        select_body_exp: 0.5,
+        select_judge_m: 6.0,
+        select_min_prospect: 0.1,
+        break_off_below: 0.05,
+        shun_s: 120.0,
     };
 }
 
@@ -1462,7 +1608,10 @@ impl FounderPhysiology {
                 // number so none is a silent zero.
                 yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
-                active: crate::Activity::Nocturnal,
+                // S3 (D1, Wrysk 2026-10-06): active wherever it is dark — at night, and by
+                // day in caves and deep shade, its lure lit — so it meets bellwings at dusk
+                // and in shade, like the dark-active prey it mostly eats.
+                active: crate::Activity::DarkActive,
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -5146,6 +5295,17 @@ pub struct SenseTable {
     /// The scent channel its body lays ([`crate::ScentChannel`]); `None` lays none (a switch,
     /// no registry row).
     pub scent: Option<crate::ScentChannel>,
+    /// **Light** (S3, [`crate::light`]): the photoreceptor's range for a beacon, metres (3D);
+    /// 0 has none.
+    pub light_m: f64,
+    /// The faintest beacon level it reads ([`crate::LightConfig`]'s contrast × falloff).
+    pub light_min: f64,
+    /// It sees the flowers' UV (the bellwing), not only the cyan of glowcaps and lures (a
+    /// switch, no registry row).
+    pub uv: bool,
+    /// **Looming**: a moving body (any but its own lineage) within this, metres (3D), is a
+    /// shadow falling on it; 0 reads none.
+    pub loom_m: f64,
     /// **Head down** (S2): while it crops between scan pauses ([`crate::Vigil::head_down`])
     /// sight reaches this fraction of its range: the blind window. 1 is no change.
     pub feeding_sight_fraction: f64,
@@ -5169,6 +5329,10 @@ impl Default for SenseTable {
             tremor_min: 0.0,
             smell_min: 0.0,
             scent: None,
+            light_m: 0.0,
+            light_min: 0.0,
+            uv: false,
+            loom_m: 0.0,
             feeding_sight_fraction: 1.0,
             kin_tracks: 1,
         }
@@ -5197,8 +5361,8 @@ impl SenseTable {
 /// steady state on open ground ([`crate::scent`]'s calibration note).
 ///
 /// The Veilhound's table is **live** since S1; S2 turns on the frondgrazer's, the loftstrider's,
-/// the seedporter's and the littershredder's ([`crate::vigil`]); the others are read by no
-/// heuristic yet.
+/// the seedporter's and the littershredder's ([`crate::vigil`]), S3 the bellwing's and the
+/// capgnawer's (their light sense, [`crate::light`]); the others are read by no heuristic yet.
 pub fn senses_of(founder: Founder) -> SenseTable {
     use crate::ScentChannel::{Grazer, Hunter, SmallPrey};
     use crate::scent::{SMELL_AT_2_5_M, SMELL_AT_2_M, SMELL_AT_3_5_M, SMELL_AT_6_M};
@@ -5209,7 +5373,10 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         Founder::Blind => SenseTable { live: true, tremor_m: 2.0, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
         // Coarse silhouettes at 1 m by day and 0.5 m dim over 240°, motion over shape;
         // substrate vibration 1–1.5 m; fungal chemistry is its own field.
+        // S3 (D2): live; its fungal chemistry leads (its forager's `Chem`), and a weak cyan
+        // light sense (glowcaps, lures) to 1.5 m pulls a hungry one with no fungal scent near.
         Founder::Capgnawer => SenseTable {
+            live: true,
             sight_m: 1.0,
             sight_night_m: 0.5,
             sight_still_fraction: 0.5,
@@ -5217,6 +5384,8 @@ pub fn senses_of(founder: Founder) -> SenseTable {
             tremor_m: 1.5,
             tremor_min: 0.003,
             scent: Some(SmallPrey),
+            light_m: 1.5,
+            light_min: 0.05,
             ..t
         },
         // Shadow and looming at 0.5 m by day, 0.25 m dim over 180°; a large walker felt at
@@ -5271,9 +5440,22 @@ pub fn senses_of(founder: Founder) -> SenseTable {
             scent: Some(Grazer),
             ..t
         },
-        // D3: no form vision (its light sense is S3's); perch vibration over ~0.5 m; floral
-        // smell is S3's nectar channel.
-        Founder::Bellwing => SenseTable { tremor_m: 0.5, tremor_min: 0.003, scent: Some(SmallPrey), ..t },
+        // D3: no form vision. S3: live; one photoreceptor (UV and blue) reads the brightest still
+        // beacon to 4 m (Astra: flowers ~4 m by day, a lure 2–3 m against the dark) and a
+        // looming shadow within 1 m; floral smell on the nectar channel to ~6 m (Astra 4–6);
+        // perch vibration over ~0.5 m.
+        Founder::Bellwing => SenseTable {
+            live: true,
+            tremor_m: 0.5,
+            tremor_min: 0.003,
+            smell_min: SMELL_AT_6_M,
+            scent: Some(SmallPrey),
+            light_m: 4.0,
+            light_min: 0.05,
+            uv: true,
+            loom_m: 1.0,
+            ..t
+        },
         // The review raises it to the Veilhound's 16 m by day (3 m at night), the best still
         // recognition in the community, about 180° with a forward binocular centre; predator
         // movement heard around 6 m; branch movement ~0.5 m; odour ~2 m.

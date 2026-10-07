@@ -33,6 +33,8 @@ mod predation;
 mod pack;
 pub mod perception;
 pub mod scent;
+pub mod light;
+pub use light::{Beacon, BeaconKind};
 pub mod vigil;
 pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
@@ -98,7 +100,7 @@ pub use manifest::{
     Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
     Transfer, Tunings, gru32_parameter_count,
 };
-pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, PerceptionConfig, PredationConfig, ScentConfig, TeacherConfig};
+pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, LightConfig, PerceptionConfig, PredationConfig, ScentConfig, TeacherConfig};
 pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, attack_preference, encounter_share, profitability, FRUITLESS_SLOTS};
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
@@ -1034,6 +1036,11 @@ pub enum DenChoice {
     FoundingPoint,
 }
 
+/// An unbounded distance (a serde default).
+fn far() -> f64 {
+    f64::INFINITY
+}
+
 /// A pack (roster R3): its den, its breeder, and the scripted pack tactic's state (its
 /// target, its chase clock, its carcass). Saved with the layer.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1059,9 +1066,18 @@ pub struct PackRecord {
     /// **The pack target**: the prey every adult member is driving or flanking now.
     #[serde(default)]
     pub target: Option<u64>,
-    /// The tick the chase on `target` began ([`Pack::chase_give_up_s`]).
+    /// The tick the chase on `target` began.
     #[serde(default)]
     pub chase_since_tick: u64,
+    /// **CHURN, the chase's progress** ([`Pack::chase_give_up_s`]): the last tick the pack
+    /// made progress on `target`, its nearest member's distance to it so far, and the work
+    /// done on it (its wound plus its pry, plus 1 while it is turned over) last read.
+    #[serde(default)]
+    pub chase_progress_tick: u64,
+    #[serde(default = "far")]
+    pub chase_best_m: f64,
+    #[serde(default)]
+    pub chase_work: f64,
     /// The target's face when last seen: where its carcass lies if it was killed.
     #[serde(default)]
     pub target_site: Option<Site>,
@@ -1078,6 +1094,11 @@ pub struct PackRecord {
     /// taken again until the pack has taken another.
     #[serde(default)]
     pub abandoned: Option<u64>,
+    /// **Shunned targets** (PACK-TUNE): bodies the pack dropped alive (broken off, late, lost,
+    /// spent, trespassing), each with the tick until which it is not taken again
+    /// (`Pack::shun_s`); `(0, 0)` is an empty slot. The oldest slot is reused.
+    #[serde(default)]
+    pub shunned: [(u64, u64); 4],
     /// **The draw** (VEILHOUND-SEARCH, the lineage's [`SenseTable`]): the prey the
     /// pack's leader is walking to by route — sensed by the pack, on its route component,
     /// not yet its target. Remade at each of the leader's samples; cleared when the pack
@@ -2143,6 +2164,10 @@ pub struct FaunaConfig {
     /// **The scent field** (SENSES-CORE, [`ScentConfig`]).
     #[serde(default)]
     pub scent: ScentConfig,
+    /// **Light** (S3, [`LightConfig`]): the beacons' brightness, the photoreceptor, the lure's
+    /// point, inspections and the failed-visit mark.
+    #[serde(default)]
+    pub light: LightConfig,
 }
 
 fn default_lineage_body_ceiling() -> u32 {
@@ -2183,6 +2208,7 @@ impl Default for FaunaConfig {
             hunt: HuntConfig::default(),
             perception: PerceptionConfig::default(),
             scent: ScentConfig::default(),
+            light: LightConfig::default(),
         }
     }
 }
@@ -2877,6 +2903,27 @@ pub struct FaunaLedger {
     /// ([`PerceptionConfig::give_up_s`]).
     #[serde(default)]
     pub pack_targets_lost: u64,
+    /// **The prey choice's readouts** (PACK-TUNE): pack targets broken off in a chase (their
+    /// prospect under `Pack::break_off_below`), and sensed takeable prey a pack declined at a
+    /// choice for a prospect under `Pack::select_min_prospect` (one count per body per choice).
+    #[serde(default)]
+    pub pack_break_offs: u64,
+    #[serde(default)]
+    pub pack_declined: u64,
+    /// **CHURN**: pack targets given up for a better one (past `Pack::switch_margin`).
+    #[serde(default)]
+    pub pack_switches: u64,
+    /// **STRIKE**: member samples steered by the close-in ([`Pack::close_in_m`]); of them,
+    /// steps off from a prey inside the outline and pivots to face one; and chases broken off
+    /// as out of reach (no face beside the target puts it in the jaw band).
+    #[serde(default)]
+    pub pack_close_in_samples: u64,
+    #[serde(default)]
+    pub pack_step_offs: u64,
+    #[serde(default)]
+    pub pack_pivots: u64,
+    #[serde(default)]
+    pub pack_out_of_reach: u64,
     /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
     #[serde(default)]
     pub vigil: VigilLedger,
@@ -2888,6 +2935,43 @@ pub struct FaunaLedger {
     pub pack_draw_lead_samples: u64,
     #[serde(default)]
     pub pack_draw_follow_samples: u64,
+    /// **Light and flight** (S3, [`crate::light`]), per lineage: inspections begun by
+    /// beacon kind (`[flower, glowcap, lure]`, [`BeaconKind`]) and those that failed (marked
+    /// "no reward here"); controller samples spent evading a looming shadow, turned from a
+    /// moving light, steered by a beacon, and led up the nectar smell.
+    #[serde(default)]
+    pub beacon_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub failed_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub loom_samples: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub repel_samples: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub beacon_samples: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub scent_led_samples: [u64; Founder::COUNT],
+    /// Kills of a prey drawn to a lure when struck (inspecting one, or a lure its brightest
+    /// still beacon), by prey lineage.
+    #[serde(default)]
+    pub lure_kills: [u64; Founder::COUNT],
+    /// **S3b readouts** ([`crate::light`]): a flyer's controller samples by what its light
+    /// steer did ([`crate::light::LightMode`]), the time budget; approaches given up because
+    /// the body stalled short of the beacon; inspections that ended in a sip, by beacon kind;
+    /// and kills, `[killer][prey]`, of a prey still naive about cyan (its cyan expectation at
+    /// least half its innate value) when it died.
+    #[serde(default)]
+    pub light_budget: [[u64; light::LightMode::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub stalled_visits: [u64; Founder::COUNT],
+    /// FINDINGS-FIX: open inspections closed as failed because the body flew away from them
+    /// (beyond `visit_m` + `visit_leave_m`), by beacon kind; also counted in `failed_visits`.
+    #[serde(default)]
+    pub left_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub sipped_visits: [[u64; BeaconKind::COUNT]; Founder::COUNT],
+    #[serde(default)]
+    pub naive_kills: [[u64; Founder::COUNT]; Founder::COUNT],
     /// Lanternjaws that left a carcass to a body that hunts them (roster R3, the yield).
     #[serde(default)]
     pub carcass_yields: u64,
@@ -3413,6 +3497,10 @@ pub struct Fauna {
     /// within a few half-lives of a load.
     #[serde(skip)]
     pub(crate) scent: scent::ScentField,
+    /// **The static beacons** (S3, [`light::Beacons`]): flowers and glowcaps, rebuilt on the
+    /// plant clock. Not saved.
+    #[serde(skip)]
+    pub(crate) beacons: light::Beacons,
     /// The faces holding a usable carcass (carrion under a carcass record) and the tick the
     /// list was read from the plant layer (HUNTER-MEAL's meal step). Not saved.
     #[serde(skip)]
@@ -3448,9 +3536,12 @@ pub(crate) struct PackPath {
 pub enum PackEvent {
     /// A pack took a target, with this many participants (the taker and its
     /// participating mates within `pack_radius_m`).
-    ChaseStart { tick: u64, pack: u64, participants: u32 },
-    /// A pack's target was dropped, and why.
-    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd },
+    /// `taker` is the member that chose `target` and `score` its choice score; `prev` is the
+    /// pack's last target dropped alive with the score the taker gave it now (`None` when it
+    /// does not sense it), the re-target's comparison (CHURN's readout).
+    ChaseStart { tick: u64, pack: u64, participants: u32, taker: u64, target: u64, score: f64, prev: Option<u64>, prev_score: Option<f64> },
+    /// A pack's target was dropped, and why; `by` is the member whose sampling dropped it.
+    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd, target: u64, by: u64 },
     /// A pack's feast ended, with the carrion its members ate there, and why.
     FeastEnd { tick: u64, pack: u64, site: Site, eaten: f64, why: FeastEnd },
 }
@@ -3471,6 +3562,10 @@ pub enum ChaseEnd {
     /// No member had sensed it within the pursuit's memory (SENSES-CORE,
     /// [`PerceptionConfig::give_up_s`]).
     Lost,
+    /// Its prospect fell under `Pack::break_off_below` (PACK-TUNE: the test went badly).
+    BrokeOff,
+    /// Another target scored past `Pack::switch_margin` of it and took the hunt (CHURN).
+    Switched,
 }
 
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
@@ -3638,6 +3733,7 @@ impl Fauna {
             pack_paths: FxHashMap::default(),
             percepts: FxHashMap::default(),
             scent: scent::ScentField::default(),
+            beacons: light::Beacons::default(),
             hunt_paths: FxHashMap::default(),
             carcass_sites: (None, Vec::new()),
             packs: Vec::new(),
@@ -3902,10 +3998,14 @@ impl Fauna {
             last_litter_tick: None,
             target: None,
             chase_since_tick: 0,
+            chase_progress_tick: 0,
+            chase_best_m: f64::INFINITY,
+            chase_work: 0.0,
             target_site: None,
             feast: None,
             feast_eaten: 0.0,
             abandoned: None,
+            shunned: [(0, 0); 4],
             drawn: None,
             drawn_scent: false,
             season: Season::default(),

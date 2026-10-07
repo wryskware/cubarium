@@ -50,6 +50,9 @@ preset = "tropical_jungle"
 # dries to about half its root water, the turf cures brown and woody seedlings starve
 # back. The forced downpour at rh_max waits for the season to end. `dry_season = false`
 # turns it off.
+# Wrysk 2026-10-06: off by default everywhere else; kept on here, his desktop display, to watch it.
+# Checks on this preset that don't study the season pass --set world.climate.dry_season_len_days=0
+# (the year clock keeps running).
 dry_season = true
 dry_season_every_days = 5.0   # world days (the day clock's, as the plants count)
 dry_season_len_days = 1.0

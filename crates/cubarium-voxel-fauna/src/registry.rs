@@ -262,6 +262,10 @@ fn founder_rows() -> Vec<Row> {
         r("senses.tremor_m", "m", nonneg, "tremor's range for bodies on the ground (0: none)"),
         r("senses.tremor_min", "organic x m/s / m^2", nonneg, "the faintest footfall felt (mass x speed / d^2, through terrain x occlusion)"),
         r("senses.smell_min", "scent units", nonneg, "the faintest scent level smelled on the scent field (0: no smell)").log(),
+        // `senses.uv` is a switch: no row.
+        r("senses.light_m", "m", nonneg, "the photoreceptor's range for a beacon (3D; 0: no light sense)"),
+        r("senses.light_min", "contrast", nonneg, "the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2)").log(),
+        r("senses.loom_m", "m", nonneg, "a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none)"),
         r("senses.feeding_sight_fraction", "fraction", nonneg, "S2: head down cropping between scans, sight reaches this fraction of its range (1: no change)"),
         r("senses.kin_tracks", "bodies", nonneg, "S2: at most this many of its own lineage weighed per remote sensing, nearest first"),
         // S2's ground response (`Vigilance`); `vigilance.mode` is a switch: no row.
@@ -353,7 +357,12 @@ fn founder_rows() -> Vec<Row> {
         r("pack.provision_efficiency", "fraction", fraction, "share of a transfer the pup receives; the rest is respired").optional().prov("decision"),
         r("pack.territory_radius_m", "m", nonneg, "a pack never paths within this of another pack's den").optional().prov("decision"),
         r("pack.flank_offset_m", "m", nonneg, "flankers go this far either side of the target").optional(),
-        r("pack.chase_give_up_s", "s", nonneg, "a chase is dropped after this").optional().prov("decision"),
+        r("pack.chase_give_up_s", "s", nonneg, "a chase is dropped after this long without progress (closing or working the target)").optional().prov("decision"),
+        r("pack.chase_progress_m", "m", nonneg, "CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock").optional(),
+        r("pack.switch_margin", "ratio", nonneg, "CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body)").optional(),
+        r("pack.switch_stall_s", "s", nonneg, "CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s)").optional(),
+        r("pack.close_in_m", "m", nonneg, "STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off)").optional(),
+        r("pack.stand_off_reach_fraction", "fraction of the strike's reach", fraction, "STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey").optional(),
         r("pack.route_reach_fraction", "fraction", fraction, "prey is taken only within this share of cruise x chase_give_up_s by route").optional(),
         r("pack.route_refresh_s", "s", nonneg, "a pack's walking route components (only prey in its own is taken) are rebuilt at most this often").optional(),
         r("pack.chase_reserve_floor", "fraction of reserve cap", fraction, "a chase is dropped when a member's reserve falls under this").optional(),
@@ -364,6 +373,17 @@ fn founder_rows() -> Vec<Row> {
         r("pack.stalk_margin", "fraction of the prey's hearing floor", nonneg, "S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk)").optional(),
         r("pack.breed_reserve_fraction", "fraction of reserve cap", fraction, "the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone)").optional(),
         r("pack.commit_m", "m", nonneg, "S2: ...and rushes within this of its prey").optional(),
+        r("pack.select_kin_m", "m", nonneg, "PACK-TUNE: kin of a target's lineage within this lower its prospect").optional(),
+        r("pack.select_kin_factor", "factor", fraction, "PACK-TUNE: each such kin multiplies the prospect by this").optional(),
+        r("pack.select_kin_max", "kin", nonneg, "PACK-TUNE: ...counting at most this many").optional(),
+        r("pack.select_aware_factor", "factor", fraction, "PACK-TUNE: a target aware of a member: prospect x this").optional(),
+        r("pack.select_wound_gain", "x wound", nonneg, "PACK-TUNE: a wounded target: prospect x (1 + this x wound)").optional(),
+        r("pack.select_airborne_factor", "factor", fraction, "PACK-TUNE: a target in flight (in reach): prospect x this").optional(),
+        r("pack.select_body_exp", "exponent", nonneg, "PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m)").optional(),
+        r("pack.select_judge_m", "m", nonneg, "PACK-TUNE: ...the distance that halves the score").optional(),
+        r("pack.select_min_prospect", "fraction", fraction, "PACK-TUNE: a pack commits only to a prospect of at least this").optional(),
+        r("pack.break_off_below", "fraction", fraction, "PACK-TUNE: in a chase, a target whose prospect falls under this is broken off").optional(),
+        r("pack.shun_s", "s", nonneg, "PACK-TUNE: a target dropped alive is not taken again for this").optional(),
         // The counter-strike seam (`Counter`): unused, `None` for every lineage.
         r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
         r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),
@@ -588,6 +608,36 @@ fn knob_rows() -> Vec<Row> {
         sk("deposit_per_s", "scent units per organic unit per s", nonneg, "what a standing body lays, by its organic matter").search(0.1, 10.0).log(),
         sk("carrion_per_s", "scent units per organic unit per s", nonneg, "what carrion lays, by its stock").search(0.1, 10.0).log(),
         sk("step_m", "m", nonneg, "neighbouring surface faces connect within this height difference, with open air over the lower one").search(0.0, 2.0),
+        sk("nectar_per_s", "scent units per s", nonneg, "what a flower holding nectar lays on the surface under it (the nectar channel)").search(0.1, 10.0).log(),
+    ]);
+
+    // `fauna.light.*`: light and flight (S3).
+    let lk = |path: &str, unit: &'static str, range: Range, what: &'static str| {
+        r(&format!("fauna.light.{path}"), unit, range, what)
+    };
+    rows.extend([
+        lk("flower_reflectance", "brightness per unit light", nonneg, "a nectar flower's brightness (UV) per unit of the light falling on it").search(0.1, 4.0),
+        lk("glowcap_emission", "brightness", nonneg, "a glowcap's own light").search(0.0, 2.0),
+        lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light").search(0.0, 4.0),
+        lk("background_floor", "light", pos, "a beacon's contrast is its brightness over the light around it plus this (the darkest background)").search(0.01, 0.5).log(),
+        lk("half_m", "m", pos, "a beacon's received level halves at this distance").search(0.25, 4.0),
+        lk("lure_height_fraction", "x body height", nonneg, "the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle"),
+        lk("visit_m", "m", nonneg, "a body this close (horizontally) to a beacon is inspecting it").search(0.1, 1.0),
+        lk("visit_s", "s", nonneg, "an inspection with no meal by then fails").search(0.5, 20.0).log(),
+        lk("visit_leave_m", "m", nonneg, "an open inspection whose body is farther than visit_m + this from its beacon is closed as failed").search(0.1, 2.0),
+        lk("mark_s", "s", nonneg, "a failed visit marks the place 'no reward here' for this long").search(10.0, 1800.0).log(),
+        lk("mark_radius_m", "m", nonneg, "a mark covers beacons within this of its centre").search(0.1, 2.0),
+        lk("lift_per_m", "lift per m", nonneg, "a flyer approaching a beacon climbs or drops toward its height at this lift per metre"),
+        lk("near_m", "m", nonneg, "inside this of a beacon a flyer slows to near_forward"),
+        lk("near_forward", "fraction", fraction, "a flyer's forward effort near a beacon"),
+        lk("glow_scent_gate", "chem response", fraction, "a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this").search(0.0, 0.5),
+        // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming.
+        lk("uv_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a UV reflector (flowers); learned ones relax back to it"),
+        lk("cyan_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures)"),
+        lk("learn_rate", "fraction", fraction, "S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way").search(0.05, 1.0),
+        lk("forget_s", "s", pos, "S3b: a learned expectation relaxes back to innate with this time constant").search(300.0, 21600.0).log(),
+        lk("expect_min", "probability", fraction, "S3b: a still beacon whose class is expected to pay less than this is not approached").search(0.0, 0.5),
+        lk("loom_tau_s", "s", nonneg, "S3b: a moving body looms only while it would reach the eye within this (distance / closing speed; 0: any moving body)").search(0.2, 3.0),
     ]);
 
     // `fauna.founding.*`: the seeder's founders.
