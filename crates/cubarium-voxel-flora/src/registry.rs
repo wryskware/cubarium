@@ -111,6 +111,9 @@ fn species_rows() -> Vec<Row> {
     vec![
         r("substrate_uptake_per_s", "organic/s per unit mycelium", nonneg, "saprotroph: dead wood and litter withdrawn")
             .evolve().log().grade("C"),
+        r("substrate_budgeted", "switch (true / false)", finite, "saprotroph uptake bounded by usable income demand").optional(),
+        r("substrate_required", "switch (true / false)", finite, "saprotroph requires substrate; dark damp supplies no carbon").optional(),
+        r("mycelium_graze_fraction", "fraction of living mycelium", fraction, "fungal tissue exposed to grazers after edible caps are cropped"),
         r("substrate_yield", "fraction", fraction, "saprotroph: share of the substrate taken that becomes tissue")
             .search(0.2, 0.7).grade("A"),
         r("establish_substrate_min", "org-units", nonneg, "saprotroph: substrate a spore cohort needs in its box").grade("C"),

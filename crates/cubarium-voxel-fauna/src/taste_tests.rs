@@ -88,7 +88,9 @@ fn fungal_read(world: &World, flora: &Flora, cap_x: f64) -> f64 {
 #[test]
 fn a_glowcap_cropped_to_its_floor_gives_off_no_fungal_scent() {
     let world = clock_off(59);
-    let mut flora = Flora::new(FloraConfig::default());
+    let mut config = FloraConfig::default();
+    config.glowcap.mycelium_graze_fraction = 0.0;
+    let mut flora = Flora::new(config);
     let (site, place) = grown(&mut flora, &world, Species::Glowcap, 30, 6);
     let cap_x = (f64::from(site.x) + 0.5) * VOXEL_M;
     let full = fungal_read(&world, &flora, cap_x);

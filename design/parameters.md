@@ -368,11 +368,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (990 rows)
+**`flora.*`** (1017 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `flora.bloomcrown.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.bloomcrown.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.bloomcrown.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.bloomcrown.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.bloomcrown.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.bloomcrown.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.bloomcrown.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -474,6 +477,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.profile.*.layers.*.share` | 1.0, 0.0, 0.4, 0.6 … (7 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.bloomcrown.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.3 … (7 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.umbrellafrond.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.umbrellafrond.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.umbrellafrond.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.umbrellafrond.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.umbrellafrond.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.umbrellafrond.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.umbrellafrond.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -575,6 +581,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.profile.*.layers.*.share` | 1.0, 0.0, 0.6, 0.4 … (8 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.umbrellafrond.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.5 … (8 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.springturf.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.springturf.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.springturf.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.springturf.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.springturf.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -676,6 +685,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.springturf.profile.*.layers.*.porosity` | 0.3 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.stonecushion.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.stonecushion.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.stonecushion.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.stonecushion.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.stonecushion.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.stonecushion.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.stonecushion.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -777,6 +789,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.profile.*.layers.*.share` | 0.7, 0.3 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.stonecushion.profile.*.layers.*.porosity` | 0.2, 0.2 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.velvetpad.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.velvetpad.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.velvetpad.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.velvetpad.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.velvetpad.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.velvetpad.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.velvetpad.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -878,6 +893,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.velvetpad.profile.*.layers.*.porosity` | 0.6 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.glowcap.substrate_uptake_per_s` | 0.02 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.glowcap.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.glowcap.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.glowcap.mycelium_graze_fraction` | 0.5 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.glowcap.substrate_yield` | 0.4 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.glowcap.establish_substrate_min` | 0.02 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.glowcap.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -979,6 +997,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.glowcap.profile.*.layers.*.porosity` | 0.5 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.vaulttree.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.vaulttree.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.vaulttree.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.vaulttree.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.vaulttree.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.vaulttree.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.vaulttree.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -1080,6 +1101,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.profile.*.layers.*.share` | 1.0, 0.0, 1.0, 0.0 … (7 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.vaulttree.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.0 … (7 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.lanternberry.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.lanternberry.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.lanternberry.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.lanternberry.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.lanternberry.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.lanternberry.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.lanternberry.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -1181,6 +1205,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.profile.*.layers.*.share` | 1.0, 0.0, 0.21428571428571427, 0.7857142857142857 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.lanternberry.profile.*.layers.*.porosity` | 0.5, 0.7, 0.5, 0.5 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.siphonreed.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.siphonreed.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.siphonreed.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.siphonreed.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.siphonreed.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.siphonreed.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.siphonreed.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |

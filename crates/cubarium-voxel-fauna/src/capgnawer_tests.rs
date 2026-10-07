@@ -240,3 +240,327 @@ fn a_young_capgnawer_smells_and_reaches_a_glowcap_metres_away() {
     assert!(reached.is_some(), "no bite on the caps in 300 ticks (x {x0:.2} -> {x1:?}, the cap at {cap_x:.2})");
     assert_closes(&fauna, "after the walk to the caps");
 }
+
+/// A mouth accepting fungal tissue switches to the stand after caps are cropped.
+/// The shared plant stays untouched, and both transfer ledgers book the same bite.
+#[test]
+fn a_cropped_cap_feeds_mycelium_to_a_capgnawer_or_another_fungal_diet() {
+    use cubarium_voxel_flora::FaceLayer;
+    for founder in [GNAWER, SHREDDER] {
+        for cropped in [false, true] {
+            let world = clock_off(89);
+            let mut fc = FloraConfig::default();
+            fc.glowcap.mycelium_graze_fraction = 0.6;
+            fc.glowcap.defence_per_bite = 0.0;
+            let mut flora = Flora::new(fc);
+            let mut c = FaunaConfig::default();
+            c.founders[founder.index()].diet = crate::Diet::only(Food::CapTissue);
+            c.founders[founder.index()].gut.s0 = 0.0;
+            let mut fauna = Fauna::new(c);
+            let gnawer = introduce(
+                &mut fauna,
+                &world,
+                founder,
+                StartingStores {
+                    body: 1.0,
+                    reserve: 0.0,
+                },
+            );
+            drive(&mut fauna, gnawer, 0.0, true);
+            let at = animal(&fauna, gnawer).site;
+            let fungus = glowcap(&mut flora, &world, i64::from(at.x), at.z);
+            assert!(flora.apply(
+                &world,
+                FloraCommand::SeedOnFace {
+                    site: at,
+                    species: Species::Springturf,
+                    wood: flora.config().springturf.wood_max,
+                }
+            ));
+            let plant = *flora.view().stand_at(at).unwrap();
+            if cropped {
+                flora
+                    .take_foliage_of(fungus, FaceLayer::Fungus, f64::MAX, &(i64::MIN..=i64::MAX))
+                    .expect("crop the edible cap tissue");
+            }
+            let before = *flora.view().fungus_at(fungus).unwrap();
+            let edible_caps = flora.view().edible_foliage(&before);
+            assert_eq!(
+                edible_caps <= 1e-12,
+                cropped,
+                "fixture: cap availability decides the diet switch"
+            );
+            if !cropped {
+                let a = animal(&fauna, gnawer);
+                let shape = crate::body_of(fauna.config(), &a).unwrap();
+                let cols = crate::body::mouth_columns(&world.view(), &a.pose, &shape);
+                assert!(
+                    crate::body::mouth_meal(
+                        &flora.view(),
+                        &world.view(),
+                        &cols,
+                        a.site.y,
+                        &shape,
+                        crate::Diet::only(Food::CapTissue)
+                    )
+                    .is_some(),
+                    "fixture: caps out of mouth reach: cols={cols:?}, band={:?}, layers={:?}",
+                    shape.mouth_layers(a.site.y, VOXEL_M),
+                    flora.view().layers(&before).collect::<Vec<_>>()
+                );
+            }
+            let cap_taken = flora.view().ledger.foliage_taken[Species::Glowcap.index()];
+            let mut ate = false;
+            for _ in 0..20 {
+                fauna.step_with(&world, &mut flora, 1);
+                if fauna.ledger.bites_by_food[Food::CapTissue.index()] > 0 {
+                    ate = true;
+                    break;
+                }
+            }
+            assert!(
+                ate,
+                "{} left fungal tissue uneaten (cropped={cropped})",
+                founder.name()
+            );
+            let after = *flora.view().fungus_at(fungus).unwrap();
+            let lost = before.wood - after.wood;
+            let offer = flora.config().glowcap.mycelium_graze_fraction * before.wood;
+            let eaten = if cropped {
+                assert!(lost > 0.0 && lost <= offer + 1e-12);
+                assert_eq!(
+                    after.foliage, before.foliage,
+                    "the bite came from W rather than refuge caps"
+                );
+                assert_eq!(
+                    flora.view().ledger.foliage_taken[Species::Glowcap.index()],
+                    cap_taken
+                );
+                lost
+            } else {
+                assert_eq!(lost, 0.0, "a reachable cap is chosen ahead of mycelium");
+                let cap_loss = before.foliage - after.foliage;
+                assert!(cap_loss > 0.0);
+                assert!(
+                    (flora.view().ledger.foliage_taken[Species::Glowcap.index()]
+                        - cap_taken
+                        - cap_loss)
+                        .abs()
+                        < 1e-12
+                );
+                cap_loss
+            };
+            assert!(
+                (flora.view().ledger.mycelium_taken[Species::Glowcap.index()] - lost).abs() < 1e-12
+            );
+            assert!((fauna.ledger.eaten_by_food[Food::CapTissue.index()] - eaten).abs() < 1e-12);
+            assert!((fauna.ledger.eaten_mycelium_by_founder[founder.index()] - lost).abs() < 1e-12);
+            assert_eq!(
+                flora.view().stand_at(at).unwrap().material(),
+                plant.material()
+            );
+            assert_closes(&fauna, "after grazing exposed mycelium");
+            let v = flora.view();
+            for (held, expected) in [
+                (v.organic(), v.ledger.expected_organic()),
+                (v.mineral(), v.ledger.expected_mineral()),
+                (v.energy(), v.ledger.expected_energy()),
+            ] {
+                assert!((held - expected).abs() < 1e-10 * held.abs().max(1.0));
+            }
+        }
+    }
+}
+
+/// Cropped caps still advertise edible stand tissue; a zero mycelium offer is quiet.
+#[test]
+fn cropped_fungal_scent_follows_the_edible_mycelium_offer() {
+    use cubarium_voxel_flora::FaceLayer;
+    let world = clock_off(97);
+    for fraction in [0.0, 0.5] {
+        let mut fc = FloraConfig::default();
+        fc.glowcap.mycelium_graze_fraction = fraction;
+        let mut flora = Flora::new(fc);
+        let mut c = FaunaConfig::default();
+        c.cue.fungal_half_life_s = 1.0;
+        let mut fauna = Fauna::new(c);
+        let id = introduce(
+            &mut fauna,
+            &world,
+            GNAWER,
+            StartingStores {
+                body: 1.0,
+                reserve: 0.0,
+            },
+        );
+        let at = animal(&fauna, id).site;
+        let fungus = glowcap(&mut flora, &world, i64::from(at.x), at.z);
+        flora
+            .take_foliage_of(fungus, FaceLayer::Fungus, f64::MAX, &(i64::MIN..=i64::MAX))
+            .expect("crop the edible caps");
+        let stand = *flora.view().fungus_at(fungus).unwrap();
+        assert!(flora.view().edible_foliage(&stand) <= 1e-12);
+        let mut senses = crate::Senses::with_cue(fauna.config().cue);
+        for _ in 0..4 {
+            senses.update(&world.view(), &flora.view());
+        }
+        let signal = chem(&fauna, id, &world, &flora, &mut senses);
+        assert_eq!(
+            signal > 1e-12,
+            fraction > 0.0,
+            "mycelium fraction {fraction}: cropped fungal scent {signal}"
+        );
+    }
+}
+
+/// Cropped mycelium is ground tissue, so raising the mouth above the face loses it.
+#[test]
+fn a_mycelium_offer_requires_a_mouth_band_touching_the_root_face() {
+    use cubarium_voxel_flora::FaceLayer;
+    let world = clock_off(101);
+    let mut fc = FloraConfig::default();
+    fc.glowcap.mycelium_graze_fraction = 0.5;
+    let mut flora = Flora::new(fc);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = introduce(
+        &mut fauna,
+        &world,
+        GNAWER,
+        StartingStores {
+            body: 1.0,
+            reserve: 0.0,
+        },
+    );
+    let a = animal(&fauna, id);
+    let fungus = glowcap(&mut flora, &world, i64::from(a.site.x), a.site.z);
+    flora
+        .take_foliage_of(fungus, FaceLayer::Fungus, f64::MAX, &(i64::MIN..=i64::MAX))
+        .expect("crop the edible caps");
+    let mut low = crate::body_of(fauna.config(), &a).unwrap();
+    low.mouth_floor_m = 0.0;
+    let cols = crate::body::mouth_columns(&world.view(), &a.pose, &low);
+    let diet = crate::Diet::only(Food::CapTissue);
+    assert!(
+        matches!(
+            crate::body::mouth_meal(&flora.view(), &world.view(), &cols, a.site.y, &low, diet),
+            Some((crate::body::Meal::Mycelium { .. }, _, _))
+        ),
+        "fixture: the grounded mouth reaches cropped mycelium"
+    );
+    let mut raised = low;
+    raised.mouth_floor_m = world.config().voxel_m;
+    raised.mouth_ceiling_m = raised.mouth_floor_m + low.height_m;
+    assert!(
+        crate::body::mouth_meal(&flora.view(), &world.view(), &cols, a.site.y, &raised, diet)
+            .is_none(),
+        "a mouth one configured voxel above the root face received mycelium"
+    );
+}
+
+/// A bite may finish a small regrown cap parcel and spend its remaining room on W.
+#[test]
+fn one_bite_finishes_regrown_caps_then_grazes_exposed_mycelium() {
+    use cubarium_voxel_flora::FaceLayer;
+    for scarce in [false, true] {
+        let mut world = clock_off(103);
+        let mut c = FaunaConfig::default();
+        let p = &mut c.founders[GNAWER.index()];
+        p.diet = crate::Diet::only(Food::CapTissue);
+        p.gut.s0 = 0.0;
+        p.gut.stomach_k = 1.0;
+        p.gut.bite_per_body_s = 1.0;
+        p.gut.mass_exponent = 1.0;
+        p.core.bite_half_stock = 0.0;
+        p.bite_spill_fraction = 0.0;
+        let full_bite =
+            p.gut.bite_per_body_s * p.core.body_max * GNAWER.manifest().controller_period_s;
+        p.core.bite_half_stock = if scarce { 2.0 * full_bite } else { 0.0 };
+        let mut fc = FloraConfig::default();
+        fc.step_every = 1;
+        fc.glowcap.mycelium_graze_fraction = 0.5;
+        fc.glowcap.defence_per_bite = 0.0;
+        fc.glowcap.maintenance = 0.0;
+        fc.glowcap.wood_rate = 0.0;
+        fc.glowcap.senescence = 0.0;
+        fc.glowcap.propagule_rate = 0.0;
+        fc.glowcap.dark_uptake_per_s = 0.0;
+        let wood = fc.glowcap.wood_max;
+        let reserve = fc.glowcap.reserve_cap * wood;
+        let regrown = (0.25 * full_bite).min(0.25 * reserve / (1.0 + fc.glowcap.build));
+        fc.glowcap.foliage_rate = regrown / (wood * cubarium_voxel_flora::DT);
+        let mut flora = Flora::new(fc);
+        let mut fauna = Fauna::new(c);
+        let id = introduce(
+            &mut fauna,
+            &world,
+            GNAWER,
+            StartingStores {
+                body: 1.0,
+                reserve: 0.0,
+            },
+        );
+        drive(&mut fauna, id, 0.0, true);
+        let at = animal(&fauna, id).site;
+        let fungus = glowcap(&mut flora, &world, i64::from(at.x), at.z);
+        flora
+            .take_foliage_of(fungus, FaceLayer::Fungus, f64::MAX, &(i64::MIN..=i64::MAX))
+            .expect("crop caps to their refuge");
+        flora.step(&mut world);
+        let before = *flora.view().fungus_at(fungus).unwrap();
+        let fresh_caps = flora.view().edible_foliage(&before);
+        assert!(
+            fresh_caps > 0.0 && fresh_caps < full_bite,
+            "fixture: regrowth {fresh_caps} leaves spare room in a configured bite {full_bite}"
+        );
+        assert!(
+            (fresh_caps - regrown).abs() < 1e-12,
+            "fixture: configured cap regrowth"
+        );
+        let cap_ledger_before = flora.view().ledger.foliage_taken[Species::Glowcap.index()];
+        for _ in 0..20 {
+            fauna.step_with(&world, &mut flora, 1);
+            if fauna.ledger.bites_by_food[Food::CapTissue.index()] > 0 {
+                break;
+            }
+        }
+        assert_eq!(fauna.ledger.bites_by_food[Food::CapTissue.index()], 1);
+        let after = *flora.view().fungus_at(fungus).unwrap();
+        let cap_loss = before.foliage - after.foliage;
+        let mycelium_loss = before.wood - after.wood;
+        assert!(
+            (cap_loss - fresh_caps).abs() < 1e-12,
+            "the bite must finish the fresh caps first"
+        );
+        assert!(
+            mycelium_loss > 0.0,
+            "fresh cap regrowth kept a hungry mouth from grazing W in its spare bite room"
+        );
+        assert!(
+            (flora.view().ledger.foliage_taken[Species::Glowcap.index()]
+                - cap_ledger_before
+                - cap_loss)
+                .abs()
+                < 1e-12
+        );
+        assert!(
+            (flora.view().ledger.mycelium_taken[Species::Glowcap.index()] - mycelium_loss).abs()
+                < 1e-12
+        );
+        assert!(
+            (fauna.ledger.eaten_mycelium_by_founder[GNAWER.index()] - mycelium_loss).abs() < 1e-12
+        );
+        assert!(
+            (fauna.ledger.eaten_by_food[Food::CapTissue.index()] - cap_loss - mycelium_loss).abs()
+                < 1e-12
+        );
+        assert_closes(&fauna, "after one combined cap and mycelium bite");
+        let v = flora.view();
+        for (held, expected) in [
+            (v.organic(), v.ledger.expected_organic()),
+            (v.mineral(), v.ledger.expected_mineral()),
+            (v.energy(), v.ledger.expected_energy()),
+        ] {
+            assert!((held - expected).abs() < 1e-10 * held.abs().max(1.0));
+        }
+    }
+}

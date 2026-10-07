@@ -275,6 +275,8 @@ pub struct Counters {
     /// Of `decomposed`, the carrion pool's share.
     pub decomposed_carrion: f64,
     pub taken: Take,
+    /// The mycelium part of fungal tissue withdrawals; caps are the remainder.
+    pub mycelium_taken: f64,
     /// Mineral the animals' returns brought back to the site pools (closed loop).
     pub returned_mineral: f64,
     /// Mineral in the glowcap caps the animals ate: the fungal place keeps no mineral
@@ -387,6 +389,15 @@ pub struct Model {
 
 fn is_photo(config: &FloraConfig, s: usize) -> bool {
     config.species(Species::ALL[s]).trophic == Trophic::Photo
+}
+
+fn substrate_request(sc: &cubarium_voxel_flora::SpeciesConfig, st: &StandState, mu: f64, upkeep: f64, dt: f64) -> f64 {
+    let raw = (sc.substrate_uptake_per_s * st.wood * mu * dt).max(0.0);
+    if !sc.substrate_budgeted { return raw; }
+    let dp = (sc.alpha*st.wood-st.foliage).max(0.0).min(sc.foliage_rate*st.wood*dt);
+    let dw = (sc.wood_max-st.wood).max(0.0).min(sc.wood_rate*st.wood*dt);
+    let spend = sc.maintenance*upkeep*st.wood*dt+(1.0+sc.build)*(dp+dw)+(sc.reserve_cap*st.wood-st.reserve).max(0.0);
+    if sc.substrate_yield > 0.0 { raw.min(spend/sc.substrate_yield) } else { 0.0 }
 }
 
 /// The newborn's break-even cover (`step::break_even_cover`, `step.rs:3760`).
@@ -1488,7 +1499,7 @@ impl Model {
             // ---- the fungi's feed (step.rs:2183): one bounded draw on the zone's pools.
             let gsc = config.species(Species::Glowcap);
             let mu_g = readings[GLOW].mu_held;
-            let demand: f64 = self.z[zi].cohorts[GLOW].iter().map(|c| c.n * gsc.substrate_uptake_per_s * c.st.wood * mu_g * dt).sum();
+            let demand: f64 = self.z[zi].cohorts[GLOW].iter().map(|c| c.n * substrate_request(gsc, &c.st, mu_g, clock.upkeep, dt)).sum();
             let held = self.z[zi].litter + self.z[zi].dead_wood;
             let taken = demand.min(held).max(0.0);
             if held > 0.0 && taken > 0.0 {
@@ -1546,8 +1557,8 @@ impl Model {
                         saturated,
                         mineral: if photo { mineral * c.site.n_rel / nbar } else { mineral },
                         darkness: zone.darkness,
-                        substrate_taken: if photo { 0.0 } else { per_demand * sc.substrate_uptake_per_s * c.st.wood * mu_g * dt },
-                        substrate_gross: if photo { 0.0 } else { per_demand * sc.substrate_uptake_per_s * c.st.wood * mu_g * dt * sc.substrate_yield },
+                        substrate_taken: if photo { 0.0 } else { per_demand * substrate_request(sc, &c.st, mu_g, clock.upkeep, dt) },
+                        substrate_gross: if photo { 0.0 } else { per_demand * substrate_request(sc, &c.st, mu_g, clock.upkeep, dt) * sc.substrate_yield },
                     };
                     let before = c.st.material();
                     let was_cured = c.st.cured;
@@ -1607,10 +1618,11 @@ impl Model {
                         }
                     }
                     self.c.by_zone[zi][1][s] += c.n;
-                    self.z[zi].dead_wood += c.n * c.st.wood;
-                    self.z[zi].litter += c.n * (c.st.material() - c.st.wood);
-                    self.c.prod_z[zi][0] += c.n * (c.st.material() - c.st.wood);
-                    self.c.prod_z[zi][1] += c.n * c.st.wood;
+                    let wood = if !photo && sc.substrate_required { 0.0 } else { c.st.wood };
+                    self.z[zi].dead_wood += c.n * wood;
+                    self.z[zi].litter += c.n * (c.st.material() - wood);
+                    self.c.prod_z[zi][0] += c.n * (c.st.material() - wood);
+                    self.c.prod_z[zi][1] += c.n * wood;
                     if photo {
                         let cnt = counts[s].max(c.n);
                         self.z[zi].pool[s] += nt * c.n * c.st.material();
@@ -2007,6 +2019,10 @@ impl Model {
     fn germinate_fungus(&mut self, zi: usize, readings: &[Reading]) {
         let sc = self.config.species(Species::Glowcap);
         let a = self.zones.zones[zi].area.max(1.0);
+        // Mean substrate in a horizontal mycelium neighbourhood; local patches
+        // remain a spatial limitation of this model.
+        let reach = f64::from(2 * sc.rooting_radius + 1).powi(2);
+        if sc.substrate_required && (self.z[zi].litter+self.z[zi].dead_wood)*reach/a < sc.establish_substrate_min { return; }
         let space = self.zones.zones[zi].fungal_space * a;
         let free = (space - self.z[zi].count(GLOW)).max(0.0);
         let bank = self.z[zi].bank[GLOW];
@@ -2069,7 +2085,7 @@ impl Model {
                 continue;
             }
             let sc = self.config.species(Species::ALL[s]);
-            let ed: f64 = self.z.iter().flat_map(|z| z.cohorts[s].iter()).map(|c| c.n * (c.st.foliage - sc.graze_refuge * sc.alpha * c.st.wood).max(0.0)).sum();
+            let ed: f64 = self.z.iter().flat_map(|z| z.cohorts[s].iter()).map(|c| c.n * Self::takeable(sc, &c.st)).sum();
             if ed <= 0.0 {
                 continue;
             }
@@ -2077,8 +2093,11 @@ impl Model {
             let sward = self.p.meadow.sward[s];
             for (zi, zs) in self.z.iter_mut().enumerate() {
                 for c in zs.cohorts[s].iter_mut() {
-                    let e = (c.st.foliage - sc.graze_refuge * sc.alpha * c.st.wood).max(0.0);
-                    c.st.foliage -= e * f;
+                    let e = Self::takeable(sc, &c.st);
+                    let caps = (c.st.foliage-sc.graze_refuge*sc.alpha*c.st.wood).max(0.0).min(e*f);
+                    c.st.foliage -= caps;
+                    let mycelium = e*f-caps;
+                    if s == GLOW { c.st.wood -= mycelium; self.c.mycelium_taken += c.n*mycelium; }
                     if sward {
                         self.graze_z[zi] += c.n * e * f / dt;
                     }
@@ -2133,7 +2152,10 @@ impl Model {
     /// (`graze_refuge · α · W`, the sum of the layers' floors). The same bound [`Model::offer`]
     /// reports and [`Model::take_from`] draws on, so the take never exceeds the offer.
     pub fn takeable(sc: &cubarium_voxel_flora::SpeciesConfig, st: &StandState) -> f64 {
-        (st.foliage - sc.graze_refuge * sc.alpha * st.wood).max(0.0)
+        let cap = (st.foliage - sc.graze_refuge * sc.alpha * st.wood).max(0.0);
+        cap + if sc.trophic == Trophic::Saprotroph {
+            sc.mycelium_graze_fraction.clamp(0.0,1.0) * st.wood.max(0.0)
+        } else { 0.0 }
     }
 
     /// **The offer to the animals** (closed loop): world totals of what the animals can take
@@ -2221,7 +2243,10 @@ impl Model {
             for (zi, zs) in self.z.iter_mut().enumerate() {
                 for c in zs.cohorts[s].iter_mut() {
                     let d = Self::takeable(&sc, &c.st) * f;
-                    c.st.foliage -= d;
+                    let caps = (c.st.foliage-sc.graze_refuge*sc.alpha*c.st.wood).max(0.0).min(d);
+                    c.st.foliage -= caps;
+                    let mycelium = d-caps;
+                    if s == GLOW { c.st.wood -= mycelium; self.c.mycelium_taken += c.n*mycelium; }
                     if sward {
                         self.graze_z[zi] += c.n * d / dt;
                     }

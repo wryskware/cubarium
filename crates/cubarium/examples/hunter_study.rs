@@ -1418,6 +1418,57 @@ fn sample(
             .collect::<Vec<_>>()
             .join(" "),
     );
+    detritus_budget(sim, params, arm, minute);
+}
+
+/// Cumulative counters survive staged saves. Differences give hourly flows; litter
+/// inflow is Δstock + fungal uptake + animal withdrawal + decomposition.
+fn detritus_budget(sim: &Sim, params: &Params, arm: &str, minute: u64) {
+    use cubarium_voxel_fauna::Food;
+    use cubarium_voxel_flora::{DeathCause, Trophic};
+    let fv = sim.flora().view();
+    let av = sim.fauna().view();
+    let l = fv.ledger;
+    let g = Species::Glowcap.index();
+    let glow: Vec<_> = fv.stands.iter().filter(|s| s.species == Species::Glowcap).collect();
+    let organic = fv.organic() + av.organic();
+    let spores: f64 = fv.ground.iter().map(|s| s.seed_organic(Species::Glowcap)).sum::<f64>()
+        + fv.burrs.iter().filter(|s| s.species == Species::Glowcap).map(|s| s.organic).sum::<f64>();
+    let fungal: f64 = glow.iter().map(|s| s.material()).sum::<f64>() + spores;
+    println!("producer,{arm},{minute},fungal_spores={spores:.6},plant_organic={:.6},turf_organic={:.6},velvetpad_organic={:.6}",
+        fv.stands.iter().filter(|s| fv.config.species(s.species).trophic == Trophic::Photo).map(|s| s.material()).sum::<f64>(),
+        fv.stands.iter().filter(|s| s.species == Species::Springturf).map(|s| s.material()).sum::<f64>(),
+        fv.stands.iter().filter(|s| s.species == Species::Velvetpad).map(|s| s.material()).sum::<f64>());
+    println!("webbudget,{arm},{minute},wood={:.6},world_organic={organic:.6},fungal_organic={fungal:.6},fungal_share={:.6},fungal_w={:.6},fungal_q={:.6},fungal_litter={:.6},fungal_wood={:.6},decay_litter={:.6},decay_wood={:.6},animal_litter={:.6},cap_built={:.6},cap_shed={:.6},cap_taken={:.6},mycelium_taken={:.6},fungal_respired={:.6},spore_funded={:.6},seep={:.6},glow_births={},{}",
+        fv.ground.iter().map(|s| s.dead_wood).sum::<f64>(), fungal/organic.max(1e-300),
+        glow.iter().map(|s| s.wood).sum::<f64>(), glow.iter().map(|s| s.reserve).sum::<f64>(),
+        l.substrate_by_pool[1], l.substrate_by_pool[0], l.decomposed_by_pool[0], l.decomposed_by_pool[1], l.litter_taken,
+        l.foliage_built[g], l.shed_organic[g], l.foliage_taken[g], l.mycelium_taken[g],
+        l.stand_respired[g] + params.flora.glowcap.build*l.propagule_funded[g], l.propagule_funded[g], l.seep_organic_in,
+        l.seeds_germinated[g] + l.clonal_births[g],
+        DeathCause::ALL.iter().map(|c| format!("death_{}={}", c.name(), l.deaths_by_cause[c.index()][g])).collect::<Vec<_>>().join(","));
+    let world = sim.world().view();
+    let mut cover = [[0usize; 3]; 2]; // lit/dark × plant/fungus/shared rooted faces
+    for ground in fv.ground {
+        let sky = world.sky_visibility(i64::from(ground.site.x), ground.site.y, ground.site.z);
+        let dark = usize::from(params.flora.glowcap.darkness(sky) > 0.0);
+        let plant = fv.stands_on(ground.site).iter().any(|s| fv.config.species(s.species).trophic == Trophic::Photo);
+        let fungus = fv.fungus_at(ground.site).is_some();
+        cover[dark][0] += usize::from(plant);
+        cover[dark][1] += usize::from(fungus);
+        cover[dark][2] += usize::from(plant && fungus);
+    }
+    println!("shared,{arm},{minute},plant_lit={},fungus_lit={},shared_lit={},plant_dark={},fungus_dark={},shared_dark={}", cover[0][0],cover[0][1],cover[0][2],cover[1][0],cover[1][1],cover[1][2]);
+    for f in [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail] {
+        let i = f.index();
+        let animals: Vec<_> = av.animals.iter().filter(|a| a.founder == Some(f)).collect();
+        let n = animals.len();
+        let adults = animals.iter().filter(|a| balance::is_adult(a, &params.fauna)).count();
+        let fullness = animals.iter().map(|a| a.reserve/params.fauna.founder(f).core.reserve_of(a.body).max(1e-300)).sum::<f64>()/n.max(1) as f64;
+        let a = av.ledger;
+        let caps = a.eaten_by_founder_food[i][Food::CapTissue.index()] - a.eaten_mycelium_by_founder[i];
+        println!("consumer,{arm},{minute},{},n={n},adults={adults},fullness={fullness:.6},eggs={},hatches={},matured={},refused={},caps={caps:.6},mycelium={:.6},litter={:.6},film={:.6},assimilated={:.6},upkeep={:.6},motor={:.6},growth={:.6},wanting={},eating={},awake={},alive={},departures={}", f.name(), a.eggs_laid_by_founder[i],a.eggs_hatched_by_founder[i],a.matured_by_founder[i],a.nest_refusals_by_founder[i],a.eaten_mycelium_by_founder[i],a.eaten_by_founder_food[i][Food::Litter.index()],a.eaten_by_founder_food[i][Food::Film.index()],a.assimilated_by_founder[i],a.upkeep_by_founder[i],a.motor_by_founder[i],a.growth_by_founder[i],a.wanting_ticks_by_founder[i],a.eating_ticks_by_founder[i],a.awake_ticks_by_founder[i],a.alive_ticks_by_founder[i],a.deaths_by_founder_cause[i].iter().sum::<u64>());
+    }
 }
 
 fn wdelta(fx: f64, fz: f64, tx: f64, tz: f64, ring: f64) -> (f64, f64) {

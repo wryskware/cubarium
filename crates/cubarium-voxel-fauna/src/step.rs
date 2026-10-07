@@ -3318,6 +3318,7 @@ fn founder_feed(
     // The place on the face is the food's: cap tissue off the fungus, foliage off the plant.
     let plant = match meal {
         body::Meal::Stand { root, place, .. } => flora.view().stand_in(root, place).map(|s| s.species),
+        body::Meal::Mycelium { root } => flora.view().fungus_at(root).map(|s| s.species),
         body::Meal::Pool { .. } => None,
     };
     // The funnel's eaten stage (SENSES-CORE): a bite of a carcass, by the dead body's lineage.
@@ -3325,10 +3326,21 @@ fn founder_feed(
         body::Meal::Pool { site, food: Food::Carrion } => flora.view().ground_at(site).and_then(|g| g.carcass).map(|c| (usize::from(c.lineage), site)),
         _ => None,
     };
+    let mut mycelium = 0.0;
     let taken = match meal {
-        body::Meal::Stand { root, place, .. } => flora
-            .take_foliage_of(root, place, bite, &layers)
-            .map(|t| t.taken),
+        body::Meal::Stand { root, place, .. } => {
+            let Some(mut caps) = flora.take_foliage_of(root, place, bite, &layers).map(|t| t.taken) else { return false; };
+            if food == Food::CapTissue && root.y == site_y && layers.contains(&(i64::from(site_y)+1)) {
+                if let Some(t) = flora.take_mycelium(root, (bite-caps.organic).max(0.0)) {
+                    mycelium = t.organic;
+                    caps.organic += t.organic;
+                    caps.mineral += t.mineral;
+                    caps.energy += t.energy;
+                }
+            }
+            Some(caps)
+        },
+        body::Meal::Mycelium { root } => flora.take_mycelium(root, bite).inspect(|t| { mycelium = t.organic; }),
         body::Meal::Pool { site, food } => match food {
             Food::Litter => flora.take_litter(site, bite),
             Food::Carrion => flora.take_carrion(site, bite),
@@ -3341,6 +3353,8 @@ fn founder_feed(
     let Some(taken) = taken else {
         return false;
     };
+    fauna.ledger.eaten_mycelium_by_founder[founder.index()] += mycelium;
+    fauna.ledger.eaten_by_founder_food[founder.index()][food.index()] += taken.organic;
     let taken = fauna.book_eaten(taken, food);
     // The sloppy feeder (roster R1): `bite_spill_fraction` of what the plant layer gave
     // falls at once to the litter at its standing face, pro rata in all three currencies,
