@@ -942,7 +942,7 @@ fn d2b_start(d: &Path, p: &cubarium_voxel_sim::params::Params, log: &D2bLog, see
         m.add(Founder::Lanternjaw, r);
     }
     if get("bank") > 0.0 {
-        m.eggs.push(cubarium_webmodel::fauna::EggCohort { lineage: Founder::Lanternjaw, n: get("bank"), organic: lp.reproduction.egg_organic, age_s: 0.0, dormant: true });
+        m.eggs.push(cubarium_webmodel::fauna::EggCohort { lineage: Founder::Lanternjaw, n: get("bank"), organic: lp.reproduction.egg_organic, age_s: 0.0, dormant: true, ..Default::default() });
     }
     m.t_s = flora.t_s;
     m.mineral = m.mineral_wanted();

@@ -468,7 +468,7 @@ fn bank_viability_is_the_sims_draw() {
     let lj = Founder::Lanternjaw;
     let sc = cfg.founder(lj).core;
     let mut m = model(&cfg, Fits::unfitted(), 10.0, &[lj]);
-    m.eggs.push(EggCohort { lineage: lj, n: 1.0, organic: sc.reproduction.egg_organic, age_s: 0.0, dormant: true });
+    m.eggs.push(EggCohort { lineage: lj, n: 1.0, organic: sc.reproduction.egg_organic, age_s: 0.0, dormant: true, ..Default::default() });
     let lo = pc.egg_viability_median_s / pc.egg_viability_spread;
     let checks = [0.5 * lo, 1.2 * lo, 0.8 * pc.egg_viability_median_s, 1.3 * pc.egg_viability_median_s, 0.9 * pc.egg_viability_median_s * pc.egg_viability_spread];
     let mut t = 0.0;
@@ -866,7 +866,7 @@ fn config_flow_incubation_sets_the_hatch() {
     let f = Founder::Blind;
     let hatch_at = |cfg: &FaunaConfig| {
         let mut m = model(cfg, Fits::unfitted(), 1.0, &[f]);
-        m.eggs.push(EggCohort { lineage: f, n: 2.0, organic: cfg.founder(f).core.reproduction.egg_organic, age_s: 0.0, dormant: false });
+        m.eggs.push(EggCohort { lineage: f, n: 2.0, organic: cfg.founder(f).core.reproduction.egg_organic, age_s: 0.0, dormant: false, ..Default::default() });
         for t in 1..10_000 {
             m.step(&Supply::default());
             if m.ledger[f.index()].hatched > 0.0 {

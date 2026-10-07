@@ -373,6 +373,9 @@ pub struct Model {
     pub film: f64,
     pub film_capacity: f64,
     pub film_light: f64,
+    pub film_beds: Vec<super::film::Bed>,
+    pub film_edges: Vec<(usize, usize, f64)>,
+    pub shore_bands: Vec<crate::fauna::behavior::ShoreBand>,
     /// Each zone's site mineral mean per species at the start (the `hold_mineral` lever).
     pub start_mineral: Vec<[f64; NS]>,
     /// The animals' take and returns over the next step (open loop: clamped).
@@ -586,6 +589,10 @@ impl Model {
                     reserve: r.reserve,
                     aeration_stress: r.aeration_stress,
                     cured: r.cured,
+                    nectar: r.nectar,
+                    fruit: r.fruit,
+                    fruit_age_s: r.fruit_age_s,
+                    fruit_rest_s: r.fruit_rest_s,
                     ..StandState::default()
                 };
                 let sc = config.species(sp);
@@ -634,6 +641,9 @@ impl Model {
             film: start.iter().map(|f| f.film).sum(),
             film_capacity: 0.0,
             film_light: 0.0,
+            film_beds: Vec::new(),
+            film_edges: Vec::new(),
+            shore_bands: Vec::new(),
             take: Take::default(),
             returns: Returns::default(),
             start_mineral: Vec::new(),
@@ -654,6 +664,7 @@ impl Model {
         }
         m.film_capacity = cap;
         m.film_light = if cap > 0.0 { light / cap } else { 0.0 };
+        m.init_film(start);
         m.rebin();
         m.canopy();
         m
@@ -2057,11 +2068,11 @@ impl Model {
         self.carrion -= dc;
         self.c.decomposed += dc;
         self.c.decomposed_carrion += dc;
-        // Glassfilm (`film.rs`): one logistic stock over its eligible faces.
+        // Glassfilm: surface bins retain land capacity, local spread and edible refuges.
         self.step_film(dt);
-        let ft = take.film.min((self.film - self.config.film_graze_refuge * self.film_capacity).max(0.0)).max(0.0);
-        self.film -= ft;
+        let ft = self.draw_film(take.film);
         self.c.taken.film += ft;
+        self.c.taken_mineral += ft*self.config.film_n_tissue;
         // Foliage and caps, by edible share; nectar and fruit from their stocks.
         for s in 0..NS {
             let want = take.foliage[s];
@@ -2145,11 +2156,11 @@ impl Model {
         let cell = self.config.voxel_m * self.config.voxel_m;
         let mut s = Supply::default();
         s.carrion = self.carrion;
-        s.film = (self.film - self.config.film_graze_refuge * self.film_capacity).max(0.0);
+        s.film = self.edible_film();
         let world: f64 = self.zones.zones.iter().map(|z| z.area).sum::<f64>() * cell;
         s.area.litter = world;
         s.area.carrion = world;
-        s.area.film = if self.config.film_capacity_per_m2 > 0.0 { self.film_capacity / self.config.film_capacity_per_m2 } else { 0.0 };
+        s.area.film = self.film_beds.iter().filter(|b| b.capacity > 0.0).map(|b| b.faces * cell).sum();
         for zs in &self.z {
             s.litter += zs.litter;
             for k in 0..NS {
@@ -2202,8 +2213,8 @@ impl Model {
         // Carrion and film: one pool each.
         got.carrion = take.carrion.min(self.carrion).max(0.0);
         self.carrion -= got.carrion;
-        got.film = take.film.min((self.film - self.config.film_graze_refuge * self.film_capacity).max(0.0)).max(0.0);
-        self.film -= got.film;
+        got.film = self.draw_film(take.film);
+        mineral += got.film * self.config.film_n_tissue;
         // Foliage and caps per species, every cohort the same share of its takeable foliage.
         for s in 0..NS {
             let want = take.foliage[s];
@@ -2357,30 +2368,17 @@ impl Model {
 
     /// The film's growth, upkeep and nothing else (`film.rs`): `rate · light · F · (1 −
     /// F / K) − upkeep · F`, light the eligible faces' sky under the water's extinction.
-    /// **Aggregation**: one stock over every eligible face (the spread to neighbours, the
-    /// dry-site death and the depth changes are frozen with the water).
+    /// **Aggregation**: surface bins with counted cardinal edges. Water depths and surface
+    /// moisture are held with the zone closure; land growth and local dispersal are stepped.
     fn step_film(&mut self, dt: f64) {
-        let c = &self.config;
-        let k = self.film_capacity;
-        if !(k > 0.0) {
-            return;
-        }
-        let day = self.day.at(self.t_s, dt).daylight;
-        let grow = c.film_growth_per_s * self.film_light * day * self.film * (1.0 - self.film / k);
-        let upkeep = c.film_maintenance_per_s * self.film;
-        let d = (grow - upkeep) * dt;
-        self.film = (self.film + d).max(0.0);
-        self.c.fixed += (grow * dt).max(0.0);
-        self.c.respired += upkeep * dt;
-        self.c.film_grown += (grow * dt).max(0.0);
-        self.c.film_upkeep += upkeep * dt;
+        self.grow_film(dt);
     }
 
     /// What the producers and the pools hold for the animals now (exchange).
     pub fn supply(&self) -> Supply {
         let mut s = Supply::default();
         s.carrion = self.carrion;
-        s.film = (self.film - self.config.film_graze_refuge * self.film_capacity).max(0.0);
+        s.film = self.edible_film();
         for zs in &self.z {
             s.litter += zs.litter;
             for k in 0..NS {
@@ -2438,7 +2436,7 @@ impl Model {
                 bank += sc.n_tissue * package_of(sc) * zs.bank[k];
             }
         }
-        (pool, inv, bank)
+        (pool, inv + self.film * self.config.film_n_tissue, bank)
     }
 
     /// Every unit of organic matter the half holds: stands (all of their material), the
