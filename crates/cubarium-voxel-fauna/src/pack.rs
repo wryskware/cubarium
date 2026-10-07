@@ -1996,3 +1996,7 @@ mod pit_tests;
 #[cfg(test)]
 #[path = "pit2_tests.rs"]
 mod pit2_tests;
+
+#[cfg(test)]
+#[path = "testpass2_pack_unit_tests.rs"]
+mod testpass2_pack_unit_tests;
