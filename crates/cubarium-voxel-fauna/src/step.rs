@@ -2573,8 +2573,8 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
         if crate::light::drawn_to_lure(fauna, fauna.animals[j].id) {
             fauna.ledger.lure_kills[f.index()] += 1;
         }
-        // S3b: a prey with a light sense still naive about cyan.
-        if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id) {
+        // S3b: a prey with a light sense still naive about the lure's class to its eye (cyan, or UV when the lure mimics a flower).
+        if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id, f) {
             fauna.ledger.naive_kills[by.index()][f.index()] += 1;
         }
     }
@@ -4389,6 +4389,9 @@ mod light_tests;
 #[cfg(test)]
 #[path = "light_learning_tests.rs"]
 mod light_learning_tests;
+#[cfg(test)]
+#[path = "bellwing_lure_tests.rs"]
+mod bellwing_lure_tests;
 
 #[cfg(test)]
 #[path = "ground_response_tests.rs"]

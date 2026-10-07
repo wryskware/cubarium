@@ -103,7 +103,9 @@ use crate::Fauna;
 // 56: PIT and PIT-2 — `Pack::{pit_search_m, route_swing_voxels, whelp_at_den}`; a pup or a
 //     Veilhound going home follows the route, a body off its graph walks back on, dens on
 //     founding faces, route walks land on the route at a bend.
-pub const SCHEMA: u32 = 56;
+// 57: BELLWING — `LightConfig::{lure_uv, lure_scent}` (the lure mimics a flower: UV and the
+//     nectar scent); the bellwing's r-strategist reproduction defaults.
+pub const SCHEMA: u32 = 57;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

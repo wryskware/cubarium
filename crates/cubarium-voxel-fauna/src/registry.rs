@@ -621,7 +621,9 @@ fn knob_rows() -> Vec<Row> {
     rows.extend([
         lk("flower_reflectance", "brightness per unit light", nonneg, "a nectar flower's brightness (UV) per unit of the light falling on it").search(0.1, 4.0),
         lk("glowcap_emission", "brightness", nonneg, "a glowcap's own light").search(0.0, 2.0),
-        lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light").search(0.0, 4.0),
+        lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light (cyan)").search(0.0, 4.0),
+        lk("lure_scent", "x nectar_per_s", nonneg, "BELLWING: a lit lure lays this x a flower's nectar scent on its lanternjaw's face (0: light alone)").search(0.0, 2.0),
+        lk("lure_uv", "x flower_reflectance", nonneg, "BELLWING: a fully lit lure's UV, x a flower's; a UV eye reads the lure as a flower (UV class), 0: cyan only").search(0.0, 2.0),
         lk("background_floor", "light", pos, "a beacon's contrast is its brightness over the light around it plus this (the darkest background)").search(0.01, 0.5).log(),
         lk("half_m", "m", pos, "a beacon's received level halves at this distance").search(0.25, 4.0),
         lk("lure_height_fraction", "x body height", nonneg, "the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle"),
