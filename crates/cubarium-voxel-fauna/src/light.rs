@@ -771,7 +771,7 @@ pub(crate) fn steer_flyer(
     // 6. Smell leads: up the nectar gradient.
     if table.smell_min > 0.0 {
         let s = fauna.scent.read_below(view, a.pose.x, a.pose.z, a.pose.y_m)[ScentChannel::Nectar.index()];
-        if s.level >= table.smell_min && (s.gx != 0.0 || s.gz != 0.0) {
+        if s.level >= table.smell_min && (s.gx != 0.0 || s.gz != 0.0) && !scent_from_marked(fauna, &a, view, fv, (s.gx, s.gz)) {
             fauna.ledger.scent_led_samples[founder.index()] += 1;
             budget(fauna, LightMode::Scent);
             return Some((crate::hunt::head(a.pose.heading_rad, s.gx.atan2(s.gz), 1.0, 0.0), asked_lift));
@@ -779,6 +779,31 @@ pub(crate) fn steer_flyer(
     }
     budget(fauna, LightMode::Search);
     None
+}
+
+/// FINDINGS-FIX-2: whether the nectar scent `grad` leads bellwing `a` to a place it has
+/// marked "no reward here": the nearest nectar source up the gradient (a flower holding
+/// nectar, or a lit lure at its lure point) under one of its marks, by the light rule's own
+/// mark test (`mark_radius_m`, for the mark's `mark_s`). Such a scent is passed by as the
+/// marked beacon is.
+fn scent_from_marked(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, fv: &FloraView<'_>, grad: (f64, f64)) -> bool {
+    let Some(record) = fauna.percepts.get(&a.id) else { return false };
+    let tick = fauna.tick;
+    if !record.marks.iter().any(|m| m.until_tick > tick) {
+        return false;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let flowers = crate::scent::flower_faces(view, fv).into_iter().map(|(x, _, z)| ((x as f64 + 0.5) * v, (f64::from(z) + 0.5) * v));
+    let lures = lures(fauna, view).into_iter().filter(|b| b.body != a.id).map(|b| (b.x, b.z));
+    let nearest = flowers
+        .chain(lures)
+        .filter_map(|(x, z)| {
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
+            (dx * grad.0 + dz * grad.1 > 0.0).then_some((dx * dx + dz * dz, x, z))
+        })
+        .min_by(|p, q| p.0.total_cmp(&q.0));
+    nearest.is_some_and(|(_, x, z)| record.marked(x, z, tick, fauna.config.light.mark_radius_m, ring))
 }
 
 /// **The capgnawer's cyan** (D2, module note) over its forager: `asked` is its forager's

@@ -925,6 +925,7 @@ fn draw_step(
     for k in &sensed {
         let Some(o) = fauna.view().animal(k.id).copied() else { continue };
         if abandoned == Some(k.id)
+            || shuns(fauna, own, k.id)
             || !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window)
             || trespass(fauna, own, k.x, k.z, t, v, ring)
         {
@@ -1411,6 +1412,48 @@ fn tactic(
     // could not cross (off the graph at a bend, or into water deeper than a pup wades) and
     // stood there for good.
     if t.whelp_at_den && rec.breeder == Some(a.id) && a.reproduction.escrow.is_some() && !a.emergency {
+        // FINDINGS-FIX-2: the hold yields to a meal at home — hungry, it eats a carcass (the
+        // pack's feast or one it knows of) lying within the den radius, as its pups do, and
+        // stays home: no hunting, no carcass beyond the den radius.
+        if a.eating {
+            let in_den = |s: Site| {
+                let (x, z) = centre(s, v);
+                let (dx, dz) = crate::pose::wrapped_delta(dcx, dcz, x, z, ring);
+                (dx * dx + dz * dz).sqrt() <= t.den_radius_m
+            };
+            if let Some(fs) = rec.feast.filter(|&fs| feast_left(fs) && in_den(fs)) {
+                if at_feast(fs) {
+                    return Some(clamp(fauna, eat));
+                }
+            }
+            crate::perception::refresh(fauna, i, view, fv, None, crate::perception::Want { carcasses: true, ..Default::default() });
+            let mut sites: Vec<(f64, Site)> = rec
+                .feast
+                .filter(|&fs| feast_left(fs))
+                .into_iter()
+                .chain(fauna.percept(a.id).map(|p| p.carcass_sites().collect::<Vec<_>>()).unwrap_or_default())
+                .filter(|&s| in_den(s))
+                .map(|s| {
+                    let (x, z) = centre(s, v);
+                    (distance(&a, x, z, ring), s)
+                })
+                .collect();
+            sites.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+            sites.dedup_by_key(|p| p.1);
+            for &(_, s) in &sites {
+                if fauna.config.hunt.meal_first {
+                    if let Some(go) = crate::hunt::meal_step_to(fauna, i, view, fv, s) {
+                        return Some(clamp(fauna, go));
+                    }
+                } else if feast_left(s) {
+                    if at_feast(s) {
+                        return Some(clamp(fauna, eat));
+                    }
+                    let (x, z) = centre(s, v);
+                    return Some(clamp(fauna, go_to(&a, x, z, ring, 0.0, 1.0)));
+                }
+            }
+        }
         if d_den > 0.5 * t.den_radius_m {
             let (to, routed) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
             let go = if routed { route_go(fauna, view, &a, founder, to, ring, 0.0) } else { go_to(&a, to.0, to.1, ring, 0.0, 0.0) };
@@ -1502,6 +1545,14 @@ fn tactic(
                 let (mut best_m, mut since) = (rec.chase_best_m, rec.chase_progress_tick);
                 if let Some(k) = knows_of(fauna, i, tid, ring) {
                     let d = nearest_member(fauna, own, a.id, k.x, k.z, ring);
+                    // FINDINGS-FIX-2, the breakaway: a target that leaves contact (the nearest
+                    // so far within the close-in or the strike reach, the nearest now past it)
+                    // restarts the measure from where it now is, as a chase restarting after a
+                    // breakaway, so closing on it again counts.
+                    let contact = t.close_in_m.max((h.strike_reach_length_fraction + h.jaw_forward_length_fraction) * geometry.length_m);
+                    if best_m <= contact && d > contact {
+                        best_m = d;
+                    }
                     if d <= best_m - t.chase_progress_m {
                         best_m = d;
                         since = now;

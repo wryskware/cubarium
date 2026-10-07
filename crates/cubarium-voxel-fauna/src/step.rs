@@ -280,7 +280,17 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
                 .binary_search_by_key(&hit.prey, |a| a.id)
                 .ok()
                 .map(|j| (fauna.animals[j].pose.x, fauna.animals[j].pose.z));
+            // FINDINGS-FIX-2: a kill by a strike that began on a prey drawn to a lure is a
+            // lure kill, though the lunge's loom closed the visit (booked once: the kill
+            // books it itself while the prey is still drawn).
+            let lure_kill = hit.lure && !crate::light::drawn_to_lure(fauna, hit.prey);
+            let prey_founder = fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).ok().and_then(|j| fauna.animals[j].founder);
             apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
+            if let (true, Some(f)) = (lure_kill, prey_founder) {
+                if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
+                    fauna.ledger.lure_kills[f.index()] += 1;
+                }
+            }
             // HUNTER-MEAL: a kill marks its place productive in the striker's memory.
             if let Some((x, z)) = stood {
                 if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
@@ -1995,6 +2005,7 @@ fn founder_act(
         };
         if let Some(prey) = target {
             let h = phys.hunter.expect("a hunter");
+            let lure = crate::light::drawn_to_lure(fauna, prey);
             let a = &mut fauna.animals[i];
             a.strike = Some(Strike {
                 phase: StrikePhase::Windup,
@@ -2002,6 +2013,7 @@ fn founder_act(
                 prey,
                 from_x: a.pose.x,
                 from_z: a.pose.z,
+                lure,
             });
             a.state = State::Resting;
             fauna.ledger.strikes_by_founder[founder.index()] += 1;
@@ -2429,12 +2441,15 @@ fn strike_tick(
         let body = fauna.animals[i].body;
         let cost = h.strike_cost_s * phys.core.maintenance_per_s * body;
         respire(fauna, i, cost, Respiration::Hunt);
+        // FINDINGS-FIX-2: the lure draw at the lunge, before its loom closes the visit.
+        let lure = s.lure || crate::light::drawn_to_lure(fauna, s.prey);
         let a = &fauna.animals[i];
         s = Strike {
             phase: StrikePhase::Lunge,
             ticks_left: crate::Hunter::ticks(h.lunge_s),
             from_x: a.pose.x,
             from_z: a.pose.z,
+            lure,
             ..s
         };
     }
@@ -2553,6 +2568,7 @@ fn strike_tick(
                     damage,
                     by: founder,
                     striker: a.id,
+                    lure: s.lure,
                 });
             }
         }
@@ -3625,6 +3641,13 @@ fn lay(
     if !rule.hold_met(&fauna.animals[i].reproduction) || fauna.animals[i].reproduction.retry_ticks > 0 {
         return;
     }
+    // LIFE-HISTORY: a layer with a breeding season lays only inside its window. Gated before
+    // the clutch wait (FINDINGS-FIX-2), so the wait is not spent while the window is shut.
+    let year = view.year();
+    if !rule.season_allows(year, season_of(fauna, i)) {
+        fauna.ledger.season_waits += 1;
+        return;
+    }
     // **A full clutch first** (the capgnawer package): with a clutch from surplus and a
     // wait, a body short of `clutch_max` eggs keeps feeding and lays when its reserve pays
     // for the full clutch, or what it can at the end of the wait.
@@ -3702,13 +3725,8 @@ fn lay(
         fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
         return;
     }
-    // LIFE-HISTORY: a layer with a breeding season lays only inside its window, and no more
-    // than `litters_per_year` clutches a year.
-    let year = view.year();
-    if !rule.season_allows(year, season_of(fauna, i)) {
-        fauna.ledger.season_waits += 1;
-        return;
-    }
+    // LIFE-HISTORY: no more than `litters_per_year` clutches a year (the window is gated
+    // above).
     if let Some(y) = year.filter(|_| rule.litters_per_year > 0) {
         count_season(fauna, i, y.number);
     }
