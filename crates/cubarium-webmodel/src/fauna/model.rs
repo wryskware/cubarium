@@ -16,7 +16,7 @@
 //! death, refusal and hatch a draw), so the twin is never a second model.
 
 use cubarium_voxel::weather::{DayClock, DayMode, Sun};
-use cubarium_voxel_fauna::{Activity, BirthMode, FaunaConfig, Food, Founder, FounderPhysiology, SurplusWindow, TICK_HZ};
+use cubarium_voxel_fauna::{Activity, BirthMode, NightClock, FaunaConfig, Food, Founder, FounderPhysiology, SurplusWindow, TICK_HZ};
 use cubarium_voxel_flora::Species;
 
 use super::fits::{habitat_food, Encounter, Fits, HunterFit};
@@ -373,18 +373,37 @@ impl FaunaModel {
         Sun::at(&self.day, phase, rise, set).daylight
     }
 
+    /// **Where in the night it is** at `t_s` ([`NightClock::of`] of the sim's own sun): the
+    /// activity windows' clock. [`NightClock::DAY`] with the clock off.
+    pub fn night_at(&self, t_s: f64) -> NightClock {
+        if self.day.mode == DayMode::Off {
+            return NightClock::DAY;
+        }
+        let tick = (t_s * f64::from(TICK_HZ)).round().max(0.0) as u64;
+        let phase = self.day.cycle_phase(tick);
+        let (rise, set) = self.day.cycle_rise_set();
+        NightClock::of(&Sun::at(&self.day, phase, rise, set))
+    }
+
     /// **The awake share** of a body of `f` now, outside the emergency latch
     /// (`Activity::awake_under`, `lib.rs:587-598`, read through `circadian`, `step.rs:586-710`):
     /// 1 or 0 by the rhythm, and for a dark-active lineage by day the fitted share of daytime
-    /// on a dark face.
+    /// on a dark face. Read as if no night end were near ([`FaunaModel::on_phase_in`] reads
+    /// the lineage's activity window too).
     pub fn on_phase(&self, f: Founder, daylight: f64) -> f64 {
+        self.on_phase_in(f, daylight, NightClock::DAY)
+    }
+
+    /// [`FaunaModel::on_phase`] with the lineage's activity window read at `night` (LURE,
+    /// `Activity::awake_in`).
+    pub fn on_phase_in(&self, f: Founder, daylight: f64, night: NightClock) -> f64 {
         let p = self.phys(f);
         let clock_on = self.day.mode != DayMode::Off;
         let life = &self.config.life;
         match p.active {
             Activity::DarkActive if clock_on && daylight >= life.day_line => self.fits.of(f).day_dark_awake,
             a => {
-                if a.awake(clock_on, daylight, life) {
+                if a.awake_in(clock_on, daylight, 1.0, night, p.active_window, life) {
                     1.0
                 } else {
                     0.0
@@ -468,6 +487,7 @@ impl FaunaModel {
     pub fn step(&mut self, supply: &Supply) -> (Take, Returns) {
         let dt = self.dt;
         let daylight = self.daylight_at(self.t_s + dt);
+        let night = self.night_at(self.t_s + dt);
         let dusk = self.day.mode != DayMode::Off
             && self.last_daylight.is_some_and(|d| d >= self.config.life.day_line)
             && daylight < self.config.life.day_line;
@@ -482,7 +502,7 @@ impl FaunaModel {
                 continue;
             }
             let phys = *self.phys(f);
-            let phase = self.on_phase(f, daylight);
+            let phase = self.on_phase_in(f, daylight, night);
             let effort = self.fits.of(f).motor_effort;
             let mut acc = Flows::default();
             let mut matured = (0.0, 0.0);

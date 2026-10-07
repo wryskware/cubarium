@@ -395,6 +395,11 @@ pub struct FounderPhysiology {
     /// When this lineage is awake: the browser is diurnal, the shredder nocturnal.
     /// Placeholders, `design/backlog.md` §1.
     pub active: crate::Activity,
+    /// **Its activity window** (LURE, [`crate::ActiveWindow`]): hours after sunset and before
+    /// sunrise it is awake on top of [`FounderPhysiology::active`]. Zero for every lineage
+    /// but the bellwing (1 h each side: dusk and dawn flights).
+    #[serde(default)]
+    pub active_window: crate::ActiveWindow,
     /// What upkeep costs while it sleeps, **× its basal upkeep**: 0.5 for endotherm-like
     /// lineages, 0.3 for the ectotherm-like shredder, ripple-snail, capgnawer and
     /// lanternjaw (`design/ecology-timescales-2026-10-02.md` 1a; provisional).
@@ -1618,6 +1623,7 @@ impl FounderPhysiology {
                 ],
                 organ_structure_fraction: 0.05,
                 active: crate::Activity::Nocturnal,
+                active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -1691,6 +1697,7 @@ impl FounderPhysiology {
                 yield_by_food: [FOLIAGE_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
                 active: crate::Activity::Diurnal,
+                active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -1785,6 +1792,7 @@ impl FounderPhysiology {
                 // day in caves and deep shade, its lure lit — so it meets bellwings at dusk
                 // and in shade, like the dark-active prey it mostly eats.
                 active: crate::Activity::DarkActive,
+                active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -1999,6 +2007,14 @@ impl FounderPhysiology {
                     },
                     organ_structure_fraction: 0.10,
                     active: crate::Activity::Diurnal,
+                    // LURE (Wrysk 2026-10-06: "dusk/dawn is fine for them to fly as well as
+                    // day"): a twilight flyer, awake from an hour before sunrise to an hour
+                    // after sunset, asleep only in deep night. Many moths and other insects
+                    // fly in a dusk peak and a smaller dawn one (Lewis & Taylor 1965); the
+                    // crepuscular hawkmoths feed at flowers at dusk (Herrera 1992; Kelber,
+                    // Balkenius & Warrant 2002), and the twilight bee Megalopta forages in
+                    // about the hour after sunset and before sunrise (Warrant et al. 2004).
+                    active_window: crate::ActiveWindow { before_rise_h: 1.0, after_set_h: 1.0 },
                     agility: 0.0,
                     diet: crate::Diet::only(crate::Food::Nectar),
                     founding: Founding::Bodies,

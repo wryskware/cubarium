@@ -178,6 +178,8 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
             .is_some_and(|before| before >= fauna.config.life.day_line)
         && daylight < fauna.config.life.day_line;
     fauna.last_daylight = Some(daylight);
+    // LURE: where in the night it is, for the lineages' activity windows.
+    fauna.night = if clock_on { crate::NightClock::of(&world.weather().sun()) } else { crate::NightClock::DAY };
     let sky = Sky {
         downpour: view.weather.mode == cubarium_voxel::weather::RainMode::Downpour,
         rain_m_per_s: f64::from(view.weather.rain_m_per_s).max(0.0),
@@ -661,7 +663,7 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
         } else {
             hungry >= phys.wake_hunger
         };
-        let on_phase = phys.active.awake_under(clock_on, daylight, sky, &life);
+        let on_phase = phys.active.awake_in(clock_on, daylight, sky, fauna.night, phys.active_window, &life);
         let dark_awake = on_phase && clock_on && phys.active.reads_face_light() && daylight >= life.day_line;
         let free = a.alert_ticks == 0
             && a.mobility.climb.is_none()
@@ -2382,7 +2384,8 @@ fn flyer_act(
     let shape = flight::Shape::of(&phys, &flight, fauna.animals[i].body);
     let basal = sc.maintenance_per_s * fauna.animals[i].body;
     let takeoff_cost = flight.takeoff_s * flight.flight_factor * basal;
-    let sleepy = !phys.active.awake(sky.clock_on, sky.daylight, &life) && !fauna.animals[i].emergency;
+    let sleepy = !phys.active.awake_in(sky.clock_on, sky.daylight, 1.0, fauna.night, phys.active_window, &life)
+        && !fauna.animals[i].emergency;
     let grounded = sky.downpour || sleepy;
     let can_pay = |a: &Animal| a.reserve >= takeoff_cost;
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
@@ -4870,6 +4873,9 @@ mod light_learning_tests;
 #[cfg(test)]
 #[path = "bellwing_lure_tests.rs"]
 mod bellwing_lure_tests;
+#[cfg(test)]
+#[path = "lure_dusk_tests.rs"]
+mod lure_dusk_tests;
 
 #[cfg(test)]
 #[path = "ground_response_tests.rs"]
