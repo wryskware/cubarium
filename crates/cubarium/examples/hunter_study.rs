@@ -628,6 +628,17 @@ impl HerdTime {
         }
     }
 
+    /// The control must hunker; HERD must also visibly run and use available shelter.
+    fn missing(&self, herd: bool) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        if herd && self.run == 0 { missing.push("no moving grazer run"); }
+        if self.hunker == 0 { missing.push("no grazer hunker"); }
+        if herd && self.eligible > 0 && self.sheltered == 0 {
+            missing.push("no juvenile shelter despite nearby closed adults");
+        }
+        missing
+    }
+
     fn add(&mut self, o: &Self) {
         self.ticks += o.ticks;
         self.run += o.run;
@@ -1175,12 +1186,9 @@ fn run(args: &[String]) {
             // The detached HERD check stops at its first short segment if the actual
             // moving run, hunker, or available juvenile shelter never fired. The staged
             // runner also checks controllers, movement/feeding, and conservation.
-            if !herd_checked && arg(args, "herd_check=") == Some("1") && params.fauna.founder(GRAZER).hunker.herd_enabled {
+            if !herd_checked && arg(args, "herd_check=") == Some("1") {
                 herd_checked = true;
-                let mut missing = Vec::new();
-                if herd_all.run == 0 { missing.push("no moving grazer run"); }
-                if herd_all.hunker == 0 { missing.push("no grazer hunker"); }
-                if herd_all.eligible > 0 && herd_all.sheltered == 0 { missing.push("no juvenile shelter despite nearby closed adults"); }
+                let missing = herd_all.missing(params.fauna.founder(GRAZER).hunker.herd_enabled);
                 if !missing.is_empty() {
                     let why = missing.join("; ");
                     eprintln!("HERD liveness failed at m{minute}: {why}");
@@ -4843,5 +4851,33 @@ fn film_hist(args: &[String]) {
     }
     for (ci, name) in ["water", "shore", "inland"].iter().enumerate() {
         println!("film,{name},total={:.4},faces<0.05={},<0.1={},<0.25={},<0.5={},>=0.5={}", tot[ci], h[ci][0], h[ci][1], h[ci][2], h[ci][3], h[ci][4]);
+    }
+}
+
+#[cfg(test)]
+mod herd_readout_tests {
+    use super::HerdTime;
+
+    #[test]
+    fn control_requires_hunkering_and_herd_also_requires_moving_running() {
+        let idle = HerdTime::default();
+        assert_eq!(idle.missing(false), vec!["no grazer hunker"]);
+        let mut clamped = idle;
+        clamped.hunker = 1;
+        assert!(clamped.missing(false).is_empty(), "the control deliberately has no runs");
+        assert_eq!(clamped.missing(true), vec!["no moving grazer run"]);
+        clamped.run = 1;
+        assert!(clamped.missing(true).is_empty());
+    }
+
+    #[test]
+    fn juvenile_shelter_is_required_only_when_closed_adults_are_reachable() {
+        let mut h = HerdTime { run: 1, hunker: 1, ..Default::default() };
+        assert!(h.missing(true).is_empty(), "no reachable calf shelter opportunity");
+        h.eligible = 1;
+        assert_eq!(h.missing(true), vec!["no juvenile shelter despite nearby closed adults"]);
+        assert!(h.missing(false).is_empty(), "the old comparison arm has no shelter behavior");
+        h.sheltered = 1;
+        assert!(h.missing(true).is_empty());
     }
 }
