@@ -511,8 +511,14 @@ impl RouteGraph {
     /// The node nearest `(x, z)` within `radius` columns of `site`'s column, within the
     /// step of its layer: where a body standing (or a prey caught) at `site` is on the
     /// graph when the disc does not stand clear on its own face.
-    pub fn node_near(&self, site: Site, (x, z): (f64, f64), radius: u32) -> Option<usize> {
-        if let Some(i) = self.face(site) {
+    pub fn node_near(&self, site: Site, xz: (f64, f64), radius: u32) -> Option<usize> {
+        self.node_near_where(site, xz, radius, |_| true)
+    }
+
+    /// [`RouteGraph::node_near`] among the nodes whose face `keep` accepts (STRIKE: a face
+    /// from which a hunter's jaw band meets the prey's body).
+    pub fn node_near_where(&self, site: Site, (x, z): (f64, f64), radius: u32, keep: impl Fn(Site) -> bool) -> Option<usize> {
+        if let Some(i) = self.face(site).filter(|&i| keep(self.faces[i])) {
             return Some(i);
         }
         let v = self.voxel_m;
@@ -531,7 +537,7 @@ impl RouteGraph {
                     if ny < 0 {
                         continue;
                     }
-                    let Some(j) = self.face(Site { x: nx, y: ny as u32, z: nz as u32 }) else {
+                    let Some(j) = self.face(Site { x: nx, y: ny as u32, z: nz as u32 }).filter(|&j| keep(self.faces[j])) else {
                         continue;
                     };
                     let (cx, cz) = self.centre(j);
