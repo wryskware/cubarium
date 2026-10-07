@@ -4484,3 +4484,6 @@ mod testpass2_life_tests;
 #[cfg(test)]
 #[path = "testpass2_light_tests.rs"]
 mod testpass2_light_tests;
+#[cfg(test)]
+#[path = "testpass2_edge_tests.rs"]
+mod testpass2_edge_tests;
