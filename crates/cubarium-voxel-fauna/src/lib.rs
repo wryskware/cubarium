@@ -49,6 +49,7 @@ pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;
+pub use step::shore_egg_site;
 
 #[cfg(test)]
 mod cone_speed_tests;
@@ -62,6 +63,8 @@ mod roster_tests;
 mod roster_mechanics_tests;
 #[cfg(test)]
 mod snail_tests;
+#[cfg(test)]
+mod snail_land_tests;
 #[cfg(test)]
 mod flight_tests;
 #[cfg(test)]
@@ -611,6 +614,77 @@ impl Activity {
     /// Whether this rhythm reads the light at its face ([`Activity::awake_under`]'s `sky`).
     pub fn reads_face_light(self) -> bool {
         self == Activity::DarkActive
+    }
+
+    /// **The rhythm with its lineage's window** (LURE, Wrysk 2026-10-06): awake when
+    /// [`Activity::awake_under`] says so, or, with the clock on, inside `window` of the night's
+    /// ends ([`ActiveWindow::holds`]). A zero window is the rhythm alone.
+    pub fn awake_in(
+        self,
+        clock_on: bool,
+        daylight: f64,
+        sky: f64,
+        night: NightClock,
+        window: ActiveWindow,
+        life: &LifeConfig,
+    ) -> bool {
+        self.awake_under(clock_on, daylight, sky, life) || (clock_on && window.holds(night))
+    }
+}
+
+/// **Where in the night it is** (LURE): hours since sunset and hours to sunrise on the day's
+/// 24-hour clock while the sun is down, both infinite while it is up. Read from the world's
+/// sun each tick ([`NightClock::of`]); derived, never saved.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NightClock {
+    pub since_set_h: f64,
+    pub to_rise_h: f64,
+}
+
+impl Default for NightClock {
+    fn default() -> NightClock {
+        NightClock::DAY
+    }
+}
+
+impl NightClock {
+    /// The sun is up (or the clock is off): no night end is near.
+    pub const DAY: NightClock = NightClock { since_set_h: f64::INFINITY, to_rise_h: f64::INFINITY };
+
+    /// The night clock of `sun`: from its phase, sunrise and sunset.
+    pub fn of(sun: &cubarium_voxel::weather::Sun) -> NightClock {
+        let day = (sun.set - sun.rise).rem_euclid(1.0);
+        let since_rise = (sun.phase - sun.rise).rem_euclid(1.0);
+        if since_rise <= day {
+            return NightClock::DAY;
+        }
+        NightClock {
+            since_set_h: 24.0 * (sun.phase - sun.set).rem_euclid(1.0),
+            to_rise_h: 24.0 * (sun.rise - sun.phase).rem_euclid(1.0),
+        }
+    }
+}
+
+/// **A lineage's activity window** (LURE, Wrysk 2026-10-06: "dusk/dawn is fine for them to
+/// fly as well as day"): how long, in hours on the day's 24-hour clock, it stays awake after
+/// sunset and wakes before sunrise on top of its [`Activity`] — a twilight flyer's dusk and
+/// dawn flights. Zero (the default) adds nothing. The bellwing's is 1 h each side: crepuscular
+/// moths and twilight bees fly in the hour or so around sunset and sunrise (module notes at
+/// the bellwing preset).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ActiveWindow {
+    /// Hours before sunrise it is awake.
+    pub before_rise_h: f64,
+    /// Hours after sunset it is awake.
+    pub after_set_h: f64,
+}
+
+impl ActiveWindow {
+    /// Whether `night` is inside this window: strictly under `after_set_h` since sunset or
+    /// `before_rise_h` to sunrise.
+    pub fn holds(self, night: NightClock) -> bool {
+        night.since_set_h < self.after_set_h || night.to_rise_h < self.before_rise_h
     }
 }
 
@@ -1426,6 +1500,13 @@ pub struct Clutch {
     /// hatches by [`egg_hatches`], not by incubation, pays [`PredationConfig::egg_upkeep_per_s`], and dies
     /// to the litter when its viability runs out.
     pub dormancy: Option<Dormancy>,
+    /// **A shore egg's clocks** (SNAIL-LAND, [`EggSite::Shore`]): ticks in a row under
+    /// standing water, and on ground drier than its lineage's `egg_dry_moisture`. 0 for
+    /// every other clutch.
+    #[serde(default)]
+    pub wet_ticks: u32,
+    #[serde(default)]
+    pub dry_ticks: u32,
 }
 
 impl Clutch {
@@ -3113,6 +3194,13 @@ pub struct FaunaLedger {
     /// Eggs lost before hatching (face gone, flooded), by lineage.
     #[serde(default)]
     pub eggs_lost_by_founder: [u64; Founder::COUNT],
+    /// **Shore eggs drowned** (SNAIL-LAND): under standing water past `egg_drown_s`, to
+    /// the litter of their face, by lineage.
+    #[serde(default)]
+    pub eggs_drowned_by_founder: [u64; Founder::COUNT],
+    /// ... and dried: on ground drier than `egg_dry_moisture` past `egg_dry_s`.
+    #[serde(default)]
+    pub eggs_dried_by_founder: [u64; Founder::COUNT],
     /// **AMPHIBIOUS-SNAIL readouts** (counters only): ticks an amphibious body was alive,
     /// `[day, night][in water, ashore]` (day: daylight at or above the day line, or the
     /// clock off), and retractions begun.
@@ -3470,6 +3558,10 @@ pub struct Fauna {
     /// — daylight falling below [`LifeConfig::day_line`] — for the egg bank's trigger
     /// (§2.13). `None` before the first tick.
     last_daylight: Option<f64>,
+    /// **Where in the night this tick is** (LURE, [`NightClock`]): set from the world's sun
+    /// at the start of every tick, read by the activity windows. Derived, so not saved.
+    #[serde(skip)]
+    pub(crate) night: NightClock,
     /// The last tick rain fell (SNAIL-FIX: an amphibious body's roam hours run on for
     /// [`Amphibious::roam_after_rain_s`] after it). `None` before any rain.
     #[serde(default)]
@@ -3872,6 +3964,7 @@ impl Fauna {
             policy_driven: [false; Founder::COUNT],
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
+            night: NightClock::DAY,
             last_rain_tick: None,
             seed_voids: Vec::new(),
             pack_events: Vec::new(),
@@ -4531,6 +4624,8 @@ impl Fauna {
                 laid_tick: self.tick,
                 lineage,
                 dormancy: Some(Dormancy::draw(&self.config.predation, c.seed, serial, self.tick)),
+                wet_ticks: 0,
+                dry_ticks: 0,
             });
             self.ledger.eggs_buried += 1;
             self.ledger.introduced_organic_in += organic;

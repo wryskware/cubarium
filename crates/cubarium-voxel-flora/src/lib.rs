@@ -65,7 +65,7 @@ mod contest_tests;
 #[cfg(test)]
 mod canopy_establish_tests;
 mod film;
-pub use film::{FilmWet, film_wet, land_census};
+pub use film::{FilmWet, film_wet, land_capacity_per_m2, land_census, shore_band};
 #[cfg(test)]
 mod film_tests;
 mod seeds;
@@ -3080,6 +3080,24 @@ pub struct FloraConfig {
     /// face only up to it.
     #[serde(default = "default_film_land_capacity_per_m2")]
     pub film_land_capacity_per_m2: f64,
+    /// **Wetter ground carries more film** (SNAIL-LAND, Wrysk 2026-10-06: "increase the
+    /// amount of food for them on land in waterlogged / shore soil"): the land capacity per
+    /// square metre on saturated ground (pore fill 1). Between a land-wet face's moisture
+    /// floor (`film_land_moisture_min`, or `film_shore_moisture_min` in the shore band) and
+    /// 1 the capacity runs linearly from `film_land_capacity_per_m2` to this. Equal to it:
+    /// one flat land capacity.
+    #[serde(default = "default_film_land_capacity_wet_per_m2")]
+    pub film_land_capacity_wet_per_m2: f64,
+    /// **The shore band** (SNAIL-LAND): a support face with no standing water over it
+    /// within this horizontal distance, metres, of a column whose highest support face at
+    /// or below it holds standing water is land-wet from `film_shore_moisture_min` (the
+    /// bank's capillary fringe and splash zone), not only from `film_land_moisture_min`.
+    /// 0: no shore band.
+    #[serde(default = "default_film_shore_band_m")]
+    pub film_shore_band_m: f64,
+    /// ... and the least pore fill a face in the shore band grows film at.
+    #[serde(default = "default_film_shore_moisture_min")]
+    pub film_shore_moisture_min: f64,
     /// Glassfilm: mineral per unit of film tissue, drawn from the site's pool as it grows
     /// (springturf's `n_tissue` by default).
     pub film_n_tissue: f64,
@@ -3145,6 +3163,9 @@ impl Default for FloraConfig {
             film_land_moisture_min: default_film_land_moisture_min(),
             film_land_growth_per_s: default_film_land_growth_per_s(),
             film_land_capacity_per_m2: default_film_land_capacity_per_m2(),
+            film_land_capacity_wet_per_m2: default_film_land_capacity_wet_per_m2(),
+            film_shore_band_m: default_film_shore_band_m(),
+            film_shore_moisture_min: default_film_shore_moisture_min(),
             film_maintenance_per_s: 0.0001,
             film_spread_per_s: 0.0002,
             film_dry_death_per_s: 0.005,
@@ -3252,6 +3273,25 @@ impl FloraConfig {
         self.seed_check_s = DT;
         self.sprout_after_arming = false;
         self
+    }
+
+    /// The glassfilm's **grazing refuge** on one site, organic matter:
+    /// `film_graze_refuge` (clamped to `[0, 1]`) of a site's capacity
+    /// (`film_capacity_per_m2 · voxel_m²`). No mouth takes it ([`Flora::take_film`]).
+    pub fn film_refuge_per_site(&self) -> f64 {
+        self.film_graze_refuge.clamp(0.0, 1.0) * self.film_capacity_per_m2 * self.voxel_m * self.voxel_m
+    }
+
+    /// **Edible film** (TASTE): of a site's `film`, what stands above its grazing refuge
+    /// ([`FloraConfig::film_refuge_per_site`]), never negative. The one reading of "film to
+    /// eat": [`Flora::take_film`] takes no more than this, and every perception of film
+    /// (a mouth's taste, the film scent, a heuristic's "food here") reads it through
+    /// [`FloraView::edible_film`], so a face grazed to its refuge is bare to every sense.
+    pub fn edible_film(&self, film: f64) -> f64 {
+        let above = film - self.film_refuge_per_site();
+        // A site grazed to its refuge keeps the float residue of the withdrawal; that dust
+        // is not food, as a plant layer's is not ([`StandLayer::edible`]).
+        if above > layers::EDIBLE_DUST { above } else { 0.0 }
     }
 
     /// Every species with **no grazing refuge** (`graze_refuge` 0): a stand can be
@@ -4416,6 +4456,30 @@ impl<'a> FloraView<'a> {
             .iter()
             .filter(|g| g.film > 0.0)
             .map(|g| (g.site, g.film))
+    }
+
+    /// **Edible film** on a ground entry (TASTE): its film above the grazing refuge,
+    /// [`FloraConfig::edible_film`] — exactly what [`Flora::take_film`] would give a mouth
+    /// asking for everything. Every perception of film reads this and not [`Ground::film`].
+    pub fn edible_film(&self, g: &Ground) -> f64 {
+        self.config.edible_film(g.film)
+    }
+
+    /// [`FloraView::edible_film`] on `site`; 0 where there is no ground entry.
+    pub fn edible_film_at(&self, site: Site) -> f64 {
+        self.ground_at(site).map_or(0.0, |g| self.edible_film(g))
+    }
+
+    /// **Edible tissue** of a stand (TASTE): the sum over its foliage layers of what each
+    /// holds above its grazing floor ([`StandLayer::edible`]) — exactly what
+    /// [`Flora::take_foliage_of`] withdraws from every layer when asked for everything with
+    /// no induced defence. A plant's foliage or a fungus's cap tissue alike; 0 for a stand
+    /// cropped to its floor, which every sense of food then reads as bare.
+    pub fn edible_foliage(&self, stand: &Stand) -> f64 {
+        if !(stand.foliage > 0.0) {
+            return 0.0;
+        }
+        self.layers(stand).map(|l| l.edible()).sum()
     }
 
     /// Organic matter in every living and dead stock, the seed banks and the latticevines
@@ -5845,14 +5909,13 @@ impl Flora {
     /// [`Flora::take_litter`]'s rule on the film pool, booked as consumed.
     pub fn take_film(&mut self, site: Site, want: f64) -> Option<Taken> {
         let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
-        // The refuge ([`FloraConfig::film_graze_refuge`]) is out of a mouth's reach.
-        let refuge = self.config.film_graze_refuge.clamp(0.0, 1.0)
-            * self.config.film_capacity_per_m2
-            * self.config.voxel_m
-            * self.config.voxel_m;
+        // The refuge ([`FloraConfig::film_graze_refuge`]) is out of a mouth's reach: it
+        // takes at most the edible film ([`FloraConfig::edible_film`]), what every sense
+        // of film reads.
+        let edible = self.config.edible_film(self.ground[i].film);
         let g = &mut self.ground[i];
         // A bad `want` stays bad (refused below); a good one stops at the refuge.
-        let want = if want.is_finite() { want.min(g.film - refuge) } else { want };
+        let want = if want.is_finite() { want.min(edible) } else { want };
         let taken = take_pool(&mut g.film, &mut g.film_mineral, &mut g.film_energy, want)?;
         self.ledger.film_consumed += taken.organic;
         Some(self.book_consumed(taken))
@@ -6021,6 +6084,31 @@ fn default_film_land_growth_per_s() -> f64 {
 
 fn default_film_land_capacity_per_m2() -> f64 {
     FILM_LAND_CAPACITY_PER_M2
+}
+
+/// The shipped [`FloraConfig::film_land_capacity_wet_per_m2`] (SNAIL-LAND): the underwater
+/// capacity (`film_capacity_per_m2`, 0.4): saturated soil is as good a film bed as a
+/// pond's floor. Plausible, untuned.
+pub const FILM_LAND_CAPACITY_WET_PER_M2: f64 = 0.4;
+/// The shipped [`FloraConfig::film_shore_band_m`] (SNAIL-LAND): half a metre of bank, the
+/// capillary fringe and splash zone over a pond's edge. Plausible, untuned.
+pub const FILM_SHORE_BAND_M: f64 = 0.5;
+/// The shipped [`FloraConfig::film_shore_moisture_min`] (SNAIL-LAND): just under drained
+/// soil's field capacity (0.65), so a bank at field capacity carries film and drier ground
+/// does not. The probe (terrarium s1 at founding): faces within 0.5 m of water sit at
+/// pore fill 0.65, and 32 of 1031 reach the 0.9 land floor. Plausible, untuned.
+pub const FILM_SHORE_MOISTURE_MIN: f64 = 0.6;
+
+fn default_film_land_capacity_wet_per_m2() -> f64 {
+    FILM_LAND_CAPACITY_WET_PER_M2
+}
+
+fn default_film_shore_band_m() -> f64 {
+    FILM_SHORE_BAND_M
+}
+
+fn default_film_shore_moisture_min() -> f64 {
+    FILM_SHORE_MOISTURE_MIN
 }
 
 /// The shipped [`FloraConfig::film_graze_refuge`]: a tenth of a site's capacity, plausible

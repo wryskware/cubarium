@@ -288,7 +288,8 @@ fn the_r2b_physiology_table_scales_the_shredders() {
     }
 
     // Eggs.
-    assert_eq!(snail.egg_site, EggSite::Film);
+    // SNAIL-LAND: its clutch goes on land by the water.
+    assert_eq!(snail.egg_site, EggSite::Shore);
     assert_eq!(shredder.egg_site, EggSite::Litter);
     // The capgnawer lays at the fungus (the capgnawer package, 2026-10-05).
     assert_eq!(gnawer.egg_site, EggSite::Fungus);
@@ -617,6 +618,8 @@ fn a_snail_lays_only_on_a_film_face() {
     assert_eq!(film_at(&flora, bed), 0.0, "litter, no film");
 
     let mut config = FaunaConfig::default();
+    // The film site (main's rule before SNAIL-LAND, still a choice).
+    config.founders[SNAIL.index()].egg_site = EggSite::Film;
     {
         let core = &mut config.founders[SNAIL.index()].core;
         core.reserve_cap = 1.0;

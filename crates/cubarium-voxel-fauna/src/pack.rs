@@ -306,7 +306,7 @@ pub(crate) fn wants_rest(fauna: &Fauna, i: usize, clock_on: bool, daylight: f64)
         return false;
     };
     let phys = fauna.config.founder(founder);
-    !phys.active.awake(clock_on, daylight, &fauna.config.life) && !a.emergency
+    !phys.active.awake_in(clock_on, daylight, 1.0, fauna.night, phys.active_window, &fauna.config.life) && !a.emergency
 }
 
 /// A member under the chase floor (`chase_reserve_floor` of its cap) that neither wants

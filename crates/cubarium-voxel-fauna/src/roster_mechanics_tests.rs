@@ -544,20 +544,25 @@ fn filmed(voxel_m: f64, fill: f64) -> (World, Flora) {
             world.apply(WorldCommand::AddWater { x, y: 3, z, volume_m3: cell });
         }
     }
-    let mut fc = FloraConfig::default();
+    // The world's own cell size, as a live world's plant layer records it: the film's
+    // grazing refuge is a share of this cell's capacity.
+    let mut fc = FloraConfig::for_voxel_size(voxel_m);
     fc.film_seed_per_m2 = fill * fc.film_capacity_per_m2;
     let mut flora = Flora::new(fc);
     assert!(flora.seed_film(&world) > 0, "fixture: the faces are wet-eligible");
     (world, flora)
 }
 
-/// **Test 7. A film site at full capacity emits `Chem(film)` ≈ 1, and at half capacity
-/// ≈ 0.5** (per second of emission, before the field's transport), on the 0.125 m and the
-/// 0.25 m grid alike.
+/// **Test 7. A film site emits `Chem(film)` by its edible share of capacity**: at full
+/// capacity `1 − film_graze_refuge`, at half `0.5 − film_graze_refuge` (TASTE: the film
+/// above the grazing refuge, what a mouth can take), per second of emission, before the
+/// field's transport, on the 0.125 m and the 0.25 m grid alike.
 #[test]
 fn a_film_site_emits_by_its_share_of_capacity() {
+    let refuge = FloraConfig::default().film_graze_refuge;
+    assert!(refuge < 0.5, "fixture: half a bed is above the refuge");
     for voxel_m in [0.125, 0.25] {
-        for (fill, want) in [(1.0, 1.0), (0.5, 0.5)] {
+        for (fill, want) in [(1.0, 1.0 - refuge), (0.5, 0.5 - refuge)] {
             let (world, flora) = filmed(voxel_m, fill);
             let s = Site { x: 4, y: 2, z: 2 };
             let e = crate::senses::film_emission(&world.view(), &flora.view(), s).expect("a source");
@@ -568,8 +573,8 @@ fn a_film_site_emits_by_its_share_of_capacity() {
 
 /// **Test 8. `taste_reference` is derived from the world's cell**: on a 0.25 m and a
 /// 0.125 m world the snail's reference is `film_capacity_per_m2 × cell area`, and a snail
-/// on a full site reads a taste of 1 before saturation (`1 / (1 + chem_saturation)` in
-/// the observation) on both.
+/// on a full site reads a taste of its edible share before saturation (`c / (c +
+/// chem_saturation)` in the observation, `c = 1 − film_graze_refuge`, TASTE) on both.
 #[test]
 fn the_snails_taste_reference_is_the_film_capacity_of_the_worlds_cell() {
     for voxel_m in [0.25, 0.125] {
@@ -595,10 +600,12 @@ fn the_snails_taste_reference_is_the_film_capacity_of_the_worlds_cell() {
             .expect("a taste module");
         let obs = crate::body::observation(&fauna, i, &world.view(), &flora.view(), &manifest, None, None);
         let sat = manifest.tunings.chem_saturation;
-        let full = 1.0 / (1.0 + sat);
+        // TASTE: a full site's edible film is `1 − film_graze_refuge` of its capacity.
+        let c = 1.0 - fc.film_graze_refuge;
+        let full = c / (c + sat);
         assert!(
             (obs[m.offset] - full).abs() <= 1e-6,
-            "{voxel_m} m: a full site tastes {} (want {full}, a cue of 1)",
+            "{voxel_m} m: a full site tastes {} (want {full}, a cue of {c})",
             obs[m.offset]
         );
     }

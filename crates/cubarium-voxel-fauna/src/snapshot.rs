@@ -112,10 +112,14 @@ use crate::Fauna;
 // 60: DROP — `FounderPhysiology::drop` (`DropRule`), `Departure::Fell`, the ledger's
 //     `drops_by_founder`, `drop_m_by_founder` and `drop_wound_by_founder`; a trapped body jumps
 //     down past its step at a wound.
-// 61: FEAR and FEAR-2 — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg, lost_calm_s}`,
+// 61: SNAIL-LAND — `EggSite::Shore`, `Amphibious::{egg_water_max_m, egg_climb_max_m,
+//     egg_moisture_min, egg_drown_s, egg_dry_moisture, egg_dry_s}`, `Clutch::{wet_ticks,
+//     dry_ticks}`, the ledger's `eggs_drowned_by_founder` and `eggs_dried_by_founder`.
+//     SNAIL-LAND-2 (same 61) — `Amphibious::{egg_search_m, graze_give_up, graze_worth, graze_search_m}`.
+// 62: FEAR and FEAR-2 — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg, lost_calm_s}`,
 //     `Vigil::{calm_walk, refuge}`, `Track::posture`; prey watch a sleeping or still Veilhound
 //     facing away, a flight ends in a perch or once its hunter is lost.
-pub const SCHEMA: u32 = 61;
+pub const SCHEMA: u32 = 62;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
