@@ -133,6 +133,7 @@ fn main() {
         Some("shore") => shore_probe(&args),
         Some("snailprobe") => snail_probe(&args),
         Some("filmhist") => film_hist(&args),
+        Some("pop") => pop_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -621,6 +622,32 @@ fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
 }
 
 /// `ledger load=DIR` (S2b): a save's frondgrazer ledger since its founding.
+/// `pop load=DIR` (TASTE): each lineage's head count in a save and its intake per
+/// alive-hour since the founding (the save's cumulative ledger), and the share of the
+/// ripple-snails on a face whose film is all refuge. Read-only; any arm's save loads.
+fn pop_probe(args: &[String]) {
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let v = s.fauna.view();
+    let fv = s.flora.view();
+    let l = &v.ledger;
+    let per = Founder::ALL
+        .iter()
+        .map(|f| {
+            let i = f.index();
+            let n = v.animals.iter().filter(|a| a.founder == Some(*f)).count();
+            let hours = l.alive_ticks_by_founder[i] as f64 / f64::from(TICK_HZ) / 3600.0;
+            let intake = if hours > 0.0 { l.assimilated_by_founder[i] / hours } else { f64::NAN };
+            format!("{}={n}/{intake:.6}", f.name())
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    let snails: Vec<_> = v.animals.iter().filter(|a| a.founder == Some(Founder::RippleSnail)).collect();
+    let on = snails.iter().filter(|a| fv.film_at(a.site) > 0.0 && fv.edible_film_at(a.site) == 0.0).count();
+    let share = if snails.is_empty() { f64::NAN } else { on as f64 / snails.len() as f64 };
+    println!("pop,{},minute={},{per},snail_at_refuge={share:.3}", dir.display(), s.minute);
+}
+
 fn ledger_dump(args: &[String]) {
     let dir = Path::new(arg(args, "load=").expect("load=DIR"));
     let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
