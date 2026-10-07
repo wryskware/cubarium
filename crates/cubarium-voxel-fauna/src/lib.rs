@@ -40,6 +40,7 @@ pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
 mod gait;
 pub use gait::Sprint;
+pub use step::jump::DropRule;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
@@ -48,6 +49,7 @@ pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;
+pub use step::shore_egg_site;
 
 #[cfg(test)]
 mod cone_speed_tests;
@@ -61,6 +63,8 @@ mod roster_tests;
 mod roster_mechanics_tests;
 #[cfg(test)]
 mod snail_tests;
+#[cfg(test)]
+mod snail_land_tests;
 #[cfg(test)]
 mod flight_tests;
 #[cfg(test)]
@@ -88,7 +92,7 @@ pub use predation::{
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use encounter::{
-    HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
+    DropWay, HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
     mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
     reachable_layers_of, route_components, standable_faces, surface_m, walkable_components,
@@ -1496,6 +1500,13 @@ pub struct Clutch {
     /// hatches by [`egg_hatches`], not by incubation, pays [`PredationConfig::egg_upkeep_per_s`], and dies
     /// to the litter when its viability runs out.
     pub dormancy: Option<Dormancy>,
+    /// **A shore egg's clocks** (SNAIL-LAND, [`EggSite::Shore`]): ticks in a row under
+    /// standing water, and on ground drier than its lineage's `egg_dry_moisture`. 0 for
+    /// every other clutch.
+    #[serde(default)]
+    pub wet_ticks: u32,
+    #[serde(default)]
+    pub dry_ticks: u32,
 }
 
 impl Clutch {
@@ -2383,12 +2394,15 @@ pub enum Departure {
     /// An amphibious body's drying clock reached its lineage's `lethal_fraction`
     /// ([`crate::Amphibious`], AMPHIBIOUS-SNAIL). A corpse.
     Desiccation,
+    /// DROP: its wound reached 1 on a jump down ([`crate::DropRule`]). A corpse.
+    Fell,
 }
 
 impl Departure {
-    pub const ALL: [Departure; 5 + Founder::COUNT] = {
-        let mut all = [Departure::Starved; 5 + Founder::COUNT];
+    pub const ALL: [Departure; 6 + Founder::COUNT] = {
+        let mut all = [Departure::Starved; 6 + Founder::COUNT];
         all[4 + Founder::COUNT] = Departure::Desiccation;
+        all[5 + Founder::COUNT] = Departure::Fell;
         all[1] = Departure::Drowned;
         all[2] = Departure::Aged;
         all[3] = Departure::Removed;
@@ -2410,6 +2424,7 @@ impl Departure {
             Departure::Removed => 3,
             Departure::Killed { by } => 4 + by.index(),
             Departure::Desiccation => 4 + Founder::COUNT,
+            Departure::Fell => 5 + Founder::COUNT,
         }
     }
 
@@ -2425,6 +2440,7 @@ impl Departure {
             Departure::Aged => "aged",
             Departure::Removed => "removed",
             Departure::Desiccation => "desiccated",
+            Departure::Fell => "fell",
             Departure::Killed { by } => {
                 static NAMES: std::sync::OnceLock<[&'static str; Founder::COUNT]> =
                     std::sync::OnceLock::new();
@@ -2822,6 +2838,14 @@ pub struct FaunaLedger {
     pub sprint_ticks_by_founder: [u64; Founder::COUNT],
     #[serde(default)]
     pub winded_by_founder: [u64; Founder::COUNT],
+    /// DROP: jumps down past the step by a trapped body, their metres summed, and the wound
+    /// they added summed, by lineage.
+    #[serde(default)]
+    pub drops_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub drop_m_by_founder: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub drop_wound_by_founder: [f64; Founder::COUNT],
     /// Predation (`design/predation-and-flight-2026-09-28.md` §2.3), by the **striker's**
     /// lineage: strikes begun, and contacts resolved as a hit or a dodge.
     pub strikes_by_founder: [u64; Founder::COUNT],
@@ -3170,6 +3194,13 @@ pub struct FaunaLedger {
     /// Eggs lost before hatching (face gone, flooded), by lineage.
     #[serde(default)]
     pub eggs_lost_by_founder: [u64; Founder::COUNT],
+    /// **Shore eggs drowned** (SNAIL-LAND): under standing water past `egg_drown_s`, to
+    /// the litter of their face, by lineage.
+    #[serde(default)]
+    pub eggs_drowned_by_founder: [u64; Founder::COUNT],
+    /// ... and dried: on ground drier than `egg_dry_moisture` past `egg_dry_s`.
+    #[serde(default)]
+    pub eggs_dried_by_founder: [u64; Founder::COUNT],
     /// **AMPHIBIOUS-SNAIL readouts** (counters only): ticks an amphibious body was alive,
     /// `[day, night][in water, ashore]` (day: daylight at or above the day line, or the
     /// clock off), and retractions begun.
@@ -3622,6 +3653,14 @@ pub struct Fauna {
     /// of that flight goes by its route graph. Session state: not saved.
     #[serde(skip)]
     pub(crate) route_flee: FxHashMap<u64, u64>,
+    /// DROP: per grounded body, its trapped clock (`step::jump::Trapped`). Session state:
+    /// not saved.
+    #[serde(skip)]
+    pub(crate) trapped: FxHashMap<u64, step::jump::Trapped>,
+    /// DROP: per trapped body, the jump down it is taking (`step::jump::DropPlan`). Session
+    /// state: not saved.
+    #[serde(skip)]
+    pub(crate) drop_plans: FxHashMap<u64, step::jump::DropPlan>,
 }
 
 /// **Which layer set a founder's held actions** on its last controller sample (EDGE's
@@ -3652,11 +3691,13 @@ pub enum Steer {
     Pack,
     /// The light, loom or glow steering.
     Light,
+    /// DROP: a trapped body's jump down.
+    Drop,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 12] = [
+    pub const ALL: [Steer; 13] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -3669,6 +3710,7 @@ impl Steer {
         Steer::Yield,
         Steer::Pack,
         Steer::Light,
+        Steer::Drop,
     ];
 
     /// A short name for tables.
@@ -3686,6 +3728,7 @@ impl Steer {
             Steer::Yield => "yield",
             Steer::Pack => "pack",
             Steer::Light => "light",
+            Steer::Drop => "drop",
         }
     }
 }
@@ -3941,6 +3984,8 @@ impl Fauna {
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
             pressed: FxHashMap::default(),
+            trapped: FxHashMap::default(),
+            drop_plans: FxHashMap::default(),
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
         })
@@ -4173,6 +4218,31 @@ impl Fauna {
     /// Turn births on or off. An isolated arena turns them off; the live world never does.
     pub fn set_births_enabled(&mut self, enabled: bool) {
         self.births_enabled = enabled;
+    }
+
+    /// DROP's readout for body `id`: the tick its trapped clock started (if it is cornered now),
+    /// and the jump it is taking (`from`, `land`).
+    pub fn drop_state(&self, id: u64) -> (Option<u64>, Option<(Site, Site)>) {
+        (
+            self.trapped.get(&id).filter(|t| t.cornered).map(|t| t.since),
+            self.drop_plans.get(&id).map(|p| (p.from, p.land)),
+        )
+    }
+
+    /// **A probe's placement** (DROP's `hunter_study drop`): the grounded body `id` stands on
+    /// `site`, centred on its column, its trapped clock and jump cleared. No check of the face:
+    /// the probe picks it. `false` when there is no such body.
+    pub fn probe_place(&mut self, id: u64, site: Site, voxel_m: f64) -> bool {
+        let Ok(i) = self.animals.binary_search_by_key(&id, |a| a.id) else { return false };
+        let a = &mut self.animals[i];
+        a.site = site;
+        a.pose.x = (f64::from(site.x) + 0.5) * voxel_m;
+        a.pose.z = (f64::from(site.z) + 0.5) * voxel_m;
+        a.pose.y_m = surface_m(site.y, voxel_m);
+        a.mobility = Mobility::default();
+        self.trapped.remove(&id);
+        self.drop_plans.remove(&id);
+        true
     }
 
     pub fn tick(&self) -> u64 {
@@ -4554,6 +4624,8 @@ impl Fauna {
                 laid_tick: self.tick,
                 lineage,
                 dormancy: Some(Dormancy::draw(&self.config.predation, c.seed, serial, self.tick)),
+                wet_ticks: 0,
+                dry_ticks: 0,
             });
             self.ledger.eggs_buried += 1;
             self.ledger.introduced_organic_in += organic;

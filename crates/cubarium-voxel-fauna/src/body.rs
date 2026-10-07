@@ -525,6 +525,11 @@ pub struct FounderPhysiology {
     /// instead of flight. Off for every lineage but the frondgrazer.
     #[serde(default)]
     pub hunker: crate::Hunker,
+    /// **Its jump down when trapped** (DROP, [`crate::DropRule`]): off its route graph with no
+    /// walking way back on and no glide, it jumps down past its step, at a wound. No jump for
+    /// the bellwing and the ripple-snail.
+    #[serde(default)]
+    pub drop: crate::DropRule,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -1049,6 +1054,92 @@ pub struct Amphibious {
     /// ... and the roam hours last this long after rain stops, seconds.
     #[serde(default = "default_roam_after_rain_s")]
     pub roam_after_rain_s: f64,
+    /// **Eggs on land** (SNAIL-LAND, Wrysk 2026-10-06; [`EggSite::Shore`]): the egg face is
+    /// out of standing water and within this horizontal distance, metres, of a column whose
+    /// highest support face at or below the egg face holds standing water. Apple snails
+    /// (*Pomacea*) lay above the waterline beside it, out of reach of aquatic egg predators.
+    #[serde(default = "default_egg_water_max_m")]
+    pub egg_water_max_m: f64,
+    /// ... at most this far above that water's surface, metres (how far it climbs).
+    #[serde(default = "default_egg_climb_max_m")]
+    pub egg_climb_max_m: f64,
+    /// ... on ground of this pore fill or more (its [`ground_moisture`]).
+    #[serde(default = "default_egg_moisture_min")]
+    pub egg_moisture_min: f64,
+    /// **The egg's risks**: a shore egg under standing water this long, seconds, without a
+    /// break drowns (to the litter of its face). *Pomacea* eggs survive a day or two under
+    /// water and fail after four or five of a two-week incubation.
+    #[serde(default = "default_egg_drown_s")]
+    pub egg_drown_s: f64,
+    /// ... and one on ground drier than this pore fill ...
+    #[serde(default = "default_egg_dry_moisture")]
+    pub egg_dry_moisture: f64,
+    /// ... for this long, seconds, without a break dries out (to the litter of its face).
+    #[serde(default = "default_egg_dry_s")]
+    pub egg_dry_s: f64,
+    /// **The trip's reach** (SNAIL-LAND-2): how far, metres, a ready layer looks for a shore
+    /// egg face it can afford and whose nest is not crowded (a world query, as the water
+    /// reflex's). Before SNAIL-LAND-2 the trip looked only as far as `roam_search_m`, and a
+    /// layer in mid-pond held its full reserve and its eggs.
+    #[serde(default = "default_egg_search_m")]
+    pub egg_search_m: f64,
+    /// **The giving-up density** (SNAIL-LAND-2, Charnov's marginal value rule): a grazer
+    /// that wants food and stands on a face holding less film than this share of one site's
+    /// underwater film capacity (`film_capacity_per_m2 · voxel_m²`) walks to a richer face
+    /// within `graze_search_m` (in water at any hour; out of water only in its roam hours).
+    /// Read on the edible film, above the grazing refuge (TASTE), as the snail's taste and
+    /// the graze target's per-snail worth (`graze_worth`) are: a face grazed to its refuge
+    /// tastes of nothing and is left in any case; this leaves a patch poorer than richer
+    /// ones in reach before it is bare. 0: off (it stays on any film it tastes).
+    #[serde(default = "default_graze_give_up")]
+    pub graze_give_up: f64,
+    /// ... a face worth the walk holds at least this share of a site's capacity per snail
+    /// standing on it (itself counted) ...
+    #[serde(default = "default_graze_worth")]
+    pub graze_worth: f64,
+    /// ... within this horizontal distance, metres.
+    #[serde(default = "default_graze_search_m")]
+    pub graze_search_m: f64,
+}
+
+fn default_egg_search_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.egg_search_m
+}
+
+fn default_graze_give_up() -> f64 {
+    Amphibious::RIPPLE_SNAIL.graze_give_up
+}
+
+fn default_graze_worth() -> f64 {
+    Amphibious::RIPPLE_SNAIL.graze_worth
+}
+
+fn default_graze_search_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.graze_search_m
+}
+
+fn default_egg_water_max_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.egg_water_max_m
+}
+
+fn default_egg_climb_max_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.egg_climb_max_m
+}
+
+fn default_egg_moisture_min() -> f64 {
+    Amphibious::RIPPLE_SNAIL.egg_moisture_min
+}
+
+fn default_egg_drown_s() -> f64 {
+    Amphibious::RIPPLE_SNAIL.egg_drown_s
+}
+
+fn default_egg_dry_moisture() -> f64 {
+    Amphibious::RIPPLE_SNAIL.egg_dry_moisture
+}
+
+fn default_egg_dry_s() -> f64 {
+    Amphibious::RIPPLE_SNAIL.egg_dry_s
 }
 
 fn default_roam_search_m() -> f64 {
@@ -1093,6 +1184,29 @@ impl Amphibious {
         roam_search_m: 1.5,
         // Snails stay out a couple of real hours after rain: 10 min of world time.
         roam_after_rain_s: 600.0,
+        // Apple snails lay a few centimetres to about half a metre above the waterline on
+        // stems, banks and walls beside the water (Hayes et al. 2015; Cowie 2002): half a
+        // metre from the water, up to half a metre above it.
+        egg_water_max_m: 0.5,
+        egg_climb_max_m: 0.5,
+        // Damp ground: over the step minimum, under drained soil's field capacity (0.65).
+        egg_moisture_min: 0.5,
+        // The clutch incubates 300 s (the shredder's); *Pomacea* eggs (two weeks) take a
+        // day or two under water and fail after four or five: about 0.3 of incubation.
+        egg_drown_s: 90.0,
+        // The calcareous clutch resists drying (it is laid in air) but fails below about
+        // 50 % air humidity over days: ground drier than the step minimum for 0.4 of the
+        // incubation.
+        egg_dry_moisture: 0.33,
+        egg_dry_s: 120.0,
+        // Its own short world, as the water reflex's: a few metres of a pond's margin.
+        egg_search_m: 4.0,
+        // A grazed face at under a third of the bed's capacity is left for one holding at
+        // least half of it, within a metre (about five body lengths), both read on the film
+        // above the grazing refuge (a tenth). Plausible, untuned: below a fresh bed.
+        graze_give_up: 0.3,
+        graze_worth: 0.5,
+        graze_search_m: 1.0,
     };
 
     /// The clock's rise per second out of water on ground of moisture `m` (0..1), before
@@ -1192,6 +1306,11 @@ pub enum EggSite {
     /// [`crate::Reproduction::egg_fungus_radius_m`] of a fungus holding cap tissue, so the
     /// young hatch at their food and recruitment follows the fungus.
     Fungus,
+    /// **On land by the water** (SNAIL-LAND, the ripple-snail; Wrysk 2026-10-06: "snails
+    /// should lay eggs on land"): on a face out of standing water near the water's edge,
+    /// on moist ground, by its lineage's [`Amphibious`] shore knobs. A lineage with no
+    /// amphibious table finds no such face.
+    Shore,
 }
 
 /// How a fresh world is founded with a lineage ([`FounderPhysiology::founding`]).
@@ -1430,6 +1549,7 @@ impl FounderPhysiology {
         p.vigilance = crate::vigil::vigilance_of(founder);
         p.sprint = crate::gait::sprint_of(founder);
         p.hunker = crate::vigil::hunker_of(founder);
+        p.drop = crate::step::jump::drop_of(founder);
         p
     }
 
@@ -1534,6 +1654,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                drop: crate::DropRule::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1605,6 +1726,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                drop: crate::DropRule::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1699,6 +1821,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                drop: crate::DropRule::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -2061,8 +2184,8 @@ impl FounderPhysiology {
                     // Amphibious (Wrysk, 2026-10-06): it crawls out onto wet ground at
                     // night and after rain, on a drying clock, and goes back to water.
                     amphibious: Some(Amphibious::RIPPLE_SNAIL),
-                    // Its clutch goes on film, under water.
-                    egg_site: EggSite::Film,
+                    // Its clutch goes on land by the water (SNAIL-LAND).
+                    egg_site: EggSite::Shore,
                     // Taste reads film against the film's own capacity per site, derived on
                     // the world's cell (`taste_reference_on`): so no fixed stock here.
                     taste_reference: None,
@@ -2770,6 +2893,42 @@ pub fn motor_probe(
     )
 }
 
+/// **DROP: the motor's own walk** of a disc of radius `r` from `(fx, fz)` on layer `standing_y`
+/// straight to `(tx, tz)` (no wrap: the caller's local coordinates, `tx` may run past the
+/// ring), in sub-steps of at most a quarter voxel and the radius, each one [`advance_candidate`]
+/// admits (no water rule): the layer it ends on, `None` when a sub-step is refused or falls
+/// short.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn motor_walk(
+    view: &VoxelView<'_>,
+    (fx, fz): (f64, f64),
+    (tx, tz): (f64, f64),
+    standing_y: u32,
+    r: f64,
+    wade_depth_m: f64,
+    headroom: u32,
+    step_limits: StepLimits,
+) -> Option<u32> {
+    let (dx, dz) = (tx - fx, tz - fz);
+    let len = (dx * dx + dz * dz).sqrt();
+    if !(len > 0.0) {
+        return Some(standing_y);
+    }
+    let dir = (dx / len, dz / len);
+    let sub = (0.25 * view.config.voxel_m).min(r.max(1e-3));
+    let n = (len / sub).ceil().max(1.0) as u32;
+    let width_m = f64::from(view.config.width) * view.config.voxel_m;
+    let (mut px, mut pz, mut y) = (fx.rem_euclid(width_m), fz, standing_y);
+    for _ in 0..n {
+        let (nx, nz, moved, ny) = advance_candidate(view, px, pz, dir, y, len / f64::from(n), r, wade_depth_m, headroom, step_limits, None)?;
+        if moved < 0.5 * len / f64::from(n) {
+            return None;
+        }
+        (px, pz, y) = (nx, nz, ny);
+    }
+    Some(y)
+}
+
 /// Whether a disc of radius `r` centred at `(cx, cz)`, standing on `standing_y`, is clear
 /// of solid over its `headroom` layers above the highest within-step ground under it:
 /// the clearance [`advance_candidate`] asks of a sub-step that stays on its layer, asked
@@ -3195,8 +3354,10 @@ fn pool_stock(fv: &FloraView<'_>, site: Site, food: crate::Food) -> f64 {
     fv.ground_at(site).map_or(0.0, |g| match food {
         crate::Food::Litter => g.litter,
         crate::Food::Carrion => g.carrion,
-        // Glassfilm (roster R2b): the film pool at the face.
-        crate::Food::Film => g.film,
+        // Glassfilm (roster R2b): the film pool at the face above its grazing refuge
+        // (TASTE): a face grazed to the refuge tastes of nothing, as `take_film` gives
+        // nothing there.
+        crate::Food::Film => fv.edible_film(g),
         // Neither is a ground pool; a mouth never asks this of them. Nectar (F1) is a
         // flower product, not a pool, and fruit (F3) a hanging one.
         crate::Food::CapTissue | crate::Food::Foliage | crate::Food::Nectar | crate::Food::Fruit => 0.0,
