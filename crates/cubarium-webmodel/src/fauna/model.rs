@@ -441,6 +441,9 @@ impl FaunaModel {
     /// `Activity::awake_in`).
     pub fn on_phase_in(&self, f: Founder, daylight: f64, night: NightClock) -> f64 {
         let p = self.phys(f);
+        if p.lure_daylight {
+            return 1.0;
+        }
         let clock_on = self.day.mode != DayMode::Off;
         let life = &self.config.life;
         match p.active {
@@ -633,7 +636,9 @@ impl FaunaModel {
             let phys = *self.phys(f);
             let fit = *self.fits.of(f);
             let hunter = phys.hunter.is_some();
-            let diet: Vec<Food> = phys.diet.foods().collect();
+            let diet: Vec<Food> = phys.diet.foods()
+                .filter(|&food| f != Founder::Seedporter || phys.catch_bellwings || food != Food::Carrion)
+                .collect();
             // The response is fitted on patch's world totals: on a larger floor the stock and the
             // crowd are read per patch-sized area. A supply that carries its areas is read per
             // its own area over the one fitted on, food by food.
@@ -849,6 +854,11 @@ impl FaunaModel {
             }
             let hp = *self.phys(hf);
             let Some(h) = hp.hunter else { continue };
+            if hf == Founder::Seedporter
+                && (!hp.catch_bellwings || self.night_at(self.t_s).since_set_h.is_finite())
+            {
+                continue;
+            }
             let rule = self.hunt_rule(hf);
             // A pack's window: its adults per pack, each at the hunter cohort's body.
             let per_pack = match hp.pack {
@@ -897,6 +907,17 @@ impl FaunaModel {
                     for c in self.pops[pf.index()].iter_mut() {
                         if c.host.is_some() || !(c.n > 0.0) || !laws::in_size_window(&hp, hb * per_pack, c.b.body) {
                             continue;
+                        }
+                        if hf == Founder::Seedporter {
+                            let damage = h.strike_power * hb / c.b.body.max(f64::MIN_POSITIVE)
+                                * (1.0 - pp.armour);
+                            let strikes = (1.0 / damage.max(f64::MIN_POSITIVE)).ceil().max(1.0);
+                            let cost = strikes * h.strike_cost_s * hp.core.maintenance_per_s * hb;
+                            let meal =
+                                (c.b.body + c.b.reserve) * hp.yield_by_food[Food::Carrion.index()];
+                            if meal - cost <= hp.catch_gain_min {
+                                continue;
+                            }
                         }
                         let share = laws::strike_share(&hp, hb, &pp, c.b.body);
                         let hazard = alpha / area * hn * share * share;

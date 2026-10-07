@@ -247,7 +247,9 @@ fn a_lanternjaw_is_active_in_a_dark_cave_by_day_and_not_in_open_daylight() {
     let life = FaunaConfig::default().life;
     let state_at = |x_m: f64| {
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut c = FaunaConfig::default();
+        c.founders[LJ.index()].lure_daylight = false;
+        let mut fauna = Fauna::new(c);
         let lj = introduce(&mut fauna, &world, LJ, StartingStores::FULL);
         place(&mut fauna, lj, x_m, LANE_Z, EAST);
         drive(&mut fauna, lj, 0.0, false);

@@ -125,7 +125,9 @@ use crate::Fauna;
 //     `FaunaLedger::{pup_swallowed_organic, pup_regurgitated_surplus, pup_regurgitated_lean,
 //     pup_upkeep_organic, pups_starved, pups_lost_other, provision_withheld_ticks}`.
 // 65: GLOWCAP — living mycelium intake by founder, included in CapTissue.
-pub const SCHEMA: u32 = 65;
+// 66: MIMIC and MIMIC-2 — FounderPhysiology daytime lure/flower ambush, opportunistic
+//     catch and bounded, density-led catch foray config.
+pub const SCHEMA: u32 = 66;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

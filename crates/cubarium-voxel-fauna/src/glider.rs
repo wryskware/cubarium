@@ -361,6 +361,32 @@ pub(super) fn glider_act(
     let manifest = fauna.config.manifest(founder);
     let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
     let mut held = fauna.animals[i].founder_state.held;
+    if mode == MobilityMode::Perched && !asleep && phys.catch_bellwings {
+        if let Some(h) = phys.hunter {
+            match fauna.animals[i].strike {
+                Some(s) if s.phase != super::StrikePhase::Recovery => {
+                    super::strike_tick(fauna, i, view, &phys, h, seed, tick, hits);
+                    return;
+                }
+                Some(mut s) => {
+                    s.ticks_left = s.ticks_left.saturating_sub(1);
+                    fauna.animals[i].strike = (s.ticks_left > 0).then_some(s);
+                }
+                None => {}
+            }
+            let g = phys.body_at(fauna.animals[i].body);
+            if due
+                && held.feed > 0.0
+                && fauna.animals[i].eating
+                && fauna.animals[i].strike.is_none()
+            {
+                if let Some(prey) = super::prey_in_capsule(fauna, i, view, &g, &h) {
+                    super::start_strike(fauna, i, prey);
+                    return;
+                }
+            }
+        }
+    }
     {
         let pc = &fauna.config.predation;
         held.forward *= (1.0 - pc.wound_slow * fauna.animals[i].wound).clamp(0.0, 1.0);
@@ -399,10 +425,23 @@ fn ground_tick(
     let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
     let held = fauna.animals[i].founder_state.held;
     let before = fauna.animals[i].pose;
-    // The walk, with the walker's mouth shut: fruit is this module's bite.
-    fauna.animals[i].founder_state.held.feed = 0.0;
+    // Fruit remains this module's bite; only a reachable catch or carcass goes through
+    // the walker's existing strike/meal machinery.
+    let geometry = phys.body_at(fauna.animals[i].body);
+    let catch = phys.catch_bellwings
+        && phys.hunter.is_some_and(|h| {
+            super::prey_in_capsule(fauna, i, view, &geometry, &h).is_some()
+                || crate::hunt::mouth_on_carcass(&flora.view(), view, &fauna.animals[i], &geometry)
+        });
+    fauna.animals[i].founder_state.held.feed = if catch { held.feed } else { 0.0};
     founder_act(fauna, i, view, flora, seed, tick, hits);
     fauna.animals[i].founder_state.held.feed = held.feed;
+    if fauna.animals[i]
+        .strike
+        .is_some_and(|s| s.phase != super::StrikePhase::Recovery)
+    {
+        return;
+    }
     let v = view.config.voxel_m;
     {
         let a = &mut fauna.animals[i];

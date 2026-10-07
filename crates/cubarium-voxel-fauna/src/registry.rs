@@ -243,6 +243,12 @@ fn founder_rows() -> Vec<Row> {
         r("yield_by_food.*", "fraction", fraction, "assimilation yield of one food class").search(0.05, 0.9),
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
+        r("flower_ambush_m", "m", nonneg, "MIMIC: holds an ambush this close to a flower"),
+        r("catch_ceiling_m", "m above hunter base", nonneg, "MIMIC: highest bellwing base a catch can reach"),
+        r("catch_gain_min", "organic units", nonneg, "MIMIC: minimum yield less expected strike upkeep cost"),
+        r("catch_foray_m", "m", nonneg, "MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays"),
+        r("catch_foray_min", "bodies", nonneg, "MIMIC-2: minimum sensed profitable visitors before a fruit-search detour"),
+        r("catch_foray_s", "s", nonneg, "MIMIC-2: maximum catch foray without a reward, before avoiding its patch"),
         r("active_window.before_rise_h", "h on the 24-h day clock", nonneg, "it wakes this long before sunrise on top of its rhythm (LURE: dawn flight)").prov("decision"),
         r("active_window.after_set_h", "h on the 24-h day clock", nonneg, "it stays awake this long after sunset on top of its rhythm (LURE: dusk flight)").prov("decision"),
         r("sleep_upkeep", "x basal upkeep", fraction, "upkeep while asleep").search(0.1, 1.0).prov("decision"),
@@ -667,7 +673,7 @@ fn knob_rows() -> Vec<Row> {
         lk("mark_s", "s", nonneg, "a failed visit marks the place 'no reward here' for this long").search(10.0, 1800.0).log(),
         lk("mark_radius_m", "m", nonneg, "a mark covers beacons within this of its centre").search(0.1, 2.0),
         lk("lift_per_m", "lift per m", nonneg, "a flyer approaching a beacon climbs or drops toward its height at this lift per metre"),
-        lk("near_m", "m", nonneg, "inside this of a beacon a flyer slows to near_forward"),
+        lk("near_m", "m", nonneg, "inside this of a beacon it slows to near_forward; walkers also start the no-reward inspection timer"),
         lk("near_forward", "fraction", fraction, "a flyer's forward effort near a beacon"),
         lk("glow_scent_gate", "chem response", fraction, "a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this").search(0.0, 0.5),
         // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming.

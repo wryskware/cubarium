@@ -667,7 +667,8 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
         } else {
             hungry >= phys.wake_hunger
         };
-        let on_phase = phys.active.awake_in(clock_on, daylight, sky, fauna.night, phys.active_window, &life);
+        let on_phase = phys.lure_daylight
+            || phys.active.awake_in(clock_on, daylight, sky, fauna.night, phys.active_window, &life);
         let dark_awake = on_phase && clock_on && phys.active.reads_face_light() && daylight >= life.day_line;
         let free = a.alert_ticks == 0
             && a.mobility.climb.is_none()
@@ -1391,6 +1392,17 @@ fn controllers(
                 actions.feed = 0.0;
             }
         }
+        if driven
+            && !fled
+            && fauna.controllers.flees(id)
+            && founder == crate::Founder::Seedporter
+            && (!sky.clock_on || sky.daylight >= fauna.config.life.day_line)
+        {
+            if let Some(go) = crate::hunt::catch_step(fauna, i, view, &fv) {
+                actions = go;
+                lure = 0.0;
+            }
+        }
         // The detritus web D2: the lanternjaw's patrol (its heuristic only, while the
         // world's `hunt.patrol` is on). The carcass yield below still wins.
         if driven && fauna.controllers.hunt_patrol(id) && !fauna.controllers.at_carcass(id) {
@@ -1412,7 +1424,8 @@ fn controllers(
                         }
                         None => 1.0,
                     };
-                    if face_sky * sky.daylight < fauna.config.life.day_line { lit } else { 0.0 }
+                    if fauna.config.founder(founder).lure_daylight
+                        || face_sky * sky.daylight < fauna.config.life.day_line { lit } else { 0.0 }
                 } else {
                     lit
                 };
@@ -1489,6 +1502,20 @@ fn controllers(
                 lure = 0.0;
                 lift = 0.0;
                 src = crate::Steer::Drop;
+            }
+        }
+        if lure > 0.0 && sky.clock_on && !fauna.config.founder(founder).lure_daylight {
+            let a = &fauna.animals[i];
+            let v = view.config.voxel_m;
+            let face_sky = a.pose.column(v, view.config.depth).map_or(1.0, |(cx, cz)| {
+                view.sky_visibility(
+                    cx.rem_euclid(i64::from(view.config.width)),
+                    a.sense_layer(v),
+                    cz,
+                )
+            });
+            if face_sky * sky.daylight >= fauna.config.life.day_line {
+                lure = 0.0;
             }
         }
         fauna.steer.insert(id, src);
@@ -2305,32 +2332,7 @@ fn founder_act(
             t => t,
         };
         if let Some(prey) = target {
-            let h = phys.hunter.expect("a hunter");
-            let lure = crate::light::drawn_to_lure(fauna, prey);
-            let a = &mut fauna.animals[i];
-            a.strike = Some(Strike {
-                phase: StrikePhase::Windup,
-                ticks_left: crate::Hunter::ticks(h.windup_s),
-                prey,
-                from_x: a.pose.x,
-                from_z: a.pose.z,
-                lure,
-            });
-            a.state = State::Resting;
-            fauna.ledger.strikes_by_founder[founder.index()] += 1;
-            if let Ok(j) = fauna.animals.binary_search_by_key(&prey, |p| p.id) {
-                if let Some(pf) = fauna.animals[j].founder {
-                    fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
-                    fauna.ledger.funnel[founder.index()][pf.index()][crate::perception::STRUCK] += 1;
-                    // D2b readout: a patroller's strike its choice did not accept.
-                    let choosy = fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(fauna.animals[i].id);
-                    if choosy && !crate::hunt::accepts(&fauna.config, &fauna.animals[i], &fauna.animals[j], fauna.tick) {
-                        fauna.ledger.strikes_unchosen_by_prey[pf.index()] += 1;
-                    }
-                }
-            }
-            // R3: a pack member calls as it strikes.
-            crate::pack::call(fauna, i);
+            start_strike(fauna, i, prey);
             return;
         }
         fed = founder_feed(fauna, i, view, flora, &manifest, &geometry, &phys, held.feed);
@@ -2646,7 +2648,11 @@ fn meets_capsule(
     if segment_distance(jaw_from, jaw_to, (prey.pose.x, prey.pose.z), ring) > reach {
         return false;
     }
-    let s0 = crate::surface_m(striker.site.y, v) + striker.wall_offset_m();
+    let s0 = if striker.mobility.mode == crate::MobilityMode::Perched {
+        striker.pose.y_m
+    } else {
+        crate::surface_m(striker.site.y, v) + striker.wall_offset_m()
+    };
     let band = (s0, s0 + h.jaw_band_height_fraction * geometry.height_m);
     // A body off the ground (perched, flying, climbing, gliding) has its base at its
     // pose's height; a walker's is its support face's top.
@@ -2674,7 +2680,8 @@ fn prey_in_capsule(
     h: &crate::Hunter,
 ) -> Option<u64> {
     let a = &fauna.animals[i];
-    if a.mobility.climb.is_some() {
+    if a.mobility.climb.is_some()
+        || (a.founder == Some(crate::Founder::Seedporter) && fauna.night.since_set_h.is_finite()) {
         return None;
     }
     let ring = f64::from(view.config.width) * view.config.voxel_m;
@@ -2767,7 +2774,10 @@ fn strike_tick(
     };
     let step_limits = phys.step_limits(view.config.voxel_m);
     let wall_friction = fauna.config.life.wall_friction;
-    let standing_y = {
+    let perched = fauna.animals[i].mobility.mode == crate::MobilityMode::Perched;
+    let standing_y = if perched {
+        fauna.animals[i].site.y
+    } else {
         let a = &mut fauna.animals[i];
         let mut standing_y = a.site.y;
         body::resolve_motion(
@@ -2802,14 +2812,22 @@ fn strike_tick(
     let a = fauna.animals[i];
     let heading = a.pose.heading_rad;
     let jaw_from = jaw_of(s.from_x, s.from_z, heading, geometry.length_m, h.jaw_forward_length_fraction);
-    let jaw_to = jaw_of(a.pose.x, a.pose.z, heading, geometry.length_m, h.jaw_forward_length_fraction);
+    let jaw_to = if perched {
+        (
+            jaw_from.0 + reach * heading.sin(),
+            jaw_from.1 + reach * heading.cos(),
+        )
+    } else {
+        jaw_of(a.pose.x, a.pose.z, heading, geometry.length_m, h.jaw_forward_length_fraction)
+    };
     let prey = fauna
         .animals
         .binary_search_by_key(&s.prey, |p| p.id)
         .ok()
         .map(|j| fauna.animals[j]);
     if let Some(p) = prey {
-        if meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p) {
+        if meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p) && (founder != crate::Founder::Seedporter || crate::is_prey_of(&fauna.config, &a, &p))
+        {
             let pf = p.founder.expect("a prey has a lineage");
             let pp = fauna.config.founder(pf);
             let ring = f64::from(view.config.width) * view.config.voxel_m;
@@ -3324,7 +3342,16 @@ fn founder_feed(
     // with — before anything is withdrawn: the richest of the lineage's diet
     // ([`body::mouth_meal`]). Its class is the source's own: a pool names it, and a
     // stand's is its species' income rule.
-    let diet = fauna.config.founder(founder).diet;
+    let diet = if founder == crate::Founder::Seedporter && !phys.catch_bellwings {
+        crate::Diet::of(
+            &phys
+                .diet
+                .foods().filter(|&f| f != Food::Carrion)
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        phys.diet
+    };
     let Some((meal, stock, _)) =
         body::mouth_meal(&flora.view(), view, &cols, site_y, geometry, diet)
     else {
@@ -5040,3 +5067,47 @@ mod testpass2_light_tests;
 #[cfg(test)]
 #[path = "testpass2_edge_tests.rs"]
 mod testpass2_edge_tests;
+
+#[cfg(test)]
+#[path = "mimic_tests.rs"]
+mod mimic_tests;
+
+/// Begin the common windup, used by walking and perched catchers.
+fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
+    let founder = fauna.animals[i].founder.expect("founder");
+    let phys = *fauna.config.founder(founder);
+    let h = phys.hunter.expect("a hunter");
+    let lure = crate::light::drawn_to_lure(fauna, prey);
+    let a = &mut fauna.animals[i];
+    a.strike = Some(Strike {
+        phase: StrikePhase::Windup,
+        ticks_left: crate::Hunter::ticks(h.windup_s),
+        prey,
+        from_x: a.pose.x,
+        from_z: a.pose.z,
+        lure,
+    });
+    a.state = State::Resting;
+    fauna.ledger.strikes_by_founder[founder.index()] += 1;
+    if let Ok(j) = fauna.animals.binary_search_by_key(&prey, |p| p.id) {
+        if let Some(pf) = fauna.animals[j].founder {
+            fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
+            fauna.ledger.funnel[founder.index()][pf.index()][crate::perception::STRUCK] += 1;
+            // D2b readout: a patroller's strike its choice did not accept.
+            let choosy =
+                fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(fauna.animals[i].id);
+            if choosy
+                && !crate::hunt::accepts(
+                    &fauna.config,
+                    &fauna.animals[i],
+                    &fauna.animals[j],
+                    fauna.tick,
+                )
+            {
+                fauna.ledger.strikes_unchosen_by_prey[pf.index()] += 1;
+            }
+        }
+    }
+    // R3: a pack member calls as it strikes.
+    crate::pack::call(fauna, i);
+}
