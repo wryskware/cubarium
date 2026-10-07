@@ -587,6 +587,30 @@ impl RouteGraph {
             .map(|(_, j)| j)
     }
 
+    /// The voxel's size the graph was built at, metres.
+    pub fn voxel_m(&self) -> f64 {
+        self.voxel_m
+    }
+
+    /// **PIT-2, the point it steers at on its route**: from node `i` (where a body standing at
+    /// `(x, z)` is on the graph), the farthest node of `field`'s route within `max_steps`
+    /// steps of `i` to which the straight line from `(x, z)` is walkable on the graph
+    /// ([`RouteGraph::walk_line`]), else the route's next node. A body steering at the next
+    /// node, one column ahead, ran past it at its pace (two or three columns a controller
+    /// period) and off the graph at a bend; steering further along a straight stretch, it has
+    /// graph under its line the whole way. `None` at the goal or off the field.
+    pub fn pursue(&self, field: &FxHashMap<usize, u32>, i: usize, (x, z): (f64, f64), max_steps: u32) -> Option<usize> {
+        let mut at = self.next_toward(field, i)?;
+        for _ in 1..max_steps {
+            let Some(j) = self.next_toward(field, at) else { break };
+            if !self.walk_line(i, (x, z), self.centre(j)) {
+                break;
+            }
+            at = j;
+        }
+        Some(at)
+    }
+
     /// **PIT, the way out**: for a body standing on `site` off the graph, the first face of
     /// the shortest way **its own body** can step back onto it — its own disc of radius `r`
     /// clear over `headroom` layers at each face's centre and at the midpoint of each step

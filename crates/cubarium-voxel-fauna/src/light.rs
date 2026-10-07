@@ -13,7 +13,13 @@
 //! - **Glowcaps** — a glowcap with a cap: its own cyan light.
 //! - **Lures** — a lanternjaw's lit lure, awake: its own cyan light, at the middle of its
 //!   strike capsule inside its jaw band ([`lure_point`]); **moving** when the lanternjaw has
-//!   moved within the still window ([`crate::moved_recently`]).
+//!   moved within the still window ([`crate::moved_recently`]). **It mimics a flower**
+//!   (BELLWING): it also shows UV ([`LightConfig::lure_uv`] × a flower's reflectance), so an
+//!   eye with the `uv` channel sees its UV and its cyan together and reads it as a flower —
+//!   the UV class ([`BeaconKind::class_seen`]); an eye without UV sees its cyan alone. It
+//!   lays a flower's nectar scent too ([`LightConfig::lure_scent`], on its lanternjaw's
+//!   face), so a flyer led by smell comes within sight of it. A visit that finds no nectar
+//!   is a failed UV visit — the mimic's cost to the flowers' signal.
 //!
 //! Flowers and glowcaps are indexed and rebuilt on the plant clock (when the plant layer's
 //! tick or the terrain changes, [`Beacons::refresh`]); the lures are read live.
@@ -153,13 +159,24 @@ impl LightMode {
 impl BeaconKind {
     pub const COUNT: usize = 3;
 
-    /// Its learned class: [`UV`] for a flower, [`CYAN`] for a glowcap or a lure.
+    /// Its learned class to an eye without UV: [`UV`] for a flower, [`CYAN`] for a glowcap
+    /// or a lure ([`BeaconKind::class_seen`] for an eye with it).
     pub fn class(self) -> usize {
         match self {
             BeaconKind::Flower => UV,
             BeaconKind::Glowcap | BeaconKind::Lure => CYAN,
         }
     }
+    /// Its class to an eye with (`uv`) or without the UV channel: a lure that shows UV
+    /// ([`LightConfig::lure_uv`] > 0) is a flower — [`UV`] — to a UV eye; otherwise
+    /// [`BeaconKind::class`].
+    pub fn class_seen(self, cfg: &LightConfig, uv: bool) -> usize {
+        match self {
+            BeaconKind::Lure if uv && cfg.lure_uv > 0.0 => UV,
+            k => k.class(),
+        }
+    }
+
     pub const ALL: [BeaconKind; 3] = [BeaconKind::Flower, BeaconKind::Glowcap, BeaconKind::Lure];
 
     pub fn index(self) -> usize {
@@ -200,19 +217,34 @@ pub struct Beacon {
 }
 
 impl Beacon {
-    /// Its brightness: a flower's reflected light, a glowcap's or a lure's own.
+    /// Its brightness to an eye without UV: a flower's reflected light, a glowcap's or a
+    /// lure's own cyan.
     pub fn brightness(&self, cfg: &LightConfig, daylight: f64) -> f64 {
+        self.brightness_seen(cfg, daylight, false)
+    }
+
+    /// Its brightness to an eye with (`uv`) or without the UV channel: a lure shows a UV eye
+    /// its UV ([`LightConfig::lure_uv`] × `flower_reflectance`) on top of its cyan.
+    pub fn brightness_seen(&self, cfg: &LightConfig, daylight: f64, uv: bool) -> f64 {
         match self.kind {
             BeaconKind::Flower => cfg.flower_reflectance.max(0.0) * self.sky.clamp(0.0, 1.0) * daylight.clamp(0.0, 1.0),
             BeaconKind::Glowcap => cfg.glowcap_emission.max(0.0),
-            BeaconKind::Lure => cfg.lure_emission.max(0.0) * self.power.clamp(0.0, 1.0),
+            BeaconKind::Lure => {
+                let mimic = if uv { cfg.lure_uv.max(0.0) * cfg.flower_reflectance.max(0.0) } else { 0.0 };
+                (cfg.lure_emission.max(0.0) + mimic) * self.power.clamp(0.0, 1.0)
+            }
         }
     }
 
-    /// Its contrast: brightness over the light around it plus the floor.
+    /// Its contrast to an eye without UV: brightness over the light around it plus the floor.
     pub fn contrast(&self, cfg: &LightConfig, daylight: f64) -> f64 {
+        self.contrast_seen(cfg, daylight, false)
+    }
+
+    /// Its contrast to an eye with (`uv`) or without the UV channel.
+    pub fn contrast_seen(&self, cfg: &LightConfig, daylight: f64, uv: bool) -> f64 {
         let around = self.sky.clamp(0.0, 1.0) * daylight.clamp(0.0, 1.0);
-        let b = self.brightness(cfg, daylight);
+        let b = self.brightness_seen(cfg, daylight, uv);
         let den = around + cfg.background_floor.max(0.0);
         if den > 0.0 { b / den } else if b > 0.0 { f64::INFINITY } else { 0.0 }
     }
@@ -221,7 +253,11 @@ impl Beacon {
 /// **The reward expectation** of `kind`'s class in the record `p` at tick `now` (module note,
 /// "Learning"): the innate value plus the learned offset, relaxed over `forget_s`.
 pub fn expectation(cfg: &LightConfig, p: &crate::perception::Percept, kind: BeaconKind, now: u64) -> f64 {
-    let c = kind.class();
+    expectation_of(cfg, p, kind.class(), now)
+}
+
+/// [`expectation`] of the class `c` ([`UV`] or [`CYAN`]).
+pub fn expectation_of(cfg: &LightConfig, p: &crate::perception::Percept, c: usize, now: u64) -> f64 {
     let innate = if c == UV { cfg.uv_innate } else { cfg.cyan_innate };
     let offset = p.expect[c];
     if offset == 0.0 {
@@ -233,29 +269,33 @@ pub fn expectation(cfg: &LightConfig, p: &crate::perception::Percept, kind: Beac
     innate + offset * decay
 }
 
-/// Move the class of `kind` in the record of `id` toward `outcome` (1 a sip, 0 a failed
-/// visit) by `learn_rate` (module note); both offsets are brought up to now first.
-fn learn(fauna: &mut Fauna, id: u64, kind: BeaconKind, outcome: f64) {
+/// Move the class `kind` has to the eye of `founder` ([`BeaconKind::class_seen`]) in the
+/// record of `id` toward `outcome` (1 a sip, 0 a failed visit) by `learn_rate` (module
+/// note); both offsets are brought up to now first.
+fn learn(fauna: &mut Fauna, id: u64, founder: crate::Founder, kind: BeaconKind, outcome: f64) {
     let cfg = fauna.config.light;
     if !cfg.learn {
         return;
     }
+    let c = kind.class_seen(&cfg, fauna.config.founder(founder).senses.uv);
     let now = fauna.tick;
     let p = fauna.percepts.entry(id).or_default();
-    let now_e = [expectation(&cfg, p, BeaconKind::Flower, now), expectation(&cfg, p, BeaconKind::Glowcap, now)];
+    let now_e = [expectation_of(&cfg, p, UV, now), expectation_of(&cfg, p, CYAN, now)];
     let innate = [cfg.uv_innate, cfg.cyan_innate];
-    let c = kind.class();
     let mut e = now_e;
     e[c] += cfg.learn_rate.clamp(0.0, 1.0) * (outcome - e[c]);
     p.expect = [e[0] - innate[0], e[1] - innate[1]];
     p.expect_tick = now;
 }
 
-/// Whether the body `id` is naive about cyan now (the readout cut [`NAIVE_FRACTION`]): a
+/// Whether the body `id` of `founder` is naive about the lure's class to its eye now (cyan,
+/// or UV for a UV eye when the lure mimics a flower; the readout cut [`NAIVE_FRACTION`]): a
 /// body with no record is.
-pub(crate) fn naive(fauna: &Fauna, id: u64) -> bool {
+pub(crate) fn naive(fauna: &Fauna, id: u64, founder: crate::Founder) -> bool {
     let cfg = fauna.config.light;
-    fauna.percepts.get(&id).is_none_or(|p| expectation(&cfg, p, BeaconKind::Glowcap, fauna.tick) >= NAIVE_FRACTION * cfg.cyan_innate)
+    let c = BeaconKind::Lure.class_seen(&cfg, fauna.config.founder(founder).senses.uv);
+    let innate = if c == UV { cfg.uv_innate } else { cfg.cyan_innate };
+    fauna.percepts.get(&id).is_none_or(|p| expectation_of(&cfg, p, c, fauna.tick) >= NAIVE_FRACTION * innate)
 }
 
 /// The level a beacon of `contrast` is received at `d` metres (module note).
@@ -467,7 +507,9 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
         let lures = lures(fauna, view);
         // S3b: a still beacon draws by level × its class's expectation; a class expected to
         // pay under `expect_min` is passed by. Moving lights repel by level.
-        let weight = |k: BeaconKind| if cfg.learn { expectation(&cfg, &record, k, tick) } else { 1.0 };
+        // BELLWING: the class and the level are the ones its eye sees (a lure is a flower to a
+        // UV eye when it mimics one).
+        let weight = |k: BeaconKind| if cfg.learn { expectation_of(&cfg, &record, k.class_seen(&cfg, table.uv), tick) } else { 1.0 };
         let mut seen: Vec<(f64, f64, f64, Beacon)> = Vec::new();
         for b in fauna.beacons.list().iter().chain(lures.iter()) {
             if (b.kind == BeaconKind::Lure && b.body == a.id) || (!table.uv && b.kind == BeaconKind::Flower) {
@@ -485,7 +527,7 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
             if !b.moving && record.marked(b.x, b.z, tick, cfg.mark_radius_m, ring) {
                 continue;
             }
-            let level = received(&cfg, b.contrast(&cfg, daylight), d);
+            let level = received(&cfg, b.contrast_seen(&cfg, daylight, table.uv), d);
             if level >= table.light_min && level > 0.0 {
                 let score = if b.moving { level } else { level * weight(b.kind) };
                 if !b.moving && cfg.learn && weight(b.kind) < cfg.expect_min {
@@ -599,7 +641,7 @@ fn left_visit(fauna: &mut Fauna, id: u64, x: f64, z: f64, founder: crate::Founde
     let k = usize::from(kind).min(BeaconKind::COUNT - 1);
     fauna.ledger.failed_visits[founder.index()][k] += 1;
     fauna.ledger.left_visits[founder.index()][k] += 1;
-    learn(fauna, id, BeaconKind::from_index(kind), 0.0);
+    learn(fauna, id, founder, BeaconKind::from_index(kind), 0.0);
 }
 
 /// The inspection of the body `id` ended in a meal (its mouth took food): no mark.
@@ -659,7 +701,7 @@ pub(crate) fn steer_flyer(
             if let Some(k) = visited {
                 fauna.ledger.sipped_visits[founder.index()][usize::from(k).min(BeaconKind::COUNT - 1)] += 1;
             }
-            learn(fauna, a.id, kind, 1.0);
+            learn(fauna, a.id, founder, kind, 1.0);
         }
         rewarded(fauna, a.id);
         return None;
@@ -700,7 +742,7 @@ pub(crate) fn steer_flyer(
         if dh <= cfg.visit_m {
             let kind = p.light.beacon_kind;
             if let Inspection::Failed = inspect(fauna, i, ring) {
-                learn(fauna, a.id, BeaconKind::from_index(kind), 0.0);
+                learn(fauna, a.id, founder, BeaconKind::from_index(kind), 0.0);
                 budget(fauna, LightMode::inspect(kind));
                 return None;
             }

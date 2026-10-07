@@ -166,6 +166,10 @@ fn species_rows() -> Vec<Row> {
             .search(0.0, 2.0),
         r("reproduction.brood_share", "fraction of net income", Range::fraction(), "the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off)")
             .search(0.0, 1.0),
+        r("reproduction.litters_per_year", "conceptions per year", nonneg, "breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season)"),
+        r("reproduction.breeding_phase", "year phase", Range::fraction(), "breeding season: the year phase its window opens at (0: a dry season's start)"),
+        r("reproduction.breeding_window", "share of the year", nonneg, "breeding season: the window's width (1 or more: the whole year)"),
+        r("reproduction.gestation_upkeep_factor", "x basal upkeep", nonneg, "pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise)"),
     ]
 }
 
@@ -360,6 +364,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.close_in_m", "m", nonneg, "STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off)").optional(),
         r("pack.stand_off_reach_fraction", "fraction of the strike's reach", fraction, "STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey").optional(),
         r("pack.pit_search_m", "m", nonneg, "PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off)").optional(),
+        r("pack.route_swing_voxels", "voxels per controller period", nonneg, "PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit)").optional(),
         r("pack.herd_shun_m", "m", nonneg, "STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone)").optional(),
         r("pack.route_reach_fraction", "fraction", fraction, "prey is taken only within this share of cruise x chase_give_up_s by route").optional(),
         r("pack.route_refresh_s", "s", nonneg, "a pack's walking route components (only prey in its own is taken) are rebuilt at most this often").optional(),
@@ -369,6 +374,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.follow_radius_m", "m", nonneg, "an idle adult walks back to within this of the breeder").optional(),
         r("pack.home_give_up_s", "s", nonneg, "an adult wanting rest walks home this long, then rests where it is").optional(),
         r("pack.stalk_margin", "fraction of the prey's hearing floor", nonneg, "S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk)").optional(),
+        r("pack.breed_reserve_fraction", "fraction of reserve cap", fraction, "the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone)").optional(),
         r("pack.commit_m", "m", nonneg, "S2: ...and rushes within this of its prey").optional(),
         r("pack.select_kin_m", "m", nonneg, "PACK-TUNE: kin of a target's lineage within this lower its prospect").optional(),
         r("pack.select_kin_factor", "factor", fraction, "PACK-TUNE: each such kin multiplies the prospect by this").optional(),
@@ -620,7 +626,9 @@ fn knob_rows() -> Vec<Row> {
     rows.extend([
         lk("flower_reflectance", "brightness per unit light", nonneg, "a nectar flower's brightness (UV) per unit of the light falling on it").search(0.1, 4.0),
         lk("glowcap_emission", "brightness", nonneg, "a glowcap's own light").search(0.0, 2.0),
-        lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light").search(0.0, 4.0),
+        lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light (cyan)").search(0.0, 4.0),
+        lk("lure_scent", "x nectar_per_s", nonneg, "BELLWING: a lit lure lays this x a flower's nectar scent on its lanternjaw's face (0: light alone)").search(0.0, 2.0),
+        lk("lure_uv", "x flower_reflectance", nonneg, "BELLWING: a fully lit lure's UV, x a flower's; a UV eye reads the lure as a flower (UV class), 0: cyan only").search(0.0, 2.0),
         lk("background_floor", "light", pos, "a beacon's contrast is its brightness over the light around it plus this (the darkest background)").search(0.01, 0.5).log(),
         lk("half_m", "m", pos, "a beacon's received level halves at this distance").search(0.25, 4.0),
         lk("lure_height_fraction", "x body height", nonneg, "the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle"),
