@@ -116,10 +116,15 @@ use crate::Fauna;
 //     egg_moisture_min, egg_drown_s, egg_dry_moisture, egg_dry_s}`, `Clutch::{wet_ticks,
 //     dry_ticks}`, the ledger's `eggs_drowned_by_founder` and `eggs_dried_by_founder`.
 //     SNAIL-LAND-2 (same 61) — `Amphibious::{egg_search_m, graze_give_up, graze_worth, graze_search_m}`.
-// 62: PUP — `Pack::{regurgitate_reserve_fraction, provision_scramble, pup_starves_on_empty}`;
+// 62: FEAR and FEAR-2 — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg, lost_calm_s}`,
+//     `Vigil::{calm_walk, refuge}`, `Track::posture`; prey watch a sleeping or still Veilhound
+//     facing away, a flight ends in a perch or once its hunter is lost.
+// 63: HERD — Hunker run/catch/shelter config; VigilLedger runs_to_hunker and exact
+//     grazer kill classes. Shelter is derived from live geometry, not a saved flag.
+// 64: PUP — `Pack::{regurgitate_reserve_fraction, provision_scramble, pup_starves_on_empty}`;
 //     `FaunaLedger::{pup_swallowed_organic, pup_regurgitated_surplus, pup_regurgitated_lean,
 //     pup_upkeep_organic, pups_starved, pups_lost_other, provision_withheld_ticks}`.
-pub const SCHEMA: u32 = 62;
+pub const SCHEMA: u32 = 64;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

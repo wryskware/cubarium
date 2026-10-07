@@ -243,6 +243,8 @@ fn founder_rows() -> Vec<Row> {
         r("yield_by_food.*", "fraction", fraction, "assimilation yield of one food class").search(0.05, 0.9),
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
+        r("active_window.before_rise_h", "h on the 24-h day clock", nonneg, "it wakes this long before sunrise on top of its rhythm (LURE: dawn flight)").prov("decision"),
+        r("active_window.after_set_h", "h on the 24-h day clock", nonneg, "it stays awake this long after sunset on top of its rhythm (LURE: dusk flight)").prov("decision"),
         r("sleep_upkeep", "x basal upkeep", fraction, "upkeep while asleep").search(0.1, 1.0).prov("decision"),
         r("wake_hunger", "hunger 0..1", fraction, "the emergency latch goes on (awake in any phase) at this reserve hunger").search(0.1, 1.0),
         r("emergency_clear_hunger", "hunger 0..1", fraction, "the emergency latch goes off below this reserve hunger")
@@ -296,7 +298,17 @@ fn founder_rows() -> Vec<Row> {
         r("vigilance.withdraw_tremor", "organic x m/s / m^2", nonneg, "S2: footfall at which it also turns away in place"),
         r("vigilance.freeze_s", "s", nonneg, "S2: a freeze lasts this long after the last tremor that set it"),
         r("vigilance.refuge_search_m", "m", nonneg, "S2: an arboreal body in flight runs to a stand it climbs within this"),
+        // FEAR (`vigilance.watch_calm` is a switch: no row).
+        r("vigilance.calm_margin_m", "m", nonneg, "FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never)"),
+        r("vigilance.calm_facing_deg", "deg", nonneg, "FEAR: a still hunter heading within this of the bearing to it faces it (a threat)"),
+        r("vigilance.lost_calm_s", "s", nonneg, "FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never)"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
+        r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
+        r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),
+        r("hunker.escape_probe_m", "m", nonneg, "HERD: motor walk distance checking a blocked escape (0 off)"),
+        r("hunker.shelter_seek_m", "m", nonneg, "HERD: seek a known closed adult within this"),
+        r("hunker.shelter_margin_m", "m", nonneg, "HERD: gap beyond summed footprints and base height tolerance for shelter"),
+        r("hunker.shelter_exposure", "fraction", fraction, "HERD: fraction of strikes that reach a juvenile behind an adult shield"),
         r("hunker.enter_m", "m", nonneg, "HUNKER: it clamps down under its shield at an approaching threat within this"),
         r("hunker.leave_m", "m", nonneg, "HUNKER: ...and comes out once none has been within this for the calm"),
         r("hunker.calm_s", "s", nonneg, "HUNKER: the calm at full condition"),

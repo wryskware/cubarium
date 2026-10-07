@@ -30,7 +30,7 @@ fn awkward() -> Vec<Face> {
     a.darkness = std::f64::consts::PI;
     a.glow_ok = false;
     a.canopy = (-0.731_f64).exp();
-    a.plant = Some((Species::Lanternberry, StandRec { wood: 0.123_456_789_012_345_67, foliage: 2.0 / 7.0, reserve: 1e-9, light: 0.61, moisture: 0.3, aeration_stress: 0.01, cured: true, edible: 0.05, mineral: 0.002 }));
+    a.plant = Some((Species::Lanternberry, StandRec { wood: 0.123_456_789_012_345_67, foliage: 2.0 / 7.0, reserve: 1e-9, light: 0.61, moisture: 0.3, aeration_stress: 0.01, cured: true, edible: 0.05, mineral: 0.002, ..Default::default() }));
     a.fungus = Some(StandRec { wood: 0.4, foliage: 0.0, reserve: 0.25, ..Default::default() });
     a.litter = 12.5;
     a.dead_wood = 1e300;

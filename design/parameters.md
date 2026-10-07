@@ -1363,7 +1363,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2197 rows)
+**`fauna.*`** (2296 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1480,6 +1480,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.littershredder.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.littershredder.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.littershredder.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.littershredder.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.littershredder.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.littershredder.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -1521,6 +1523,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.withdraw_tremor` | 0.06 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.littershredder.vigilance.freeze_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.littershredder.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.littershredder.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.littershredder.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.littershredder.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.littershredder.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.littershredder.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.littershredder.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.littershredder.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.littershredder.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.littershredder.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -1702,6 +1713,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.frondgrazer.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.frondgrazer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.frondgrazer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.frondgrazer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.frondgrazer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -1743,6 +1756,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.frondgrazer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.frondgrazer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.frondgrazer.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.frondgrazer.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.frondgrazer.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.frondgrazer.hunker.shelter_seek_m` | 6.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.frondgrazer.hunker.shelter_margin_m` | 0.15 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.frondgrazer.hunker.shelter_exposure` | 0.25 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.frondgrazer.hunker.enter_m` | 2.5 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.frondgrazer.hunker.leave_m` | 5.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.frondgrazer.hunker.calm_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -1924,6 +1946,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.lanternjaw.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.lanternjaw.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.lanternjaw.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.lanternjaw.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.lanternjaw.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -1965,6 +1989,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.lanternjaw.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.lanternjaw.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.lanternjaw.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.lanternjaw.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.lanternjaw.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.lanternjaw.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.lanternjaw.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.lanternjaw.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.lanternjaw.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.lanternjaw.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.lanternjaw.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2146,6 +2179,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.capgnawer.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.capgnawer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.capgnawer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.capgnawer.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.capgnawer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.capgnawer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -2187,6 +2222,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.capgnawer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.capgnawer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.capgnawer.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.capgnawer.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.capgnawer.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.capgnawer.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.capgnawer.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.capgnawer.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.capgnawer.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.capgnawer.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.capgnawer.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2368,6 +2412,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.loftstrider.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.loftstrider.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.loftstrider.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.loftstrider.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.loftstrider.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.loftstrider.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -2409,6 +2455,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.loftstrider.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.loftstrider.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.loftstrider.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.loftstrider.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.loftstrider.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.loftstrider.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.loftstrider.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.loftstrider.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.loftstrider.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.loftstrider.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.loftstrider.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2590,6 +2645,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.ripple-snail.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.ripple-snail.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.ripple-snail.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.ripple-snail.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.ripple-snail.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.ripple-snail.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -2631,6 +2688,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.ripple-snail.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.ripple-snail.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.ripple-snail.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.ripple-snail.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.ripple-snail.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.ripple-snail.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.ripple-snail.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.ripple-snail.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.ripple-snail.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.ripple-snail.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.ripple-snail.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2812,6 +2878,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.bellwing.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.bellwing.active_window.before_rise_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.bellwing.active_window.after_set_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.bellwing.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.bellwing.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.bellwing.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -2853,6 +2921,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.bellwing.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.bellwing.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.bellwing.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.bellwing.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.bellwing.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.bellwing.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.bellwing.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.bellwing.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.bellwing.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.bellwing.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.bellwing.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3034,6 +3111,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.seedporter.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.seedporter.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.seedporter.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.seedporter.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.seedporter.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.seedporter.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -3075,6 +3154,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.seedporter.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.seedporter.vigilance.refuge_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.seedporter.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.seedporter.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.seedporter.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.seedporter.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.seedporter.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.seedporter.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.seedporter.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.seedporter.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.seedporter.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3256,6 +3344,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.chorister.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
+| `fauna.founders.chorister.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
+| `fauna.founders.chorister.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
 | `fauna.founders.chorister.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.chorister.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -3297,6 +3387,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.chorister.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.chorister.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.chorister.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.chorister.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.chorister.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.chorister.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.chorister.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.chorister.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.chorister.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.chorister.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.chorister.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |

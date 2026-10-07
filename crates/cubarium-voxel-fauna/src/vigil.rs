@@ -27,6 +27,51 @@
 //!   `freeze_s` (no step, no bite); at least `withdraw_tremor` it also turns away in place. It
 //!   never flees: it stays on its litter.
 //!
+//! **FEAR** (Wrysk, 2026-10-06: "Should seedporters ignore a resting or sleeping Veilhound,
+//! the way gazelles graze near resting lions?" — "sure."). A lineage with `watch_calm` on
+//! **watches** a hunter it sees asleep, or awake and resting ([`crate::perception::posture_of`]:
+//! still, no strike, not feeding) and not facing it (its heading more than `calm_facing_deg`
+//! off the bearing to the prey): that hunter is not a threat to its flight, its hunker or its
+//! orientation. Inside `calm_margin_m` of one it **walks off** (its walk, no sprint, no refuge
+//! run, no feeding; [`Vigil::calm_walk`]) until it is outside. It fears the hunter fully again
+//! as soon as it wakes, stands, faces it, or approaches (S2's "pressing": seen moving, heard,
+//! felt). Wild models: Thomson's gazelles graze in view of resting cheetahs and lions and keep
+//! their distance, and monitor rather than flee a predator that is not hunting (Fitzgibbon
+//! 1990, Anim. Behav. 40:837; Caro 2005, *Antipredator Defenses in Birds and Mammals*, ch. 4–5
+//! on predator monitoring and flight-initiation distance).
+//!
+//! **FEAR-2** (FEAR's check: seedporters still in flight 75 % of their awake time). Three
+//! holds kept a flight going after the prey was safe, and the fix ends each by behaviour:
+//! - **the refuge**: a seedporter's flight stayed on through its whole perch (FEAR-2's probe:
+//!   0.48–1.0 of its flight ticks perched, mostly not eating). A flight now **ends on reaching
+//!   a perch**; the **refuge watch** ([`Vigil::refuge`]) keeps it up there — no step down, no
+//!   glide, turning and feeding as it asks — while a hunter it does not watch is within
+//!   `flee_start_m` (then `flee_stop_m`), and `lost_calm_s` (at least `calm_s`) after the last;
+//! - **the lost hunter**: a flight held while its hunter was out of every sense and the body
+//!   within `flee_stop_m` of where it last knew it (a perched or stuck body never gets beyond;
+//!   0.83–1.0 of the probe's flight ticks). No hunter known within `flee_stop_m` for
+//!   `lost_calm_s` ends it where it is;
+//! - **the idle hunter**: FEAR's watch read only a hunter in [`State::Resting`]; one standing
+//!   idle (awake and still in another state) stayed a threat at any heading. Still and facing
+//!   away, it is watched in any awake state ([`crate::perception::posture_of`]); still and
+//!   facing the prey (a stalk's freeze) it stays a threat; awake within the predation table's
+//!   `still_threat_near_m` (in contact: a hunter working at a hunkered grazer) it is a threat
+//!   whichever way it faces.
+//!
+//! **HERD** (Wrysk 2026-10-07): run as a group before contact, then bunch and clamp;
+//! calves seek the closed adults' far sides. Muskox accounts: Mech (1970), *The Wolf*;
+//! Gray (1987), *The Muskoxen of Polar Bear Pass*; Tener (1965), *Muskoxen in Canada*.
+//! Canadian Wildlife Service's illustrated account independently describes running to a
+//! defensive position, adults facing out, and calves pressed to their mothers' sides:
+//! https://publications.gc.ca/collections/collection_2018/eccc/CW69-4-51-1990-eng.pdf
+//! Terrarium-scale seeds (not measured animal values): run at the 8 m sight range, clamp
+//! within the existing 2.5 m; a faster hunter within 3 m catches it, as does a blocked
+//! 0.5 m escape step. Seek adults within 6 m and tuck against summed footprint radii, with
+//! a 0.15 m gap/height tolerance. A strike path crossing a closed adult footprint reaches
+//! the calf at exposure 0.25 (incomplete cover; its own dodge and the jaw reach still apply).
+//! Armour, ring resistance and pry rates are unchanged; only hungry hunters do herd work,
+//! and a pack contributes work only to its selected prey.
+//!
 //! The awareness the strike's dodge reads ([`awareness`], D5) and the Veilhound's stalk
 //! ([`stalk`]) are here too: both read the prey's record.
 //!
@@ -67,6 +112,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::perception::{HEARING, SIGHT, TREMOR, class};
 use crate::{Actions, Animal, Fauna, FaunaConfig, Founder, MobilityMode, Percept, State, Track};
+#[cfg(test)]
+#[path = "testpass3_fear_tests.rs"]
+mod testpass3_fear_tests;
 
 /// Which response a lineage's heuristics run on its record (a switch, no registry row).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +166,17 @@ pub struct Vigilance {
     pub freeze_s: f64,
     /// An arboreal body runs to a stand it can climb within this, metres.
     pub refuge_search_m: f64,
+    /// **FEAR** (module note): it watches, not flees, a hunter it sees asleep or resting and
+    /// not facing it (a switch, no registry row; off: S2's rule).
+    pub watch_calm: bool,
+    /// ...and walks off a watched hunter closer than this (3D), metres; 0 never walks off.
+    pub calm_margin_m: f64,
+    /// A resting hunter whose heading is within this of the bearing to it faces it: a
+    /// threat, degrees.
+    pub calm_facing_deg: f64,
+    /// **FEAR-2** (module note): a flight, or a refuge watch, whose hunter it has not known
+    /// within `flee_stop_m` for this long ends where it is, seconds; 0 never (S2's hold).
+    pub lost_calm_s: f64,
 }
 
 impl Default for Vigilance {
@@ -140,9 +199,48 @@ impl Default for Vigilance {
             withdraw_tremor: 0.0,
             freeze_s: 0.0,
             refuge_search_m: 0.0,
+            watch_calm: false,
+            calm_margin_m: 0.0,
+            calm_facing_deg: 0.0,
+            lost_calm_s: 0.0,
         }
     }
 }
+
+/// **FEAR's watch** (module note), the same for every lineage that reads a sensed threat by
+/// sight (the frondgrazer, the loftstrider, the seedporter), placeholders at the terrarium's
+/// scale, untuned: the margin is 3 m, a little beyond the Veilhound's pack `commit_m` (2.5 m,
+/// where its rush begins: a hunter that rises from beyond it is seen moving before it can
+/// rush), about two of its body lengths; a resting hunter faces a prey whose bearing lies within
+/// 30° of its heading (about a third of a predator's binocular field: looking at it, not past
+/// it). **FEAR-2**: a hunter not known within the stop distance for 30 s (three calms: a
+/// hunter that slips from view may still be near, so it waits longer than for one it saw go)
+/// ends a flight or a refuge watch; a placeholder, untuned.
+const WATCH: Vigilance = Vigilance { watch_calm: true, calm_margin_m: 3.0, calm_facing_deg: 30.0, lost_calm_s: 30.0, ..NONE };
+
+/// [`Vigilance::default`] as a constant.
+const NONE: Vigilance = Vigilance {
+    mode: VigilMode::None,
+    flee_start_m: 0.0,
+    flee_stop_m: 0.0,
+    calm_s: 0.0,
+    group_min: 1,
+    run_noise: 1.0,
+    scan_every_s: 0.0,
+    scan_s: 0.0,
+    orient_s: 0.0,
+    alarm_emission_factor: 0.0,
+    alarm_bolt_s: 0.0,
+    alarm_refractory_s: 0.0,
+    freeze_tremor: 0.0,
+    withdraw_tremor: 0.0,
+    freeze_s: 0.0,
+    refuge_search_m: 0.0,
+    watch_calm: false,
+    calm_margin_m: 0.0,
+    calm_facing_deg: 0.0,
+    lost_calm_s: 0.0,
+};
 
 /// **A lineage's hunker** (module note, HUNKER): its knobs. Inert unless `enabled` and its
 /// vigilance is a herd's.
@@ -151,6 +249,21 @@ impl Default for Vigilance {
 pub struct Hunker {
     /// The switch (no registry row): off, the lineage keeps S2's flight.
     pub enabled: bool,
+    /// HERD switch: run first, hunker when caught, shelter juveniles. Off keeps HUNKER's
+    /// original response (the comparison arm). No registry row for a switch.
+    pub herd_enabled: bool,
+    /// HERD: a pressing threat within this starts the herd's run, metres.
+    pub run_start_m: f64,
+    /// HERD: a moving, faster hunter within this makes running unprofitable, metres. 0 off.
+    pub catch_m: f64,
+    /// HERD: distance to check the intended escape with the body's motor, metres. 0 off.
+    pub escape_probe_m: f64,
+    /// HERD: maximum distance to seek a known hunkered adult for shelter, metres.
+    pub shelter_seek_m: f64,
+    /// HERD: allowed gap beyond summed footprint radii, and base height difference, metres.
+    pub shelter_margin_m: f64,
+    /// HERD: fraction of strikes reaching a juvenile behind an intervening adult's shield.
+    pub shelter_exposure: f64,
     /// It hunkers when an approaching threat is within this, metres.
     pub enter_m: f64,
     /// ...and comes out once none has been within this (at least `enter_m`) for the calm, metres.
@@ -190,6 +303,13 @@ impl Default for Hunker {
     fn default() -> Hunker {
         Hunker {
             enabled: false,
+            herd_enabled: false,
+            run_start_m: 0.0,
+            catch_m: 0.0,
+            escape_probe_m: 0.0,
+            shelter_seek_m: 0.0,
+            shelter_margin_m: 0.0,
+            shelter_exposure: 1.0,
             enter_m: 0.0,
             leave_m: 0.0,
             calm_s: 0.0,
@@ -274,6 +394,13 @@ pub fn hunker_of(founder: Founder) -> Hunker {
     match founder {
         Founder::Browser => Hunker {
             enabled: true,
+            herd_enabled: true,
+            run_start_m: 8.0,
+            catch_m: 3.0,
+            escape_probe_m: 0.5,
+            shelter_seek_m: 6.0,
+            shelter_margin_m: 0.15,
+            shelter_exposure: 0.25,
             enter_m: 2.5,
             leave_m: 5.0,
             calm_s: 20.0,
@@ -316,7 +443,7 @@ pub fn vigilance_of(founder: Founder) -> Vigilance {
             alarm_emission_factor: 2.0,
             alarm_bolt_s: 3.0,
             alarm_refractory_s: 20.0,
-            ..none
+            ..WATCH
         },
         // Panoramic from its eye ring, so no scan pause; an adult stands its ground against
         // a lone hunter and moves off before a converging group (two or more); no herd alarm.
@@ -328,7 +455,7 @@ pub fn vigilance_of(founder: Founder) -> Vigilance {
             group_min: 2,
             run_noise: 3.0,
             orient_s: 3.0,
-            ..none
+            ..WATCH
         },
         // Flight to the trees: a threat within 8 m (half its daylight sight) on the ground
         // sends it to a stand within twice its roost reach (8 m); no alarm calls (D6, later).
@@ -340,7 +467,7 @@ pub fn vigilance_of(founder: Founder) -> Vigilance {
             group_min: 1,
             run_noise: 3.0,
             refuge_search_m: 8.0,
-            ..none
+            ..WATCH
         },
         // Freeze at the old flee line (predation's `flee_tremor`, 0.015), turn away at four
         // times it, 3 s.
@@ -393,6 +520,11 @@ pub struct Vigil {
     /// A freeze runs until this tick, turning `withdraw_turn` (0 still).
     pub freeze_until: u64,
     pub withdraw_turn: f64,
+    /// **FEAR**: at its last sample it was walking off a watched hunter inside its margin.
+    pub calm_walk: bool,
+    /// **FEAR-2**: at its last sample it held its perch under a hunter (the refuge watch: in
+    /// refuge, not in flight).
+    pub refuge: bool,
 }
 
 impl Vigil {
@@ -434,12 +566,46 @@ struct Threat {
     x: f64,
     z: f64,
     id: u64,
-    /// Seen moving or near, heard, or felt: an approaching body, not a still shape.
+    /// Seen moving or near, heard, or felt: an approaching body, not a still shape. Never
+    /// for a watched one (`calm`).
     pressing: bool,
+    /// **FEAR**: seen asleep, or resting and not facing it, by a lineage that watches.
+    calm: bool,
+    /// From it, 3D (its base to the track's base), metres.
+    d3: f64,
+    /// Gait inferred from a fresh moving track's lineage and visible length, m/s.
+    gait: f64,
 }
 
-fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64) -> Vec<Threat> {
+/// **FEAR's judgement** of track `t` by the body at `a` with response `vg` (module note):
+/// seen (only sight reads a posture), neither heard nor felt nor moving, and asleep, or
+/// resting with its heading more than `calm_facing_deg` off the bearing to `a`.
+fn calm_of(config: &FaunaConfig, vg: &Vigilance, a: &Animal, t: &Track, ring: f64) -> bool {
+    use crate::perception::posture;
+    if !vg.watch_calm || t.modes & SIGHT == 0 || t.modes & (HEARING | TREMOR) != 0 || t.moving {
+        return false;
+    }
+    match t.posture {
+        posture::ASLEEP => true,
+        posture::REST => {
+            let (dx, dz) = crate::pose::wrapped_delta(t.x, t.z, a.pose.x, a.pose.z, ring);
+            // FEAR-2: awake in contact (within the predation table's `still_threat_near_m`),
+            // it is a threat whichever way it faces: a hunter working at a hunkered grazer.
+            if dx == 0.0 && dz == 0.0 || (dx * dx + dz * dz).sqrt() <= config.predation.still_threat_near_m {
+                return false;
+            }
+            let d = (dx.atan2(dz) - t.heading).rem_euclid(std::f64::consts::TAU);
+            let off = if d > std::f64::consts::PI { std::f64::consts::TAU - d } else { d };
+            off > vg.calm_facing_deg.max(0.0).to_radians()
+        }
+        _ => false,
+    }
+}
+
+fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, vm: f64) -> Vec<Threat> {
     let fresh = 2 * config.perception.stagger_ticks();
+    let vg = a.founder.map(|f| config.founder(f).vigilance).unwrap_or_default();
+    let base = crate::perception::base_m(a, vm);
     let mut out: Vec<Threat> = p
         .tracks()
         .iter()
@@ -448,11 +614,31 @@ fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64) -
             let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
             let d = (dx * dx + dz * dz).sqrt();
             let seen_pressing = t.modes & SIGHT != 0 && (t.moving || d <= config.predation.still_threat_near_m);
-            Threat { d, x: t.x, z: t.z, id: t.id, pressing: seen_pressing || t.modes & (HEARING | TREMOR) != 0 }
+            let calm = calm_of(config, &vg, a, t, ring);
+            let dy = t.y_m - base;
+            Threat {
+                d,
+                x: t.x,
+                z: t.z,
+                id: t.id,
+                pressing: !calm && (seen_pressing || t.modes & (HEARING | TREMOR) != 0),
+                calm,
+                d3: (d * d + dy * dy).sqrt(),
+                gait: if t.moving {
+                    Founder::ALL.get(usize::from(t.lineage)).map_or(0.0, |&f| config.founder(f).cruise_body_lengths_per_s * t.size_m)
+                } else { 0.0 },
+            }
         })
         .collect();
     out.sort_by(|p, q| p.d.total_cmp(&q.d).then(p.id.cmp(&q.id)));
     out
+}
+
+/// **A readout** (FEAR-2's probe; no rule reads it): the threats the body `a` knows from its
+/// record `p` at `now`, nearest first, each as `(id, distance on the ring, pressing as the herd
+/// reads it, watched)`. The arboreal rule counts every unwatched one as pressing.
+pub fn threat_readout(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, vm: f64) -> Vec<(u64, f64, bool, bool)> {
+    threats(config, a, p, now, ring, vm).into_iter().map(|t| (t.id, t.d, t.pressing, t.calm)).collect()
 }
 
 /// The flight's hysteresis, shared by the herd and the arboreal: starts at `need` pressing
@@ -485,7 +671,11 @@ fn flight(v: &mut Vigil, vg: &Vigilance, a: &Animal, th: &[Threat], need: usize,
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, v.from_x, v.from_z, ring);
         let beyond = (dx * dx + dz * dz).sqrt() > stop;
         let seen_still = th.iter().any(|t| t.id == v.flee_id && !t.pressing);
-        if (beyond || seen_still) && now.saturating_sub(v.close_tick) >= ticks(vg.calm_s) {
+        // FEAR-2: no hunter known within `flee_stop_m` for `lost_calm_s` (out of sight, a
+        // body that cannot get beyond the stop distance of where it last saw it): over.
+        let since = now.saturating_sub(v.close_tick);
+        let lost = vg.lost_calm_s > 0.0 && since >= ticks(vg.lost_calm_s);
+        if (beyond || seen_still || lost) && since >= ticks(vg.calm_s) {
             v.fleeing = false;
         }
     }
@@ -608,6 +798,29 @@ fn cornered(config: &FaunaConfig, a: &Animal, v: &Vigil, now: u64) -> bool {
     v.fleeing && now.saturating_sub(v.flee_tick) >= still && a.still_ticks >= still
 }
 
+/// **FEAR's walk off** (module note): away from the nearest watched hunter within its
+/// `calm_margin_m` (3D), at its walk (forward 1, no sprint), not feeding; at the strip's end,
+/// along it, as [`away`] does. `None` with none that near, or once its motor has refused the
+/// walk for `teachers.press_replan_s` (it does not press a wall to keep the margin).
+fn calm_walk(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, vg: &Vigilance, th: &[Threat], ring: f64) -> Option<Actions> {
+    if !(vg.calm_margin_m > 0.0) || a.mobility.mode != MobilityMode::Ground {
+        return None;
+    }
+    let t = th.iter().filter(|t| t.calm && t.d3 <= vg.calm_margin_m).min_by(|p, q| p.d3.total_cmp(&q.d3).then(p.id.cmp(&q.id)))?;
+    let press = fauna.config.teachers.press_replan_s;
+    if fauna.pressed.get(&a.id).is_some_and(|&n| press.is_finite() && press >= 0.0 && n >= cubarium_voxel::ticks_at_least_one(press)) {
+        return None;
+    }
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
+    let want = if dx == 0.0 && dz == 0.0 { a.pose.heading_rad } else { (-dx).atan2(-dz) };
+    let vm = view.config.voxel_m;
+    let r = a.founder.map_or(0.0, |f| fauna.config.founder(f).body_at(a.body).footprint_radius());
+    let (near, depth_m) = (r + 0.5 * vm, f64::from(view.config.depth) * vm);
+    let side = if dx > 0.0 { -1.0 } else if dx < 0.0 { 1.0 } else if a.id % 2 == 0 { 1.0 } else { -1.0 };
+    let want = if (a.pose.z <= near && want.cos() < 0.0) || (a.pose.z >= depth_m - near && want.cos() > 0.0) { f64::atan2(side, 0.0) } else { want };
+    Some(head(a, want, 1.0, 0.0))
+}
+
 /// Its condition: reserve over its cap at its body.
 fn condition_of(config: &FaunaConfig, a: &Animal) -> f64 {
     let Some(f) = a.founder else { return 1.0 };
@@ -648,6 +861,97 @@ pub(crate) fn respond(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Fl
     }
 }
 
+/// A terrain check uses the same footprint, clearance, steps and water depth as movement.
+fn walk_clear(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, (dx, dz): (f64, f64)) -> bool {
+    let Some(f) = a.founder else { return false };
+    let phys = fauna.config.founder(f);
+    let b = phys.body_at(a.body);
+    crate::body::motor_walk(view, (a.pose.x, a.pose.z), (a.pose.x + dx, a.pose.z + dz), a.site.y,
+        b.footprint_radius(), phys.wade_depth_m(&b), b.headroom_voxels(view.config.voxel_m), phys.step_limits(view.config.voxel_m)).is_some()
+}
+
+fn escape_blocked(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, t: &Threat, ring: f64) -> bool {
+    let reach = fauna.config.founder(a.founder.unwrap()).hunker.escape_probe_m;
+    if !(reach > 0.0) { return false; }
+    let (dx, dz) = crate::pose::wrapped_delta(t.x, t.z, a.pose.x, a.pose.z, ring);
+    let d = dx.hypot(dz);
+    d > 0.0 && !walk_clear(fauna, view, a, (dx / d * reach, dz / d * reach))
+}
+
+/// Adults provide physical cover only while clamped, grown, on the same level and unopened.
+fn shelter_adults<'a>(fauna: &'a Fauna, prey: &'a Animal, vm: f64) -> impl Iterator<Item = &'a Animal> {
+    let phys = prey.founder.map(|f| fauna.config.founder(f));
+    fauna.animals.iter().filter(move |o| {
+        phys.is_some_and(|p| p.hunker.enabled && p.hunker.herd_enabled && prey.body < p.core.birth_body &&
+            o.id != prey.id && o.founder == prey.founder && o.body >= p.core.birth_body && o.hunkered &&
+            matches!(guard(&fauna.config, o, fauna.percept(o.id), fauna.tick), Guard::Shield(_)) &&
+            (crate::perception::base_m(o, vm) - crate::perception::base_m(prey, vm)).abs() <= p.hunker.shelter_margin_m)
+    })
+}
+
+fn beside_shield(fauna: &Fauna, prey: &Animal, adult: &Animal, ring: f64) -> bool {
+    let p = fauna.config.founder(prey.founder.unwrap());
+    let r = p.body_at(prey.body).footprint_radius() + p.body_at(adult.body).footprint_radius() + p.hunker.shelter_margin_m;
+    let (dx, dz) = crate::pose::wrapped_delta(prey.pose.x, prey.pose.z, adult.pose.x, adult.pose.z, ring);
+    dx.hypot(dz) <= r
+}
+
+/// HERD readout: a juvenile physically against a closed adult's shield (not merely seeking).
+pub fn sheltered(fauna: &Fauna, prey: &Animal, ring: f64, voxel_m: f64) -> bool {
+    shelter_adults(fauna, prey, voxel_m).any(|o| beside_shield(fauna, prey, o, ring))
+}
+
+/// The strike's path to a sheltered calf crosses a closed adult footprint. It must work
+/// around that shield to reach the calf: only `shelter_exposure` of those lunges reach it.
+/// A shield on the far side, across a ledge, or turned over gives no cover.
+pub(crate) fn shelter_exposure(fauna: &Fauna, prey: &Animal, striker: &Animal, ring: f64, vm: f64) -> f64 {
+    let (dx, dz) = crate::pose::wrapped_delta(striker.pose.x, striker.pose.z, prey.pose.x, prey.pose.z, ring);
+    let length2 = dx * dx + dz * dz;
+    if length2 <= f64::EPSILON { return 1.0; }
+    for o in shelter_adults(fauna, prey, vm).filter(|o| beside_shield(fauna, prey, o, ring)) {
+        let (ox, oz) = crate::pose::wrapped_delta(striker.pose.x, striker.pose.z, o.pose.x, o.pose.z, ring);
+        let along = (ox * dx + oz * dz) / length2;
+        if !(0.0..=1.0).contains(&along) { continue; }
+        let cross = (ox - along * dx).hypot(oz - along * dz);
+        let phys = fauna.config.founder(prey.founder.unwrap());
+        if cross <= phys.body_at(o.body).footprint_radius() {
+            return phys.hunker.shelter_exposure.clamp(0.0, 1.0);
+        }
+    }
+    1.0
+}
+
+/// Seek only an adult in the juvenile's fresh kin record, by a walking path, and tuck in
+/// against its far side from the nearest known hunter. No adult reachable: keep running.
+fn seek_shelter(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, p: &Percept, th: &[Threat], v: &mut Vigil, ring: f64) -> Option<Actions> {
+    let phys = fauna.config.founder(a.founder?);
+    let hk = phys.hunker;
+    let fresh = 2 * fauna.config.perception.stagger_ticks();
+    let adult = shelter_adults(fauna, a, view.config.voxel_m)
+        .filter(|o| p.tracks().iter().any(|t| t.id == o.id && t.class == class::KIN && fauna.tick.saturating_sub(t.tick) <= fresh))
+        .filter_map(|o| {
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+            let d = dx.hypot(dz);
+            (d <= hk.shelter_seek_m).then_some((d, o))
+        }).min_by(|(d, o), (e, q)| d.total_cmp(e).then(o.id.cmp(&q.id)))?.1;
+    let threat = th.iter().find(|t| t.pressing);
+    let (tx, tz) = threat.map_or((v.from_x, v.from_z), |t| (t.x, t.z));
+    let (dx, dz) = crate::pose::wrapped_delta(tx, tz, adult.pose.x, adult.pose.z, ring);
+    let length = dx.hypot(dz);
+    let gap = phys.body_at(a.body).footprint_radius() + phys.body_at(adult.body).footprint_radius();
+    let (ox, oz) = if length > 0.0 { (dx / length * gap, dz / length * gap) } else { (0.0, 0.0) };
+    let (gx, gz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, adult.pose.x + ox, adult.pose.z + oz, ring);
+    if gx.hypot(gz) <= hk.shelter_margin_m.max(f64::EPSILON) {
+        v.fleeing = false;
+        v.bolt_until = fauna.tick;
+        return Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
+    }
+    if !walk_clear(fauna, view, a, (gx, gz)) { return None; }
+    v.bolt_until = fauna.tick + ticks(phys.vigilance.alarm_bolt_s).max(1);
+    v.bolt_heading = gx.atan2(gz);
+    Some(head(a, v.bolt_heading, 1.0, 0.0))
+}
+
 fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, ring: f64, held: Actions) -> Option<Actions> {
     let a = fauna.animals[i];
     let founder = a.founder?;
@@ -657,18 +961,49 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
     let now = fauna.tick;
     let p = fauna.percepts.get(&a.id).copied().unwrap_or_default();
     let mut v = p.vigil;
-    let th = threats(&fauna.config, &a, &p, now, ring);
+    v.calm_walk = false;
+    let th = threats(&fauna.config, &a, &p, now, ring, view.config.voxel_m);
     let adult = a.body >= phys.core.birth_body;
     let need = if adult { vg.group_min.max(1) as usize } else { 1 };
     let k = founder.index();
     let kin = if hk.enabled { kin_of(&fauna.config, &a, &p, now, ring) } else { None };
+    let herd = hk.enabled && hk.herd_enabled;
+    if herd && !v.hunkered {
+        let run = Vigilance { flee_start_m: hk.run_start_m, ..vg };
+        if flight(&mut v, &run, &a, &th, need, now, ring) {
+            fauna.ledger.vigil.flees[k] += 1;
+        }
+    }
+    let mut bunch = None;
     // HUNKER: clamp down at an approaching threat within `enter_m`; come out once none has been
     // within `leave_m` for the calm, which hunger shortens.
     if hk.enabled {
         let enter = hk.enter_m.max(0.0);
         let leave = hk.leave_m.max(enter);
         let cond = condition_of(&fauna.config, &a);
-        if !v.hunkered && cond >= hk.min_condition && th.iter().any(|t| t.pressing && t.d <= enter) {
+        let pressing = th.iter().find(|t| t.pressing);
+        let caught = pressing.is_some_and(|t| {
+            t.d <= enter || (herd && t.d <= hk.run_start_m &&
+                (escape_blocked(fauna, view, &a, t, ring) ||
+                 (hk.catch_m > 0.0 && t.d <= hk.catch_m && t.gait > fauna.config.manifest(founder).cruise_m_per_s)))
+        });
+        // Before contact, close a reachable bunch; in contact, clamp immediately.
+        if herd && adult && !v.hunkered && caught && cond >= hk.min_condition && pressing.is_some_and(|t| t.d > enter) {
+            if let Some(((dx, dz), _)) = kin.filter(|(_, d)| *d > hk.ring_m) {
+                if walk_clear(fauna, view, &a, (dx, dz)) {
+                    bunch = Some(head(&a, dx.atan2(dz), 1.0, 0.0));
+                    if now >= v.bolt_until {
+                        fauna.ledger.vigil.bunches[k] += 1;
+                    }
+                    v.bolt_until = now + ticks(vg.alarm_bolt_s).max(1);
+                    v.bolt_heading = dx.atan2(dz);
+                }
+            }
+        }
+        if !v.hunkered && (!herd || adult) && cond >= hk.min_condition && caught && bunch.is_none() {
+            if herd && p.vigil.running(now) {
+                fauna.ledger.vigil.runs_to_hunker[k] += 1;
+            }
             v.hunkered = true;
             v.hunker_close = now;
             v.pry = 0.0;
@@ -687,7 +1022,14 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
                 v.opened_until = 0;
             }
         }
-        v.fleeing = false;
+        if !herd || v.hunkered {
+            v.fleeing = false;
+        }
+        if herd && !adult {
+            v.hunkered = false;
+            v.pry = 0.0;
+            v.opened_until = 0;
+        }
     } else {
         v.hunkered = false;
         if flight(&mut v, &vg, &a, &th, need, now, ring) {
@@ -706,9 +1048,21 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
         fauna.percepts.entry(a.id).or_default().vigil = v;
         return Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
     }
+    if herd && !adult {
+        if let Some(act) = seek_shelter(fauna, view, &a, &p, &th, &mut v, ring) {
+            v.cropping = false;
+            fauna.percepts.entry(a.id).or_default().vigil = v;
+            return Some(act);
+        }
+    }
+    if let Some(act) = bunch {
+        v.cropping = false;
+        fauna.percepts.entry(a.id).or_default().vigil = v;
+        return Some(act);
+    }
     // HUNKER's bunching: a threat within `flee_start_m` sends a body whose kin are farther
     // than `ring_m` running to them (loud: the run alarms the rest).
-    if hk.enabled && now >= v.bolt_until {
+    if hk.enabled && !herd && now >= v.bolt_until {
         if let Some(((kx, kz), nearest)) = kin {
             if nearest > hk.ring_m && th.iter().any(|t| t.pressing && t.d <= vg.flee_start_m) {
                 v.bolt_until = now + ticks(vg.alarm_bolt_s).max(1);
@@ -729,8 +1083,8 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
             v.bolt_until = now + ticks(vg.alarm_bolt_s).max(1);
             // HUNKER: toward the kin it knows, not along the runner's heading.
             v.bolt_heading = match kin {
-                Some(((kx, kz), _)) => kx.atan2(kz),
-                None => t.heading,
+                Some(((kx, kz), _)) if !herd => kx.atan2(kz),
+                _ => t.heading,
             };
             v.alarm_ready = v.bolt_until + ticks(vg.alarm_refractory_s);
             fauna.ledger.vigil.alarm_bolts[k] += 1;
@@ -742,7 +1096,7 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
         out = Some(away(fauna, view, fv, &a, &v, ring, cornered));
     } else if now < v.bolt_until {
         // A bunching body already beside its kin stands, head up, facing them.
-        let beside = hk.enabled && kin.is_some_and(|(_, nearest)| nearest <= hk.ring_m);
+        let beside = hk.enabled && !herd && kin.is_some_and(|(_, nearest)| nearest <= hk.ring_m);
         out = Some(head(&a, v.bolt_heading, if beside { 0.0 } else { 1.0 }, 0.0));
     } else if vg.orient_s > 0.0 {
         // A threat it has not faced: face it. Below its group it stands its ground, facing
@@ -761,6 +1115,13 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
             out = Some(act);
         } else if th.iter().all(|t| t.id != v.orient_id) {
             v.orient_id = 0;
+        }
+    }
+    // FEAR: inside its margin of a watched hunter, it walks off.
+    if out.is_none() && !v.fleeing && now >= v.bolt_until {
+        if let Some(act) = calm_walk(fauna, view, &a, &vg, &th, ring) {
+            v.calm_walk = true;
+            out = Some(act);
         }
     }
     // The scan pause, while cropping and nothing else holds it.
@@ -795,11 +1156,33 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
     let now = fauna.tick;
     let p = fauna.percepts.get(&a.id).copied().unwrap_or_default();
     let mut v = p.vigil;
-    let th = threats(&fauna.config, &a, &p, now, ring);
+    v.calm_walk = false;
+    let th = threats(&fauna.config, &a, &p, now, ring, view.config.voxel_m);
     let k = founder.index();
-    // Any threat it senses counts: it is a small body on the ground.
-    let sensed: Vec<Threat> = th.iter().map(|t| Threat { pressing: true, ..*t }).collect();
+    // Any threat it senses counts, still or moving: it is a small body on the ground. FEAR: not
+    // one it watches (asleep, or resting and not facing it).
+    let sensed: Vec<Threat> = th.iter().map(|t| Threat { pressing: !t.calm, ..*t }).collect();
     let grounded = a.mobility.mode == MobilityMode::Ground;
+    // FEAR-2: a perch is its refuge. A flight ends on reaching one, and the refuge watch keeps
+    // it there (no step down, no glide; it turns and feeds as it asks) while a hunter it does
+    // not watch is within `flee_start_m`, then within `flee_stop_m`, and `lost_calm_s` (at
+    // least `calm_s`) after the last.
+    if a.mobility.mode == MobilityMode::Perched {
+        v.fleeing = false;
+        let (start, stop) = (vg.flee_start_m.max(0.0), vg.flee_stop_m.max(vg.flee_start_m.max(0.0)));
+        let reach = if v.refuge { stop } else { start };
+        if sensed.iter().any(|t| t.pressing && t.d <= reach) {
+            v.refuge = true;
+            v.close_tick = now;
+        }
+        if v.refuge && vg.lost_calm_s > 0.0 && now.saturating_sub(v.close_tick) >= ticks(vg.lost_calm_s.max(vg.calm_s)) {
+            v.refuge = false;
+        }
+        let out = v.refuge.then_some(Actions { forward: 0.0, turn: held.turn, feed: held.feed });
+        fauna.percepts.entry(a.id).or_default().vigil = v;
+        return out;
+    }
+    v.refuge = false;
     if flight(&mut v, &vg, &a, &sensed, 1, now, ring) && grounded {
         fauna.ledger.vigil.flees[k] += 1;
     }
@@ -819,11 +1202,14 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
                     }
                 }
             }
-            // Up the stem, and still in the crown.
+            // Up the stem (in the crown, the refuge watch above).
             MobilityMode::Climb if !a.mobility.falling => Some(Actions { forward: 1.0, turn: 0.0, feed: 0.0 }),
-            MobilityMode::Perched => Some(Actions { forward: 0.0, turn: 0.0, feed: held.feed }),
             _ => None,
         };
+    } else if let Some(act) = calm_walk(fauna, view, &a, &vg, &th, ring) {
+        // FEAR: inside its margin of a watched hunter, it walks off (no dash, no refuge).
+        v.calm_walk = true;
+        out = Some(act);
     }
     fauna.percepts.entry(a.id).or_default().vigil = v;
     out
@@ -947,10 +1333,15 @@ pub(crate) fn pry(fauna: &mut Fauna, ring: f64) {
                 continue;
             }
             let hunts = fauna.config.founder(of).hunter.is_some_and(|h| h.hunts(f));
-            if !hunts || o.pack.is_some_and(|m| m.pup) {
+            if !hunts || o.pack.is_some_and(|m| m.pup) || (hk.herd_enabled && !(o.eating || o.emergency)) {
                 continue;
             }
             let Some(ol) = crate::body_of(&fauna.config, o).map(|b| b.length_m) else { continue };
+            // HERD: work belongs to the pack's selected prey. Passing a grazer on the
+            // way to another prey, or resting at its feast, must not pry that grazer.
+            if hk.herd_enabled && o.pack.is_some_and(|m| !fauna.packs.iter().any(|r| r.id == m.pack && r.target == Some(p.id))) {
+                continue;
+            }
             if d <= 0.5 * (pl + ol) + hk.pry_reach_m {
                 members += 1;
             }
@@ -1037,6 +1428,10 @@ pub struct VigilLedger {
     /// of juveniles (under the adult body) and of adults.
     pub hunkers: [u64; Founder::COUNT],
     pub bunches: [u64; Founder::COUNT],
+    /// HERD: runs followed by a hunker, by lineage.
+    pub runs_to_hunker: [u64; Founder::COUNT],
+    /// HERD: grazer kills by hunter; sheltered/exposed juvenile, hunkered/running/other adult.
+    pub grazer_kills_by_posture: [[u64; 5]; Founder::COUNT],
     pub hunker_ticks: [u64; Founder::COUNT],
     pub worked_ticks: [u64; Founder::COUNT],
     pub worker_ticks: [u64; Founder::COUNT],

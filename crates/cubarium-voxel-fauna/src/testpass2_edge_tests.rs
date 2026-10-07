@@ -241,7 +241,8 @@ fn a_seedporter_takes_its_only_fruit_stand_again_once_the_press_shun_lapses() {
 // ------------------------------------------------------------------ the strip's end x a hunter
 
 /// One flight response of a seedporter standing at `z` facing `heading`, fleeing a still
-/// Veilhound at `(threat_x, threat_z)` that it has seen (the stillness rule out of reach).
+/// Veilhound at `(threat_x, threat_z)` that it has seen (the stillness rule out of reach). The
+/// Veilhound faces it: FEAR's watch leaves a still one facing away unfled.
 fn end_response(z: f64, heading: f64, threat: (f64, f64)) -> Actions {
     let (width, depth) = (48u32, 16u32);
     let world = plain(width, depth, 12);
@@ -255,7 +256,7 @@ fn end_response(z: f64, heading: f64, threat: (f64, f64)) -> Actions {
     let toward = (threat.0 - x).atan2(threat.1 - z);
     let sp = put(&mut fauna, &world, SP, (x, z), toward, StartingStores::FULL);
     heuristic(&mut fauna, sp);
-    let vh = put(&mut fauna, &world, VH, threat, WEST, StartingStores::FULL);
+    let vh = put(&mut fauna, &world, VH, threat, (x - threat.0).atan2(z - threat.1), StartingStores::FULL);
     hold(&mut fauna, vh, Actions::REST);
     let i = fauna.animals.iter().position(|a| a.id == sp).unwrap();
     fauna.tick += 1;
