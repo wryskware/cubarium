@@ -942,7 +942,8 @@ fn seek_shelter(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, p: &Percept, th
     let (ox, oz) = if length > 0.0 { (dx / length * gap, dz / length * gap) } else { (0.0, 0.0) };
     let (gx, gz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, adult.pose.x + ox, adult.pose.z + oz, ring);
     if gx.hypot(gz) <= hk.shelter_margin_m.max(f64::EPSILON) {
-        v.fleeing = false;
+        // Tucked in, it stays in its flight (aware of its hunter) without running; clearing
+        // it here restarted the flight every sample (TEST-PASS-4 F1).
         v.bolt_until = fauna.tick;
         return Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
     }
