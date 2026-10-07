@@ -54,7 +54,10 @@ use crate::Flora;
 //     film_shore_moisture_min, film_land_capacity_wet_per_m2}`.
 // 35: GLOWCAP — demand-bound substrate, required carbon substrate, mycelium grazing,
 //     and pool-specific intake/decomposition diagnostics.
-pub const SCHEMA: u32 = 35;
+// 36: GLOWCAP-2 — the sun on a saprotroph: `SpeciesConfig::{sun_shade_max,
+//     sun_cap_loss_per_s, sun_mycelium_loss_per_s}`, `FloraLedger::sun_dried` and
+//     `DeathCause::Desiccated`.
+pub const SCHEMA: u32 = 36;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

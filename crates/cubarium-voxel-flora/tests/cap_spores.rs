@@ -64,6 +64,9 @@ fn graze(flora: &mut Flora, site: Site) {
 fn spores(share: f64, grazed: bool, ticks: u32) -> (f64, f64) {
     let mut world = strip(4);
     let mut config = FloraConfig::default();
+        // Open sky: the sun is `glowcap_sun_tests`' subject (GLOWCAP-2).
+        config.glowcap.sun_cap_loss_per_s = 0.0;
+        config.glowcap.sun_mycelium_loss_per_s = 0.0;
     config.glowcap.propagule_cap_share = share;
     let mut flora = Flora::new(config);
     let sc = flora.config().species(Species::Glowcap).clone();
@@ -115,6 +118,9 @@ fn regrowing_grazed_caps_slows_the_mycelium() {
     let grow = |grazed: bool| -> f64 {
         let mut world = strip(4);
         let mut config = FloraConfig::default();
+        // Open sky: the sun is `glowcap_sun_tests`' subject (GLOWCAP-2).
+        config.glowcap.sun_cap_loss_per_s = 0.0;
+        config.glowcap.sun_mycelium_loss_per_s = 0.0;
         config.glowcap.foliage_rate = 10.0 * config.glowcap.wood_rate;
         let mut flora = Flora::new(config);
         let sc = flora.config().species(Species::Glowcap).clone();

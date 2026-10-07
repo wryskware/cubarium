@@ -63,6 +63,8 @@ mod shared_face_tests;
 #[cfg(test)]
 mod glowcap_budget_tests;
 #[cfg(test)]
+mod glowcap_sun_tests;
+#[cfg(test)]
 mod contest_tests;
 #[cfg(test)]
 mod canopy_establish_tests;
@@ -305,7 +307,10 @@ pub struct Stand {
     /// `Q`: reserve, material units.
     pub reserve: f64,
     /// Light this stand received last tick as a fraction of open sky, `0..=1`, after
-    /// terrain sky visibility and canopy attenuation. For inspection and drawing.
+    /// terrain sky visibility and canopy attenuation. For inspection and drawing. A
+    /// [`Trophic::Saprotroph`]'s is its raw **exposure** — the open sky times every taller
+    /// foliage layer over its cap, its own face's plant included — which is what its sun
+    /// loss reads ([`SpeciesConfig::sun_mycelium_loss_per_s`]).
     pub light: f64,
     /// Moisture factor `μ` this stand saw last tick, `0..=1`. Zero means wilting.
     pub moisture: f64,
@@ -958,6 +963,25 @@ pub struct SpeciesConfig {
     /// Zero disables stand grazing; the remaining wood can regrow or die below alive_min.
     #[serde(default)]
     pub mycelium_graze_fraction: f64,
+    /// **Saprotroph only. The sun on the fruiting body and the surface mycelium**
+    /// (GLOWCAP-2): the exposure ([`Stand::light`], the share of open sun reaching the cap,
+    /// its face's plant included) at and below which the sun costs the stand nothing —
+    /// shade. Above it the two `sun_*_loss_per_s` rates apply in proportion to
+    /// `ramp(exposure, sun_shade_max, 1)`, times the daylight: a gradient, not a cliff, and
+    /// nothing at night. A fraction of open sun; inert while both rates are 0.
+    #[serde(default)]
+    pub sun_shade_max: f64,
+    /// **Saprotroph only.** The share of its cap tissue (foliage) a fully exposed stand
+    /// loses per second in full daylight — desiccation and UV on a fruiting body, which
+    /// dries and collapses in sun — to its own face's litter. /s; 0 is off.
+    #[serde(default)]
+    pub sun_cap_loss_per_s: f64,
+    /// **Saprotroph only.** The share of its mycelium (wood) a fully exposed stand loses
+    /// per second in full daylight — the surface mycelium in sunlit, drying litter — to its
+    /// own face's litter, with its mineral and energy. Where this outruns the stand's
+    /// regrowth the stand dies ([`DeathCause::Desiccated`]). /s; 0 is off.
+    #[serde(default)]
+    pub sun_mycelium_loss_per_s: f64,
     /// **Saprotroph only.** The fraction of the organic matter taken that becomes tissue;
     /// the rest is respired at once (`respired_out`, heat). The brief's `yield`, spelled out
     /// because `yield` is a reserved word. **Placeholder**; inert on a `Photo` species.
@@ -1746,6 +1770,9 @@ impl SpeciesConfig {
             substrate_budgeted: false,
             substrate_required: false,
             mycelium_graze_fraction: 0.0,
+            sun_shade_max: 0.0,
+            sun_cap_loss_per_s: 0.0,
+            sun_mycelium_loss_per_s: 0.0,
             substrate_yield: 0.0,
             establish_substrate_min: 0.0,
             // One row up and one down, for a species that ever walks the box. Inert here:
@@ -2500,6 +2527,18 @@ impl SpeciesConfig {
     ///   exception to the two rules above. There the cave damp stands in for soil water and
     ///   the seep for wood (`dark_*`, [`SpeciesConfig::darkness`]), so a bare dark rock
     ///   face is habitat and a lit one is not.
+    /// - **The sun** (GLOWCAP-2, 2026-10-07): a shade and cave fungus. Light earns it
+    ///   nothing and costs it its tissue: exposure above `sun_shade_max` (the open sun
+    ///   reaching the cap, the face's own plant included, `Stand::light`) dries the caps
+    ///   (`sun_cap_loss_per_s`) and the surface mycelium (`sun_mycelium_loss_per_s`) to the
+    ///   face's litter, in proportion to the ramp to full sun and to the daylight. Where it
+    ///   outruns regrowth the stand dies (`DeathCause::Desiccated`); in shade and in the dark
+    ///   it costs nothing, and at night nothing, so an open face can carry a night flush
+    ///   that the morning takes. Fruiting bodies form and persist in damp shade and dry
+    ///   out in sun, and solar UV-B inhibits fungal growth (Boddy et al. 2014, Fungal
+    ///   Ecology 10:20; Hughes, Lawley & Newsham 2003, Appl. Environ. Microbiol. 69:1488).
+    ///   Before it, a spore had no light gate and no light cost, so every litter-bearing
+    ///   lit face under the plants filled with stands that nothing removed.
     /// - **Small and cheap.** `wood_max` 0.1, `alive_min` 0.01, `donor_min` 0.05 —
     ///   stonecushion's body; `foliage_rate` 0.004 and `wood_rate` 0.002 are twice the base,
     ///   a mycelium that fills a log fairly quickly; `propagule_rate` 0.0005 is two and a
@@ -2537,6 +2576,18 @@ impl SpeciesConfig {
             substrate_budgeted: true,
             substrate_required: true,
             mycelium_graze_fraction: 0.5,
+            // The sun (GLOWCAP-2): a shade and cave fungus. Above an exposure of 0.2 of open
+            // sun — understorey shade is the few to twenty per cent of open sky that reaches
+            // a forest floor — the caps dry at up to 0.0006/s (ten times their senescence in
+            // the presets) and the surface mycelium at up to 0.01/s (about three times the
+            // presets' best regrowth, `wood_rate` 0.0033), in proportion to the ramp to full
+            // sun and to the daylight, so by day a stand dies above an exposure of about
+            // 0.5. On the desktop terrarium at minute 70 the dark habitat's stands sat almost
+            // all below 0.2 and three quarters of the lit-face stands above 0.5
+            // (`hunter_study`'s `glowsite` readout, seed 1, the sun off).
+            sun_shade_max: 0.2,
+            sun_cap_loss_per_s: 0.0006,
+            sun_mycelium_loss_per_s: 0.01,
             substrate_yield: 0.4,
             establish_substrate_min: 0.02,
             // No light income at all, and no light gate (`step`'s `gates` opens `light_ok`
@@ -3585,6 +3636,10 @@ pub struct FloraLedger {
     pub decomposed_by_pool: [f64; 3],
     /// Mycelium eaten by animals, a diagnostic subset of consumed_organic_out.
     pub mycelium_taken: [f64; Species::COUNT],
+    /// Cap tissue and mycelium the sun dried to the litter (GLOWCAP-2,
+    /// [`SpeciesConfig::sun_mycelium_loss_per_s`]): a diagnostic, organic matter moved
+    /// stand → litter inside the layer, no boundary term.
+    pub sun_dried: [f64; Species::COUNT],
     /// Organic matter respired by each stand species (substrate loss and metabolism).
     pub stand_respired: [f64; Species::COUNT],
     /// **Seed counts per species**, indexed by [`Species::index`], cumulative:
@@ -4873,15 +4928,19 @@ pub enum DeathCause {
     /// Died while cured: past its species' `cure_max_s`, or its reserve and wood ran out on
     /// the dormant upkeep. The drought outlasted the dormancy.
     Drought,
+    /// A saprotroph whose mycelium the sun dried below `alive_min` this tick, which it would
+    /// have kept without the sun ([`SpeciesConfig::sun_mycelium_loss_per_s`]).
+    Desiccated,
 }
 
 impl DeathCause {
-    pub const ALL: [DeathCause; 5] = [
+    pub const ALL: [DeathCause; 6] = [
         DeathCause::Starved,
         DeathCause::Drowned,
         DeathCause::Overtopped,
         DeathCause::Displaced,
         DeathCause::Drought,
+        DeathCause::Desiccated,
     ];
     pub const COUNT: usize = DeathCause::ALL.len();
 
@@ -4896,6 +4955,7 @@ impl DeathCause {
             DeathCause::Overtopped => "overtopped",
             DeathCause::Displaced => "displaced",
             DeathCause::Drought => "drought",
+            DeathCause::Desiccated => "desiccated",
         }
     }
 }

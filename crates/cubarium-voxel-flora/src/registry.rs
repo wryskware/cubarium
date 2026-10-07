@@ -114,6 +114,9 @@ fn species_rows() -> Vec<Row> {
         r("substrate_budgeted", "switch (true / false)", finite, "saprotroph uptake bounded by usable income demand").optional(),
         r("substrate_required", "switch (true / false)", finite, "saprotroph requires substrate; dark damp supplies no carbon").optional(),
         r("mycelium_graze_fraction", "fraction of living mycelium", fraction, "fungal tissue exposed to grazers after edible caps are cropped"),
+        r("sun_shade_max", "fraction of open sun", fraction, "saprotroph: exposure at and below which the sun costs nothing (shade)").optional(),
+        r("sun_cap_loss_per_s", "/s of cap tissue at full exposure", nonneg, "saprotroph: caps dried to litter in full sun and daylight").optional(),
+        r("sun_mycelium_loss_per_s", "/s of mycelium at full exposure", nonneg, "saprotroph: surface mycelium dried to litter in full sun and daylight").optional(),
         r("substrate_yield", "fraction", fraction, "saprotroph: share of the substrate taken that becomes tissue")
             .search(0.2, 0.7).grade("A"),
         r("establish_substrate_min", "org-units", nonneg, "saprotroph: substrate a spore cohort needs in its box").grade("C"),

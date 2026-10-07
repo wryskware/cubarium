@@ -368,7 +368,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (1017 rows)
+**`flora.*`** (1044 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -376,6 +376,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.bloomcrown.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.bloomcrown.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.bloomcrown.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.bloomcrown.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.bloomcrown.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.bloomcrown.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.bloomcrown.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.bloomcrown.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -480,6 +483,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.umbrellafrond.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.umbrellafrond.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.umbrellafrond.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.umbrellafrond.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.umbrellafrond.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.umbrellafrond.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.umbrellafrond.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.umbrellafrond.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -584,6 +590,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.springturf.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.springturf.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.springturf.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.springturf.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.springturf.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.springturf.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -688,6 +697,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.stonecushion.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.stonecushion.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.stonecushion.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.stonecushion.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.stonecushion.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.stonecushion.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.stonecushion.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.stonecushion.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -792,6 +804,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.velvetpad.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.velvetpad.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.velvetpad.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.velvetpad.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.velvetpad.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.velvetpad.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.velvetpad.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.velvetpad.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -896,6 +911,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.glowcap.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.glowcap.mycelium_graze_fraction` | 0.5 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.glowcap.sun_shade_max` | 0.2 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.glowcap.sun_cap_loss_per_s` | 0.0006 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.glowcap.sun_mycelium_loss_per_s` | 0.01 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.glowcap.substrate_yield` | 0.4 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.glowcap.establish_substrate_min` | 0.02 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.glowcap.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -1000,6 +1018,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.vaulttree.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.vaulttree.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.vaulttree.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.vaulttree.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.vaulttree.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.vaulttree.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.vaulttree.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.vaulttree.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -1104,6 +1125,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.lanternberry.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.lanternberry.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.lanternberry.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.lanternberry.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.lanternberry.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.lanternberry.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.lanternberry.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.lanternberry.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -1208,6 +1232,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
 | `flora.siphonreed.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
 | `flora.siphonreed.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
+| `flora.siphonreed.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
+| `flora.siphonreed.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
+| `flora.siphonreed.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
 | `flora.siphonreed.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.siphonreed.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.siphonreed.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
