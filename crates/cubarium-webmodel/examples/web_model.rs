@@ -206,6 +206,9 @@ fn world_of(args: &[String]) -> Web {
     if let Some(n) = arg(args, "lj=") {
         set_hunters(&mut w, n.parse().unwrap());
     }
+    if let Some(list) = arg(args, "fresh=") {
+        fresh_founders(&mut w, list);
+    }
     if let Some(only) = arg(args, "only=") {
         let keep: Vec<&str> = only.split(',').collect();
         for f in Founder::ALL {
@@ -213,6 +216,29 @@ fn world_of(args: &[String]) -> Web {
         }
     }
     w
+}
+
+/// **Fresh founders** (LIFE-HISTORY): `fresh=chorister,frondgrazer` replaces those lineages'
+/// free bodies with the config's founding count of founders at the arrival stores (the
+/// Veilhound's packs re-formed at its first step), as a fresh founding has them; the plants
+/// stay the soak's.
+fn fresh_founders(w: &mut Web, list: &str) {
+    let counts = w.fauna.config.founder_counts();
+    for name in list.split(',') {
+        let f = *Founder::ALL.iter().find(|f| f.name() == name || lineage_name(**f) == name).unwrap_or_else(|| panic!("no lineage {name}"));
+        w.fauna.pops[f.index()].retain(|c| c.host.is_some());
+        w.fauna.packs[f.index()].clear();
+        // A pack lineage's count is packs of `pack_size` adults.
+        let per = w.fauna.config.founder(f).pack.map_or(1, |p| p.pack_size.max(1));
+        let n = (counts[f.index()] * per) as f64;
+        if n > 0.0 {
+            let c = Cohort::founders(&w.fauna.config, f, n);
+            w.fauna.add(f, c);
+        }
+        eprintln!("fresh {}: {n} founders", lineage_name(f));
+    }
+    w.fauna.mineral = w.fauna.mineral_wanted();
+    *w = Web::new(w.flora.clone(), w.fauna.clone());
 }
 
 /// Replace the free lanternjaws with `n` adults at the arrival stores (riders and the bank kept;
@@ -354,6 +380,19 @@ fn season(args: &[String]) {
         let c = &w.flora.c;
         let cured: f64 = w.flora.z.iter().map(|z| z.cohorts[tk].iter().filter(|x| x.st.cured).map(|x| x.n).sum::<f64>()).sum();
         let mut fauna: Vec<String> = lineages.iter().map(|f| format!("{}={:.1}", lineage_name(*f), w.fauna.census(*f).n)).collect();
+        // LIFE-HISTORY: the Veilhound's pups now, and its litters, young and pups come of age
+        // (cumulative), and the year.
+        let vh = Founder::Chorister;
+        let pups: f64 = w.fauna.pops[vh.index()].iter().filter(|c| w.fauna.is_pup(vh, c)).map(|c| c.n).sum();
+        let l = &w.fauna.ledger[vh.index()];
+        fauna.push(format!(
+            "vh_pups={pups:.1},vh_conceived={:.1},vh_litters={:.1},vh_born={:.1},vh_indep={:.1},year={}",
+            l.conceived,
+            l.litters,
+            l.born,
+            l.pups_independent,
+            w.fauna.year().map_or("-".to_string(), |y| format!("{}:{:.2}", y.number, y.phase))
+        ));
         // The rest of the drained ground by species.
         let o = drained_species(w);
         fauna.push(format!("rest=[{}]", Species::ALL.iter().filter(|s| ![Species::Springturf, Species::Lanternberry, Species::Vaulttree, Species::Glowcap].contains(s) && o[s.index()] >= 0.005).map(|s| format!("{}:{:.3}", s.name(), o[s.index()])).collect::<Vec<_>>().join(" ")));

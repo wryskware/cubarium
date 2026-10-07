@@ -166,6 +166,10 @@ fn species_rows() -> Vec<Row> {
             .search(0.0, 2.0),
         r("reproduction.brood_share", "fraction of net income", Range::fraction(), "the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off)")
             .search(0.0, 1.0),
+        r("reproduction.litters_per_year", "conceptions per year", nonneg, "breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season)"),
+        r("reproduction.breeding_phase", "year phase", Range::fraction(), "breeding season: the year phase its window opens at (0: a dry season's start)"),
+        r("reproduction.breeding_window", "share of the year", nonneg, "breeding season: the window's width (1 or more: the whole year)"),
+        r("reproduction.gestation_upkeep_factor", "x basal upkeep", nonneg, "pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise)"),
     ]
 }
 
@@ -367,6 +371,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.follow_radius_m", "m", nonneg, "an idle adult walks back to within this of the breeder").optional(),
         r("pack.home_give_up_s", "s", nonneg, "an adult wanting rest walks home this long, then rests where it is").optional(),
         r("pack.stalk_margin", "fraction of the prey's hearing floor", nonneg, "S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk)").optional(),
+        r("pack.breed_reserve_fraction", "fraction of reserve cap", fraction, "the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone)").optional(),
         r("pack.commit_m", "m", nonneg, "S2: ...and rushes within this of its prey").optional(),
         r("pack.select_kin_m", "m", nonneg, "PACK-TUNE: kin of a target's lineage within this lower its prospect").optional(),
         r("pack.select_kin_factor", "factor", fraction, "PACK-TUNE: each such kin multiplies the prospect by this").optional(),

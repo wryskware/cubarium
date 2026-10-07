@@ -1110,6 +1110,10 @@ pub struct PackRecord {
     /// [`PackRecord::drawn`] is.
     #[serde(default)]
     pub drawn_scent: bool,
+    /// **The pack's breeding season** (LIFE-HISTORY): the year of its last litter's
+    /// conception and the conceptions in it ([`Reproduction::litters_per_year`] per pack).
+    #[serde(default)]
+    pub season: Season,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -1339,6 +1343,32 @@ pub struct ReproductionState {
     /// ([`ReproductionState::brood_held`]).
     #[serde(default)]
     pub brood: f64,
+    /// **This body's breeding season** (LIFE-HISTORY, [`Reproduction::litters_per_year`]):
+    /// the year of its last conception and how many it has had in it. A pack lineage counts
+    /// on its [`PackRecord::season`] instead.
+    #[serde(default)]
+    pub season: Season,
+}
+
+/// **A breeding season's count** (LIFE-HISTORY): the Cubarium year of the last conception and
+/// the conceptions in it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Season {
+    pub year: i64,
+    pub litters: u32,
+}
+
+impl Season {
+    /// The conceptions already had in `year`.
+    pub fn used_in(&self, year: i64) -> u32 {
+        if self.year == year { self.litters } else { 0 }
+    }
+
+    /// Count one conception in `year`.
+    pub fn count(&mut self, year: i64) {
+        let used = self.used_in(year);
+        *self = Season { year, litters: used + 1 };
+    }
 }
 
 impl ReproductionState {
@@ -1517,6 +1547,31 @@ pub struct Reproduction {
     /// brood also does not sate: hunger counts only the reserve above it. 0 turns it off.
     #[serde(default)]
     pub brood_share: f64,
+    /// **Breeding seasons** (LIFE-HISTORY, Wrysk 2026-10-06): at most this many conceptions —
+    /// a gestation opened, or a clutch laid — per Cubarium year
+    /// ([`cubarium_voxel::weather::Climate::year`], the dry-season cycle), each inside the
+    /// window [`Reproduction::breeding_phase`] + [`Reproduction::breeding_window`]. A pack
+    /// lineage counts them per pack (the pack breeds, whoever its breeder is). **0: no season**
+    /// — the lineage breeds exactly as without these knobs; so does a seasonal lineage in a
+    /// world with no year (no season period).
+    #[serde(default)]
+    pub litters_per_year: u32,
+    /// The year phase, `[0, 1)`, at which the breeding window opens (phase 0 is a dry
+    /// season's start).
+    #[serde(default)]
+    pub breeding_phase: f64,
+    /// The breeding window's width, a share of the year (wrapping past its end; 1 or more is
+    /// the whole year).
+    #[serde(default)]
+    pub breeding_window: f64,
+    /// **Pregnancy upkeep**: a gestating body's basal upkeep is multiplied by this while its
+    /// escrow is open. 1 is no raise.
+    #[serde(default = "default_gestation_upkeep_factor")]
+    pub gestation_upkeep_factor: f64,
+}
+
+fn default_gestation_upkeep_factor() -> f64 {
+    1.0
 }
 
 fn default_surplus_share() -> f64 {
@@ -1645,6 +1700,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// The littershredder's egg placeholders.
@@ -1682,6 +1741,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13), revised with its metabolism in the
@@ -1712,6 +1775,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// What the **smallest** offspring package costs the parent's reserve, the price
@@ -1817,6 +1884,20 @@ impl Reproduction {
 
     pub fn incubation_ticks(&self) -> u64 {
         cubarium_voxel::ticks_at_least_one(self.incubation_s)
+    }
+
+    /// **The breeding season's gate** (LIFE-HISTORY): whether a conception may happen at
+    /// `year` with `season` counted so far — always, for a lineage with no season
+    /// (`litters_per_year` 0) or in a world with no year; else only inside the window and
+    /// while the year's conceptions are under `litters_per_year`.
+    pub fn season_allows(&self, year: Option<cubarium_voxel::weather::Year>, season: Season) -> bool {
+        if self.litters_per_year == 0 {
+            return true;
+        }
+        let Some(y) = year else {
+            return true;
+        };
+        y.in_window(self.breeding_phase, self.breeding_window) && season.used_in(y.number) < self.litters_per_year
     }
 }
 
@@ -2899,6 +2980,14 @@ pub struct FaunaLedger {
     pub litters: u64,
     #[serde(default)]
     pub pups_born: u64,
+    /// Pups that came of age (reached [`Pack::independence_age_s`] alive) and joined their
+    /// pack (LIFE-HISTORY).
+    #[serde(default)]
+    pub pups_independent: u64,
+    /// Conceptions a breeding season refused (outside the window, or the year's litters
+    /// used), counted once per refused tick a ready body waited (LIFE-HISTORY).
+    #[serde(default)]
+    pub season_waits: u64,
     /// **The minimal gut's books** (repair 2 item 10). Raw food into stomachs (every bite,
     /// after any spill), out of them by digestion (into assimilation, egesta and the
     /// unfunded share's respiration), moved stomach to stomach by regurgitation (inside
@@ -3919,6 +4008,7 @@ impl Fauna {
             shunned: [(0, 0); 4],
             drawn: None,
             drawn_scent: false,
+            season: Season::default(),
         });
         Some(id)
     }

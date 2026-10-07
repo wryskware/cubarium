@@ -94,7 +94,11 @@ use crate::Fauna;
 //     branch unmerged): `Pack::switch_stall_s`; a switch only after that long stalled.
 //     STRIKE (same 53, the branch unmerged): `Pack::{close_in_m, stand_off_reach_fraction}`,
 //     the ledger's `pack_close_in_samples, pack_step_offs, pack_pivots, pack_out_of_reach`.
-pub const SCHEMA: u32 = 53;
+// 54: LIFE-HISTORY — `Reproduction::{litters_per_year, breeding_phase, breeding_window,
+//     gestation_upkeep_factor}`, `Pack::{breed_reserve_fraction, litter_by_condition}`,
+//     `ReproductionState::season` and `PackRecord::season` (`Season`), the ledger's
+//     `pups_independent` and `season_waits`; the Veilhound's season, gestation and rearing.
+pub const SCHEMA: u32 = 54;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
