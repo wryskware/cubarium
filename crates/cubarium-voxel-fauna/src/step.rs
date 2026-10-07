@@ -4475,3 +4475,15 @@ mod testpass_light_tests;
 #[cfg(test)]
 #[path = "testpass_snail_tests.rs"]
 mod testpass_snail_tests;
+#[cfg(test)]
+#[path = "testpass2_pack_tests.rs"]
+mod testpass2_pack_tests;
+#[cfg(test)]
+#[path = "testpass2_life_tests.rs"]
+mod testpass2_life_tests;
+#[cfg(test)]
+#[path = "testpass2_light_tests.rs"]
+mod testpass2_light_tests;
+#[cfg(test)]
+#[path = "testpass2_edge_tests.rs"]
+mod testpass2_edge_tests;
