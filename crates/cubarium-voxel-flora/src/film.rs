@@ -32,6 +32,10 @@
 //!   `K_land = film_land_capacity_per_m2 · cell area`; film above `K_land` there dies back
 //!   at `film_dry_death_per_s` to litter; it gives and receives spread (receiving up to
 //!   `K_land`). Drier than that it is a dry site. Film is a pool, not a cover slot.
+//! - **Wetter ground and the shore** (SNAIL-LAND): a face within `film_shore_band_m` of
+//!   standing water at or below it is land-wet from `film_shore_moisture_min`; and a
+//!   land-wet face's capacity runs linearly with pore fill from `film_land_capacity_per_m2`
+//!   at its floor to `film_land_capacity_wet_per_m2` at saturation ([`land_capacity_per_m2`]).
 //! - **Spread** (between eligible and land-wet sites only, so a dry residue neither gives nor receives): an
 //!   eligible site with less film gains from each eligible 4-neighbour
 //!   `film_spread_per_s · neighbour film` (never more than half the difference, so a pair
@@ -87,20 +91,76 @@ pub enum FilmWet {
 
 /// The [`FilmWet`] class of support face `(x, y, z)`.
 pub fn film_wet(view: &VoxelView<'_>, c: &FloraConfig, x: i64, y: u32, z: u32) -> FilmWet {
+    classify(view, c, x, y, z).0
+}
+
+/// [`film_wet`] with, for a land-wet face, its capacity per square metre
+/// ([`land_capacity_per_m2`]); 0 otherwise.
+pub(crate) fn classify(view: &VoxelView<'_>, c: &FloraConfig, x: i64, y: u32, z: u32) -> (FilmWet, f64) {
     let d = view.standing_depth_m(x, y, z);
     if d > 0.0 && d >= c.film_wet_min_depth_m && d <= c.film_max_depth_m {
-        return FilmWet::Under(d);
+        return (FilmWet::Under(d), 0.0);
     }
     let cfg = view.config;
     if d > c.film_max_depth_m || z >= cfg.depth || y >= cfg.height || view.pore.is_empty() {
-        return FilmWet::Dry;
+        return (FilmWet::Dry, 0.0);
     }
     let m = view.pore_at(x, y, z);
-    if m.is_finite() && m >= c.film_land_moisture_min {
-        FilmWet::Land
-    } else {
-        FilmWet::Dry
+    if !m.is_finite() {
+        return (FilmWet::Dry, 0.0);
     }
+    // SNAIL-LAND: in the shore band the floor is the shore's; the band is only searched
+    // for a face that is under the land floor and could clear the shore's.
+    let floor = if m >= c.film_land_moisture_min {
+        c.film_land_moisture_min
+    } else if m >= c.film_shore_moisture_min && shore_band(view, c.film_shore_band_m, x, y, z) {
+        c.film_shore_moisture_min
+    } else {
+        return (FilmWet::Dry, 0.0);
+    };
+    (FilmWet::Land, land_capacity_per_m2(c, m, floor))
+}
+
+/// **Land film capacity** (SNAIL-LAND), organic matter per square metre, on a face of
+/// pore fill `m` whose moisture floor is `floor`: `film_land_capacity_per_m2` at the floor,
+/// rising linearly to `film_land_capacity_wet_per_m2` at saturation (pore fill 1).
+pub fn land_capacity_per_m2(c: &FloraConfig, m: f64, floor: f64) -> f64 {
+    let span = 1.0 - floor;
+    let t = if span > 0.0 { ((m - floor) / span).clamp(0.0, 1.0) } else { 1.0 };
+    let (lo, hi) = (c.film_land_capacity_per_m2, c.film_land_capacity_wet_per_m2);
+    (lo + (hi - lo) * t).max(0.0)
+}
+
+/// **The shore band** (SNAIL-LAND, [`FloraConfig::film_shore_band_m`]): whether a column
+/// within `band_m` (horizontal, centre to centre; `x` wraps) of face `(x, y, z)` has its
+/// highest support face at or below row `y` under standing water. The face's own column
+/// counts. `false` for a band of 0.
+pub fn shore_band(view: &VoxelView<'_>, band_m: f64, x: i64, y: u32, z: u32) -> bool {
+    let cfg = view.config;
+    let v = cfg.voxel_m;
+    if !(band_m > 0.0) || !(v > 0.0) {
+        return false;
+    }
+    let r = band_m / v;
+    let k = (r + 1e-9).floor() as i64;
+    for dz in -k..=k {
+        let zz = i64::from(z) + dz;
+        if zz < 0 || zz >= i64::from(cfg.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            if ((dx * dx + dz * dz) as f64) > r * r + 1e-9 {
+                continue;
+            }
+            let xx = (x + dx).rem_euclid(i64::from(cfg.width));
+            if let Some(yy) = view.highest_support_in(xx, zz as u32, 0, y)
+                && view.standing_depth_m(xx, yy, zz as u32) > 0.0
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// **Land film census** (SNAIL-FIX readout): over every column's top support face, the
@@ -155,7 +215,7 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
     } = flora;
     let voxel_m = view.config.voxel_m;
     let cap = c.film_capacity_per_m2 * voxel_m * voxel_m;
-    let land_cap = c.film_land_capacity_per_m2 * voxel_m * voxel_m;
+    let area = voxel_m * voxel_m;
     let (n_t, e_t) = (c.film_n_tissue, c.film_energy_density);
 
     // The step-start film of every site holding any, and the eligible ones' sites: what
@@ -171,7 +231,8 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
         }
         let s = g.site;
         before.push((s, f));
-        let wet = film_wet(&view, c, i64::from(s.x), s.y, s.z);
+        let (wet, land_k) = classify(&view, c, i64::from(s.x), s.y, s.z);
+        let land_cap = land_k * area;
         let depth = match wet {
             FilmWet::Under(d) => Some(d),
             _ => None,
@@ -298,10 +359,10 @@ pub(crate) fn step(flora: &mut Flora, world: &World, open: &[(Site, f64)], dayli
                 continue;
             }
             // Onto wet-eligible ground, or land-wet ground up to its own capacity.
-            let room = match film_wet(&view, c, i64::from(to.x), to.y, to.z) {
-                FilmWet::Under(_) => f64::INFINITY,
-                FilmWet::Land => land_cap,
-                FilmWet::Dry => continue,
+            let room = match classify(&view, c, i64::from(to.x), to.y, to.z) {
+                (FilmWet::Under(_), _) => f64::INFINITY,
+                (FilmWet::Land, k) => k * area,
+                (FilmWet::Dry, _) => continue,
             };
             let there = before
                 .binary_search_by_key(&to, |e| e.0)

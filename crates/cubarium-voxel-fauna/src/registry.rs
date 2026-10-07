@@ -225,6 +225,18 @@ fn founder_rows() -> Vec<Row> {
         r("amphibious.retract_armour", "fraction", fraction, "a hit on it while retracted is reduced by this, on top of its armour").optional().prov("decision"),
         r("amphibious.roam_search_m", "m", nonneg, "at night and in or after rain, not thirsty and not feeding, it walks to the land face with the most film within this, or out of water to the nearest wet land face (0: no roam)").optional(),
         r("amphibious.roam_after_rain_s", "s", nonneg, "the roam hours last this long after rain stops").optional(),
+        // SNAIL-LAND: eggs on land (EggSite::Shore) and their risks.
+        r("amphibious.egg_water_max_m", "m", nonneg, "shore eggs: the egg face is within this horizontal distance of standing water").optional(),
+        r("amphibious.egg_climb_max_m", "m", nonneg, "shore eggs: the egg face stands at most this far above that water's surface").optional(),
+        r("amphibious.egg_moisture_min", "pore fill 0..1", fraction, "shore eggs: the least ground moisture of the egg face").optional(),
+        r("amphibious.egg_drown_s", "s", nonneg, "shore eggs: an egg under standing water this long without a break dies to the litter").optional().prov("decision"),
+        r("amphibious.egg_dry_moisture", "pore fill 0..1", fraction, "shore eggs: an egg on ground drier than this ...").optional().prov("decision"),
+        r("amphibious.egg_dry_s", "s", nonneg, "... for this long without a break dies to the litter").optional().prov("decision"),
+        // SNAIL-LAND-2: the trip's reach and the giving-up density.
+        r("amphibious.egg_search_m", "m", nonneg, "a ready layer looks this far for a shore egg face it can afford whose nest is not crowded").optional(),
+        r("amphibious.graze_give_up", "fraction of a site's film capacity", nonneg, "wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes)").optional(),
+        r("amphibious.graze_worth", "fraction of a site's film capacity", nonneg, "... one holding at least this per snail on it (itself counted) ...").optional(),
+        r("amphibious.graze_search_m", "m", nonneg, "... within this distance (in water at any hour, out of water in its roam hours)").optional(),
         r("contact_height_fraction", "x body height", nonneg, "the contact receptors' height").digest(),
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),

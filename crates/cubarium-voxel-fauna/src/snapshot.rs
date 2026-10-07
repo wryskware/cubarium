@@ -112,7 +112,11 @@ use crate::Fauna;
 // 60: DROP — `FounderPhysiology::drop` (`DropRule`), `Departure::Fell`, the ledger's
 //     `drops_by_founder`, `drop_m_by_founder` and `drop_wound_by_founder`; a trapped body jumps
 //     down past its step at a wound.
-pub const SCHEMA: u32 = 60;
+// 61: SNAIL-LAND — `EggSite::Shore`, `Amphibious::{egg_water_max_m, egg_climb_max_m,
+//     egg_moisture_min, egg_drown_s, egg_dry_moisture, egg_dry_s}`, `Clutch::{wet_ticks,
+//     dry_ticks}`, the ledger's `eggs_drowned_by_founder` and `eggs_dried_by_founder`.
+//     SNAIL-LAND-2 (same 61) — `Amphibious::{egg_search_m, graze_give_up, graze_worth, graze_search_m}`.
+pub const SCHEMA: u32 = 61;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
