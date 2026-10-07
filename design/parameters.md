@@ -1363,7 +1363,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2233 rows)
+**`fauna.*`** (2287 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1526,6 +1526,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.littershredder.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.littershredder.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.littershredder.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.littershredder.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.littershredder.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.littershredder.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.littershredder.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.littershredder.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -1752,6 +1758,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.frondgrazer.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.frondgrazer.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.frondgrazer.hunker.shelter_seek_m` | 6.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.frondgrazer.hunker.shelter_margin_m` | 0.15 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.frondgrazer.hunker.shelter_exposure` | 0.25 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.frondgrazer.hunker.enter_m` | 2.5 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.frondgrazer.hunker.leave_m` | 5.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.frondgrazer.hunker.calm_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -1978,6 +1990,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.lanternjaw.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.lanternjaw.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.lanternjaw.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.lanternjaw.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.lanternjaw.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.lanternjaw.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.lanternjaw.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.lanternjaw.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2204,6 +2222,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.capgnawer.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.capgnawer.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.capgnawer.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.capgnawer.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.capgnawer.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.capgnawer.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.capgnawer.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.capgnawer.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2430,6 +2454,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.loftstrider.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.loftstrider.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.loftstrider.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.loftstrider.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.loftstrider.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.loftstrider.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.loftstrider.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.loftstrider.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2656,6 +2686,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.ripple-snail.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.ripple-snail.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.ripple-snail.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.ripple-snail.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.ripple-snail.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.ripple-snail.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.ripple-snail.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.ripple-snail.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2882,6 +2918,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.bellwing.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.bellwing.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.bellwing.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.bellwing.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.bellwing.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.bellwing.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.bellwing.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.bellwing.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3108,6 +3150,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.seedporter.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.seedporter.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.seedporter.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.seedporter.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.seedporter.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.seedporter.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.seedporter.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.seedporter.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3334,6 +3382,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.chorister.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.chorister.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.chorister.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.chorister.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.chorister.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.chorister.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.chorister.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.chorister.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |

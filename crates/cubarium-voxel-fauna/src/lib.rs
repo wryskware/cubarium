@@ -62,6 +62,8 @@ mod descent_tests;
 #[cfg(test)]
 mod hot_path_tests;
 #[cfg(test)]
+mod herd_tests;
+#[cfg(test)]
 mod roster_tests;
 #[cfg(test)]
 mod roster_mechanics_tests;
@@ -3509,6 +3511,10 @@ pub struct FaunaTick(step::TickStart);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Fauna {
     config: FaunaConfig,
+    /// Last world's (ring circumference, voxel size), rebuilt on introduction/step for
+    /// exact death readouts that need cover geometry. Runtime cache, never saved.
+    #[serde(skip)]
+    world_geometry: Option<(f64, f64)>,
     tick: u64,
     /// Sorted by id, so every pass over them is in one stable order however they move.
     /// A `Vec` with a binary search, never a `HashMap`: this layer iterates nothing
@@ -3957,6 +3963,7 @@ impl Fauna {
         config.validate()?;
         Ok(Fauna {
             config,
+            world_geometry: None,
             tick: 0,
             animals: Vec::new(),
             clutches: Vec::new(),
@@ -4653,6 +4660,7 @@ impl Fauna {
         heading_rad: f64,
     ) -> bool {
         let view = world.view();
+        self.world_geometry = Some((f64::from(view.config.width) * view.config.voxel_m, view.config.voxel_m));
         // A founder body is introduced under its **own** physiology: thresholds,
         // densities and tissue mineral content come from the founder table, not from
         // the placeholder species it shares a [`Species`] tag with.
