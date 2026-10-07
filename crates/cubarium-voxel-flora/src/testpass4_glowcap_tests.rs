@@ -73,6 +73,9 @@ fn config() -> FloraConfig {
     s.wilt_water = 0.0;
     s.full_water = 0.5;
     c.litter_energy_cap = c.glowcap.energy_density;
+    // GLOWCAP-2: the open sky would dry the fungus; these are substrate and grazing tests.
+    c.glowcap.sun_cap_loss_per_s = 0.0;
+    c.glowcap.sun_mycelium_loss_per_s = 0.0;
     c
 }
 

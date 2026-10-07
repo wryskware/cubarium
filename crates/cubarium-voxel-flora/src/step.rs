@@ -923,6 +923,11 @@ fn light_per_stand(
     let receive = |i: usize| -> f64 {
         let stand = &stands[i];
         let open = open[i];
+        // A saprotroph earns nothing from light, so what it reads is its **exposure**
+        // (GLOWCAP-2, [`SpeciesConfig::sun_mycelium_loss_per_s`]): the share of the open sun
+        // that reaches its cap, raw, with its own face's plant over it as well — a cap
+        // under the leaves of the plant it shares a face with is in that plant's shade.
+        let saprotroph = config.species(stand.species).trophic == Trophic::Saprotroph;
         let mine = &layers[span[i].0 as usize..span[i].1 as usize];
         let near = index.near(stand.site);
         // The weights: where this stand's tissue is. A stand with no foliage left has
@@ -950,6 +955,7 @@ fn light_per_stand(
                 // cap grows under the plant's leaves, and earns nothing from light. A face's
                 // two plants do, by the same law as any other pair (CONTEST).
                 if stands[c.j as usize].site == stand.site
+                    && !saprotroph
                     && !same_face_shades(&stands[c.j as usize], stand)
                 {
                     continue;
@@ -976,7 +982,11 @@ fn light_per_stand(
             weighed += w;
         }
         let l = if weighed > 0.0 { l / weighed } else { open };
-        light_response(config.species(stand.species), l)
+        if saprotroph {
+            l
+        } else {
+            light_response(config.species(stand.species), l)
+        }
     };
     let lit = for_chunks(
         stands.len(),
@@ -2954,6 +2964,7 @@ fn grow(
         ledger.foliage_built[s.species.index()] += b.built;
         ledger.stand_respired[s.species.index()] += b.respired[..b.respired_n as usize].iter().sum::<f64>();
         ledger.shed_organic[s.species.index()] += b.shed;
+        ledger.sun_dried[s.species.index()] += b.sun;
     }
     for (b, s) in books.iter().zip(stands.iter()) {
         let k = s.species.index();
@@ -2984,7 +2995,7 @@ pub(crate) struct Booked {
     seep: [f64; 3],
     respired: [f64; 2],
     respired_n: u8,
-    heat: [f64; 4],
+    heat: [f64; 5],
     heat_n: u8,
     /// The night budget's spend on `[reflush, nectar, fruit]` (1b), the reflush with its
     /// construction respiration: `FloraLedger::night_spend`'s line for this stand.
@@ -2997,6 +3008,8 @@ pub(crate) struct Booked {
     cured: bool,
     woke: bool,
     cure_shed: f64,
+    /// Cap tissue and mycelium the sun dried to the litter (`FloraLedger::sun_dried`).
+    sun: f64,
 }
 
 impl Booked {
@@ -3455,6 +3468,39 @@ pub(crate) fn grow_stand_cause(
         g.dead_wood_energy += e_v * die_back;
     }
 
+    // ---- 4.6a the sun (GLOWCAP-2): a saprotroph whose exposure is above its shade dries —
+    // its caps and its surface mycelium, each at its own rate times how far the exposure is
+    // toward full sun ([`sun_share`]) times the daylight — to its own face's litter, with
+    // their mineral and energy. Nothing at night, nothing in shade.
+    let mut desiccated = false;
+    if sc.trophic == Trophic::Saprotroph
+        && (sc.sun_cap_loss_per_s > 0.0 || sc.sun_mycelium_loss_per_s > 0.0)
+    {
+        let sun = sun_share(sc, l_eff) * daylight.max(0.0);
+        if sun > 0.0 {
+            let cap = (sc.sun_cap_loss_per_s * sun * dt).clamp(0.0, 1.0) * stand.foliage.max(0.0);
+            let myc = (sc.sun_mycelium_loss_per_s * sun * dt).clamp(0.0, 1.0) * stand.wood.max(0.0);
+            let wood_was = stand.wood;
+            let organic_before = stand.material();
+            stand.foliage -= cap;
+            {
+                let n = sc.foliage_layer_count(stand.wood);
+                crate::layers::shed_from_top(stand.layer_stocks_mut(n), cap);
+                stand.settle_layers(n);
+            }
+            stand.wood -= myc;
+            let dried = cap + myc;
+            let dried_mineral = pull_mineral(stand, organic_before, dried);
+            let mut heat = FloraLedger::default();
+            add_litter(config, g, dried, dried_mineral, e_v * dried, &mut heat);
+            if heat.heat_out != 0.0 {
+                book.heat(heat.heat_out);
+            }
+            book.sun = dried;
+            desiccated = wood_was >= sc.alive_min && stand.wood < sc.alive_min;
+        }
+    }
+
     // ---- 4.6b the stage, after every change to the wood
     //
     // Growth and dieback both move `W`, and the profile is staged by `W / W_max`.
@@ -3464,8 +3510,22 @@ pub(crate) fn grow_stand_cause(
     // nothing is destroyed (decisions §4).
     stand.resync_layers(config.species(species));
 
-    // ---- 4.7 death
-    (stand.wood < sc.alive_min).then_some(DeathCause::Starved)
+    // ---- 4.7 death: the sun's when this tick's drying took it under, else starvation
+    (stand.wood < sc.alive_min).then_some(if desiccated {
+        DeathCause::Desiccated
+    } else {
+        DeathCause::Starved
+    })
+}
+
+/// How far a saprotroph's `exposure` ([`Stand::light`]) is from shade toward full sun, for
+/// its sun loss ([`SpeciesConfig::sun_shade_max`]): 0 at and below `sun_shade_max`, rising
+/// linearly to 1 at full sun.
+pub(crate) fn sun_share(sc: &SpeciesConfig, exposure: f64) -> f64 {
+    if !(exposure > sc.sun_shade_max) || sc.sun_shade_max >= 1.0 {
+        return 0.0;
+    }
+    ramp(exposure, sc.sun_shade_max, 1.0)
 }
 
 /// **A stand cures**: `cure_shed` of its foliage falls to its site's litter, from the top
@@ -4856,7 +4916,9 @@ mod tests {
                 }
                 let mut here = open;
                 for (j, other) in crowns.iter().enumerate() {
-                    if j == i || (stands[j].site == stand.site && !super::same_face_shades(&stands[j], stand)) {
+                    // A fungus's exposure has its own face's plant over it (GLOWCAP-2).
+                    let fungus = config.species(stand.species).trophic == Trophic::Saprotroph;
+                    if j == i || (stands[j].site == stand.site && !fungus && !super::same_face_shades(&stands[j], stand)) {
                         continue;
                     }
                     let (top, radius) = envelope[j];
@@ -4886,7 +4948,11 @@ mod tests {
                 weighed += w;
             }
             let l = if weighed > 0.0 { l / weighed } else { open };
-            out.push(light_response(config.species(stand.species), l));
+            out.push(if config.species(stand.species).trophic == Trophic::Saprotroph {
+                l
+            } else {
+                light_response(config.species(stand.species), l)
+            });
         }
         out
     }

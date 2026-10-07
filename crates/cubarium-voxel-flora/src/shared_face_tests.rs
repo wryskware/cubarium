@@ -57,6 +57,9 @@ fn quiet() -> FloraConfig {
         s.burr_pickup = 0.0;
         s.cure_after_s = 0.0;
     }
+    // The faces are under open sky; the sun's cost is `glowcap_sun_tests`' subject.
+    c.glowcap.sun_cap_loss_per_s = 0.0;
+    c.glowcap.sun_mycelium_loss_per_s = 0.0;
     c
 }
 

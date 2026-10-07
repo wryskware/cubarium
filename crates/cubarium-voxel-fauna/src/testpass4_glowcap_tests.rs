@@ -36,6 +36,9 @@ fn scene(fraction: f64, regrow: f64) -> (cubarium_voxel::World, Flora, Fauna, Si
     fc.glowcap.senescence = 0.0;
     fc.glowcap.propagule_rate = 0.0;
     fc.glowcap.dark_uptake_per_s = 0.0;
+    // GLOWCAP-2: the open sky would dry the mycelium and move the refuge; this is about bites.
+    fc.glowcap.sun_cap_loss_per_s = 0.0;
+    fc.glowcap.sun_mycelium_loss_per_s = 0.0;
     let wood = fc.glowcap.wood_max;
     let reserve = fc.glowcap.reserve_cap * wood;
     let regrown = (regrow * full_bite).min(0.25 * reserve / (1.0 + fc.glowcap.build));
