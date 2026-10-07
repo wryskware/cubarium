@@ -623,3 +623,166 @@ fn a_breeder_carrying_a_litter_in_an_emergency_hunts() {
     let (d, r) = run(true);
     assert!(d > 0.5 * r, "in an emergency it is not held at the den ({d:.2} m from the den)");
 }
+
+// ------------------------------------------------------------------ CHURN: work is progress
+
+/// **Work on the target is progress**: a pack at a hunkered adult grazer it can open (two
+/// members' pry against its resistance), every member hungry and in contact, with no closing
+/// counted (`chase_progress_m` past the plain) and a give-up of 1 s, keeps its target over three
+/// give-ups while it pries. The control, the same pack at the same grazer unhunkered (no pry, and
+/// strikes that do no harm: no work), goes late.
+#[test]
+fn work_on_the_target_is_progress() {
+    let arm = |hunkered: bool| -> (bool, usize) {
+        let world = world(951);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut c = config();
+        let base = crate::vigil::hunker_of(PREY);
+        c.founders[PREY.index()].hunker = crate::Hunker { enabled: true, ring_resist_per_kin: 0.0, pry_per_member_s: base.resist_per_s / 1.5, ..base };
+        c.founders[CH.index()].pack.as_mut().unwrap().close_in_m = 2.5;
+        let hk = c.founders[PREY.index()].hunker;
+        let mut fauna = Fauna::new(c.clone());
+        fauna.set_births_enabled(false);
+        let members = pack(&mut fauna, &world);
+        let g = grazer(&mut fauna, &world, 6.0, LANE_Z, 1.0);
+        let adult = fauna.config.founder(PREY).core.birth_body;
+        assert_eq!(hk.members_to_open(adult, adult, 0), Some(2), "fixture: two members open it");
+        animal_mut(&mut fauna, g).hunkered = hunkered;
+        step_until(&mut fauna, &world, &mut flora, 300, |f| f.ledger.pack_chases > 0).expect("fixture: the pack commits");
+        step_until(&mut fauna, &world, &mut flora, 400, |f| nearest(f, &members, g) <= 1.5).expect("fixture: the pack reaches the grazer");
+        {
+            let pk = c.founders[CH.index()].pack.as_mut().unwrap();
+            pk.chase_give_up_s = 1.0;
+            pk.route_reach_fraction = 1.0;
+            pk.chase_progress_m = 100.0;
+        }
+        fauna.replace_config(c).unwrap();
+        let mut events = Vec::new();
+        let mut kept = true;
+        for _ in 0..cubarium_voxel::ticks_at_least_one(3.0) {
+            step_s(&mut fauna, &world, &mut flora, 0.0, &mut events);
+            kept &= fauna.packs()[0].target == Some(g) || fauna.view().animal(g).is_none();
+        }
+        (kept, ends(&events, ChaseEnd::Late))
+    };
+    let (kept, late) = arm(false);
+    assert!(!kept && late >= 1, "control, no work: kept {kept}, late {late}");
+    let (kept, late) = arm(true);
+    assert!(kept && late == 0, "prying: kept {kept}, late {late}");
+}
+
+// ------------------------------------------------------------------ STRIKE: the switch off
+
+/// **`close_in_m` 0 restores the chase**: a member with its grazer inside its outline (0.15 m
+/// ahead), alone and hungry: with the close-in off nothing is booked to it (no close-in
+/// samples, step-offs or pivots) and the member stays within the chase's stop distance of the
+/// grazer (half its length); with it on, its close-in samples and step-offs are booked.
+#[test]
+fn close_in_m_zero_restores_the_chase() {
+    let run = |close_in_m: f64| {
+        let world = world(952);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut c = config();
+        c.founders[CH.index()].pack.as_mut().unwrap().close_in_m = close_in_m;
+        let (mut fauna, a, g) = one_member(&world, &mut flora, c);
+        place(&mut fauna, a, 5.0, LANE_Z, EAST);
+        place(&mut fauna, g, 5.15, LANE_Z, WEST);
+        let before = (fauna.ledger.pack_close_in_samples, fauna.ledger.pack_step_offs, fauna.ledger.pack_pivots);
+        let stop = 0.5 * fauna.config.founder(CH).body_at(animal(&fauna, a).body).length_m;
+        let mut farthest: f64 = 0.0;
+        for _ in 0..cubarium_voxel::ticks_at_least_one(1.0) {
+            fauna.step_with(&world, &mut flora, 1);
+            if fauna.view().animal(g).is_none() {
+                break;
+            }
+            farthest = farthest.max(distance(&fauna, a, g));
+        }
+        let after = (fauna.ledger.pack_close_in_samples, fauna.ledger.pack_step_offs, fauna.ledger.pack_pivots);
+        (after.0 - before.0, after.1 - before.1, after.2 - before.2, farthest, stop)
+    };
+    let (samples, offs, pivots, farthest, stop) = run(0.0);
+    assert_eq!((samples, offs, pivots), (0, 0, 0), "close-in off: nothing booked to it");
+    assert!(farthest <= stop, "close-in off: it stays within the chase's stop ({farthest:.2} > {stop:.2})");
+    let (samples, offs, _, _, _) = run(2.5);
+    assert!(samples > 0 && offs > 0, "close-in on: samples {samples}, step-offs {offs}");
+}
+
+// ------------------------------------------------------------------ save and load
+
+/// **Every state field and knob the night's packages added round-trips a snapshot** (fauna
+/// schema 58): CHURN's progress clock on a pack (a finite nearest-so-far and an infinite one),
+/// LIFE-HISTORY's season on a pack and on a body, the new ledger lines, and the knobs of CHURN,
+/// STRIKE, STRIKE-2, LIFE-HISTORY, PIT, PIT-2, BELLWING and EDGE set off their defaults; EDGE's
+/// session state (the pressed run, the walk and its give-ups, the route flight) is not saved
+/// and loads empty.
+#[test]
+fn every_new_state_field_and_knob_round_trips_a_snapshot() {
+    let world = world(961);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = config();
+    {
+        let pk = c.founders[CH.index()].pack.as_mut().unwrap();
+        pk.chase_progress_m = 0.35;
+        pk.switch_margin = 1.7;
+        pk.switch_stall_s = 7.0;
+        pk.close_in_m = 2.2;
+        pk.stand_off_reach_fraction = 0.3;
+        pk.herd_shun_m = 2.5;
+        pk.breed_reserve_fraction = 0.55;
+        pk.litter_by_condition = !pk.litter_by_condition;
+        pk.pit_search_m = 3.5;
+        pk.route_swing_voxels = 0.4;
+        pk.whelp_at_den = !pk.whelp_at_den;
+        let r = &mut c.founders[CH.index()].core.reproduction;
+        r.litters_per_year = 2;
+        r.breeding_phase = 0.35;
+        r.breeding_window = 0.2;
+        r.gestation_upkeep_factor = 1.3;
+    }
+    c.light.lure_uv = 0.6;
+    c.light.lure_scent = 0.4;
+    c.teachers.press_replan_s = 2.5;
+    c.teachers.press_shun_s = 45.0;
+    c.teachers.route_refresh_s = 30.0;
+    c.teachers.route_detour = 1.5;
+    c.teachers.way_on_m = 3.0;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let members = pack(&mut fauna, &world);
+    let g = grazer(&mut fauna, &world, 6.0, LANE_Z, 0.5);
+    step_until(&mut fauna, &world, &mut flora, 300, |f| f.ledger.pack_chases > 0).expect("fixture: the pack commits");
+    let own = fauna.packs()[0].id;
+    {
+        let p = fauna.pack_mut(own).unwrap();
+        p.chase_progress_tick = 123;
+        p.chase_best_m = 2.75;
+        p.chase_work = 0.4;
+        p.season = crate::Season { year: 3, litters: 1 };
+    }
+    animal_mut(&mut fauna, g).reproduction.season = crate::Season { year: -1, litters: 2 };
+    let l = &mut fauna.ledger;
+    l.pups_independent = 3;
+    l.season_waits = 4;
+    l.pack_switches = 5;
+    l.pack_close_in_samples = 6;
+    l.pack_step_offs = 7;
+    l.pack_pivots = 8;
+    l.pack_out_of_reach = 9;
+    // EDGE's session state.
+    let m = members[0];
+    fauna.pressed.insert(m, 40);
+    fauna.walk_targets.insert(m, (77, 10, 20));
+    fauna.walk_shun.insert(m, vec![(77, 9999)]);
+    fauna.route_flee.insert(m, 5);
+    let back = crate::snapshot::decode(&crate::snapshot::encode(&fauna)).expect("a live layer's own bytes load");
+    assert_eq!(back.config, fauna.config, "the knobs");
+    assert_eq!(back.packs(), fauna.packs(), "the pack's progress clock and season");
+    assert_eq!(back.animals, fauna.animals, "the body's season");
+    assert_eq!(back.ledger, fauna.ledger, "the new ledger lines");
+    assert_eq!(back.press_of(m), (0, None, Vec::new()), "EDGE's session state loads empty");
+    assert!(back.route_flee.is_empty());
+    // An unbounded nearest-so-far (a commit on a target gone) loads as it was.
+    fauna.pack_mut(own).unwrap().chase_best_m = f64::INFINITY;
+    let back = crate::snapshot::decode(&crate::snapshot::encode(&fauna)).expect("an infinite nearest-so-far loads");
+    assert_eq!(back.packs()[0].chase_best_m, f64::INFINITY);
+}
