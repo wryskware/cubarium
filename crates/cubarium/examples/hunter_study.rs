@@ -132,6 +132,7 @@ fn main() {
         Some("churn") => churn_probe(&args),
         Some("approach") => approach_probe(&args),
         Some("trace") => trace_probe(&args),
+        Some("pit") => pit_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -867,6 +868,7 @@ fn run(args: &[String]) {
     let mut hunts = Hunts { log: arg(args, "hunt_log=") == Some("1"), chase_kills: sim.fauna().view().ledger.pack_chase_kills, ..Hunts::default() };
     let (mut strk_win, mut strk_all, mut strk_on) = (Contact::default(), Contact::default(), rustc_hash::FxHashSet::default());
     let mut stuck = Stuck { log: arg(args, "wedge_log=") == Some("1"), ..Stuck::default() };
+    let mut wedge = Wedge::default();
     let vh_cadence = params.fauna.manifest(VH).cadence_ticks().max(1);
     let mut ends = Ends { log: arg(args, "ends_log=") == Some("1"), oor: sim.fauna().view().ledger.pack_out_of_reach, ..Ends::default() };
     sample(&sim, &params, &arm, minute0, &lw, &lw, &win, &mut track, 0, 0.0);
@@ -925,6 +927,7 @@ fn run(args: &[String]) {
             strk_win.tick(&sim, &params, &mut strk_on);
             ends.tick(&mut sim, &params);
             stuck.tick(&sim, &params);
+            wedge.tick(&sim, &params);
         }
         if (minute - minute0) % every == 0 || minute == end {
             let ms = t0.elapsed().as_secs_f64() * 1000.0 / ticks_in_window.max(1) as f64;
@@ -959,6 +962,8 @@ fn run(args: &[String]) {
             ends.win.clear();
             println!("stuck,{arm},{minute},{}", Stuck::line(&stuck.win, vh_cadence));
             stuck.win = [0; 4];
+            println!("wedge,{arm},{minute},{}", wedge.line(false));
+            wedge.win = Default::default();
             strk_all.add(&strk_win);
             strk_win = Contact::default();
             hunts.win = HuntTally::default();
@@ -1012,6 +1017,7 @@ fn run(args: &[String]) {
     println!("sumpry,{arm},{},{}", minute0, strk_all.pry_line());
     println!("sumends,{arm},{},{}", minute0, Ends::line(&ends.all));
     println!("sumstuck,{arm},{},{}", minute0, Stuck::line(&stuck.all, vh_cadence));
+    println!("sumwedge,{arm},{},{}", minute0, wedge.line(true));
     /*PT{*/
     println!("sumptune,{arm},{},break_offs={},declined={},switches={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined, l.pack_switches - l0.pack_switches);
     /*}PT*/
@@ -2462,6 +2468,58 @@ impl Contact {
     }
 }
 
+/// **PIT's wedged bodies by lineage** (`wedge,` per window, `sumwedge,` at the end): as
+/// [`Stuck`] (motor delivered under 5 % over runs of at least `STUCK_S`, at the controller
+/// cadence) for every awake grounded walker of every lineage, the Veilhound's pups apart
+/// (`chorister_pup`). Each item is `lineage=wedged share/awake seconds`.
+#[derive(Default)]
+struct Wedge {
+    run: rustc_hash::FxHashMap<u64, u64>,
+    /// Per lineage index, then the Veilhound's pups at 9: [awake samples, wedged samples, seconds a sample].
+    win: [[f64; 3]; 10],
+    all: [[f64; 3]; 10],
+}
+
+impl Wedge {
+    fn tick(&mut self, sim: &Sim, params: &Params) {
+        use cubarium_voxel_fauna::{MobilityMode, State};
+        let fv = sim.fauna().view();
+        for b in fv.animals.iter() {
+            let Some(f) = b.founder else { continue };
+            let cadence = params.fauna.manifest(f).cadence_ticks().max(1);
+            if b.age_ticks % cadence != 0 || b.state == State::Asleep || b.mobility.mode != MobilityMode::Ground || b.attached.is_some() {
+                continue;
+            }
+            let long = (STUCK_S * f64::from(TICK_HZ) / cadence as f64).ceil() as u64;
+            let fb = b.founder_state.feedback;
+            let refused = fb.attempted_equivalent > 1e-12 && fb.delivered_equivalent / fb.attempted_equivalent < 0.05;
+            let r = self.run.entry(b.id).or_default();
+            *r = if refused { *r + 1 } else { 0 };
+            let add = if *r == long { long } else if *r > long { 1 } else { 0 };
+            let k = if f == VH && b.pack.is_some_and(|m| m.pup) { 9 } else { f.index() };
+            let s = cadence as f64 / f64::from(TICK_HZ);
+            for t in [&mut self.win, &mut self.all] {
+                t[k][0] += 1.0;
+                t[k][1] += add as f64;
+                t[k][2] = s;
+            }
+        }
+    }
+
+    fn line(&self, all: bool) -> String {
+        let t = if all { &self.all } else { &self.win };
+        let mut out = Vec::new();
+        for (k, c) in t.iter().enumerate() {
+            if c[0] == 0.0 {
+                continue;
+            }
+            let name = if k == 9 { "chorister_pup".to_string() } else { Founder::ALL[k].name().to_string() };
+            out.push(format!("{name}={:.3}/{:.0}", c[1] / c[0], c[0] * c[2]));
+        }
+        out.join(",")
+    }
+}
+
 /// **STRIKE-2's wedged members** (`stuck,` per window, `sumstuck,` at the end): awake adult
 /// Veilhound controller samples whose motor delivered under 5 % of what it was asked over the
 /// interval, the samples in runs of at least `STUCK_S` seconds (a body walking into the same
@@ -2732,5 +2790,285 @@ fn trace_probe(args: &[String]) {
                 );
             }
         }
+    }
+}
+
+/// **PIT's probe** (`hunter_study pit load=DIR/mM [minutes=30] [config=FILE] [log=1]`): every
+/// grounded walker each tick, on or off its lineage's route graph (`RouteGraph::node_near`
+/// within its own footprint radius, as `route_from` asks); each step off it printed as an
+/// `enter,` line with how it came (layer change, mode, homing, strike, den distance), and per
+/// lineage the off-graph share and the wedged share (motor delivered under 5 % over runs of
+/// at least `STUCK_S`, sampled at the controller cadence). At the start each pack's den and
+/// whether it is on the graph.
+fn pit_probe(args: &[String]) {
+    use cubarium_voxel_fauna::{MobilityMode, RouteGraph, State};
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(30, |m| m.parse().unwrap());
+    let log = arg(args, "log=").is_some_and(|s| s == "1");
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let v = sim.world().config().voxel_m;
+    let ring = f64::from(sim.world().config().width) * v;
+    let margin = params.fauna.founding.clearance_margin_m;
+    let hz = u64::from(TICK_HZ);
+    let mut graphs: rustc_hash::FxHashMap<usize, (u64, std::sync::Arc<RouteGraph>)> = Default::default();
+    let graph_of = |sim: &Sim, graphs: &mut rustc_hash::FxHashMap<usize, (u64, std::sync::Arc<RouteGraph>)>, f: Founder, t: u64| {
+        if let Some((b, g)) = graphs.get(&f.index()) {
+            if t.saturating_sub(*b) < 60 * hz {
+                return g.clone();
+            }
+        }
+        let g = std::sync::Arc::new(RouteGraph::for_founder(&sim.world().view(), params.fauna.founder(f), margin));
+        graphs.insert(f.index(), (t, g.clone()));
+        g
+    };
+    // The nearest node within `r + 6` columns, any layer: its layer difference and distance.
+    let nearest_any = |g: &RouteGraph, site: cubarium_voxel_flora::Site, x: f64, z: f64, r: u32| -> String {
+        let mut best: Option<(f64, i64)> = None;
+        for dy in -12i64..=12 {
+            let y = i64::from(site.y) + dy;
+            if y < 0 {
+                continue;
+            }
+            if let Some(j) = g.node_near(cubarium_voxel_flora::Site { y: y as u32, ..site }, (x, z), r + 6) {
+                let (cx, cz) = g.centre(j);
+                let (ddx, ddz) = wdelta(x, z, cx, cz, ring);
+                let d = (ddx * ddx + ddz * ddz).sqrt();
+                if best.is_none_or(|(bd, bdy)| d + 0.05 * dy.unsigned_abs() as f64 * v < bd + 0.05 * bdy.unsigned_abs() as f64 * v) {
+                    best = Some((d, i64::from(g.faces[j].y) - i64::from(site.y)));
+                }
+            }
+        }
+        best.map_or("none".into(), |(d, dy)| format!("d{d:.2}/dy{dy}"))
+    };
+    for f in Founder::ALL {
+        let p = params.fauna.founder(f);
+        let st = p.step_limits(v);
+        let b = p.adult_body();
+        println!("lineage,{},step_up={},step_down={},walls={},adult_r={:.3},headroom={},margin={margin}", f.name(), st.up, st.down, p.climbs_walls, b.footprint_radius(), b.headroom_voxels(v));
+    }
+    for r in sim.fauna().packs().to_vec() {
+        let g = graph_of(&sim, &mut graphs, r.lineage, 0);
+        let rr = (params.fauna.founder(r.lineage).adult_body().footprint_radius() / v).ceil() as u32;
+        let (cx, cz) = cubarium_voxel_fauna::pack_centre(r.den, v);
+        println!("den,pack={},den={:?},choice={:?},node={:?},near={:?},nearest={}", r.id, r.den, r.den_choice, g.face(r.den), g.node_near(r.den, (cx, cz), rr), nearest_any(&g, r.den, cx, cz, rr));
+    }
+    // id -> (on graph, site, pose xz, mode, homing ticks, state, strike, tick)
+    #[derive(Clone, Copy)]
+    struct Last {
+        on: bool,
+        site: cubarium_voxel_flora::Site,
+        x: f64,
+        z: f64,
+        mode: MobilityMode,
+        homing: u32,
+        tick: u64,
+    }
+    let mut last: rustc_hash::FxHashMap<u64, Last> = Default::default();
+    let mut hist: rustc_hash::FxHashMap<u64, std::collections::VecDeque<String>> = Default::default();
+    // per lineage index: [samples, off samples, adult-VH samples, adult-VH off, entries, exits, born/start off]
+    let mut tally = [[0u64; 7]; 9];
+    // wedged per lineage: [awake cadence samples, wedged samples], runs per id
+    let mut wedge = [[0u64; 2]; 9];
+    // The Veilhound's wedged samples split: [adult awake, adult wedged, pup awake, pup wedged].
+    let mut vh_wedge = [0u64; 4];
+    let mut run: rustc_hash::FxHashMap<u64, u64> = Default::default();
+    let total = minutes * 60 * hz;
+    for t in 0..=total {
+        if t > 0 {
+            sim.step();
+        }
+        let fv = sim.fauna().view();
+        let tick = fv.tick;
+        let animals: Vec<cubarium_voxel_fauna::Animal> = fv.animals.iter().filter(|a| a.founder.is_some()).copied().collect();
+        let dens: rustc_hash::FxHashMap<u64, cubarium_voxel_flora::Site> = sim.fauna().packs().iter().map(|p| (p.id, p.den)).collect();
+        for a in &animals {
+            let f = a.founder.unwrap();
+            let k = f.index();
+            let p = params.fauna.founder(f);
+            // Wedged, at the controller cadence, awake bodies on the ground.
+            let cadence = params.fauna.manifest(f).cadence_ticks().max(1);
+            if a.age_ticks % cadence == 0 && a.state != State::Asleep && a.mobility.mode == MobilityMode::Ground && a.attached.is_none() {
+                let long = (STUCK_S * f64::from(TICK_HZ) / cadence as f64).ceil() as u64;
+                let fb = a.founder_state.feedback;
+                let refused = fb.attempted_equivalent > 1e-12 && fb.delivered_equivalent / fb.attempted_equivalent < 0.05;
+                let r = run.entry(a.id).or_default();
+                *r = if refused { *r + 1 } else { 0 };
+                wedge[k][0] += 1;
+                let add = if *r == long { long } else if *r > long { 1 } else { 0 };
+                wedge[k][1] += add;
+                if f == Founder::Chorister {
+                    let o = if a.pack.is_some_and(|m| m.pup) { 2 } else { 0 };
+                    vh_wedge[o] += 1;
+                    vh_wedge[o + 1] += add;
+                }
+            }
+            if a.mobility.mode != MobilityMode::Ground || a.attached.is_some() {
+                last.remove(&a.id);
+                continue;
+            }
+            if t % 4 != 0 {
+                continue;
+            }
+            let g = graph_of(&sim, &mut graphs, f, t);
+            let geom = p.body_at(a.body);
+            let r = (geom.footprint_radius() / v).ceil().max(0.0) as u32;
+            let on = g.node_near(a.site, (a.pose.x, a.pose.z), r).is_some();
+            let pup = a.pack.is_some_and(|m| m.pup);
+            tally[k][0] += 1;
+            if !on {
+                tally[k][1] += 1;
+            }
+            if f == Founder::Chorister && !pup {
+                tally[k][2] += 1;
+                if !on {
+                    tally[k][3] += 1;
+                }
+            }
+            let den_d = a.pack.and_then(|m| dens.get(&m.pack)).map_or(f64::NAN, |d| {
+                let (cx, cz) = cubarium_voxel_fauna::pack_centre(*d, v);
+                let (dx, dz) = wdelta(a.pose.x, a.pose.z, cx, cz, ring);
+                (dx * dx + dz * dz).sqrt()
+            });
+            let desc = format!("{}:y{}:({:.2},{:.2}):{:?}:h{}", tick, a.site.y, a.pose.x, a.pose.z, a.state, a.homing_ticks);
+            let q = hist.entry(a.id).or_default();
+            q.push_back(desc);
+            if q.len() > 12 {
+                q.pop_front();
+            }
+            match last.get(&a.id).copied() {
+                None => {
+                    if !on {
+                        tally[k][6] += 1;
+                        println!(
+                            "first_off,{tick},{}{},pup={pup},age_s={},site={:?},den_d={den_d:.2},nearest={}",
+                            f.name(), a.id, a.age_ticks / hz, a.site, nearest_any(&g, a.site, a.pose.x, a.pose.z, r)
+                        );
+                    }
+                }
+                Some(l) => {
+                    if l.on && !on {
+                        tally[k][4] += 1;
+                        let (dx, dz) = wdelta(l.x, l.z, a.pose.x, a.pose.z, ring);
+                        let hop = (dx * dx + dz * dz).sqrt();
+                        let fb = a.founder_state.feedback;
+                        println!(
+                            "enter,{tick},{}{},pup={pup},age_s={},from={:?},to={:?},dy={},hop={hop:.2},dt={},mode0={:?},homing={}->{},state={:?},strike={:?},rest={},eating={},emerg={},den_d={den_d:.2},target={:?},hunt={:?},speed={:.2},motor={:.2},nearest={},body={:.3}",
+                            f.name(), a.id, a.age_ticks / hz, l.site, a.site,
+                            i64::from(a.site.y) - i64::from(l.site.y), tick - l.tick, l.mode, l.homing, a.homing_ticks, a.state,
+                            a.strike.map(|s| s.phase), a.rest.is_some(), a.eating, a.emergency,
+                            a.pack.and_then(|m| sim.fauna().pack(m.pack)).and_then(|p| p.target),
+                            a.hunt.mode, a.speed_m_s,
+                            if fb.attempted_equivalent > 1e-12 { fb.delivered_equivalent / fb.attempted_equivalent } else { f64::NAN },
+                            nearest_any(&g, a.site, a.pose.x, a.pose.z, r), a.body,
+                        );
+                        if log {
+                            println!("  hist,{}", hist[&a.id].iter().cloned().collect::<Vec<_>>().join(" "));
+                        }
+                    } else if !l.on && on {
+                        tally[k][5] += 1;
+                        println!("exit,{tick},{}{},to={:?}", f.name(), a.id, a.site);
+                    }
+                }
+            }
+            last.insert(a.id, Last { on, site: a.site, x: a.pose.x, z: a.pose.z, mode: a.mobility.mode, homing: a.homing_ticks, tick });
+        }
+        if t > 0 && t % (10 * 60 * hz) == 0 {
+            for f in Founder::ALL {
+                let k = f.index();
+                if tally[k][0] == 0 && wedge[k][0] == 0 {
+                    continue;
+                }
+                println!(
+                    "win,{}m,{},off_share={:.3},vh_adult_off={:.3},entries={},exits={},first_off={},wedged_share={:.3}",
+                    minute0 + t / (60 * hz), f.name(),
+                    tally[k][1] as f64 / tally[k][0].max(1) as f64,
+                    tally[k][3] as f64 / tally[k][2].max(1) as f64,
+                    tally[k][4], tally[k][5], tally[k][6],
+                    wedge[k][1] as f64 / wedge[k][0].max(1) as f64,
+                );
+            }
+        }
+    }
+    for f in Founder::ALL {
+        let k = f.index();
+        if tally[k][0] == 0 && wedge[k][0] == 0 {
+            continue;
+        }
+        println!(
+            "sumpit,{},samples={},off_share={:.3},vh_adult_off={:.3},entries={},exits={},first_off={},wedged_share={:.3}",
+            f.name(), tally[k][0], tally[k][1] as f64 / tally[k][0].max(1) as f64, tally[k][3] as f64 / tally[k][2].max(1) as f64,
+            tally[k][4], tally[k][5], tally[k][6], wedge[k][1] as f64 / wedge[k][0].max(1) as f64,
+        );
+    }
+    println!(
+        "sumvh,adult_wedged_share={:.3},pup_wedged_share={:.3},adult_awake_samples={},pup_awake_samples={}",
+        vh_wedge[1] as f64 / vh_wedge[0].max(1) as f64, vh_wedge[3] as f64 / vh_wedge[2].max(1) as f64, vh_wedge[0], vh_wedge[2]
+    );
+    // Who is off the graph at the end, and where.
+    let fv = sim.fauna().view();
+    for a in fv.animals.iter().filter(|a| a.founder.is_some() && a.mobility.mode == MobilityMode::Ground) {
+        let f = a.founder.unwrap();
+        let g = graph_of(&sim, &mut graphs, f, total + 60 * hz);
+        let r = (params.fauna.founder(f).body_at(a.body).footprint_radius() / v).ceil() as u32;
+        if g.node_near(a.site, (a.pose.x, a.pose.z), r).is_none() {
+            if f == Founder::Chorister {
+                pit_map(&sim, &g, a.site);
+            }
+            let geom = params.fauna.founder(f).body_at(a.body);
+            let view = sim.world().view();
+            let fb = a.founder_state.feedback;
+            println!(
+                "end_off,{}{},site={:?},pose=({:.3},{:.3}),pup={},still_s={},nearest={},water={:.3},wade={:.3},r={:.3},height={:.3},motor={:.2},held={:?}",
+                f.name(), a.id, a.site, a.pose.x, a.pose.z, a.pack.is_some_and(|m| m.pup), a.still_ticks / hz, nearest_any(&g, a.site, a.pose.x, a.pose.z, r),
+                view.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z), params.fauna.founder(f).wade_depth_m(&geom), geom.footprint_radius(), geom.height_m,
+                if fb.attempted_equivalent > 1e-12 { fb.delivered_equivalent / fb.attempted_equivalent } else { f64::NAN }, a.founder_state.held,
+            );
+        }
+    }
+}
+
+/// The terrain around `site` (PIT): each column within 6 of it, the support face nearest
+/// its layer (within 15) as the layer difference, `*` where that face is a node of `g`,
+/// `#` with no face within 15; the body's own column bracketed.
+fn pit_map(sim: &Sim, g: &cubarium_voxel_fauna::RouteGraph, site: cubarium_voxel_flora::Site) {
+    let view = sim.world().view();
+    let c = view.config;
+    for dz in -6i64..=6 {
+        let z = i64::from(site.z) + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        let mut row = String::new();
+        for dx in -6i64..=6 {
+            let x = (i64::from(site.x) + dx).rem_euclid(i64::from(c.width));
+            let mut best: Option<i64> = None;
+            for d in 0..=15i64 {
+                for y in [i64::from(site.y) + d, i64::from(site.y) - d] {
+                    if best.is_none() && y >= 0 && y < i64::from(c.height) && view.is_support(x, y as u32, z as u32) {
+                        best = Some(y);
+                    }
+                }
+            }
+            let cell = match best {
+                None => "  #".to_string(),
+                Some(y) => {
+                    let node = g.face(cubarium_voxel_flora::Site { x: x as u32, y: y as u32, z: z as u32 }).is_some();
+                    let wet = view.water_depth_m(x, y as u32, z as u32) > 0.0;
+                    format!("{:>2}{}", y - i64::from(site.y), if node { '*' } else if wet { '~' } else { ' ' })
+                }
+            };
+            if dx == 0 && dz == 0 {
+                row.push_str(&format!("[{}]", cell.trim()));
+            } else {
+                row.push_str(&cell);
+            }
+        }
+        println!("  map,{row}");
     }
 }

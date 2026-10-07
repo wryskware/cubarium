@@ -95,7 +95,8 @@ use crate::Fauna;
 //     STRIKE (same 53, the branch unmerged): `Pack::{close_in_m, stand_off_reach_fraction}`,
 //     the ledger's `pack_close_in_samples, pack_step_offs, pack_pivots, pack_out_of_reach`.
 //     STRIKE-2 (same 53, the branch unmerged): `Pack::herd_shun_m`.
-pub const SCHEMA: u32 = 53;
+// 54: PIT (the branch unmerged; the parent renumbers at merge) — `Pack::pit_search_m`.
+pub const SCHEMA: u32 = 54;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

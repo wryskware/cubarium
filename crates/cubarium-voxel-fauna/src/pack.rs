@@ -1199,6 +1199,101 @@ pub(crate) fn steer(
     held: Actions,
     occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Option<Actions> {
+    let act = tactic(fauna, i, view, fv, clock_on, daylight, held, occupancy)?;
+    Some(out_of_pit(fauna, i, view, act).unwrap_or(act))
+}
+
+/// **PIT, the way out** for the pack body at `i` whose tactic moves it (a walk, or a turn
+/// toward one): off
+/// its route graph — no node within its footprint of where it stands — it walks to the first
+/// face of the shortest way its own body can step back onto the graph
+/// ([`crate::encounter::RouteGraph::way_on`], out to `pit_search_m`), feed held off, rather
+/// than straight at its goal: off the graph there is no route, and the straight walk and the
+/// refused motor's escape both pressed into the riser (PIT's probe: pups born in a stream
+/// channel 15 m from the den stood at one riser for hours). Not while it closes on its target
+/// (within `close_in_m`), off the ground, or with no way out in reach (then the tactic's
+/// action stands). Territory is kept as the tactic keeps it.
+fn out_of_pit(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, act: Actions) -> Option<Actions> {
+    // A walk or a turn toward one (a turn in place is how `head` starts every walk whose
+    // goal is behind it); a body standing still or eating is left as it is.
+    if !(act.forward > 0.0 || act.turn != 0.0) {
+        return None;
+    }
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let (t, h) = (phys.pack?, phys.hunter?);
+    if !(t.pit_search_m > 0.0) || a.mobility.climb.is_some() || a.mobility.mode != crate::MobilityMode::Ground {
+        return None;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let own = a.pack?.pack;
+    if let Some(o) = fauna.pack(own).and_then(|p| p.target).and_then(|tid| knows_of(fauna, i, tid, ring)) {
+        if distance(&a, o.x, o.z, ring) <= t.close_in_m {
+            return None;
+        }
+    }
+    let geometry = phys.body_at(a.body);
+    let (own_r, _) = node_radii(&geometry, &h, v);
+    let graph = fauna.pack_routes(view, founder);
+    if graph.node_near(a.site, (a.pose.x, a.pose.z), own_r).is_some() {
+        return None;
+    }
+    let reach = (t.pit_search_m / v).ceil().min(f64::from(u32::MAX)) as u32;
+    let face = graph.way_on(
+        view,
+        a.site,
+        geometry.footprint_radius(),
+        geometry.headroom_voxels(v),
+        phys.step_limits(v),
+        phys.wade_depth_m(&geometry),
+        own_r,
+        reach,
+    )?;
+    let (gx, gz) = centre(face, v);
+    let manifest = fauna.config.manifest(founder);
+    let guard = manifest.cruise_m_per_s * manifest.controller_period_s
+        + (h.strike_reach_length_fraction + h.jaw_forward_length_fraction) * geometry.length_m;
+    Some(keep_out(fauna, i, own, go_to(&a, gx, gz, ring, 0.0, 0.0), &t, guard, v, ring))
+}
+
+/// **PIT, the way home**: the point a pack body at `a` walks to on its way to its `den` —
+/// the den's centre when the straight line is walkable on its route graph (or either end is
+/// off the graph: the tactic's own straight walk, [`out_of_pit`] takes a body off it back
+/// on), else the next node of the pack's route field to the den's node. A pup born metres
+/// from the den and an adult going home to rest walked straight at it, down the stair of a
+/// trench whose far riser held them.
+fn way_home(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, den: Site) -> (f64, f64) {
+    let v = view.config.voxel_m;
+    let goal = centre(den, v);
+    let Some(own) = a.pack.map(|m| m.pack) else {
+        return goal;
+    };
+    let (own_r, _) = node_radii(geometry, h, v);
+    let graph = fauna.pack_routes(view, founder);
+    let (Some(from), Some(to)) = (graph.node_near(a.site, (a.pose.x, a.pose.z), own_r), graph.node_near(den, goal, own_r)) else {
+        return goal;
+    };
+    if from == to || graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
+        return goal;
+    }
+    let (graph, field) = fauna.den_path(view, founder, own, to);
+    graph.next_toward(&field, from).map_or(goal, |j| graph.centre(j))
+}
+
+/// The pack tactic of [`steer`], before [`out_of_pit`].
+#[allow(clippy::too_many_arguments)]
+fn tactic(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    clock_on: bool,
+    daylight: f64,
+    held: Actions,
+    occupancy: Option<crate::senses::Occ<'_>>,
+) -> Option<Actions> {
     let a = fauna.animals[i];
     let m = a.pack?;
     let founder = a.founder?;
@@ -1247,7 +1342,8 @@ pub(crate) fn steer(
             }
         }
         if d_den > 0.5 * t.den_radius_m {
-            return Some(go_to(&a, dcx, dcz, ring, 0.0, 0.0));
+            let (gx, gz) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
+            return Some(go_to(&a, gx, gz, ring, 0.0, 0.0));
         }
         return Some(Actions {
             forward: 0.0,
@@ -1269,7 +1365,8 @@ pub(crate) fn steer(
         && d_den > t.den_radius_m
         && u64::from(a.homing_ticks) < cubarium_voxel::ticks_at_least_one(t.home_give_up_s)
     {
-        return Some(clamp(fauna, go_to(&a, dcx, dcz, ring, 0.0, 0.0)));
+        let (gx, gz) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
+        return Some(clamp(fauna, go_to(&a, gx, gz, ring, 0.0, 0.0)));
     }
 
     let now = fauna.tick;
@@ -1823,3 +1920,7 @@ pub(crate) fn carcass_yield(fauna: &mut Fauna, i: usize, ring: f64, at_carcass: 
     };
     Some(head(&a, (-dx).atan2(-dz), 1.0, 0.0))
 }
+
+#[cfg(test)]
+#[path = "pit_tests.rs"]
+mod pit_tests;

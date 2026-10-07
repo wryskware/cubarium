@@ -359,6 +359,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.switch_stall_s", "s", nonneg, "CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s)").optional(),
         r("pack.close_in_m", "m", nonneg, "STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off)").optional(),
         r("pack.stand_off_reach_fraction", "fraction of the strike's reach", fraction, "STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey").optional(),
+        r("pack.pit_search_m", "m", nonneg, "PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off)").optional(),
         r("pack.herd_shun_m", "m", nonneg, "STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone)").optional(),
         r("pack.route_reach_fraction", "fraction", fraction, "prey is taken only within this share of cruise x chase_give_up_s by route").optional(),
         r("pack.route_refresh_s", "s", nonneg, "a pack's walking route components (only prey in its own is taken) are rebuilt at most this often").optional(),

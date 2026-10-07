@@ -601,6 +601,13 @@ pub struct Pack {
     /// a ring are left by wolves that cannot break it). Metres; 0 shuns the target alone.
     #[serde(default = "pack_herd_shun_m")]
     pub herd_shun_m: f64,
+    /// **PIT, the way out**: a member standing off its route graph (no node within its
+    /// footprint of where it stands: a stream channel, a slope ledge, a pocket its disc fits
+    /// but the graph's margin does not) walks back onto it by the shortest way its own body can
+    /// step — its own disc, step and wade depth, face by face — searched this far round it,
+    /// metres, rather than pressing on straight at its goal into a riser. 0: off.
+    #[serde(default = "pack_pit_search_m")]
+    pub pit_search_m: f64,
     /// A pack takes only prey standing in its own walking route component; the
     /// lineage's components are rebuilt from the terrain at most this often, seconds (a
     /// placeholder: the terrain and its water change slowly). 60.
@@ -726,6 +733,9 @@ fn pack_stand_off_reach_fraction() -> f64 {
 fn pack_herd_shun_m() -> f64 {
     Pack::CHORISTER.herd_shun_m
 }
+fn pack_pit_search_m() -> f64 {
+    Pack::CHORISTER.pit_search_m
+}
 
 fn pack_stalk_margin() -> f64 {
     Pack::CHORISTER.stalk_margin
@@ -776,6 +786,9 @@ impl Pack {
         // STRIKE-2: the herd a pack leaves, twice the frondgrazer's ring (`Hunker::ring_m`,
         // the kin beside it that stiffen it): a placeholder.
         herd_shun_m: 3.0,
+        // PIT: the way out of a pit is looked for within about twice the den radius (a
+        // placeholder; the probe's pits were a few metres from the graph).
+        pit_search_m: 4.0,
         route_refresh_s: 60.0,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,

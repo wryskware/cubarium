@@ -1669,10 +1669,11 @@ fn den_spacing_m(t: &cubarium_voxel_fauna::Pack) -> f64 {
 /// the first spaced point's fallback (Fable): the face within `den_search_m` with the most
 /// solid over it, else the founding point. The den choice is recorded on the pack.
 ///
-/// A den need not be walkable from the prey's component (a covered pocket often is not):
-/// the adults are founded on the den when it is, and otherwise on the face of the
-/// founding point's component nearest the den within `den_radius_m`, which is where they
-/// rest; a den with no such face is passed over.
+/// A den is a face of the route graph's founding component
+/// ([`cubarium_voxel_fauna::founding_faces`], PIT: where the pack can come and go, never a
+/// covered pocket it cannot stand in). The adults are founded on the den when it is in the
+/// founding point's walking component, and otherwise on that component's face nearest the
+/// den within `den_radius_m`; a den with no such face is passed over.
 fn found_packs(
     world: &World,
     fauna: &mut Fauna,
@@ -1754,13 +1755,15 @@ fn found_packs(
         }
         (covered, count)
     };
-    // Every standable dry face (any component): a den may be a covered pocket the pack
-    // cannot stand in, so long as it lives within `den_radius_m` of it.
+    // PIT: a den goes where the pack can come and go — a dry face of the route graph's
+    // founding component (its disc clear, joined to the rest by steps it takes both ways). A
+    // covered pocket the pack could not stand in was a den its pups and its adults walking
+    // home went straight at, down slopes and channels off the graph they could not leave.
     let all: Vec<(Site, usize)> = map
         .faces
         .iter()
         .zip(&map.components)
-        .filter(|(f, _)| !wet(f))
+        .filter(|(f, _)| !wet(f) && found.contains(*f))
         .map(|(f, c)| (*f, *c))
         .collect();
     // Where the pack stands for a den `d` from a founding point of component `comp`: the
@@ -3308,7 +3311,8 @@ mod tests {
         (dx * dx + (a.pose.z - cz).powi(2)).sqrt()
     }
 
-    /// R3: what a world founded one pack with — the pack, its den covered, `pack_size`
+    /// R3: what a world founded one pack with — the pack, its den on the route graph's
+    /// founding component (PIT) and covered when such a face is covered, `pack_size`
     /// choristers all of it, none a pup, one of them its breeder, each within
     /// `den_radius_m` of the den.
     fn assert_one_founded_pack(world: &World, fauna: &Fauna) {
@@ -3317,12 +3321,16 @@ mod tests {
         assert_eq!(fauna.packs().len(), 1, "one pack: {:?}", fauna.packs());
         let pack = fauna.packs()[0];
         assert_eq!(pack.lineage, c);
-        assert!(
-            covered(world, pack.den, table.den_cover_m),
-            "the den {:?} has solid within {} m over it",
-            pack.den,
-            table.den_cover_m
-        );
+        let found = cubarium_voxel_fauna::founding_faces(&world.view(), fauna.config().founder(c), fauna.config().founding.clearance_margin_m);
+        assert!(found.contains(&pack.den), "the den {:?} is on the route graph", pack.den);
+        if found.iter().any(|&f| covered(world, f, table.den_cover_m)) {
+            assert!(
+                covered(world, pack.den, table.den_cover_m),
+                "the den {:?} has solid within {} m over it",
+                pack.den,
+                table.den_cover_m
+            );
+        }
         let members: Vec<_> = fauna
             .view()
             .animals
@@ -3343,7 +3351,8 @@ mod tests {
     }
 
     /// R3 (Brief R3, "Founding"): **a preset of one chorister pack founds `pack_size`
-    /// choristers with one pack id and a breeder, the den covered.** The authored scene, the other lineages at their defaults (the prey are
+    /// choristers with one pack id and a breeder, the den on the route graph (covered where a
+    /// face of it is: the authored scene's covered faces are all off it, PIT).** The authored scene, the other lineages at their defaults (the prey are
     /// there).
     #[test]
     fn a_preset_of_one_chorister_pack_founds_a_pack_on_a_covered_den() {
@@ -3842,5 +3851,64 @@ mod tests {
         let arrival = founder_arrival(&cubarium_voxel_fauna::FoundingConfig::default());
         assert_eq!(arrival.body, 1.0);
         assert_eq!(arrival.reserve, knob);
+    }
+
+    /// **PIT: a pack's den is on its route graph** (a den goes where the pack can come and
+    /// go). The plain's only covered face is a pocket in a walled block, its column clear
+    /// over the body's height but too narrow for its disc: off the lineage's route graph. A
+    /// pack founded by the plain's one grazer gets its den on a face of the graph's founding
+    /// component ([`cubarium_voxel_fauna::founding_faces`], the founding's own margin), not in
+    /// the pocket. (The breeder took the pocket: a covered den the pack could not stand in,
+    /// lived beside.)
+    #[test]
+    fn a_pack_den_is_on_its_route_graph() {
+        let cfg = Config { width: 96, height: 24, depth: 24, voxel_m: 0.125, ..Config::default() };
+        let top = 8u32;
+        let mut world = World::empty(cfg.clone());
+        let set = |w: &mut World, x: i64, y: u32, z: u32, material: Material| {
+            w.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material });
+        };
+        for z in 0..cfg.depth {
+            for x in 0..i64::from(cfg.width) {
+                for y in 1..=top {
+                    set(&mut world, x, y, z, Material::Soil);
+                }
+            }
+        }
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::default());
+        let phys = *fauna.config().founder(Founder::Chorister);
+        let room = phys.adult_body().headroom_voxels(cfg.voxel_m);
+        // The block: three by three columns, a voxel over the body's headroom tall, its middle
+        // column hollowed to the headroom under a one-voxel roof.
+        let (bx, bz) = (16i64, 11u32);
+        for dz in 0..3u32 {
+            for dx in 0..3i64 {
+                for y in top + 1..=top + room + 2 {
+                    let hollow = dx == 1 && dz == 1 && y <= top + room + 1;
+                    set(&mut world, bx - 1 + dx, y, bz - 1 + dz, if hollow { Material::Air } else { Material::Rock });
+                }
+            }
+        }
+        let pocket = Site { x: bx as u32, y: top, z: bz };
+        let margin = fauna.config().founding.clearance_margin_m;
+        let found = cubarium_voxel_fauna::founding_faces(&world.view(), &phys, margin);
+        assert!(!found.contains(&pocket), "the pocket is off the route graph (the premise)");
+        assert!(
+            RouteMap::for_founder(&world.view(), &phys).faces.contains(&pocket),
+            "the pocket is a face its column rule stands on (the premise)"
+        );
+        assert!(fauna.apply(
+            &world,
+            FaunaCommand::IntroduceFounderOnFace {
+                site: Site { x: 40, y: top, z: 12 },
+                founder: Founder::Browser,
+                stores: StartingStores::FULL,
+                heading_rad: 0.0,
+            },
+        ));
+        let flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(cfg.voxel_m));
+        introduce_packs(&world, &flora, &mut fauna, Founder::Chorister, 1).expect("a pack is founded");
+        let den = fauna.packs()[0].den;
+        assert!(found.contains(&den), "the den {den:?} is off the route graph ({:?})", fauna.packs()[0].den_choice);
     }
 }
