@@ -10,7 +10,7 @@
 //! the windup. No shipped default, ratio or verdict is asserted.
 
 use super::predation_fixture::*;
-use crate::{Activity, Command, Fauna, FaunaConfig, Founder, HuntConfig, StartingStores, VigilMode};
+use crate::{Activity, ChaseEnd, Command, Fauna, FaunaConfig, Founder, HuntConfig, PackEvent, StartingStores, VigilMode};
 use cubarium_voxel::World;
 use cubarium_voxel_flora::{Flora, FloraConfig, Site};
 use std::f64::consts::PI;
@@ -188,4 +188,197 @@ fn a_member_within_the_close_in_does_not_steer_toward_a_point_away_from_the_prey
     });
     assert!(farthest <= d0 + slack, "it moved away from the grazer: {d0:.2} -> {farthest:.2} m");
     assert!(t.is_some(), "no strike within {bound} ticks; at {:.2} m", distance(&fauna, a, g));
+}
+
+// ------------------------------------------------------------------ STRIKE-2
+
+/// The plain with a ledge `rise` voxels high over every column from `x0` (voxels) to the
+/// ring's end: soil laid on the plain's surface.
+fn ledged(seed: u64, x0: i64, rise: u32) -> World {
+    let mut w = plain_of_height(cubarium_voxel::weather::DayClock { mode: cubarium_voxel::weather::DayMode::Off, ..Default::default() }, seed, 8);
+    let (width, depth) = (i64::from(w.config().width), w.config().depth);
+    for z in 0..depth {
+        for x in x0..width {
+            for y in SURFACE_Y + 1..=SURFACE_Y + rise {
+                w.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material: cubarium_voxel::Material::Soil });
+            }
+        }
+    }
+    w
+}
+
+/// **STRIKE-2: a member below its prey's level climbs to a face it can strike it from**: the
+/// grazer stands at a ledge's edge two voxels up (above the member's jaw band, within its
+/// step), and the only hungry member stands below the edge, nearer the grazer than the chase's
+/// stop distance (half its length). It strikes the grazer within the config's bound plus a walk
+/// across the close-in distance, having climbed onto the grazer's level within that walk and
+/// three controller periods. (STRIKE's close-in left such a member to the chase, whose stop
+/// distance held it below the ledge, its jaw short of the prey's body.)
+#[test]
+fn a_member_below_its_prey_climbs_to_a_face_it_strikes_from() {
+    let close_in = 2.5;
+    let world = ledged(411, 32, 2);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(config(close_in));
+    fauna.set_births_enabled(false);
+    let den = Site { x: 10, y: SURFACE_Y, z: 6 };
+    assert!(fauna.apply(&world, Command::FoundPack { den, founder: CH, stores: HUNTING, heading_rad: EAST }));
+    let teachers = fauna.config.teachers;
+    let mut members: Vec<u64> = fauna.animals.iter().filter(|a| a.founder == Some(CH)).map(|a| a.id).collect();
+    members.sort_unstable();
+    for (k, &id) in members.iter().enumerate() {
+        fauna.controllers.set(id, crate::controller::heuristic(CH, teachers));
+        place(&mut fauna, id, 2.0 + 0.5 * (k / 2) as f64, 0.75 + 1.5 * (k % 2) as f64, EAST);
+        animal_mut(&mut fauna, id).eating = true;
+    }
+    let g = introduce(&mut fauna, &world, PREY, StartingStores::FULL);
+    place(&mut fauna, g, 6.0, LANE_Z, WEST);
+    let birth = fauna.config.founder(PREY).core.birth_body;
+    animal_mut(&mut fauna, g).body = 0.5 * birth;
+    drive(&mut fauna, g, 0.0, false);
+    step_until(&mut fauna, &world, &mut flora, 300, |f| f.ledger.pack_chases > 0).expect("the pack commits");
+    assert_eq!(fauna.packs()[0].target, Some(g), "the only prey is the target");
+    for (k, &id) in members.iter().enumerate().skip(1) {
+        place(&mut fauna, id, 0.5 + 0.5 * k as f64, 0.5, EAST);
+        animal_mut(&mut fauna, id).eating = false;
+    }
+    // The grazer on the ledge (its face two voxels up) by its edge, the member below the edge
+    // within the chase's stop distance of it.
+    let a = members[0];
+    let stop = 0.5 * fauna.config.founder(CH).body_at(animal(&fauna, a).body).length_m;
+    let (gx, ax) = (8.05, 8.05 - 0.6 * stop);
+    assert!(ax < 8.0 - 0.05, "the member stands below the edge");
+    place(&mut fauna, g, gx, LANE_Z, WEST);
+    animal_mut(&mut fauna, g).site.y = SURFACE_Y + 2;
+    place(&mut fauna, a, ax, LANE_Z, EAST);
+    {
+        let m = animal_mut(&mut fauna, a);
+        m.eating = true;
+        m.strike = None;
+        m.founder_state.held = crate::controller::Actions::REST;
+    }
+    // Out of its jaw band from where it stands: the case is the one the rule is for.
+    let phys = *fauna.config.founder(CH);
+    let (h, geo) = (phys.hunter.unwrap(), phys.body_at(animal(&fauna, a).body));
+    let rise = 2.0 * VOXEL_M;
+    assert!(rise >= h.jaw_band_height_fraction * geo.height_m, "the ledge lifts the grazer out of the jaw band");
+    assert!(rise <= phys.step_up_m, "the ledge is within the member's step");
+    let m = fauna.config.manifest(CH);
+    let bound = bound_ticks(&fauna, a) + cubarium_voxel::ticks_at_least_one(close_in / m.cruise_m_per_s) as u32;
+    // It goes up within a walk across the close-in distance and three controller periods...
+    let climb = cubarium_voxel::ticks_at_least_one(close_in / m.cruise_m_per_s + 3.0 * m.controller_period_s) as u32;
+    let up = step_until(&mut fauna, &world, &mut flora, climb, |f| animal(f, a).site.y == animal(f, g).site.y);
+    assert!(up.is_some(), "still below the ledge after {climb} ticks, at {:.2} m", distance(&fauna, a, g));
+    // ...and strikes within the bound.
+    let t = step_until(&mut fauna, &world, &mut flora, bound, |f| striking(f, a, g));
+    let at = animal(&fauna, a);
+    assert!(t.is_some(), "no strike within {bound} ticks; at {:.2} m, on layer {} (the grazer's {})", distance(&fauna, a, g), at.site.y, animal(&fauna, g).site.y);
+}
+
+/// The plain with a pen: walls `SURFACE_Y + 1 ..= SURFACE_Y + 4` round the columns x 19..=22,
+/// z 0..=4 (the strip's own end is its fourth side).
+fn penned(seed: u64) -> World {
+    let mut w = world(seed);
+    let wall = |w: &mut World, x: i64, z: u32| {
+        for y in SURFACE_Y + 1..=SURFACE_Y + 4 {
+            w.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material: cubarium_voxel::Material::Soil });
+        }
+    };
+    for z in 0..=5u32 {
+        wall(&mut w, 18, z);
+        wall(&mut w, 23, z);
+    }
+    for x in 18..=23i64 {
+        wall(&mut w, x, 5);
+    }
+    w
+}
+
+/// **STRIKE-2: a pack that gives up an armoured grazer of a herd leaves the herd**: two adult
+/// grazers hunkered side by side (each the other's ring), a pack of four hungry members, two of
+/// them penned (counted at hand, never in contact), so the two that reach the target pry it
+/// short of its resistance and the chase goes late. With `herd_shun_m` set, the pack shuns the
+/// herd-mate it could not open alone with its target and takes neither within the shun; with it
+/// 0 (the control) it takes the herd-mate next.
+#[test]
+fn a_pack_that_gives_up_an_armoured_grazer_leaves_its_herd() {
+    let arm = |herd_shun_m: f64| -> (bool, bool) {
+        let world = penned(412);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut c = config(2.5);
+        c.founders[PREY.index()].hunker = crate::Hunker { enabled: true, ..crate::vigil::hunker_of(PREY) };
+        let cruise = c.manifest(CH).cruise_m_per_s;
+        let pk = c.founders[CH.index()].pack.as_mut().unwrap();
+        pk.chase_give_up_s = 6.0;
+        pk.route_reach_fraction = (8.0 / (cruise * pk.chase_give_up_s)).min(1.0);
+        pk.shun_s = 60.0;
+        pk.herd_shun_m = herd_shun_m;
+        pk.select_kin_factor = 1.0;
+        pk.select_aware_factor = 1.0;
+        let hk = c.founders[PREY.index()].hunker;
+        let shun_s = pk.shun_s;
+        let mut fauna = Fauna::new(c);
+        fauna.set_births_enabled(false);
+        let den = Site { x: 20, y: SURFACE_Y, z: 6 };
+        assert!(fauna.apply(&world, Command::FoundPack { den, founder: CH, stores: HUNTING, heading_rad: EAST }));
+        let teachers = fauna.config.teachers;
+        let mut members: Vec<u64> = fauna.animals.iter().filter(|a| a.founder == Some(CH)).map(|a| a.id).collect();
+        members.sort_unstable();
+        assert!(members.len() >= 4, "a pack of four");
+        for (k, &id) in members.iter().enumerate() {
+            fauna.controllers.set(id, crate::controller::heuristic(CH, teachers));
+            let (x, z) = [(5.0, 0.5), (5.5, 0.6), (3.0, 2.0), (3.0, 2.6)][k.min(3)];
+            place(&mut fauna, id, x, z, EAST);
+            animal_mut(&mut fauna, id).eating = true;
+        }
+        let birth = fauna.config.founder(PREY).core.birth_body;
+        let herd: Vec<u64> = [7.5, 8.5]
+            .into_iter()
+            .map(|x| {
+                let id = introduce(&mut fauna, &world, PREY, StartingStores::FULL);
+                place(&mut fauna, id, x, LANE_Z, WEST);
+                animal_mut(&mut fauna, id).body = birth;
+                animal_mut(&mut fauna, id).hunkered = true;
+                drive(&mut fauna, id, 0.0, false);
+                id
+            })
+            .collect();
+        // Each needs every member of the pack with its ring (so the pack commits), and more
+        // than one alone (so it is armour, not a soft juvenile).
+        let need = hk.members_to_open(birth, birth, 1).expect("a pry opens it");
+        assert!(need as usize <= members.len() && need > 2, "the herd is openable by the pack, not by the two free members ({need})");
+        // The first chase, until it goes late; then, over half the shun, whether the herd-mate is
+        // taken (a re-target in the same tick counts).
+        let mut first: Option<u64> = None;
+        let mut dropped: Option<(u64, u64)> = None;
+        let mut took_b = false;
+        let mut shunned = false;
+        let limit = cubarium_voxel::ticks_at_least_one(60.0) + cubarium_voxel::ticks_at_least_one(0.5 * shun_s);
+        for _ in 0..limit {
+            fauna.step_with(&world, &mut flora, 1);
+            for e in fauna.take_pack_events() {
+                match e {
+                    PackEvent::ChaseStart { target, .. } if first.is_none() => first = Some(target),
+                    PackEvent::ChaseStart { target, .. } => {
+                        took_b |= dropped.is_some_and(|(a, _)| herd.contains(&target) && target != a);
+                    }
+                    PackEvent::ChaseEnd { why: ChaseEnd::Late, target, .. } if dropped.is_none() && Some(target) == first => {
+                        dropped = Some((target, fauna.tick));
+                        let b = *herd.iter().find(|&&h| h != target).unwrap();
+                        shunned = fauna.packs()[0].shunned.iter().any(|&(s, until)| s == b && fauna.tick < until);
+                    }
+                    _ => {}
+                }
+            }
+            if dropped.is_some_and(|(_, t)| fauna.tick >= t + cubarium_voxel::ticks_at_least_one(0.5 * shun_s)) {
+                break;
+            }
+        }
+        assert!(dropped.is_some(), "the chase on the first grazer goes late");
+        (shunned, took_b)
+    };
+    let (shunned, took) = arm(3.0);
+    assert!(shunned && !took, "with the herd shun: the herd-mate shunned {shunned}, taken {took}");
+    let (shunned, took) = arm(0.0);
+    assert!(!shunned && took, "the control: the herd-mate shunned {shunned}, taken {took}");
 }

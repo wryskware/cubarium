@@ -94,6 +94,7 @@ use crate::Fauna;
 //     branch unmerged): `Pack::switch_stall_s`; a switch only after that long stalled.
 //     STRIKE (same 53, the branch unmerged): `Pack::{close_in_m, stand_off_reach_fraction}`,
 //     the ledger's `pack_close_in_samples, pack_step_offs, pack_pivots, pack_out_of_reach`.
+//     STRIKE-2 (same 53, the branch unmerged): `Pack::herd_shun_m`.
 pub const SCHEMA: u32 = 53;
 
 #[derive(Serialize, Deserialize)]

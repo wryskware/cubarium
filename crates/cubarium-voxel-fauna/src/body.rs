@@ -593,6 +593,14 @@ pub struct Pack {
     /// the middle of the strike capsule.
     #[serde(default = "pack_stand_off_reach_fraction")]
     pub stand_off_reach_fraction: f64,
+    /// **STRIKE-2, leaving the herd**: a pack that drops an armoured target alive (hunkered,
+    /// not turned over: given up late, or broken off) also shuns, for `shun_s`, its armoured
+    /// kin within this of it — hunkered, not turned over, and more than one member's work to
+    /// open — the herd that stood against it, nearest first, as many as the record holds
+    /// beside the target; so it leaves the herd rather than cycling through it (musk oxen in
+    /// a ring are left by wolves that cannot break it). Metres; 0 shuns the target alone.
+    #[serde(default = "pack_herd_shun_m")]
+    pub herd_shun_m: f64,
     /// A pack takes only prey standing in its own walking route component; the
     /// lineage's components are rebuilt from the terrain at most this often, seconds (a
     /// placeholder: the terrain and its water change slowly). 60.
@@ -715,6 +723,9 @@ fn pack_close_in_m() -> f64 {
 fn pack_stand_off_reach_fraction() -> f64 {
     Pack::CHORISTER.stand_off_reach_fraction
 }
+fn pack_herd_shun_m() -> f64 {
+    Pack::CHORISTER.herd_shun_m
+}
 
 fn pack_stalk_margin() -> f64 {
     Pack::CHORISTER.stalk_margin
@@ -762,6 +773,9 @@ impl Pack {
         // strikes on perched bellwings missing by geometry).
         close_in_m: 2.5,
         stand_off_reach_fraction: 0.0,
+        // STRIKE-2: the herd a pack leaves, twice the frondgrazer's ring (`Hunker::ring_m`,
+        // the kin beside it that stiffen it): a placeholder.
+        herd_shun_m: 3.0,
         route_refresh_s: 60.0,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,

@@ -1360,7 +1360,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1988 rows)
+**`fauna.*`** (1997 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1570,6 +1570,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.littershredder.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.littershredder.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.littershredder.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.littershredder.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.littershredder.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -1770,6 +1771,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.frondgrazer.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.frondgrazer.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.frondgrazer.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.frondgrazer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.frondgrazer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -1970,6 +1972,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.lanternjaw.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.lanternjaw.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.lanternjaw.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.lanternjaw.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.lanternjaw.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2170,6 +2173,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.capgnawer.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.capgnawer.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.capgnawer.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.capgnawer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.capgnawer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2370,6 +2374,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.loftstrider.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.loftstrider.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.loftstrider.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.loftstrider.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.loftstrider.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2570,6 +2575,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.ripple-snail.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.ripple-snail.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.ripple-snail.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.ripple-snail.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.ripple-snail.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2770,6 +2776,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.bellwing.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.bellwing.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.bellwing.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.bellwing.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.bellwing.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2970,6 +2977,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.seedporter.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.seedporter.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.seedporter.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.seedporter.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.seedporter.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -3170,6 +3178,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.switch_stall_s` | 10.0 | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
 | `fauna.founders.chorister.pack.close_in_m` | 2.5 | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
 | `fauna.founders.chorister.pack.stand_off_reach_fraction` | 0.0 | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.chorister.pack.herd_shun_m` | 3.0 | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.chorister.pack.route_reach_fraction` | 0.8 | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.chorister.pack.route_refresh_s` | 60.0 | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |

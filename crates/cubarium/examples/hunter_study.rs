@@ -10,6 +10,7 @@
 //! hunter_study strikes load=DIR/mM [minutes=10] [config=FILE] [set=...]
 //! hunter_study churn load=DIR/mM [minutes=10] [config=FILE] [set=...]
 //! hunter_study approach load=DIR/mM [minutes=10] [config=FILE] [set=...]
+//! hunter_study trace load=DIR/mM [seconds=60] [every_s=1] [config=FILE] [set=...]
 //! ```
 //!
 //! `ledger` (S2b) prints a save's frondgrazer ledger since its founding: deaths by cause,
@@ -130,6 +131,7 @@ fn main() {
         Some("glide") => glide_probe(&args),
         Some("churn") => churn_probe(&args),
         Some("approach") => approach_probe(&args),
+        Some("trace") => trace_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -864,6 +866,9 @@ fn run(args: &[String]) {
     let (mut age_win, mut age_all) = ([0u64; 2], [0u64; 2]);
     let mut hunts = Hunts { log: arg(args, "hunt_log=") == Some("1"), chase_kills: sim.fauna().view().ledger.pack_chase_kills, ..Hunts::default() };
     let (mut strk_win, mut strk_all, mut strk_on) = (Contact::default(), Contact::default(), rustc_hash::FxHashSet::default());
+    let mut stuck = Stuck { log: arg(args, "wedge_log=") == Some("1"), ..Stuck::default() };
+    let vh_cadence = params.fauna.manifest(VH).cadence_ticks().max(1);
+    let mut ends = Ends { log: arg(args, "ends_log=") == Some("1"), oor: sim.fauna().view().ledger.pack_out_of_reach, ..Ends::default() };
     sample(&sim, &params, &arm, minute0, &lw, &lw, &win, &mut track, 0, 0.0);
     for minute in minute0 + 1..=end {
         for _ in 0..per_min {
@@ -918,6 +923,8 @@ fn run(args: &[String]) {
             before = now;
             hunts.tick(&sim, &params);
             strk_win.tick(&sim, &params, &mut strk_on);
+            ends.tick(&mut sim, &params);
+            stuck.tick(&sim, &params);
         }
         if (minute - minute0) % every == 0 || minute == end {
             let ms = t0.elapsed().as_secs_f64() * 1000.0 / ticks_in_window.max(1) as f64;
@@ -946,6 +953,12 @@ fn run(args: &[String]) {
             println!("ptune,{arm},{minute},break_offs={},declined={},switches={}", l.pack_break_offs - lw.pack_break_offs, l.pack_declined - lw.pack_declined, l.pack_switches - lw.pack_switches);
             /*}PT*/
             println!("strk,{arm},{minute},{}", strk_win.line(&lw, &l));
+            println!("strkcls,{arm},{minute},{}", strk_win.cls_line());
+            println!("pry,{arm},{minute},{}", strk_win.pry_line());
+            println!("ends,{arm},{minute},{}", Ends::line(&ends.win));
+            ends.win.clear();
+            println!("stuck,{arm},{minute},{}", Stuck::line(&stuck.win, vh_cadence));
+            stuck.win = [0; 4];
             strk_all.add(&strk_win);
             strk_win = Contact::default();
             hunts.win = HuntTally::default();
@@ -995,6 +1008,10 @@ fn run(args: &[String]) {
     println!("sumhunt,{arm},{},{}", minute0, hunts.all.line());
     strk_all.add(&strk_win);
     println!("sumstrk,{arm},{},{}", minute0, strk_all.line(&l0, &l));
+    println!("sumstrkcls,{arm},{},{}", minute0, strk_all.cls_line());
+    println!("sumpry,{arm},{},{}", minute0, strk_all.pry_line());
+    println!("sumends,{arm},{},{}", minute0, Ends::line(&ends.all));
+    println!("sumstuck,{arm},{},{}", minute0, Stuck::line(&stuck.all, vh_cadence));
     /*PT{*/
     println!("sumptune,{arm},{},break_offs={},declined={},switches={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined, l.pack_switches - l0.pack_switches);
     /*}PT*/
@@ -2095,19 +2112,62 @@ fn approach_probe(args: &[String]) {
     println!("sumapproach_prey,{}", cls_prey.iter().map(|(k, x)| format!("{k}={x}")).collect::<Vec<_>>().join(","));
 }
 
-/// **STRIKE's readout** (`strk,` per window, `sumstrk,` at the end): pack-seconds with the
-/// pack's nearest awake member within 1 m (and 1.5 m) of its unhunkered target; Veilhound
-/// strikes begun on pack targets; member controller samples within 1 m (1.5 m) of the
-/// unhunkered target, wanting food, not striking or recovering, and of those the share whose
-/// strike capsule misses it (the reach test fails); the ledger's close-in samples, step-offs,
-/// pivots and out-of-reach break-offs.
+/// **STRIKE's readout** (`strk,` per window, `sumstrk,` at the end), STRIKE-2's breakdown
+/// (`strkcls,`/`sumstrkcls,`) and pry readout (`pry,`/`sumpry,`).
+///
+/// STRIKE's own numbers, kept as they were (`contact_s`, `strikes`, `per_contact_s`,
+/// `fail_share`): pack-seconds with the pack's nearest awake member within 1 m (1.5 m) of its
+/// unhunkered target, whatever that member was doing; every Veilhound strike begun on a pack
+/// target, hunkered ones included; and the reach test's fail share over the member samples
+/// within 1 m (1.5 m) of the unhunkered target, wanting food and not striking.
+///
+/// STRIKE-2's **corrected** measure of what STRIKE claimed (a member at its target, able to
+/// strike, ends its approach in reach and facing it, and strikes): `ready_s`, the pack-seconds
+/// with at least one member **ready** within 1 m (1.5 m) of an unarmoured target (unhunkered,
+/// or hunkered and turned over), ready meaning awake, wanting food, no strike in hand (nor its
+/// recovery) and the target in its jaw band; `ready_strikes`, the strikes begun on the target
+/// while unarmoured; `per_ready_s` their ratio. STRIKE's denominator counted seconds whose only
+/// near member was recovering or fed, and its numerator strikes on armoured bodies.
+///
+/// The breakdown: every member controller sample within 1 m of its pack's target, by what the
+/// member was doing (`CLASSES`, first that applies), apart for an unarmoured, a turned-over
+/// and an armoured (hunkered, not turned over) target.
 #[derive(Default, Clone, Copy)]
 struct Contact {
     ticks: [u64; 2],
     strikes: u64,
     samples: [u64; 2],
     fails: [u64; 2],
+    ready_ticks: [u64; 2],
+    ready_strikes: u64,
+    cls: [[u64; CLASSES.len()]; 3],
+    /// Armoured pack targets: ticks; ticks with a member in pry contact; pry member-ticks;
+    /// ticks with enough in contact to open it; hungry member-ticks within `close_in_m` but
+    /// outside pry contact; the least margin seen between pry contact and the stand-off.
+    hunk_ticks: u64,
+    worked_ticks: u64,
+    pry_member_ticks: u64,
+    enough_ticks: u64,
+    near_out_ticks: u64,
+    margin_min: f64,
+    margin_seen: bool,
+    /// Unarmoured `band` samples by the prey's base over the member's, in voxels (-4..=4).
+    band_dy: [u64; 9],
+    /// Armoured targets: hungry awake member-ticks by distance (pry contact, to `close_in_m`,
+    /// to `pack_radius_m`, to twice it, beyond) and, within `close_in_m` outside pry contact,
+    /// out of the jaw band / striking or recovering / motor refused / other.
+    hunk_dist: [u64; 5],
+    near_out_why: [u64; 4],
 }
+
+/// What a member within 1 m of its target was doing at a controller sample, first that applies:
+/// it began a strike; it was in one; in its recovery; wanting no food; (armoured target) in pry
+/// contact, or not; its capsule takes the target in the jaw band (a strike is due); the target
+/// out of its jaw band; inside its outline (STRIKE's step-off); not facing it (the pivot);
+/// facing it with its motor refused (blocked); facing it otherwise.
+const CLASSES: [&str; 14] =
+    ["struck", "striking", "recovery", "not_hungry", "pry", "hunk_out_of_pry", "in_capsule", "band", "step_off", "pivot", "ahead_blocked", "ahead_other", "in_capsule_feed0", "band_wedged"];
+const ARMOUR: [&str; 3] = ["unhunkered", "opened", "armoured"];
 
 impl Contact {
     fn add(&mut self, o: &Contact) {
@@ -2115,15 +2175,40 @@ impl Contact {
             self.ticks[k] += o.ticks[k];
             self.samples[k] += o.samples[k];
             self.fails[k] += o.fails[k];
+            self.ready_ticks[k] += o.ready_ticks[k];
         }
         self.strikes += o.strikes;
+        self.ready_strikes += o.ready_strikes;
+        for a in 0..3 {
+            for c in 0..CLASSES.len() {
+                self.cls[a][c] += o.cls[a][c];
+            }
+        }
+        self.hunk_ticks += o.hunk_ticks;
+        self.worked_ticks += o.worked_ticks;
+        self.pry_member_ticks += o.pry_member_ticks;
+        self.enough_ticks += o.enough_ticks;
+        self.near_out_ticks += o.near_out_ticks;
+        for k in 0..9 {
+            self.band_dy[k] += o.band_dy[k];
+        }
+        for k in 0..5 {
+            self.hunk_dist[k] += o.hunk_dist[k];
+        }
+        for k in 0..4 {
+            self.near_out_why[k] += o.near_out_why[k];
+        }
+        if o.margin_seen {
+            self.margin_min = if self.margin_seen { self.margin_min.min(o.margin_min) } else { o.margin_min };
+            self.margin_seen = true;
+        }
     }
 
     fn line(&self, l0: &FaunaLedger, l: &FaunaLedger) -> String {
         let hz = TICK_HZ as f64;
         let s = |t: u64| t as f64 / hz;
         format!(
-            "contact_s={:.0},contact15_s={:.0},strikes={},per_contact_s={:.3},per_contact15_s={:.3},samples={},fail_share={:.2},samples15={},fail_share15={:.2},close_in={},step_offs={},pivots={},out_of_reach={}",
+            "contact_s={:.0},contact15_s={:.0},strikes={},per_contact_s={:.3},per_contact15_s={:.3},samples={},fail_share={:.2},samples15={},fail_share15={:.2},close_in={},step_offs={},pivots={},out_of_reach={},ready_s={:.0},ready15_s={:.0},ready_strikes={},per_ready_s={:.3},per_ready15_s={:.3},withheld={}",
             s(self.ticks[0]),
             s(self.ticks[1]),
             self.strikes,
@@ -2137,6 +2222,43 @@ impl Contact {
             l.pack_step_offs - l0.pack_step_offs,
             l.pack_pivots - l0.pack_pivots,
             l.pack_out_of_reach - l0.pack_out_of_reach,
+            s(self.ready_ticks[0]),
+            s(self.ready_ticks[1]),
+            self.ready_strikes,
+            self.ready_strikes as f64 / s(self.ready_ticks[0]).max(1e-9),
+            self.ready_strikes as f64 / s(self.ready_ticks[1]).max(1e-9),
+            l.hunt_strikes_withheld - l0.hunt_strikes_withheld,
+        )
+    }
+
+    /// The breakdown: `armour:class=n` for every class seen.
+    fn cls_line(&self) -> String {
+        let mut out = Vec::new();
+        for (a, an) in ARMOUR.iter().enumerate() {
+            let n: u64 = self.cls[a].iter().sum();
+            out.push(format!("{an}_n={n}"));
+            for (c, cn) in CLASSES.iter().enumerate() {
+                if self.cls[a][c] > 0 {
+                    out.push(format!("{an}:{cn}={}", self.cls[a][c]));
+                }
+            }
+        }
+        out.join(",")
+    }
+
+    fn pry_line(&self) -> String {
+        let hz = TICK_HZ as f64;
+        format!(
+            "armoured_target_s={:.0},worked_s={:.0},pry_members_per_worked={:.2},enough_share_of_worked={:.2},near_out_member_s={:.0},margin_min_m={:.2},hungry_member_s_by_dist(pry/close_in/pack_r/2pack_r/beyond)={},near_out_why(band/strike/blocked/other)={},band_dy_vox(-4..4)={}",
+            self.hunk_ticks as f64 / hz,
+            self.worked_ticks as f64 / hz,
+            self.pry_member_ticks as f64 / self.worked_ticks.max(1) as f64,
+            self.enough_ticks as f64 / self.worked_ticks.max(1) as f64,
+            self.near_out_ticks as f64 / hz,
+            if self.margin_seen { self.margin_min } else { f64::NAN },
+            self.hunk_dist.iter().map(|&t| format!("{:.0}", t as f64 / hz)).collect::<Vec<_>>().join("/"),
+            self.near_out_why.iter().map(|&t| format!("{:.0}", t as f64 / hz)).collect::<Vec<_>>().join("/"),
+            self.band_dy.iter().map(u64::to_string).collect::<Vec<_>>().join("/"),
         )
     }
 
@@ -2145,11 +2267,14 @@ impl Contact {
         use cubarium_voxel_fauna::{MobilityMode, State, StrikePhase};
         let fauna = sim.fauna();
         let fv = fauna.view();
+        let now = fv.tick;
         let v = sim.world().config().voxel_m;
         let ring = f64::from(sim.world().config().width) * v;
         let phys = params.fauna.founder(VH);
         let Some(h) = phys.hunter else { return };
+        let Some(pk) = phys.pack else { return };
         let cadence = params.fauna.manifest(VH).cadence_ticks().max(1);
+        let refused = params.fauna.teachers.motor_refused;
         let base = |a: &cubarium_voxel_fauna::Animal| -> f64 {
             if a.mobility.mode != MobilityMode::Ground && a.pose.y_m.is_finite() {
                 a.pose.y_m
@@ -2159,12 +2284,21 @@ impl Contact {
         };
         for p in fauna.packs() {
             let Some(o) = p.target.and_then(|t| fv.animal(t)).copied() else { continue };
+            let Some(of) = o.founder else { continue };
+            let pf = params.fauna.founder(of);
+            let pg = pf.body_at(o.body);
+            let hk = pf.hunker;
+            let opened = fauna.percept(o.id).is_some_and(|r| now < r.vigil.opened_until);
+            let armour = if !o.hunkered { 0 } else if opened { 1 } else { 2 };
             let mut near = f64::INFINITY;
+            let mut ready = [false; 2];
+            let (mut pry_n, mut near_out) = (0u64, 0u64);
             for b in fv.animals.iter().filter(|b| b.pack.is_some_and(|m| m.pack == p.id && !m.pup)) {
                 let on = b.strike.is_some_and(|s| s.prey == o.id && s.phase == StrikePhase::Windup);
                 let began = on && striking.insert(b.id);
                 if began {
                     self.strikes += 1;
+                    self.ready_strikes += u64::from(armour < 2);
                 } else if !on {
                     striking.remove(&b.id);
                 }
@@ -2174,23 +2308,55 @@ impl Contact {
                 let (dx, dz) = wdelta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
                 let d = (dx * dx + dz * dz).sqrt();
                 near = near.min(d);
-                if o.hunkered || d > 1.5 || !b.eating {
-                    continue;
-                }
-                // A strike begun this tick passed the reach test at this sampling.
-                if began {
-                    for (k, lim) in [1.0, 1.5].into_iter().enumerate() {
-                        self.samples[k] += u64::from(d <= lim);
-                    }
-                    continue;
-                }
-                if b.age_ticks % cadence != 0 || b.strike.is_some() {
-                    continue;
-                }
                 let g = phys.body_at(b.body);
-                let pg = params.fauna.founder(o.founder.unwrap()).body_at(o.body);
                 let jaw = h.jaw_forward_length_fraction * g.length_m;
                 let reach = h.strike_reach_length_fraction * g.length_m;
+                let radii = g.footprint_radius() + pg.footprint_radius();
+                let pry_d = 0.5 * (g.length_m + pg.length_m) + hk.pry_reach_m;
+                let (s0, p0) = (base(b), base(&o));
+                let in_band = p0 < s0 + h.jaw_band_height_fraction * g.height_m && s0 < p0 + pg.height_m;
+                let fb = b.founder_state.feedback;
+                let blocked = fb.attempted_equivalent > 1e-12 && fb.delivered_equivalent / fb.attempted_equivalent < refused;
+                if armour == 2 && (b.eating || b.emergency) {
+                    let k = if d <= pry_d {
+                        0
+                    } else if d <= pk.close_in_m {
+                        1
+                    } else if d <= pk.pack_radius_m {
+                        2
+                    } else if d <= 2.0 * pk.pack_radius_m {
+                        3
+                    } else {
+                        4
+                    };
+                    self.hunk_dist[k] += 1;
+                    if k == 1 {
+                        let w = if !in_band {
+                            0
+                        } else if b.strike.is_some() {
+                            1
+                        } else if blocked {
+                            2
+                        } else {
+                            3
+                        };
+                        self.near_out_why[w] += 1;
+                    }
+                }
+                if armour == 2 {
+                    let stand = jaw + pk.stand_off_reach_fraction * reach;
+                    let m = pry_d - stand;
+                    self.margin_min = if self.margin_seen { self.margin_min.min(m) } else { m };
+                    self.margin_seen = true;
+                    if d <= pry_d && b.attached.is_none() {
+                        pry_n += 1;
+                    } else if d <= pk.close_in_m && (b.eating || b.emergency) {
+                        near_out += 1;
+                    }
+                }
+                if d > 1.5 {
+                    continue;
+                }
                 let (fx, fz) = b.pose.forward();
                 let along = dx * fx + dz * fz;
                 let lateral = (dx * fz - dz * fx).abs();
@@ -2201,19 +2367,369 @@ impl Contact {
                 } else {
                     lateral
                 };
-                let (s0, p0) = (base(b), base(&o));
-                let in_band = p0 < s0 + h.jaw_band_height_fraction * g.height_m && s0 < p0 + pg.height_m;
-                let miss = !(seg <= g.footprint_radius() + pg.footprint_radius() && in_band);
+                let in_capsule = seg <= radii && in_band;
+                if armour < 2 && b.eating && b.strike.is_none() && in_band {
+                    for (k, lim) in [1.0, 1.5].into_iter().enumerate() {
+                        ready[k] |= d <= lim;
+                    }
+                }
+                let due = b.age_ticks % cadence == 0;
+                // The breakdown, at controller samples within 1 m.
+                if d <= 1.0 && (due || began) {
+                    let diff = {
+                        let mut x = dx.atan2(dz) - b.pose.heading_rad;
+                        x = (x + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                        x
+                    };
+                    let aligned = diff.abs() <= (radii / d.max(radii)).asin();
+                    let c = if began {
+                        0
+                    } else if b.strike.is_some_and(|s| s.phase != StrikePhase::Recovery) {
+                        1
+                    } else if b.strike.is_some() {
+                        2
+                    } else if !b.eating {
+                        3
+                    } else if armour == 2 {
+                        if d <= pry_d { 4 } else { 5 }
+                    } else if in_capsule {
+                        if b.founder_state.held.feed > 0.0 { 6 } else { 12 }
+                    } else if !in_band {
+                        if blocked { 13 } else { 7 }
+                    } else if d < (jaw - radii).max(0.0) {
+                        8
+                    } else if !aligned {
+                        9
+                    } else if blocked {
+                        10
+                    } else {
+                        11
+                    };
+                    self.cls[armour][c] += 1;
+                    if (c == 7 || c == 13) && armour < 2 {
+                        self.band_dy[(((p0 - s0) / v).round().clamp(-4.0, 4.0) + 4.0) as usize] += 1;
+                    }
+                }
+                // STRIKE's own fail share, unchanged.
+                if o.hunkered || !b.eating {
+                    continue;
+                }
+                if began {
+                    for (k, lim) in [1.0, 1.5].into_iter().enumerate() {
+                        self.samples[k] += u64::from(d <= lim);
+                    }
+                    continue;
+                }
+                if !due || b.strike.is_some() {
+                    continue;
+                }
                 for (k, lim) in [1.0, 1.5].into_iter().enumerate() {
                     if d <= lim {
                         self.samples[k] += 1;
-                        self.fails[k] += u64::from(miss);
+                        self.fails[k] += u64::from(!in_capsule);
                     }
                 }
             }
             if !o.hunkered {
                 self.ticks[0] += u64::from(near <= 1.0);
                 self.ticks[1] += u64::from(near <= 1.5);
+            }
+            for k in 0..2 {
+                self.ready_ticks[k] += u64::from(ready[k]);
+            }
+            if armour == 2 {
+                self.hunk_ticks += 1;
+                self.near_out_ticks += near_out;
+                if pry_n > 0 {
+                    self.worked_ticks += 1;
+                    self.pry_member_ticks += pry_n;
+                    let ringed = fv
+                        .animals
+                        .iter()
+                        .filter(|k| {
+                            k.id != o.id && k.founder == Some(of) && k.hunkered && k.state != State::Asleep && {
+                                let (dx, dz) = wdelta(o.pose.x, o.pose.z, k.pose.x, k.pose.z, ring);
+                                (dx * dx + dz * dz).sqrt() <= hk.ring_m
+                            }
+                        })
+                        .count() as u32;
+                    if hk.members_to_open(o.body, pf.core.birth_body, ringed).is_some_and(|need| u64::from(need) <= pry_n) {
+                        self.enough_ticks += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// **STRIKE-2's wedged members** (`stuck,` per window, `sumstuck,` at the end): awake adult
+/// Veilhound controller samples whose motor delivered under 5 % of what it was asked over the
+/// interval, the samples in runs of at least `STUCK_S` seconds (a body walking into the same
+/// face that long is wedged, not turning a corner), the runs begun, the longest run.
+const STUCK_S: f64 = 30.0;
+
+#[derive(Default)]
+struct Stuck {
+    run: rustc_hash::FxHashMap<u64, u64>,
+    /// Each member's last samples (tick, layer, strike phase, pack target distance, motor share),
+    /// printed as a `wedge,` line when a run reaches `STUCK_S` and `log` is on.
+    hist: rustc_hash::FxHashMap<u64, std::collections::VecDeque<(u64, u32, String, f64, f64)>>,
+    log: bool,
+    win: [u64; 4],
+    all: [u64; 4],
+}
+
+impl Stuck {
+    fn tick(&mut self, sim: &Sim, params: &Params) {
+        use cubarium_voxel_fauna::State;
+        let fv = sim.fauna().view();
+        let cadence = params.fauna.manifest(VH).cadence_ticks().max(1);
+        let long = (STUCK_S * f64::from(TICK_HZ) / cadence as f64).ceil() as u64;
+        for b in fv.animals.iter().filter(|b| b.founder == Some(VH) && b.pack.is_some_and(|m| !m.pup)) {
+            if b.age_ticks % cadence != 0 || b.state == State::Asleep {
+                continue;
+            }
+            let fb = b.founder_state.feedback;
+            let refused = fb.attempted_equivalent > 1e-12 && fb.delivered_equivalent / fb.attempted_equivalent < 0.05;
+            let r = self.run.entry(b.id).or_default();
+            *r = if refused { *r + 1 } else { 0 };
+            let n = *r;
+            if self.log {
+                let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+                let d = b
+                    .pack
+                    .and_then(|m| sim.fauna().pack(m.pack))
+                    .and_then(|p| p.target)
+                    .and_then(|t| fv.animal(t))
+                    .map_or(f64::NAN, |o| {
+                        let (dx, dz) = wdelta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
+                        (dx * dx + dz * dz).sqrt()
+                    });
+                let share = if fb.attempted_equivalent > 1e-12 { fb.delivered_equivalent / fb.attempted_equivalent } else { f64::NAN };
+                let q = self.hist.entry(b.id).or_default();
+                q.push_back((fv.tick, b.site.y, b.strike.map_or("-".to_string(), |s| format!("{:?}", s.phase)), d, share));
+                if q.len() as u64 > long + 40 {
+                    q.pop_front();
+                }
+                if n == long {
+                    let pre: Vec<String> = q.iter().take(q.len().saturating_sub(long as usize)).map(|(t, y, ph, d, sh)| format!("{t}:y{y}:{ph}:d{d:.1}:m{sh:.2}")).collect();
+                    println!("wedge,{},id={},at=({:.2},{:.2},y{}),before={}", fv.tick, b.id, b.pose.x, b.pose.z, b.site.y, pre.join(" "));
+                }
+            }
+            for t in [&mut self.win, &mut self.all] {
+                t[0] += 1;
+                if n == long {
+                    t[1] += long;
+                    t[2] += 1;
+                } else if n > long {
+                    t[1] += 1;
+                }
+                t[3] = t[3].max(n);
+            }
+        }
+    }
+
+    fn line(t: &[u64; 4], cadence: u64) -> String {
+        let s = cadence as f64 / f64::from(TICK_HZ);
+        format!("awake_member_s={:.0},wedged_s={:.0},wedged_share={:.3},wedges={},longest_s={:.0}", t[0] as f64 * s, t[1] as f64 * s, t[1] as f64 / t[0].max(1) as f64, t[2], t[3] as f64 * s)
+    }
+}
+
+/// **STRIKE-2's chase-end causes** (`ends,` per window, `sumends,` at the end): every chase
+/// end that leaves its target alive, by cause, and every re-target (a new chase within
+/// `RETARGET_S` of one) by the cause of the end before it:
+/// - `brokeoff:out_of_reach` (the ledger's out-of-reach count rose that tick);
+/// - `brokeoff:herd_ring` (an armoured target its members at hand could open alone but not
+///   with the awake kin within `ring_m`, as the prospect counts them);
+/// - `brokeoff:too_few` (one they could not open even alone);
+/// - `brokeoff:fewer_than_commit` (openable by the members counted at the commitment, not by
+///   those at hand now);
+/// - `brokeoff:low_other` (the kin, awareness or flight factors);
+/// - `late:pry_short` / `late:armoured_untouched` / `late:unarmoured`, `switched`, `spent`,
+///   `lost`, `trespass`.
+///
+/// A re-target is also marked `same_herd` (the new target of the old one's lineage within
+/// `ring_m × 2` of where the old one stood) and `starving` (its taker in an emergency).
+#[derive(Default)]
+struct Ends {
+    win: std::collections::BTreeMap<String, u64>,
+    all: std::collections::BTreeMap<String, u64>,
+    last: rustc_hash::FxHashMap<u64, (u64, String, Option<Founder>, f64, f64)>,
+    commit_n: rustc_hash::FxHashMap<u64, u32>,
+    oor: u64,
+    log: bool,
+}
+
+impl Ends {
+    fn bump(&mut self, k: String) {
+        *self.win.entry(k.clone()).or_default() += 1;
+        *self.all.entry(k).or_default() += 1;
+    }
+
+    fn line(m: &std::collections::BTreeMap<String, u64>) -> String {
+        m.iter().map(|(k, x)| format!("{k}={x}")).collect::<Vec<_>>().join(",")
+    }
+
+    fn tick(&mut self, sim: &mut Sim, params: &Params) {
+        use cubarium_voxel_fauna::{ChaseEnd, PackEvent, State};
+        let events = sim.fauna_mut().take_pack_events();
+        let fauna = sim.fauna();
+        let fv = fauna.view();
+        let now = fv.tick;
+        let oor = fv.ledger.pack_out_of_reach;
+        let oor_rose = oor > self.oor;
+        self.oor = oor;
+        let v = sim.world().config().voxel_m;
+        let ring = f64::from(sim.world().config().width) * v;
+        let phys = params.fauna.founder(VH);
+        let Some(pk) = phys.pack else { return };
+        let hz = u64::from(TICK_HZ);
+        let dist = |ax: f64, az: f64, bx: f64, bz: f64| {
+            let (dx, dz) = wdelta(ax, az, bx, bz, ring);
+            (dx * dx + dz * dz).sqrt()
+        };
+        for e in events {
+            match e {
+                PackEvent::ChaseStart { pack, participants, taker, target, .. } => {
+                    self.commit_n.insert(pack, participants);
+                    let Some((t_end, cause, f0, x0, z0)) = self.last.remove(&pack) else { continue };
+                    if now.saturating_sub(t_end) > (RETARGET_S * f64::from(TICK_HZ)) as u64 {
+                        continue;
+                    }
+                    let o = fv.animal(target);
+                    let same = o.is_some_and(|o| o.founder == f0 && f0.is_some_and(|f| dist(x0, z0, o.pose.x, o.pose.z) <= 2.0 * params.fauna.founder(f).hunker.ring_m.max(1.0)));
+                    let starving = fv.animal(taker).is_some_and(|a| a.emergency);
+                    self.bump(format!("rt:{cause}"));
+                    if same {
+                        self.bump("rt_flag:same_herd".into());
+                    }
+                    if starving {
+                        self.bump("rt_flag:starving".into());
+                    }
+                    self.bump("rt:all".into());
+                }
+                PackEvent::ChaseEnd { pack, why, target, .. } => {
+                    let Some(o) = fv.animal(target).copied() else {
+                        self.last.remove(&pack);
+                        continue;
+                    };
+                    let Some(of) = o.founder else { continue };
+                    let pf = params.fauna.founder(of);
+                    let hk = pf.hunker;
+                    let opened = fauna.percept(o.id).is_some_and(|r| now < r.vigil.opened_until);
+                    let members: Vec<_> = fv.animals.iter().filter(|b| b.pack.is_some_and(|m| m.pack == pack && !m.pup)).copied().collect();
+                    let n = members
+                        .iter()
+                        .filter(|b| b.state != State::Asleep && (b.eating || b.emergency) && dist(b.pose.x, b.pose.z, o.pose.x, o.pose.z) <= 2.0 * pk.pack_radius_m)
+                        .count() as u32;
+                    let ringed = fv
+                        .animals
+                        .iter()
+                        .filter(|k| k.id != o.id && k.founder == Some(of) && k.state != State::Asleep && dist(o.pose.x, o.pose.z, k.pose.x, k.pose.z) <= hk.ring_m)
+                        .count() as u32;
+                    let armoured = hk.enabled && !opened;
+                    let adult = pf.core.birth_body;
+                    let opens = |n: u32, r: u32| hk.members_to_open(o.body, adult, r).is_some_and(|need| need <= n);
+                    let in_pry = members
+                        .iter()
+                        .filter(|b| {
+                            b.state != State::Asleep
+                                && dist(b.pose.x, b.pose.z, o.pose.x, o.pose.z) <= 0.5 * (phys.body_at(b.body).length_m + pf.body_at(o.body).length_m) + hk.pry_reach_m
+                        })
+                        .count();
+                    let cause = match why {
+                        ChaseEnd::BrokeOff if oor_rose => "brokeoff:out_of_reach",
+                        ChaseEnd::BrokeOff if armoured && !opens(n, ringed) && opens(n, 0) => "brokeoff:herd_ring",
+                        ChaseEnd::BrokeOff if armoured && !opens(n, ringed) && self.commit_n.get(&pack).is_some_and(|&c| opens(c, ringed)) => "brokeoff:fewer_than_commit",
+                        ChaseEnd::BrokeOff if armoured && !opens(n, ringed) => "brokeoff:too_few",
+                        ChaseEnd::BrokeOff => "brokeoff:low_other",
+                        ChaseEnd::Late if o.hunkered && !opened && in_pry > 0 => "late:pry_short",
+                        ChaseEnd::Late if o.hunkered && !opened => "late:armoured_untouched",
+                        ChaseEnd::Late => "late:unarmoured",
+                        ChaseEnd::Switched => "switched",
+                        ChaseEnd::Spent => "spent",
+                        ChaseEnd::Lost => "lost",
+                        ChaseEnd::Trespass => "trespass",
+                        _ => "other",
+                    };
+                    let juv = o.body < adult;
+                    self.bump(format!("end:{cause}"));
+                    self.bump(format!("end_prey:{cause}/{}{}", of.name(), if juv { "_juv" } else { "" }));
+                    if self.log {
+                        println!(
+                            "cend,{now},pack={pack},cause={cause},target={target},{}{},hunk={},opened={opened},n={n},commit_n={:?},ringed={ringed},in_pry={in_pry},emergency={}",
+                            of.name(),
+                            if juv { "_juv" } else { "" },
+                            o.hunkered,
+                            self.commit_n.get(&pack),
+                            members.iter().filter(|b| b.emergency).count(),
+                        );
+                    }
+                    self.last.insert(pack, (now, cause.to_string(), Some(of), o.pose.x, o.pose.z));
+                }
+                PackEvent::FeastEnd { .. } => {}
+            }
+        }
+        let _ = hz;
+    }
+}
+
+/// `trace load=DIR [seconds=60] [every_s=1]` (STRIKE-2): each Veilhound pack member every
+/// `every_s`: its target's distance and height over it (voxels), its held actions, its motor's
+/// delivered share, its bearing off the target, hunger and state.
+fn trace_probe(args: &[String]) {
+    let params = resolve(args);
+    let seconds: u64 = arg(args, "seconds=").map_or(60, |m| m.parse().unwrap());
+    let every_s: u64 = arg(args, "every_s=").map_or(1, |m| m.parse().unwrap());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, _) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let v = sim.world().config().voxel_m;
+    let ring = f64::from(sim.world().config().width) * v;
+    let hz = u64::from(TICK_HZ);
+    for t in 0..seconds * hz {
+        sim.step();
+        if t % (every_s * hz) != 0 {
+            continue;
+        }
+        let fa = sim.fauna();
+        let fv = fa.view();
+        for r in fa.packs() {
+            let o = r.target.and_then(|t| fv.animal(t)).copied();
+            let ts = o.map(|o| {
+                let (pry, open) = fa.percept(o.id).map_or((0.0, false), |p| (p.vigil.pry, fv.tick < p.vigil.opened_until));
+                format!("{}{}@({:.2},{:.2},y{}) hunk={} open={open} pry={pry:.2} mode={:?} heading={:.2}", o.founder.map_or("-", |f| f.name()), o.id, o.pose.x, o.pose.z, o.site.y, o.hunkered, o.mobility.mode, o.pose.heading_rad)
+            });
+            println!("P,{}s,pack={},target={:?},feast={:?}", t / hz, r.id, ts, r.feast);
+            for b in fv.animals.iter().filter(|b| b.pack.is_some_and(|m| m.pack == r.id && !m.pup)) {
+                let (d, dy, bear) = o.map_or((f64::NAN, 0i64, f64::NAN), |o| {
+                    let (dx, dz) = wdelta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
+                    let mut x = dx.atan2(dz) - b.pose.heading_rad;
+                    x = (x + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                    ((dx * dx + dz * dz).sqrt(), i64::from(o.site.y) - i64::from(b.site.y), x.to_degrees())
+                });
+                let fb = b.founder_state.feedback;
+                let h = b.founder_state.held;
+                println!(
+                    "  M,{},d={d:.2},dy={dy},bear={bear:.0},held=({:.2},{:.2},{:.1}),motor={:.2},eat={},emerg={},state={:?},strike={:?},at=({:.2},{:.2},y{}),speed={:.2}",
+                    b.id,
+                    h.forward,
+                    h.turn,
+                    h.feed,
+                    if fb.attempted_equivalent > 1e-12 { fb.delivered_equivalent / fb.attempted_equivalent } else { f64::NAN },
+                    b.eating,
+                    b.emergency,
+                    b.state,
+                    b.strike.map(|s| s.phase),
+                    b.pose.x,
+                    b.pose.z,
+                    b.site.y,
+                    b.speed_m_s,
+                );
             }
         }
     }
