@@ -786,3 +786,47 @@ fn every_new_state_field_and_knob_round_trips_a_snapshot() {
     let back = crate::snapshot::decode(&crate::snapshot::encode(&fauna)).expect("an infinite nearest-so-far loads");
     assert_eq!(back.packs()[0].chase_best_m, f64::INFINITY);
 }
+
+// ------------------------------------------------------------------ STRIKE-2 x the draw
+
+/// **A pack's draw does not lead it to a prey it shuns** (STRIKE-2's herd shun and PACK-TUNE's
+/// shun against VEILHOUND-SEARCH's draw): a hungry pack with no target whose only sensed prey is
+/// a grazer it shuns (as a herd-mate left with a dropped armoured target), 6 m off: its leader's
+/// sample takes no target and records no draw to that grazer. The control, the same grazer not
+/// shunned, is drawn to or taken.
+#[test]
+#[ignore = "FINDING: the draw (draw_step) skips only the abandoned target, not the shun list, so a pack is drawn back to herd-mates STRIKE-2 just shunned"]
+fn a_packs_draw_does_not_lead_it_to_a_prey_it_shuns() {
+    let run = |shunned: bool| {
+        let world = world(971);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut c = config();
+        // The choice reaches 2 m: the grazer is beyond it, so the draw is what would move the pack.
+        {
+            let cruise = c.manifest(CH).cruise_m_per_s;
+            let pk = c.founders[CH.index()].pack.as_mut().unwrap();
+            pk.route_reach_fraction = 2.0 / (cruise * pk.chase_give_up_s);
+        }
+        let mut fauna = Fauna::new(c);
+        fauna.set_births_enabled(false);
+        let members = pack(&mut fauna, &world);
+        let g = grazer(&mut fauna, &world, 8.5, LANE_Z, 0.5);
+        let own = fauna.packs()[0].id;
+        if shunned {
+            let until = fauna.tick + 100_000;
+            fauna.pack_mut(own).unwrap().shunned[0] = (g, until);
+        }
+        let rec = fauna.packs()[0];
+        let leader = rec.breeder.filter(|b| members.contains(b)).unwrap_or(members[0]);
+        let mut events = Vec::new();
+        sample(&mut fauna, &world, &flora, leader, &mut events);
+        let _ = &mut flora;
+        let p = fauna.packs()[0];
+        (p.target == Some(g), p.drawn == Some(g))
+    };
+    let (taken, drawn) = run(false);
+    assert!(taken || drawn, "control: the unshunned grazer is drawn to or taken (taken {taken}, drawn {drawn})");
+    let (taken, drawn) = run(true);
+    assert!(!taken, "a shunned grazer is taken");
+    assert!(!drawn, "the pack is drawn to a grazer it shuns");
+}
