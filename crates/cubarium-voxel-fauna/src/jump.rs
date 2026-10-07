@@ -28,6 +28,10 @@ use crate::{Actions, Fauna, Founder, FounderPhysiology, Site};
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::FloraView;
 
+#[cfg(test)]
+#[path = "testpass3_drop_tests.rs"]
+mod testpass3_drop_tests;
+
 /// **A lineage's jump down** when trapped (DROP). A reach at or under its step is no jump.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

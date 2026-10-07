@@ -98,6 +98,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::perception::{HEARING, SIGHT, TREMOR, class};
 use crate::{Actions, Animal, Fauna, FaunaConfig, Founder, MobilityMode, Percept, State, Track};
+#[cfg(test)]
+#[path = "testpass3_fear_tests.rs"]
+mod testpass3_fear_tests;
 
 /// Which response a lineage's heuristics run on its record (a switch, no registry row).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -984,7 +987,7 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
             v.refuge = true;
             v.close_tick = now;
         }
-        if v.refuge && now.saturating_sub(v.close_tick) >= ticks(vg.lost_calm_s.max(vg.calm_s)) {
+        if v.refuge && vg.lost_calm_s > 0.0 && now.saturating_sub(v.close_tick) >= ticks(vg.lost_calm_s.max(vg.calm_s)) {
             v.refuge = false;
         }
         let out = v.refuge.then_some(Actions { forward: 0.0, turn: held.turn, feed: held.feed });
