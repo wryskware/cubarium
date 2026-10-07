@@ -1082,8 +1082,10 @@ pub struct Amphibious {
     /// that wants food and stands on a face holding less film than this share of one site's
     /// underwater film capacity (`film_capacity_per_m2 · voxel_m²`) walks to a richer face
     /// within `graze_search_m` (in water at any hour; out of water only in its roam hours).
-    /// The film's grazing refuge keeps a grazed face tasting of food, so without this a
-    /// snail never leaves it. 0: off (it stays on any film it tastes).
+    /// Read on the edible film, above the grazing refuge (TASTE), as the snail's taste and
+    /// the graze target's per-snail worth (`graze_worth`) are: a face grazed to its refuge
+    /// tastes of nothing and is left in any case; this leaves a patch poorer than richer
+    /// ones in reach before it is bare. 0: off (it stays on any film it tastes).
     #[serde(default = "default_graze_give_up")]
     pub graze_give_up: f64,
     /// ... a face worth the walk holds at least this share of a site's capacity per snail
@@ -1195,8 +1197,8 @@ impl Amphibious {
         // Its own short world, as the water reflex's: a few metres of a pond's margin.
         egg_search_m: 4.0,
         // A grazed face at under a third of the bed's capacity is left for one holding at
-        // least half of it, within a metre (about five body lengths). Plausible, untuned:
-        // above the film's grazing refuge (a tenth), below a fresh bed.
+        // least half of it, within a metre (about five body lengths), both read on the film
+        // above the grazing refuge (a tenth). Plausible, untuned: below a fresh bed.
         graze_give_up: 0.3,
         graze_worth: 0.5,
         graze_search_m: 1.0,
@@ -3336,8 +3338,10 @@ fn pool_stock(fv: &FloraView<'_>, site: Site, food: crate::Food) -> f64 {
     fv.ground_at(site).map_or(0.0, |g| match food {
         crate::Food::Litter => g.litter,
         crate::Food::Carrion => g.carrion,
-        // Glassfilm (roster R2b): the film pool at the face.
-        crate::Food::Film => g.film,
+        // Glassfilm (roster R2b): the film pool at the face above its grazing refuge
+        // (TASTE): a face grazed to the refuge tastes of nothing, as `take_film` gives
+        // nothing there.
+        crate::Food::Film => fv.edible_film(g),
         // Neither is a ground pool; a mouth never asks this of them. Nectar (F1) is a
         // flower product, not a pool, and fruit (F3) a hanging one.
         crate::Food::CapTissue | crate::Food::Foliage | crate::Food::Nectar | crate::Food::Fruit => 0.0,

@@ -561,3 +561,83 @@ fn a_grazer_goes_to_the_richest_face_worth_it_and_onto_land_only_in_its_hours() 
     let poor = |s: Site| if s == pond { 0.4 * k } else { 0.0 };
     assert_eq!(crate::step::graze_target(&view, &am, &a, false, k, &poor, &[]), None, "nothing worth the walk");
 }
+
+// ------------------------------------------------------------ TASTE: only what it can eat
+
+/// Film seeded at the full bed on every pond face, then every pond face from column 2 east
+/// grazed to the refuge (`film_graze_refuge` of a site's capacity); columns 0 and 1 stay full.
+fn grazed_pond(world: &World) -> Flora {
+    let fc = FloraConfig { film_seed_per_m2: FloraConfig::default().film_capacity_per_m2, ..FloraConfig::default() };
+    assert!(fc.film_graze_refuge > 0.0, "fixture: a refuge");
+    let mut flora = Flora::new(fc);
+    assert!(flora.seed_film(world) > 0, "fixture: film on the pond");
+    for x in 2..=5 {
+        for z in 0..D {
+            assert!(flora.take_film(site(x, z), 1.0).is_some(), "fixture: film to graze at ({x}, {z})");
+        }
+    }
+    flora
+}
+
+/// **TASTE** (Wrysk 2026-10-06: "why does empty face still taste like algae? shouldnt that
+/// be fixed?"): a face grazed to the film's refuge holds film no mouth can take, so it
+/// tastes of nothing — the mouth finds no film there and the taste channel reads 0 — and a
+/// hungry snail under its heuristic leaves it. The giving-up density is off here
+/// (`graze_give_up` 0), so what moves it is its taste alone.
+#[test]
+fn a_film_face_grazed_to_its_refuge_tastes_of_nothing_and_a_snail_leaves_it() {
+    let world = shore_world(clock_off(), |_, _| 0.8);
+    let mut flora = grazed_pond(&world);
+    let home = site(3, 2);
+    assert!(flora.view().film_at(home) > 0.0, "fixture: the refuge is left on the face");
+    let mut cfg = config(1.0e6, |am| am.graze_give_up = 0.0);
+    // No laying here.
+    cfg.founders[SNAIL.index()].core.reproduction.surplus_hold_s = 1.0e9;
+    let mut fauna = Fauna::new(cfg);
+    let id = introduce(&mut fauna, &world, 3, 2, StartingStores { body: 1.0, reserve: 0.3 });
+    {
+        let (view, fv) = (world.view(), flora.view());
+        let i = fauna.animals.iter().position(|a| a.id == id).expect("placed");
+        let a = &fauna.animals[i];
+        let body = fauna.config().founder(SNAIL).body_at(a.body);
+        let cols = crate::body::mouth_columns(&view, &a.pose, &body);
+        assert!(cols.iter().all(|&(x, _)| (2..=5).contains(&x)), "fixture: the mouth is over grazed faces only: {cols:?}");
+        assert_eq!(
+            crate::body::mouth_pool_site(&fv, &cols, a.site.y, crate::Food::Film),
+            None,
+            "the mouth finds no film it can take"
+        );
+        let manifest = fauna.config().manifest(SNAIL);
+        let m = *manifest.modules.iter().find(|m| m.name.starts_with("Taste")).expect("a taste module");
+        let obs = crate::body::observation(&fauna, i, &view, &fv, &manifest, None, None);
+        assert_eq!(obs[m.offset], 0.0, "the taste channel reads nothing on a face at its refuge");
+    }
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(SNAIL, teachers)));
+    steps(&mut fauna, &world, &mut flora, 300);
+    let b = fauna.view().animal(id).expect("alive").clone();
+    assert_ne!(b.site, home, "it left the face that tastes of nothing");
+}
+
+/// **TASTE: perception equals the take.** On one pond face at film stocks across the refuge
+/// (full, half, just over the refuge, at it, under it), the film the snail's mouth finds
+/// there is exactly what [`Flora::take_film`] gives a mouth asking for everything, and
+/// none at or under the refuge.
+#[test]
+fn the_film_a_snails_mouth_finds_is_what_take_film_gives() {
+    let world = shore_world(clock_off(), |_, _| 0.8);
+    let k = FloraConfig::default().film_capacity_per_m2 * V * V;
+    let refuge = FloraConfig::default().film_graze_refuge;
+    for fill in [1.0, 0.5, refuge * 1.5, refuge, refuge * 0.5] {
+        let fc = FloraConfig { film_seed_per_m2: fill * FloraConfig::default().film_capacity_per_m2, ..FloraConfig::default() };
+        let mut flora = Flora::new(fc);
+        assert!(flora.seed_film(&world) > 0, "fixture: film on the pond");
+        let home = site(3, 2);
+        let found = crate::body::mouth_pool_site(&flora.view(), &[(3, 2)], home.y, crate::Food::Film).map_or(0.0, |(_, s)| s);
+        let took = flora.take_film(home, 1.0e9).map_or(0.0, |t| t.organic);
+        assert_eq!(found, took, "film at {fill} of the bed: the mouth finds {found}, a take gives {took}");
+        if fill * k <= refuge * k {
+            assert_eq!(found, 0.0, "film at {fill} of the bed is at or under the refuge");
+        }
+    }
+}

@@ -3275,6 +3275,25 @@ impl FloraConfig {
         self
     }
 
+    /// The glassfilm's **grazing refuge** on one site, organic matter:
+    /// `film_graze_refuge` (clamped to `[0, 1]`) of a site's capacity
+    /// (`film_capacity_per_m2 · voxel_m²`). No mouth takes it ([`Flora::take_film`]).
+    pub fn film_refuge_per_site(&self) -> f64 {
+        self.film_graze_refuge.clamp(0.0, 1.0) * self.film_capacity_per_m2 * self.voxel_m * self.voxel_m
+    }
+
+    /// **Edible film** (TASTE): of a site's `film`, what stands above its grazing refuge
+    /// ([`FloraConfig::film_refuge_per_site`]), never negative. The one reading of "film to
+    /// eat": [`Flora::take_film`] takes no more than this, and every perception of film
+    /// (a mouth's taste, the film scent, a heuristic's "food here") reads it through
+    /// [`FloraView::edible_film`], so a face grazed to its refuge is bare to every sense.
+    pub fn edible_film(&self, film: f64) -> f64 {
+        let above = film - self.film_refuge_per_site();
+        // A site grazed to its refuge keeps the float residue of the withdrawal; that dust
+        // is not food, as a plant layer's is not ([`StandLayer::edible`]).
+        if above > layers::EDIBLE_DUST { above } else { 0.0 }
+    }
+
     /// Every species with **no grazing refuge** (`graze_refuge` 0): a stand can be
     /// withdrawn to nothing. For a fixture whose patches are eaten down to nothing. Not a
     /// shipped configuration: the live world's plants keep theirs.
@@ -4437,6 +4456,30 @@ impl<'a> FloraView<'a> {
             .iter()
             .filter(|g| g.film > 0.0)
             .map(|g| (g.site, g.film))
+    }
+
+    /// **Edible film** on a ground entry (TASTE): its film above the grazing refuge,
+    /// [`FloraConfig::edible_film`] — exactly what [`Flora::take_film`] would give a mouth
+    /// asking for everything. Every perception of film reads this and not [`Ground::film`].
+    pub fn edible_film(&self, g: &Ground) -> f64 {
+        self.config.edible_film(g.film)
+    }
+
+    /// [`FloraView::edible_film`] on `site`; 0 where there is no ground entry.
+    pub fn edible_film_at(&self, site: Site) -> f64 {
+        self.ground_at(site).map_or(0.0, |g| self.edible_film(g))
+    }
+
+    /// **Edible tissue** of a stand (TASTE): the sum over its foliage layers of what each
+    /// holds above its grazing floor ([`StandLayer::edible`]) — exactly what
+    /// [`Flora::take_foliage_of`] withdraws from every layer when asked for everything with
+    /// no induced defence. A plant's foliage or a fungus's cap tissue alike; 0 for a stand
+    /// cropped to its floor, which every sense of food then reads as bare.
+    pub fn edible_foliage(&self, stand: &Stand) -> f64 {
+        if !(stand.foliage > 0.0) {
+            return 0.0;
+        }
+        self.layers(stand).map(|l| l.edible()).sum()
     }
 
     /// Organic matter in every living and dead stock, the seed banks and the latticevines
@@ -5866,14 +5909,13 @@ impl Flora {
     /// [`Flora::take_litter`]'s rule on the film pool, booked as consumed.
     pub fn take_film(&mut self, site: Site, want: f64) -> Option<Taken> {
         let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
-        // The refuge ([`FloraConfig::film_graze_refuge`]) is out of a mouth's reach.
-        let refuge = self.config.film_graze_refuge.clamp(0.0, 1.0)
-            * self.config.film_capacity_per_m2
-            * self.config.voxel_m
-            * self.config.voxel_m;
+        // The refuge ([`FloraConfig::film_graze_refuge`]) is out of a mouth's reach: it
+        // takes at most the edible film ([`FloraConfig::edible_film`]), what every sense
+        // of film reads.
+        let edible = self.config.edible_film(self.ground[i].film);
         let g = &mut self.ground[i];
         // A bad `want` stays bad (refused below); a good one stops at the refuge.
-        let want = if want.is_finite() { want.min(g.film - refuge) } else { want };
+        let want = if want.is_finite() { want.min(edible) } else { want };
         let taken = take_pool(&mut g.film, &mut g.film_mineral, &mut g.film_energy, want)?;
         self.ledger.film_consumed += taken.organic;
         Some(self.book_consumed(taken))
