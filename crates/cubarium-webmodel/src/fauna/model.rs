@@ -635,10 +635,8 @@ impl FaunaModel {
             }
             let phys = *self.phys(f);
             let fit = *self.fits.of(f);
-            let hunter = phys.hunter.is_some();
-            let diet: Vec<Food> = phys.diet.foods()
-                .filter(|&food| f != Founder::Seedporter || phys.catch_bellwings || food != Food::Carrion)
-                .collect();
+            let hunter = phys.active_hunter().is_some();
+            let diet: Vec<Food> = phys.eating_diet().foods().collect();
             // The response is fitted on patch's world totals: on a larger floor the stock and the
             // crowd are read per patch-sized area. A supply that carries its areas is read per
             // its own area over the one fitted on, food by food.
@@ -853,10 +851,9 @@ impl FaunaModel {
                 continue;
             }
             let hp = *self.phys(hf);
-            let Some(h) = hp.hunter else { continue };
-            if hf == Founder::Seedporter
-                && (!hp.catch_bellwings || self.night_at(self.t_s).since_set_h.is_finite())
-            {
+            let Some(h) = hp.active_hunter() else { continue };
+            // An opportunist's catch (the seedporter's) is a daytime one.
+            if hp.opportunist && self.night_at(self.t_s).since_set_h.is_finite() {
                 continue;
             }
             let rule = self.hunt_rule(hf);
@@ -908,7 +905,7 @@ impl FaunaModel {
                         if c.host.is_some() || !(c.n > 0.0) || !laws::in_size_window(&hp, hb * per_pack, c.b.body) {
                             continue;
                         }
-                        if hf == Founder::Seedporter {
+                        if hp.opportunist {
                             let damage = h.strike_power * hb / c.b.body.max(f64::MIN_POSITIVE)
                                 * (1.0 - pp.armour);
                             let strikes = (1.0 / damage.max(f64::MIN_POSITIVE)).ceil().max(1.0);

@@ -127,7 +127,9 @@ use crate::Fauna;
 // 65: GLOWCAP — living mycelium intake by founder, included in CapTissue.
 // 66: MIMIC and MIMIC-2 — FounderPhysiology daytime lure/flower ambush, opportunistic
 //     catch and bounded, density-led catch foray config.
-pub const SCHEMA: u32 = 66;
+// 67: CATCH-SWITCH — `FounderPhysiology::opportunist`: the hunter table exists only while
+//     `catch_bellwings` is on.
+pub const SCHEMA: u32 = 67;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

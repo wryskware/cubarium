@@ -1162,7 +1162,7 @@ fn controllers(
     // instead (cone-speed item 4): built once, patched from bites and deaths, bodies
     // re-indexed — the same grid either way.
     let v2_cone: [bool; Founder::COUNT] = Founder::ALL
-        .map(|f| f.manifest().cone_range_m > 0.0 && fauna.config.founder(f).hunter.is_none());
+        .map(|f| f.manifest().cone_range_m > 0.0 && fauna.config.founder(f).active_hunter().is_none());
     let observers = due
         .iter()
         .any(|&i| fauna.animals[i].founder.is_some_and(|f| v2_cone[f.index()]));
@@ -1171,7 +1171,7 @@ fn controllers(
     let hunters_here = fauna
         .animals
         .iter()
-        .any(|a| a.founder.is_some_and(|f| fauna.config.founder(f).hunter.is_some()));
+        .any(|a| a.founder.is_some_and(|f| fauna.config.founder(f).active_hunter().is_some()));
     let predators = hunters_here
         && due
             .iter()
@@ -1561,7 +1561,7 @@ fn flee(
     let config = &fauna.config;
     let hunted = Founder::ALL
         .iter()
-        .any(|&f| config.founder(f).hunter.is_some_and(|h| h.hunts(founder)));
+        .any(|&f| config.founder(f).active_hunter().is_some_and(|h| h.hunts(founder)));
     if !hunted {
         return None;
     }
@@ -2160,7 +2160,7 @@ fn founder_act(
 
     // A carnivore's lit lure costs `lure_power` × its awake upkeep (predation §2.2). It
     // lures only while it wants food (repair 2 item 7): a fed hunter's lure is dark.
-    if let Some(h) = phys.hunter {
+    if let Some(h) = phys.active_hunter() {
         if !fauna.animals[i].eating {
             fauna.animals[i].founder_state.lure = 0.0;
         }
@@ -2313,7 +2313,7 @@ fn founder_act(
         // only while it wants food (repair 2 item 7).
         let pup = fauna.animals[i].pack.is_some_and(|m| m.pup);
         let wants = fauna.animals[i].eating;
-        let target = match phys.hunter {
+        let target = match phys.active_hunter() {
             Some(h) if fauna.animals[i].strike.is_none() && !pup && wants => {
                 prey_in_capsule(fauna, i, view, &geometry, &h)
             }
@@ -3342,16 +3342,7 @@ fn founder_feed(
     // with — before anything is withdrawn: the richest of the lineage's diet
     // ([`body::mouth_meal`]). Its class is the source's own: a pool names it, and a
     // stand's is its species' income rule.
-    let diet = if founder == crate::Founder::Seedporter && !phys.catch_bellwings {
-        crate::Diet::of(
-            &phys
-                .diet
-                .foods().filter(|&f| f != Food::Carrion)
-                .collect::<Vec<_>>(),
-        )
-    } else {
-        phys.diet
-    };
+    let diet = phys.eating_diet();
     let Some((meal, stock, _)) =
         body::mouth_meal(&flora.view(), view, &cols, site_y, geometry, diet)
     else {
@@ -4602,7 +4593,7 @@ fn dormant_eggs(
             if f == c.lineage && a.body >= phys.core.birth_body {
                 nearest_adult = Some(nearest_adult.map_or(dist, |n: f64| n.min(dist)));
             }
-            let prey = phys.hunter.is_some_and(|h| h.hunts(f));
+            let prey = phys.active_hunter().is_some_and(|h| h.hunts(f));
             // Footfall is feet on the ground: a flyer aloft or a glider in the air makes none.
             let on_foot = !matches!(a.mobility.mode, crate::MobilityMode::Fly | crate::MobilityMode::Glide);
             if prey
@@ -5085,7 +5076,7 @@ mod mimic_tests;
 fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
     let founder = fauna.animals[i].founder.expect("founder");
     let phys = *fauna.config.founder(founder);
-    let h = phys.hunter.expect("a hunter");
+    let h = phys.active_hunter().expect("a hunter");
     let lure = crate::light::drawn_to_lure(fauna, prey);
     let a = &mut fauna.animals[i];
     a.strike = Some(Strike {

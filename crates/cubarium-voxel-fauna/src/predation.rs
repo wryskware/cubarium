@@ -99,11 +99,14 @@ pub(crate) fn is_prey_in_window(
     let (Some(hf), Some(pf)) = (hunter.founder, prey.founder) else {
         return false;
     };
-    let Some(h) = config.founder(hf).hunter else {
+    let Some(h) = config.founder(hf).active_hunter() else {
         return false;
     };
-    if hf == crate::Founder::Seedporter {
-        let p = config.founder(hf);
+    // An opportunist's table is the bellwing catch's ([`crate::FounderPhysiology::opportunist`]):
+    // `active_hunter` already holds it off with the switch; on, it takes a low bellwing
+    // worth the strikes and nothing else.
+    let p = config.founder(hf);
+    if p.opportunist {
         if !p.catch_bellwings
             || pf != crate::Founder::Bellwing
             || prey.pose.y_m - hunter.pose.y_m > p.catch_ceiling_m
@@ -400,7 +403,7 @@ pub(crate) fn catch_worthwhile(config: &FaunaConfig, hunter: &Animal, prey: &Ani
         return false;
     };
     let p = config.founder(hf);
-    let Some(h) = p.hunter else { return false };
+    let Some(h) = p.active_hunter() else { return false };
     let armour = prey.founder.map_or(0.0, |pf| config.founder(pf).armour);
     let damage = h.strike_power * hunter.body / prey.body.max(f64::MIN_POSITIVE) * (1.0 - armour);
     if damage <= 0.0 {

@@ -23,7 +23,7 @@ impl FaunaModel {
                     continue;
                 }
                 let hp = self.phys(hf);
-                if !hp.hunter.is_some_and(|h| h.hunts(f)) {
+                if !hp.active_hunter().is_some_and(|h| h.hunts(f)) {
                     continue;
                 }
                 for (k, c) in self.pops[hf.index()].iter().enumerate() {
@@ -124,7 +124,7 @@ impl FaunaModel {
                 continue;
             }
             let hp = *self.phys(hf);
-            let Some(h) = hp.hunter else { continue };
+            let Some(h) = hp.active_hunter() else { continue };
             let rule = self.hunt_rule(hf);
             let members = if hp.pack.is_some() {
                 self.pops[hf.index()]

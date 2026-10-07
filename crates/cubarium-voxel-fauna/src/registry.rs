@@ -244,6 +244,7 @@ fn founder_rows() -> Vec<Row> {
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
         r("flower_ambush_m", "m", nonneg, "MIMIC: holds an ambush this close to a flower"),
+        // `opportunist` (CATCH-SWITCH: the hunter table is the catch's, on with `catch_bellwings`) is a switch: no row.
         r("catch_ceiling_m", "m above hunter base", nonneg, "MIMIC: highest bellwing base a catch can reach"),
         r("catch_gain_min", "organic units", nonneg, "MIMIC: minimum yield less expected strike upkeep cost"),
         r("catch_foray_m", "m", nonneg, "MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays"),

@@ -245,7 +245,7 @@ pub fn attack_chance(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::
     let (Some(hf), Some(pf)) = (a.founder, o.founder) else {
         return 0.0;
     };
-    let Some(h) = config.founder(hf).hunter else {
+    let Some(h) = config.founder(hf).active_hunter() else {
         return 0.0;
     };
     profitability(&h, a.body, o.body, config.founder(pf).armour) * attack_preference(&config.hunt, &h, &a.hunt.image, pf)
@@ -633,7 +633,7 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
     }
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
-    phys.hunter?;
+    phys.active_hunter()?;
     if !phys.diet.foods().any(|f| f == Food::Carrion) {
         return None;
     }
@@ -817,7 +817,7 @@ pub(crate) fn steer(
     let a = fauna.animals[i];
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
-    let h = phys.hunter?;
+    let h = phys.active_hunter()?;
     if a.attached.is_some() || a.strike.is_some() {
         return None;
     }
@@ -1112,7 +1112,7 @@ pub(crate) fn catch_step(
     if let Some(go) = meal_step(fauna, i, view, fv) {
         return Some(go);
     }
-    let h = phys.hunter?;
+    let h = phys.active_hunter()?;
     let geometry = phys.body_at(a.body);
     let ring = f64::from(view.config.width) * view.config.voxel_m;
     let target = fauna
@@ -1186,7 +1186,7 @@ fn catch_foray(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView
         return None;
     }
     let route = route_from(fauna, i, view);
-    let h = phys.hunter?;
+    let h = phys.active_hunter()?;
     let g = phys.body_at(a.body);
     for (_, target) in targets {
         let reach = (h.jaw_forward_length_fraction + h.strike_reach_length_fraction)*g.length_m;

@@ -1301,7 +1301,7 @@ impl LanternjawAmbush {
     /// its lure lit only for a hunter whose table pays one.
     fn for_founder(founder: Founder, cfg: TeacherConfig) -> LanternjawAmbush {
         let manifest = founder.manifest();
-        let hunter = crate::FounderPhysiology::frozen(founder).hunter;
+        let hunter = crate::FounderPhysiology::frozen(founder).active_hunter();
         LanternjawAmbush {
             cfg,
             mode: Ambush::Seek,

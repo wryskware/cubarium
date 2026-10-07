@@ -362,7 +362,7 @@ pub(super) fn glider_act(
     let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
     let mut held = fauna.animals[i].founder_state.held;
     if mode == MobilityMode::Perched && !asleep && phys.catch_bellwings {
-        if let Some(h) = phys.hunter {
+        if let Some(h) = phys.active_hunter() {
             match fauna.animals[i].strike {
                 Some(s) if s.phase != super::StrikePhase::Recovery => {
                     super::strike_tick(fauna, i, view, &phys, h, seed, tick, hits);
@@ -429,7 +429,7 @@ fn ground_tick(
     // the walker's existing strike/meal machinery.
     let geometry = phys.body_at(fauna.animals[i].body);
     let catch = phys.catch_bellwings
-        && phys.hunter.is_some_and(|h| {
+        && phys.active_hunter().is_some_and(|h| {
             super::prey_in_capsule(fauna, i, view, &geometry, &h).is_some()
                 || crate::hunt::mouth_on_carcass(&flora.view(), view, &fauna.animals[i], &geometry)
         });

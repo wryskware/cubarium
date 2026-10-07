@@ -390,7 +390,7 @@ impl Beacons {
 /// [`LightConfig::lure_height_fraction`] of its height, ahead of its centre at the middle of
 /// its strike capsule; `None` for a body whose table pays no lure.
 pub fn lure_point(config: &FaunaConfig, a: &Animal, voxel_m: f64) -> Option<(f64, f64, f64)> {
-    let h = config.founder(a.founder?).hunter?;
+    let h = config.founder(a.founder?).active_hunter()?;
     if !(h.lure_power > 0.0) {
         return None;
     }

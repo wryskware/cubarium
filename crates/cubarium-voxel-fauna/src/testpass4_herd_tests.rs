@@ -357,7 +357,6 @@ fn with_the_herd_switch_off_a_closed_adult_gives_a_calf_no_cover() {
 }
 
 #[test]
-#[ignore = "FINDING: a calf tucked against a closed adult books a new flight (vigil.flees) every sample"]
 fn a_calf_tucked_against_its_shield_does_not_begin_a_new_flight_every_sample() {
     let c = config();
     let w = clock_off(405);
