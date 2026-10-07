@@ -140,6 +140,34 @@ pub struct Track {
     pub tick: u64,
     /// Its heading then, radians (S2: a herd bolts the way a neighbour runs).
     pub heading: f64,
+    /// **FEAR**: its posture as seen ([`posture`]); [`posture::ACTIVE`] unless sight detected
+    /// it (a posture is read by eye: a still body is neither heard nor felt).
+    pub posture: u8,
+}
+
+/// **A body's posture** as a sighted observer reads it (FEAR, [`posture_of`]).
+pub mod posture {
+    /// Up and about, or not seen: whatever it is doing, it may come.
+    pub const ACTIVE: u8 = 0;
+    /// Awake, lying still: no strike, not moving within the still window, not feeding.
+    pub const REST: u8 = 1;
+    /// Asleep.
+    pub const ASLEEP: u8 = 2;
+}
+
+/// **FEAR**: `o`'s posture ([`posture`]): asleep; resting (awake, its state
+/// [`crate::State::Resting`], no strike under way, still for the predation table's
+/// `still_after_s`); else active. A body feeding ([`crate::State::Cropping`], a hunter at a
+/// carcass) is active: FEAR's probe found prey fleeing a feeding Veilhound in at most 1 % of
+/// the seedporter's flight ticks (0–8 % of the loftstrider's), too little to rule on.
+pub fn posture_of(config: &FaunaConfig, o: &Animal) -> u8 {
+    if o.state == crate::State::Asleep {
+        posture::ASLEEP
+    } else if o.state == crate::State::Resting && o.strike.is_none() && !crate::moved_recently(&config.predation, o) {
+        posture::REST
+    } else {
+        posture::ACTIVE
+    }
 }
 
 impl Track {
@@ -474,6 +502,7 @@ pub(crate) fn sense_pair(
         size_m: og.length_m,
         tick,
         heading: o.pose.heading_rad,
+        posture: if modes & SIGHT != 0 { posture_of(config, o) } else { posture::ACTIVE },
     })
 }
 
@@ -868,6 +897,7 @@ fn interim_track(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, o: &Animal, cl
         size_m: crate::body_of(&fauna.config, o).map_or(0.0, |g| g.length_m),
         tick: fauna.tick,
         heading: o.pose.heading_rad,
+        posture: if modes & SIGHT != 0 { posture_of(&fauna.config, o) } else { posture::ACTIVE },
     }
 }
 

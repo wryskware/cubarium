@@ -98,7 +98,10 @@ use crate::Fauna;
 // 54: PIT (the branch unmerged; the parent renumbers at merge) — `Pack::pit_search_m`.
 // 55: EDGE (the branch unmerged; the parent renumbers at merge) — `TeacherConfig::{press_replan_s,
 //     press_shun_s, route_refresh_s, route_detour, way_on_m}`.
-pub const SCHEMA: u32 = 55;
+// 57: FEAR (the branch unmerged, on EDGE's 55; main is at 56 with PIT; the parent renumbers at
+//     merge) — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg}`, `Vigil::calm_walk`,
+//     `Track::posture`.
+pub const SCHEMA: u32 = 57;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -280,6 +280,9 @@ fn founder_rows() -> Vec<Row> {
         r("vigilance.withdraw_tremor", "organic x m/s / m^2", nonneg, "S2: footfall at which it also turns away in place"),
         r("vigilance.freeze_s", "s", nonneg, "S2: a freeze lasts this long after the last tremor that set it"),
         r("vigilance.refuge_search_m", "m", nonneg, "S2: an arboreal body in flight runs to a stand it climbs within this"),
+        // FEAR (`vigilance.watch_calm` is a switch: no row).
+        r("vigilance.calm_margin_m", "m", nonneg, "FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never)"),
+        r("vigilance.calm_facing_deg", "deg", nonneg, "FEAR: a resting hunter heading within this of the bearing to it faces it (a threat)"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.enter_m", "m", nonneg, "HUNKER: it clamps down under its shield at an approaching threat within this"),
         r("hunker.leave_m", "m", nonneg, "HUNKER: ...and comes out once none has been within this for the calm"),

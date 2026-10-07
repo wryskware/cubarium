@@ -134,6 +134,7 @@ fn main() {
         Some("trace") => trace_probe(&args),
         Some("pit") => pit_probe(&args),
         Some("edge") => edge_probe(&args),
+        Some("fear") => fear_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -870,6 +871,7 @@ fn run(args: &[String]) {
     let (mut strk_win, mut strk_all, mut strk_on) = (Contact::default(), Contact::default(), rustc_hash::FxHashSet::default());
     let mut stuck = Stuck { log: arg(args, "wedge_log=") == Some("1"), ..Stuck::default() };
     let mut wedge = Wedge::default();
+    let mut fear = Fear::default();
     // EDGE: bodies born by lineage (a new id), against the ids standing at the start.
     let mut seen: rustc_hash::FxHashSet<u64> = sim.fauna().view().animals.iter().map(|a| a.id).collect();
     let mut born = [0u64; 9];
@@ -936,6 +938,7 @@ fn run(args: &[String]) {
             ends.tick(&mut sim, &params);
             stuck.tick(&sim, &params);
             wedge.tick(&sim, &params);
+            fear.tick(&sim, &params);
         }
         if (minute - minute0) % every == 0 || minute == end {
             let ms = t0.elapsed().as_secs_f64() * 1000.0 / ticks_in_window.max(1) as f64;
@@ -972,6 +975,8 @@ fn run(args: &[String]) {
             stuck.win = [0; 4];
             println!("wedge,{arm},{minute},{}", wedge.line(false));
             wedge.win = Default::default();
+            println!("fear,{arm},{minute},{}", fear.line(false));
+            fear.win = Default::default();
             strk_all.add(&strk_win);
             strk_win = Contact::default();
             hunts.win = HuntTally::default();
@@ -1027,6 +1032,7 @@ fn run(args: &[String]) {
     println!("sumstuck,{arm},{},{}", minute0, Stuck::line(&stuck.all, vh_cadence));
     println!("sumwedge,{arm},{},{}", minute0, wedge.line(true));
     println!("sumwedgewhy,{arm},{},{}", minute0, wedge.why_line());
+    println!("sumfear,{arm},{},{}", minute0, fear.line(true));
     // EDGE: per lineage, the founder-hours alive, the organic swallowed per alive hour (its
     // intake) and the bodies born over the run.
     {
@@ -3494,4 +3500,133 @@ fn edge_line(tally: &[[u64; 2]; 9], why: &[[u64; STEERS + 1]; 9]) -> String {
         ));
     }
     out.join(",")
+}
+
+// ------------------------------------------------------------------ FEAR: what prey flee
+
+/// The prey lineages FEAR reads (`fear,` / `sumfear,`).
+const FEAR_PREY: [Founder; 5] = [Founder::Browser, Founder::Loftstrider, Founder::Seedporter, Founder::Bellwing, Founder::Capgnawer];
+/// What a fled hunter was doing: asleep, feeding (cropping a carcass), moving, still and sated
+/// (eating latch off, no strike), still and hungry, gone (no hunter of it known).
+const FEAR_FROM: [&str; 6] = ["asleep", "feeding", "moving", "still_sated", "still_hungry", "none"];
+
+#[derive(Clone, Copy, Default)]
+struct FearTally {
+    awake: u64,
+    flee: u64,
+    calm: u64,
+    hunker: u64,
+    from: [u64; 6],
+}
+
+/// **FEAR's readout**: per prey lineage, awake ticks, ticks in flight (a ground response's
+/// flight, else the flee rule steering), ticks moving off a calm hunter (FEAR's margin walk),
+/// hunkered ticks, and the flight ticks by what the hunter it fled (its `flee_id`, else the
+/// nearest body that hunts it) was doing.
+#[derive(Default)]
+struct Fear {
+    win: [FearTally; 5],
+    all: [FearTally; 5],
+}
+
+/// What hunter `o` is doing, as [`FEAR_FROM`] indexes it.
+fn fear_from(params: &Params, o: &cubarium_voxel_fauna::Animal) -> usize {
+    use cubarium_voxel_fauna::State;
+    if o.state == State::Asleep {
+        0
+    } else if o.state == State::Cropping {
+        1
+    } else if cubarium_voxel_fauna::moved_recently(&params.fauna.predation, o) {
+        2
+    } else if !o.eating && o.strike.is_none() {
+        3
+    } else {
+        4
+    }
+}
+
+impl Fear {
+    fn tick(&mut self, sim: &Sim, params: &Params) {
+        let fa = sim.fauna();
+        let v = fa.view();
+        let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+        for a in v.animals.iter() {
+            let Some(f) = a.founder else { continue };
+            let Some(k) = FEAR_PREY.iter().position(|&p| p == f) else { continue };
+            if a.state == cubarium_voxel_fauna::State::Asleep {
+                continue;
+            }
+            let vg = fa.percept(a.id).map(|p| p.vigil).unwrap_or_default();
+            let vigil = params.fauna.founder(f).vigilance.mode != cubarium_voxel_fauna::VigilMode::None && params.fauna.founder(f).senses.live;
+            let fleeing = if vigil { vg.fleeing } else { fa.steer_of(a.id) == Some(cubarium_voxel_fauna::Steer::Flee) };
+            let calm = vg.calm_walk;
+            let mut add = |t: &mut FearTally| {
+                t.awake += 1;
+                t.flee += u64::from(fleeing);
+                t.calm += u64::from(calm);
+                t.hunker += u64::from(a.hunkered);
+            };
+            add(&mut self.win[k]);
+            add(&mut self.all[k]);
+            if !fleeing {
+                continue;
+            }
+            let hunts = |o: &&cubarium_voxel_fauna::Animal| o.founder.is_some_and(|of| params.fauna.founder(of).hunter.is_some_and(|h| h.hunts(f)));
+            let fled = (vg.flee_id != 0).then(|| v.animal(vg.flee_id)).flatten().filter(|o| hunts(o)).or_else(|| {
+                v.animals.iter().filter(hunts).min_by(|p, q| {
+                    let d = |o: &cubarium_voxel_fauna::Animal| {
+                        let (dx, dz) = wdelta(o.pose.x, o.pose.z, a.pose.x, a.pose.z, ring);
+                        dx * dx + dz * dz
+                    };
+                    d(p).total_cmp(&d(q))
+                })
+            });
+            let c = fled.map_or(5, |o| fear_from(params, o));
+            self.win[k].from[c] += 1;
+            self.all[k].from[c] += 1;
+        }
+    }
+
+    fn line(&self, all: bool) -> String {
+        let t = if all { &self.all } else { &self.win };
+        FEAR_PREY
+            .iter()
+            .enumerate()
+            .map(|(k, f)| {
+                let x = t[k];
+                let sh = |n: u64| n as f64 / x.awake.max(1) as f64;
+                let from = (0..6).map(|c| format!("{:.3}", x.from[c] as f64 / x.flee.max(1) as f64)).collect::<Vec<_>>().join(":");
+                format!(
+                    "{}=awake_h:{:.2}/flee:{:.3}/calm:{:.3}/hunker:{:.3}/from:{from}",
+                    f.name(),
+                    x.awake as f64 / f64::from(TICK_HZ) / 3600.0,
+                    sh(x.flee),
+                    sh(x.calm),
+                    sh(x.hunker)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+            + &format!(",from_order={}", FEAR_FROM.join(":"))
+    }
+}
+
+/// `fear load=DIR minutes=M [config=...] [set=...]` (FEAR's probe): runs a save and prints the
+/// per-lineage flight shares and what the fled hunters were doing (the `sumfear,` line).
+fn fear_probe(args: &[String]) {
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(10, |m| m.parse().unwrap());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let mut fear = Fear::default();
+    for _ in 0..minutes * 60 * u64::from(TICK_HZ) {
+        sim.step();
+        fear.tick(&sim, &params);
+    }
+    println!("sumfear,{},{minute0},{}", dir.display(), fear.line(true));
 }
