@@ -108,7 +108,8 @@ use crate::Fauna;
 // 58: EDGE and EDGE-2 — `TeacherConfig::{press_replan_s, press_shun_s, route_refresh_s,
 //     route_detour, way_on_m}`; reflex walks take reachable stands by the route, a pressed walk
 //     re-plans, a flight turns along the strip's end, a body caught in solid steps out.
-pub const SCHEMA: u32 = 58;
+// 59: FINDINGS-FIX-2 — `Strike::lure` (a lure kill is booked by the lure draw at the lunge).
+pub const SCHEMA: u32 = 59;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

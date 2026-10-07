@@ -263,13 +263,15 @@ fn an_adult_walking_home_round_a_bend_keeps_to_its_route_graph() {
 /// open gestation (an escrow carrying two young), awake and wanting nothing, at the west end
 /// of the east leg; its den at the north leg's end. It walks home within the bound of the walk
 /// to within half the den radius (where its pups stay, so they are born where they live), and
-/// is still there a gestation's length later. (The probe's breeders gave birth where they
+/// is still there a gestation's length later (its own short gestation). (The probe's breeders gave birth where they
 /// stood, 5 to 13 metres from the den, and the pups walked home across ground they could not
 /// cross: off the graph at a bend, or into water deeper than a pup wades.) Births off, so the
 /// litter stays carried for the case.
 #[test]
 fn a_breeder_carrying_a_litter_whelps_at_its_den() {
-    let c = config();
+    let mut c = config();
+    // Its own short gestation (10 s), so the stay is a few hundred ticks, not the default's.
+    c.founders[CH.index()].core.reproduction.gestation_s = 10.0;
     let world = world(&c, 703);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(c.clone());

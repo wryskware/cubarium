@@ -206,7 +206,6 @@ fn breakaway(contact: bool) -> (bool, usize, f64) {
 /// nearest, so after a close-in no renewed closing counts and `late` (pack.rs:1519) fires one
 /// give-up after the breakaway. Decision: reset or window the nearest-so-far when the gap opens.
 #[test]
-#[ignore = "FINDING: CHURN's progress is measured against the chase's all-time nearest, so a prey that breaks away after contact is dropped late while the pack closes on it again"]
 fn a_target_that_breaks_away_after_contact_is_kept_while_the_pack_closes_on_it_again() {
     let (kept, late, closed) = breakaway(false);
     assert!(closed > 1.0, "control: the pack closed on the grazer: {closed:.2} m");
@@ -572,7 +571,6 @@ fn carcass_at(flora: &mut Flora, x_m: f64, z_m: f64, organic: f64) -> Site {
 /// HUNTER-MEAL's meal step (pack.rs:1700-1704); only the emergency latch releases it. Decision:
 /// let a carrying breeder eat within `den_radius_m`, as its pups do (pack.rs:1375-1386).
 #[test]
-#[ignore = "FINDING: whelp_at_den holds a hungry pregnant breeder within half its den radius ahead of HUNTER-MEAL's carcass step, so it does not eat a carcass lying inside its den radius"]
 fn a_hungry_breeder_carrying_a_litter_eats_a_carcass_lying_at_its_den() {
     let world = world(941);
     let den = Site { x: 24, y: SURFACE_Y, z: 6 };
@@ -812,7 +810,6 @@ fn every_new_state_field_and_knob_round_trips_a_snapshot() {
 /// `|| shuns(fauna, own, k.id)` at pack.rs:927, not applied (whether a shunned herd still draws
 /// is a design call).
 #[test]
-#[ignore = "FINDING: the draw (draw_step) skips only the abandoned target, not the shun list, so a pack is drawn back to herd-mates STRIKE-2 just shunned"]
 fn a_packs_draw_does_not_lead_it_to_a_prey_it_shuns() {
     let run = |shunned: bool| {
         let world = world(971);

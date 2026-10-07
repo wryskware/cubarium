@@ -79,7 +79,6 @@ fn index(fauna: &Fauna, id: u64) -> usize {
 /// while they hold nectar; the lure lays it with none. Decision: skip a smell lead under a mark,
 /// or accept that the mimic's scent overrides it.
 #[test]
-#[ignore = "FINDING: the lure's nectar scent leads a bellwing straight back to a lure it has marked as a failed visit; S3b's smell step reads no mark"]
 fn a_failed_visit_mark_on_a_lure_holds_against_the_lures_scent() {
     let world = clock_off(501);
     let flora = Flora::new(FloraConfig::default());
@@ -267,7 +266,6 @@ fn the_ledgers_close_through_a_lure_kill() {
 /// still beacon; the kill reads `drawn_to_lure` false (step.rs:2606, light.rs:837), so
 /// `lure_kills` stays 0. Decision: remember the lure draw at the strike's start for the readout.
 #[test]
-#[ignore = "FINDING: a bellwing killed at a lure is not booked a lure kill: the lunge's loom closes its visit and the lunging lure is no still beacon, so drawn_to_lure is false at the kill"]
 fn a_bellwing_killed_inspecting_a_lure_is_booked_a_lure_kill() {
     let (fauna, visited) = lure_kill();
     assert!(visited, "fixture: it inspected the lure");

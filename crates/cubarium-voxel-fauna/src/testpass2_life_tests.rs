@@ -450,3 +450,57 @@ fn a_breeder_conceiving_away_from_its_den_gives_birth_at_its_den() {
         assert!((dx * dx + dz * dz).sqrt() <= 0.5 * radius + VOXEL_M, "a pup born at ({x:.2}, {z:.2}), {:.2} m from the den (breeder at ({bx:.2}, {bz:.2}))", (dx * dx + dz * dz).sqrt());
     }
 }
+
+/// **FINDINGS-FIX-2: a layer's clutch wait is not spent while its season's window is shut**:
+/// a lanternjaw (dormant eggs, no nest site) laying from surplus up to `clutch_max` 4, its
+/// reserve paying three and a half eggs (short of the full clutch), with a clutch wait of
+/// `wait_s` and a season whose window opens at `breeding_phase` of a one-minute year, its hold
+/// met long before. No clutch before the window opens; once it opens the layer still waits its
+/// full clutch time (the season gates before the wait counts), and then lays.
+#[test]
+fn a_layers_clutch_wait_counts_only_inside_its_season() {
+    let mut world = year_world(35, 48);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = FaunaConfig::default();
+    c.founders[LJ.index()].active = Activity::Always;
+    c.founders[LJ.index()].gut.s0 = 0.0;
+    let (wait_s, phase) = (2.0, 0.3);
+    let (egg, floor) = {
+        let core = &mut c.founders[LJ.index()].core;
+        core.reserve_cap = 10.0;
+        core.reproduction = Reproduction {
+            surplus_hold_s: 0.1,
+            birth_interval_s: 1e6,
+            clutch_max: 4,
+            clutch_hold_max_s: wait_s,
+            litters_per_year: 1,
+            breeding_phase: phase,
+            breeding_window: 0.5,
+            ..core.reproduction
+        };
+        (core.reproduction.egg_organic, core.reproduction.surplus_floor)
+    };
+    let sc = c.founder(LJ).core;
+    let reserve = (floor + 3.5 * egg) / sc.reserve_of(sc.body_max);
+    assert!(reserve < 1.0, "fixture: the reserve fits the cap");
+    let mut fauna = Fauna::new(c);
+    let lj = introduce(&mut fauna, &world, LJ, StartingStores { body: 1.0, reserve });
+    drive(&mut fauna, lj, 0.0, false);
+    let w0 = (phase * year_ticks(&world) as f64).ceil() as u64;
+    let wait = cubarium_voxel::ticks_at_least_one(wait_s);
+    let hold = cubarium_voxel::ticks_at_least_one(0.1);
+    assert!(w0 > hold + wait + 10, "fixture: the hold and a whole wait fit before the window ({w0} ticks)");
+    let mut laid = None;
+    for _ in 0..w0 + wait + 40 {
+        let t = world.tick();
+        fauna.step_with(&world, &mut flora, 1);
+        world.advance_tick();
+        if fauna.ledger.clutches_laid > 0 {
+            laid = Some(t);
+            break;
+        }
+    }
+    let t = laid.expect("the clutch is laid after the window opens and the wait runs");
+    assert!(t >= w0 + wait - 1, "laid at tick {t}: the window opened at {w0} and the wait is {wait} ticks");
+    assert!(fauna.ledger.eggs_laid >= 1 && fauna.ledger.eggs_laid < 4, "a short clutch: {} eggs", fauna.ledger.eggs_laid);
+}
