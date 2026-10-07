@@ -8,6 +8,7 @@
 //! hunter_study pack  load=DIR/mM [minutes=10] [sample_s=30] [reseed=N] [config=FILE] [set=...]
 //! hunter_study ledger load=DIR/mM
 //! hunter_study strikes load=DIR/mM [minutes=10] [config=FILE] [set=...]
+//! hunter_study churn load=DIR/mM [minutes=10] [config=FILE] [set=...]
 //! ```
 //!
 //! `ledger` (S2b) prints a save's frondgrazer ledger since its founding: deaths by cause,
@@ -126,6 +127,7 @@ fn main() {
         Some("strikes") => strike_probe(&args),
         Some("budget") => budget_probe(&args),
         Some("glide") => glide_probe(&args),
+        Some("churn") => churn_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -937,7 +939,7 @@ fn run(args: &[String]) {
             println!("gait,{arm},{minute},{}", gait_line(&lw, &l));
             println!("hunt,{arm},{minute},{}", hunts.win.line());
             /*PT{*/
-            println!("ptune,{arm},{minute},break_offs={},declined={}", l.pack_break_offs - lw.pack_break_offs, l.pack_declined - lw.pack_declined);
+            println!("ptune,{arm},{minute},break_offs={},declined={},switches={}", l.pack_break_offs - lw.pack_break_offs, l.pack_declined - lw.pack_declined, l.pack_switches - lw.pack_switches);
             /*}PT*/
             hunts.win = HuntTally::default();
             vh_all.add(&vh_win);
@@ -985,7 +987,7 @@ fn run(args: &[String]) {
     println!("sumgait,{arm},{},{}", minute0, gait_line(&l0, &l));
     println!("sumhunt,{arm},{},{}", minute0, hunts.all.line());
     /*PT{*/
-    println!("sumptune,{arm},{},break_offs={},declined={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined);
+    println!("sumptune,{arm},{},break_offs={},declined={},switches={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined, l.pack_switches - l0.pack_switches);
     /*}PT*/
     for f in PREY {
         if !params.fauna.founder(LJ).hunter.is_some_and(|h| h.hunts(f)) {
@@ -1558,5 +1560,200 @@ fn budget_probe(args: &[String]) {
         fl_lens.len(), mean(&fl_lens), max(&fl_lens), open.len(), mean(&open),
         fl_still as f64 / t[1].max(1) as f64,
         fl_near[0], fl_near[1], fl_near[2], fl_near[3]
+    );
+}
+
+// ------------------------------------------------------------------ CHURN: the re-target probe
+
+/// **The churn probe** (CHURN): `hunter_study churn load=DIR minutes=M` runs a save and prints
+/// every Veilhound chase end (`cend,`: why, the target, the member whose sampling dropped it,
+/// the chase's seconds, the nearest awake adult's distance at the end and 5 s before, whether
+/// it was closing, whether any adult came within the chase distance `2 × pack_radius_m`) and
+/// every re-target (`rt,`: a new target within 30 s of one dropped alive: the old end's
+/// reason and closing, the new score against the old target's as the taker sees it, the
+/// taker, whether it was the member that dropped the old one, whether the new target is one
+/// of the pack's last three), then `sumchurn,` shares.
+fn churn_probe(args: &[String]) {
+    use cubarium_voxel_fauna::{ChaseEnd, PackEvent};
+    use std::collections::VecDeque;
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(10, |m| m.parse().unwrap());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let pk = params.fauna.founder(VH).pack.expect("the Veilhound has a pack table");
+    let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+    let hz = u64::from(TICK_HZ);
+    let retarget = 30 * hz;
+    #[derive(Default, Clone)]
+    struct Cur {
+        target: u64,
+        since: u64,
+        taker: u64,
+        hist: VecDeque<(u64, f64)>,
+        engaged: bool,
+        min_d: f64,
+        d0: f64,
+        strikes: u32,
+        striking: bool,
+        hunk_ticks: u64,
+        contact_ticks: u64,
+        pry_max: f64,
+        opened: bool,
+    }
+    #[derive(Clone, Copy)]
+    struct End {
+        tick: u64,
+        why: ChaseEnd,
+        target: u64,
+        by: u64,
+        closing: bool,
+        engaged: bool,
+        alive: bool,
+    }
+    let mut cur: rustc_hash::FxHashMap<u64, Cur> = Default::default();
+    let mut last_end: rustc_hash::FxHashMap<u64, End> = Default::default();
+    let mut recent: rustc_hash::FxHashMap<u64, VecDeque<u64>> = Default::default();
+    let mut ends: rustc_hash::FxHashMap<String, u64> = Default::default();
+    let mut rt_by: rustc_hash::FxHashMap<String, u64> = Default::default();
+    let (mut starts, mut rts, mut late_closing, mut late_engaged, mut late_n) = (0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut prev_unseen, mut new_worse, mut new_close, mut new_better, mut pingpong, mut same_member, mut breeder_taker) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let near = |sim: &Sim, pack: u64, tid: u64| -> f64 {
+        let v = sim.fauna().view();
+        let Some(o) = v.animal(tid) else { return f64::NAN };
+        v.animals
+            .iter()
+            .filter(|b| b.pack.is_some_and(|m| m.pack == pack && !m.pup) && b.state != cubarium_voxel_fauna::State::Asleep)
+            .map(|b| {
+                let (dx, dz) = wdelta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
+                (dx * dx + dz * dz).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let total = minutes * 60 * hz;
+    for _ in 0..total {
+        sim.step();
+        let now = sim.fauna().view().tick;
+        let events = sim.fauna_mut().take_pack_events();
+        for e in events {
+            match e {
+                PackEvent::ChaseEnd { pack, why, target, by, .. } => {
+                    let Some(c) = cur.remove(&pack) else { continue };
+                    let alive = sim.fauna().view().animal(target).is_some();
+                    let d_end = c.hist.back().map_or(f64::NAN, |h| h.1);
+                    let d_5 = c.hist.iter().find(|h| now.saturating_sub(h.0) <= 5 * hz).map_or(f64::NAN, |h| h.1);
+                    let closing = d_5 - d_end > 0.5;
+                    let o = sim.fauna().view().animal(target).copied();
+                    let founder = o.and_then(|o| o.founder).map_or("-", |f| f.name());
+                    let juv = o.and_then(|o| o.founder.map(|f| o.body < params.fauna.founder(f).core.birth_body));
+                    let at = sim.fauna().view().animals.iter().filter(|b| b.pack.is_some_and(|m| m.pack == pack && !m.pup)).filter(|b| {
+                        o.is_some_and(|o| {
+                            let (dx, dz) = wdelta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
+                            (dx * dx + dz * dz).sqrt() <= 1.5
+                        })
+                    }).count();
+                    let dur = now.saturating_sub(c.since).max(1) as f64;
+                    println!(
+                        "cend,{now},pack={pack},why={why:?},target={target},{founder},juv={juv:?},by={by},taker={},s={:.1},d0={:.1},d5={d_5:.1},d_end={d_end:.1},min_d={:.1},closing={closing},engaged={},strikes={},hunk_share={:.2},contact_share={:.2},pry_max={:.2},opened={},members_within_1.5m={at},mode={:?}",
+                        c.taker,
+                        now.saturating_sub(c.since) as f64 / hz as f64,
+                        c.d0,
+                        c.min_d,
+                        c.engaged,
+                        c.strikes,
+                        c.hunk_ticks as f64 / dur,
+                        c.contact_ticks as f64 / dur,
+                        c.pry_max,
+                        c.opened,
+                        o.map(|o| o.mobility.mode),
+                    );
+                    *ends.entry(format!("{why:?}")).or_default() += 1;
+                    if why == ChaseEnd::Late {
+                        late_n += 1;
+                        late_closing += u64::from(closing);
+                        late_engaged += u64::from(c.engaged);
+                    }
+                    last_end.insert(pack, End { tick: now, why, target, by, closing, engaged: c.engaged, alive });
+                }
+                PackEvent::ChaseStart { pack, taker, target, score, prev, prev_score, .. } => {
+                    starts += 1;
+                    let d0 = near(&sim, pack, target);
+                    let r = recent.entry(pack).or_default();
+                    let pp = r.contains(&target);
+                    r.push_back(target);
+                    if r.len() > 3 {
+                        r.pop_front();
+                    }
+                    if let Some(le) = last_end.get(&pack).copied().filter(|le| le.alive && now.saturating_sub(le.tick) <= retarget) {
+                        rts += 1;
+                        *rt_by.entry(format!("{:?}{}", le.why, if le.why == ChaseEnd::Late { if le.closing { "+closing" } else if le.engaged { "+engaged" } else { "+never_engaged" } } else { "" })).or_default() += 1;
+                        let ratio = prev_score.map(|p| if p > 0.0 { score / p } else { f64::INFINITY });
+                        match ratio {
+                            None => prev_unseen += 1,
+                            Some(x) if x < 1.0 => new_worse += 1,
+                            Some(x) if x < 1.25 => new_close += 1,
+                            Some(_) => new_better += 1,
+                        }
+                        pingpong += u64::from(pp);
+                        same_member += u64::from(le.by == taker);
+                        let breeder = sim.fauna().pack(pack).and_then(|p| p.breeder) == Some(taker);
+                        breeder_taker += u64::from(breeder);
+                        println!(
+                            "rt,{now},pack={pack},after_s={:.1},old={},{:?},closing={},engaged={},prev={prev:?},prev_is_old={},new={target},score={score:.4},prev_score={prev_score:?},ratio={ratio:?},taker={taker},dropper={},breeder_taker={breeder},pingpong={pp},d0={d0:.1}",
+                            now.saturating_sub(le.tick) as f64 / hz as f64,
+                            le.target,
+                            le.why,
+                            le.closing,
+                            le.engaged,
+                            prev == Some(le.target),
+                            le.by,
+                        );
+                    }
+                    cur.insert(pack, Cur { target, since: now, taker, hist: VecDeque::new(), engaged: d0 <= 2.0 * pk.pack_radius_m, min_d: d0, d0, ..Cur::default() });
+                }
+                PackEvent::FeastEnd { .. } => {}
+            }
+        }
+        let packs: Vec<(u64, u64)> = cur.iter().map(|(&p, c)| (p, c.target)).collect();
+        for (p, t) in packs {
+            let d = near(&sim, p, t);
+            let c = cur.get_mut(&p).unwrap();
+            let v = sim.fauna().view();
+            let striking = v.animals.iter().any(|a| a.founder == Some(VH) && a.strike.is_some_and(|s| s.prey == t));
+            c.strikes += u32::from(striking && !c.striking);
+            c.striking = striking;
+            c.hunk_ticks += u64::from(v.animal(t).is_some_and(|o| o.hunkered));
+            c.contact_ticks += u64::from(d <= 1.0);
+            if let Some(p) = sim.fauna().percept(t) {
+                c.pry_max = c.pry_max.max(p.vigil.pry);
+                c.opened |= now < p.vigil.opened_until;
+            }
+            if d.is_finite() {
+                c.hist.push_back((now, d));
+                c.min_d = c.min_d.min(d);
+                c.engaged |= d <= 2.0 * pk.pack_radius_m;
+            }
+            while c.hist.front().is_some_and(|h| now.saturating_sub(h.0) > 6 * hz) {
+                c.hist.pop_front();
+            }
+        }
+    }
+    let f = |x: u64, n: u64| x as f64 / n.max(1) as f64;
+    println!("sumchurn,minute0={minute0},minutes={minutes},starts={starts},retargets={rts},share={:.2},ends={ends:?}", f(rts, starts));
+    println!("sumchurn_rt_by_old_end,{rt_by:?}");
+    println!("sumchurn_late,n={late_n},closing={:.2},engaged={:.2}", f(late_closing, late_n), f(late_engaged, late_n));
+    println!(
+        "sumchurn_rt,prev_unseen={:.2},new_worse={:.2},new_within_25pct={:.2},new_better_25pct={:.2},pingpong={:.2},same_member_as_dropper={:.2},breeder_taker={:.2}",
+        f(prev_unseen, rts),
+        f(new_worse, rts),
+        f(new_close, rts),
+        f(new_better, rts),
+        f(pingpong, rts),
+        f(same_member, rts),
+        f(breeder_taker, rts)
     );
 }

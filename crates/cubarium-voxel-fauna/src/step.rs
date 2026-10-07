@@ -4339,6 +4339,9 @@ mod testpass_vigil_tests;
 #[path = "testpass_pack_tests.rs"]
 mod testpass_pack_tests;
 #[cfg(test)]
+#[path = "churn_tests.rs"]
+mod churn_tests;
+#[cfg(test)]
 #[path = "testpass_light_tests.rs"]
 mod testpass_light_tests;
 #[cfg(test)]
