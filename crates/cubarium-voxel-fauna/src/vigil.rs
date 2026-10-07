@@ -98,6 +98,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::perception::{HEARING, SIGHT, TREMOR, class};
 use crate::{Actions, Animal, Fauna, FaunaConfig, Founder, MobilityMode, Percept, State, Track};
+#[cfg(test)]
+#[path = "testpass3_fear_tests.rs"]
+mod testpass3_fear_tests;
 
 /// Which response a lineage's heuristics run on its record (a switch, no registry row).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

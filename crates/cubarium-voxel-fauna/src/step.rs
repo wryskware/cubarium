@@ -60,6 +60,9 @@ use cubarium_voxel::{DT, VoxelView, World};
 use cubarium_voxel_flora::{DepositKind, Flora, Site, Taken};
 
 use crate::body;
+#[cfg(test)]
+#[path = "testpass3_snail_taste_tests.rs"]
+mod testpass3_snail_taste_tests;
 use crate::controller::Actions;
 use crate::manifest::Founder;
 use crate::predation::{Hit, Rest, Strike, StrikePhase};
