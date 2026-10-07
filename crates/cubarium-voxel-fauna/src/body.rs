@@ -2479,9 +2479,15 @@ pub(crate) fn water_within(view: &VoxelView<'_>, x: i64, y: u32, z: u32, margin_
 /// descents run the second pass.
 ///
 /// The standing water at the destination must be within the body's wade depth, **or no
-/// deeper than the water at the column the sub-step starts from**: a body caught deeper
+/// deeper than the water at the column the sub-step starts from** (within
+/// [`LEVEL_TOLERANCE_M`]): a body caught deeper
 /// than it can wade may always step toward the shallows or across a pool's level floor,
 /// and never deeper; it may also move about the face it stands on.
+/// Water this little deeper than where a body stands is the same level: a flowing stream's
+/// surface slopes by millimetres a column, and "no deeper" must not read that as deeper. A
+/// tolerance, not a knob: a real step deeper is a layer (`voxel_m`) of water.
+pub(crate) const LEVEL_TOLERANCE_M: f64 = 0.01;
+
 #[allow(clippy::too_many_arguments)]
 fn advance_candidate(
     view: &VoxelView<'_>,
@@ -2548,7 +2554,9 @@ fn advance_candidate(
         let same_face = (hx, hz) == (cx, cz as u32) && ny == standing_y;
         // No deeper (roster mechanics fix 2): across a flat-bottomed pool every face is as
         // deep as the next, and "strictly shallower" held a body in place until it drowned.
-        if !same_face && !(there <= view.water_depth_m(hx, standing_y, hz)) {
+        // EDGE: within `LEVEL_TOLERANCE_M`, as a stream's surface slopes by millimetres a
+        // column (a seedporter stood 30 min in a stream, the face upstream 2 mm deeper).
+        if !same_face && !(there <= view.water_depth_m(hx, standing_y, hz) + LEVEL_TOLERANCE_M) {
             return None;
         }
     }

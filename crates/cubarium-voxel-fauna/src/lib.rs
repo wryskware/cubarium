@@ -3431,7 +3431,104 @@ pub struct Fauna {
     /// against: pure terrain geometry, so derived and not saved.
     #[serde(skip)]
     face_sky: (Option<u64>, FxHashMap<(i64, u32, u32), f64>),
+    /// EDGE's readout: per founder id, which layer of the write side last set its held
+    /// actions ([`Steer`]). Session state for probes and studies: not saved.
+    #[serde(skip)]
+    steer: FxHashMap<u64, Steer>,
+    /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
+    /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
+    /// and the last tick it walked there. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) walk_targets: FxHashMap<u64, (u64, u64, u64)>,
+    /// EDGE: per body, the target the last reflex walk to succeed this sample took and the
+    /// layer it walks for; committed to `walk_targets` at the end of the body's write when
+    /// that layer is the one held ([`Fauna::walk_commit`]). Not saved.
+    #[serde(skip)]
+    pub(crate) walk_pending: FxHashMap<u64, (u64, Steer)>,
+    /// EDGE: per grounded founder, the ticks it has **pressed** without a break: controller
+    /// intervals in which it held forward and its motor delivered under
+    /// `teachers.motor_refused` of what it attempted. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) pressed: FxHashMap<u64, u64>,
+    /// EDGE: per body, the targets it gave up for pressing and the tick it may try each
+    /// again, at most [`WALK_SHUN_SLOTS`]. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) walk_shun: FxHashMap<u64, Vec<(u64, u64)>>,
+    /// EDGE: per body, the flight (its `Vigil::flee_tick`) in which it was cornered: the rest
+    /// of that flight goes by its route graph. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) route_flee: FxHashMap<u64, u64>,
 }
+
+/// **Which layer set a founder's held actions** on its last controller sample (EDGE's
+/// readout, [`Fauna::steer_of`]): its own heuristic, or the reflex that overrode it last.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Steer {
+    /// Not driven (no controller, or a non-finite observation): rest.
+    Rest,
+    /// Its controller's own actions.
+    Heuristic,
+    /// A glider's fruit search (`glider::fruit_reflex`).
+    Fruit,
+    /// The flee rule or the ground response (herd, arboreal refuge or away, freeze).
+    Flee,
+    /// A glider's roost.
+    Roost,
+    /// Fed perching.
+    FedRest,
+    /// The shallows reflex.
+    Shallows,
+    /// An amphibious body's roam or water reflex.
+    Roam,
+    /// The lanternjaw's patrol.
+    Patrol,
+    /// A carcass yield.
+    Yield,
+    /// The pack tactic.
+    Pack,
+    /// The light, loom or glow steering.
+    Light,
+}
+
+impl Steer {
+    /// Every source, in a fixed order for tables.
+    pub const ALL: [Steer; 12] = [
+        Steer::Rest,
+        Steer::Heuristic,
+        Steer::Fruit,
+        Steer::Flee,
+        Steer::Roost,
+        Steer::FedRest,
+        Steer::Shallows,
+        Steer::Roam,
+        Steer::Patrol,
+        Steer::Yield,
+        Steer::Pack,
+        Steer::Light,
+    ];
+
+    /// A short name for tables.
+    pub fn name(self) -> &'static str {
+        match self {
+            Steer::Rest => "rest",
+            Steer::Heuristic => "heuristic",
+            Steer::Fruit => "fruit",
+            Steer::Flee => "flee",
+            Steer::Roost => "roost",
+            Steer::FedRest => "fed_rest",
+            Steer::Shallows => "shallows",
+            Steer::Roam => "roam",
+            Steer::Patrol => "patrol",
+            Steer::Yield => "yield",
+            Steer::Pack => "pack",
+            Steer::Light => "light",
+        }
+    }
+}
+
+/// The most targets a body keeps given up at once ([`Fauna::walk_shun`]): a memory bound,
+/// not a knob; the soonest to lapse goes first.
+pub(crate) const WALK_SHUN_SLOTS: usize = 8;
 
 /// The most gut-seed void events [`Fauna`] keeps undrained.
 pub const SEED_VOID_LOG_MAX: usize = 65_536;
@@ -3675,7 +3772,84 @@ impl Fauna {
             packs: Vec::new(),
             next_pack: 0,
             face_sky: (None, FxHashMap::default()),
+            steer: FxHashMap::default(),
+            walk_targets: FxHashMap::default(),
+            walk_pending: FxHashMap::default(),
+            pressed: FxHashMap::default(),
+            walk_shun: FxHashMap::default(),
+            route_flee: FxHashMap::default(),
         })
+    }
+
+    /// EDGE's readout: which layer set the founder `id`'s held actions on its last
+    /// controller sample, `None` before its first.
+    pub fn steer_of(&self, id: u64) -> Option<Steer> {
+        self.steer.get(&id).copied()
+    }
+
+    /// EDGE's readout: the ticks founder `id` has pressed without a break, the target its
+    /// reflex walk last took (key, set out, last walked) and the targets it has given up.
+    pub fn press_of(&self, id: u64) -> (u64, Option<(u64, u64, u64)>, Vec<(u64, u64)>) {
+        (
+            self.pressed.get(&id).copied().unwrap_or(0),
+            self.walk_targets.get(&id).copied(),
+            self.walk_shun.get(&id).cloned().unwrap_or_default(),
+        )
+    }
+
+    /// EDGE: the key a reflex walk's target goes by: a stand by its id, a face by its
+    /// coordinates under the top bit.
+    pub(crate) fn walk_key_face(site: Site) -> u64 {
+        (1 << 63) | u64::from(site.x) | (u64::from(site.y) << 21) | (u64::from(site.z) << 42)
+    }
+
+    /// **EDGE, a pressed walk re-plans** — call first in a reflex walk's sample for body
+    /// `id` of `founder`: when the target it has walked to for `teachers.press_replan_s`
+    /// (taken again at least every two controller periods) has had it pressing that long
+    /// without a break ([`Fauna::pressed`]), that target is given up for
+    /// `teachers.press_shun_s`. Returns the targets given up now.
+    pub(crate) fn walk_shunned(&mut self, id: u64, founder: Founder) -> Vec<u64> {
+        let now = self.tick;
+        let tc = self.config.teachers;
+        let ticks = |s: f64| if s.is_finite() && s > 0.0 { cubarium_voxel::ticks_at_least_one(s) } else { u64::MAX };
+        let press = ticks(tc.press_replan_s);
+        let gap = 2 * founder.manifest().cadence_ticks().max(1);
+        if let Some(&(t, since, last)) = self.walk_targets.get(&id) {
+            let pressed = self.pressed.get(&id).copied().unwrap_or(0);
+            if now.saturating_sub(last) <= gap && now.saturating_sub(since) >= press && pressed >= press {
+                let until = now.saturating_add(ticks(tc.press_shun_s).min(u64::MAX / 2));
+                let list = self.walk_shun.entry(id).or_default();
+                list.retain(|&(k, u)| k != t && now < u);
+                if list.len() >= WALK_SHUN_SLOTS {
+                    list.sort_by_key(|&(_, u)| std::cmp::Reverse(u));
+                    list.truncate(WALK_SHUN_SLOTS - 1);
+                }
+                list.push((t, until));
+                self.walk_targets.remove(&id);
+            }
+        }
+        self.walk_shun.get(&id).map_or(Vec::new(), |l| l.iter().filter(|&&(_, u)| now < u).map(|&(k, _)| k).collect())
+    }
+
+    /// EDGE: a reflex walk for layer `kind` takes body `id` to target `key` this sample.
+    pub(crate) fn walking_to(&mut self, id: u64, key: u64, kind: Steer) {
+        self.walk_pending.insert(id, (key, kind));
+    }
+
+    /// EDGE: the end of body `id`'s write, `held` the layer whose actions it holds: a walk
+    /// that layer took starts or continues [`Fauna::walk_shunned`]'s clock.
+    pub(crate) fn walk_commit(&mut self, id: u64, founder: Founder, held: Steer) {
+        let Some((key, kind)) = self.walk_pending.remove(&id) else { return };
+        if kind != held {
+            return;
+        }
+        let now = self.tick;
+        let gap = 2 * founder.manifest().cadence_ticks().max(1);
+        let since = match self.walk_targets.get(&id) {
+            Some(&(t, since, last)) if t == key && now.saturating_sub(last) <= gap => since,
+            _ => now,
+        };
+        self.walk_targets.insert(id, (key, since, now));
     }
 
     /// The terrain sky visibility of face `(x, y, z)` ([`VoxelView::sky_visibility`]),

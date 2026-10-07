@@ -133,6 +133,7 @@ fn main() {
         Some("approach") => approach_probe(&args),
         Some("trace") => trace_probe(&args),
         Some("pit") => pit_probe(&args),
+        Some("edge") => edge_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -1018,6 +1019,7 @@ fn run(args: &[String]) {
     println!("sumends,{arm},{},{}", minute0, Ends::line(&ends.all));
     println!("sumstuck,{arm},{},{}", minute0, Stuck::line(&stuck.all, vh_cadence));
     println!("sumwedge,{arm},{},{}", minute0, wedge.line(true));
+    println!("sumwedgewhy,{arm},{},{}", minute0, wedge.why_line());
     /*PT{*/
     println!("sumptune,{arm},{},break_offs={},declined={},switches={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined, l.pack_switches - l0.pack_switches);
     /*}PT*/
@@ -2478,6 +2480,26 @@ struct Wedge {
     /// Per lineage index, then the Veilhound's pups at 9: [awake samples, wedged samples, seconds a sample].
     win: [[f64; 3]; 10],
     all: [[f64; 3]; 10],
+    /// EDGE: per lineage index (pups at 9), wedged samples by the layer that steered
+    /// ([`Steer::ALL`] order), then at the strip's z end (the last slot).
+    why: [[u64; STEERS + 1]; 10],
+    /// EDGE: per lineage, [awake samples, refused samples of any run length]: a body that
+    /// re-plans every few seconds and presses again is not wedged by the 30 s rule.
+    refused: [[u64; 2]; 10],
+}
+
+const STEERS: usize = cubarium_voxel_fauna::Steer::ALL.len();
+
+/// EDGE: whether a body stands within its radius and half a voxel of the strip's z end its
+/// heading presses into (heading's z share over 0.3 toward that end).
+fn at_z_end(sim: &Sim, params: &Params, b: &cubarium_voxel_fauna::Animal) -> bool {
+    let Some(f) = b.founder else { return false };
+    let c = sim.world().config();
+    let v = c.voxel_m;
+    let r = params.fauna.founder(f).body_at(b.body).footprint_radius();
+    let depth_m = f64::from(c.depth) * v;
+    let (_, fz) = b.pose.forward();
+    (b.pose.z <= r + 0.5 * v && fz < -0.3) || (b.pose.z >= depth_m - r - 0.5 * v && fz > 0.3)
 }
 
 impl Wedge {
@@ -2503,7 +2525,44 @@ impl Wedge {
                 t[k][1] += add as f64;
                 t[k][2] = s;
             }
+            self.refused[k][0] += 1;
+            self.refused[k][1] += u64::from(refused && b.founder_state.held.forward > 0.0);
+            if add > 0 {
+                let src = sim.fauna().steer_of(b.id).unwrap_or(cubarium_voxel_fauna::Steer::Rest);
+                let j = cubarium_voxel_fauna::Steer::ALL.iter().position(|&x| x == src).unwrap_or(0);
+                self.why[k][j] += add;
+                if at_z_end(sim, params, b) {
+                    self.why[k][STEERS] += add;
+                }
+            }
         }
+    }
+
+    /// EDGE: per lineage with wedged samples, the share of them by the layer that steered
+    /// and the share at the strip's z end.
+    fn why_line(&self) -> String {
+        let mut out = Vec::new();
+        for (k, w) in self.why.iter().enumerate() {
+            let n: u64 = w[..STEERS].iter().sum();
+            if n == 0 {
+                continue;
+            }
+            let name = if k == 9 { "chorister_pup".to_string() } else { Founder::ALL[k].name().to_string() };
+            let parts: Vec<String> = cubarium_voxel_fauna::Steer::ALL
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| w[*j] > 0)
+                .map(|(j, st)| format!("{}:{:.2}", st.name(), w[j] as f64 / n as f64))
+                .collect();
+            out.push(format!("{name}=zend:{:.2}/{}", w[STEERS] as f64 / n as f64, parts.join("/")));
+        }
+        for (k, r) in self.refused.iter().enumerate() {
+            if r[0] > 0 {
+                let name = if k == 9 { "chorister_pup".to_string() } else { Founder::ALL[k].name().to_string() };
+                out.push(format!("pressed_any:{name}={:.3}", r[1] as f64 / r[0] as f64));
+            }
+        }
+        out.join(",")
     }
 
     fn line(&self, all: bool) -> String {
@@ -3071,4 +3130,225 @@ fn pit_map(sim: &Sim, g: &cubarium_voxel_fauna::RouteGraph, site: cubarium_voxel
         }
         println!("  map,{row}");
     }
+}
+
+/// **EDGE's probe** (`hunter_study edge load=DIR/mM [minutes=30] [config=FILE] [lineages=a,b]`):
+/// every awake grounded founder at its controller cadence, wedged as [`Wedge`] counts it
+/// (motor delivered under 5 % over runs of at least `STUCK_S`). Each wedge's start is printed
+/// as an `edgewedge,` line: where the body stands and how far from either z end, its heading,
+/// the layer that steers it ([`cubarium_voxel_fauna::Steer`]), its state, eating latch,
+/// flight, and the food it tracks. Per lineage at the end: the wedged share and its split by
+/// steering layer and by z end. Also counted for every body (readout check): awake samples
+/// in each mobility mode, and the refused samples by mode, so a climbing or perched body's
+/// stillness shows whether it is in the wedged count or not.
+fn edge_probe(args: &[String]) {
+    use cubarium_voxel_fauna::{MobilityMode, State, Steer};
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(30, |m| m.parse().unwrap());
+    let only: Option<Vec<String>> = arg(args, "lineages=").map(|s| s.split(',').map(str::to_string).collect());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let (width, depth, v) = (sim.world().config().width, sim.world().config().depth, sim.world().config().voxel_m);
+    let depth_m = f64::from(depth) * v;
+    let ring = f64::from(width) * v;
+    println!("world,width={width},depth={depth},voxel_m={v},depth_m={depth_m:.2}");
+    let hz = u64::from(TICK_HZ);
+    let mut run: rustc_hash::FxHashMap<u64, u64> = Default::default();
+    // per lineage: [awake ground samples, wedged samples]
+    let mut tally = [[0u64; 2]; 9];
+    let mut why = [[0u64; STEERS + 1]; 9];
+    // per lineage: refused samples of any run length by steering layer
+    let mut refused_by = [[0u64; STEERS]; 9];
+    // per lineage, per mobility mode (debug name): [awake samples, refused samples]
+    let mut modes: std::collections::BTreeMap<(usize, String), [u64; 2]> = Default::default();
+    let total = minutes * 60 * hz;
+    for t in 0..=total {
+        if t > 0 {
+            sim.step();
+        }
+        let fv = sim.fauna().view();
+        for b in fv.animals.iter() {
+            let Some(f) = b.founder else { continue };
+            if only.as_ref().is_some_and(|o| !o.iter().any(|n| n == f.name())) {
+                continue;
+            }
+            let cadence = params.fauna.manifest(f).cadence_ticks().max(1);
+            if b.age_ticks % cadence != 0 || b.state == State::Asleep {
+                continue;
+            }
+            let fb = b.founder_state.feedback;
+            let refused = fb.attempted_equivalent > 1e-12 && fb.delivered_equivalent / fb.attempted_equivalent < 0.05;
+            let m = modes.entry((f.index(), format!("{:?}{}", b.mobility.mode, if b.attached.is_some() { "+attached" } else { "" }))).or_default();
+            m[0] += 1;
+            m[1] += u64::from(refused);
+            if b.mobility.mode != MobilityMode::Ground || b.attached.is_some() {
+                run.remove(&b.id);
+                continue;
+            }
+            let k = f.index();
+            let long = (STUCK_S * f64::from(TICK_HZ) / cadence as f64).ceil() as u64;
+            let r = run.entry(b.id).or_default();
+            *r = if refused { *r + 1 } else { 0 };
+            let add = if *r == long { long } else if *r > long { 1 } else { 0 };
+            tally[k][0] += 1;
+            tally[k][1] += add;
+            if refused {
+                let src = sim.fauna().steer_of(b.id).unwrap_or(Steer::Rest);
+                refused_by[k][Steer::ALL.iter().position(|&x| x == src).unwrap_or(0)] += 1;
+                if *r == 1 && b.id % 3 == 0 && fv.tick % 7 == 0 {
+                    let (fx, fz) = b.pose.forward();
+                    println!("edgeshort,{},{}{},at=({:.2},{:.2},y{}),head=({fx:.2},{fz:.2}),steer={},held=({:.2},{:.2}),press={:?}", fv.tick, f.name(), b.id, b.pose.x, b.pose.z, b.site.y, src.name(), b.founder_state.held.forward, b.founder_state.held.turn, sim.fauna().press_of(b.id));
+                    if arg(args, "detail=").is_some_and(|d| d == "1") {
+                        let p = params.fauna.founder(f);
+                        let g = cubarium_voxel_fauna::RouteGraph::for_founder(&sim.world().view(), p, params.fauna.founding.clearance_margin_m);
+                        let body = p.body_at(b.body);
+                        let r = body.footprint_radius();
+                        let own = (r / v).ceil() as u32;
+                        let near = g.node_near(b.site, (b.pose.x, b.pose.z), own).map(|j| g.faces[j]);
+                        let wv = sim.world().view();
+                        let way = g.way_on(&wv, b.site, r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 24);
+                        println!("  detail,site={:?},near={near:?},way={way:?},wade={:.3},here_water={:.3}", b.site, p.wade_depth_m(&body), wv.water_depth_m(i64::from(b.site.x), b.site.y, b.site.z));
+                        for z in b.site.z.saturating_sub(1)..=b.site.z + 2 {
+                            let mut row = String::new();
+                            for dx in -4i64..=3 {
+                                let x = (i64::from(b.site.x) + dx).rem_euclid(i64::from(width));
+                                let sup = wv.highest_support_in(x, z, 0, b.site.y + 8);
+                                row.push_str(&format!(" {}:{}/{:.4}", x, sup.map_or("-".into(), |y| format!("{}", i64::from(y) - i64::from(b.site.y))), sup.map_or(0.0, |y| wv.water_depth_m(x, y, z))));
+                            }
+                            println!("  col,z{z}:{row}");
+                        }
+                    }
+                }
+            }
+            if add == 0 {
+                continue;
+            }
+            let src = sim.fauna().steer_of(b.id).unwrap_or(Steer::Rest);
+            let j = Steer::ALL.iter().position(|&x| x == src).unwrap_or(0);
+            why[k][j] += add;
+            let zend = at_z_end(&sim, &params, b);
+            if zend {
+                why[k][STEERS] += add;
+            }
+            if *r == long || *r % (300 * hz / cadence) == 0 {
+                let p = sim.fauna().percept(b.id);
+                let food = p.map(|p| p.best[cubarium_voxel_fauna::perception::class::FOOD as usize]);
+                let fleeing = p.is_some_and(|p| p.vigil.fleeing);
+                let from_d = p.filter(|p| p.vigil.fleeing).map_or(f64::NAN, |p| {
+                    let (dx, dz) = wdelta(b.pose.x, b.pose.z, p.vigil.from_x, p.vigil.from_z, ring);
+                    (dx * dx + dz * dz).sqrt()
+                });
+                let threat = p.filter(|p| p.vigil.fleeing).and_then(|p| fv.animal(p.vigil.flee_id)).map_or("-".to_string(), |t| {
+                    let (dx, dz) = wdelta(b.pose.x, b.pose.z, t.pose.x, t.pose.z, ring);
+                    format!("{}{}:{:?}:d{:.2}:dy{}", t.founder.map_or("?", |f| f.name()), t.id, t.state, (dx * dx + dz * dz).sqrt(), i64::from(t.site.y) - i64::from(b.site.y))
+                });
+                // The nearest stand a glider might climb (foliage, crown at least its glider's
+                // climb_min_stand_m), and its layer difference.
+                let stand_s = params.fauna.founder(f).glider.map_or("-".to_string(), |g| {
+                    let flv = sim.flora().view();
+                    let mut best: Option<(f64, i64, f64, f64)> = None;
+                    for st in flv.stands.iter().filter(|st| st.foliage > 0.0 && flv.config.species(st.species).crown_height_m_at(st.wood) >= g.climb_min_stand_m - 1e-9) {
+                        let sx = (f64::from(st.site.x) + 0.5) * v;
+                        let sz = (f64::from(st.site.z) + 0.5) * v;
+                        let (dx, dz) = wdelta(b.pose.x, b.pose.z, sx, sz, ring);
+                        let d = (dx * dx + dz * dz).sqrt();
+                        if best.is_none_or(|q| d < q.0) {
+                            best = Some((d, i64::from(st.site.y) - i64::from(b.site.y), dx, dz));
+                        }
+                    }
+                    best.map_or("none".into(), |(d, dy, dx, dz)| format!("d{d:.2}/dy{dy}/({dx:.2},{dz:.2})"))
+                });
+                // The support faces in the column one voxel ahead, near its layer.
+                let ahead = {
+                    let (fx, fz) = b.pose.forward();
+                    let ax = ((b.pose.x + fx * v) / v).floor() as i64;
+                    let az = ((b.pose.z + fz * v) / v).floor() as i64;
+                    let wv = sim.world().view();
+                    let mut ys = Vec::new();
+                    if az >= 0 && az < i64::from(depth) {
+                        for y in b.site.y.saturating_sub(6)..b.site.y + 12 {
+                            if wv.is_support(ax.rem_euclid(i64::from(width)), y, az as u32) {
+                                ys.push(format!("{}", i64::from(y) - i64::from(b.site.y)));
+                            }
+                        }
+                    }
+                    // Solid profiles (y-3..y+4, low to high) of its own column and of the
+                    // columns at a quarter, a half and one voxel ahead.
+                    let prof = |px: f64, pz: f64| -> String {
+                        let cx = ((px / v).floor() as i64).rem_euclid(i64::from(width));
+                        let cz = (pz / v).floor() as i64;
+                        if cz < 0 || cz >= i64::from(depth) {
+                            return "out".into();
+                        }
+                        (b.site.y.saturating_sub(3)..=b.site.y + 4)
+                            .map(|y| if wv.is_solid(cx, y, cz as u32) { '#' } else if wv.water_depth_m(cx, y, cz as u32) > 0.0 { 'w' } else { '.' })
+                            .collect()
+                    };
+                    let r = params.fauna.founder(f).body_at(b.body).footprint_radius();
+                    format!(
+                        "{}:r{r:.3}:here{}:q{}:h{}:one{}",
+                        ys.join("|"),
+                        prof(b.pose.x, b.pose.z),
+                        prof(b.pose.x + fx * (r + 0.25 * v), b.pose.z + fz * (r + 0.25 * v)),
+                        prof(b.pose.x + fx * (r + 0.5 * v), b.pose.z + fz * (r + 0.5 * v)),
+                        prof(b.pose.x + fx * v, b.pose.z + fz * v)
+                    )
+                };
+                let food_s = food.filter(|t| t.known).map_or("-".to_string(), |t| {
+                    let (dx, dz) = wdelta(b.pose.x, b.pose.z, t.x, t.z, ring);
+                    format!("({:.2},{:.2})d{:.2}age{}", t.x, t.z, (dx * dx + dz * dz).sqrt(), (fv.tick.saturating_sub(t.tick)) / hz)
+                });
+                let (fx, fz) = b.pose.forward();
+                let held = b.founder_state.held;
+                println!(
+                    "edgewedge,{},{}{},run_s={},at=({:.2},{:.2},y{}),z_lo={:.2},z_hi={:.2},head=({fx:.2},{fz:.2}),zend={zend},steer={},held=({:.2},{:.2}),state={:?},eating={},fleeing={fleeing},emerg={},food={food_s},body={:.3},from_d={from_d:.2},threat={threat},stand={stand_s},press={:?},ahead_dy={ahead}",
+                    fv.tick, f.name(), b.id, *r * cadence / hz, b.pose.x, b.pose.z, b.site.y, b.pose.z, depth_m - b.pose.z,
+                    src.name(), held.forward, held.turn, b.state, b.eating, b.emergency, b.body, sim.fauna().press_of(b.id)
+                );
+            }
+        }
+        if t > 0 && t % (10 * 60 * hz) == 0 {
+            println!("win,{}m,{}", minute0 + t / (60 * hz), edge_line(&tally, &why));
+        }
+    }
+    println!("sumedge,{}", edge_line(&tally, &why));
+    for k in 0..9 {
+        let n: u64 = refused_by[k].iter().sum();
+        if n > 0 {
+            let parts: Vec<String> = Steer::ALL.iter().enumerate().filter(|(j, _)| refused_by[k][*j] > 0).map(|(j, st)| format!("{}:{:.2}", st.name(), refused_by[k][j] as f64 / n as f64)).collect();
+            println!("refusedby,{},samples={n},{}", Founder::ALL[k].name(), parts.join("/"));
+        }
+    }
+    for ((k, mode), [n, refused]) in &modes {
+        println!("mode,{},{mode},awake={n},refused={:.3}", Founder::ALL[*k].name(), *refused as f64 / (*n).max(1) as f64);
+    }
+}
+
+fn edge_line(tally: &[[u64; 2]; 9], why: &[[u64; STEERS + 1]; 9]) -> String {
+    let mut out = Vec::new();
+    for k in 0..9 {
+        if tally[k][0] == 0 {
+            continue;
+        }
+        let n: u64 = why[k][..STEERS].iter().sum();
+        let parts: Vec<String> = cubarium_voxel_fauna::Steer::ALL
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| why[k][*j] > 0)
+            .map(|(j, st)| format!("{}:{:.2}", st.name(), why[k][j] as f64 / n.max(1) as f64))
+            .collect();
+        out.push(format!(
+            "{}=wedged:{:.3}/zend:{:.2}/{}",
+            Founder::ALL[k].name(),
+            tally[k][1] as f64 / tally[k][0].max(1) as f64,
+            why[k][STEERS] as f64 / n.max(1) as f64,
+            parts.join("/")
+        ));
+    }
+    out.join(",")
 }

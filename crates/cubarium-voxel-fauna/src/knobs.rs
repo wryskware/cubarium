@@ -389,6 +389,44 @@ pub struct TeacherConfig {
     /// was), count. 0 walks straight on.
     #[serde(default = "turn_back_samples")]
     pub forage_turn_back_samples: u32,
+    /// **EDGE, a pressed walk re-plans**: a reflex walking a body to a target (a glider's
+    /// refuge, roost or fruit) that has asked it forward this long without its moving
+    /// (`Animal::still_ticks`) gives that target up, seconds.
+    #[serde(default = "press_replan_s")]
+    pub press_replan_s: f64,
+    /// How long a target given up that way stays given up, seconds.
+    #[serde(default = "press_shun_s")]
+    pub press_shun_s: f64,
+    /// **EDGE, walks on the route graph**: the walking route graph a reflex's walk plans on
+    /// (the lineage's own, shared with its pack or patrol) is rebuilt after this, seconds.
+    #[serde(default = "route_refresh_s")]
+    pub route_refresh_s: f64,
+    /// A target counts as in reach when its route is at most this many times the reflex's
+    /// own search radius (its sight, `fruit_search_m`, `roost_search_m`,
+    /// `refuge_search_m`), a ratio.
+    #[serde(default = "route_detour")]
+    pub route_detour: f64,
+    /// How far round itself a cornered body off its route graph looks for its own way back
+    /// onto it (`RouteGraph::way_on`), metres.
+    #[serde(default = "way_on_m")]
+    pub way_on_m: f64,
+}
+
+fn way_on_m() -> f64 {
+    4.0
+}
+
+fn press_replan_s() -> f64 {
+    3.0
+}
+fn press_shun_s() -> f64 {
+    60.0
+}
+fn route_refresh_s() -> f64 {
+    60.0
+}
+fn route_detour() -> f64 {
+    2.0
 }
 
 fn stay_forward() -> f64 {
@@ -462,6 +500,11 @@ impl Default for TeacherConfig {
             bellwing_roost_ceiling: bw_roost_ceiling(),
             forage_stay_forward: stay_forward(),
             forage_turn_back_samples: turn_back_samples(),
+            press_replan_s: press_replan_s(),
+            press_shun_s: press_shun_s(),
+            route_refresh_s: route_refresh_s(),
+            route_detour: route_detour(),
+            way_on_m: way_on_m(),
         }
     }
 }

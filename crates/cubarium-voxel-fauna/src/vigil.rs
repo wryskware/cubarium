@@ -496,7 +496,26 @@ fn flight(v: &mut Vigil, vg: &Vigilance, a: &Animal, th: &[Threat], need: usize,
 /// table's `still_after_s` this far into its flight, pressed against a wall or the strip's
 /// end), it runs along the obstruction instead: voxel walls and the strip's ends lie along
 /// the axes, so it takes the axis across its push, on the side away from the threat.
-fn away(a: &Animal, v: &Vigil, ring: f64, cornered: bool) -> Actions {
+///
+/// **EDGE**: the strip's end is no way out. Standing at an end (within its radius and half a
+/// voxel), a heading out through it is taken along the end instead, on the side away from the
+/// threat. And once cornered, or pressed for `teachers.press_replan_s` (held forward, its motor
+/// refused: a body pushing hard can slide too much to count as still), the rest of that
+/// flight goes by its lineage's route graph
+/// ([`route_away`]): to the neighbouring node farthest from the point it flees, if any is
+/// farther than its own; else it holds still, not pressing a wall it cannot pass. A body off
+/// its graph keeps the axis rule.
+fn away(fauna: &mut Fauna, view: &VoxelView<'_>, a: &Animal, v: &Vigil, ring: f64, cornered: bool) -> Actions {
+    let press = fauna.config.teachers.press_replan_s;
+    let pressed = fauna.pressed.get(&a.id).is_some_and(|&t| press.is_finite() && press >= 0.0 && t >= cubarium_voxel::ticks_at_least_one(press));
+    if cornered || pressed {
+        fauna.route_flee.insert(a.id, v.flee_tick);
+    }
+    if fauna.route_flee.get(&a.id) == Some(&v.flee_tick) {
+        if let Some(act) = route_away(fauna, view, a, v, ring) {
+            return act;
+        }
+    }
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, v.from_x, v.from_z, ring);
     let side = |d: f64| -> f64 {
         if d > 0.0 {
@@ -518,7 +537,63 @@ fn away(a: &Animal, v: &Vigil, ring: f64, cornered: bool) -> Actions {
     } else {
         (-dx).atan2(-dz)
     };
+    // The strip's ends: `forward` is `(sin h, cos h)`, so `cos` is the heading's z.
+    let vm = view.config.voxel_m;
+    let r = a.founder.map_or(0.0, |f| fauna.config.founder(f).body_at(a.body).footprint_radius());
+    let (near, depth_m) = (r + 0.5 * vm, f64::from(view.config.depth) * vm);
+    let want = if (a.pose.z <= near && want.cos() < 0.0) || (a.pose.z >= depth_m - near && want.cos() > 0.0) {
+        side(dx).atan2(0.0)
+    } else {
+        want
+    };
     head(a, want, 1.0, 0.0)
+}
+
+/// EDGE: a cornered body's step away on its lineage's route graph (`teachers.route_refresh_s`):
+/// toward the neighbour of its node whose centre is farthest from the point it flees, when
+/// that is farther than its own node's; else still. Off its graph, toward the first face of
+/// its own body's way back onto it ([`crate::RouteGraph::way_on`], out to
+/// `teachers.way_on_m`); with none, still.
+fn route_away(fauna: &mut Fauna, view: &VoxelView<'_>, a: &Animal, v: &Vigil, ring: f64) -> Option<Actions> {
+    let founder = a.founder?;
+    let tc = fauna.config.teachers;
+    let graph = fauna.routes(view, founder, tc.route_refresh_s);
+    let vm = view.config.voxel_m;
+    let phys = *fauna.config.founder(founder);
+    let body = phys.body_at(a.body);
+    let r = body.footprint_radius();
+    let own = (r / vm).ceil().max(0.0) as u32;
+    let still = Actions { forward: 0.0, turn: 0.0, feed: 0.0 };
+    let Some(from) = graph.node_near(a.site, (a.pose.x, a.pose.z), own) else {
+        let cols = if tc.way_on_m.is_finite() && tc.way_on_m > 0.0 { (tc.way_on_m / vm).ceil() as u32 } else { 0 };
+        let way = graph.way_on(view, a.site, r, body.headroom_voxels(vm), phys.step_limits(vm), phys.wade_depth_m(&body), own, cols);
+        return Some(match way {
+            Some(f) => {
+                let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * vm, (f64::from(f.z) + 0.5) * vm, ring);
+                head(a, dx.atan2(dz), 1.0, 0.0)
+            }
+            None => still,
+        });
+    };
+    let d_of = |(x, z): (f64, f64)| {
+        let (dx, dz) = crate::pose::wrapped_delta(x, z, v.from_x, v.from_z, ring);
+        dx * dx + dz * dz
+    };
+    let here = d_of(graph.centre(from));
+    let best = graph
+        .neighbours(from)
+        .iter()
+        .map(|&j| (d_of(graph.centre(j)), j))
+        .filter(|&(d, _)| d > here)
+        .max_by(|p, q| p.0.total_cmp(&q.0).then(q.1.cmp(&p.1)));
+    Some(match best {
+        Some((_, j)) => {
+            let (cx, cz) = graph.centre(j);
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, cx, cz, ring);
+            head(a, dx.atan2(dz), 1.0, 0.0)
+        }
+        None => still,
+    })
 }
 
 /// Whether a body `flee_tick` into its flight has been still for `still_after_s` of it.
@@ -561,13 +636,13 @@ pub(crate) fn respond(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Fl
     let ring = f64::from(view.config.width) * view.config.voxel_m;
     match phys.vigilance.mode {
         VigilMode::None => None,
-        VigilMode::Herd => herd(fauna, i, ring, held),
+        VigilMode::Herd => herd(fauna, i, view, ring, held),
         VigilMode::Arboreal => arboreal(fauna, i, view, fv, ring, held),
         VigilMode::Freeze => freeze(fauna, i),
     }
 }
 
-fn herd(fauna: &mut Fauna, i: usize, ring: f64, held: Actions) -> Option<Actions> {
+fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, ring: f64, held: Actions) -> Option<Actions> {
     let a = fauna.animals[i];
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
@@ -657,7 +732,8 @@ fn herd(fauna: &mut Fauna, i: usize, ring: f64, held: Actions) -> Option<Actions
     }
     let mut out = None;
     if v.fleeing {
-        out = Some(away(&a, &v, ring, cornered(&fauna.config, &a, &v, now)));
+        let cornered = cornered(&fauna.config, &a, &v, now);
+        out = Some(away(fauna, view, &a, &v, ring, cornered));
     } else if now < v.bolt_until {
         // A bunching body already beside its kin stands, head up, facing them.
         let beside = hk.enabled && kin.is_some_and(|(_, nearest)| nearest <= hk.ring_m);
@@ -730,7 +806,11 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
                         fauna.ledger.vigil.refuges[k] += 1;
                         Some(crate::gait::dash(&fauna.config, founder, v.close_tick == now, go))
                     }
-                    None => Some(crate::gait::dash(&fauna.config, founder, v.close_tick == now, away(&a, &v, ring, cornered(&fauna.config, &a, &v, now)))),
+                    None => {
+                        let cornered = cornered(&fauna.config, &a, &v, now);
+                        let go = away(fauna, view, &a, &v, ring, cornered);
+                        Some(crate::gait::dash(&fauna.config, founder, v.close_tick == now, go))
+                    }
                 }
             }
             // Up the stem, and still in the crown.

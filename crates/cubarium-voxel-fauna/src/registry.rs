@@ -543,6 +543,11 @@ fn knob_rows() -> Vec<Row> {
             .search(0.0, 1.0).prov("decision"),
         t("forage_turn_back_samples", "samples", count, "samples the blind forager turns after leaving an exhausted patch (area-restricted search)")
             .search(0.0, 8.0),
+        t("press_replan_s", "s", nonneg, "a reflex walk asking forward this long without moving gives its target up (EDGE)").search(1.0, 10.0),
+        t("press_shun_s", "s", nonneg, "a target given up for pressing stays given up this long").search(10.0, 600.0).log(),
+        t("route_refresh_s", "s", pos, "the walking route graph a reflex walk plans on is rebuilt after this").search(10.0, 600.0).log(),
+        t("route_detour", "ratio", pos, "a target is in reach when its route is at most this times the reflex's search radius").search(1.0, 4.0),
+        t("way_on_m", "m", nonneg, "how far round itself a cornered body off its route graph looks for its own way back onto it").search(1.0, 8.0),
     ]);
 
     // `fauna.hunt.*`: the lanternjaw's patrol (the detritus web D2), every one a plausible
