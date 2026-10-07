@@ -1296,7 +1296,7 @@ fn d2b_start(p: &cubarium_voxel_sim::params::Params, fits: &Fits, med: &BTreeMap
     }
     let bank = get(lj, "bank");
     if bank > 0.0 {
-        m.eggs.push(model::EggCohort { lineage: Founder::Lanternjaw, n: bank, organic: lp.reproduction.egg_organic, age_s: 0.0, dormant: true });
+        m.eggs.push(model::EggCohort { lineage: Founder::Lanternjaw, n: bank, organic: lp.reproduction.egg_organic, age_s: 0.0, dormant: true, ..Default::default() });
     }
     m.t_s = 120.0 * 60.0;
     m

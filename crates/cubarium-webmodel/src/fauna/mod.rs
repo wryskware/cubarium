@@ -11,6 +11,8 @@
 //!   stochastic twin on one code path ([`rng::Draws`]).
 
 pub mod config;
+pub mod behavior;
+mod sync;
 pub mod fits;
 pub mod laws;
 pub mod model;

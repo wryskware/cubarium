@@ -49,6 +49,10 @@ pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;
+#[cfg(test)]
+mod testpass3_support;
+#[cfg(test)]
+mod testpass3_state_tests;
 pub use step::shore_egg_site;
 
 #[cfg(test)]
