@@ -222,7 +222,12 @@ fn two_equal_targets_do_not_ping_pong() {
         held &= fauna.packs()[0].target == first;
     }
     assert!(held, "the pack held {first:?} (now {:?})", fauna.packs()[0].target);
-    assert_eq!((fauna.ledger.pack_chases, ends(&events, ChaseEnd::Switched)), (1, 0), "(chases, switches): {events:?}");
+    // STRIKE: a kill can end the hunt and a new one begin on the same tick; the chases
+    // counted are those before the kill.
+    let before_kill = events.iter().position(|e| matches!(e, PackEvent::ChaseEnd { why: ChaseEnd::Killed, .. })).unwrap_or(events.len());
+    let after_kill = events[before_kill..].iter().filter(|e| matches!(e, PackEvent::ChaseStart { .. })).count() as u64;
+    let chases = fauna.ledger.pack_chases - after_kill;
+    assert_eq!((chases, ends(&events, ChaseEnd::Switched)), (1, 0), "(chases, switches): {events:?}");
 }
 
 // ------------------------------------------------------------------ CHURN2: the stall

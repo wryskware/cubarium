@@ -2832,6 +2832,17 @@ pub struct FaunaLedger {
     /// **CHURN**: pack targets given up for a better one (past `Pack::switch_margin`).
     #[serde(default)]
     pub pack_switches: u64,
+    /// **STRIKE**: member samples steered by the close-in ([`Pack::close_in_m`]); of them,
+    /// steps off from a prey inside the outline and pivots to face one; and chases broken off
+    /// as out of reach (no face beside the target puts it in the jaw band).
+    #[serde(default)]
+    pub pack_close_in_samples: u64,
+    #[serde(default)]
+    pub pack_step_offs: u64,
+    #[serde(default)]
+    pub pack_pivots: u64,
+    #[serde(default)]
+    pub pack_out_of_reach: u64,
     /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
     #[serde(default)]
     pub vigil: VigilLedger,

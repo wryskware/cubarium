@@ -580,6 +580,19 @@ pub struct Pack {
     /// et al. 2007: wolves test, then commit and stay on that animal).
     #[serde(default = "pack_switch_stall_s")]
     pub switch_stall_s: f64,
+    /// **STRIKE, the last metres**: within this of its target (centre to centre), with the
+    /// target in its jaw band from where it stands and a straight walk to it, a member leaves
+    /// its route and its flank point and steers to its **stand-off**, facing the prey: it turns
+    /// in place to a prey to its side or behind it, steps off from one inside its outline, and
+    /// never presses into it ([`crate::pack`]'s close-in). Metres; 0 turns it off.
+    #[serde(default = "pack_close_in_m")]
+    pub close_in_m: f64,
+    /// ...the stand-off: the jaw's reach ahead of its centre (`jaw_forward_length_fraction`)
+    /// plus this share of the strike's reach (`strike_reach_length_fraction`), from the prey's
+    /// centre; 0 stands it at the jaw (where a lunge that cannot move still meets it), 0.5 in
+    /// the middle of the strike capsule.
+    #[serde(default = "pack_stand_off_reach_fraction")]
+    pub stand_off_reach_fraction: f64,
     /// A pack takes only prey standing in its own walking route component; the
     /// lineage's components are rebuilt from the terrain at most this often, seconds (a
     /// placeholder: the terrain and its water change slowly). 60.
@@ -696,6 +709,12 @@ fn pack_switch_margin() -> f64 {
 fn pack_switch_stall_s() -> f64 {
     Pack::CHORISTER.switch_stall_s
 }
+fn pack_close_in_m() -> f64 {
+    Pack::CHORISTER.close_in_m
+}
+fn pack_stand_off_reach_fraction() -> f64 {
+    Pack::CHORISTER.stand_off_reach_fraction
+}
 
 fn pack_stalk_margin() -> f64 {
     Pack::CHORISTER.stalk_margin
@@ -736,6 +755,13 @@ impl Pack {
         chase_progress_m: 0.5,
         switch_margin: 1.5,
         switch_stall_s: 10.0,
+        // STRIKE: the commit distance (`commit_m`, where the rush begins) is where a wolf or a
+        // lion leaves its line of approach for the animal itself (MacNulty et al. 2007's
+        // attack stage); the stand-off is at the jaw's reach (the probe: from the capsule's
+        // middle, a lunge blocked by a ledge or a stem swept short of the prey, 45 of 50
+        // strikes on perched bellwings missing by geometry).
+        close_in_m: 2.5,
+        stand_off_reach_fraction: 0.0,
         route_refresh_s: 60.0,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,

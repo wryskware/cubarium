@@ -380,6 +380,106 @@ fn node_radii(geometry: &crate::Body, h: &crate::Hunter, v: f64) -> (u32, u32) {
     (cols(r), cols(r + reach))
 }
 
+/// **STRIKE, the height band**: whether a hunter of `geometry` standing on a surface at `s0`
+/// meets, with its jaw band (`[s0, s0 + jaw_band_height_fraction × height]`, the strike
+/// capsule's band), a body whose base is at `base` and which is `height` tall.
+fn band_meets(geometry: &crate::Body, h: &crate::Hunter, s0: f64, base: f64, height: f64) -> bool {
+    base < s0 + h.jaw_band_height_fraction * geometry.height_m && s0 < base + height
+}
+
+/// The height of body `id` as it is now; 0 when it is gone.
+fn height_of(fauna: &Fauna, id: u64) -> f64 {
+    fauna.view().animal(id).and_then(|o| crate::body_of(&fauna.config, o)).map_or(0.0, |g| g.height_m)
+}
+
+/// **The node a member takes body `o` from** (STRIKE): on its graph within the strike's
+/// radius of where it was known ([`node_radii`]), on a face whose jaw band meets its body
+/// ([`band_meets`], `height` tall). `None` when there is none: a perched or ledged prey above
+/// (or below) every face a member could stand on beside it is out of reach.
+fn strike_node(graph: &crate::encounter::RouteGraph, o: &Track, height: f64, geometry: &crate::Body, h: &crate::Hunter, v: f64) -> Option<usize> {
+    let (_, prey_r) = node_radii(geometry, h, v);
+    graph.node_near_where(o.face(), (o.x, o.z), prey_r, |f| band_meets(geometry, h, crate::surface_m(f.y, v), o.y_m, height))
+}
+
+/// **STRIKE, the last metres** for the member `a` at `i` on its target `o` (as it knows it):
+/// within `close_in_m` of it, with the prey in its jaw band from where it stands and a
+/// straight walk to it on the disc's graph, it leaves its route and its flank point and
+/// steers to its **stand-off** — the jaw's reach plus `stand_off_reach_fraction` of the
+/// strike's reach from the prey's centre — facing it, as a wolf or a lion ends its approach
+/// in reach and facing its prey:
+/// - inside its outline (the prey's centre nearer than where a capsule facing it begins,
+///   the jaw's reach less both radii) it steps off, straight away from the prey, to the
+///   stand-off;
+/// - else, not facing it (its centre outside the capsule's half-width), it turns in place,
+///   paying the rotation as any turn;
+/// - facing it, it walks on to the stand-off, never past it: no step outruns the distance
+///   left (`cruise × controller period` is one sampling's walk), and the rush's sprint is the
+///   most it asks.
+///
+/// Feed is held throughout: a prey in the capsule is struck. `None` when the rule does not
+/// apply (off, out of range, the target gone, out of band, or a wall or a ledge between).
+#[allow(clippy::too_many_arguments)]
+fn close_in(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    founder: crate::Founder,
+    a: &Animal,
+    o: &Track,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    t: &Pack,
+    ring: f64,
+) -> Option<Actions> {
+    if !(t.close_in_m > 0.0) {
+        return None;
+    }
+    let (dx, dz, d) = delta(a, o.x, o.z, ring);
+    if d > t.close_in_m {
+        return None;
+    }
+    let prey = fauna.view().animal(o.id).copied()?;
+    let pg = crate::body_of(&fauna.config, &prey)?;
+    let v = view.config.voxel_m;
+    if a.mobility.climb.is_some() || !band_meets(geometry, h, crate::perception::base_m(a, v), o.y_m, pg.height_m) {
+        return None;
+    }
+    let (own_r, _) = node_radii(geometry, h, v);
+    let graph = fauna.pack_routes(view, founder);
+    if let Some(from) = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r) {
+        if !graph.walk_line(from, (a.pose.x, a.pose.z), (o.x, o.z)) {
+            return None;
+        }
+    }
+    let manifest = fauna.config.manifest(founder);
+    let length = geometry.length_m;
+    let jaw = h.jaw_forward_length_fraction * length;
+    let reach = h.strike_reach_length_fraction * length;
+    let radii = geometry.footprint_radius() + pg.footprint_radius();
+    let stand = jaw + t.stand_off_reach_fraction * reach;
+    let near = (jaw - radii).max(0.0);
+    let step = (manifest.cruise_m_per_s * manifest.controller_period_s).max(1e-9);
+    fauna.ledger.pack_close_in_samples += 1;
+    if d < near {
+        fauna.ledger.pack_step_offs += 1;
+        let away = if d > 1e-9 { (-dx).atan2(-dz) } else { a.pose.heading_rad };
+        return Some(head(a, away, ((stand - d) / step).min(1.0), 1.0));
+    }
+    let diff = angle_to(a.pose.heading_rad, dx.atan2(dz));
+    let aligned = diff.abs() <= (radii / d.max(radii)).asin();
+    let forward = if aligned {
+        let most = crate::vigil::stalk(fauna, a, o, d, 1.0).unwrap_or(1.0);
+        ((d - stand) / step).clamp(0.0, most.max(0.0))
+    } else {
+        fauna.ledger.pack_pivots += 1;
+        0.0
+    };
+    Some(Actions {
+        forward,
+        turn: (diff / FRAC_PI_4).clamp(-1.0, 1.0),
+        feed: 1.0,
+    })
+}
+
 /// **The next step on the route** (bellwing3 item 1, bellwing4): `None` when the member
 /// can walk straight to `goal` on the disc's graph (or is off the graph); else the centre
 /// of the next node on its route to the node it would strike the target from — the
@@ -399,13 +499,14 @@ fn route_step(
     goal: (f64, f64),
 ) -> Option<(f64, f64)> {
     let v = view.config.voxel_m;
-    let (own_r, prey_r) = node_radii(geometry, h, v);
+    let (own_r, _) = node_radii(geometry, h, v);
     let graph = fauna.pack_routes(view, founder);
     let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r)?;
     if graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
         return None;
     }
-    let target = graph.node_near(o.face(), (o.x, o.z), prey_r)?;
+    // STRIKE: the node it would strike from, on a face whose jaw band meets the prey.
+    let target = strike_node(&graph, o, height_of(fauna, o.id), geometry, h, v)?;
     let (graph, field) = fauna.pack_path(view, founder, own, target, reach_steps(t, cruise_m_per_s, v));
     graph.next_toward(&field, from).map(|j| graph.centre(j))
 }
@@ -886,7 +987,7 @@ fn choose(
     let sensed: Vec<Track> = known(fauna, i, ring).into_iter().filter(|k| takeable(fauna, i, k)).collect();
     let abandoned = fauna.pack(own).and_then(|p| p.abandoned);
     let mut prev_score = None;
-    let mut candidates: Vec<(f64, u64, Site, (f64, f64), u8)> = Vec::new();
+    let mut candidates: Vec<(f64, u64, Site, (f64, f64), u8, Track)> = Vec::new();
     for k in &sensed {
         let Some(o) = fauna.view().animal(k.id).copied() else { continue };
         if abandoned == Some(o.id) {
@@ -912,7 +1013,7 @@ fn choose(
         }
         let s = weigh_of(fauna, &o, k);
         if s >= floor {
-            candidates.push((-s, o.id, k.face(), (k.x, k.z), k.modes));
+            candidates.push((-s, o.id, k.face(), (k.x, k.z), k.modes, *k));
         }
     }
     if candidates.is_empty() {
@@ -920,14 +1021,16 @@ fn choose(
     }
     candidates.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
     let routes = fauna.pack_routes(view, founder);
-    let (own_r, prey_r) = node_radii(geometry, h, v);
+    let (own_r, _) = node_radii(geometry, h, v);
     let Some(from) = routes.node_near(a.site, (a.pose.x, a.pose.z), own_r) else {
         return (None, prev_score);
     };
     let field = routes.distances(from, reach_steps(t, cruise_m_per_s, v));
+    // STRIKE: reached at a node it could strike it from (its jaw band meeting the body): a
+    // prey perched or ledged out of every such face is out of reach.
     let best = candidates
         .into_iter()
-        .find(|c| routes.node_near(c.2, c.3, prey_r).is_some_and(|j| field.contains_key(&j)))
+        .find(|c| strike_node(&routes, &c.5, height_of(fauna, c.1), geometry, h, v).is_some_and(|j| field.contains_key(&j)))
         .map(|c| Choice { score: -c.0, id: c.1, site: c.2, modes: c.4 });
     (best, prev_score)
 }
@@ -1125,6 +1228,7 @@ pub(crate) fn steer(
                 });
             }
             Some(o) => {
+                let o_height = crate::body_of(&fauna.config, &o).map_or(0.0, |g| g.height_m);
                 // CHURN, the give-up: `chase_give_up_s` without progress — the pack's nearest
                 // member closing on the target by `chase_progress_m` past its nearest so far,
                 // or work done on it (a wound or a pry gained, or turned over). A pack at a
@@ -1166,8 +1270,32 @@ pub(crate) fn steer(
                 // distance (`2 × pack_radius_m`) of the target, the pack is still closing in
                 // and is weighed as the commit weighed it: the members at hand around this
                 // member (itself and the participants within `pack_radius_m`).
-                let broke = !(late || spent || out || lost)
+                // STRIKE, the height band: a target no member could strike from any face
+                // beside it (perched or ledged out of its jaw band) is out of reach: its
+                // prospect is 0, and the test breaks it off.
+                // So is one, in a chase stalled `switch_stall_s`, that none of the pack's members
+                // taking part can walk to within the chase's reach (`reach_steps`, the choice's
+                // own bound): the probe's stuck-short chases had the prey on a ledge 1.5 m up or
+                // 4-5 m down a cliff, the members walking straight into the face for the whole
+                // give-up.
+                let stalled_now = now.saturating_sub(since) >= cubarium_voxel::ticks_at_least_one(t.switch_stall_s);
+                let unreachable = !(late || spent || out || lost)
                     && knows_of(fauna, i, tid, ring).is_some_and(|k| {
+                        let graph = fauna.pack_routes(view, founder);
+                        let Some(goal) = strike_node(&graph, &k, o_height, &geometry, &h, v) else {
+                            return true;
+                        };
+                        if !stalled_now {
+                            return false;
+                        }
+                        let (_, field) = fauna.pack_path(view, founder, own, goal, reach_steps(&t, manifest.cruise_m_per_s, v));
+                        !adults.iter().filter(|b| b.id == a.id || participates(b, own)).any(|b| {
+                            let (br, _) = node_radii(&phys.body_at(b.body), &h, v);
+                            graph.node_near(b.site, (b.pose.x, b.pose.z), br).is_some_and(|j| field.contains_key(&j))
+                        })
+                    });
+                let broke = !(late || spent || out || lost)
+                    && (unreachable || knows_of(fauna, i, tid, ring).is_some_and(|k| {
                         let arrived = at_hand(fauna, own, a.id, k.x, k.z, 2.0 * t.pack_radius_m, ring);
                         let n = if arrived > 0 {
                             arrived
@@ -1175,7 +1303,10 @@ pub(crate) fn steer(
                             at_hand(fauna, own, a.id, a.pose.x, a.pose.z, t.pack_radius_m, ring)
                         };
                         prospect(fauna, i, &o, &k, n, ring) < t.break_off_below
-                    });
+                    }));
+                if unreachable {
+                    fauna.ledger.pack_out_of_reach += 1;
+                }
                 keep = !(late || spent || out || lost || broke);
                 if keep {
                     // The kill's bookkeeping: where the carcass will lie if a member kills it.
@@ -1357,6 +1488,18 @@ pub(crate) fn steer(
     };
     if draw_go.is_some() {
         fauna.ledger.pack_draw_lead_samples += 1;
+    }
+
+    // STRIKE, the last metres ([`close_in`]): close in on its target, on its level, a member
+    // steers to its stand-off facing the prey — before the escape below, whose route step
+    // walked members beside a prey into a wall toward the next node (CHURN-2: two members 20 s
+    // at 0.25 m from a juvenile seedporter).
+    if joins {
+        if let Some(o) = fauna.pack(own).and_then(|p| p.target).and_then(|tid| knows_of(fauna, i, tid, ring)) {
+            if let Some(act) = close_in(fauna, view, founder, &a, &o, &geometry, &h, &t, ring) {
+                return Some(clamp(fauna, act));
+            }
+        }
     }
 
     // Its motor was refused over the last interval (a wall, a ledge, a pocket): its own
