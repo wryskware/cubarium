@@ -4911,6 +4911,12 @@ mod ground_response_tests;
 #[path = "edge_tests.rs"]
 mod edge_tests;
 #[cfg(test)]
+#[path = "fear_tests.rs"]
+mod fear_tests;
+#[cfg(test)]
+#[path = "fear2_tests.rs"]
+mod fear2_tests;
+#[cfg(test)]
 #[path = "drop_tests.rs"]
 mod drop_tests;
 #[cfg(test)]

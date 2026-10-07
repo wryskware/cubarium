@@ -65,6 +65,10 @@ pub struct Cohort {
     pub litter: f64,
     /// A pack breeder carrying its pack's litter: the pack's index ([`FaunaModel::packs`]).
     pub breeder_of: Option<usize>,
+    pub response: super::behavior::ResponseState,
+    /// Edible local film as a fraction of one underwater site's capacity.
+    pub film_patch: Option<f64>,
+    pub film_travel_s: f64,
 }
 
 impl Cohort {
@@ -87,6 +91,9 @@ impl Cohort {
             carcass: 0.0,
             litter: 1.0,
             breeder_of: None,
+            response: Default::default(),
+            film_patch: None,
+            film_travel_s: 0.0,
         }
     }
 
@@ -111,6 +118,12 @@ pub struct EggCohort {
     pub organic: f64,
     pub age_s: f64,
     pub dormant: bool,
+    pub wet_s: f64,
+    pub dry_s: f64,
+}
+
+impl Default for EggCohort {
+    fn default() -> Self { Self {lineage:Founder::Blind,n:0.0,organic:0.0,age_s:0.0,dormant:false,wet_s:0.0,dry_s:0.0} }
 }
 
 /// One lineage's running ledger: the sim's `FaunaLedger` lines by founder, and the
@@ -171,6 +184,16 @@ pub struct LineageLedger {
     pub body_s: f64,
     /// As a hunter: hunting body-seconds (awake, free, eating latch on).
     pub hunting_s: f64,
+    pub hunker_s: f64,
+    pub flight_s: f64,
+    pub kills_juvenile: f64,
+    pub kills_adult: f64,
+    pub lure_visits: f64,
+    pub lure_kills: f64,
+    pub lure_lit_s: f64,
+    pub eggs_drowned: f64,
+    pub eggs_dried: f64,
+    pub refuge_s: f64,
 }
 
 /// What a lineage is now: the census readouts the sim's study examples print.
@@ -258,6 +281,13 @@ pub struct FaunaModel {
     /// its first step (`pack_size` adults a pack, at least one), never more after (the sim
     /// founds packs and never splits one).
     pub packs: [Vec<PackState>; Founder::COUNT],
+    pub habitat: Option<super::behavior::Habitat>,
+    /// Diagnostic clamp or future daylight-lure switch input, lit fraction 0..1.
+    pub lure_lit_override: Option<f64>,
+    /// Historical pre-TASTE arm only; the normal model reads edible film.
+    pub edible_perception: bool,
+    /// Open-loop validation: offered intake per awake body-second, by food/lineage.
+    pub clamped_intake: Option<[[Option<f64>; Food::COUNT]; Founder::COUNT]>,
     last_daylight: Option<f64>,
     merge_clock: f64,
 }
@@ -346,6 +376,10 @@ impl FaunaModel {
             min_cohort: 0.01,
             merge_every_s: 60.0,
             packs: Default::default(),
+            habitat: None,
+            lure_lit_override: None,
+            edible_perception: true,
+            clamped_intake: None,
             last_daylight: None,
             merge_clock: 0.0,
         }
@@ -500,6 +534,7 @@ impl FaunaModel {
 
         // 1. Circadian state, upkeep, digestion and growth.
         let mut awake_of: Vec<Vec<f64>> = vec![Vec::new(); Founder::COUNT];
+        let habitat = self.habitat.clone();
         for f in Founder::ALL {
             if !self.enabled[f.index()] {
                 continue;
@@ -568,6 +603,7 @@ impl FaunaModel {
         }
         self.riders(dt);
         self.provision(dt, &awake_of);
+        self.behavior_response(dt, &awake_of);
         self.share_feasts();
 
         // 2. The act: feeding, then the hunt.
@@ -614,7 +650,7 @@ impl FaunaModel {
                     continue;
                 }
                 let own = if theta == 0.0 { s_theta } else { s_theta / c.b.body.max(1e-12).powf(theta) } / area;
-                let want = laws::bite_want(&phys, &c.b, dt) * a;
+                let want = laws::bite_want(&phys, &c.b, dt) * a * (1.0-c.response.hunker-c.response.flight).max(0.0);
                 if !(want > 0.0) {
                     continue;
                 }
@@ -627,6 +663,19 @@ impl FaunaModel {
                     } else {
                         fit.psi(food, density, own)
                     };
+                    if food == Food::Nectar && f == Founder::Bellwing {
+                        if let Some(env) = &habitat {
+                            psi[food.index()] = super::behavior::nectar_response(&self.config.light, &phys, c.b.body, left[food.index()], env.flowers, env.glowcaps, daylight, env.area);
+                        }
+                    }
+                    if food == Food::Film && f == Founder::RippleSnail && habitat.is_some() {
+                        if c.film_travel_s > 0.0 || c.film_patch.unwrap_or(0.0) <= 0.0 {psi[food.index()]=0.0;}
+                    }
+                    if let Some(clamp) = &self.clamped_intake {
+                        if let Some(rate) = clamp[f.index()][food.index()] {
+                            psi[food.index()] = (rate * dt * a / want).clamp(0.0,1.0);
+                        }
+                    }
                 }
                 let total: f64 = psi.iter().sum();
                 if !(total > 0.0) {
@@ -639,6 +688,9 @@ impl FaunaModel {
                         continue;
                     }
                     let mut bite = want * share;
+                    if food == Food::Film && f == Founder::RippleSnail {
+                        if let Some(env)=&habitat {bite=bite.min(c.film_patch.unwrap_or(0.0)*env.film_reference);}
+                    }
                     let from_carcass = hunter && food == Food::Carrion && c.carcass > 0.0;
                     let avail = if from_carcass { c.carcass } else { left[food.index()] };
                     bite = bite.min(avail / c.n.max(1e-12));
@@ -655,6 +707,11 @@ impl FaunaModel {
                     }
                     ret.litter += all * spill;
                     c.b.stomach[food.index()] += bite * (1.0 - spill);
+                    if food == Food::Film {
+                        if let (Some(fill), Some(env)) = (&mut c.film_patch, &habitat) {
+                            *fill = (*fill - bite/env.film_reference.max(f64::MIN_POSITIVE)).max(0.0);
+                        }
+                    }
                     self.ledger[f.index()].swallowed[food.index()] += all;
                 }
                 if laws::full(&phys, &c.b) {
@@ -663,10 +720,10 @@ impl FaunaModel {
             }
         }
         let habitat_area = self.habitat_areas(supply);
-        self.hunt(dt, &awake_of, &habitat_area, &mut ret);
+        self.hunt_synced(dt, &awake_of, &habitat_area, &mut ret);
 
         // 3. Births, then 4. deaths.
-        self.reproduce(dt, dusk, &mut ret);
+        self.reproduce_synced(dt, dusk, &awake_of, &mut ret);
         self.deaths(dt, &mut ret);
 
         // The hunters' fresh kills decay at the carrion rate, and are left to the carrion pool
@@ -780,7 +837,7 @@ impl FaunaModel {
     /// lineage's adults per pack). The share `reach` of the corpse goes to the killer cohort's
     /// carcass, the rest to the carrion pool; each kill costs `strikes_per_kill` strikes at
     /// `strike_cost_s` of awake upkeep (`Hunter::strike_cost_s`).
-    fn hunt(&mut self, dt: f64, awake_of: &[Vec<f64>], habitat_area: &[(f64, f64); Founder::COUNT], ret: &mut Returns) {
+    pub(super) fn hunt(&mut self, dt: f64, awake_of: &[Vec<f64>], habitat_area: &[(f64, f64); Founder::COUNT], ret: &mut Returns) {
         for hf in Founder::ALL {
             if !self.enabled[hf.index()] {
                 continue;
@@ -980,7 +1037,7 @@ impl FaunaModel {
     /// **Births** (`reproduce`, `step.rs:2808-2850`; `advance_eligibility`, `step.rs:2855-2879`;
     /// `lay`, `step.rs:3168-3313`; `gestate`, `step.rs:2883-3018`; `hatch`, `step.rs:3470-3515`;
     /// the dormant bank, `dormant_eggs`, `step.rs:3552-3637`).
-    fn reproduce(&mut self, dt: f64, dusk: bool, ret: &mut Returns) {
+    pub(super) fn reproduce(&mut self, dt: f64, dusk: bool, ret: &mut Returns) {
         // Clutches at term hatch; dormant eggs pay upkeep, die past viability, hatch at dusk.
         let mut hatchlings: Vec<(Founder, Cohort)> = Vec::new();
         let mut keep = Vec::with_capacity(self.eggs.len());
@@ -1212,7 +1269,7 @@ impl FaunaModel {
                             ret.carrion += lost * per_egg;
                             self.ledger[f.index()].eggs_lost += lost;
                         }
-                        self.eggs.push(EggCohort { lineage: f, n: laid - lost, organic: per_egg, age_s: 0.0, dormant: rule.dormant });
+                        self.eggs.push(EggCohort { lineage: f, n: laid - lost, organic: per_egg, age_s: 0.0, dormant: rule.dormant, ..Default::default() });
                     }
                 }
             }
@@ -1417,6 +1474,8 @@ impl FaunaModel {
             for o in out.iter_mut() {
                 if o.lineage == e.lineage
                     && o.dormant == e.dormant
+                    && o.wet_s == e.wet_s
+                    && o.dry_s == e.dry_s
                     && (o.organic - e.organic).abs() <= 1e-9 * o.organic.max(1e-12)
                     && (o.age_s - e.age_s).abs() <= EGG_MERGE_S
                 {
@@ -1566,6 +1625,10 @@ fn absorb(a: &mut Cohort, b: &Cohort) {
     a.refractory_s = w(a.refractory_s, b.refractory_s);
     a.retry_s = w(a.retry_s, b.retry_s);
     a.clutch_wait_s = w(a.clutch_wait_s, b.clutch_wait_s);
+    a.response.hunker = w(a.response.hunker, b.response.hunker);
+    a.response.flight = w(a.response.flight, b.response.flight);
+    a.film_patch = match (a.film_patch,b.film_patch) { (Some(x),Some(y))=>Some(w(x,y)), (x,y)=>x.or(y) };
+    a.film_travel_s = w(a.film_travel_s,b.film_travel_s);
     a.carcass += b.carcass;
     if b.n > a.n {
         a.window = b.window;

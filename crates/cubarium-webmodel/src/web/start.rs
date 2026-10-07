@@ -169,7 +169,7 @@ pub fn fauna(p: &Params, fits: Fits, census: &FaunaCensus, enabled: &[Founder], 
         if n == 0 {
             continue;
         }
-        m.eggs.push(EggCohort { lineage: f, n: f64::from(n), organic: organic / f64::from(n), age_s: census.tick.saturating_sub(laid) as f64 / hz, dormant });
+        m.eggs.push(EggCohort { lineage: f, n: f64::from(n), organic: organic / f64::from(n), age_s: census.tick.saturating_sub(laid) as f64 / hz, dormant, ..Default::default() });
     }
     m.t_s = census.tick as f64 / hz;
     m.merge_cohorts();
