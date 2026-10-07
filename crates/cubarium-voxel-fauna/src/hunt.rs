@@ -642,7 +642,9 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
     let ring = f64::from(view.config.width) * v;
     let geometry = phys.body_at(a.body);
     let mut m = a.hunt;
-    if mouth_on_carcass(fv, view, &a, &geometry) {
+    let above_meal = a.mobility.mode == crate::MobilityMode::Perched
+        && a.pose.y_m > crate::surface_m(a.site.y, v) + geometry.mouth_ceiling_m;
+    if !above_meal && mouth_on_carcass(fv, view, &a, &geometry) {
         m.mode = HuntMode::Meal;
         m.samples = 0;
         fauna.animals[i].hunt = m;
@@ -669,6 +671,15 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
             ((only.is_some() || d <= scan) && !a.hunt.is_fruitless(&cfg, x, z, tick, ring)).then_some((s, d))
         })
         .collect();
+    if above_meal {
+        // The catch fell to a support face. Descend to the nearest carcass it knows
+        // through the same perception scan; a crown cannot eat through empty air.
+        return near.iter().min_by(|x, y| x.1.total_cmp(&y.1)).map(|(site, _)| {
+            let (x, z) = centre(*site);
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
+            head(a.pose.heading_rad, dx.atan2(dz), fauna.config.teachers.stalk, 0.0)
+        });
+    }
     let leave = |fauna: &mut Fauna, mut m: HuntMemory| {
         if m.mode == HuntMode::Meal {
             m.mode = HuntMode::Idle;
@@ -923,6 +934,16 @@ pub(crate) fn steer(
         return Some((Actions { forward: 0.0, turn, feed: 1.0 }, lit));
     }
 
+    // MIMIC: the same patrol holds beside flowers by day, after prey and meals win.
+    if phys.lure_daylight
+        && fauna.night.since_set_h.is_infinite()
+        && view.config.day.mode != cubarium_voxel::weather::DayMode::Off
+    {
+        if let Some(go) = flower_ambush(fauna, i, view) {
+            return Some((go, if go.forward == 0.0 { lit } else { 0.0 }));
+        }
+    }
+
     // 3. The patrol.
     let forget_at = tick + cubarium_voxel::ticks_at_least_one(cfg.fruitless_memory_s);
     let mut m = fauna.animals[i].hunt;
@@ -985,4 +1006,211 @@ pub(crate) fn steer(
     fauna.animals[i].hunt = m;
     fauna.ledger.hunt_travel_samples += 1;
     Some((act, 0.0))
+}
+/// Choose a reachable flower-side patch instead of a dark detritivore patch by day.
+fn flower_ambush(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let phys = *fauna.config.founder(a.founder?);
+    let radius = phys.flower_ambush_m;
+    if radius <= 0.0 {
+        return None;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let light_m = fauna.config.founder(Founder::Bellwing).senses.light_m;
+    let mut flowers: Vec<_> = fauna
+        .beacons
+        .list()
+        .iter()
+        .filter(|b| b.kind == crate::light::BeaconKind::Flower)
+        .filter_map(|b| {
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, b.x, b.z, ring);
+            let d = dx.hypot(dz);
+            (d <= fauna.config.hunt.cue_scan_m).then_some((d, *b))
+        })
+        .collect();
+    flowers.sort_by(|x, y| {
+        x.0.total_cmp(&y.0)
+            .then(x.1.x.total_cmp(&y.1.x))
+            .then(x.1.z.total_cmp(&y.1.z))
+    });
+    let route = route_from(fauna, i, view);
+    for (d, b) in flowers {
+        if d <= radius && (b.y_m - a.pose.y_m).abs() <= light_m {
+            let m = &mut fauna.animals[i].hunt;
+            m.mode = HuntMode::Wait;
+            m.patch = (a.pose.x, a.pose.z);
+            m.samples = 0;
+            fauna.ledger.hunt_wait_samples += 1;
+            return Some(Actions {
+                forward: 0.0,
+                turn: 0.0,
+                feed: 1.0,
+            });
+        }
+        let goal = if let Some(r) = &route {
+            r.field
+                .keys()
+                .copied()
+                .filter_map(|j| {
+                    let site = r.graph.faces[j];
+                    let (x, z) = r.graph.centre(j);
+                    let (dx, dz) = crate::pose::wrapped_delta(x, z, b.x, b.z, ring);
+                    let d = dx.hypot(dz);
+                    (d <= radius && (b.y_m - crate::surface_m(site.y, v)).abs() <= light_m)
+                        .then_some((d, r.field[&j], j))
+                })
+                .min_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2)))
+                .map(|(_, _, j)| (r.graph.centre(j), Some(j)))
+        } else if !fauna.config.hunt.reachable_only && (b.y_m - a.pose.y_m).abs() <= light_m {
+            Some(((b.x, b.z), None))
+        } else {
+            None
+        };
+        let Some((patch, node)) = goal else { continue };
+        let go = match (&route, node) {
+            (Some(r), Some(j)) => waypoint(fauna, i, &r.graph, r.from, j, r.steps),
+            _ => patch,
+        };
+        let m = &mut fauna.animals[i].hunt;
+        m.mode = HuntMode::Travel;
+        m.patch = patch;
+        m.samples = 0;
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, go.0, go.1, ring);
+        fauna.ledger.hunt_travel_samples += 1;
+        return Some(head(
+            a.pose.heading_rad,
+            dx.atan2(dz),
+            fauna.config.teachers.stalk,
+            0.0,
+        ));
+    }
+    None
+}
+
+/// A fruit eater takes an insect in reach, or makes a bounded detour to sensed low visitors.
+pub(crate) fn catch_step(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let phys = *fauna.config.founder(a.founder?);
+    if !phys.catch_bellwings
+        || !a.eating
+        || a.attached.is_some()
+        || a.strike.is_some()
+        || a.mobility.climb.is_some()
+        || matches!(
+            a.mobility.mode,
+            crate::MobilityMode::Glide | crate::MobilityMode::Fly
+        )
+    {
+        return None;
+    }
+    if let Some(go) = meal_step(fauna, i, view, fv) {
+        return Some(go);
+    }
+    let h = phys.hunter?;
+    let geometry = phys.body_at(a.body);
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let target = fauna
+        .animals
+        .iter()
+        .filter(|o| o.founder == Some(Founder::Bellwing) && crate::is_prey_of(&fauna.config, &a, o))
+        .filter_map(|o| {
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+            let d = dx.hypot(dz);
+            let prey_radius = crate::body_of(&fauna.config, o)?.footprint_radius();
+            let reach = (h.jaw_forward_length_fraction + h.strike_reach_length_fraction)
+                * geometry.length_m
+                + geometry.footprint_radius()
+                + prey_radius;
+            (d <= reach).then_some((d, dx, dz, o.id))
+        })
+        .min_by(|x, y| x.0.total_cmp(&y.0).then(x.3.cmp(&y.3)));
+    let Some((_, dx, dz, id)) = target else {
+        return catch_foray(fauna, i, view, fv);
+    };
+    fauna.animals[i].hunt.mode = HuntMode::Wait;
+    fauna.animals[i].hunt.samples = 0;
+    crate::perception::approach(fauna, a.id, id);
+    Some(head(a.pose.heading_rad, dx.atan2(dz), 0.0, 1.0))
+}
+
+/// Fruit stays the staple. A hungry ground forager without fruit at its mouth
+/// makes a short detour only to a dense cluster it actually saw, at catch height.
+/// Fruitless detours use the same patch memory as ordinary hunting.
+fn catch_foray(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    if phys.catch_foray_m <= 0.0 || phys.catch_foray_s <= 0.0
+        || a.mobility.mode != crate::MobilityMode::Ground
+        || crate::step::glider_fruit_in_reach(view, fv, &a, &phys).is_some()
+    {
+        fauna.animals[i].hunt.samples = 0;
+        fauna.animals[i].hunt.mode = HuntMode::Idle;
+        return None;
+    }
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let cfg = fauna.config.hunt;
+    let now = fauna.tick;
+    let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
+    let p = fauna.percepts.get(&a.id)?;
+    let mut targets: Vec<_> = p.tracks.iter().take(usize::from(p.n))
+        .filter(|t| t.known && t.lineage == Founder::Bellwing.index() as u8
+            && t.modes & crate::perception::SIGHT != 0 && now.saturating_sub(t.tick) <= memory)
+        .filter_map(|t| {
+            let prey = fauna.animals.iter().find(|b| b.id == t.id)?;
+            if !crate::is_prey_of(&fauna.config, &a, prey)
+                || a.hunt.is_fruitless(&cfg, t.x, t.z, now, ring) { return None; }
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
+            let d = dx.hypot(dz);
+            (d <= phys.catch_foray_m).then_some((d, *t))
+        }).collect();
+    if targets.is_empty() || (targets.len() as f64) < phys.catch_foray_min {
+        fauna.animals[i].hunt.mode = HuntMode::Idle;
+        fauna.animals[i].hunt.samples = 0;
+        return None;
+    }
+    targets.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
+    let cadence_s = founder.manifest().cadence_ticks() as f64 / f64::from(crate::TICK_HZ);
+    if a.hunt.mode == HuntMode::Travel && a.hunt.samples >= samples_for(phys.catch_foray_s, cadence_s) {
+        let m = &mut fauna.animals[i].hunt;
+        m.remember_fruitless(a.hunt.patch.0, a.hunt.patch.1,
+            now + cubarium_voxel::ticks_at_least_one(cfg.fruitless_memory_s));
+        m.mode = HuntMode::Idle;
+        m.samples = 0;
+        return None;
+    }
+    let route = route_from(fauna, i, view);
+    let h = phys.hunter?;
+    let g = phys.body_at(a.body);
+    for (_, target) in targets {
+        let reach = (h.jaw_forward_length_fraction + h.strike_reach_length_fraction)*g.length_m;
+        let goal = if let Some(r) = &route {
+            r.field.keys().copied().filter_map(|j| {
+                let (x, z) = r.graph.centre(j);
+                let (dx, dz) = crate::pose::wrapped_delta(x, z, target.x, target.z, ring);
+                let dy = target.y_m - crate::surface_m(r.graph.faces[j].y, view.config.voxel_m);
+                (dx.hypot(dz) <= reach && dy <= phys.catch_ceiling_m
+                    && dy.abs() <= h.jaw_band_height_fraction*g.height_m)
+                    .then_some((r.field[&j], j))
+            }).min().map(|(_, j)| waypoint(fauna, i, &r.graph, r.from, j, r.steps))
+        } else if !cfg.reachable_only {
+            Some((target.x, target.z))
+        } else { None };
+        let Some((x, z)) = goal else { continue };
+        let m = &mut fauna.animals[i].hunt;
+        if m.mode != HuntMode::Travel { m.samples = 0; }
+        m.mode = HuntMode::Travel;
+        m.samples = m.samples.saturating_add(1);
+        m.patch = (target.x, target.z);
+        crate::perception::approach(fauna, a.id, target.id);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
+        return Some(head(a.pose.heading_rad, dx.atan2(dz), 1.0, 0.0));
+    }
+    None
 }

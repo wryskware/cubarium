@@ -102,6 +102,16 @@ pub(crate) fn is_prey_in_window(
     let Some(h) = config.founder(hf).hunter else {
         return false;
     };
+    if hf == crate::Founder::Seedporter {
+        let p = config.founder(hf);
+        if !p.catch_bellwings
+            || pf != crate::Founder::Bellwing
+            || prey.pose.y_m - hunter.pose.y_m > p.catch_ceiling_m
+            || !catch_worthwhile(config, hunter, prey)
+        {
+            return false;
+        }
+    }
     // A rider is no prey on its own and hunts nothing while it rides (parasite §2).
     if prey.attached.is_some() || hunter.attached.is_some() {
         return false;
@@ -383,4 +393,21 @@ mod hatch_tests {
             "{share} of the bank hatched at one dusk"
         );
     }
+}
+/// The existing hit and meal terms decide whether a small catch pays for its strikes.
+pub(crate) fn catch_worthwhile(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool {
+    let Some(hf) = hunter.founder else {
+        return false;
+    };
+    let p = config.founder(hf);
+    let Some(h) = p.hunter else { return false };
+    let armour = prey.founder.map_or(0.0, |pf| config.founder(pf).armour);
+    let damage = h.strike_power * hunter.body / prey.body.max(f64::MIN_POSITIVE) * (1.0 - armour);
+    if damage <= 0.0 {
+        return false;
+    }
+    let strikes = ((1.0 - prey.wound).max(0.0) / damage).ceil().max(1.0);
+    let cost = strikes * h.strike_cost_s * p.core.maintenance_per_s * hunter.body;
+    let meal = (prey.body + prey.reserve) * p.yield_by_food[crate::Food::Carrion.index()];
+    meal - cost > p.catch_gain_min
 }

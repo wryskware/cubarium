@@ -44,7 +44,7 @@ use cubarium_voxel_flora::{
 };
 
 use crate::{
-    Actions, Animal, Command, Diet, Fauna, FaunaConfig, Food, Founder, FounderPhysiology,
+    Actions, Animal, Command, Fauna, FaunaConfig, Food, Founder, FounderPhysiology,
     Founding, FoundingSite, GutSeeds, Hunter, MobilityMode, PerchAnchor, Pose, Scripted,
     StartingStores,
 };
@@ -400,14 +400,14 @@ fn the_seedporter_table_scales_the_browsers_and_glides() {
     let shredder = FounderPhysiology::frozen(Founder::Blind);
     let sp = FounderPhysiology::frozen(SP);
     let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
-    assert_eq!(sp.diet, Diet::only(Food::Fruit));
+    assert!(sp.diet.eats(Food::Fruit) && sp.diet.eats(Food::Carrion));
     let r = (x1.adult_length_m * x1.adult_width_m * x1.adult_height_m)
         / (grazer.adult_length_m * grazer.adult_width_m * grazer.adult_height_m);
     assert!(close(x1.core.body_max, grazer.core.body_max * r), "the browser's by volume");
     assert!(close(sp.wall_climb_cost_factor, shredder.wall_climb_cost_factor), "the shredder's climb cost");
     assert_eq!(sp.active, crate::Activity::Diurnal);
     assert_eq!((sp.founding, sp.founding_site), (Founding::Bodies, FoundingSite::AtFood));
-    assert!(sp.hunter.is_none());
+    assert!(sp.hunter.expect("the opportunistic insect catcher").hunts(Founder::Bellwing));
     assert!(sp.flight.is_none(), "it glides, it does not fly");
 
     let g = sp.glider.expect("the seedporter glides");
