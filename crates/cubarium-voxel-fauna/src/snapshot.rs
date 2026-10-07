@@ -105,7 +105,10 @@ use crate::Fauna;
 //     founding faces, route walks land on the route at a bend.
 // 57: BELLWING — `LightConfig::{lure_uv, lure_scent}` (the lure mimics a flower: UV and the
 //     nectar scent); the bellwing's r-strategist reproduction defaults.
-pub const SCHEMA: u32 = 57;
+// 58: EDGE and EDGE-2 — `TeacherConfig::{press_replan_s, press_shun_s, route_refresh_s,
+//     route_detour, way_on_m}`; reflex walks take reachable stands by the route, a pressed walk
+//     re-plans, a flight turns along the strip's end, a body caught in solid steps out.
+pub const SCHEMA: u32 = 58;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

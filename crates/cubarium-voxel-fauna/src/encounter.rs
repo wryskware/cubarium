@@ -669,7 +669,7 @@ impl RouteGraph {
                     continue;
                 }
                 let deep = water(n);
-                if deep > wade_m && deep > water(f) {
+                if deep > wade_m && deep > water(f) + crate::body::LEVEL_TOLERANCE_M {
                     continue;
                 }
                 let (cx, cz) = centre(n);
@@ -686,6 +686,68 @@ impl RouteGraph {
             }
         }
         None
+    }
+
+    /// Node `i`'s neighbours on the graph.
+    pub fn neighbours(&self, i: usize) -> &[usize] {
+        &self.adj[i]
+    }
+
+    /// **EDGE: the route from node `from` to node `goal`**, at most `max_steps` steps (one
+    /// node to a neighbouring column each): the nodes in order, `from` first and `goal`
+    /// last; `None` when the two are in different components or no route is that short.
+    /// A* on the columns walked, the wrapped x plus z span to the goal being a lower bound.
+    pub fn path(&self, from: usize, goal: usize, max_steps: u32) -> Option<Vec<usize>> {
+        if self.components[from] != self.components[goal] {
+            return None;
+        }
+        let w = i64::from(self.width);
+        let g = self.faces[goal];
+        let h = |i: usize| -> u32 {
+            let f = self.faces[i];
+            let dx = (i64::from(f.x) - i64::from(g.x)).rem_euclid(w);
+            (dx.min(w - dx) + (i64::from(f.z) - i64::from(g.z)).abs()) as u32
+        };
+        if h(from) > max_steps {
+            return None;
+        }
+        let mut best: FxHashMap<usize, (u32, usize)> = FxHashMap::default();
+        let mut open = std::collections::BinaryHeap::new();
+        best.insert(from, (0, from));
+        open.push(std::cmp::Reverse((h(from), 0u32, from)));
+        while let Some(std::cmp::Reverse((_, d, i))) = open.pop() {
+            if best.get(&i).is_some_and(|&(b, _)| b < d) {
+                continue;
+            }
+            if i == goal {
+                let mut out = vec![goal];
+                let mut k = goal;
+                while k != from {
+                    k = best[&k].1;
+                    out.push(k);
+                }
+                out.reverse();
+                return Some(out);
+            }
+            for &j in &self.adj[i] {
+                let dj = d + 1;
+                if dj + h(j) > max_steps || best.get(&j).is_some_and(|&(b, _)| b <= dj) {
+                    continue;
+                }
+                best.insert(j, (dj, i));
+                open.push(std::cmp::Reverse((dj + h(j), dj, j)));
+            }
+        }
+        None
+    }
+
+    /// EDGE: where a body standing on node `path[0]` at `xz` heads on `path` (a
+    /// [`RouteGraph::path`]): the farthest of its next `lookahead` nodes it can walk straight
+    /// to ([`RouteGraph::walk_line`]), else the next node.
+    pub fn waypoint(&self, path: &[usize], xz: (f64, f64), lookahead: usize) -> Option<(f64, f64)> {
+        let next = *path.get(1)?;
+        let far = path.iter().skip(2).take(lookahead.saturating_sub(1)).rev().find(|&&j| self.walk_line(path[0], xz, self.centre(j)));
+        Some(self.centre(*far.unwrap_or(&next)))
     }
 
     /// The centre of node `i`, metres `(x, z)`.

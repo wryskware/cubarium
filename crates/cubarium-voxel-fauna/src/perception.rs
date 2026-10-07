@@ -661,9 +661,14 @@ fn fold(fauna: &mut Fauna, id: u64, founder: Founder, tracks: &[Track], classes:
 /// lineage whose id falls on this tick of the stagger senses; the records are written in
 /// body order. Records of the dead are dropped.
 pub(crate) fn sense_pass(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: f64, threads: usize) {
-    if !fauna.percepts.is_empty() && fauna.tick % 64 == 0 {
+    if fauna.tick % 64 == 0 {
         let alive: rustc_hash::FxHashSet<u64> = fauna.animals.iter().map(|a| a.id).collect();
         fauna.percepts.retain(|id, _| alive.contains(id));
+        fauna.steer.retain(|id, _| alive.contains(id));
+        fauna.walk_targets.retain(|id, _| alive.contains(id));
+        fauna.pressed.retain(|id, _| alive.contains(id));
+        fauna.walk_shun.retain(|id, _| alive.contains(id));
+        fauna.route_flee.retain(|id, _| alive.contains(id));
     }
     let stagger = fauna.config.perception.stagger_ticks();
     let tick = fauna.tick;
