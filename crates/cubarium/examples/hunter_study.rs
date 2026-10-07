@@ -602,13 +602,16 @@ fn hunk_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
 /// failed, and the living bellwings' mean UV and cyan expectations now.
 /// **BELLWING: lure encounters**, sampled once a sim second: seconds with a lit lure (an
 /// awake lanternjaw's lure lit), with an awake bellwing in flight, with both, and with the
-/// nearest pair (3D, bellwing to lure point) within 4, 10 and 20 m.
+/// nearest pair (3D, bellwing to lure point) within 4, 10 and 20 m. LURE: bellwing-seconds
+/// alive and awake (any mode), for the awake share by hour of day.
 #[derive(Clone, Copy, Default)]
 struct LureMeet {
     lit_s: u64,
     bw_s: u64,
     both_s: u64,
     near: [u64; 3],
+    bw_body_s: u64,
+    bw_up_s: u64,
 }
 
 impl LureMeet {
@@ -631,6 +634,10 @@ impl LureMeet {
             .filter(|a| a.founder == Some(Founder::Bellwing) && a.state != cubarium_voxel_fauna::State::Asleep && a.mobility.mode == cubarium_voxel_fauna::MobilityMode::Fly)
             .map(|a| (a.pose.x, a.pose.z, a.pose.y_m))
             .collect();
+        for a in f.animals.iter().filter(|a| a.founder == Some(Founder::Bellwing)) {
+            self.bw_body_s += 1;
+            self.bw_up_s += u64::from(a.state != cubarium_voxel_fauna::State::Asleep);
+        }
         self.lit_s += u64::from(!lures.is_empty());
         self.bw_s += u64::from(!bws.is_empty());
         if lures.is_empty() || bws.is_empty() {
@@ -652,7 +659,10 @@ impl LureMeet {
     }
 
     fn line(&self) -> String {
-        format!("lit_s={},bw_awake_s={},both_s={},near4_s={},near10_s={},near20_s={}", self.lit_s, self.bw_s, self.both_s, self.near[0], self.near[1], self.near[2])
+        format!(
+            "lit_s={},bw_awake_s={},both_s={},near4_s={},near10_s={},near20_s={},bw_body_s={},bw_up_s={}",
+            self.lit_s, self.bw_s, self.both_s, self.near[0], self.near[1], self.near[2], self.bw_body_s, self.bw_up_s
+        )
     }
 }
 
@@ -1051,7 +1061,13 @@ fn run(args: &[String]) {
             println!("ffx,{arm},{minute},open_exits={},bared_entries={}", l.vigil.open_exits[GRAZER.index()] - lw.vigil.open_exits[GRAZER.index()], l.vigil.bared_entries[GRAZER.index()] - lw.vigil.bared_entries[GRAZER.index()]);
             println!("bwl,{arm},{minute},{}", bwl_line(&sim, &lw, &l));
             println!("meet,{arm},{minute},{}", meet_win.line());
-            for (x, y) in [(&mut meet_all.lit_s, meet_win.lit_s), (&mut meet_all.bw_s, meet_win.bw_s), (&mut meet_all.both_s, meet_win.both_s)] {
+            for (x, y) in [
+                (&mut meet_all.lit_s, meet_win.lit_s),
+                (&mut meet_all.bw_s, meet_win.bw_s),
+                (&mut meet_all.both_s, meet_win.both_s),
+                (&mut meet_all.bw_body_s, meet_win.bw_body_s),
+                (&mut meet_all.bw_up_s, meet_win.bw_up_s),
+            ] {
                 *x += y;
             }
             for k in 0..3 {
@@ -1284,8 +1300,13 @@ fn sample(
             free.iter().map(|x| x.reserve / p.core.reserve_of(x.body).max(1e-300)).sum::<f64>() / free.len() as f64
         }
     };
+    // LURE: the free lanternjaws' share on the emergency latch now.
+    let emergency = {
+        let free: Vec<_> = bodies(LJ).filter(|x| x.attached.is_none()).collect();
+        if free.is_empty() { f64::NAN } else { free.iter().filter(|x| x.emergency).count() as f64 / free.len() as f64 }
+    };
     println!(
-        "lj,{arm},{minute},n={n},adults={adults},juveniles={},riders={riders},min_n={},min_adults={},bank={bank},fullness={fullness:.3},{}",
+        "lj,{arm},{minute},n={n},adults={adults},juveniles={},riders={riders},min_n={},min_adults={},bank={bank},fullness={fullness:.3},lj_emergency={emergency:.3},{}",
         n - adults - riders,
         t.min_n.unwrap_or(0),
         t.min_adults.unwrap_or(0),
