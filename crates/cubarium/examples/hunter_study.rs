@@ -528,7 +528,7 @@ fn drop_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
 /// The Veilhound's window line, `a` → `b`.
 /// **PUP's readout**, cumulative since the run's start (`a`): the Veilhound's pups alive now with
 /// their body and reserve fraction (min / mean), the litters' fates (born, independent,
-/// starved, lost otherwise), the pups' income by source in organic units (their own bites,
+/// starved, lost otherwise; adults starved), the pups' income by source in organic units (their own bites,
 /// regurgitation by givers at or above `provision_reserve_fraction` and below it, the reserve
 /// fallback received), the upkeep the pups paid, ticks a giver withheld its meal, and the
 /// adults' mean reserve fraction now.
@@ -545,7 +545,7 @@ fn pup_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger) -> Str
     let ar: Vec<f64> = adults.iter().map(|x| frac(x)).collect();
     let min = |xs: &[f64]| xs.iter().copied().fold(f64::NAN, f64::min);
     format!(
-        "pups={},pup_body={:.3}/{:.3},pup_reserve={:.3}/{:.3},adults={},adult_reserve={:.3},born={},independent={},starved={},lost_other={},in_bites={:.4},in_regurg_surplus={:.4},in_regurg_lean={:.4},in_fallback={:.4},pup_upkeep={:.4},withheld_ticks={}",
+        "pups={},pup_body={:.3}/{:.3},pup_reserve={:.3}/{:.3},adults={},adult_reserve={:.3},adults_starved={},born={},independent={},starved={},lost_other={},in_bites={:.4},in_regurg_surplus={:.4},in_regurg_lean={:.4},in_fallback={:.4},pup_upkeep={:.4},withheld_ticks={}",
         pups.len(),
         min(&pb),
         mean(&pb),
@@ -553,6 +553,7 @@ fn pup_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger) -> Str
         mean(&pr),
         adults.len(),
         mean(&ar),
+        (b.departed_founder(ch, Departure::Starved) - a.departed_founder(ch, Departure::Starved)).saturating_sub(b.pups_starved - a.pups_starved),
         b.pups_born - a.pups_born,
         b.pups_independent - a.pups_independent,
         b.pups_starved - a.pups_starved,
