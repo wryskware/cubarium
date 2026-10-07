@@ -415,6 +415,15 @@ pub struct FounderPhysiology {
     /// Organic units: minimum carrion yield less the expected strikes' upkeep cost.
     #[serde(default)]
     pub catch_gain_min: f64,
+    /// Metres: radius in which sensed low bellwing clusters invite a foray (0 disables).
+    #[serde(default)]
+    pub catch_foray_m: f64,
+    /// Bodies: minimum nearby, sensed, profitable low bellwings to leave fruit search.
+    #[serde(default)]
+    pub catch_foray_min: f64,
+    /// Seconds: maximum fruit-search detour without a catch, then avoid its fruitless patch.
+    #[serde(default)]
+    pub catch_foray_s: f64,
     /// What upkeep costs while it sleeps, **× its basal upkeep**: 0.5 for endotherm-like
     /// lineages, 0.3 for the ectotherm-like shredder, ripple-snail, capgnawer and
     /// lanternjaw (`design/ecology-timescales-2026-10-02.md` 1a; provisional).
@@ -1644,6 +1653,9 @@ impl FounderPhysiology {
                 catch_bellwings: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
+                catch_foray_m: 0.0,
+                catch_foray_min: 2.0,
+                catch_foray_s: 8.0,
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -1723,6 +1735,9 @@ impl FounderPhysiology {
                 catch_bellwings: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
+                catch_foray_m: 0.0,
+                catch_foray_min: 2.0,
+                catch_foray_s: 8.0,
                 sleep_upkeep: SLEEP_UPKEEP,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -1823,6 +1838,9 @@ impl FounderPhysiology {
                 catch_bellwings: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
+                catch_foray_m: 0.0,
+                catch_foray_min: 2.0,
+                catch_foray_s: 8.0,
                 sleep_upkeep: SLEEP_UPKEEP_ECTOTHERM,
                 wake_hunger: WAKE_HUNGER,
                 emergency_clear_hunger: EMERGENCY_CLEAR_HUNGER,
@@ -2104,6 +2122,7 @@ impl FounderPhysiology {
                     active: crate::Activity::Diurnal,
                     diet: crate::Diet::of(&[crate::Food::Fruit, crate::Food::Carrion]),
                     catch_bellwings: true,
+                    catch_foray_m: 5.0,
                     hunter: Some(Hunter {
                         prey: [false, false, false, false, false, false, true, false, false],
                         strike_power: 4.0,

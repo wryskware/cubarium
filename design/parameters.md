@@ -1363,7 +1363,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2260 rows)
+**`fauna.*`** (2287 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1483,6 +1483,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.littershredder.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.littershredder.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.littershredder.catch_foray_m` | 0.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.littershredder.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.littershredder.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.littershredder.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.littershredder.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.littershredder.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -1712,6 +1715,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.frondgrazer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.frondgrazer.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.frondgrazer.catch_foray_m` | 0.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.frondgrazer.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.frondgrazer.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.frondgrazer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.frondgrazer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -1941,6 +1947,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.lanternjaw.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.lanternjaw.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.lanternjaw.catch_foray_m` | 0.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.lanternjaw.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.lanternjaw.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.lanternjaw.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.lanternjaw.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.lanternjaw.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -2170,6 +2179,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.capgnawer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.capgnawer.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.capgnawer.catch_foray_m` | 0.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.capgnawer.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.capgnawer.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.capgnawer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.capgnawer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.capgnawer.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -2399,6 +2411,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.loftstrider.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.loftstrider.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.loftstrider.catch_foray_m` | 0.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.loftstrider.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.loftstrider.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.loftstrider.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.loftstrider.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.loftstrider.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -2628,6 +2643,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.ripple-snail.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.ripple-snail.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.ripple-snail.catch_foray_m` | 0.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.ripple-snail.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.ripple-snail.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.ripple-snail.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.ripple-snail.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.ripple-snail.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -2857,6 +2875,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.bellwing.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.bellwing.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.bellwing.catch_foray_m` | 0.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.bellwing.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.bellwing.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.bellwing.active_window.before_rise_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.bellwing.active_window.after_set_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.bellwing.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -3086,6 +3107,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.seedporter.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.seedporter.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.seedporter.catch_foray_m` | 5.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.seedporter.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.seedporter.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.seedporter.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.seedporter.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.seedporter.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -3315,6 +3339,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.chorister.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
 | `fauna.founders.chorister.catch_gain_min` | 0.0 | organic units | [0, inf) |  | - | placeholder | MIMIC: minimum yield less expected strike upkeep cost |
+| `fauna.founders.chorister.catch_foray_m` | 0.0 | m | [0, inf) |  | - | placeholder | MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays |
+| `fauna.founders.chorister.catch_foray_min` | 2.0 | bodies | [0, inf) |  | - | placeholder | MIMIC-2: minimum sensed profitable visitors before a fruit-search detour |
+| `fauna.founders.chorister.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.chorister.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.chorister.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
 | `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
@@ -3604,7 +3631,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.light.mark_s` | 120.0 | s | [0, inf) | 10–1800 log | - | placeholder | a failed visit marks the place 'no reward here' for this long |
 | `fauna.light.mark_radius_m` | 0.5 | m | [0, inf) | 0.1–2 | - | placeholder | a mark covers beacons within this of its centre |
 | `fauna.light.lift_per_m` | 4.0 | lift per m | [0, inf) |  | - | placeholder | a flyer approaching a beacon climbs or drops toward its height at this lift per metre |
-| `fauna.light.near_m` | 1.0 | m | [0, inf) |  | - | placeholder | inside this of a beacon a flyer slows to near_forward |
+| `fauna.light.near_m` | 1.0 | m | [0, inf) |  | - | placeholder | inside this of a beacon it slows to near_forward; walkers also start the no-reward inspection timer |
 | `fauna.light.near_forward` | 0.3 | fraction | [0, 1] |  | - | placeholder | a flyer's forward effort near a beacon |
 | `fauna.light.glow_scent_gate` | 0.05 | chem response | [0, 1] | 0–0.5 | - | placeholder | a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this |
 | `fauna.light.uv_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a UV reflector (flowers); learned ones relax back to it |

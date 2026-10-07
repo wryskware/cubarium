@@ -828,33 +828,78 @@ pub(crate) fn steer_glow(
     // Food at its mouth: its forager eats, and an inspection that ends here is rewarded.
     if asked.feed > 0.5 {
         rewarded(fauna, a.id);
+        reset_glow_approach(fauna, i);
         return None;
     }
     let cfg = fauna.config.light;
     // Its chemistry leads; fed, it does not look.
     if !a.eating || fungal.is_some_and(|q| q >= cfg.glow_scent_gate) {
+        reset_glow_approach(fauna, i);
         return None;
     }
     refresh_light(fauna, i, view, fv, daylight);
     let p = *fauna.percepts.get(&a.id)?;
     if !p.light.beacon {
+        reset_glow_approach(fauna, i);
         return None;
     }
     let ring = f64::from(view.config.width) * view.config.voxel_m;
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, p.light.beacon_x, p.light.beacon_z, ring);
     let dh = (dx * dx + dz * dz).sqrt();
     let want = dx.atan2(dz);
-    fauna.ledger.beacon_samples[founder.index()] += 1;
-    if dh <= cfg.visit_m {
-        if let Inspection::Failed = inspect(fauna, i, ring) {
+    // Capgnawers do not patrol as hunters, so their existing hunt memory can hold
+    // a bounded light approach. Circling counts as movement: still_ticks cannot
+    // catch it. Allow one sensed-range traversal at cruise plus visit_s, then mark
+    // the unrewarded place just as a stalled bellwing does. No new saved state.
+    if founder == crate::Founder::Capgnawer {
+        let m = &mut fauna.animals[i].hunt;
+        let (px, pz) = crate::pose::wrapped_delta(m.patch.0, m.patch.1,
+            p.light.beacon_x, p.light.beacon_z, ring);
+        if m.mode != crate::HuntMode::Travel || px.hypot(pz) > cfg.mark_radius_m {
+            m.mode = crate::HuntMode::Travel;
+            m.samples = 0;
+            m.patch = (p.light.beacon_x, p.light.beacon_z);
+        }
+        let manifest = fauna.config.manifest(founder);
+        let travel_s = table.light_m / manifest.cruise_m_per_s.max(1e-9);
+        let cadence_s = manifest.cadence_ticks() as f64 / f64::from(crate::TICK_HZ);
+        let budget = ((travel_s + cfg.visit_s) / cadence_s).ceil().max(1.0);
+        if f64::from(m.samples) >= budget {
+            let rec = fauna.percepts.entry(a.id).or_default();
+            rec.mark(p.light.beacon_x, p.light.beacon_z,
+                fauna.tick + cubarium_voxel::ticks_at_least_one(cfg.mark_s));
+            rec.visit = Visit::default();
+            rec.light.beacon = false;
+            fauna.ledger.stalled_visits[founder.index()] += 1;
+            reset_glow_approach(fauna, i);
             return None;
         }
+        m.samples = m.samples.saturating_add(1);
+    }
+    fauna.ledger.beacon_samples[founder.index()] += 1;
+    // A walking body's centre need not reach the light: its footprint or turning
+    // circle can hold it just outside visit_m. Start the existing no-reward timer
+    // in the near band while it keeps approaching, so this cannot orbit forever.
+    if dh <= cfg.near_m.max(cfg.visit_m) {
+        if let Inspection::Failed = inspect(fauna, i, ring) {
+            reset_glow_approach(fauna, i);
+            return None;
+        }
+    }
+    if dh <= cfg.visit_m {
         let mut act = crate::hunt::head(a.pose.heading_rad, want, 0.0, 1.0);
         act.forward = 0.0;
         return Some(act);
     }
     let forward = if dh <= cfg.near_m { cfg.near_forward } else { 1.0 };
     Some(crate::hunt::head(a.pose.heading_rad, want, forward, 1.0))
+}
+
+fn reset_glow_approach(fauna: &mut Fauna, i: usize) {
+    if fauna.animals[i].founder == Some(crate::Founder::Capgnawer) {
+        fauna.animals[i].hunt.mode = crate::HuntMode::Idle;
+        fauna.animals[i].hunt.samples = 0;
+    }
 }
 
 /// Whether the body `id` is drawn to a lure now — inspecting one, or with a lure its

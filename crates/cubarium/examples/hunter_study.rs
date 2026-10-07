@@ -4806,19 +4806,28 @@ fn film_hist(args: &[String]) {
         println!("film,{name},total={:.4},faces<0.05={},<0.1={},<0.25={},<0.5={},>=0.5={}", tot[ci], h[ci][0], h[ci][1], h[ci][2], h[ci][3], h[ci][4]);
     }
 }
-/// MIMIC spatial probe: daytime habitats and separation, sampled once per simulated second.
+/// Apply the same plant/animal settings and controller restoration as the study run.
+fn mimic_configure(params: &Params, flora: &mut cubarium_voxel_flora::Flora, fauna: &mut Fauna) {
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(fauna, &[]).expect("controllers");
+}
+
+/// MIMIC spatial probe: habitats and encounters, sampled once per simulated second.
 fn mimic_probe(args: &[String]) {
     let params = resolve(args);
     let s = cubarium_voxel_sim::saved::load(Path::new(arg(args, "load=").expect("load=")), &[])
         .expect("load");
-    let (world, flora, mut fauna) = (s.world, s.flora, s.fauna);
-    fauna.replace_config(params.fauna.clone()).expect("config");
-    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("controllers");
+    let (world, mut flora, mut fauna) = (s.world, s.flora, s.fauna);
+    mimic_configure(&params, &mut flora, &mut fauna);
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     let seconds: u64 = arg(args, "seconds=").map_or(300, |s| s.parse().unwrap());
     let mut samples: [Vec<f64>; 6] = Default::default();
     let mut counts = [0u64; 4];
-    for _ in 0..seconds {
+    let mut encounters = [0u64; 3];
+    let mut cap_light = [0u64; 3];
+    let mut forays = [0u64; 2];
+    for second in 0..seconds {
         for _ in 0..TICK_HZ {
             sim.step();
         }
@@ -4851,6 +4860,22 @@ fn mimic_probe(args: &[String]) {
             .filter(|st| st.nectar > 0.0)
             .map(|st| ((st.site.x as f64 + 0.5) * v, (st.site.z as f64 + 0.5) * v))
             .collect();
+        let lures = cubarium_voxel_fauna::light::lures(sim.fauna(), &view);
+        for a in f.animals.iter().filter(|a| a.founder == Some(Founder::Capgnawer)) {
+            if let Some(p) = sim.fauna().percept(a.id) {
+                cap_light[0] += 1;
+                cap_light[1] += u64::from(p.light.beacon);
+                cap_light[2] += u64::from(p.visit.active);
+                if second % 60 == 0 {
+                    let (dx, dz) = wdelta(a.pose.x, a.pose.z, p.light.beacon_x, p.light.beacon_z, ring);
+                    let nearest = lures.iter().map(|b| {
+                        let (dx, dz) = wdelta(a.pose.x, a.pose.z, b.x, b.z, ring);
+                        dx.hypot(dz)
+                    }).min_by(f64::total_cmp).unwrap_or(f64::NAN);
+                    println!("captrace,s={},id={},x={:.3},z={:.3},y={:.3},state={:?},steer={:?},beacon={},kind={},d={:.3},lure_d={:.3},visit={},failed={}", second+1,a.id,a.pose.x,a.pose.z,a.pose.y_m,a.state,sim.fauna().steer_of(a.id),p.light.beacon,p.light.beacon_kind,dx.hypot(dz),nearest,p.visit.active,f.ledger.failed_visits[Founder::Capgnawer.index()][2]);
+                }
+            }
+        }
         for a in &ljs {
             let sky = view.sky_visibility(a.site.x as i64, a.sense_layer(v), a.site.z);
             samples[0].push(sky * day);
@@ -4890,11 +4915,35 @@ fn mimic_probe(args: &[String]) {
             .filter(|a| a.founder == Some(Founder::Seedporter))
         {
             counts[3] += 1;
+            forays[0] += u64::from(a.mobility.mode == cubarium_voxel_fauna::MobilityMode::Ground);
+            forays[1] += u64::from(a.hunt.mode == cubarium_voxel_fauna::HuntMode::Travel);
+            let phys = f.config.founder(Founder::Seedporter);
+            if let Some(h) = phys.hunter {
+                let g = phys.body_at(a.body);
+                let mut in_reach = false;
+                let mut below = false;
+                let mut jaw = false;
+                for b in &bws {
+                    let (dx, dz) = wdelta(a.pose.x, a.pose.z, b.pose.x, b.pose.z, ring);
+                    let bg = f.config.founder(Founder::Bellwing).body_at(b.body);
+                    let reach = (h.jaw_forward_length_fraction + h.strike_reach_length_fraction)*g.length_m + g.footprint_radius() + bg.footprint_radius();
+                    let dy = b.pose.y_m - a.pose.y_m;
+                    in_reach |= dx.hypot(dz) <= reach;
+                    below |= dx.hypot(dz) <= reach && dy <= phys.catch_ceiling_m;
+                    jaw |= dx.hypot(dz) <= reach && dy <= phys.catch_ceiling_m && dy.abs() <= h.jaw_band_height_fraction*g.height_m;
+                }
+                encounters[0] += u64::from(in_reach);
+                encounters[1] += u64::from(below);
+                encounters[2] += u64::from(jaw);
+            }
+
             if let Some(d) = bws.iter().map(|b| distance(a, b)).min_by(f64::total_cmp) {
                 samples[3].push(d);
             }
         }
     }
+    println!("foray,sp_ground_s={},sp_foray_s={}",forays[0],forays[1]);
+    println!("encounter,sp_day_s={},reach_s={},reach_below_ceiling_s={},reach_jaw_band_s={},cap_samples={},cap_beacon_s={},cap_visit_s={}", counts[3],encounters[0],encounters[1],encounters[2],cap_light[0],cap_light[1],cap_light[2]);
     for (name, mut values) in [
         "lj_face_light",
         "bw_face_light",
@@ -4935,5 +4984,27 @@ fn mimic_probe(args: &[String]) {
             l.eaten_carrion_by_founder[f.index()],
             l.departed_founder(Founder::Bellwing, Departure::Killed { by: f })
         );
+    }
+}
+
+#[cfg(test)]
+mod mimic_setup_tests {
+    use super::*;
+
+    #[test]
+    fn mimic_probe_applies_the_arms_flora_and_fauna_config() {
+        let args = vec![format!("config={}/../../config/desktop/terrarium.toml", env!("CARGO_MANIFEST_DIR")),
+            "set=flora.lanternberry.fruit_per_s=0.0".to_string(),
+            "set=fauna.founders.seedporter.catch_foray_m=3.0".to_string()];
+        let params = resolve(&args);
+        let mut initial = params.flora_for_world();
+        initial.lanternberry.fruit_per_s = 0.001;
+        let mut flora = cubarium_voxel_flora::Flora::new(initial);
+        let mut initial = params.fauna.clone();
+        initial.founders[Founder::Seedporter.index()].catch_foray_m = 0.0;
+        let mut fauna = Fauna::new(initial);
+        mimic_configure(&params, &mut flora, &mut fauna);
+        assert_eq!(flora.config().lanternberry.fruit_per_s, params.flora_for_world().lanternberry.fruit_per_s);
+        assert_eq!(fauna.config().founder(Founder::Seedporter).catch_foray_m, params.fauna.founder(Founder::Seedporter).catch_foray_m);
     }
 }

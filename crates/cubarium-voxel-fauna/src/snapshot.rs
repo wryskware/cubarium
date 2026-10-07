@@ -119,7 +119,8 @@ use crate::Fauna;
 // 62: FEAR and FEAR-2 — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg, lost_calm_s}`,
 //     `Vigil::{calm_walk, refuge}`, `Track::posture`; prey watch a sleeping or still Veilhound
 //     facing away, a flight ends in a perch or once its hunter is lost.
-// 63: MIMIC — FounderPhysiology daytime lure/flower ambush and opportunistic catch config.
+// 63: MIMIC and MIMIC-2 — FounderPhysiology daytime lure/flower ambush, opportunistic
+//     catch and bounded, density-led catch foray config.
 pub const SCHEMA: u32 = 63;
 
 #[derive(Serialize, Deserialize)]
