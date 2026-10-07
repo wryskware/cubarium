@@ -870,6 +870,10 @@ fn run(args: &[String]) {
     let (mut strk_win, mut strk_all, mut strk_on) = (Contact::default(), Contact::default(), rustc_hash::FxHashSet::default());
     let mut stuck = Stuck { log: arg(args, "wedge_log=") == Some("1"), ..Stuck::default() };
     let mut wedge = Wedge::default();
+    // EDGE: bodies born by lineage (a new id), against the ids standing at the start.
+    let mut seen: rustc_hash::FxHashSet<u64> = sim.fauna().view().animals.iter().map(|a| a.id).collect();
+    let mut born = [0u64; 9];
+    let life0 = sim.fauna().view().ledger.clone();
     let vh_cadence = params.fauna.manifest(VH).cadence_ticks().max(1);
     let mut ends = Ends { log: arg(args, "ends_log=") == Some("1"), oor: sim.fauna().view().ledger.pack_out_of_reach, ..Ends::default() };
     sample(&sim, &params, &arm, minute0, &lw, &lw, &win, &mut track, 0, 0.0);
@@ -883,6 +887,9 @@ fn run(args: &[String]) {
             }
             for a in sim.fauna().view().animals {
                 if let Some(f) = a.founder {
+                    if seen.insert(a.id) {
+                        born[f.index()] += 1;
+                    }
                     win[f.index()].body_ticks += 1;
                     if f == VH {
                         vh_win.alive_ticks += 1;
@@ -1020,6 +1027,21 @@ fn run(args: &[String]) {
     println!("sumstuck,{arm},{},{}", minute0, Stuck::line(&stuck.all, vh_cadence));
     println!("sumwedge,{arm},{},{}", minute0, wedge.line(true));
     println!("sumwedgewhy,{arm},{},{}", minute0, wedge.why_line());
+    // EDGE: per lineage, the founder-hours alive, the organic swallowed per alive hour (its
+    // intake) and the bodies born over the run.
+    {
+        let l = sim.fauna().view().ledger.clone();
+        let parts: Vec<String> = Founder::ALL
+            .iter()
+            .map(|f| {
+                let k = f.index();
+                let h = (l.alive_ticks_by_founder[k] - life0.alive_ticks_by_founder[k]) as f64 / f64::from(TICK_HZ) / 3600.0;
+                let eat = l.swallowed_by_founder[k] - life0.swallowed_by_founder[k];
+                format!("{}=alive_h:{h:.2}/intake_per_h:{:.5}/born:{}", f.name(), if h > 0.0 { eat / h } else { f64::NAN }, born[k])
+            })
+            .collect();
+        println!("sumlife,{arm},{},{}", minute0, parts.join(","));
+    }
     /*PT{*/
     println!("sumptune,{arm},{},break_offs={},declined={},switches={}", minute0, l.pack_break_offs - l0.pack_break_offs, l.pack_declined - l0.pack_declined, l.pack_switches - l0.pack_switches);
     /*}PT*/
