@@ -72,6 +72,12 @@ fn index(fauna: &Fauna, id: u64) -> usize {
 /// nectar scent laid round it (no flower anywhere), and the lure's place marked by a failed
 /// visit. The light rule passes the marked lure by; the bellwing's answer must not lead it
 /// back toward the marked place. (The control, no mark: the lure is its beacon.)
+///
+/// FINDING (evidence): marked, `beacon` is false and step 6 answers forward 1.0, turn -0.096
+/// (straight at the lure), one scent-led sample. Marks are read only by the light rule
+/// (light.rs:527); the smell step (light.rs:771-779) has no mark check. Flowers lay scent only
+/// while they hold nectar; the lure lays it with none. Decision: skip a smell lead under a mark,
+/// or accept that the mimic's scent overrides it.
 #[test]
 #[ignore = "FINDING: the lure's nectar scent leads a bellwing straight back to a lure it has marked as a failed visit; S3b's smell step reads no mark"]
 fn a_failed_visit_mark_on_a_lure_holds_against_the_lures_scent() {
@@ -255,6 +261,11 @@ fn the_ledgers_close_through_a_lure_kill() {
 /// **A bellwing killed inspecting a lure is booked a lure kill** (`FaunaLedger::lure_kills`,
 /// the readout BELLWING's table reads): the same kill, the bellwing's lure visit open when the
 /// strike began.
+///
+/// FINDING (evidence, traced): the visit opens at the windup (kind lure); at the lunge the loom
+/// (0.08 -> 0.42) closes it through `rewarded` (light.rs:715-719) and the lunging lure is no
+/// still beacon; the kill reads `drawn_to_lure` false (step.rs:2606, light.rs:837), so
+/// `lure_kills` stays 0. Decision: remember the lure draw at the strike's start for the readout.
 #[test]
 #[ignore = "FINDING: a bellwing killed at a lure is not booked a lure kill: the lunge's loom closes its visit and the lunging lure is no still beacon, so drawn_to_lure is false at the kill"]
 fn a_bellwing_killed_inspecting_a_lure_is_booked_a_lure_kill() {

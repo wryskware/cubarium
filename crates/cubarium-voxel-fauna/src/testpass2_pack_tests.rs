@@ -199,6 +199,12 @@ fn breakaway(contact: bool) -> (bool, usize, f64) {
 /// pack that never reached its grazer, keeps it over three give-ups while it closes; the same
 /// pack after a contact (its nearest-so-far a metre or less) is weighed against that contact
 /// distance, so its renewed closing never counts and the chase goes late on the first give-up.
+///
+/// FINDING (evidence): after contact the pack closed 0.52 m in the next second and the chase
+/// ended `Late` (kept false, 1 late end); the control kept it over 3 s and closed over 1 m.
+/// Progress is `d <= best_m - chase_progress_m` (pack.rs:1505) against the chase's all-time
+/// nearest, so after a close-in no renewed closing counts and `late` (pack.rs:1519) fires one
+/// give-up after the breakaway. Decision: reset or window the nearest-so-far when the gap opens.
 #[test]
 #[ignore = "FINDING: CHURN's progress is measured against the chase's all-time nearest, so a prey that breaks away after contact is dropped late while the pack closes on it again"]
 fn a_target_that_breaks_away_after_contact_is_kept_while_the_pack_closes_on_it_again() {
@@ -560,6 +566,11 @@ fn carcass_at(flora: &mut Flora, x_m: f64, z_m: f64, organic: f64) -> Site {
 /// it, where the whelping rule keeps the breeder. The control (no litter carried) walks to it
 /// and eats within the walk's bound; carrying a litter it must eat too — its pups, at the same
 /// den, would.
+///
+/// FINDING (evidence): carrying, it never ate within the bound (it stands); the control ate.
+/// The whelping branch (pack.rs:1413-1424) returns before the feast step (pack.rs:1654-1696) and
+/// HUNTER-MEAL's meal step (pack.rs:1700-1704); only the emergency latch releases it. Decision:
+/// let a carrying breeder eat within `den_radius_m`, as its pups do (pack.rs:1375-1386).
 #[test]
 #[ignore = "FINDING: whelp_at_den holds a hungry pregnant breeder within half its den radius ahead of HUNTER-MEAL's carcass step, so it does not eat a carcass lying inside its den radius"]
 fn a_hungry_breeder_carrying_a_litter_eats_a_carcass_lying_at_its_den() {
@@ -794,6 +805,12 @@ fn every_new_state_field_and_knob_round_trips_a_snapshot() {
 /// a grazer it shuns (as a herd-mate left with a dropped armoured target), 6 m off: its leader's
 /// sample takes no target and records no draw to that grazer. The control, the same grazer not
 /// shunned, is drawn to or taken.
+///
+/// FINDING (evidence): shunned, the grazer is not taken (the choice skips it, pack.rs:1131) but
+/// `drawn == Some(grazer)`; draw_step filters only the abandoned target (pack.rs:927). After
+/// STRIKE-2's leave_herd the draw leads the pack back to the herd it left. One-line candidate
+/// `|| shuns(fauna, own, k.id)` at pack.rs:927, not applied (whether a shunned herd still draws
+/// is a design call).
 #[test]
 #[ignore = "FINDING: the draw (draw_step) skips only the abandoned target, not the shun list, so a pack is drawn back to herd-mates STRIKE-2 just shunned"]
 fn a_packs_draw_does_not_lead_it_to_a_prey_it_shuns() {
