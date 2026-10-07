@@ -167,6 +167,7 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
     fauna.tick += 1;
     let tick = fauna.tick;
     let view = world.view();
+    fauna.world_geometry = Some((f64::from(view.config.width) * view.config.voxel_m, view.config.voxel_m));
     let seed = view.config.seed;
     // Dusk (the egg bank's hour, predation §2.13): the tick the world's daylight first
     // falls below the day line, with the clock on.
@@ -2837,7 +2838,13 @@ fn strike_tick(
                 crate::vigil::Guard::Shield(shield) => crate::dodges(shield, seed ^ GLANCE_KEY, a.id, p.id, tick),
                 _ => false,
             };
-            if glanced {
+            // HERD: a closed adult between the jaw and its calf obstructs the lunge.
+            // Its own keyed draw avoids changing the existing shield/dodge draws.
+            let exposure = crate::vigil::shelter_exposure(fauna, &p, &a, f64::from(view.config.width) * view.config.voxel_m, view.config.voxel_m);
+            let covered = crate::dodges(1.0 - exposure, seed ^ 0x5348_454C_5445_5200, a.id, p.id, tick);
+            if covered {
+                // A missed reach: no damage, no body transfers, and normal recovery below.
+            } else if glanced {
                 fauna.ledger.vigil.glances[pf.index()] += 1;
             } else if crate::dodges(chance, seed, a.id, p.id, tick) {
                 fauna.ledger.dodges_by_founder[founder.index()] += 1;
@@ -2917,6 +2924,13 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
         if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id, f) {
             fauna.ledger.naive_kills[by.index()][f.index()] += 1;
         }
+    }
+    if let (Departure::Killed { by }, Some(Founder::Browser)) = (cause, fauna.animals[j].founder) {
+        let prey = &fauna.animals[j];
+        let posture = if prey.body < fauna.config.founder(Founder::Browser).core.birth_body {
+            if fauna.world_geometry.is_some_and(|(ring, vm)| crate::vigil::sheltered(fauna, prey, ring, vm)) { 0 } else { 1 }
+        } else if prey.hunkered { 2 } else if fauna.percept(prey.id).is_some_and(|p| p.vigil.running(fauna.tick)) { 3 } else { 4 };
+        fauna.ledger.vigil.grazer_kills_by_posture[by.index()][posture] += 1;
     }
     let a = fauna.animals.remove(j);
     fauna.controllers.take(a.id);

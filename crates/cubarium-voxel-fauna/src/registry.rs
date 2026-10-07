@@ -303,6 +303,12 @@ fn founder_rows() -> Vec<Row> {
         r("vigilance.calm_facing_deg", "deg", nonneg, "FEAR: a still hunter heading within this of the bearing to it faces it (a threat)"),
         r("vigilance.lost_calm_s", "s", nonneg, "FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never)"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
+        r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
+        r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),
+        r("hunker.escape_probe_m", "m", nonneg, "HERD: motor walk distance checking a blocked escape (0 off)"),
+        r("hunker.shelter_seek_m", "m", nonneg, "HERD: seek a known closed adult within this"),
+        r("hunker.shelter_margin_m", "m", nonneg, "HERD: gap beyond summed footprints and base height tolerance for shelter"),
+        r("hunker.shelter_exposure", "fraction", fraction, "HERD: fraction of strikes that reach a juvenile behind an adult shield"),
         r("hunker.enter_m", "m", nonneg, "HUNKER: it clamps down under its shield at an approaching threat within this"),
         r("hunker.leave_m", "m", nonneg, "HUNKER: ...and comes out once none has been within this for the calm"),
         r("hunker.calm_s", "s", nonneg, "HUNKER: the calm at full condition"),

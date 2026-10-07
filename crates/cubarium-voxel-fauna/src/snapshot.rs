@@ -119,7 +119,9 @@ use crate::Fauna;
 // 62: FEAR and FEAR-2 — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg, lost_calm_s}`,
 //     `Vigil::{calm_walk, refuge}`, `Track::posture`; prey watch a sleeping or still Veilhound
 //     facing away, a flight ends in a perch or once its hunter is lost.
-pub const SCHEMA: u32 = 62;
+// 63: HERD — Hunker run/catch/shelter config; VigilLedger runs_to_hunker and exact
+//     grazer kill classes. Shelter is derived from live geometry, not a saved flag.
+pub const SCHEMA: u32 = 63;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

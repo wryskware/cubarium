@@ -241,7 +241,7 @@ fn a_sleeping_veilhound_does_not_hunker_a_frondgrazer_and_an_approaching_one_doe
     let world = world(45);
     let flora = Flora::new(FloraConfig::default());
     let mut c = config(true, 0.5, 30.0);
-    c.founders[GRAZER.index()].hunker = crate::vigil::hunker_of(GRAZER);
+    c.founders[GRAZER.index()].hunker = crate::Hunker { herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
     c.founders[GRAZER.index()].senses =
         SenseTable { live: true, sight_m: 6.0, sight_night_m: 6.0, sight_still_fraction: 1.0, sight_half_angle_deg: 180.0, ..SenseTable::default() };
     let enter = c.founder(GRAZER).hunker.enter_m;

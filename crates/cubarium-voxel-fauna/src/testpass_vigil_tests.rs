@@ -49,7 +49,7 @@ fn flight_only(start: f64, stop: f64, calm_s: f64) -> Vigilance {
 /// A hunker entered at `enter`, left beyond `leave` after `calm_s`, hunger not shortening the
 /// calm, no condition floor; the rest the lineage's.
 fn hunker(enter: f64, leave: f64, calm_s: f64) -> Hunker {
-    Hunker { enabled: true, enter_m: enter, leave_m: leave, calm_s, hunger_calm_exp: 0.0, min_condition: 0.0, ..crate::vigil::hunker_of(GRAZER) }
+    Hunker { enabled: true, enter_m: enter, leave_m: leave, calm_s, hunger_calm_exp: 0.0, min_condition: 0.0, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) }
 }
 
 fn body(fauna: &mut Fauna, world: &World, f: Founder, x: f64, heading: f64, speed: f64) -> u64 {
@@ -523,7 +523,7 @@ fn sure_dodger(c: &mut FaunaConfig) {
 fn a_hunkered_grazer_never_dodges_even_when_it_would_dodge_every_strike_open() {
     let edit = |c: &mut FaunaConfig| {
         sure_dodger(c);
-        c.founders[GRAZER.index()].hunker = Hunker { enabled: true, shield: 0.0, ..crate::vigil::hunker_of(GRAZER) };
+        c.founders[GRAZER.index()].hunker = Hunker { enabled: true, shield: 0.0, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
     };
     let (hits_open, dodges_open, _, _) = strike_on(false, false, edit);
     assert_eq!((hits_open, dodges_open), (0, 1), "control: open, it dodges");
@@ -540,7 +540,7 @@ fn a_turned_over_grazer_takes_the_strike_without_its_armour() {
     let edit = |c: &mut FaunaConfig| {
         sure_dodger(c);
         c.founders[GRAZER.index()].armour = armour;
-        c.founders[GRAZER.index()].hunker = Hunker { enabled: true, shield: 0.0, ..crate::vigil::hunker_of(GRAZER) };
+        c.founders[GRAZER.index()].hunker = Hunker { enabled: true, shield: 0.0, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
     };
     let (_, _, _, shielded) = strike_on(true, false, edit);
     let (_, dodges, glances, bared) = strike_on(true, true, edit);
@@ -555,7 +555,7 @@ fn a_turned_over_grazer_takes_the_strike_without_its_armour() {
 fn a_certain_shield_turns_every_strike() {
     let edit = |c: &mut FaunaConfig| {
         sure_dodger(c);
-        c.founders[GRAZER.index()].hunker = Hunker { enabled: true, shield: 1.0, wound_opens: 0.0, ..crate::vigil::hunker_of(GRAZER) };
+        c.founders[GRAZER.index()].hunker = Hunker { enabled: true, shield: 1.0, wound_opens: 0.0, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
     };
     let (hits, dodges, glances, wound) = strike_on(true, false, edit);
     assert_eq!((hits, dodges, glances), (0, 0, 1));
