@@ -94,11 +94,16 @@ use crate::Fauna;
 //     branch unmerged): `Pack::switch_stall_s`; a switch only after that long stalled.
 //     STRIKE (same 53, the branch unmerged): `Pack::{close_in_m, stand_off_reach_fraction}`,
 //     the ledger's `pack_close_in_samples, pack_step_offs, pack_pivots, pack_out_of_reach`.
-//     STRIKE-2 (same 53, the branch unmerged): `Pack::herd_shun_m`.
-// 54: PIT (the branch unmerged; the parent renumbers at merge) — `Pack::pit_search_m`.
-// 55: PIT-2 (the branch unmerged; the parent renumbers at merge) —
-//     `Pack::{route_swing_voxels, whelp_at_den}`.
-pub const SCHEMA: u32 = 55;
+// 54: LIFE-HISTORY — `Reproduction::{litters_per_year, breeding_phase, breeding_window,
+//     gestation_upkeep_factor}`, `Pack::{breed_reserve_fraction, litter_by_condition}`,
+//     `ReproductionState::season` and `PackRecord::season` (`Season`), the ledger's
+//     `pups_independent` and `season_waits`; the Veilhound's season, gestation and rearing.
+// 55: STRIKE-2 — `Pack::herd_shun_m`; a member out of its target's jaw band steps to a level
+//     that meets it, and a pack that drops an armoured target leaves its armoured herd-mates.
+// 56: PIT and PIT-2 — `Pack::{pit_search_m, route_swing_voxels, whelp_at_den}`; a pup or a
+//     Veilhound going home follows the route, a body off its graph walks back on, dens on
+//     founding faces, route walks land on the route at a bend.
+pub const SCHEMA: u32 = 56;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

@@ -191,6 +191,10 @@ fn pack_world(n: f64, litter_max: u32, draws: Draws) -> (FaunaModel, Params) {
     let mut p = clock_off();
     let vh = Founder::Chorister;
     p.fauna.founders[vh.index()].pack.as_mut().unwrap().litter_size_max = litter_max;
+    // The interval rule alone (no LIFE-HISTORY season, the drawn litter of 2 up).
+    p.fauna.founders[vh.index()].core.reproduction.litters_per_year = 0;
+    p.fauna.founders[vh.index()].pack.as_mut().unwrap().litter_by_condition = false;
+    p.fauna.founders[vh.index()].pack.as_mut().unwrap().breed_reserve_fraction = 0.0;
     let mut m = FaunaModel::new(&p, Fits::unfitted(), 1.0);
     m.draws = draws;
     only(&mut m, &[vh]);
@@ -364,6 +368,10 @@ fn the_ledger_closes_with_the_pack() {
         let mut p = Params::defaults();
         p.world.day = DayClock::default();
         let vh = Founder::Chorister;
+        // Litters inside the hour (LIFE-HISTORY's season and gestation would put the first
+        // after it): no season and a short gestation, so the pack provisions its young.
+        p.fauna.founders[vh.index()].core.reproduction.litters_per_year = 0;
+        p.fauna.founders[vh.index()].core.reproduction.gestation_s = 180.0;
         let mut fits = Fits::recorded();
         let mut rule = HunterFit { kill: [0.0; Founder::COUNT], reach: 1.0, meal_cap: 0.2, strikes_per_kill: 2.0, encounter: Encounter::Floor };
         rule.kill[Founder::Browser.index()] = 1e-3;
@@ -395,4 +403,67 @@ fn the_ledger_closes_with_the_pack() {
         let l = &m.ledger[vh.index()];
         assert!(l.kills > 0.0 && l.provision_given > 0.0, "kills {} provision {}", l.kills, l.provision_given);
     }
+}
+
+/// **LIFE-HISTORY in the model** (`conceive_litters`, as the sim's `gestate`): a pack with a
+/// breeding season conceives only inside its window and at most `litters_per_year` times a
+/// year (here one pack, one a year, over three short years), and a breeder under
+/// `breed_reserve_fraction` of its cap does not conceive.
+#[test]
+fn a_seasonal_pack_conceives_inside_its_window_once_a_year() {
+    let vh = Founder::Chorister;
+    let (phase, window) = (0.5, 0.2);
+    let run = |reserve_fraction: f64| -> Vec<(i64, f64)> {
+        let mut p = clock_off();
+        p.world.day.length_min = 10.0;
+        p.world.climate.dry_season_every_days = 1.0;
+        p.world.climate.dry_season_phase_days = 0.0;
+        {
+            let f = &mut p.fauna.founders[vh.index()];
+            let r = &mut f.core.reproduction;
+            r.litters_per_year = 1;
+            r.breeding_phase = phase;
+            r.breeding_window = window;
+            r.surplus_hold_s = 10.0;
+            r.gestation_s = 20.0;
+            r.birth_interval_s = 1.0;
+            let t = f.pack.as_mut().unwrap();
+            t.pack_size = 4;
+            t.litter_interval_s = 0.0;
+            t.breed_reserve_fraction = 0.6;
+        }
+        let mut m = FaunaModel::new(&p, Fits::unfitted(), 1.0);
+        only(&mut m, &[vh]);
+        let sc = p.fauna.founder(vh).core;
+        let mut c = Cohort::new(4.0, sc.body_max, reserve_fraction * sc.reserve_of(sc.body_max));
+        c.matured = true;
+        m.add(vh, c);
+        let mut seen = Vec::new();
+        let mut last = 0.0;
+        for _ in 0..1800 {
+            if reserve_fraction > 0.9 {
+                for c in m.pops[vh.index()].iter_mut() {
+                    c.carcass = 10.0 * c.n;
+                }
+            }
+            m.step(&Supply::default());
+            let n = m.ledger[vh.index()].conceived;
+            if n > last {
+                let y = m.year().expect("a year");
+                seen.push((y.number, y.phase));
+                last = n;
+            }
+        }
+        seen
+    };
+    let fed = run(1.0);
+    assert!(!fed.is_empty(), "a fed pack conceives");
+    for &(_, ph) in &fed {
+        assert!((ph - phase).rem_euclid(1.0) < window + 0.01, "conceived at phase {ph}: {fed:?}");
+    }
+    let mut years: Vec<i64> = fed.iter().map(|c| c.0).collect();
+    years.dedup();
+    assert_eq!(years.len(), fed.len(), "once a year: {fed:?}");
+    assert!(fed.len() >= 2, "a conception in each of the years: {fed:?}");
+    assert!(run(0.3).is_empty(), "a breeder under the breeding reserve does not conceive");
 }

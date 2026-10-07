@@ -120,6 +120,7 @@ pub(crate) fn upkeep(fauna: &mut Fauna, view: &VoxelView<'_>) {
         m.calling_ticks = m.calling_ticks.saturating_sub(1);
         if m.pup && t.is_some_and(|t| a.age_ticks as f64 * DT >= t.independence_age_s) {
             m.pup = false;
+            fauna.ledger.pups_independent += 1;
         }
     }
     // Succession: a breeder that is gone (or no adult of the pack) gives way to the oldest
