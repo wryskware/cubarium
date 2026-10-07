@@ -608,6 +608,20 @@ pub struct Pack {
     /// metres, rather than pressing on straight at its goal into a riser. 0: off.
     #[serde(default = "pack_pit_search_m")]
     pub pit_search_m: f64,
+    /// **PIT-2, the turn onto a route's next leg**: a member walking its route (home, to a
+    /// strike face, behind the draw's leader, or onto the graph) steers at the farthest node
+    /// its line reaches on the graph within a controller period's walk, slows to land on it
+    /// within the period, and while turning walks no faster than carries it this many voxels
+    /// across its line in a period. (At its full pace it ran two or three columns past the
+    /// next node at a bend, off the graph onto a ledge it could not leave.) 0: no limit on
+    /// the turn.
+    #[serde(default = "pack_route_swing_voxels")]
+    pub route_swing_voxels: f64,
+    /// **PIT-2, the litter at the den**: the breeder carrying a litter goes home and stays
+    /// within half the den radius until it gives birth (not in an emergency), so its pups are
+    /// born where they live. False: it gives birth wherever it is.
+    #[serde(default = "pack_whelp_at_den")]
+    pub whelp_at_den: bool,
     /// A pack takes only prey standing in its own walking route component; the
     /// lineage's components are rebuilt from the terrain at most this often, seconds (a
     /// placeholder: the terrain and its water change slowly). 60.
@@ -736,6 +750,12 @@ fn pack_herd_shun_m() -> f64 {
 fn pack_pit_search_m() -> f64 {
     Pack::CHORISTER.pit_search_m
 }
+fn pack_route_swing_voxels() -> f64 {
+    Pack::CHORISTER.route_swing_voxels
+}
+fn pack_whelp_at_den() -> bool {
+    Pack::CHORISTER.whelp_at_den
+}
 
 fn pack_stalk_margin() -> f64 {
     Pack::CHORISTER.stalk_margin
@@ -789,6 +809,10 @@ impl Pack {
         // PIT: the way out of a pit is looked for within about twice the den radius (a
         // placeholder; the probe's pits were a few metres from the graph).
         pit_search_m: 4.0,
+        // PIT-2: a quarter voxel across its line a period while it turns (a placeholder: the
+        // bend case's ledge a column off the route held a half voxel's swing, not a quarter's).
+        route_swing_voxels: 0.25,
+        whelp_at_den: true,
         route_refresh_s: 60.0,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,
