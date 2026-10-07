@@ -3484,6 +3484,10 @@ pub struct Fauna {
     /// target changes face. Not saved.
     #[serde(skip)]
     pack_paths: FxHashMap<u64, PackPath>,
+    /// Per pack id (PIT): the route field to its den's node, as `pack_paths` (a member walks
+    /// home on it, not straight at the den). Not saved.
+    #[serde(skip)]
+    den_paths: FxHashMap<u64, PackPath>,
     /// Per hunter id (HUNTER-MEAL): the route field to the face it walks to, as
     /// `pack_paths`. Not saved.
     #[serde(skip)]
@@ -3684,6 +3688,26 @@ impl Fauna {
         (graph, field)
     }
 
+    /// Pack `pack`'s route field to its den's node `goal` on lineage `founder`'s graph (PIT),
+    /// over the whole graph: cached until the graph is rebuilt or the node changes.
+    pub(crate) fn den_path(
+        &mut self,
+        view: &VoxelView<'_>,
+        founder: Founder,
+        pack: u64,
+        goal: usize,
+    ) -> (std::sync::Arc<encounter::RouteGraph>, std::sync::Arc<FxHashMap<usize, u32>>) {
+        let graph = self.pack_routes(view, founder);
+        if let Some(p) = self.den_paths.get(&pack) {
+            if std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal {
+                return (graph, p.field.clone());
+            }
+        }
+        let field = std::sync::Arc::new(graph.distances(goal, u32::MAX));
+        self.den_paths.insert(pack, PackPath { graph: graph.clone(), goal, steps: u32::MAX, field: field.clone() });
+        (graph, field)
+    }
+
     /// The open air under `flight`'s band, rebuilt from `view` when older than its
     /// `egg_air_refresh_s` (or never built).
     pub(crate) fn open_air(&mut self, view: &VoxelView<'_>, flight: &Flight) -> std::sync::Arc<flight::OpenAir> {
@@ -3731,6 +3755,7 @@ impl Fauna {
             pack_routes: FxHashMap::default(),
             open_air: None,
             pack_paths: FxHashMap::default(),
+            den_paths: FxHashMap::default(),
             percepts: FxHashMap::default(),
             scent: scent::ScentField::default(),
             beacons: light::Beacons::default(),
@@ -3886,6 +3911,7 @@ impl Fauna {
         self.config = config;
         self.pack_routes.clear();
         self.pack_paths.clear();
+        self.den_paths.clear();
         self.open_air = None;
         Ok(())
     }

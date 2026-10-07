@@ -100,7 +100,10 @@ use crate::Fauna;
 //     `pups_independent` and `season_waits`; the Veilhound's season, gestation and rearing.
 // 55: STRIKE-2 — `Pack::herd_shun_m`; a member out of its target's jaw band steps to a level
 //     that meets it, and a pack that drops an armoured target leaves its armoured herd-mates.
-pub const SCHEMA: u32 = 55;
+// 56: PIT and PIT-2 — `Pack::{pit_search_m, route_swing_voxels, whelp_at_den}`; a pup or a
+//     Veilhound going home follows the route, a body off its graph walks back on, dens on
+//     founding faces, route walks land on the route at a bend.
+pub const SCHEMA: u32 = 56;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
