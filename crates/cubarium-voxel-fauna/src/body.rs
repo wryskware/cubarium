@@ -613,6 +613,20 @@ pub struct Pack {
     /// metres, rather than pressing on straight at its goal into a riser. 0: off.
     #[serde(default = "pack_pit_search_m")]
     pub pit_search_m: f64,
+    /// **PIT-2, the turn onto a route's next leg**: a member walking its route (home, to a
+    /// strike face, behind the draw's leader, or onto the graph) steers at the farthest node
+    /// its line reaches on the graph within a controller period's walk, slows to land on it
+    /// within the period, and while turning walks no faster than carries it this many voxels
+    /// across its line in a period. (At its full pace it ran two or three columns past the
+    /// next node at a bend, off the graph onto a ledge it could not leave.) 0: no limit on
+    /// the turn.
+    #[serde(default = "pack_route_swing_voxels")]
+    pub route_swing_voxels: f64,
+    /// **PIT-2, the litter at the den**: the breeder carrying a litter goes home and stays
+    /// within half the den radius until it gives birth (not in an emergency), so its pups are
+    /// born where they live. False: it gives birth wherever it is.
+    #[serde(default = "pack_whelp_at_den")]
+    pub whelp_at_den: bool,
     /// A pack takes only prey standing in its own walking route component; the
     /// lineage's components are rebuilt from the terrain at most this often, seconds (a
     /// placeholder: the terrain and its water change slowly). 60.
@@ -650,6 +664,18 @@ pub struct Pack {
     /// row).
     #[serde(default = "pack_stalk_freeze")]
     pub stalk_freeze: bool,
+    /// **The breeding reserve** (LIFE-HISTORY): the breeder conceives only with its reserve at
+    /// or above this fraction of its reserve cap. 0: no threshold beyond the ordinary surplus.
+    #[serde(default)]
+    pub breed_reserve_fraction: f64,
+    /// **A litter by condition** (LIFE-HISTORY; a switch, no registry row): the litter is
+    /// `1 + floor(c × litter_size_max)`, at most `litter_size_max`, where `c` is the breeder's
+    /// reserve fraction above `breed_reserve_fraction` as a share of the rest of the cap
+    /// (`(r − f) / (1 − f)`), so a breeder in poor condition has one pup and a full one the
+    /// most. Off: the old uniform draw on 2..=`litter_size_max`. Either way never more young
+    /// than its reserve above the surplus floor funds.
+    #[serde(default)]
+    pub litter_by_condition: bool,
     /// **The prey choice** (PACK-TUNE, [`crate::pack::prospect`]): a pack weighs each target
     /// it could take by its prospect — the chance-like share of a hunt on it that ends in a
     /// kill, from what it can see — times its meat, over its distance, and commits to the best.
@@ -741,6 +767,12 @@ fn pack_herd_shun_m() -> f64 {
 fn pack_pit_search_m() -> f64 {
     Pack::CHORISTER.pit_search_m
 }
+fn pack_route_swing_voxels() -> f64 {
+    Pack::CHORISTER.route_swing_voxels
+}
+fn pack_whelp_at_den() -> bool {
+    Pack::CHORISTER.whelp_at_den
+}
 
 fn pack_stalk_margin() -> f64 {
     Pack::CHORISTER.stalk_margin
@@ -763,6 +795,17 @@ fn pack_route_reach_fraction() -> f64 {
 }
 
 impl Pack {
+    /// **A litter by condition** (LIFE-HISTORY, [`Pack::litter_by_condition`]): a breeder at
+    /// reserve fraction `r` has `1 + floor(c × litter_size_max)` young, at most
+    /// `litter_size_max`, with `c = (r − f) / (1 − f)` clamped to `[0, 1]` and `f` the
+    /// [`Pack::breed_reserve_fraction`].
+    pub fn condition_litter(&self, r: f64) -> u32 {
+        let hi = self.litter_size_max.max(1);
+        let f = self.breed_reserve_fraction.clamp(0.0, 1.0);
+        let c = if f < 1.0 { ((r - f) / (1.0 - f)).clamp(0.0, 1.0) } else { 1.0 };
+        (1 + (c * f64::from(hi)).floor() as u32).min(hi)
+    }
+
     /// The chorister's table (Brief R3).
     pub const CHORISTER: Pack = Pack {
         pack_radius_m: 6.0,
@@ -771,7 +814,7 @@ impl Pack {
         den_radius_m: 4.0,
         litter_size_max: 4,
         litter_interval_s: 3.0 * 7200.0,
-        independence_age_s: 7200.0,
+        independence_age_s: CHORISTER_INDEPENDENCE_S,
         provision_reserve_fraction: 0.6,
         provision_rate_per_s: 0.01,
         provision_efficiency: 0.7,
@@ -794,6 +837,10 @@ impl Pack {
         // PIT: the way out of a pit is looked for within about twice the den radius (a
         // placeholder; the probe's pits were a few metres from the graph).
         pit_search_m: 4.0,
+        // PIT-2: a quarter voxel across its line a period while it turns (a placeholder: the
+        // bend case's ledge a column off the route held a half voxel's swing, not a quarter's).
+        route_swing_voxels: 0.25,
+        whelp_at_den: true,
         route_refresh_s: 60.0,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,
@@ -804,6 +851,8 @@ impl Pack {
         stalk_margin: 0.7,
         commit_m: 2.5,
         stalk_freeze: true,
+        breed_reserve_fraction: 0.6,
+        litter_by_condition: true,
         // PACK-TUNE's prey choice, placeholders at the terrarium's scale. Wolves and lions
         // test prey and quit fast on healthy, defended animals; they take the young, the
         // isolated, the wounded and the unaware far more often than their share (Mech 1970,
@@ -828,6 +877,36 @@ impl Pack {
         shun_s: 120.0,
     };
 }
+
+/// **The Veilhound's life history** (LIFE-HISTORY, Wrysk 2026-10-06: "veilhound cubs should
+/// be very expensive to birth and to rear. like lions and wolves only have one litter a year").
+/// The Cubarium year is the dry-season cycle (5 world days, 10 h at 1×; phase 0 a season's
+/// start, the season over phases 0–0.2). Read from wolves and lions:
+///
+/// - **One litter a year, conceived just after the dry season.** Wolves breed once a year in
+///   a short late-winter season and pup in spring, when the ungulates calve (Mech & Boitani
+///   2003, *Wolves: Behavior, Ecology, and Conservation*, ch. 2 and 6). The window opens at
+///   phase 0.2, as the rains return and the grazers recover, and lasts 0.15 of the year
+///   (wolves' oestrus season is about two months).
+/// - **Gestation** 0.167 of the year, 6,000 s: the wolf's 63 days of 365 (lions 110).
+///   Pregnancy raises upkeep by half ([`CHORISTER_PREGNANCY_UPKEEP`]): late gestation costs
+///   a mammal roughly a quarter to a half above maintenance (Robbins 1993, *Wildlife Feeding
+///   and Nutrition*).
+/// - **Only a breeder in condition conceives**, at 60 % of its reserve cap (the same line it
+///   provisions above), and its litter follows that condition, 1 to 4 (wolf and lion litter
+///   size and pup survival track prey per adult: Fuller, Mech & Cochrane 2003; Packer et al.
+///   1988, "Reproductive success of lions"). A pup's package stays two `body_min` (a litter of
+///   four is three quarters of its mother's body).
+/// - **Rearing**: a pup stays at the den, fed only by the pack, for 0.6 of the year
+///   ([`CHORISTER_INDEPENDENCE_S`], 3 world days): wolf pups travel with the pack from about
+///   six months and lion cubs depend on the pride for well over a year. A pup the pack cannot
+///   feed starves; wild wolves and lions lose a third to two thirds of their young in a lean
+///   year, the provisioning's real cost.
+pub const CHORISTER_INDEPENDENCE_S: f64 = 3.0 * 7200.0;
+/// The Veilhound's gestation, seconds (0.167 of the 5-day year; see [`CHORISTER_INDEPENDENCE_S`]).
+pub const CHORISTER_GESTATION_S: f64 = 6000.0;
+/// The Veilhound's pregnancy upkeep factor (see [`CHORISTER_INDEPENDENCE_S`]).
+pub const CHORISTER_PREGNANCY_UPKEEP: f64 = 1.5;
 
 /// A glider's table ([`FounderPhysiology::glider`], F3; the seedporter's numbers are
 /// predation-and-flight §3.5, §3.9 and the roster brief's Brief F3, placeholders).
@@ -1764,6 +1843,27 @@ impl FounderPhysiology {
                 // full flower gives about nine tenths of a sip and a nearly drained one
                 // crumbs. Not a mass (the food's stock does not scale with the eater).
                 core.bite_half_stock = 0.002;
+                // BELLWING (Wrysk 2026-10-06: "bellwing should have fast reproduction"): an
+                // r-strategist moth, an income breeder whose eggs are paid from nectar
+                // (Boggs 1997; Jervis, Boggs & Ferns 2005), on the egg-layer machinery:
+                // - small young: a hatchling of a tenth of the adult (`body_min`; a moth's
+                //   egg is ~0.1-2 % of the female, Garcia-Barros 2000 — no caterpillar here,
+                //   so the smallest flyer), its egg the hatchling plus a sliver of reserve;
+                // - early breeding at half the adult body (`birth_body`; moths lay within
+                //   the first days of an adult life of one to two weeks, Fitt 1989);
+                // - a clutch from surplus, up to six eggs, waiting at most 300 s to fill
+                //   it: fecundity grows with the female's stores (Honek 1993), so a flush
+                //   of flowers is laid out as large clutches; a gravid reserve of up to 0.8
+                //   of the body (the egg load, Jervis et al. 2005) holds the full clutch;
+                // - the surplus judged over 300 s (was 900 s).
+                core.body_min = 0.1 * core.body_max;
+                core.birth_body = 0.5 * core.body_max;
+                core.reserve_cap = 0.8;
+                // The egg: the hatchling and a sixth of it again as its reserve.
+                core.reproduction.egg_organic = core.body_min * (1.0 + 1.0 / 6.0);
+                core.reproduction.clutch_max = 6;
+                core.reproduction.clutch_hold_max_s = 300.0;
+                core.reproduction.surplus_hold_s = 300.0;
                 FounderPhysiology {
                     core,
                     // Cruise 8 BL/s, 1 m/s at 0.125 m (§3.3).
@@ -1884,6 +1984,13 @@ impl FounderPhysiology {
                 core.reserve_cap = 1.0;
                 core.scale_mass(CHORISTER_VOLUME_RATIO);
                 core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
+                // LIFE-HISTORY: one litter a pack a year, conceived just after the dry season,
+                // a wolf's gestation at a raised upkeep ([`CHORISTER_INDEPENDENCE_S`]).
+                core.reproduction.gestation_s = CHORISTER_GESTATION_S;
+                core.reproduction.litters_per_year = 1;
+                core.reproduction.breeding_phase = 0.2;
+                core.reproduction.breeding_window = 0.15;
+                core.reproduction.gestation_upkeep_factor = CHORISTER_PREGNANCY_UPKEEP;
                 FounderPhysiology {
                     core,
                     // GAIT: its own cruise, 1 BL/s (1.4 m/s; the standing pace rule), no

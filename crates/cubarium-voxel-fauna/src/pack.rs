@@ -120,6 +120,7 @@ pub(crate) fn upkeep(fauna: &mut Fauna, view: &VoxelView<'_>) {
         m.calling_ticks = m.calling_ticks.saturating_sub(1);
         if m.pup && t.is_some_and(|t| a.age_ticks as f64 * DT >= t.independence_age_s) {
             m.pup = false;
+            fauna.ledger.pups_independent += 1;
         }
     }
     // Succession: a breeder that is gone (or no adult of the pack) gives way to the oldest
@@ -370,6 +371,36 @@ fn head(a: &Animal, want: f64, forward: f64, feed: f64) -> Actions {
     }
 }
 
+/// **PIT-2, the pace on a route**: walk at a point of its route (a node it steers at, from
+/// [`route_point`]), no further in one controller period than the point — the full pace
+/// short of it, slowed to land on it within the period — so that it turns there with the
+/// route rather than run on past it off the graph (the probe's pups, at a bend, two or three
+/// columns past the node in one period, onto a ledge they could not leave); and while it
+/// turns onto the route's next leg, no faster than carries it `Pack::route_swing_voxels`
+/// across its line in a period (at the full pace with the turn [`head`] still allows, it
+/// swung a column wide).
+fn route_go(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, founder: crate::Founder, (x, z): (f64, f64), ring: f64, feed: f64) -> Actions {
+    let m = fauna.config.manifest(founder);
+    let travel = (m.cruise_m_per_s * m.controller_period_s).max(1e-9);
+    let (dx, dz, d) = delta(a, x, z, ring);
+    let want = dx.atan2(dz);
+    let across = angle_to(a.pose.heading_rad, want).sin().abs() * travel;
+    let room = fauna.config.founder(founder).pack.map_or(0.0, |t| t.route_swing_voxels) * view.config.voxel_m;
+    let swing = if across > 0.0 && room > 0.0 { room / across } else { 1.0 };
+    head(a, want, (d / travel).min(swing).min(1.0), feed)
+}
+
+/// **PIT-2, the point on a route**: the node of `field`'s route a body at `a` on node `from`
+/// steers at ([`crate::encounter::RouteGraph::pursue`]): the farthest within the steps its
+/// pace covers in a controller period and one more, to which its line is walkable on the
+/// graph; else the next node. `None` at the goal or off the field.
+fn route_point(fauna: &Fauna, founder: crate::Founder, graph: &crate::encounter::RouteGraph, field: &rustc_hash::FxHashMap<usize, u32>, from: usize, a: &Animal) -> Option<(f64, f64)> {
+    let m = fauna.config.manifest(founder);
+    let v = graph.voxel_m();
+    let steps = if v > 0.0 { ((m.cruise_m_per_s * m.controller_period_s) / v).ceil().clamp(0.0, 1e6) as u32 + 1 } else { 1 };
+    graph.pursue(field, from, (a.pose.x, a.pose.z), steps).map(|j| graph.centre(j))
+}
+
 /// How far from a body's own face its node may be, and how far from a prey's face the
 /// node a hunter takes it from, columns: the disc's radius, and the radius plus the
 /// strike's reach (a prey is struck from beside it, not stood on).
@@ -536,8 +567,8 @@ fn level_step(
     let cruise = fauna.config.manifest(founder).cruise_m_per_s;
     let target = strike_node(&graph, o, height, geometry, h, v)?;
     let (graph, field) = fauna.pack_path(view, founder, own, target, reach_steps(t, cruise, v));
-    let (nx, nz) = graph.centre(graph.next_toward(&field, from)?);
-    Some(go_to(a, nx, nz, ring, 0.0, 1.0))
+    let next = route_point(fauna, founder, &graph, &field, from, a)?;
+    Some(route_go(fauna, view, a, founder, next, ring, 1.0))
 }
 
 /// **STRIKE-2, leaving the herd**: pack `own`, dropping its target `o` alive while it is
@@ -612,7 +643,7 @@ fn route_step(
     // STRIKE: the node it would strike from, on a face whose jaw band meets the prey.
     let target = strike_node(&graph, o, height_of(fauna, o.id), geometry, h, v)?;
     let (graph, field) = fauna.pack_path(view, founder, own, target, reach_steps(t, cruise_m_per_s, v));
-    graph.next_toward(&field, from).map(|j| graph.centre(j))
+    route_point(fauna, founder, &graph, &field, from, a)
 }
 
 /// A pack's reach on foot in route steps (one voxel each): what it covers in a chase,
@@ -894,6 +925,7 @@ fn draw_step(
     for k in &sensed {
         let Some(o) = fauna.view().animal(k.id).copied() else { continue };
         if abandoned == Some(k.id)
+            || shuns(fauna, own, k.id)
             || !crate::predation::is_prey_in_window(&fauna.config, &a, &o, window)
             || trespass(fauna, own, k.x, k.z, t, v, ring)
         {
@@ -932,7 +964,7 @@ fn draw_step(
 /// **A follower's step** (VEILHOUND-SEARCH) toward the draw's `leader`: straight at it when
 /// the line is walkable on the route graph, else the next node of the pack's route field to
 /// the leader's node (the field [`draw_step`] builds); straight at it off the graph.
-fn follow_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, founder: crate::Founder, leader: &Animal, geometry: &crate::Body, h: &crate::Hunter) -> (f64, f64) {
+fn follow_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, founder: crate::Founder, leader: &Animal, geometry: &crate::Body, h: &crate::Hunter) -> ((f64, f64), bool) {
     let a = fauna.animals[i];
     let v = view.config.voxel_m;
     let goal_xy = (leader.pose.x, leader.pose.z);
@@ -942,13 +974,13 @@ fn follow_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, foun
         graph.node_near(a.site, (a.pose.x, a.pose.z), own_r),
         graph.node_near(leader.site, goal_xy, own_r),
     ) else {
-        return goal_xy;
+        return (goal_xy, false);
     };
     if from == to || graph.walk_line(from, (a.pose.x, a.pose.z), goal_xy) {
-        return goal_xy;
+        return (goal_xy, true);
     }
     let (graph, field) = fauna.pack_path(view, founder, own, to, u32::MAX);
-    graph.next_toward(&field, from).map_or(goal_xy, |j| graph.centre(j))
+    (route_point(fauna, founder, &graph, &field, from, &a).unwrap_or(goal_xy), true)
 }
 
 /// Walk to a point; stop (turning to face it) within `stop_m`.
@@ -1229,15 +1261,26 @@ fn out_of_pit(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, act: Actions) -
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let own = a.pack?.pack;
-    if let Some(o) = fauna.pack(own).and_then(|p| p.target).and_then(|tid| knows_of(fauna, i, tid, ring)) {
-        if distance(&a, o.x, o.z, ring) <= t.close_in_m {
-            return None;
+    // PIT-2, wedged beside the graph: its motor refused over the last interval (the tactic's
+    // own reading, `motor_refused`) on a face that is not a node. Its route reads the node
+    // beside it (`node_near`, within its footprint) as where it stands, and steers on from
+    // there into a step its own face does not take (the probe's founders, a riser five layers
+    // over the face they stood on, wedged an hour on seed 4): it steps onto a node face first,
+    // by its own body's way, whatever its tactic (a target close by included).
+    let fb = a.founder_state.feedback;
+    let wedged = fb.attempted_equivalent > 1e-12 && fb.delivered_equivalent / fb.attempted_equivalent < fauna.config.teachers.motor_refused;
+    if !wedged {
+        if let Some(o) = fauna.pack(own).and_then(|p| p.target).and_then(|tid| knows_of(fauna, i, tid, ring)) {
+            if distance(&a, o.x, o.z, ring) <= t.close_in_m {
+                return None;
+            }
         }
     }
     let geometry = phys.body_at(a.body);
     let (own_r, _) = node_radii(&geometry, &h, v);
     let graph = fauna.pack_routes(view, founder);
-    if graph.node_near(a.site, (a.pose.x, a.pose.z), own_r).is_some() {
+    let beside = wedged && graph.face(a.site).is_none();
+    if graph.node_near(a.site, (a.pose.x, a.pose.z), own_r).is_some() && !beside {
         return None;
     }
     let reach = (t.pit_search_m / v).ceil().min(f64::from(u32::MAX)) as u32;
@@ -1248,38 +1291,40 @@ fn out_of_pit(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, act: Actions) -
         geometry.headroom_voxels(v),
         phys.step_limits(v),
         phys.wade_depth_m(&geometry),
-        own_r,
+        if beside { 0 } else { own_r },
         reach,
     )?;
-    let (gx, gz) = centre(face, v);
     let manifest = fauna.config.manifest(founder);
     let guard = manifest.cruise_m_per_s * manifest.controller_period_s
         + (h.strike_reach_length_fraction + h.jaw_forward_length_fraction) * geometry.length_m;
-    Some(keep_out(fauna, i, own, go_to(&a, gx, gz, ring, 0.0, 0.0), &t, guard, v, ring))
+    let go = route_go(fauna, view, &a, founder, centre(face, v), ring, 0.0);
+    Some(keep_out(fauna, i, own, go, &t, guard, v, ring))
 }
 
 /// **PIT, the way home**: the point a pack body at `a` walks to on its way to its `den` —
 /// the den's centre when the straight line is walkable on its route graph (or either end is
 /// off the graph: the tactic's own straight walk, [`out_of_pit`] takes a body off it back
-/// on), else the next node of the pack's route field to the den's node. A pup born metres
+/// on), else the point of the pack's route field to the den's node it steers at
+/// ([`route_point`], PIT-2); with whether it is on the graph (then walked at the route's pace,
+/// [`route_go`]). A pup born metres
 /// from the den and an adult going home to rest walked straight at it, down the stair of a
 /// trench whose far riser held them.
-fn way_home(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, den: Site) -> (f64, f64) {
+fn way_home(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, den: Site) -> ((f64, f64), bool) {
     let v = view.config.voxel_m;
     let goal = centre(den, v);
     let Some(own) = a.pack.map(|m| m.pack) else {
-        return goal;
+        return (goal, false);
     };
     let (own_r, _) = node_radii(geometry, h, v);
     let graph = fauna.pack_routes(view, founder);
     let (Some(from), Some(to)) = (graph.node_near(a.site, (a.pose.x, a.pose.z), own_r), graph.node_near(den, goal, own_r)) else {
-        return goal;
+        return (goal, false);
     };
     if from == to || graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
-        return goal;
+        return (goal, true);
     }
     let (graph, field) = fauna.den_path(view, founder, own, to);
-    graph.next_toward(&field, from).map_or(goal, |j| graph.centre(j))
+    (route_point(fauna, founder, &graph, &field, from, a).unwrap_or(goal), true)
 }
 
 /// The pack tactic of [`steer`], before [`out_of_pit`].
@@ -1342,8 +1387,8 @@ fn tactic(
             }
         }
         if d_den > 0.5 * t.den_radius_m {
-            let (gx, gz) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
-            return Some(go_to(&a, gx, gz, ring, 0.0, 0.0));
+            let (to, routed) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
+            return Some(if routed { route_go(fauna, view, &a, founder, to, ring, 0.0) } else { go_to(&a, to.0, to.1, ring, 0.0, 0.0) });
         }
         return Some(Actions {
             forward: 0.0,
@@ -1360,13 +1405,75 @@ fn tactic(
     let own = m.pack;
     let clamp = |fauna: &Fauna, act: Actions| keep_out(fauna, i, own, act, &t, guard, v, ring);
 
+    // PIT-2, the litter at the den: the breeder carrying a litter (an open gestation) goes
+    // home and stays within half the den radius — where its pups stay — until it gives birth,
+    // so they are born where they live; not in an emergency. The probe's breeders gave birth
+    // where they stood, 5 to 13 m from the den, and their pups walked home across ground they
+    // could not cross (off the graph at a bend, or into water deeper than a pup wades) and
+    // stood there for good.
+    if t.whelp_at_den && rec.breeder == Some(a.id) && a.reproduction.escrow.is_some() && !a.emergency {
+        // FINDINGS-FIX-2: the hold yields to a meal at home — hungry, it eats a carcass (the
+        // pack's feast or one it knows of) lying within the den radius, as its pups do, and
+        // stays home: no hunting, no carcass beyond the den radius.
+        if a.eating {
+            let in_den = |s: Site| {
+                let (x, z) = centre(s, v);
+                let (dx, dz) = crate::pose::wrapped_delta(dcx, dcz, x, z, ring);
+                (dx * dx + dz * dz).sqrt() <= t.den_radius_m
+            };
+            if let Some(fs) = rec.feast.filter(|&fs| feast_left(fs) && in_den(fs)) {
+                if at_feast(fs) {
+                    return Some(clamp(fauna, eat));
+                }
+            }
+            crate::perception::refresh(fauna, i, view, fv, None, crate::perception::Want { carcasses: true, ..Default::default() });
+            let mut sites: Vec<(f64, Site)> = rec
+                .feast
+                .filter(|&fs| feast_left(fs))
+                .into_iter()
+                .chain(fauna.percept(a.id).map(|p| p.carcass_sites().collect::<Vec<_>>()).unwrap_or_default())
+                .filter(|&s| in_den(s))
+                .map(|s| {
+                    let (x, z) = centre(s, v);
+                    (distance(&a, x, z, ring), s)
+                })
+                .collect();
+            sites.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+            sites.dedup_by_key(|p| p.1);
+            for &(_, s) in &sites {
+                if fauna.config.hunt.meal_first {
+                    if let Some(go) = crate::hunt::meal_step_to(fauna, i, view, fv, s) {
+                        return Some(clamp(fauna, go));
+                    }
+                } else if feast_left(s) {
+                    if at_feast(s) {
+                        return Some(clamp(fauna, eat));
+                    }
+                    let (x, z) = centre(s, v);
+                    return Some(clamp(fauna, go_to(&a, x, z, ring, 0.0, 1.0)));
+                }
+            }
+        }
+        if d_den > 0.5 * t.den_radius_m {
+            let (to, routed) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
+            let go = if routed { route_go(fauna, view, &a, founder, to, ring, 0.0) } else { go_to(&a, to.0, to.1, ring, 0.0, 0.0) };
+            return Some(clamp(fauna, go));
+        }
+        return Some(Actions {
+            forward: 0.0,
+            turn: held.turn,
+            feed: held.feed,
+        });
+    }
+
     // Home to sleep: out of its phase.
     if wants_rest(fauna, i, clock_on, daylight)
         && d_den > t.den_radius_m
         && u64::from(a.homing_ticks) < cubarium_voxel::ticks_at_least_one(t.home_give_up_s)
     {
-        let (gx, gz) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
-        return Some(clamp(fauna, go_to(&a, gx, gz, ring, 0.0, 0.0)));
+        let (to, routed) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
+        let go = if routed { route_go(fauna, view, &a, founder, to, ring, 0.0) } else { go_to(&a, to.0, to.1, ring, 0.0, 0.0) };
+        return Some(clamp(fauna, go));
     }
 
     let now = fauna.tick;
@@ -1438,6 +1545,14 @@ fn tactic(
                 let (mut best_m, mut since) = (rec.chase_best_m, rec.chase_progress_tick);
                 if let Some(k) = knows_of(fauna, i, tid, ring) {
                     let d = nearest_member(fauna, own, a.id, k.x, k.z, ring);
+                    // FINDINGS-FIX-2, the breakaway: a target that leaves contact (the nearest
+                    // so far within the close-in or the strike reach, the nearest now past it)
+                    // restarts the measure from where it now is, as a chase restarting after a
+                    // breakaway, so closing on it again counts.
+                    let contact = t.close_in_m.max((h.strike_reach_length_fraction + h.jaw_forward_length_fraction) * geometry.length_m);
+                    if best_m <= contact && d > contact {
+                        best_m = d;
+                    }
                     if d <= best_m - t.chase_progress_m {
                         best_m = d;
                         since = now;
@@ -1723,7 +1838,10 @@ fn tactic(
             .and_then(|tid| knows_of(fauna, i, tid, ring))
             .filter(|o| joins && distance(&a, o.x, o.z, ring) <= 2.0 * t.pack_radius_m)
             .and_then(|o| route_step(fauna, view, founder, own, &t, manifest.cruise_m_per_s, &a, &o, &geometry, &h, (o.x, o.z)));
-        match on_route.or(draw_go) {
+        if let Some(p) = on_route {
+            return Some(clamp(fauna, route_go(fauna, view, &a, founder, p, ring, 1.0)));
+        }
+        match draw_go {
             Some((nx, nz)) => return Some(clamp(fauna, go_to(&a, nx, nz, ring, 0.0, 1.0))),
             None => return Some(clamp(fauna, held)),
         }
@@ -1768,11 +1886,11 @@ fn tactic(
             };
             let act = if driver_id == Some(a.id) {
                 match routed(fauna, o.x, o.z) {
-                    Some((nx, nz)) => go_to(&a, nx, nz, ring, 0.0, 1.0),
+                    Some(p) => route_go(fauna, view, &a, founder, p, ring, 1.0),
                     None => go_to(&a, o.x, o.z, ring, stop, 1.0),
                 }
-            } else if let Some((nx, nz)) = routed(fauna, o.x, o.z) {
-                go_to(&a, nx, nz, ring, 0.0, 1.0)
+            } else if let Some(p) = routed(fauna, o.x, o.z) {
+                route_go(fauna, view, &a, founder, p, ring, 1.0)
             } else {
                 let rank = hunters
                     .iter()
@@ -1820,8 +1938,9 @@ fn tactic(
     // breeder (of the draw's leader while the pack is drawn).
     if let Some(b) = drawn_by {
         if distance(&a, b.pose.x, b.pose.z, ring) > t.follow_radius_m {
-            let (gx, gz) = follow_step(fauna, i, view, own, founder, &b, &geometry, &h);
-            return Some(clamp(fauna, go_to(&a, gx, gz, ring, 0.0, 0.0)));
+            let (to, routed) = follow_step(fauna, i, view, own, founder, &b, &geometry, &h);
+            let go = if routed { route_go(fauna, view, &a, founder, to, ring, 0.0) } else { go_to(&a, to.0, to.1, ring, 0.0, 0.0) };
+            return Some(clamp(fauna, go));
         }
     } else if let Some(b) = rec
         .breeder
@@ -1924,3 +2043,11 @@ pub(crate) fn carcass_yield(fauna: &mut Fauna, i: usize, ring: f64, at_carcass: 
 #[cfg(test)]
 #[path = "pit_tests.rs"]
 mod pit_tests;
+
+#[cfg(test)]
+#[path = "pit2_tests.rs"]
+mod pit2_tests;
+
+#[cfg(test)]
+#[path = "testpass2_pack_unit_tests.rs"]
+mod testpass2_pack_unit_tests;

@@ -851,8 +851,26 @@ pub struct LightConfig {
     pub flower_reflectance: f64,
     /// A glowcap's own light, in the same units (it needs no light to be seen). 0.3.
     pub glowcap_emission: f64,
-    /// A fully lit lure's own light. 1.
+    /// A fully lit lure's own light (its cyan). 1.
     pub lure_emission: f64,
+    /// **The lure mimics a flower** (BELLWING, Wrysk 2026-10-06: "make lure mimic flowers"):
+    /// a fully lit lure also shows UV, this × a flower's reflectance (`flower_reflectance`) —
+    /// what a flower in full light shows. A body with the `uv` channel sees the lure's UV and
+    /// its cyan together and reads it as the **UV class** (a flower): its learned UV
+    /// expectation draws it; a visit that finds no nectar is a failed UV visit. A body
+    /// without UV sees the cyan alone (the cyan class, as before). 0: no UV, the lure is
+    /// cyan to every eye. 1: aggressive mimicry matches its model's signal (Photuris
+    /// fireflies copy the prey species' flash code, Lloyd 1965; bolas spiders the moth's
+    /// sex pheromone, Eberhard 1977; the anglerfish's lure is light alone).
+    pub lure_uv: f64,
+    /// **The lure's scent** (BELLWING): a lit lure lays this × a flower's nectar scent
+    /// (`fauna.scent.nectar_per_s`) on the face its lanternjaw stands on, × its lit fraction,
+    /// so a flyer that smells nectar is led toward it as toward a flower (bolas spiders lure
+    /// moths by scent alone, Eberhard 1977). 0: light alone. 1: a flower's: the BELLWING
+    /// probe found light alone never reaches an awake bellwing — lit lures and awake
+    /// bellwings overlap only at dusk, and in two seeds' dusks no pair came within the
+    /// bellwing's 4 m light range (74 of 253 s within 10 m).
+    pub lure_scent: f64,
     /// A beacon is seen by its **contrast**: its brightness over the light around it (`sky ×
     /// daylight` where it is) plus this floor, the darkest background. 0.05.
     pub background_floor: f64,
@@ -923,6 +941,8 @@ impl Default for LightConfig {
             flower_reflectance: 1.0,
             glowcap_emission: 0.3,
             lure_emission: 1.0,
+            lure_uv: 1.0,
+            lure_scent: 1.0,
             background_floor: 0.05,
             half_m: 1.0,
             lure_height_fraction: 0.4,

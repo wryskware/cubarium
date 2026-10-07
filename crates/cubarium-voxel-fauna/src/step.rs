@@ -282,7 +282,17 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
                 .binary_search_by_key(&hit.prey, |a| a.id)
                 .ok()
                 .map(|j| (fauna.animals[j].pose.x, fauna.animals[j].pose.z));
+            // FINDINGS-FIX-2: a kill by a strike that began on a prey drawn to a lure is a
+            // lure kill, though the lunge's loom closed the visit (booked once: the kill
+            // books it itself while the prey is still drawn).
+            let lure_kill = hit.lure && !crate::light::drawn_to_lure(fauna, hit.prey);
+            let prey_founder = fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).ok().and_then(|j| fauna.animals[j].founder);
             apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
+            if let (true, Some(f)) = (lure_kill, prey_founder) {
+                if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
+                    fauna.ledger.lure_kills[f.index()] += 1;
+                }
+            }
             // HUNTER-MEAL: a kill marks its place productive in the striker's memory.
             if let Some((x, z)) = stood {
                 if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
@@ -922,7 +932,13 @@ fn maintenance(fauna: &mut Fauna) {
         };
         let a = &mut fauna.animals[i];
         a.age_ticks = a.age_ticks.saturating_add(1);
-        let want = sc.maintenance_per_s * rest * a.body * DT;
+        // LIFE-HISTORY: a gestating body pays its lineage's pregnancy upkeep factor.
+        let pregnant = if a.reproduction.escrow.is_some() {
+            sc.reproduction.gestation_upkeep_factor.max(0.0)
+        } else {
+            1.0
+        };
+        let want = sc.maintenance_per_s * rest * pregnant * a.body * DT;
         let (_, from_body) = respire(fauna, i, want, Respiration::Maintenance);
         if is_founder && from_body > 0.0 {
             fauna.animals[i].founder_state.feedback.structural_loss += from_body;
@@ -2005,6 +2021,7 @@ fn founder_act(
         };
         if let Some(prey) = target {
             let h = phys.hunter.expect("a hunter");
+            let lure = crate::light::drawn_to_lure(fauna, prey);
             let a = &mut fauna.animals[i];
             a.strike = Some(Strike {
                 phase: StrikePhase::Windup,
@@ -2012,6 +2029,7 @@ fn founder_act(
                 prey,
                 from_x: a.pose.x,
                 from_z: a.pose.z,
+                lure,
             });
             a.state = State::Resting;
             fauna.ledger.strikes_by_founder[founder.index()] += 1;
@@ -2439,12 +2457,15 @@ fn strike_tick(
         let body = fauna.animals[i].body;
         let cost = h.strike_cost_s * phys.core.maintenance_per_s * body;
         respire(fauna, i, cost, Respiration::Hunt);
+        // FINDINGS-FIX-2: the lure draw at the lunge, before its loom closes the visit.
+        let lure = s.lure || crate::light::drawn_to_lure(fauna, s.prey);
         let a = &fauna.animals[i];
         s = Strike {
             phase: StrikePhase::Lunge,
             ticks_left: crate::Hunter::ticks(h.lunge_s),
             from_x: a.pose.x,
             from_z: a.pose.z,
+            lure,
             ..s
         };
     }
@@ -2563,6 +2584,7 @@ fn strike_tick(
                     damage,
                     by: founder,
                     striker: a.id,
+                    lure: s.lure,
                 });
             }
         }
@@ -2616,8 +2638,8 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
         if crate::light::drawn_to_lure(fauna, fauna.animals[j].id) {
             fauna.ledger.lure_kills[f.index()] += 1;
         }
-        // S3b: a prey with a light sense still naive about cyan.
-        if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id) {
+        // S3b: a prey with a light sense still naive about the lure's class to its eye (cyan, or UV when the lure mimics a flower).
+        if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id, f) {
             fauna.ledger.naive_kills[by.index()][f.index()] += 1;
         }
     }
@@ -3227,13 +3249,15 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
     clutch_fate(fauna, view, flora);
     let parents = fauna.animals.len();
     let mut newborns: Vec<Animal> = Vec::new();
+    // LIFE-HISTORY: the Cubarium year, for the lineages with a breeding season.
+    let year = view.year();
     for i in 0..parents {
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let rule = sc.reproduction;
         advance_eligibility(fauna, i, &sc, &rule);
         match rule.mode {
             crate::BirthMode::Gestation => {
-                gestate(fauna, i, &sc, &rule, view.config.seed, &mut newborns);
+                gestate(fauna, i, &sc, &rule, (view.config.seed, year), &mut newborns);
             }
             crate::BirthMode::Eggs => lay(fauna, i, view, flora, &sc, &rule),
         }
@@ -3296,7 +3320,7 @@ fn gestate(
     i: usize,
     sc: &SpeciesConfig,
     rule: &crate::Reproduction,
-    seed: u64,
+    (seed, year): (u64, Option<cubarium_voxel::weather::Year>),
     newborns: &mut Vec<Animal>,
 ) {
     let a = &fauna.animals[i];
@@ -3314,6 +3338,15 @@ fn gestate(
             Litter::Of(n) => n,
             Litter::Not => return,
         };
+        // LIFE-HISTORY: a breeding season conceives only inside its window, and no more
+        // than `litters_per_year` times a year (a pack's count is the pack's).
+        if !rule.season_allows(year, season_of(fauna, i)) {
+            fauna.ledger.season_waits += 1;
+            return;
+        }
+        if let Some(y) = year.filter(|_| rule.litters_per_year > 0) {
+            count_season(fauna, i, y.number);
+        }
         fauna.animals[i].reproduction.escrow = Some(crate::Escrow {
             young,
             ..crate::Escrow::default()
@@ -3428,6 +3461,28 @@ fn gestate(
     }
 }
 
+/// The breeding season a body's conceptions count against (LIFE-HISTORY): its pack's for a
+/// pack member, its own otherwise.
+fn season_of(fauna: &Fauna, i: usize) -> crate::Season {
+    let a = &fauna.animals[i];
+    match a.pack.and_then(|m| fauna.pack(m.pack)) {
+        Some(p) => p.season,
+        None => a.reproduction.season,
+    }
+}
+
+/// Count one conception in `year` against [`season_of`]'s season.
+fn count_season(fauna: &mut Fauna, i: usize, year: i64) {
+    match fauna.animals[i].pack.map(|m| m.pack) {
+        Some(pack) if fauna.pack(pack).is_some() => {
+            if let Some(p) = fauna.pack_mut(pack) {
+                p.season.count(year);
+            }
+        }
+        _ => fauna.animals[i].reproduction.season.count(year),
+    }
+}
+
 /// What a gestating lineage's next conception carries (roster R3).
 enum Litter {
     /// Not a pack lineage: one young, the ordinary rule.
@@ -3447,6 +3502,11 @@ const DOMAIN_LITTER: u64 = 0x11_77E2;
 /// 2..=`litter_size_max` (keyed by the world seed, the breeder and the tick), and is
 /// never more young than its reserve above the surplus floor funds; with too little for
 /// two, it waits.
+///
+/// LIFE-HISTORY: the breeder conceives only with its reserve at `breed_reserve_fraction` of
+/// its cap or more, and with `litter_by_condition` the litter is not drawn but follows that
+/// condition, 1 to `litter_size_max` ([`Pack::litter_by_condition`]); with funds for none,
+/// it waits.
 fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reproduction, seed: u64) -> Litter {
     let a = &fauna.animals[i];
     let Some(t) = a.founder.and_then(|f| fauna.config.founder(f).pack) else {
@@ -3467,9 +3527,19 @@ fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reprod
         }
     }
     let hi = t.litter_size_max.max(1);
-    let lo = hi.min(2);
-    let mut rng = Rng::keyed(DOMAIN_LITTER, seed, a.id, fauna.tick);
-    let drawn = lo + (rng.unit() * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo)) as u32;
+    let cap = sc.reserve_of(a.body);
+    let r = if cap > 0.0 { a.reserve / cap } else { 0.0 };
+    let f = t.breed_reserve_fraction.clamp(0.0, 1.0);
+    if f > 0.0 && r < f {
+        return Litter::Not;
+    }
+    let (lo, drawn) = if t.litter_by_condition {
+        (1, t.condition_litter(r))
+    } else {
+        let lo = hi.min(2);
+        let mut rng = Rng::keyed(DOMAIN_LITTER, seed, a.id, fauna.tick);
+        (lo, lo + (rng.unit() * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo)) as u32)
+    };
     let package = rule.package_cost(sc);
     let funds = if package > 0.0 {
         ((a.reserve - rule.surplus_floor) / package).floor().max(0.0)
@@ -3589,6 +3659,13 @@ fn lay(
     if !rule.hold_met(&fauna.animals[i].reproduction) || fauna.animals[i].reproduction.retry_ticks > 0 {
         return;
     }
+    // LIFE-HISTORY: a layer with a breeding season lays only inside its window. Gated before
+    // the clutch wait (FINDINGS-FIX-2), so the wait is not spent while the window is shut.
+    let year = view.year();
+    if !rule.season_allows(year, season_of(fauna, i)) {
+        fauna.ledger.season_waits += 1;
+        return;
+    }
     // **A full clutch first** (the capgnawer package): with a clutch from surplus and a
     // wait, a body short of `clutch_max` eggs keeps feeding and lays when its reserve pays
     // for the full clutch, or what it can at the end of the wait.
@@ -3665,6 +3742,11 @@ fn lay(
         fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
         fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
         return;
+    }
+    // LIFE-HISTORY: no more than `litters_per_year` clutches a year (the window is gated
+    // above).
+    if let Some(y) = year.filter(|_| rule.litters_per_year > 0) {
+        count_season(fauna, i, y.number);
     }
     book_first_young(fauna, i);
     let a = &mut fauna.animals[i];
@@ -4375,6 +4457,9 @@ mod parasite_tests;
 #[path = "chorister_tests.rs"]
 mod chorister_tests;
 #[cfg(test)]
+#[path = "life_history_tests.rs"]
+mod life_history_tests;
+#[cfg(test)]
 #[path = "night_survival_tests.rs"]
 mod night_survival_tests;
 #[cfg(test)]
@@ -4398,6 +4483,9 @@ mod light_tests;
 #[cfg(test)]
 #[path = "light_learning_tests.rs"]
 mod light_learning_tests;
+#[cfg(test)]
+#[path = "bellwing_lure_tests.rs"]
+mod bellwing_lure_tests;
 
 #[cfg(test)]
 #[path = "ground_response_tests.rs"]
@@ -4432,3 +4520,15 @@ mod testpass_light_tests;
 #[cfg(test)]
 #[path = "testpass_snail_tests.rs"]
 mod testpass_snail_tests;
+#[cfg(test)]
+#[path = "testpass2_pack_tests.rs"]
+mod testpass2_pack_tests;
+#[cfg(test)]
+#[path = "testpass2_life_tests.rs"]
+mod testpass2_life_tests;
+#[cfg(test)]
+#[path = "testpass2_light_tests.rs"]
+mod testpass2_light_tests;
+#[cfg(test)]
+#[path = "testpass2_edge_tests.rs"]
+mod testpass2_edge_tests;
