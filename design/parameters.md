@@ -1360,7 +1360,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1997 rows)
+**`fauna.*`** (2046 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1393,6 +1393,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.frondgrazer.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.frondgrazer.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.frondgrazer.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.frondgrazer.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.frondgrazer.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.frondgrazer.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.littershredder.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -1422,6 +1426,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.littershredder.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.littershredder.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.littershredder.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.littershredder.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.littershredder.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.littershredder.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1579,6 +1587,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.littershredder.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.littershredder.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.littershredder.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.littershredder.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1623,6 +1632,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.frondgrazer.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.frondgrazer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.frondgrazer.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.frondgrazer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.frondgrazer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.frondgrazer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.000008333333333333334 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1780,6 +1793,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.frondgrazer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.frondgrazer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.frondgrazer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.frondgrazer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1824,6 +1838,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.lanternjaw.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.lanternjaw.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.lanternjaw.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.lanternjaw.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.lanternjaw.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.000009722222222222223 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1981,6 +1999,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.lanternjaw.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.lanternjaw.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.lanternjaw.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.lanternjaw.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2025,6 +2044,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.capgnawer.core.reproduction.egg_fungus_radius_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.capgnawer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.capgnawer.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.capgnawer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.capgnawer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.capgnawer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.capgnawer.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.capgnawer.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.capgnawer.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2182,6 +2205,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.capgnawer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.capgnawer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.capgnawer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.capgnawer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2226,6 +2250,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.loftstrider.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.loftstrider.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.loftstrider.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.loftstrider.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.loftstrider.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.loftstrider.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.loftstrider.motor_respiration_per_s` | 0.000005555555555555556 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.loftstrider.step_up_m` | 1.15 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.loftstrider.step_down_m` | 1.15 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2383,6 +2411,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.loftstrider.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.loftstrider.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.loftstrider.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.loftstrider.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2427,6 +2456,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.ripple-snail.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.ripple-snail.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.ripple-snail.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.ripple-snail.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.ripple-snail.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.ripple-snail.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.ripple-snail.motor_respiration_per_s` | 0.000002777777777777778 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.ripple-snail.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.ripple-snail.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2584,6 +2617,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.ripple-snail.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.ripple-snail.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.ripple-snail.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.ripple-snail.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2628,6 +2662,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.bellwing.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.bellwing.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.bellwing.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.bellwing.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.bellwing.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.bellwing.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.bellwing.motor_respiration_per_s` | 0.000020833333333333333 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.bellwing.step_up_m` | 0.0 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.bellwing.step_down_m` | 0.0 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2785,6 +2823,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.bellwing.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.bellwing.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.bellwing.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.bellwing.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2829,6 +2868,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.seedporter.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.seedporter.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.seedporter.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.seedporter.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.seedporter.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.seedporter.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.seedporter.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2986,6 +3029,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.seedporter.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.seedporter.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.seedporter.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.seedporter.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3016,7 +3060,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.surplus_floor` | 0.2744 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.chorister.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.chorister.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.chorister.core.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.chorister.core.reproduction.gestation_s` | 6000.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
 | `fauna.founders.chorister.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.chorister.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.chorister.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -3030,6 +3074,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.chorister.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.chorister.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.chorister.core.reproduction.litters_per_year` | 1 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.chorister.core.reproduction.breeding_phase` | 0.2 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.chorister.core.reproduction.breeding_window` | 0.15 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.chorister.core.reproduction.gestation_upkeep_factor` | 1.5 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.chorister.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3166,7 +3214,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.den_radius_m` | 4.0 | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
 | `fauna.founders.chorister.pack.litter_size_max` | 4 | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.chorister.pack.litter_interval_s` | 21600.0 | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
-| `fauna.founders.chorister.pack.independence_age_s` | 7200.0 | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.chorister.pack.independence_age_s` | 21600.0 | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
 | `fauna.founders.chorister.pack.provision_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
 | `fauna.founders.chorister.pack.provision_rate_per_s` | 0.01 | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
 | `fauna.founders.chorister.pack.provision_efficiency` | 0.7 | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
@@ -3187,6 +3235,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.follow_radius_m` | 3.0 | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.chorister.pack.breed_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.chorister.pack.commit_m` | 2.5 | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.chorister.pack.select_kin_m` | 3.0 | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.chorister.pack.select_kin_factor` | 0.8 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
