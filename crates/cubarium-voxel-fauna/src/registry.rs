@@ -166,6 +166,10 @@ fn species_rows() -> Vec<Row> {
             .search(0.0, 2.0),
         r("reproduction.brood_share", "fraction of net income", Range::fraction(), "the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off)")
             .search(0.0, 1.0),
+        r("reproduction.litters_per_year", "conceptions per year", nonneg, "breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season)"),
+        r("reproduction.breeding_phase", "year phase", Range::fraction(), "breeding season: the year phase its window opens at (0: a dry season's start)"),
+        r("reproduction.breeding_window", "share of the year", nonneg, "breeding season: the window's width (1 or more: the whole year)"),
+        r("reproduction.gestation_upkeep_factor", "x basal upkeep", nonneg, "pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise)"),
     ]
 }
 
@@ -313,6 +317,10 @@ fn founder_rows() -> Vec<Row> {
         r("sprint.endurance_s", "s", nonneg, "GAIT: seconds at top speed from rested to spent (0: no sprint)"),
         r("sprint.recovery_s", "s", nonneg, "GAIT: seconds off the sprint from spent to rested"),
         r("sprint.resume_fraction", "fraction", fraction, "GAIT: a winded body sprints again once rested to this"),
+        // DROP's jump down when trapped (`DropRule`).
+        r("drop.after_s", "s", nonneg, "DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down"),
+        r("drop.max_m", "m", nonneg, "DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump)"),
+        r("drop.wound_per_m", "wound per m", nonneg, "DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills)"),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
@@ -365,7 +373,15 @@ fn founder_rows() -> Vec<Row> {
         r("pack.provision_efficiency", "fraction", fraction, "share of a transfer the pup receives; the rest is respired").optional().prov("decision"),
         r("pack.territory_radius_m", "m", nonneg, "a pack never paths within this of another pack's den").optional().prov("decision"),
         r("pack.flank_offset_m", "m", nonneg, "flankers go this far either side of the target").optional(),
-        r("pack.chase_give_up_s", "s", nonneg, "a chase is dropped after this").optional().prov("decision"),
+        r("pack.chase_give_up_s", "s", nonneg, "a chase is dropped after this long without progress (closing or working the target)").optional().prov("decision"),
+        r("pack.chase_progress_m", "m", nonneg, "CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock").optional(),
+        r("pack.switch_margin", "ratio", nonneg, "CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body)").optional(),
+        r("pack.switch_stall_s", "s", nonneg, "CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s)").optional(),
+        r("pack.close_in_m", "m", nonneg, "STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off)").optional(),
+        r("pack.stand_off_reach_fraction", "fraction of the strike's reach", fraction, "STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey").optional(),
+        r("pack.pit_search_m", "m", nonneg, "PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off)").optional(),
+        r("pack.route_swing_voxels", "voxels per controller period", nonneg, "PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit)").optional(),
+        r("pack.herd_shun_m", "m", nonneg, "STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone)").optional(),
         r("pack.route_reach_fraction", "fraction", fraction, "prey is taken only within this share of cruise x chase_give_up_s by route").optional(),
         r("pack.route_refresh_s", "s", nonneg, "a pack's walking route components (only prey in its own is taken) are rebuilt at most this often").optional(),
         r("pack.chase_reserve_floor", "fraction of reserve cap", fraction, "a chase is dropped when a member's reserve falls under this").optional(),
@@ -374,6 +390,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.follow_radius_m", "m", nonneg, "an idle adult walks back to within this of the breeder").optional(),
         r("pack.home_give_up_s", "s", nonneg, "an adult wanting rest walks home this long, then rests where it is").optional(),
         r("pack.stalk_margin", "fraction of the prey's hearing floor", nonneg, "S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk)").optional(),
+        r("pack.breed_reserve_fraction", "fraction of reserve cap", fraction, "the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone)").optional(),
         r("pack.commit_m", "m", nonneg, "S2: ...and rushes within this of its prey").optional(),
         r("pack.select_kin_m", "m", nonneg, "PACK-TUNE: kin of a target's lineage within this lower its prospect").optional(),
         r("pack.select_kin_factor", "factor", fraction, "PACK-TUNE: each such kin multiplies the prospect by this").optional(),
@@ -548,6 +565,11 @@ fn knob_rows() -> Vec<Row> {
             .search(0.0, 1.0).prov("decision"),
         t("forage_turn_back_samples", "samples", count, "samples the blind forager turns after leaving an exhausted patch (area-restricted search)")
             .search(0.0, 8.0),
+        t("press_replan_s", "s", nonneg, "a reflex walk asking forward this long without moving gives its target up (EDGE)").search(1.0, 10.0),
+        t("press_shun_s", "s", nonneg, "a target given up for pressing stays given up this long").search(10.0, 600.0).log(),
+        t("route_refresh_s", "s", pos, "the walking route graph a reflex walk plans on is rebuilt after this").search(10.0, 600.0).log(),
+        t("route_detour", "ratio", pos, "a target is in reach when its route is at most this times the reflex's search radius").search(1.0, 4.0),
+        t("way_on_m", "m", nonneg, "how far round itself a cornered body off its route graph looks for its own way back onto it").search(1.0, 8.0),
     ]);
 
     // `fauna.hunt.*`: the lanternjaw's patrol (the detritus web D2), every one a plausible
@@ -620,7 +642,9 @@ fn knob_rows() -> Vec<Row> {
     rows.extend([
         lk("flower_reflectance", "brightness per unit light", nonneg, "a nectar flower's brightness (UV) per unit of the light falling on it").search(0.1, 4.0),
         lk("glowcap_emission", "brightness", nonneg, "a glowcap's own light").search(0.0, 2.0),
-        lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light").search(0.0, 4.0),
+        lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light (cyan)").search(0.0, 4.0),
+        lk("lure_scent", "x nectar_per_s", nonneg, "BELLWING: a lit lure lays this x a flower's nectar scent on its lanternjaw's face (0: light alone)").search(0.0, 2.0),
+        lk("lure_uv", "x flower_reflectance", nonneg, "BELLWING: a fully lit lure's UV, x a flower's; a UV eye reads the lure as a flower (UV class), 0: cyan only").search(0.0, 2.0),
         lk("background_floor", "light", pos, "a beacon's contrast is its brightness over the light around it plus this (the darkest background)").search(0.01, 0.5).log(),
         lk("half_m", "m", pos, "a beacon's received level halves at this distance").search(0.25, 4.0),
         lk("lure_height_fraction", "x body height", nonneg, "the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle"),

@@ -158,6 +158,14 @@ pub struct VoxelView<'a> {
 }
 
 impl<'a> VoxelView<'a> {
+    /// The Cubarium year at this view's tick ([`crate::weather::Climate::year`]): what the
+    /// fauna and flora read for their seasons.
+    pub fn year(&self) -> Option<crate::weather::Year> {
+        self.config.climate.year(&self.config.day, self.tick)
+    }
+}
+
+impl<'a> VoxelView<'a> {
     /// A view of terrain alone, for a reader that holds a copy of `material` off the world
     /// (the renderer's sky plane): no water, no stores, and no solid mask, so every support
     /// and column query takes the direct test over `material`.

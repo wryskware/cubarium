@@ -1363,7 +1363,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2033 rows)
+**`fauna.*`** (2188 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1396,6 +1396,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.frondgrazer.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.frondgrazer.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.frondgrazer.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.frondgrazer.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.frondgrazer.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.frondgrazer.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.littershredder.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -1425,6 +1429,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.littershredder.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.littershredder.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.littershredder.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.littershredder.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.littershredder.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.littershredder.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1532,6 +1540,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.littershredder.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.littershredder.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.littershredder.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.littershredder.drop.max_m` | 1.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.littershredder.drop.wound_per_m` | 0.02 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1577,7 +1588,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.littershredder.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.littershredder.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.littershredder.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.littershredder.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.littershredder.pack.chase_progress_m` | (absent) | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.littershredder.pack.switch_margin` | (absent) | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.littershredder.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.littershredder.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.littershredder.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.littershredder.pack.pit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.littershredder.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.littershredder.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.littershredder.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.littershredder.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -1586,6 +1605,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.littershredder.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.littershredder.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.littershredder.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.littershredder.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1630,6 +1650,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.frondgrazer.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.frondgrazer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.frondgrazer.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.frondgrazer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.frondgrazer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.frondgrazer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.000008333333333333334 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1737,6 +1761,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.frondgrazer.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.frondgrazer.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.frondgrazer.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.frondgrazer.drop.max_m` | 1.1 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.frondgrazer.drop.wound_per_m` | 0.15 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1782,7 +1809,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.frondgrazer.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.frondgrazer.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.frondgrazer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.frondgrazer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.frondgrazer.pack.chase_progress_m` | (absent) | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.frondgrazer.pack.switch_margin` | (absent) | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.frondgrazer.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.frondgrazer.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.frondgrazer.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.frondgrazer.pack.pit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.frondgrazer.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.frondgrazer.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.frondgrazer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.frondgrazer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -1791,6 +1826,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.frondgrazer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.frondgrazer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.frondgrazer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.frondgrazer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1835,6 +1871,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.lanternjaw.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.lanternjaw.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.lanternjaw.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.lanternjaw.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.lanternjaw.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.000009722222222222223 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1942,6 +1982,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.lanternjaw.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.lanternjaw.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.lanternjaw.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.lanternjaw.drop.max_m` | 1.8 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.lanternjaw.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1987,7 +2030,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.lanternjaw.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.lanternjaw.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.lanternjaw.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.lanternjaw.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.lanternjaw.pack.chase_progress_m` | (absent) | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.lanternjaw.pack.switch_margin` | (absent) | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.lanternjaw.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.lanternjaw.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.lanternjaw.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.lanternjaw.pack.pit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.lanternjaw.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.lanternjaw.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.lanternjaw.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.lanternjaw.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -1996,6 +2047,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.lanternjaw.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.lanternjaw.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.lanternjaw.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.lanternjaw.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2040,6 +2092,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.capgnawer.core.reproduction.egg_fungus_radius_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.capgnawer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.capgnawer.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.capgnawer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.capgnawer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.capgnawer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.capgnawer.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.capgnawer.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.capgnawer.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2147,6 +2203,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.capgnawer.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.capgnawer.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.capgnawer.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.capgnawer.drop.max_m` | 1.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.capgnawer.drop.wound_per_m` | 0.03 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2192,7 +2251,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.capgnawer.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.capgnawer.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.capgnawer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.capgnawer.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.capgnawer.pack.chase_progress_m` | (absent) | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.capgnawer.pack.switch_margin` | (absent) | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.capgnawer.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.capgnawer.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.capgnawer.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.capgnawer.pack.pit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.capgnawer.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.capgnawer.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.capgnawer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.capgnawer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2201,6 +2268,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.capgnawer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.capgnawer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.capgnawer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.capgnawer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2245,6 +2313,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.loftstrider.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.loftstrider.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.loftstrider.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.loftstrider.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.loftstrider.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.loftstrider.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.loftstrider.motor_respiration_per_s` | 0.000005555555555555556 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.loftstrider.step_up_m` | 1.15 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.loftstrider.step_down_m` | 1.15 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2352,6 +2424,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.loftstrider.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.loftstrider.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.loftstrider.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.loftstrider.drop.max_m` | 2.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.loftstrider.drop.wound_per_m` | 0.3 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2397,7 +2472,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.loftstrider.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.loftstrider.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.loftstrider.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.loftstrider.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.loftstrider.pack.chase_progress_m` | (absent) | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.loftstrider.pack.switch_margin` | (absent) | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.loftstrider.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.loftstrider.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.loftstrider.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.loftstrider.pack.pit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.loftstrider.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.loftstrider.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.loftstrider.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.loftstrider.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2406,6 +2489,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.loftstrider.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.loftstrider.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.loftstrider.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.loftstrider.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2450,6 +2534,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.ripple-snail.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.ripple-snail.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.ripple-snail.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.ripple-snail.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.ripple-snail.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.ripple-snail.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.ripple-snail.motor_respiration_per_s` | 0.000002777777777777778 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.ripple-snail.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.ripple-snail.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2557,6 +2645,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.ripple-snail.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.ripple-snail.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.ripple-snail.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.ripple-snail.drop.max_m` | 0.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.ripple-snail.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2602,7 +2693,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.ripple-snail.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.ripple-snail.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.ripple-snail.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.ripple-snail.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.ripple-snail.pack.chase_progress_m` | (absent) | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.ripple-snail.pack.switch_margin` | (absent) | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.ripple-snail.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.ripple-snail.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.ripple-snail.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.ripple-snail.pack.pit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.ripple-snail.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.ripple-snail.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.ripple-snail.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.ripple-snail.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2611,6 +2710,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.ripple-snail.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.ripple-snail.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.ripple-snail.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.ripple-snail.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2631,30 +2731,34 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.bellwing.core.body_max` | 0.03 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.bellwing.core.growth_max_per_s` | 0.00000816 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
-| `fauna.founders.bellwing.core.body_min` | 0.0075 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
-| `fauna.founders.bellwing.core.birth_body` | 0.03 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.bellwing.core.body_min` | 0.003 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.bellwing.core.birth_body` | 0.015 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.bellwing.core.birth_cost` | 0.015 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
-| `fauna.founders.bellwing.core.reserve_cap` | 0.5 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
+| `fauna.founders.bellwing.core.reserve_cap` | 0.8 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.bellwing.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.bellwing.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.bellwing.core.lifespan_median_s` | 43200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
 | `fauna.founders.bellwing.core.reproduction.surplus_floor` | 0.0015 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
-| `fauna.founders.bellwing.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
+| `fauna.founders.bellwing.core.reproduction.surplus_hold_s` | 300.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.bellwing.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
 | `fauna.founders.bellwing.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
 | `fauna.founders.bellwing.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.bellwing.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.bellwing.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
-| `fauna.founders.bellwing.core.reproduction.egg_organic` | 0.009600000000000001 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.bellwing.core.reproduction.egg_organic` | 0.0035000000000000005 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
 | `fauna.founders.bellwing.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.bellwing.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
-| `fauna.founders.bellwing.core.reproduction.clutch_max` | 0 | eggs | [0, inf) | 0–8 | - | placeholder | clutch from surplus: most eggs a clutch holds, sized at laying from the reserve above the floor (0: the fixed clutch_size) |
+| `fauna.founders.bellwing.core.reproduction.clutch_max` | 6 | eggs | [0, inf) | 0–8 | - | placeholder | clutch from surplus: most eggs a clutch holds, sized at laying from the reserve above the floor (0: the fixed clutch_size) |
 | `fauna.founders.bellwing.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.bellwing.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.bellwing.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
-| `fauna.founders.bellwing.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.bellwing.core.reproduction.clutch_hold_max_s` | 300.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.bellwing.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.bellwing.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.bellwing.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.bellwing.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.bellwing.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.bellwing.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.bellwing.motor_respiration_per_s` | 0.000020833333333333333 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.bellwing.step_up_m` | 0.0 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.bellwing.step_down_m` | 0.0 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2762,6 +2866,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.bellwing.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.bellwing.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.bellwing.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.bellwing.drop.max_m` | 0.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.bellwing.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2807,7 +2914,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.bellwing.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.bellwing.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.bellwing.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.bellwing.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.bellwing.pack.chase_progress_m` | (absent) | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.bellwing.pack.switch_margin` | (absent) | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.bellwing.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.bellwing.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.bellwing.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.bellwing.pack.pit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.bellwing.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.bellwing.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.bellwing.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.bellwing.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -2816,6 +2931,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.bellwing.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.bellwing.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.bellwing.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.bellwing.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2860,6 +2976,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.seedporter.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.seedporter.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.seedporter.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.seedporter.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.seedporter.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.seedporter.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.seedporter.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2967,6 +3087,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.sprint.endurance_s` | 10.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.seedporter.sprint.recovery_s` | 60.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.seedporter.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.seedporter.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.seedporter.drop.max_m` | 1.6 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.seedporter.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -3012,7 +3135,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.provision_efficiency` | (absent) | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.seedporter.pack.territory_radius_m` | (absent) | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.seedporter.pack.flank_offset_m` | (absent) | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.seedporter.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.seedporter.pack.chase_give_up_s` | (absent) | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.seedporter.pack.chase_progress_m` | (absent) | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.seedporter.pack.switch_margin` | (absent) | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.seedporter.pack.switch_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.seedporter.pack.close_in_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.seedporter.pack.stand_off_reach_fraction` | (absent) | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.seedporter.pack.pit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.seedporter.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.seedporter.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.seedporter.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.seedporter.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -3021,6 +3152,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.seedporter.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.seedporter.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.seedporter.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.seedporter.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3051,7 +3183,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.surplus_floor` | 0.2744 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.chorister.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.chorister.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.chorister.core.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.chorister.core.reproduction.gestation_s` | 6000.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
 | `fauna.founders.chorister.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.chorister.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.chorister.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -3065,6 +3197,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.chorister.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.chorister.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.chorister.core.reproduction.litters_per_year` | 1 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
+| `fauna.founders.chorister.core.reproduction.breeding_phase` | 0.2 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
+| `fauna.founders.chorister.core.reproduction.breeding_window` | 0.15 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
+| `fauna.founders.chorister.core.reproduction.gestation_upkeep_factor` | 1.5 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.chorister.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3172,6 +3308,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.sprint.endurance_s` | 20.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.chorister.sprint.recovery_s` | 120.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.chorister.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.chorister.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.chorister.drop.max_m` | 3.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.chorister.drop.wound_per_m` | 0.08 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -3211,13 +3350,21 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.den_radius_m` | 4.0 | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
 | `fauna.founders.chorister.pack.litter_size_max` | 4 | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.chorister.pack.litter_interval_s` | 21600.0 | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
-| `fauna.founders.chorister.pack.independence_age_s` | 7200.0 | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
+| `fauna.founders.chorister.pack.independence_age_s` | 21600.0 | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
 | `fauna.founders.chorister.pack.provision_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | decision | an adult at the den provisions a pup while its reserve is above this |
 | `fauna.founders.chorister.pack.provision_rate_per_s` | 0.01 | org-units/s per unit giver body | [0, inf) |  | - | placeholder | the provisioning transfer |
 | `fauna.founders.chorister.pack.provision_efficiency` | 0.7 | fraction | [0, 1] |  | - | decision | share of a transfer the pup receives; the rest is respired |
 | `fauna.founders.chorister.pack.territory_radius_m` | 10.0 | m | [0, inf) |  | - | decision | a pack never paths within this of another pack's den |
 | `fauna.founders.chorister.pack.flank_offset_m` | 1.5 | m | [0, inf) |  | - | placeholder | flankers go this far either side of the target |
-| `fauna.founders.chorister.pack.chase_give_up_s` | 20.0 | s | [0, inf) |  | - | decision | a chase is dropped after this |
+| `fauna.founders.chorister.pack.chase_give_up_s` | 20.0 | s | [0, inf) |  | - | decision | a chase is dropped after this long without progress (closing or working the target) |
+| `fauna.founders.chorister.pack.chase_progress_m` | 0.5 | m | [0, inf) |  | - | placeholder | CHURN: closing this much nearer than the pack's nearest so far restarts the give-up clock |
+| `fauna.founders.chorister.pack.switch_margin` | 1.5 | ratio | [0, inf) |  | - | placeholder | CHURN: in a stalled chase, another target takes the hunt only when worth this many times the current one (prospect x body) |
+| `fauna.founders.chorister.pack.switch_stall_s` | 10.0 | s | [0, inf) |  | - | placeholder | CHURN2: a chase is open to a switch only after this long without progress (below chase_give_up_s) |
+| `fauna.founders.chorister.pack.close_in_m` | 2.5 | m | [0, inf) |  | - | placeholder | STRIKE: within this of its target, on its level, a member leaves its route and steers to its stand-off facing the prey (0: off) |
+| `fauna.founders.chorister.pack.stand_off_reach_fraction` | 0.0 | fraction of the strike's reach | [0, 1] |  | - | placeholder | STRIKE: the stand-off is the jaw's reach plus this share of the strike's reach from the prey |
+| `fauna.founders.chorister.pack.pit_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | PIT: a member off its route graph walks back onto it by its own body's shortest way, searched this far (0: off) |
+| `fauna.founders.chorister.pack.route_swing_voxels` | 0.25 | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
+| `fauna.founders.chorister.pack.herd_shun_m` | 3.0 | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.chorister.pack.route_reach_fraction` | 0.8 | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
 | `fauna.founders.chorister.pack.route_refresh_s` | 60.0 | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
@@ -3226,6 +3373,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.follow_radius_m` | 3.0 | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
 | `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
+| `fauna.founders.chorister.pack.breed_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.chorister.pack.commit_m` | 2.5 | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.chorister.pack.select_kin_m` | 3.0 | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.chorister.pack.select_kin_factor` | 0.8 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3327,6 +3475,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.bellwing_roost_ceiling` | 0.4 | fraction of band | [0, 1] | 0.1–0.8 | - | placeholder | going to rest, cover closer than this overhead is an underside to rise into |
 | `fauna.teachers.forage_stay_forward` | 0.0 | effort | [0, 1] | 0–1 | - | decision | the blind forager's forward effort while it tastes food (0 stays on food, 1 walks across it) |
 | `fauna.teachers.forage_turn_back_samples` | 2 | samples | [0, inf) | 0–8 | - | placeholder | samples the blind forager turns after leaving an exhausted patch (area-restricted search) |
+| `fauna.teachers.press_replan_s` | 3.0 | s | [0, inf) | 1–10 | - | placeholder | a reflex walk asking forward this long without moving gives its target up (EDGE) |
+| `fauna.teachers.press_shun_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | a target given up for pressing stays given up this long |
+| `fauna.teachers.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | the walking route graph a reflex walk plans on is rebuilt after this |
+| `fauna.teachers.route_detour` | 2.0 | ratio | (0, inf) | 1–4 | - | placeholder | a target is in reach when its route is at most this times the reflex's search radius |
+| `fauna.teachers.way_on_m` | 4.0 | m | [0, inf) | 1–8 | - | placeholder | how far round itself a cornered body off its route graph looks for its own way back onto it |
 | `fauna.hunt.cue_scan_m` | 6.0 | m | [0, inf) | 2–12 | - | placeholder | how far around itself a patroller reads its prey's food to choose the next patch |
 | `fauna.hunt.patch_m` | 1.0 | m | (0, inf) | 0.5–3 | - | placeholder | food cells are pooled into square patches this wide |
 | `fauna.hunt.patch_min_hop_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | the nearest a next patch may be |
@@ -3367,7 +3520,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.scent.nectar_per_s` | 2.25 | scent units per s | [0, inf) | 0.1–10 log | - | placeholder | what a flower holding nectar lays on the surface under it (the nectar channel) |
 | `fauna.light.flower_reflectance` | 1.0 | brightness per unit light | [0, inf) | 0.1–4 | - | placeholder | a nectar flower's brightness (UV) per unit of the light falling on it |
 | `fauna.light.glowcap_emission` | 0.3 | brightness | [0, inf) | 0–2 | - | placeholder | a glowcap's own light |
-| `fauna.light.lure_emission` | 1.0 | brightness | [0, inf) | 0–4 | - | placeholder | a fully lit lure's own light |
+| `fauna.light.lure_emission` | 1.0 | brightness | [0, inf) | 0–4 | - | placeholder | a fully lit lure's own light (cyan) |
+| `fauna.light.lure_scent` | 1.0 | x nectar_per_s | [0, inf) | 0–2 | - | placeholder | BELLWING: a lit lure lays this x a flower's nectar scent on its lanternjaw's face (0: light alone) |
+| `fauna.light.lure_uv` | 1.0 | x flower_reflectance | [0, inf) | 0–2 | - | placeholder | BELLWING: a fully lit lure's UV, x a flower's; a UV eye reads the lure as a flower (UV class), 0: cyan only |
 | `fauna.light.background_floor` | 0.05 | light | (0, inf) | 0.01–0.5 log | - | placeholder | a beacon's contrast is its brightness over the light around it plus this (the darkest background) |
 | `fauna.light.half_m` | 1.0 | m | (0, inf) | 0.25–4 | - | placeholder | a beacon's received level halves at this distance |
 | `fauna.light.lure_height_fraction` | 0.4 | x body height | [0, inf) |  | - | placeholder | the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle |

@@ -98,7 +98,9 @@ pub(crate) use cubarium_voxel::KeyedRng as Rng;
 
 #[path = "glider.rs"]
 mod glider;
-pub(crate) use glider::glider_fruit_in_reach;
+pub(crate) use glider::{OffGraph, glider_fruit_in_reach, off_graph_exit};
+#[path = "jump.rs"]
+pub(crate) mod jump;
 
 /// The tick's sky, read once (F1): what a flyer's act needs of the weather and the clock.
 #[derive(Clone, Copy, Debug)]
@@ -280,7 +282,17 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
                 .binary_search_by_key(&hit.prey, |a| a.id)
                 .ok()
                 .map(|j| (fauna.animals[j].pose.x, fauna.animals[j].pose.z));
+            // FINDINGS-FIX-2: a kill by a strike that began on a prey drawn to a lure is a
+            // lure kill, though the lunge's loom closed the visit (booked once: the kill
+            // books it itself while the prey is still drawn).
+            let lure_kill = hit.lure && !crate::light::drawn_to_lure(fauna, hit.prey);
+            let prey_founder = fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).ok().and_then(|j| fauna.animals[j].founder);
             apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
+            if let (true, Some(f)) = (lure_kill, prey_founder) {
+                if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
+                    fauna.ledger.lure_kills[f.index()] += 1;
+                }
+            }
             // HUNTER-MEAL: a kill marks its place productive in the striker's memory.
             if let Some((x, z)) = stood {
                 if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
@@ -363,6 +375,8 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
     for a in &gone {
         // As with a death: the body left the world, so its controller does too.
         fauna.controllers.take(a.id);
+        fauna.trapped.remove(&a.id);
+        fauna.drop_plans.remove(&a.id);
         fauna.book_removed(a);
         fauna.free_riders(a);
     }
@@ -918,7 +932,13 @@ fn maintenance(fauna: &mut Fauna) {
         };
         let a = &mut fauna.animals[i];
         a.age_ticks = a.age_ticks.saturating_add(1);
-        let want = sc.maintenance_per_s * rest * a.body * DT;
+        // LIFE-HISTORY: a gestating body pays its lineage's pregnancy upkeep factor.
+        let pregnant = if a.reproduction.escrow.is_some() {
+            sc.reproduction.gestation_upkeep_factor.max(0.0)
+        } else {
+            1.0
+        };
+        let want = sc.maintenance_per_s * rest * pregnant * a.body * DT;
         let (_, from_body) = respire(fauna, i, want, Respiration::Maintenance);
         if is_founder && from_body > 0.0 {
             fauna.animals[i].founder_state.feedback.structural_loss += from_body;
@@ -1231,6 +1251,23 @@ fn controllers(
         let founder = fauna.animals[i].founder.expect("a due founder");
         let Sensed { ref manifest, actions, lure, lift, driven, .. } = sensed[k];
         let (mut actions, mut lure, mut lift) = (actions, lure, lift);
+        // EDGE's readout: which layer sets the held actions, the last override winning.
+        let mut src = if driven { crate::Steer::Heuristic } else { crate::Steer::Rest };
+        // EDGE: the interval just ended pressed (held forward, its motor refused), on the
+        // ground: the run of pressed ticks the reflexes below re-plan by.
+        {
+            let a = &fauna.animals[i];
+            let fb = a.founder_state.feedback;
+            let pressed = a.mobility.mode == crate::MobilityMode::Ground
+                && a.founder_state.held.forward > 0.0
+                && fb.attempted_equivalent > 1e-12
+                && fb.delivered_equivalent / fb.attempted_equivalent < fauna.config.teachers.motor_refused;
+            if pressed {
+                *fauna.pressed.entry(id).or_default() += manifest.cadence_ticks().max(1);
+            } else {
+                fauna.pressed.remove(&id);
+            }
+        }
         // The prey heuristics' flee rule (predation §2.7): a body driven by its own
         // heuristic — not a saved policy, whose behaviour changes only through the world
         // — turns away from a seen threat within 3 m, or from tremor, and resumes after.
@@ -1243,6 +1280,7 @@ fn controllers(
             let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
             if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv, day) {
                 actions = go;
+                src = crate::Steer::Fruit;
             }
         }
         // AMPHIBIOUS-SNAIL: a body that retracts (its lineage's `retract_hold_s`) does so
@@ -1258,6 +1296,7 @@ fn controllers(
                 lure = 0.0;
                 lift = 0.0;
                 fled = true;
+                src = crate::Steer::Flee;
             }
         }
         // A glider's roost reflex (F3): at its rest hour or in a downpour, its own
@@ -1265,6 +1304,7 @@ fn controllers(
         if driven && fauna.controllers.flees(id) && fauna.config.founder(founder).glider.is_some() {
             if let Some(roost) = glider::roost_reflex(fauna, i, view, &fv, sky) {
                 actions = roost;
+                src = crate::Steer::Roost;
             }
         }
         // Fed perching (the minimal gut's repair 3 item 8): a body whose controller rests
@@ -1273,6 +1313,7 @@ fn controllers(
         if driven && fauna.controllers.rests_when_fed(id) && !fauna.animals[i].eating {
             actions = Actions { forward: 0.0, turn: 0.0, feed: 0.0 };
             lure = 0.0;
+            src = crate::Steer::FedRest;
             lift = if fauna.animals[i].mobility.mode == crate::MobilityMode::Perched {
                 0.0
             } else {
@@ -1286,6 +1327,7 @@ fn controllers(
                 actions = out;
                 lure = 0.0;
                 lift = 0.0;
+                src = crate::Steer::Shallows;
             }
         }
         // SNAIL-FIX: the roam drive. At night and in or after rain, an amphibious body
@@ -1296,6 +1338,7 @@ fn controllers(
                 actions = go;
                 lure = 0.0;
                 lift = 0.0;
+                src = crate::Steer::Roam;
             }
         }
         // SNAIL-LAND-2: the giving-up density. A grazer wanting food on a grazed face (its
@@ -1321,6 +1364,7 @@ fn controllers(
         if driven && fauna.controllers.flees(id) {
             if let Some(go) = water_reflex(fauna, i, view) {
                 actions = go;
+                src = crate::Steer::Roam;
             }
         }
         // A retracted body is stopped and closed; a desiccated one cannot feed.
@@ -1340,6 +1384,7 @@ fn controllers(
                 crate::hunt::steer(fauna, i, view, &fv, predation_occupancy)
             {
                 actions = go;
+                src = crate::Steer::Patrol;
                 // S3 (D1): the lure is lit only where it is dark — the light at its face,
                 // `sky × daylight`, under the day line (at night, in caves, in deep shade).
                 lure = if lit > 0.0 && sky.clock_on {
@@ -1368,6 +1413,7 @@ fn controllers(
                 if let Some(away) = crate::pack::carcass_yield(fauna, i, ring, at_carcass) {
                     actions = away;
                     lure = 0.0;
+                    src = crate::Steer::Yield;
                 }
             }
         }
@@ -1377,6 +1423,7 @@ fn controllers(
             {
                 actions = tactic;
                 lure = 0.0;
+                src = crate::Steer::Pack;
             }
         }
         // S3 LIGHT AND FLIGHT (`crate::light`): over a live lineage's heuristic with a light
@@ -1396,6 +1443,7 @@ fn controllers(
                         actions = go;
                         lift = up;
                         lure = 0.0;
+                        src = crate::Steer::Light;
                     }
                 } else {
                     let fungal = match (senses.as_deref(), manifest.modules.iter().any(|m| m.name == "Chem(fungal)")) {
@@ -1410,6 +1458,7 @@ fn controllers(
                     };
                     if let Some(go) = crate::light::steer_glow(fauna, i, view, &fv, daylight, actions, fungal) {
                         actions = go;
+                        src = crate::Steer::Light;
                     }
                 }
             }
@@ -1418,6 +1467,19 @@ fn controllers(
         if driven && fauna.controllers.flees(id) && actions.feed > 0.5 && actions.forward <= fauna.config.teachers.forage_stay_forward {
             fauna.ledger.feed_still_ticks_by_founder[founder.index()] += 1;
         }
+        // DROP: a body trapped off its route graph (no walking way back on, no glide) for its
+        // lineage's `drop.after_s` jumps down; last, as it is the only way out.
+        if driven {
+            if let Some(go) = jump::reflex(fauna, i, view, &fv) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Drop;
+            }
+        }
+        fauna.steer.insert(id, src);
+        // EDGE: a reflex walk overridden by a later layer is not the one held.
+        fauna.walk_commit(id, founder, src);
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;
         a.founder_state.lure = if lure.is_finite() { lure.clamp(0.0, 1.0) } else { 0.0 };
@@ -1504,9 +1566,10 @@ fn flee(
 }
 
 /// **The arboreal refuge** (S2, [`crate::vigil`]): a grounded glider's walk to the nearest
-/// stand it can climb within `search_m` (walking into the stem climbs it).
+/// stand it can climb within `search_m` that it can walk to (EDGE), walking into the stem
+/// climbs it.
 pub(crate) fn refuge_step(
-    fauna: &Fauna,
+    fauna: &mut Fauna,
     i: usize,
     view: &VoxelView<'_>,
     fv: &cubarium_voxel_flora::FloraView<'_>,
@@ -2168,6 +2231,8 @@ fn founder_act(
             };
         }
     }
+    // DROP: walked to the edge its jump leaves from, facing the landing, it jumps down.
+    jump::take_off(fauna, i, founder, view, held);
     // The interval's motion feedback, attempted and delivered separately, plus the
     // motor respiration the interval paid — the per-interval counter the search driver's
     // score reads alongside the ledger's own split.
@@ -2224,6 +2289,7 @@ fn founder_act(
         };
         if let Some(prey) = target {
             let h = phys.hunter.expect("a hunter");
+            let lure = crate::light::drawn_to_lure(fauna, prey);
             let a = &mut fauna.animals[i];
             a.strike = Some(Strike {
                 phase: StrikePhase::Windup,
@@ -2231,6 +2297,7 @@ fn founder_act(
                 prey,
                 from_x: a.pose.x,
                 from_z: a.pose.z,
+                lure,
             });
             a.state = State::Resting;
             fauna.ledger.strikes_by_founder[founder.index()] += 1;
@@ -2658,12 +2725,15 @@ fn strike_tick(
         let body = fauna.animals[i].body;
         let cost = h.strike_cost_s * phys.core.maintenance_per_s * body;
         respire(fauna, i, cost, Respiration::Hunt);
+        // FINDINGS-FIX-2: the lure draw at the lunge, before its loom closes the visit.
+        let lure = s.lure || crate::light::drawn_to_lure(fauna, s.prey);
         let a = &fauna.animals[i];
         s = Strike {
             phase: StrikePhase::Lunge,
             ticks_left: crate::Hunter::ticks(h.lunge_s),
             from_x: a.pose.x,
             from_z: a.pose.z,
+            lure,
             ..s
         };
     }
@@ -2782,6 +2852,7 @@ fn strike_tick(
                     damage,
                     by: founder,
                     striker: a.id,
+                    lure: s.lure,
                 });
             }
         }
@@ -2835,13 +2906,15 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
         if crate::light::drawn_to_lure(fauna, fauna.animals[j].id) {
             fauna.ledger.lure_kills[f.index()] += 1;
         }
-        // S3b: a prey with a light sense still naive about cyan.
-        if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id) {
+        // S3b: a prey with a light sense still naive about the lure's class to its eye (cyan, or UV when the lure mimics a flower).
+        if fauna.config.founder(f).senses.light_m > 0.0 && crate::light::naive(fauna, fauna.animals[j].id, f) {
             fauna.ledger.naive_kills[by.index()][f.index()] += 1;
         }
     }
     let a = fauna.animals.remove(j);
     fauna.controllers.take(a.id);
+    fauna.trapped.remove(&a.id);
+    fauna.drop_plans.remove(&a.id);
     fauna.free_riders(&a);
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
@@ -3445,13 +3518,15 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
     shore_eggs(fauna, view, flora);
     let parents = fauna.animals.len();
     let mut newborns: Vec<Animal> = Vec::new();
+    // LIFE-HISTORY: the Cubarium year, for the lineages with a breeding season.
+    let year = view.year();
     for i in 0..parents {
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let rule = sc.reproduction;
         advance_eligibility(fauna, i, &sc, &rule);
         match rule.mode {
             crate::BirthMode::Gestation => {
-                gestate(fauna, i, &sc, &rule, view.config.seed, &mut newborns);
+                gestate(fauna, i, &sc, &rule, (view.config.seed, year), &mut newborns);
             }
             crate::BirthMode::Eggs => lay(fauna, i, view, flora, &sc, &rule),
         }
@@ -3514,7 +3589,7 @@ fn gestate(
     i: usize,
     sc: &SpeciesConfig,
     rule: &crate::Reproduction,
-    seed: u64,
+    (seed, year): (u64, Option<cubarium_voxel::weather::Year>),
     newborns: &mut Vec<Animal>,
 ) {
     let a = &fauna.animals[i];
@@ -3532,6 +3607,15 @@ fn gestate(
             Litter::Of(n) => n,
             Litter::Not => return,
         };
+        // LIFE-HISTORY: a breeding season conceives only inside its window, and no more
+        // than `litters_per_year` times a year (a pack's count is the pack's).
+        if !rule.season_allows(year, season_of(fauna, i)) {
+            fauna.ledger.season_waits += 1;
+            return;
+        }
+        if let Some(y) = year.filter(|_| rule.litters_per_year > 0) {
+            count_season(fauna, i, y.number);
+        }
         fauna.animals[i].reproduction.escrow = Some(crate::Escrow {
             young,
             ..crate::Escrow::default()
@@ -3646,6 +3730,28 @@ fn gestate(
     }
 }
 
+/// The breeding season a body's conceptions count against (LIFE-HISTORY): its pack's for a
+/// pack member, its own otherwise.
+fn season_of(fauna: &Fauna, i: usize) -> crate::Season {
+    let a = &fauna.animals[i];
+    match a.pack.and_then(|m| fauna.pack(m.pack)) {
+        Some(p) => p.season,
+        None => a.reproduction.season,
+    }
+}
+
+/// Count one conception in `year` against [`season_of`]'s season.
+fn count_season(fauna: &mut Fauna, i: usize, year: i64) {
+    match fauna.animals[i].pack.map(|m| m.pack) {
+        Some(pack) if fauna.pack(pack).is_some() => {
+            if let Some(p) = fauna.pack_mut(pack) {
+                p.season.count(year);
+            }
+        }
+        _ => fauna.animals[i].reproduction.season.count(year),
+    }
+}
+
 /// What a gestating lineage's next conception carries (roster R3).
 enum Litter {
     /// Not a pack lineage: one young, the ordinary rule.
@@ -3665,6 +3771,11 @@ const DOMAIN_LITTER: u64 = 0x11_77E2;
 /// 2..=`litter_size_max` (keyed by the world seed, the breeder and the tick), and is
 /// never more young than its reserve above the surplus floor funds; with too little for
 /// two, it waits.
+///
+/// LIFE-HISTORY: the breeder conceives only with its reserve at `breed_reserve_fraction` of
+/// its cap or more, and with `litter_by_condition` the litter is not drawn but follows that
+/// condition, 1 to `litter_size_max` ([`Pack::litter_by_condition`]); with funds for none,
+/// it waits.
 fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reproduction, seed: u64) -> Litter {
     let a = &fauna.animals[i];
     let Some(t) = a.founder.and_then(|f| fauna.config.founder(f).pack) else {
@@ -3685,9 +3796,19 @@ fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reprod
         }
     }
     let hi = t.litter_size_max.max(1);
-    let lo = hi.min(2);
-    let mut rng = Rng::keyed(DOMAIN_LITTER, seed, a.id, fauna.tick);
-    let drawn = lo + (rng.unit() * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo)) as u32;
+    let cap = sc.reserve_of(a.body);
+    let r = if cap > 0.0 { a.reserve / cap } else { 0.0 };
+    let f = t.breed_reserve_fraction.clamp(0.0, 1.0);
+    if f > 0.0 && r < f {
+        return Litter::Not;
+    }
+    let (lo, drawn) = if t.litter_by_condition {
+        (1, t.condition_litter(r))
+    } else {
+        let lo = hi.min(2);
+        let mut rng = Rng::keyed(DOMAIN_LITTER, seed, a.id, fauna.tick);
+        (lo, lo + (rng.unit() * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo)) as u32)
+    };
     let package = rule.package_cost(sc);
     let funds = if package > 0.0 {
         ((a.reserve - rule.surplus_floor) / package).floor().max(0.0)
@@ -3807,6 +3928,13 @@ fn lay(
     if !rule.hold_met(&fauna.animals[i].reproduction) || fauna.animals[i].reproduction.retry_ticks > 0 {
         return;
     }
+    // LIFE-HISTORY: a layer with a breeding season lays only inside its window. Gated before
+    // the clutch wait (FINDINGS-FIX-2), so the wait is not spent while the window is shut.
+    let year = view.year();
+    if !rule.season_allows(year, season_of(fauna, i)) {
+        fauna.ledger.season_waits += 1;
+        return;
+    }
     // **A full clutch first** (the capgnawer package): with a clutch from surplus and a
     // wait, a body short of `clutch_max` eggs keeps feeding and lays when its reserve pays
     // for the full clutch, or what it can at the end of the wait.
@@ -3888,6 +4016,11 @@ fn lay(
         fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
         fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
         return;
+    }
+    // LIFE-HISTORY: no more than `litters_per_year` clutches a year (the window is gated
+    // above).
+    if let Some(y) = year.filter(|_| rule.litters_per_year > 0) {
+        count_season(fauna, i, y.number);
     }
     book_first_young(fauna, i);
     let a = &mut fauna.animals[i];
@@ -4443,10 +4576,10 @@ fn water_over_feet(view: &VoxelView<'_>, a: &Animal) -> f64 {
 /// and its centre is inside the strip's `z` ends. A heuristic world query, not a sense:
 /// read by this reflex only, never an observation. `None` when it is not in too-deep water
 /// or no such face is in reach.
-fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
-    let a = &fauna.animals[i];
+fn shallows_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    let a = fauna.animals[i];
     let founder = a.founder?;
-    let phys = fauna.config.founder(founder);
+    let phys = *fauna.config.founder(founder);
     if phys.aquatic || a.mobility.mode != crate::MobilityMode::Ground || a.attached.is_some() {
         return None;
     }
@@ -4467,7 +4600,25 @@ fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Acti
     let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
     let ring = f64::from(c.width) * v;
     let top = (a.site.y + up).min(c.height.saturating_sub(1));
-    let mut best: Option<(f64, f64, f64)> = None;
+    // EDGE: a face it pressed toward without a break is given up (`teachers.press_replan_s`).
+    let shunned = fauna.walk_shunned(a.id, founder);
+    // EDGE: off its lineage's route graph (whose faces are all within the adult's wade), its
+    // own body's way back onto it (`RouteGraph::way_on`: its disc, its step, water no deeper
+    // than it stands in) is the way out of the water, where one is within reach.
+    {
+        let graph = fauna.routes(view, founder, fauna.config.teachers.route_refresh_s);
+        let own = (r / v).ceil().max(0.0) as u32;
+        if graph.node_near(a.site, (a.pose.x, a.pose.z), own).is_none() {
+            let cols = if reach.is_finite() && reach > 0.0 { (reach / v).ceil() as u32 } else { 0 };
+            let way = graph.way_on(view, a.site, r, geometry.headroom_voxels(v), limits, wade, own, cols);
+            if let Some(f) = way.filter(|f| !shunned.contains(&Fauna::walk_key_face(*f))) {
+                let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, ring);
+                fauna.walking_to(a.id, Fauna::walk_key_face(f), crate::Steer::Shallows);
+                return Some(glider::walk_toward(&a, dx, dz, 0.0));
+            }
+        }
+    }
+    let mut best: Option<(f64, f64, f64, Site)> = None;
     for dz in -k..=k {
         let z = hz + dz;
         if z < 0 || z >= i64::from(c.depth) {
@@ -4489,18 +4640,19 @@ fn shallows_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Acti
                 continue;
             }
             let face = Site { x: x as u32, y, z: z as u32 };
-            if !body::disc_clear_on_face(view, &geometry, face, limits) {
+            if shunned.contains(&Fauna::walk_key_face(face)) || !body::disc_clear_on_face(view, &geometry, face, limits) {
                 continue;
             }
             let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
             let d = (ddx * ddx + ddz * ddz).sqrt();
-            if d <= reach && best.is_none_or(|(b, _, _)| d < b) {
-                best = Some((d, ddx, ddz));
+            if d <= reach && best.is_none_or(|(b, _, _, _)| d < b) {
+                best = Some((d, ddx, ddz, face));
             }
         }
     }
-    let (_, dx, dz) = best?;
-    Some(glider::walk_toward(a, dx, dz, 0.0))
+    let (_, dx, dz, face) = best?;
+    fauna.walking_to(a.id, Fauna::walk_key_face(face), crate::Steer::Shallows);
+    Some(glider::walk_toward(&a, dx, dz, 0.0))
 }
 
 /// **The drying clock** (AMPHIBIOUS-SNAIL, [`crate::Amphibious`]): every amphibious body's
@@ -4607,6 +4759,10 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
                 Some((i, Departure::Desiccation))
             } else if a.lifespan_ticks > 0 && a.age_ticks >= a.lifespan_ticks {
                 Some((i, Departure::Aged))
+            } else if a.wound >= 1.0 {
+                // DROP: a hit that wounds to 1 kills at once (`apply_hit`); a wound of 1 here
+                // is a jump down's.
+                Some((i, Departure::Fell))
             } else {
                 None
             }
@@ -4632,6 +4788,8 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         // A dead body's controller goes with it. Ids are never reused, so a table that
         // only ever grows is a leak once the world breeds and buries.
         fauna.controllers.take(*id);
+        fauna.trapped.remove(id);
+        fauna.drop_plans.remove(id);
     }
     for (a, cause) in &dead {
         bury_corpse(fauna, flora, a, *cause);
@@ -4676,6 +4834,9 @@ mod parasite_tests;
 #[path = "chorister_tests.rs"]
 mod chorister_tests;
 #[cfg(test)]
+#[path = "life_history_tests.rs"]
+mod life_history_tests;
+#[cfg(test)]
 #[path = "night_survival_tests.rs"]
 mod night_survival_tests;
 #[cfg(test)]
@@ -4699,10 +4860,19 @@ mod light_tests;
 #[cfg(test)]
 #[path = "light_learning_tests.rs"]
 mod light_learning_tests;
+#[cfg(test)]
+#[path = "bellwing_lure_tests.rs"]
+mod bellwing_lure_tests;
 
 #[cfg(test)]
 #[path = "ground_response_tests.rs"]
 mod ground_response_tests;
+#[cfg(test)]
+#[path = "edge_tests.rs"]
+mod edge_tests;
+#[cfg(test)]
+#[path = "drop_tests.rs"]
+mod drop_tests;
 #[cfg(test)]
 #[path = "hunker_tests.rs"]
 mod hunker_tests;
@@ -4716,8 +4886,26 @@ mod testpass_vigil_tests;
 #[path = "testpass_pack_tests.rs"]
 mod testpass_pack_tests;
 #[cfg(test)]
+#[path = "churn_tests.rs"]
+mod churn_tests;
+#[cfg(test)]
+#[path = "strike_tests.rs"]
+mod strike_tests;
+#[cfg(test)]
 #[path = "testpass_light_tests.rs"]
 mod testpass_light_tests;
 #[cfg(test)]
 #[path = "testpass_snail_tests.rs"]
 mod testpass_snail_tests;
+#[cfg(test)]
+#[path = "testpass2_pack_tests.rs"]
+mod testpass2_pack_tests;
+#[cfg(test)]
+#[path = "testpass2_life_tests.rs"]
+mod testpass2_life_tests;
+#[cfg(test)]
+#[path = "testpass2_light_tests.rs"]
+mod testpass2_light_tests;
+#[cfg(test)]
+#[path = "testpass2_edge_tests.rs"]
+mod testpass2_edge_tests;

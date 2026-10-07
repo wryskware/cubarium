@@ -88,11 +88,35 @@ use crate::Fauna;
 //     failed-visit marks and visit, `Percept::{expect, expect_tick, last_sip}`, the lanternjaw
 //     `DarkActive`, the light ledger lines (`light_budget`, `stalled_visits`, `sipped_visits`,
 //     `naive_kills`).
-// 53: SNAIL-LAND — `EggSite::Shore`, `Amphibious::{egg_water_max_m, egg_climb_max_m,
+// 53: CHURN — `Pack::{chase_progress_m, switch_margin}`, `PackRecord::{chase_progress_tick,
+//     chase_best_m, chase_work}`, `ChaseEnd::Switched`, the ledger's `pack_switches`; a
+//     chase's give-up reads time without progress, not a chase clock. CHURN2 (same 53, the
+//     branch unmerged): `Pack::switch_stall_s`; a switch only after that long stalled.
+//     STRIKE (same 53, the branch unmerged): `Pack::{close_in_m, stand_off_reach_fraction}`,
+//     the ledger's `pack_close_in_samples, pack_step_offs, pack_pivots, pack_out_of_reach`.
+// 54: LIFE-HISTORY — `Reproduction::{litters_per_year, breeding_phase, breeding_window,
+//     gestation_upkeep_factor}`, `Pack::{breed_reserve_fraction, litter_by_condition}`,
+//     `ReproductionState::season` and `PackRecord::season` (`Season`), the ledger's
+//     `pups_independent` and `season_waits`; the Veilhound's season, gestation and rearing.
+// 55: STRIKE-2 — `Pack::herd_shun_m`; a member out of its target's jaw band steps to a level
+//     that meets it, and a pack that drops an armoured target leaves its armoured herd-mates.
+// 56: PIT and PIT-2 — `Pack::{pit_search_m, route_swing_voxels, whelp_at_den}`; a pup or a
+//     Veilhound going home follows the route, a body off its graph walks back on, dens on
+//     founding faces, route walks land on the route at a bend.
+// 57: BELLWING — `LightConfig::{lure_uv, lure_scent}` (the lure mimics a flower: UV and the
+//     nectar scent); the bellwing's r-strategist reproduction defaults.
+// 58: EDGE and EDGE-2 — `TeacherConfig::{press_replan_s, press_shun_s, route_refresh_s,
+//     route_detour, way_on_m}`; reflex walks take reachable stands by the route, a pressed walk
+//     re-plans, a flight turns along the strip's end, a body caught in solid steps out.
+// 59: FINDINGS-FIX-2 — `Strike::lure` (a lure kill is booked by the lure draw at the lunge).
+// 60: DROP — `FounderPhysiology::drop` (`DropRule`), `Departure::Fell`, the ledger's
+//     `drops_by_founder`, `drop_m_by_founder` and `drop_wound_by_founder`; a trapped body jumps
+//     down past its step at a wound.
+// 61: SNAIL-LAND — `EggSite::Shore`, `Amphibious::{egg_water_max_m, egg_climb_max_m,
 //     egg_moisture_min, egg_drown_s, egg_dry_moisture, egg_dry_s}`, `Clutch::{wet_ticks,
 //     dry_ticks}`, the ledger's `eggs_drowned_by_founder` and `eggs_dried_by_founder`.
-// 54: SNAIL-LAND-2 — `Amphibious::{egg_search_m, graze_give_up, graze_worth, graze_search_m}`.
-pub const SCHEMA: u32 = 54;
+//     SNAIL-LAND-2 (same 61) — `Amphibious::{egg_search_m, graze_give_up, graze_worth, graze_search_m}`.
+pub const SCHEMA: u32 = 61;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

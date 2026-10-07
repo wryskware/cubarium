@@ -358,6 +358,18 @@ impl ScentField {
                         }
                     }
                 }
+                // BELLWING: a lit lure that mimics a flower's scent lays `lure_scent` × a
+                // flower's on the face its lanternjaw stands on (× its lit fraction).
+                let ls = config.light.lure_scent;
+                if s.nectar_per_s > 0.0 && ls > 0.0 {
+                    for a in animals.iter().filter(|a| a.state != crate::State::Asleep && a.attached.is_none() && a.founder_state.lure > 0.0) {
+                        let Some((x, y, z)) = standing_face(a) else { continue };
+                        if let Some(n) = graph.node(x, y, z) {
+                            self.emit[n as usize] += s.nectar_per_s * ls * a.founder_state.lure.clamp(0.0, 1.0) * dt;
+                            any = true;
+                        }
+                    }
+                }
             } else if s.deposit_per_s > 0.0 {
                 for a in animals {
                     let laid = a.founder.and_then(|fd| config.founder(fd).senses.scent);
