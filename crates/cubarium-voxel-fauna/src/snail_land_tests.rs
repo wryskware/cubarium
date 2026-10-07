@@ -360,3 +360,204 @@ fn the_shore_state_round_trips_through_save_and_load() {
     assert_eq!(back.clutches, fauna.clutches, "the clutch's clocks");
     assert_eq!(back.ledger, fauna.ledger, "the drowned and dried counts");
 }
+
+// ------------------------------------------------------------------ SNAIL-LAND-2
+
+/// A controller that holds still and opts into the reflexes (the flee rule's gate): the
+/// body moves only where a reflex walks it.
+struct StillReflexive;
+
+impl crate::Controller for StillReflexive {
+    fn drive(&mut self, _observation: &[f64]) -> crate::Response {
+        crate::Response::Bounded(Actions { forward: 0.0, turn: 0.0, feed: 0.0 })
+    }
+    fn reset(&mut self) {}
+    fn flees(&self) -> bool {
+        true
+    }
+}
+
+/// **A layer saving for its full clutch is not trip-ready** (SNAIL-LAND-2): with a clutch
+/// from surplus and a wait (`clutch_hold_max_s`), a body whose hold is met but whose
+/// reserve pays for less than its full clutch keeps feeding (no trip) until the wait is
+/// spent — the laying's own rule, so the trip never takes a snail ashore to hold still
+/// for a wait it could spend eating. A full clutch, a spent wait, or no wait at all is
+/// trip-ready. Read against the config the test sets.
+#[test]
+fn a_layer_saving_for_its_full_clutch_is_not_trip_ready_until_its_wait_is_spent() {
+    let mut cfg = config(1.0e6, |_| {});
+    let wait_ticks = 50u64;
+    {
+        let r = &mut cfg.founders[SNAIL.index()].core.reproduction;
+        r.clutch_max = 3;
+        r.surplus_floor = 0.0;
+        r.clutch_hold_max_s = wait_ticks as f64 * DT;
+    }
+    let sc = cfg.founder(SNAIL).core;
+    let rule = sc.reproduction;
+    let cap = sc.reserve_of(sc.body_max);
+    let full = rule.full_clutch(cap);
+    assert!(full >= 2, "fixture: a full clutch of two or more eggs ({full})");
+    let partial = 1.5 * rule.egg_organic;
+    assert!(rule.clutch_for(partial) >= 1 && rule.clutch_for(partial) < full, "fixture: a partial clutch");
+    let mut st = crate::ReproductionState { eligible_now: true, surplus_ticks: rule.hold_required(), ..Default::default() };
+    assert!(rule.hold_met(&st), "fixture: the hold is met");
+    let ready = |st: &crate::ReproductionState, reserve: f64, rule: &Reproduction| crate::step::trip_ready(rule, st, reserve, cap);
+    assert!(!ready(&st, partial, &rule), "saving: no trip at the wait's start");
+    st.clutch_wait_ticks = rule.clutch_hold_max_ticks() - 1;
+    assert!(!ready(&st, partial, &rule), "saving: no trip a tick before the wait is spent");
+    st.clutch_wait_ticks = rule.clutch_hold_max_ticks();
+    assert!(ready(&st, partial, &rule), "the wait spent: it goes with what it has");
+    st.clutch_wait_ticks = 0;
+    assert!(ready(&st, f64::from(full) * rule.egg_organic, &rule), "a full clutch goes at once");
+    let no_wait = Reproduction { clutch_hold_max_s: 0.0, ..rule };
+    assert!(ready(&st, partial, &no_wait), "no wait: it goes at once");
+    st.retry_ticks = 1;
+    assert!(!ready(&st, f64::from(full) * rule.egg_organic, &rule), "a refused laying waits out its retry");
+}
+
+/// **The trip passes over a crowded nest** (SNAIL-LAND-2): with the nest-site brake on
+/// (`nest_radius_m`, `nest_crowd_max` 0), a ready layer in the pond, the bank beside it
+/// taken by another snail and its clutch, walks to a shore face outside that nest's
+/// radius and lays there at the first try: no laying is refused.
+#[test]
+fn the_trip_passes_over_a_crowded_nest_for_a_free_shore_face() {
+    let world = shore_world(noon(), |_, _| 0.8);
+    let mut cfg = config(1.0e6, |_| {});
+    cfg.founders[SNAIL.index()].cruise_body_lengths_per_s = 2.0;
+    cfg.founders[SNAIL.index()].active = crate::Activity::Diurnal;
+    {
+        let r = &mut cfg.founders[SNAIL.index()].core.reproduction;
+        r.nest_radius_m = 0.5;
+        r.nest_crowd_max = 0;
+    }
+    let radius = cfg.founder(SNAIL).core.reproduction.nest_radius_m;
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(cfg);
+    // The first snail lays on the bank at (6, 0) and stays there.
+    let first = introduce(&mut fauna, &world, 6, 0, StartingStores::FULL);
+    still(&mut fauna, first);
+    steps(&mut fauna, &world, &mut flora, 1);
+    assert_eq!(fauna.view().clutches.len(), 1, "fixture: the first clutch");
+    let taken = fauna.view().clutches[0].site;
+    let refused0 = fauna.view().ledger.nest_refusals_by_founder[SNAIL.index()];
+    let id = introduce(&mut fauna, &world, 3, 0, StartingStores::FULL);
+    assert!(fauna.set_controller(id, Box::new(StillReflexive)));
+    for _ in 0..1200 {
+        fauna.step(&world, &mut flora);
+        if fauna.view().clutches.len() == 2 {
+            break;
+        }
+    }
+    let v = fauna.view();
+    assert_eq!(v.clutches.len(), 2, "it laid");
+    let c = v.clutches[1];
+    let ring = f64::from(W) * V;
+    let (dx, dz) = crate::pose::wrapped_delta(
+        (f64::from(taken.x) + 0.5) * V,
+        (f64::from(taken.z) + 0.5) * V,
+        (f64::from(c.site.x) + 0.5) * V,
+        (f64::from(c.site.z) + 0.5) * V,
+        ring,
+    );
+    assert!((dx * dx + dz * dz).sqrt() > radius, "outside the taken nest: {:?} against {:?}", c.site, taken);
+    let am = v.config.founder(SNAIL).amphibious.unwrap();
+    assert!(crate::shore_egg_site(&world.view(), &am, c.site), "on a shore face: {:?}", c.site);
+    assert_eq!(v.ledger.nest_refusals_by_founder[SNAIL.index()], refused0, "no laying refused");
+}
+
+/// **The trip looks as far as `egg_search_m`** (SNAIL-LAND-2), not `roam_search_m`: a
+/// ready layer in mid-pond, its nearest shore face beyond its roam reach, lays ashore with
+/// the bank within its egg search and does not when the bank is beyond it.
+#[test]
+fn the_trip_looks_as_far_as_its_egg_search() {
+    let world = shore_world(noon(), |_, _| 0.8);
+    let lays = |egg_search_m: f64| {
+        let mut cfg = config(1.0e6, |am| {
+            am.roam_search_m = 0.25;
+            am.egg_search_m = egg_search_m;
+        });
+        cfg.founders[SNAIL.index()].cruise_body_lengths_per_s = 2.0;
+        cfg.founders[SNAIL.index()].active = crate::Activity::Diurnal;
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(cfg);
+        let id = introduce(&mut fauna, &world, 3, 2, StartingStores::FULL);
+        assert!(fauna.set_controller(id, Box::new(StillReflexive)));
+        steps(&mut fauna, &world, &mut flora, 1200);
+        fauna.view().clutches.len()
+    };
+    // The bank's nearest shore face (column 6) is 0.75 m from the pond's middle (column 3).
+    assert_eq!(lays(1.0), 1, "the bank within the egg search: it lays ashore");
+    assert_eq!(lays(0.5), 0, "the bank beyond the egg search: no trip, no clutch");
+}
+
+/// **A grazer leaves a grazed face for a richer one** (SNAIL-LAND-2, the giving-up
+/// density): film on every pond face, the snail's own face grazed to the refuge; a hungry
+/// snail under its heuristic with `graze_give_up` above the refuge walks off and eats more;
+/// with it 0 (main's rule) it stays on its grazed face, which still tastes of food, eating
+/// only what its mouth reaches on the face ahead.
+#[test]
+fn a_hungry_grazer_leaves_a_grazed_face_for_a_richer_one() {
+    let world = shore_world(clock_off(), |_, _| 0.8);
+    let run = |give_up: f64| {
+        let mut cfg = config(1.0e6, |am| am.graze_give_up = give_up);
+        // No laying here.
+        cfg.founders[SNAIL.index()].core.reproduction.surplus_hold_s = 1.0e9;
+        let fc = FloraConfig { film_seed_per_m2: FloraConfig::default().film_capacity_per_m2, ..FloraConfig::default() };
+        let mut flora = Flora::new(fc.clone());
+        assert!(flora.seed_film(&world) > 0, "fixture: film on the pond");
+        let k = fc.film_capacity_per_m2 * V * V;
+        let am = cfg.founder(SNAIL).amphibious.unwrap();
+        assert!(fc.film_graze_refuge < am.graze_give_up || give_up == 0.0, "fixture: the give-up above the refuge");
+        assert!(fc.film_seed_per_m2 * V * V >= am.graze_worth * k, "fixture: the other faces are worth the walk");
+        let home = site(3, 2);
+        let _ = flora.take_film(home, 1.0);
+        let grazed = flora.view().film_at(home);
+        assert!(grazed <= fc.film_graze_refuge * k + 1e-12 && grazed > 0.0, "fixture: its face at the refuge");
+        let mut fauna = Fauna::new(cfg);
+        let id = introduce(&mut fauna, &world, 3, 2, StartingStores { body: 1.0, reserve: 0.3 });
+        let teachers = fauna.config().teachers;
+        assert!(fauna.set_controller(id, crate::controller::heuristic(SNAIL, teachers)));
+        steps(&mut fauna, &world, &mut flora, 300);
+        let b = fauna.view().animal(id).expect("alive").clone();
+        (b.site, fauna.view().ledger.eaten_by_food[crate::Food::Film.index()])
+    };
+    let (at, ate_on) = run(0.3);
+    assert_ne!(at, site(3, 2), "it left the grazed face");
+    let (at, ate_off) = run(0.0);
+    assert_eq!(at, site(3, 2), "with the give-up off it stays on the grazed face");
+    assert!(ate_on > ate_off, "leaving, it ate more: {ate_on} against {ate_off} (its mouth reaches only the face ahead)");
+}
+
+/// **Where a grazer goes** (SNAIL-LAND-2, [`crate::step::graze_target`]): the face within
+/// `graze_search_m` with the most film per snail on it above its own, per metre, among
+/// faces worth the walk (`graze_worth` of a site's capacity per snail, itself counted); a
+/// face out of standing water only in its roam hours; none worth it, no walk.
+#[test]
+fn a_grazer_goes_to_the_richest_face_worth_it_and_onto_land_only_in_its_hours() {
+    let world = shore_world(clock_off(), |_, _| 0.8);
+    let cfg = config(1.0e6, |am| {
+        am.graze_search_m = 0.6;
+        am.graze_worth = 0.5;
+    });
+    let am = cfg.founder(SNAIL).amphibious.unwrap();
+    let mut fauna = Fauna::new(cfg);
+    let id = introduce(&mut fauna, &world, 5, 2, StartingStores::FULL);
+    let a = fauna.view().animal(id).expect("alive").clone();
+    let k = 1.0;
+    let (bank, pond) = (site(6, 2), site(3, 2));
+    let film = |s: Site| if s == bank { 0.9 * k } else if s == pond { 0.6 * k } else { 0.0 };
+    let view = world.view();
+    let to = |roam: bool, others: &[Site]| {
+        crate::step::graze_target(&view, &am, &a, roam, k, &film, others).map(|(dx, dz)| {
+            let x = ((a.pose.x + dx) / V).floor() as i64;
+            let z = ((a.pose.z + dz) / V).floor() as u32;
+            (x.rem_euclid(i64::from(W)) as u32, z)
+        })
+    };
+    assert_eq!(to(true, &[]), Some((6, 2)), "in its hours: the richer bank, nearer");
+    assert_eq!(to(false, &[]), Some((3, 2)), "out of its hours: only the pond");
+    assert_eq!(to(true, &[bank]), Some((3, 2)), "a snail on the bank halves it below the worth: the pond");
+    let poor = |s: Site| if s == pond { 0.4 * k } else { 0.0 };
+    assert_eq!(crate::step::graze_target(&view, &am, &a, false, k, &poor, &[]), None, "nothing worth the walk");
+}

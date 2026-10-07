@@ -131,6 +131,8 @@ fn main() {
         Some("budget") => budget_probe(&args),
         Some("glide") => glide_probe(&args),
         Some("shore") => shore_probe(&args),
+        Some("snailprobe") => snail_probe(&args),
+        Some("filmhist") => film_hist(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
 }
@@ -1699,5 +1701,211 @@ fn shore_probe(args: &[String]) {
         if m % 10 == 0 || m == minutes {
             println!("shore,{m},{}", shore_line(&sim));
         }
+    }
+}
+
+/// **SNAIL-LAND-2 probe** (`snailprobe load=DIR minutes=M [config=] [set=...]`): steps a save
+/// tick by tick and, per minute, splits the ripple-snails' body-ticks and assimilated intake
+/// by where they stand (under standing water `w`, the 0.5 m shore band `s`, further inland
+/// `l`), by day and night, by readiness to lay (the trip's own test) and by the laying
+/// wait, with the reproduction refusals and the film standing under water and on land.
+fn snail_probe(args: &[String]) {
+    use cubarium_voxel_fauna::{BirthMode, effective_config, shore_egg_site};
+    let params = resolve(args);
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let minutes: u64 = arg(args, "minutes=").map_or(30, |m| m.parse().unwrap());
+    let f = Founder::RippleSnail;
+    let fi = f.index();
+    let phys = *params.fauna.founder(f);
+    let am = phys.amphibious.expect("amphibious");
+    if let Some(a) = sim.fauna().view().animals.iter().find(|a| a.founder == Some(f)) {
+        let sc = effective_config(&params.fauna, a);
+        println!("rule,{:?}", sc.reproduction);
+        println!("core,birth_body={},body_max={},reserve_cap_at_max={},egg_site={:?},ceiling={}", sc.birth_body, sc.body_max, sc.reserve_of(sc.body_max), phys.egg_site, params.fauna.lineage_body_ceiling);
+    }
+    // [class w/s/l][day 0 / night 1]: body ticks, intake, ready ticks, holding-still ticks,
+    // clutch-wait ticks, eating ticks, adult ticks, full-reserve ticks.
+    #[derive(Default, Clone, Copy)]
+    struct Acc { ticks: f64, intake: f64, ready: f64, hold: f64, wait: f64, eating: f64, adult: f64, full: f64, retry: f64, refr: f64, still: f64, asleep: f64, ashore: f64, film: f64, emerg: f64, resv: f64 }
+    let mut win = [[Acc::default(); 2]; 3];
+    let k_site = params.flora.film_capacity_per_m2 * sim.world().view().config.voxel_m.powi(2);
+    let mut prev: rustc_hash::FxHashMap<u64, f64> = rustc_hash::FxHashMap::default();
+    let mut l_prev = sim.fauna().view().ledger.clone();
+    let per_min = 60 * u64::from(TICK_HZ);
+    for minute in minute0 + 1..=minute0 + minutes {
+        let lm = sim.fauna().view().ledger.clone();
+        for _ in 0..per_min {
+            sim.step();
+            let fv = sim.fauna().view();
+            let l = fv.ledger;
+            let night = (l.amphibious_ticks[1][0] + l.amphibious_ticks[1][1]) > (l_prev.amphibious_ticks[1][0] + l_prev.amphibious_ticks[1][1]);
+            let d = usize::from(night);
+            let view = sim.world().view();
+            for a in fv.animals.iter().filter(|a| a.founder == Some(f)) {
+                let now = a.founder_state.feedback.intake;
+                let was = prev.insert(a.id, now).unwrap_or(now);
+                let got = if now >= was { now - was } else { now };
+                let (x, y, z) = (i64::from(a.site.x), a.site.y, a.site.z);
+                let class = if view.standing_depth_m(x, y, z) > 0.0 {
+                    0
+                } else if cubarium_voxel_flora::shore_band(&view, 0.5, x, y, z) {
+                    1
+                } else {
+                    2
+                };
+                let sc = effective_config(&params.fauna, a);
+                let rule = sc.reproduction;
+                let ready = rule.mode == BirthMode::Eggs && !rule.dormant && rule.hold_met(&a.reproduction) && a.reproduction.retry_ticks == 0 && rule.clutch_for(a.reserve) > 0;
+                let o = &mut win[class][d];
+                o.ticks += 1.0;
+                o.intake += got;
+                o.ready += f64::from(u8::from(ready));
+                o.hold += f64::from(u8::from(ready && shore_egg_site(&view, &am, a.site)));
+                o.wait += f64::from(u8::from(a.reproduction.clutch_wait_ticks > 0));
+                o.eating += f64::from(u8::from(a.eating));
+                o.adult += f64::from(u8::from(a.body >= sc.birth_body));
+                o.full += f64::from(u8::from(a.reserve >= 0.98 * sc.reserve_of(a.body)));
+                o.retry += f64::from(u8::from(a.reproduction.retry_ticks > 0));
+                o.refr += f64::from(u8::from(a.reproduction.refractory_ticks > 0));
+                o.still += f64::from(u8::from(a.speed_m_s < 1e-4));
+                o.asleep += f64::from(u8::from(a.state == cubarium_voxel_fauna::State::Asleep));
+                o.ashore += f64::from(u8::from(a.mobility.ashore));
+                o.emerg += f64::from(u8::from(a.emergency));
+                o.resv += a.reserve / sc.reserve_of(a.body).max(1e-12);
+                o.film += sim.flora().view().film_at(cubarium_voxel_flora::Site { x: a.site.x, y: a.site.y, z: a.site.z }) / k_site;
+            }
+            l_prev = l.clone();
+        }
+        if minute % 10 == 0 || minute == minute0 + minutes {
+            let fv = sim.fauna().view();
+            let l = fv.ledger;
+            let snails: Vec<_> = fv.animals.iter().filter(|a| a.founder == Some(f)).collect();
+            let n = snails.len();
+            let adults = snails.iter().filter(|a| a.body >= effective_config(&params.fauna, a).birth_body).count();
+            let body: f64 = snails.iter().map(|a| a.body).sum::<f64>() / n.max(1) as f64;
+            let resv: f64 = snails.iter().map(|a| a.reserve / effective_config(&params.fauna, a).reserve_of(a.body)).sum::<f64>() / n.max(1) as f64;
+            // Film under water and on land, column tops.
+            let view = sim.world().view();
+            let flv = sim.flora().view();
+            let c = view.config;
+            let (mut fw, mut nw, mut fs, mut ns) = (0.0, 0u64, 0.0, 0u64);
+            for z in 0..c.depth {
+                for x in 0..i64::from(c.width) {
+                    let Some(y) = view.highest_support_in(x, z, 0, c.height.saturating_sub(1)) else { continue };
+                    let film = flv.film_at(cubarium_voxel_flora::Site { x: x as u32, y, z });
+                    if view.standing_depth_m(x, y, z) > 0.0 {
+                        fw += film;
+                        nw += 1;
+                    } else if cubarium_voxel_flora::shore_band(&view, 0.5, x, y, z) {
+                        fs += film;
+                        ns += 1;
+                    }
+                }
+            }
+            let mut faces: Vec<(u32, u32, u32)> = snails.iter().map(|a| (a.site.x, a.site.y, a.site.z)).collect();
+            faces.sort_unstable();
+            faces.dedup();
+            let mut ready_n = 0;
+            let mut ready_site = 0;
+            let mut ready_near = 0;
+            for a in &snails {
+                let sc = effective_config(&params.fauna, a);
+                let rule = sc.reproduction;
+                if !(rule.hold_met(&a.reproduction) && a.reproduction.retry_ticks == 0 && rule.clutch_for(a.reserve) > 0) {
+                    continue;
+                }
+                ready_n += 1;
+                let v = c.voxel_m;
+                let k = (am.roam_search_m / v).ceil() as i64;
+                let mut best = f64::INFINITY;
+                for dz in -k..=k {
+                    let zz = i64::from(a.site.z) + dz;
+                    if zz < 0 || zz >= i64::from(c.depth) {
+                        continue;
+                    }
+                    for dx in -k..=k {
+                        let xx = (i64::from(a.site.x) + dx).rem_euclid(i64::from(c.width));
+                        let top = (a.site.y + k as u32).min(c.height - 1);
+                        let Some(yy) = view.highest_support_in(xx, zz as u32, 0, top) else { continue };
+                        let d = ((dx * dx + dz * dz) as f64).sqrt() * v;
+                        if d <= am.roam_search_m && shore_egg_site(&view, &am, cubarium_voxel_flora::Site { x: xx as u32, y: yy, z: zz as u32 }) {
+                            best = best.min(d);
+                        }
+                    }
+                }
+                if best.is_finite() {
+                    ready_site += 1;
+                    if best <= 0.5 {
+                        ready_near += 1;
+                    }
+                }
+            }
+            let mut parts = vec![format!(
+                "faces_occ={},ready_n={ready_n},ready_with_site={ready_site},ready_site_le0.5m={ready_near},n={n},adults={adults},", faces.len()) + &format!("body={body:.5},reserve_frac={resv:.3},laid={},nest_ref={},ceil_ref={},film_w={fw:.4},faces_w={nw},film_s={fs:.4},faces_s={ns},assim={:.6}",
+                l.eggs_laid_by_founder[fi] - lm.eggs_laid_by_founder[fi],
+                l.nest_refusals_by_founder[fi] - lm.nest_refusals_by_founder[fi],
+                l.ceiling_refusals_by_founder[fi] - lm.ceiling_refusals_by_founder[fi],
+                l.assimilated_by_founder[fi] - lm.assimilated_by_founder[fi],
+            )];
+            for (ci, cn) in ["w", "s", "l"].iter().enumerate() {
+                for (di, dn) in ["d", "n"].iter().enumerate() {
+                    let o = win[ci][di];
+                    if o.ticks == 0.0 {
+                        continue;
+                    }
+                    let t = o.ticks;
+                    parts.push(format!(
+                        "{cn}{dn}:t={t},in_h={:.6},ready={:.3},hold={:.3},wait={:.3},eat={:.3},adult={:.3},full={:.3},retry={:.3},refr={:.3},still={:.3},asleep={:.3},ashore={:.3},emerg={:.3},resv={:.3},film_rel={:.3}",
+                        o.intake / (t / f64::from(TICK_HZ) / 3600.0),
+                        o.ready / t, o.hold / t, o.wait / t, o.eating / t, o.adult / t, o.full / t, o.retry / t, o.refr / t, o.still / t,
+                        o.asleep / t, o.ashore / t, o.emerg / t, o.resv / t, o.film / t
+                    ));
+                }
+            }
+            println!("sp,{minute},{}", parts.join(";"));
+            win = [[Acc::default(); 2]; 3];
+        }
+    }
+}
+
+/// **SNAIL-LAND-2 film histogram** (`filmhist load=DIR`): column-top faces by class (under
+/// standing water; out of it within 0.5 m of water; farther), counted by film as a share of
+/// one site's underwater capacity (<0.05, <0.1, <0.25, <0.5, >=0.5), with the snails standing
+/// on each class.
+fn film_hist(args: &[String]) {
+    let params = resolve(args);
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let view = s.world.view();
+    let flv = s.flora.view();
+    let c = view.config;
+    let k = params.flora.film_capacity_per_m2 * c.voxel_m * c.voxel_m;
+    let edges = [0.05, 0.1, 0.25, 0.5];
+    let mut h = [[0u64; 5]; 3];
+    let mut tot = [0.0f64; 3];
+    for z in 0..c.depth {
+        for x in 0..i64::from(c.width) {
+            let Some(y) = view.highest_support_in(x, z, 0, c.height.saturating_sub(1)) else { continue };
+            let class = if view.standing_depth_m(x, y, z) > 0.0 {
+                0
+            } else if cubarium_voxel_flora::shore_band(&view, 0.5, x, y, z) {
+                1
+            } else {
+                2
+            };
+            let f = flv.film_at(cubarium_voxel_flora::Site { x: x as u32, y, z }) / k;
+            tot[class] += f * k;
+            let b = edges.iter().position(|&e| f < e).unwrap_or(4);
+            h[class][b] += 1;
+        }
+    }
+    for (ci, name) in ["water", "shore", "inland"].iter().enumerate() {
+        println!("film,{name},total={:.4},faces<0.05={},<0.1={},<0.25={},<0.5={},>=0.5={}", tot[ci], h[ci][0], h[ci][1], h[ci][2], h[ci][3], h[ci][4]);
     }
 }

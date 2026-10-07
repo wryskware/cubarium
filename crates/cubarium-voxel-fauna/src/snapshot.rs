@@ -91,7 +91,8 @@ use crate::Fauna;
 // 53: SNAIL-LAND — `EggSite::Shore`, `Amphibious::{egg_water_max_m, egg_climb_max_m,
 //     egg_moisture_min, egg_drown_s, egg_dry_moisture, egg_dry_s}`, `Clutch::{wet_ticks,
 //     dry_ticks}`, the ledger's `eggs_drowned_by_founder` and `eggs_dried_by_founder`.
-pub const SCHEMA: u32 = 53;
+// 54: SNAIL-LAND-2 — `Amphibious::{egg_search_m, graze_give_up, graze_worth, graze_search_m}`.
+pub const SCHEMA: u32 = 54;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

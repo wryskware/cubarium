@@ -906,6 +906,43 @@ pub struct Amphibious {
     /// ... for this long, seconds, without a break dries out (to the litter of its face).
     #[serde(default = "default_egg_dry_s")]
     pub egg_dry_s: f64,
+    /// **The trip's reach** (SNAIL-LAND-2): how far, metres, a ready layer looks for a shore
+    /// egg face it can afford and whose nest is not crowded (a world query, as the water
+    /// reflex's). Before SNAIL-LAND-2 the trip looked only as far as `roam_search_m`, and a
+    /// layer in mid-pond held its full reserve and its eggs.
+    #[serde(default = "default_egg_search_m")]
+    pub egg_search_m: f64,
+    /// **The giving-up density** (SNAIL-LAND-2, Charnov's marginal value rule): a grazer
+    /// that wants food and stands on a face holding less film than this share of one site's
+    /// underwater film capacity (`film_capacity_per_m2 · voxel_m²`) walks to a richer face
+    /// within `graze_search_m` (in water at any hour; out of water only in its roam hours).
+    /// The film's grazing refuge keeps a grazed face tasting of food, so without this a
+    /// snail never leaves it. 0: off (it stays on any film it tastes).
+    #[serde(default = "default_graze_give_up")]
+    pub graze_give_up: f64,
+    /// ... a face worth the walk holds at least this share of a site's capacity per snail
+    /// standing on it (itself counted) ...
+    #[serde(default = "default_graze_worth")]
+    pub graze_worth: f64,
+    /// ... within this horizontal distance, metres.
+    #[serde(default = "default_graze_search_m")]
+    pub graze_search_m: f64,
+}
+
+fn default_egg_search_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.egg_search_m
+}
+
+fn default_graze_give_up() -> f64 {
+    Amphibious::RIPPLE_SNAIL.graze_give_up
+}
+
+fn default_graze_worth() -> f64 {
+    Amphibious::RIPPLE_SNAIL.graze_worth
+}
+
+fn default_graze_search_m() -> f64 {
+    Amphibious::RIPPLE_SNAIL.graze_search_m
 }
 
 fn default_egg_water_max_m() -> f64 {
@@ -989,6 +1026,14 @@ impl Amphibious {
         // incubation.
         egg_dry_moisture: 0.33,
         egg_dry_s: 120.0,
+        // Its own short world, as the water reflex's: a few metres of a pond's margin.
+        egg_search_m: 4.0,
+        // A grazed face at under a third of the bed's capacity is left for one holding at
+        // least half of it, within a metre (about five body lengths). Plausible, untuned:
+        // above the film's grazing refuge (a tenth), below a fresh bed.
+        graze_give_up: 0.3,
+        graze_worth: 0.5,
+        graze_search_m: 1.0,
     };
 
     /// The clock's rise per second out of water on ground of moisture `m` (0..1), before

@@ -228,6 +228,11 @@ fn founder_rows() -> Vec<Row> {
         r("amphibious.egg_drown_s", "s", nonneg, "shore eggs: an egg under standing water this long without a break dies to the litter").optional().prov("decision"),
         r("amphibious.egg_dry_moisture", "pore fill 0..1", fraction, "shore eggs: an egg on ground drier than this ...").optional().prov("decision"),
         r("amphibious.egg_dry_s", "s", nonneg, "... for this long without a break dies to the litter").optional().prov("decision"),
+        // SNAIL-LAND-2: the trip's reach and the giving-up density.
+        r("amphibious.egg_search_m", "m", nonneg, "a ready layer looks this far for a shore egg face it can afford whose nest is not crowded").optional(),
+        r("amphibious.graze_give_up", "fraction of a site's film capacity", nonneg, "wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes)").optional(),
+        r("amphibious.graze_worth", "fraction of a site's film capacity", nonneg, "... one holding at least this per snail on it (itself counted) ...").optional(),
+        r("amphibious.graze_search_m", "m", nonneg, "... within this distance (in water at any hour, out of water in its roam hours)").optional(),
         r("contact_height_fraction", "x body height", nonneg, "the contact receptors' height").digest(),
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),

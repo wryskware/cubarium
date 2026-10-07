@@ -48,6 +48,7 @@ pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;
+pub use step::shore_egg_site;
 
 #[cfg(test)]
 mod cone_speed_tests;

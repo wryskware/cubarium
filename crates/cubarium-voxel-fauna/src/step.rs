@@ -1298,6 +1298,15 @@ fn controllers(
                 lift = 0.0;
             }
         }
+        // SNAIL-LAND-2: the giving-up density. A grazer wanting food on a grazed face (its
+        // film under `graze_give_up` of a site's capacity) walks to a richer face in reach.
+        if driven && fauna.controllers.flees(id) {
+            if let Some(go) = graze_reflex(fauna, i, view, &fv, sky) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+            }
+        }
         // SNAIL-LAND: a ready layer whose eggs go on the shore walks to a shore egg face
         // its drying clock can afford, and outside its roam hours one ashore that is not
         // ready goes back to the water. Thirst (below) still wins.
@@ -1590,13 +1599,145 @@ fn to_water(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
     Some(glider::walk_toward(a, dx, dz, 0.0))
 }
 
+/// **Ready for the trip ashore** (SNAIL-LAND-2): the laying's own test ([`lay`]) — an
+/// egg-layer, not dormant, its hold met, no retry pending, a clutch its reserve pays for —
+/// and not saving: with a clutch from surplus and a wait (`clutch_hold_max_s`), a reserve
+/// short of the full clutch the reserve cap `cap` pays for waits out the wait first,
+/// feeding where it is.
+pub(crate) fn trip_ready(rule: &crate::Reproduction, st: &crate::ReproductionState, reserve: f64, cap: f64) -> bool {
+    if rule.mode != crate::BirthMode::Eggs
+        || rule.dormant
+        || !rule.hold_met(st)
+        || st.retry_ticks > 0
+        || rule.clutch_for(reserve) == 0
+    {
+        return false;
+    }
+    let wait = rule.clutch_hold_max_ticks();
+    let saving = rule.clutch_max > 0 && wait > 0 && rule.clutch_for(reserve) < rule.full_clutch(cap) && st.clutch_wait_ticks < wait;
+    !saving
+}
+
+/// **The giving-up density** (SNAIL-LAND-2, [`crate::Amphibious::graze_give_up`]): an
+/// amphibious grazer driven by its own heuristic, on the ground, awake, free, not
+/// retracted and not thirsty, wanting food (its eating latch on), on a face whose film is
+/// under `graze_give_up` of one site's underwater capacity, walks to the face
+/// [`graze_target`] picks, feeding as it goes. `None` otherwise (its heuristic stays on
+/// the film it tastes). A heuristic world query over the plant layer, as the roam is.
+fn graze_reflex(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &cubarium_voxel_flora::FloraView<'_>,
+    sky: &Sky,
+) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    let am = phys.amphibious.filter(|am| am.graze_give_up > 0.0 && am.graze_search_m > 0.0)?;
+    let m = &a.mobility;
+    if !a.eating
+        || m.thirsty
+        || m.retract_ticks > 0
+        || m.mode != crate::MobilityMode::Ground
+        || a.attached.is_some()
+        || a.state == State::Asleep
+    {
+        return None;
+    }
+    let v = view.config.voxel_m;
+    let k_site = fv.config.film_capacity_per_m2 * v * v;
+    if !(k_site > 0.0) || fv.film_at(a.site) >= am.graze_give_up * k_site {
+        return None;
+    }
+    let roam = am.on_land && roam_hours(fauna, &am, view, sky);
+    let others: Vec<Site> = fauna
+        .animals
+        .iter()
+        .filter(|b| b.id != a.id && b.founder == Some(founder))
+        .map(|b| b.site)
+        .collect();
+    let (dx, dz) = graze_target(view, &am, a, roam, k_site, &|s| fv.film_at(s), &others)?;
+    Some(glider::walk_toward(a, dx, dz, 1.0))
+}
+
+/// **Where a grazer goes** ([`graze_reflex`]): over the support faces within
+/// `graze_search_m` of body `a` (each column's highest at most `roam_search_m` above its
+/// own face, as the roam's search), not its own, under standing water — or, with `roam`
+/// (its roam hours, on land allowed), out of it on ground of `step_moisture_min` or more —
+/// the face whose `film` per snail on it (itself counted; `others` are the lineage's other
+/// bodies' faces) is at least `graze_worth · k_site` and beats its own face's film by the
+/// most per metre. The offset `(dx, dz)` to its centre, metres (`x` wraps); `None` when no
+/// face is worth the walk.
+pub(crate) fn graze_target<F: Fn(Site) -> f64>(
+    view: &VoxelView<'_>,
+    am: &crate::Amphibious,
+    a: &Animal,
+    roam: bool,
+    k_site: f64,
+    film: &F,
+    others: &[Site],
+) -> Option<(f64, f64)> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let reach = am.graze_search_m;
+    if !(reach > 0.0) || !(v > 0.0) {
+        return None;
+    }
+    let here = film(a.site);
+    let worth = am.graze_worth * k_site;
+    let k = (reach / v).ceil() as i64;
+    let rise = (am.roam_search_m.max(0.0) / v).ceil() as u32;
+    let top = (a.site.y + rise).min(c.height.saturating_sub(1));
+    let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
+    let ring = f64::from(c.width) * v;
+    let mut best: Option<(f64, f64, f64)> = None;
+    for dz in -k..=k {
+        let z = hz + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            let x = (hx + dx).rem_euclid(i64::from(c.width));
+            let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
+                continue;
+            };
+            let s = Site { x: x as u32, y, z: z as u32 };
+            if s == a.site {
+                continue;
+            }
+            let wet = view.standing_depth_m(x, y, s.z) > 0.0;
+            if !wet && !(roam && body::ground_moisture(view, x, y, s.z) >= am.step_moisture_min) {
+                continue;
+            }
+            let crowd = 1 + others.iter().filter(|&&o| o == s).count();
+            let per = film(s) / crowd as f64;
+            if per < worth || per <= here {
+                continue;
+            }
+            let (tx, tz) = ((x as f64 + 0.5) * v, (f64::from(s.z) + 0.5) * v);
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if d > reach || !(d > 0.0) {
+                continue;
+            }
+            let score = (per - here) / d;
+            if best.is_none_or(|(b, _, _)| score > b) {
+                best = Some((score, ddx, ddz));
+            }
+        }
+    }
+    best.map(|(_, dx, dz)| (dx, dz))
+}
+
 /// **The trip ashore to lay** (SNAIL-LAND, [`crate::EggSite::Shore`]). For an amphibious
 /// body allowed on land whose lineage lays on the shore, on the ground, free, awake, not
 /// retracted and not thirsty:
-/// - **ready to lay** (its hold met, no retry pending, a clutch its reserve pays for): on a
-///   shore egg face ([`shore_egg_site`]) it holds still to lay; otherwise it walks to the
-///   nearest shore egg face within `roam_search_m` whose round trip its drying clock can
-///   afford — the clock now plus twice the walk at cruise, at the drying rate of the
+/// - **ready to lay** ([`trip_ready`]: its hold met, no retry pending, a clutch its reserve pays for,
+///   not saving through its clutch wait): on a
+///   shore egg face ([`shore_egg_site`]) whose nest is not crowded it holds still to lay;
+///   otherwise it walks to the nearest such face within `egg_search_m` (SNAIL-LAND-2; it
+///   was `roam_search_m`) whose round trip its drying clock can afford — the clock now plus twice the walk at cruise, at the drying rate of the
 ///   target's ground (times the day factor by day), stays under the line it turns back
 ///   at — and with none, its heuristic steers;
 /// - **not ready**, ashore and outside its roam hours: back to the water ([`to_water`]):
@@ -1620,15 +1761,14 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
     }
     let sc = body::effective_config(&fauna.config, a);
     let rule = sc.reproduction;
-    let ready = rule.mode == crate::BirthMode::Eggs
-        && !rule.dormant
-        && rule.hold_met(&a.reproduction)
-        && a.reproduction.retry_ticks == 0
-        && rule.clutch_for(a.reserve) > 0;
+    // SNAIL-LAND-2: ready by the laying's own rule — a layer saving for its full clutch
+    // keeps feeding through its wait instead of holding still ashore.
+    let ready = trip_ready(&rule, &a.reproduction, a.reserve, sc.reserve_of(a.body));
     if !ready {
         return if m.ashore && !roam_hours(fauna, &am, view, sky) { to_water(fauna, i, view) } else { None };
     }
-    if shore_egg_site(view, &am, a.site) {
+    // It holds to lay on a shore face whose nest is not crowded (the laying's own test).
+    if shore_egg_site(view, &am, a.site) && !nest_crowded(fauna, i, view, &rule) {
         return Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
     }
     let c = view.config;
@@ -1640,13 +1780,17 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
     if !(speed > 0.0) {
         return None;
     }
-    let reach = am.roam_search_m.max(0.0);
+    // SNAIL-LAND-2: its own reach for the trip (it was `roam_search_m`).
+    let reach = am.egg_search_m.max(0.0);
     let k = (reach / v).ceil() as i64;
     let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
     let ring = f64::from(c.width) * v;
-    let top = (a.site.y + k.max(0) as u32).min(c.height.saturating_sub(1));
+    // A pond's bank stands above the bed: faces up to `roam_search_m` above its own.
+    let rise = (am.roam_search_m.max(0.0) / v).ceil() as u32;
+    let top = (a.site.y + rise).min(c.height.saturating_sub(1));
     // The faces in reach that pass the cheap tests, nearest first; the first that is a
-    // shore egg face and whose round trip the clock affords is the target.
+    // shore egg face whose round trip the clock affords and whose nest is not crowded
+    // (SNAIL-LAND-2) is the target.
     let mut near: Vec<(f64, f64, f64, Site)> = Vec::new();
     for dz in -k..=k {
         let z = hz + dz;
@@ -1682,6 +1826,10 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
             rate *= am.rain_drying_factor;
         }
         if !(m.dryness + rate * 2.0 * d / speed < back_at) || !shore_egg_site(view, &am, s) {
+            continue;
+        }
+        let (fx, fz) = ((f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v);
+        if nest_crowded_at(fauna, a.id, founder, fx, fz, view, &rule) {
             continue;
         }
         best = Some((d, ddx, ddz));
@@ -3813,7 +3961,7 @@ fn lay(
 /// `egg_moisture_min`, and a column within `egg_water_max_m` (horizontal, centre to centre;
 /// `x` wraps) has its highest support face at or below `site` under standing water whose
 /// surface is at most `egg_climb_max_m` below `site`'s top.
-pub(crate) fn shore_egg_site(view: &VoxelView<'_>, am: &crate::Amphibious, site: Site) -> bool {
+pub fn shore_egg_site(view: &VoxelView<'_>, am: &crate::Amphibious, site: Site) -> bool {
     let (x, y, z) = (i64::from(site.x), site.y, site.z);
     if view.standing_depth_m(x, y, z) > 0.0 || body::ground_moisture(view, x, y, z) < am.egg_moisture_min {
         return false;
@@ -3978,22 +4126,29 @@ fn at_body_ceiling(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) -> b
 /// and eggs waiting to hatch — stand within [`crate::Reproduction::nest_radius_m`] of it.
 /// Off (false) at a radius of 0.
 fn nest_crowded(fauna: &Fauna, i: usize, view: &VoxelView<'_>, rule: &crate::Reproduction) -> bool {
+    let me = &fauna.animals[i];
+    let Some(f) = me.founder else { return false };
+    nest_crowded_at(fauna, me.id, f, me.pose.x, me.pose.z, view, rule)
+}
+
+/// [`nest_crowded`] for a body `me` of lineage `f` at the point `(px, pz)`, metres: the
+/// lineage's other living bodies and waiting eggs within `nest_radius_m` of it, more than
+/// `nest_crowd_max` (SNAIL-LAND-2: the trip asks it of a target face before walking there).
+fn nest_crowded_at(fauna: &Fauna, me: u64, f: Founder, px: f64, pz: f64, view: &VoxelView<'_>, rule: &crate::Reproduction) -> bool {
     let r = rule.nest_radius_m;
     if !(r > 0.0) {
         return false;
     }
-    let me = &fauna.animals[i];
-    let Some(f) = me.founder else { return false };
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let near = |x: f64, z: f64| {
-        let (dx, dz) = crate::pose::wrapped_delta(me.pose.x, me.pose.z, x, z, ring);
+        let (dx, dz) = crate::pose::wrapped_delta(px, pz, x, z, ring);
         dx * dx + dz * dz <= r * r
     };
     let mut n: u64 = fauna
         .animals
         .iter()
-        .filter(|a| a.id != me.id && a.founder == Some(f) && near(a.pose.x, a.pose.z))
+        .filter(|a| a.id != me && a.founder == Some(f) && near(a.pose.x, a.pose.z))
         .count() as u64;
     for c in fauna.clutches.iter().filter(|c| c.lineage == f && c.dormancy.is_none()) {
         let (x, z) = ((f64::from(c.site.x) + 0.5) * v, (f64::from(c.site.z) + 0.5) * v);

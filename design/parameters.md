@@ -1363,7 +1363,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (1997 rows)
+**`fauna.*`** (2033 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1464,6 +1464,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.amphibious.egg_drown_s` | (absent) | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.littershredder.amphibious.egg_dry_moisture` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.littershredder.amphibious.egg_dry_s` | (absent) | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.littershredder.amphibious.egg_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.littershredder.amphibious.graze_give_up` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.littershredder.amphibious.graze_worth` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.littershredder.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1665,6 +1669,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.amphibious.egg_drown_s` | (absent) | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.frondgrazer.amphibious.egg_dry_moisture` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.frondgrazer.amphibious.egg_dry_s` | (absent) | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.frondgrazer.amphibious.egg_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.frondgrazer.amphibious.graze_give_up` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.frondgrazer.amphibious.graze_worth` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.frondgrazer.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -1866,6 +1874,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.amphibious.egg_drown_s` | (absent) | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.lanternjaw.amphibious.egg_dry_moisture` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.lanternjaw.amphibious.egg_dry_s` | (absent) | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.lanternjaw.amphibious.egg_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.lanternjaw.amphibious.graze_give_up` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.lanternjaw.amphibious.graze_worth` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.lanternjaw.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2067,6 +2079,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.amphibious.egg_drown_s` | (absent) | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.capgnawer.amphibious.egg_dry_moisture` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.capgnawer.amphibious.egg_dry_s` | (absent) | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.capgnawer.amphibious.egg_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.capgnawer.amphibious.graze_give_up` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.capgnawer.amphibious.graze_worth` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.capgnawer.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.capgnawer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2268,6 +2284,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.amphibious.egg_drown_s` | (absent) | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.loftstrider.amphibious.egg_dry_moisture` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.loftstrider.amphibious.egg_dry_s` | (absent) | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.loftstrider.amphibious.egg_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.loftstrider.amphibious.graze_give_up` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.loftstrider.amphibious.graze_worth` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.loftstrider.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.loftstrider.contact_height_fraction` | 0.15 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2469,6 +2489,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.amphibious.egg_drown_s` | 90.0 | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.ripple-snail.amphibious.egg_dry_moisture` | 0.33 | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.ripple-snail.amphibious.egg_dry_s` | 120.0 | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.ripple-snail.amphibious.egg_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.ripple-snail.amphibious.graze_give_up` | 0.3 | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.ripple-snail.amphibious.graze_worth` | 0.5 | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.ripple-snail.amphibious.graze_search_m` | 1.0 | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.ripple-snail.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2670,6 +2694,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.amphibious.egg_drown_s` | (absent) | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.bellwing.amphibious.egg_dry_moisture` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.bellwing.amphibious.egg_dry_s` | (absent) | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.bellwing.amphibious.egg_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.bellwing.amphibious.graze_give_up` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.bellwing.amphibious.graze_worth` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.bellwing.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.bellwing.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -2871,6 +2899,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.amphibious.egg_drown_s` | (absent) | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.seedporter.amphibious.egg_dry_moisture` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.seedporter.amphibious.egg_dry_s` | (absent) | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.seedporter.amphibious.egg_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.seedporter.amphibious.graze_give_up` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.seedporter.amphibious.graze_worth` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.seedporter.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.seedporter.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
@@ -3072,6 +3104,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.amphibious.egg_drown_s` | (absent) | s | [0, inf) |  | - | decision | shore eggs: an egg under standing water this long without a break dies to the litter |
 | `fauna.founders.chorister.amphibious.egg_dry_moisture` | (absent) | pore fill 0..1 | [0, 1] |  | - | decision | shore eggs: an egg on ground drier than this ... |
 | `fauna.founders.chorister.amphibious.egg_dry_s` | (absent) | s | [0, inf) |  | - | decision | ... for this long without a break dies to the litter |
+| `fauna.founders.chorister.amphibious.egg_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a ready layer looks this far for a shore egg face it can afford whose nest is not crowded |
+| `fauna.founders.chorister.amphibious.graze_give_up` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | wanting food on a face with less film than this, it walks to a richer face (0: it stays on any film it tastes) |
+| `fauna.founders.chorister.amphibious.graze_worth` | (absent) | fraction of a site's film capacity | [0, inf) |  | - | placeholder | ... one holding at least this per snail on it (itself counted) ... |
+| `fauna.founders.chorister.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.chorister.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
 | `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
