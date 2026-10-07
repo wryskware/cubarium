@@ -285,7 +285,7 @@ fn an_awake_hunter_in_contact_keeps_a_hunkered_grazer_clamped_down() {
     let flora = Flora::new(FloraConfig::default());
     for state in [State::Walking, State::Resting, State::Asleep] {
         let mut c = config(LOST_S);
-        c.founders[GRAZER.index()].hunker = crate::vigil::hunker_of(GRAZER);
+        c.founders[GRAZER.index()].hunker = crate::Hunker { herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
         let near = c.predation.still_threat_near_m;
         let calm = c.founder(GRAZER).hunker.calm_s;
         let mut fauna = Fauna::new(c);

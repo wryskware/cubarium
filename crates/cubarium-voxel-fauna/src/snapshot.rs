@@ -119,9 +119,15 @@ use crate::Fauna;
 // 62: FEAR and FEAR-2 — `Vigilance::{watch_calm, calm_margin_m, calm_facing_deg, lost_calm_s}`,
 //     `Vigil::{calm_walk, refuge}`, `Track::posture`; prey watch a sleeping or still Veilhound
 //     facing away, a flight ends in a perch or once its hunter is lost.
-// 63: MIMIC and MIMIC-2 — FounderPhysiology daytime lure/flower ambush, opportunistic
+// 63: HERD — Hunker run/catch/shelter config; VigilLedger runs_to_hunker and exact
+//     grazer kill classes. Shelter is derived from live geometry, not a saved flag.
+// 64: PUP — `Pack::{regurgitate_reserve_fraction, provision_scramble, pup_starves_on_empty}`;
+//     `FaunaLedger::{pup_swallowed_organic, pup_regurgitated_surplus, pup_regurgitated_lean,
+//     pup_upkeep_organic, pups_starved, pups_lost_other, provision_withheld_ticks}`.
+// 65: GLOWCAP — living mycelium intake by founder, included in CapTissue.
+// 66: MIMIC and MIMIC-2 — FounderPhysiology daytime lure/flower ambush, opportunistic
 //     catch and bounded, density-led catch foray config.
-pub const SCHEMA: u32 = 63;
+pub const SCHEMA: u32 = 66;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

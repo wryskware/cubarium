@@ -251,7 +251,7 @@ fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (
             let gross = site.substrate_gross.max(0.0).min(site.substrate_taken);
             out.respired += (site.substrate_taken - gross).max(0.0);
             let spend = m + (1.0 + sc.build) * (d_p + d_w) + d_q;
-            let seep = (sc.dark_uptake_per_s * w0 * site.darkness * mu * dt).max(0.0).min((spend - gross).max(0.0));
+            let seep = (if sc.substrate_required { 0.0 } else { sc.dark_uptake_per_s * w0 * site.darkness * mu * dt }).max(0.0).min((spend - gross).max(0.0));
             out.seep = seep;
             // The substrate's own mineral at the substrate's density (the pool's n_tissue);
             // the seep brings n_tissue per unit.
@@ -352,7 +352,8 @@ fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (
     // 4.6 dieback (step.rs:3242)
     let die_back = st.wood.min(sc.dieback * unpaid);
     st.wood -= die_back;
-    out.dead_wood += die_back;
+    if sc.trophic == Trophic::Saprotroph && sc.substrate_required { out.litter += die_back; }
+    else { out.dead_wood += die_back; }
     // 4.7 death (step.rs:3260)
     let death = (st.wood < sc.alive_min).then_some(Death::Starved);
     (out, death)

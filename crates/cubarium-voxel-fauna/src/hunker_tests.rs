@@ -47,7 +47,7 @@ fn flight_only(start: f64, stop: f64, calm_s: f64) -> Vigilance {
 /// A hunker entered at `enter`, left beyond `leave` after `calm_s` (at full condition), with
 /// hunger shortening the calm linearly and no condition floor.
 fn hunker(enter: f64, leave: f64, calm_s: f64) -> Hunker {
-    Hunker { enabled: true, enter_m: enter, leave_m: leave, calm_s, hunger_calm_exp: 1.0, min_condition: 0.0, ..crate::vigil::hunker_of(GRAZER) }
+    Hunker { enabled: true, enter_m: enter, leave_m: leave, calm_s, hunger_calm_exp: 1.0, min_condition: 0.0, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) }
 }
 
 fn body(fauna: &mut Fauna, world: &World, f: Founder, x: f64, heading: f64, speed: f64) -> u64 {
@@ -178,7 +178,7 @@ fn a_strike_on_a_hunkered_adult_harms_less_than_on_a_cropping_one_and_juvenile_a
         let mut flora = Flora::new(FloraConfig::default());
         let mut c = hunting_config();
         c.founders[GRAZER.index()].agility = 0.0;
-        c.founders[GRAZER.index()].hunker = Hunker { enabled: true, shield: 1.0, wound_opens: 0.0, ..crate::vigil::hunker_of(GRAZER) };
+        c.founders[GRAZER.index()].hunker = Hunker { enabled: true, shield: 1.0, wound_opens: 0.0, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
         let mut fauna = Fauna::new(c);
         fauna.set_births_enabled(false);
         let g = introduce(&mut fauna, &world, GRAZER, StartingStores::FULL);
@@ -203,7 +203,7 @@ fn a_strike_on_a_hunkered_adult_harms_less_than_on_a_cropping_one_and_juvenile_a
     let (down, out) = (wound_after_strike(true), wound_after_strike(false));
     assert!(down < out, "hunkered wound {down}, cropping wound {out}");
 
-    let h = crate::vigil::hunker_of(GRAZER);
+    let h = Hunker { herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
     let birth = FaunaConfig::default().founder(GRAZER).core.birth_body;
     assert!(h.shield_of(0.3 * birth, birth, 0.0) < h.shield_of(birth, birth, 0.0), "a juvenile's armour is not hard yet");
     assert!(h.shield_of(birth, birth, 0.5) <= h.shield_of(birth, birth, 0.0), "a wound does not harden it");
@@ -217,7 +217,7 @@ fn a_strike_on_a_hunkered_adult_harms_less_than_on_a_cropping_one_and_juvenile_a
 fn one_veilhound_cannot_open_a_hunkered_adult_and_enough_pack_members_can() {
     let world = world(44);
     let mut c = config();
-    let h = Hunker { enabled: true, pry_per_member_s: 0.5, resist_per_s: 0.8, ring_resist_per_kin: 0.0, ..crate::vigil::hunker_of(GRAZER) };
+    let h = Hunker { enabled: true, pry_per_member_s: 0.5, resist_per_s: 0.8, ring_resist_per_kin: 0.0, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
     c.founders[GRAZER.index()].hunker = h;
     assert!(h.pry_per_member_s < h.resist_per_s, "the case needs one member below the resistance");
     let enough = (h.resist_per_s / h.pry_per_member_s).floor() as usize + 1;
@@ -311,7 +311,7 @@ fn members_open_a_hunkered_adult_exactly_when_their_pry_beats_its_ringed_resista
         ring_m: 1.5,
         ring_kin_max: 3,
         opened_s: 10.0,
-        ..crate::vigil::hunker_of(GRAZER)
+        herd_enabled: false, ..crate::vigil::hunker_of(GRAZER)
     };
     let long = cubarium_voxel::ticks_at_least_one(120.0);
     let mut seen = [false; 2];
@@ -333,7 +333,7 @@ fn members_open_a_hunkered_adult_exactly_when_their_pry_beats_its_ringed_resista
 /// and that many open it.
 #[test]
 fn a_hunkered_juvenile_needs_fewer_members_than_an_adult_and_that_many_open_it() {
-    let h = Hunker { enabled: true, pry_per_member_s: 0.5, resist_per_s: 1.2, ring_resist_per_kin: 0.0, ..crate::vigil::hunker_of(GRAZER) };
+    let h = Hunker { enabled: true, pry_per_member_s: 0.5, resist_per_s: 1.2, ring_resist_per_kin: 0.0, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
     let birth = config().founder(GRAZER).core.birth_body;
     let adult = h.members_to_open(birth, birth, 0).expect("some number opens an adult");
     let young = h.members_to_open(0.5 * birth, birth, 0).expect("some number opens a juvenile");
@@ -359,7 +359,7 @@ fn an_alarmed_grazer_with_kin_in_hearing_moves_toward_them() {
     c.founders[GRAZER.index()].senses = SenseTable { live: true, hearing_m, hearing_min: 1e-9, kin_tracks: 3, ..SenseTable::default() };
     c.founders[GRAZER.index()].vigilance =
         Vigilance { run_noise: 3.0, alarm_emission_factor: 2.0, alarm_bolt_s: 2.0, alarm_refractory_s: 10.0, ..flight_only(0.0, 0.0, 0.0) };
-    c.founders[GRAZER.index()].hunker = Hunker { enabled: true, ring_m: 0.5, ..crate::vigil::hunker_of(GRAZER) };
+    c.founders[GRAZER.index()].hunker = Hunker { enabled: true, ring_m: 0.5, herd_enabled: false, ..crate::vigil::hunker_of(GRAZER) };
     let mut fauna = Fauna::new(c);
     fauna.set_births_enabled(false);
     let listener = body(&mut fauna, &world, GRAZER, 2.0, EAST, 0.0);

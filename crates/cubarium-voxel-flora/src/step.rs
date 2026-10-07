@@ -2331,6 +2331,7 @@ pub(crate) fn substrate_in_box(
 /// does **not** keep is respired in [`grow`], where every other respiration is.
 fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize, dt: f64) -> Vec<Substrate> {
     let mut out = vec![Substrate::default(); flora.stands.len()];
+    let upkeep = Climate::of(world, flora.config.upkeep_q10).upkeep;
     let view = world.view();
     let index = GroundIndex::build(&flora.ground, view.config.width, view.config.depth);
     // Every fungus's wants, gathered per chunk of stands in stand order: what each asks of
@@ -2359,9 +2360,12 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize, dt: f
                     if sc.trophic != Trophic::Saprotroph {
                         continue;
                     }
-                    let want =
-                        (sc.substrate_uptake_per_s * stand.wood * drink[si].moisture * dt).max(0.0);
-                    if !(want > 0.0) {
+                    let raw = (sc.substrate_uptake_per_s * stand.wood * drink[si].moisture * dt).max(0.0);
+                    // A satiated decomposer cannot remove its neighbours' litter simply
+                    // to respire income it has nowhere to put. This is a demand rule,
+                    // using the same upkeep, construction and reserve room as growth.
+                    let spend = substrate_spend(sc, stand, upkeep, dt);
+                    if !(raw > 0.0) {
                         continue;
                     }
                     pools.clear();
@@ -2387,6 +2391,19 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize, dt: f
                     if !(total > 0.0) {
                         continue;
                     }
+                    let want = if sc.substrate_budgeted {
+                        // Income per unit of the pro-rata mix, at each pool's own
+                        // energy and mineral density, rather than its nominal yield.
+                        let gross: f64 = pools.iter().map(|&(gi, pool, _)| {
+                            let g = &ground[gi];
+                            let (organic, mineral, energy) = match pool {
+                                Pool::DeadWood => (g.dead_wood, g.dead_wood_mineral, g.dead_wood_energy),
+                                Pool::Litter => (g.litter, g.litter_mineral, g.litter_energy),
+                            };
+                            yield_of(sc, Taken { organic, mineral, energy })
+                        }).sum();
+                        if gross > 0.0 { raw.min(spend * total / gross) } else { 0.0 }
+                    } else { raw };
                     for &(gi, pool, held) in &pools {
                         let share = split_proportional(want, held, total);
                         if share > 0.0 {
@@ -2429,6 +2446,7 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize, dt: f
         }
         // One bounded withdrawal for the whole pool, whatever asked for it.
         if let Some(taken) = pool.take(&mut ground[gi], total) {
+            ledger.substrate_by_pool[match pool { Pool::DeadWood => 0, Pool::Litter => 1 }] += taken.organic;
             split_shares(taken, &wants[at..end], &mut shares);
             for (w, share) in wants[at..end].iter().zip(shares.iter().copied()) {
                 let s = &mut out[w.si];
@@ -2445,6 +2463,14 @@ fn feed(flora: &mut Flora, world: &World, drink: &[Drink], threads: usize, dt: f
         ledger.substrate_uptake[stand.species.index()] += out[si].taken.organic;
     }
     out
+}
+
+fn substrate_spend(sc: &SpeciesConfig, stand: &Stand, upkeep: f64, dt: f64) -> f64 {
+    let w = stand.wood;
+    let caps = (sc.alpha * w - stand.foliage).max(0.0).min(sc.foliage_rate * w * dt);
+    let wood = (sc.wood_max - w).max(0.0).min(sc.wood_rate * w * dt);
+    sc.maintenance * upkeep * w * dt + (1.0 + sc.build) * (caps + wood)
+        + (sc.reserve_cap * w - stand.reserve).max(0.0)
 }
 
 /// [`feed`]'s wants, filed by `(ground index, pool)` and within one pool in the order the
@@ -2926,6 +2952,7 @@ fn grow(
             line[k] += b.night[k];
         }
         ledger.foliage_built[s.species.index()] += b.built;
+        ledger.stand_respired[s.species.index()] += b.respired[..b.respired_n as usize].iter().sum::<f64>();
         ledger.shed_organic[s.species.index()] += b.shed;
     }
     for (b, s) in books.iter().zip(stands.iter()) {
@@ -2957,7 +2984,7 @@ pub(crate) struct Booked {
     seep: [f64; 3],
     respired: [f64; 2],
     respired_n: u8,
-    heat: [f64; 3],
+    heat: [f64; 4],
     heat_n: u8,
     /// The night budget's spend on `[reflush, nectar, fruit]` (1b), the reflush with its
     /// construction respiration: `FloraLedger::night_spend`'s line for this stand.
@@ -3221,7 +3248,7 @@ pub(crate) fn grow_stand_cause(
             // stand can spend this tick — what it cannot spend never arrives. It brings its
             // own mineral at `n_tissue` and its energy at `e_v`, booked as an input.
             let spend = m + (1.0 + sc.build) * (d_p + d_w) + d_q;
-            let seep = (sc.dark_uptake_per_s * w0 * drink.darkness * mu * dt)
+            let seep = (if sc.substrate_required { 0.0 } else { sc.dark_uptake_per_s * w0 * drink.darkness * mu * dt })
                 .max(0.0)
                 .min((spend - a).max(0.0));
             if seep > 0.0 {
@@ -3418,9 +3445,15 @@ pub(crate) fn grow_stand_cause(
     let organic_before = stand.material();
     stand.wood -= die_back;
     let die_back_mineral = pull_mineral(stand, organic_before, die_back);
-    g.dead_wood += die_back;
-    g.dead_wood_mineral += die_back_mineral;
-    g.dead_wood_energy += e_v * die_back;
+    if sc.trophic == Trophic::Saprotroph && sc.substrate_required {
+        let mut heat = FloraLedger::default();
+        add_litter(config, g, die_back, die_back_mineral, e_v * die_back, &mut heat);
+        book.heat(heat.heat_out);
+    } else {
+        g.dead_wood += die_back;
+        g.dead_wood_mineral += die_back_mineral;
+        g.dead_wood_energy += e_v * die_back;
+    }
 
     // ---- 4.6b the stage, after every change to the wood
     //
@@ -3545,6 +3578,14 @@ pub(crate) fn die(
     let sc = config.species(stand.species);
     let e_v = sc.energy_density;
     let organic = stand.material();
+    if sc.trophic == Trophic::Saprotroph && sc.substrate_required {
+        let gi = ground_slot(ground, stand.site);
+        add_litter(config, &mut ground[gi], organic, stand.mineral, e_v * organic, ledger);
+        ledger.deaths += 1;
+        ledger.deaths_by_cause[cause.index()][stand.species.index()] += 1;
+        log.push(DeathRecord { id: stand.id, site: stand.site, species: stand.species, cause });
+        return;
+    }
     let wood_mineral = cubarium_voxel::pro_rata(stand.mineral, stand.wood, organic);
     let wood_energy = e_v * stand.wood;
     let line = if sc.falls {
@@ -3787,6 +3828,7 @@ fn decompose(flora: &mut Flora, pre: &[Pre], dt: f64) {
             continue;
         }
         let (litter0, wood0, carrion0) = (pre[i].litter, pre[i].dead_wood, pre[i].carrion);
+        let before = g.litter;
         decompose_pool(
             &mut g.litter,
             &mut g.litter_mineral,
@@ -3797,6 +3839,8 @@ fn decompose(flora: &mut Flora, pre: &[Pre], dt: f64) {
             litter0,
             ledger,
         );
+        ledger.decomposed_by_pool[0] += before - g.litter;
+        let before = g.dead_wood;
         decompose_pool(
             &mut g.dead_wood,
             &mut g.dead_wood_mineral,
@@ -3807,6 +3851,8 @@ fn decompose(flora: &mut Flora, pre: &[Pre], dt: f64) {
             wood0,
             ledger,
         );
+        ledger.decomposed_by_pool[1] += before - g.dead_wood;
+        let before = g.carrion;
         // Carrion, at its own rate, on exactly the two flows the other two pools use: a
         // corpse is not a special case of the ledger, only of the clock.
         decompose_pool(
@@ -3819,6 +3865,7 @@ fn decompose(flora: &mut Flora, pre: &[Pre], dt: f64) {
             carrion0,
             ledger,
         );
+        ledger.decomposed_by_pool[2] += before - g.carrion;
         g.clear_spent_carcass(config.carcass_gone_fraction);
     }
 }
@@ -4333,10 +4380,10 @@ pub fn establishment_gates_with_sky(
         },
         substrate_ok: match sc.trophic {
             Trophic::Photo => true,
-            // Or dark enough to live on the seep alone.
+            // Optional legacy seep can admit a dark face without substrate.
             Trophic::Saprotroph => {
                 dead_wood + litter >= sc.establish_substrate_min
-                    || (sc.dark_establish_min > 0.0 && darkness >= sc.dark_establish_min)
+                    || (!sc.substrate_required && sc.dark_establish_min > 0.0 && darkness >= sc.dark_establish_min)
             }
         },
         darkness,
@@ -4661,7 +4708,9 @@ mod tests {
     #[test]
     fn two_fungi_share_one_log_in_proportion_to_their_demand() {
         let world = slab(4, 0.6);
-        let mut flora = Flora::new(FloraConfig::default());
+        let mut config = FloraConfig::default();
+        config.glowcap.substrate_budgeted = false;
+        let mut flora = Flora::new(config);
         for (x, wood) in [(1i64, 0.02), (2, 0.06)] {
             assert!(flora.apply(
                 &world,

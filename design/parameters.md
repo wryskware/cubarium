@@ -368,11 +368,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (990 rows)
+**`flora.*`** (1017 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `flora.bloomcrown.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.bloomcrown.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.bloomcrown.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.bloomcrown.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.bloomcrown.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.bloomcrown.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.bloomcrown.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -474,6 +477,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.profile.*.layers.*.share` | 1.0, 0.0, 0.4, 0.6 … (7 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.bloomcrown.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.3 … (7 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.umbrellafrond.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.umbrellafrond.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.umbrellafrond.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.umbrellafrond.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.umbrellafrond.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.umbrellafrond.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.umbrellafrond.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -575,6 +581,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.profile.*.layers.*.share` | 1.0, 0.0, 0.6, 0.4 … (8 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.umbrellafrond.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.5 … (8 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.springturf.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.springturf.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.springturf.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.springturf.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.springturf.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -676,6 +685,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.springturf.profile.*.layers.*.porosity` | 0.3 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.stonecushion.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.stonecushion.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.stonecushion.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.stonecushion.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.stonecushion.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.stonecushion.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.stonecushion.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -777,6 +789,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.profile.*.layers.*.share` | 0.7, 0.3 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.stonecushion.profile.*.layers.*.porosity` | 0.2, 0.2 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.velvetpad.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.velvetpad.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.velvetpad.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.velvetpad.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.velvetpad.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.velvetpad.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.velvetpad.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -878,6 +893,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.velvetpad.profile.*.layers.*.porosity` | 0.6 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.glowcap.substrate_uptake_per_s` | 0.02 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.glowcap.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.glowcap.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.glowcap.mycelium_graze_fraction` | 0.5 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.glowcap.substrate_yield` | 0.4 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.glowcap.establish_substrate_min` | 0.02 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.glowcap.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -979,6 +997,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.profile.*.layers.*.share` | 1.0 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.glowcap.profile.*.layers.*.porosity` | 0.5 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.vaulttree.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.vaulttree.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.vaulttree.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.vaulttree.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.vaulttree.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.vaulttree.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.vaulttree.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -1080,6 +1101,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.profile.*.layers.*.share` | 1.0, 0.0, 1.0, 0.0 … (7 values) | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.vaulttree.profile.*.layers.*.porosity` | 0.4, 0.0, 0.4, 0.0 … (7 values) | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.lanternberry.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.lanternberry.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.lanternberry.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.lanternberry.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.lanternberry.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.lanternberry.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.lanternberry.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -1181,6 +1205,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.profile.*.layers.*.share` | 1.0, 0.0, 0.21428571428571427, 0.7857142857142857 | fraction of the stage's foliage | [0, inf) | yes | C | placeholder | a foliage layer's share (a trunk's is 0) |
 | `flora.lanternberry.profile.*.layers.*.porosity` | 0.5, 0.7, 0.5, 0.5 | fraction transmitted | [0, 1] | yes | C | placeholder | light a layer lets through |
 | `flora.siphonreed.substrate_uptake_per_s` | 0.0 | organic/s per unit mycelium | [0, inf) | yes | C | placeholder | saprotroph: dead wood and litter withdrawn |
+| `flora.siphonreed.substrate_budgeted` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph uptake bounded by usable income demand |
+| `flora.siphonreed.substrate_required` | (absent) | switch (true / false) | (-inf, inf) |  | - | placeholder | saprotroph requires substrate; dark damp supplies no carbon |
+| `flora.siphonreed.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.siphonreed.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.siphonreed.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
 | `flora.siphonreed.substrate_reach_up_down` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | saprotroph: the mycelium box's vertical reach |
@@ -1363,7 +1390,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2287 rows)
+**`fauna.*`** (2350 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1532,6 +1559,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.littershredder.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.littershredder.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.littershredder.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.littershredder.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.littershredder.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.littershredder.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.littershredder.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.littershredder.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -1617,6 +1650,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.littershredder.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.littershredder.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.littershredder.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.littershredder.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.littershredder.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1764,6 +1798,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.frondgrazer.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.frondgrazer.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.frondgrazer.hunker.shelter_seek_m` | 6.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.frondgrazer.hunker.shelter_margin_m` | 0.15 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.frondgrazer.hunker.shelter_exposure` | 0.25 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.frondgrazer.hunker.enter_m` | 2.5 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.frondgrazer.hunker.leave_m` | 5.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.frondgrazer.hunker.calm_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -1849,6 +1889,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.frondgrazer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.frondgrazer.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.frondgrazer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.frondgrazer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.frondgrazer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1996,6 +2037,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.lanternjaw.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.lanternjaw.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.lanternjaw.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.lanternjaw.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.lanternjaw.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.lanternjaw.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.lanternjaw.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.lanternjaw.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2081,6 +2128,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.lanternjaw.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.lanternjaw.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.lanternjaw.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.lanternjaw.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.lanternjaw.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2228,6 +2276,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.capgnawer.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.capgnawer.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.capgnawer.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.capgnawer.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.capgnawer.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.capgnawer.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.capgnawer.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.capgnawer.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2313,6 +2367,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.capgnawer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.capgnawer.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.capgnawer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.capgnawer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.capgnawer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2460,6 +2515,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.loftstrider.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.loftstrider.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.loftstrider.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.loftstrider.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.loftstrider.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.loftstrider.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.loftstrider.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.loftstrider.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2545,6 +2606,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.loftstrider.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.loftstrider.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.loftstrider.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.loftstrider.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.loftstrider.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2692,6 +2754,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.ripple-snail.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.ripple-snail.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.ripple-snail.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.ripple-snail.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.ripple-snail.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.ripple-snail.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.ripple-snail.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.ripple-snail.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2777,6 +2845,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.ripple-snail.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.ripple-snail.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.ripple-snail.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.ripple-snail.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.ripple-snail.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2924,6 +2993,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.bellwing.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.bellwing.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.bellwing.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.bellwing.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.bellwing.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.bellwing.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.bellwing.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.bellwing.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3009,6 +3084,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.bellwing.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.bellwing.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.bellwing.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.bellwing.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.bellwing.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3156,6 +3232,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.seedporter.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.seedporter.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.seedporter.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.seedporter.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.seedporter.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.seedporter.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.seedporter.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.seedporter.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3241,6 +3323,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.seedporter.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.seedporter.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.seedporter.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.seedporter.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.seedporter.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3388,6 +3471,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.chorister.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.chorister.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.chorister.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.chorister.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.chorister.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.chorister.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.chorister.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.chorister.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3473,6 +3562,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.chorister.pack.breed_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.chorister.pack.regurgitate_reserve_fraction` | 0.5 | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.chorister.pack.commit_m` | 2.5 | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.chorister.pack.select_kin_m` | 3.0 | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.chorister.pack.select_kin_factor` | 0.8 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |

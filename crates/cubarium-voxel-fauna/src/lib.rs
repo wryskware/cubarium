@@ -49,6 +49,10 @@ pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;
+#[cfg(test)]
+mod testpass3_support;
+#[cfg(test)]
+mod testpass3_state_tests;
 pub use step::shore_egg_site;
 
 #[cfg(test)]
@@ -57,6 +61,8 @@ mod cone_speed_tests;
 mod descent_tests;
 #[cfg(test)]
 mod hot_path_tests;
+#[cfg(test)]
+mod herd_tests;
 #[cfg(test)]
 mod roster_tests;
 #[cfg(test)]
@@ -2816,6 +2822,10 @@ pub struct FaunaLedger {
     /// `eaten_organic_in` over every bite this layer took.
     pub bites_by_food: [u64; Food::COUNT],
     pub eaten_by_food: [f64; Food::COUNT],
+    /// Living fungal mycelium withdrawn by lineage, included in CapTissue intake.
+    pub eaten_mycelium_by_founder: [f64; Founder::COUNT],
+    /// Raw organic matter withdrawn by founder and food, before any bite spillage.
+    pub eaten_by_founder_food: [[f64; Food::COUNT]; Founder::COUNT],
     /// A founder body's bites by lineage **and** food class (roster R1's measure: which
     /// of its foods a lineage actually takes, when two lineages share one). Founder
     /// bites only, so each row sums to [`FaunaLedger::bites_by_founder`].
@@ -3083,6 +3093,29 @@ pub struct FaunaLedger {
     /// used), counted once per refused tick a ready body waited (LIFE-HISTORY).
     #[serde(default)]
     pub season_waits: u64,
+    /// **A pup's income by source** (PUP), organic units: raw food pups swallowed by their own
+    /// bites (a feast at the den), and raw food regurgitated into pups by a giver at or above
+    /// its lineage's `provision_reserve_fraction` (`_surplus`) or below it (`_lean`). The
+    /// reserve fallback is `provision_received_organic`; the birth stores are the litters'
+    /// parcels (`pups_born` × the package).
+    #[serde(default)]
+    pub pup_swallowed_organic: f64,
+    #[serde(default)]
+    pub pup_regurgitated_surplus: f64,
+    #[serde(default)]
+    pub pup_regurgitated_lean: f64,
+    /// Basal upkeep the pups paid (PUP), organic units.
+    #[serde(default)]
+    pub pup_upkeep_organic: f64,
+    /// Pups that died as pups (PUP): starved, and by any other cause.
+    #[serde(default)]
+    pub pups_starved: u64,
+    #[serde(default)]
+    pub pups_lost_other: u64,
+    /// Ticks an adult at the den held raw food and a pup there begged, but its condition kept
+    /// the meal (PUP, [`Pack::regurgitate_reserve_fraction`]).
+    #[serde(default)]
+    pub provision_withheld_ticks: u64,
     /// **The minimal gut's books** (repair 2 item 10). Raw food into stomachs (every bite,
     /// after any spill), out of them by digestion (into assimilation, egesta and the
     /// unfunded share's respiration), moved stomach to stomach by regurgitation (inside
@@ -3505,6 +3538,10 @@ pub struct FaunaTick(step::TickStart);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Fauna {
     config: FaunaConfig,
+    /// Last world's (ring circumference, voxel size), rebuilt on introduction/step for
+    /// exact death readouts that need cover geometry. Runtime cache, never saved.
+    #[serde(skip)]
+    world_geometry: Option<(f64, f64)>,
     tick: u64,
     /// Sorted by id, so every pass over them is in one stable order however they move.
     /// A `Vec` with a binary search, never a `HashMap`: this layer iterates nothing
@@ -3953,6 +3990,7 @@ impl Fauna {
         config.validate()?;
         Ok(Fauna {
             config,
+            world_geometry: None,
             tick: 0,
             animals: Vec::new(),
             clutches: Vec::new(),
@@ -4265,6 +4303,46 @@ impl Fauna {
 
     pub(crate) fn packs_mut(&mut self) -> &mut Vec<PackRecord> {
         &mut self.packs
+    }
+
+    /// **A litter born now** (PUP, a scenario control): pack `pack`'s breeder pays the
+    /// lineage's package for `young` pups out of its reserve, exactly as a gestation would
+    /// have paid it, and they are born at the den, each with an even share; the litter counts
+    /// against the breeder's interval and the year's season as a born litter would. Refused
+    /// (`Err`) for a pack with no breeder, or a breeder whose reserve cannot pay. Returns the
+    /// pups' ids.
+    pub fn whelp(&mut self, view: &VoxelView<'_>, pack: u64, young: u32) -> Result<Vec<u64>, String> {
+        step::whelp(self, view, pack, young)
+    }
+
+    /// **A body's reserve set to `fraction` of its cap** (PUP, a scenario control: a lean year's
+    /// thin adults). Organic matter, mineral and energy move pro rata with the reserve's own
+    /// composition (the body's, for a body with none); a cut is booked `removed_*_out` and a
+    /// rise `introduced_*_in`, so the books close. `false` for no such body.
+    pub fn set_reserve_fraction(&mut self, id: u64, fraction: f64) -> bool {
+        let Some(i) = self.animals.iter().position(|a| a.id == id) else {
+            return false;
+        };
+        let sc = body::effective_config(&self.config, &self.animals[i]);
+        let a = &mut self.animals[i];
+        let want = fraction.max(0.0) * sc.reserve_of(a.body);
+        let held = a.organic();
+        let d = want - a.reserve;
+        let (dm, de) = if held > 0.0 { (a.mineral * d / held, a.energy * d / held) } else { (0.0, 0.0) };
+        a.reserve = want;
+        a.mineral += dm;
+        a.energy += de;
+        let l = &mut self.ledger;
+        if d >= 0.0 {
+            l.introduced_organic_in += d;
+            l.introduced_mineral_in += dm;
+            l.introduced_energy_in += de;
+        } else {
+            l.removed_organic_out -= d;
+            l.removed_mineral_out -= dm;
+            l.removed_energy_out -= de;
+        }
+        true
     }
 
     /// The breeder's den pick (the habitat seeder's founding search): the pack's den, and
@@ -4649,6 +4727,7 @@ impl Fauna {
         heading_rad: f64,
     ) -> bool {
         let view = world.view();
+        self.world_geometry = Some((f64::from(view.config.width) * view.config.voxel_m, view.config.voxel_m));
         // A founder body is introduced under its **own** physiology: thresholds,
         // densities and tissue mineral content come from the founder table, not from
         // the placeholder species it shares a [`Species`] tag with.

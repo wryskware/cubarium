@@ -195,6 +195,68 @@ fn params() -> Params {
     Params { weather: Weather::Frozen, ..Params::default() }
 }
 
+#[test]
+fn a_required_substrate_fungus_gets_no_carbon_from_dark_damp() {
+    let (p, mut fc) = resolved();
+    fc.glowcap.maintenance = 0.1;
+    fc.glowcap.dark_uptake_per_s = 1.0;
+    fc.glowcap.foliage_rate = 0.0;
+    fc.glowcap.wood_rate = 0.0;
+    let dm = DayModel::of(&p.world, fc.upkeep_q10);
+    let site = stand::Site { light_eff: 0.0, available: 1.0, saturated: 0.0,
+        mineral: 1.0, darkness: 1.0, substrate_taken: 0.0, substrate_gross: 0.0 };
+    for required in [true, false] {
+        fc.glowcap.substrate_required = required;
+        let sc = &fc.glowcap;
+        let mut st = StandState { wood: sc.wood_max, foliage: sc.alpha*sc.wood_max, ..Default::default() };
+        let (flows, _) = stand::grow(sc, &mut st, site, dm.at(0.0, cubarium_voxel::DT));
+        if required { assert_eq!(flows.seep, 0.0); assert!(flows.litter > 0.0); }
+        else { assert!(flows.seep > 0.0); }
+    }
+}
+
+#[test]
+fn the_model_bounds_fungal_uptake_by_upkeep_and_offers_cropped_mycelium() {
+    let (p, mut fc) = resolved();
+    fc.glowcap.substrate_required = true;
+    fc.glowcap.substrate_budgeted = true;
+    fc.glowcap.mycelium_graze_fraction = 0.6;
+    fc.glowcap.substrate_uptake_per_s = 10.0;
+    fc.glowcap.foliage_rate = 0.0;
+    fc.glowcap.wood_rate = 0.0;
+    fc.glowcap.propagule_rate = 0.0;
+    fc.glowcap.senescence = 0.0;
+    let (zones, faces) = one_zone(&fc, 1, 0.8, 1.0, &[(Species::Glowcap,1.0,1)]);
+    let mut mp = params(); mp.dt = cubarium_voxel::DT;
+    let mut m = build(&fc, &p, zones, &faces, mp);
+    let k = Species::Glowcap.index();
+    let sc = fc.glowcap.clone();
+    let c = &mut m.z[0].cohorts[k][0];
+    c.st.foliage = sc.alpha*c.st.wood;
+    c.st.reserve = sc.reserve_cap*c.st.wood;
+    m.z[0].litter = 1.0;
+    let expected = sc.maintenance * m.day.at(m.minute()*60.0, m.p.dt).upkeep * sc.wood_max * m.p.dt / sc.substrate_yield;
+    m.step();
+    assert!((m.c.substrate-expected).abs()<1e-10, "{} vs {expected}",m.c.substrate);
+    let c = &mut m.z[0].cohorts[k][0];
+    let before = c.st.wood;
+    let mycelium = sc.mycelium_graze_fraction*before;
+    let cap = mycelium/4.0;
+    c.st.foliage = sc.graze_refuge*sc.alpha*before + cap;
+    assert!((m.offer().foliage[k] - (cap+mycelium)).abs()<1e-10);
+    let mut take = cubarium_webmodel::exchange::Take::default(); take.foliage[k] = cap+mycelium/2.0;
+    m.take_from(&take);
+    assert!((m.z[0].cohorts[k][0].st.wood-(before-mycelium/2.0)).abs()<1e-10);
+    let c = &mut m.z[0].cohorts[k][0];
+    c.st.foliage = sc.graze_refuge*sc.alpha*c.st.wood;
+    let before = c.st.wood;
+    let offer = sc.mycelium_graze_fraction*before;
+    assert!((m.offer().foliage[k]-offer).abs()<1e-10);
+    let mut take = cubarium_webmodel::exchange::Take::default(); take.foliage[k] = offer;
+    m.take_from(&take);
+    assert!((m.z[0].cohorts[k][0].st.wood-(before-offer)).abs()<1e-10);
+}
+
 /// **Conservation**: over a day and a half of growth, seed rain, germination, takeover,
 /// deaths, decomposition and a clamped take and return, the organic ledger closes —
 /// `Δ held = fixed + seep + returned − respired − decomposed − taken` — and the mineral

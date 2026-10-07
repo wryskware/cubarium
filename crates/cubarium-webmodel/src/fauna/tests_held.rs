@@ -539,3 +539,81 @@ fn seedporter_model_switch_off_keeps_fruit_and_refuses_carrion() {
     assert!(run(true, Food::Carrion) > 0.0);
     assert!(run(false, Food::Fruit) > 0.0 && run(true, Food::Fruit) > 0.0);
 }
+
+/// PUP's scene: at the start of a night (the diurnal adults asleep at the den), `adults`
+/// Veilhounds whose reserve stands `excess` above `provision_reserve_fraction` of their cap and
+/// a litter of four newborns on 2 % of a cap each — four ranked places with `scramble`, one
+/// cohort of four without — run to the night's end. Returns (the pups starved, the places
+/// alive by rank, the reserve the pups received).
+fn pup_night(scramble: bool, excess: f64) -> (f64, Vec<(u32, f64)>, f64) {
+    let mut p = Params::defaults();
+    p.world.day = DayClock::default();
+    let vh = Founder::Chorister;
+    {
+        let t = p.fauna.founders[vh.index()].pack.as_mut().unwrap();
+        t.provision_scramble = scramble;
+        t.pup_starves_on_empty = true;
+    }
+    let mut m = FaunaModel::new(&p, Fits::unfitted(), 1.0);
+    only(&mut m, &[vh]);
+    let day = m.day.day_s();
+    let asleep = |m: &FaunaModel, t: f64| m.on_phase(vh, m.daylight_at(t + 1.0)) == 0.0;
+    let night = (0..1440).map(|k| k as f64 * day / 1440.0).find(|&t| asleep(&m, t) && !asleep(&m, t - day / 1440.0)).expect("a dusk");
+    let morning = (1..1440).map(|k| night + k as f64 * day / 1440.0).find(|&t| !asleep(&m, t)).expect("a dawn");
+    m.t_s = night;
+    let sc = p.fauna.founder(vh).core;
+    let t = p.fauna.founder(vh).pack.unwrap();
+    let cap = sc.reserve_of(sc.body_max);
+    let mut a = Cohort::new(4.0, sc.body_max, t.provision_reserve_fraction * cap + excess);
+    a.matured = true;
+    a.refractory_s = 1e9;
+    m.add(vh, a);
+    let r0 = 0.02 * sc.reserve_of(sc.body_min);
+    if scramble {
+        for rank in 1..=4 {
+            let mut c = Cohort::new(1.0, sc.body_min, r0);
+            c.native = true;
+            c.rank = rank;
+            m.add(vh, c);
+        }
+    } else {
+        let mut c = Cohort::new(4.0, sc.body_min, r0);
+        c.native = true;
+        m.add(vh, c);
+    }
+    let steps = (morning - night).floor() as usize;
+    for _ in 0..steps {
+        m.step(&Supply::default());
+        m.merge_cohorts();
+    }
+    let l = &m.ledger[vh.index()];
+    let places = m.pops[vh.index()].iter().filter(|c| c.native).map(|c| (c.rank, c.n)).collect();
+    (l.pups_starved, places, l.provision_given - l.provision_loss)
+}
+
+/// **The model loses part of a litter under partial provisioning** (PUP): with the scramble,
+/// a ration that fills two of the four newborns' reserves keeps the strongest places
+/// and starves the weakest (rank 1 alive, some starved, not all); unfed, the whole litter
+/// starves; with the old shared rule the litter's fate is one fate (all or none).
+#[test]
+fn the_model_loses_part_of_a_litter_under_partial_provisioning() {
+    let sc = Params::defaults().fauna.founder(Founder::Chorister).core;
+    let plenty = 0.3 * sc.reserve_of(sc.body_max);
+    let (starved, _, fed_need) = pup_night(true, plenty);
+    assert_eq!(starved, 0.0, "a fed litter lives through the night");
+    assert!(fed_need > 0.0);
+    let (starved, places, _) = pup_night(true, 0.0);
+    assert!((starved - 4.0).abs() < 1e-9, "unfed, the whole litter starves: {starved} {places:?}");
+    // Two newborns' reserve room, over four adults (and the transfer's loss): food for half
+    // the litter.
+    let eff = Params::defaults().fauna.founder(Founder::Chorister).pack.unwrap().provision_efficiency;
+    let room = 0.98 * sc.reserve_of(sc.body_min);
+    let half = 2.0 * room / eff / 4.0;
+    let (starved, places, _) = pup_night(true, half);
+    assert!(starved > 0.0 && starved < 4.0, "part of the litter starves: {starved} {places:?}");
+    assert!(places.iter().any(|&(r, n)| r == 1 && n > 0.0), "the strongest place lives: {places:?}");
+    let weakest = places.iter().filter(|&&(_, n)| n > 0.0).map(|&(r, _)| r).max().unwrap_or(0);
+    assert!(weakest < 4, "the weakest place is gone: {places:?}");
+    let (starved, places, _) = pup_night(false, half);
+    assert!(starved == 0.0 || (starved - 4.0).abs() < 1e-9, "shared, one fate for the litter: {starved} {places:?}");
+}

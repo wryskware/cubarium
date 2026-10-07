@@ -221,6 +221,10 @@ senescence = 0.0017932039887126894
 wood_rate = 0.0016396050372662204
 
 [flora.glowcap]
+# Substrate demand, carbon dependence and exposed-mycelium grazing (GLOWCAP).
+substrate_budgeted = true
+substrate_required = true
+mycelium_graze_fraction = 0.5
 defence_half_life_s = 731.8835772795675
 foliage_rate = 0.00024
 maintenance = 0.0003279210074532441

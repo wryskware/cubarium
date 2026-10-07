@@ -653,9 +653,12 @@ pub fn seed_pre_rolled(
                 establishment_gates_with_sky(&view, *site, &sc, terrain_sky[i], log_organic, 0.0);
             let on_log = gates.passes()
                 && view.material_at(i64::from(site.x), site.y, site.z) == Material::Soil;
-            // A dark face passes with nothing on it at all.
+            // Legacy seep admits bare dark faces; required-carbon founders get the
+            // same log parcel as the ordinary substrate founders below.
             let bare = establishment_gates_with_sky(&view, *site, &sc, terrain_sky[i], 0.0, 0.0);
-            let dark = sc.dark_founder_share > 0.0 && bare.passes();
+            let dark = sc.dark_founder_share > 0.0 && if sc.substrate_required {
+                sc.dark_establish_min > 0.0 && gates.darkness >= sc.dark_establish_min && gates.passes()
+            } else { bare.passes() };
             if on_log || dark {
                 seeded.eligible_by_species[Species::Glowcap.index()] += 1;
             }
@@ -686,6 +689,13 @@ pub fn seed_pre_rolled(
         .into_iter()
         .enumerate()
     {
+        if sc.substrate_required {
+            if !flora.deposit(site, Deposit {
+                kind: DepositKind::DeadWood, organic: log_organic,
+                mineral: sc.n_tissue * log_organic, energy: sc.energy_density * log_organic,
+            }) { continue; }
+            seeded.logs += 1;
+        }
         let wood = fractions[i % fractions.len()] * sc.wood_max;
         if flora.apply(
             world,
