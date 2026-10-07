@@ -1390,7 +1390,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2206 rows)
+**`fauna.*`** (2296 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1550,6 +1550,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.withdraw_tremor` | 0.06 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.littershredder.vigilance.freeze_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.littershredder.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.littershredder.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.littershredder.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.littershredder.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.littershredder.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.littershredder.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.littershredder.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.littershredder.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.littershredder.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.littershredder.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -1635,6 +1644,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.littershredder.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.littershredder.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.littershredder.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.littershredder.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.littershredder.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1773,6 +1783,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.frondgrazer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.frondgrazer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.frondgrazer.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.frondgrazer.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.frondgrazer.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.frondgrazer.hunker.shelter_seek_m` | 6.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.frondgrazer.hunker.shelter_margin_m` | 0.15 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.frondgrazer.hunker.shelter_exposure` | 0.25 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.frondgrazer.hunker.enter_m` | 2.5 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.frondgrazer.hunker.leave_m` | 5.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.frondgrazer.hunker.calm_s` | 20.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -1858,6 +1877,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.frondgrazer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.frondgrazer.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.frondgrazer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.frondgrazer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.frondgrazer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -1996,6 +2016,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.lanternjaw.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.lanternjaw.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.lanternjaw.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.lanternjaw.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.lanternjaw.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.lanternjaw.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.lanternjaw.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.lanternjaw.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.lanternjaw.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.lanternjaw.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.lanternjaw.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2081,6 +2110,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.lanternjaw.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.lanternjaw.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.lanternjaw.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.lanternjaw.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.lanternjaw.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2219,6 +2249,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.capgnawer.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.capgnawer.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.capgnawer.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.capgnawer.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.capgnawer.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.capgnawer.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.capgnawer.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.capgnawer.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.capgnawer.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.capgnawer.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.capgnawer.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2304,6 +2343,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.capgnawer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.capgnawer.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.capgnawer.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.capgnawer.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.capgnawer.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2442,6 +2482,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.loftstrider.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.loftstrider.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.loftstrider.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.loftstrider.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.loftstrider.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.loftstrider.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.loftstrider.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.loftstrider.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.loftstrider.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.loftstrider.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.loftstrider.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2527,6 +2576,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.loftstrider.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.loftstrider.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.loftstrider.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.loftstrider.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.loftstrider.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2665,6 +2715,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.ripple-snail.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.ripple-snail.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.ripple-snail.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.ripple-snail.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.ripple-snail.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.ripple-snail.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.ripple-snail.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.ripple-snail.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.ripple-snail.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.ripple-snail.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.ripple-snail.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2750,6 +2809,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.ripple-snail.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.ripple-snail.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.ripple-snail.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.ripple-snail.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.ripple-snail.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -2888,6 +2948,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.bellwing.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.bellwing.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.bellwing.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.bellwing.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.bellwing.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.bellwing.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.bellwing.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.bellwing.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.bellwing.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.bellwing.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.bellwing.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -2973,6 +3042,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.bellwing.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.bellwing.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.bellwing.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.bellwing.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.bellwing.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3111,6 +3181,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.seedporter.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.seedporter.vigilance.refuge_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.seedporter.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.seedporter.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.seedporter.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.seedporter.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.seedporter.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.seedporter.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.seedporter.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.seedporter.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.seedporter.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3196,6 +3275,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.seedporter.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.seedporter.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.seedporter.pack.commit_m` | (absent) | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.seedporter.pack.select_kin_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.seedporter.pack.select_kin_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |
@@ -3334,6 +3414,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.withdraw_tremor` | 0.0 | organic x m/s / m^2 | [0, inf) |  | - | placeholder | S2: footfall at which it also turns away in place |
 | `fauna.founders.chorister.vigilance.freeze_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a freeze lasts this long after the last tremor that set it |
 | `fauna.founders.chorister.vigilance.refuge_search_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: an arboreal body in flight runs to a stand it climbs within this |
+| `fauna.founders.chorister.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
+| `fauna.founders.chorister.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
+| `fauna.founders.chorister.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
+| `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
+| `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
+| `fauna.founders.chorister.hunker.shelter_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: seek a known closed adult within this |
+| `fauna.founders.chorister.hunker.shelter_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: gap beyond summed footprints and base height tolerance for shelter |
+| `fauna.founders.chorister.hunker.shelter_exposure` | 1.0 | fraction | [0, 1] |  | - | placeholder | HERD: fraction of strikes that reach a juvenile behind an adult shield |
 | `fauna.founders.chorister.hunker.enter_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: it clamps down under its shield at an approaching threat within this |
 | `fauna.founders.chorister.hunker.leave_m` | 0.0 | m | [0, inf) |  | - | placeholder | HUNKER: ...and comes out once none has been within this for the calm |
 | `fauna.founders.chorister.hunker.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | HUNKER: the calm at full condition |
@@ -3419,6 +3508,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
 | `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.chorister.pack.breed_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
+| `fauna.founders.chorister.pack.regurgitate_reserve_fraction` | 0.5 | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
 | `fauna.founders.chorister.pack.commit_m` | 2.5 | m | [0, inf) |  | - | placeholder | S2: ...and rushes within this of its prey |
 | `fauna.founders.chorister.pack.select_kin_m` | 3.0 | m | [0, inf) |  | - | placeholder | PACK-TUNE: kin of a target's lineage within this lower its prospect |
 | `fauna.founders.chorister.pack.select_kin_factor` | 0.8 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: each such kin multiplies the prospect by this |

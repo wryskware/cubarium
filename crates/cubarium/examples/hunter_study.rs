@@ -78,7 +78,19 @@
 //!   ripple-snail's numbers with its eggs laid, hatched, drowned, dried and lost; land
 //!   faces by distance to standing water with pore fill, land film, grass and moss cover.
 //!   `shore load=DIR|seed=N [minutes=M]` prints the shore census alone.
+//! - `herd,` / `sumherd,` (HERD): moving run and hunker shares of awake grazer time,
+//!   run-to-hunker transitions, juvenile shelter while adults hunker (all and reachable
+//!   denominators), Veilhound kills at death: sheltered/exposed juvenile, hunkered/running/
+//!   other adult. Shelter/kill classes are derived at contact, not at hunt commitment.
 //! - `stocks,`: litter, film, glowcap stands and cap tissue, bodies, ms/tick.
+//! - `pup,` (PUP): the Veilhound's pups alive with body and reserve fraction (min / mean); since
+//!   the run's start, pups born, independent, starved and lost otherwise, and the pups' income
+//!   by source (own bites, regurgitation from givers above and below
+//!   `provision_reserve_fraction`, the reserve fallback), their upkeep, and ticks a giver kept
+//!   its meal. `run ... litter=N [keep_grazers=K] [pack_reserve=F]` is PUP's scenario: on the
+//!   loaded save, every frondgrazer but K is taken off, every pack's breeder whelps N pups at
+//!   its den, and the pack adults' reserves are cut to at most F of their caps (a lean year),
+//!   before the run.
 //! - At the end, `sum,` lines over the whole run.
 
 use std::path::Path;
@@ -115,7 +127,7 @@ fn resolve(args: &[String]) -> Params {
         .unwrap_or_else(|e| panic!("the parameter set: {e}"))
 }
 
-const FOUNDING_ONLY: &[&str] = &["seed=", "minutes=", "save=", "lanternjaws="];
+const FOUNDING_ONLY: &[&str] = &["seed=", "minutes=", "save=", "lanternjaws=", "litter=", "keep_grazers=", "pack_reserve="];
 
 fn main() {
     let raw: Vec<String> = std::env::args().collect();
@@ -142,6 +154,8 @@ fn main() {
         Some("trace") => trace_probe(&args),
         Some("pit") => pit_probe(&args),
         Some("edge") => edge_probe(&args),
+        Some("fear") => fear_probe(&args),
+        Some("fear2") => fear2_probe(&args),
         Some("drop") => drop_probe(&args),
         Some("pit2") => pit2_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
@@ -518,6 +532,47 @@ fn drop_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
 }
 
 /// The Veilhound's window line, `a` → `b`.
+/// **PUP's readout**, cumulative since the run's start (`a`): the Veilhound's pups alive now with
+/// their body and reserve fraction (min / mean), the litters' fates (born, independent,
+/// starved, lost otherwise; adults starved), the pups' income by source in organic units (their own bites,
+/// regurgitation by givers at or above `provision_reserve_fraction` and below it, the reserve
+/// fallback received), the upkeep the pups paid, ticks a giver withheld its meal, and the
+/// adults' mean reserve fraction now.
+fn pup_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let ch = Founder::Chorister;
+    let p = params.fauna.founder(ch);
+    let v = sim.fauna().view();
+    let frac = |x: &cubarium_voxel_fauna::Animal| x.reserve / p.core.reserve_of(x.body).max(1e-300);
+    let pups: Vec<_> = v.animals.iter().filter(|x| x.founder == Some(ch) && x.pack.is_some_and(|m| m.pup)).collect();
+    let adults: Vec<_> = v.animals.iter().filter(|x| x.founder == Some(ch) && !x.pack.is_some_and(|m| m.pup)).collect();
+    let mean = |xs: &[f64]| if xs.is_empty() { f64::NAN } else { xs.iter().sum::<f64>() / xs.len() as f64 };
+    let pb: Vec<f64> = pups.iter().map(|x| x.body).collect();
+    let pr: Vec<f64> = pups.iter().map(|x| frac(x)).collect();
+    let ar: Vec<f64> = adults.iter().map(|x| frac(x)).collect();
+    let min = |xs: &[f64]| xs.iter().copied().fold(f64::NAN, f64::min);
+    format!(
+        "pups={},pup_body={:.3}/{:.3},pup_reserve={:.3}/{:.3},adults={},adult_reserve={:.3},adults_starved={},born={},independent={},starved={},lost_other={},in_bites={:.4},in_regurg_surplus={:.4},in_regurg_lean={:.4},in_fallback={:.4},pup_upkeep={:.4},withheld_ticks={}",
+        pups.len(),
+        min(&pb),
+        mean(&pb),
+        min(&pr),
+        mean(&pr),
+        adults.len(),
+        mean(&ar),
+        (b.departed_founder(ch, Departure::Starved) - a.departed_founder(ch, Departure::Starved)).saturating_sub(b.pups_starved - a.pups_starved),
+        b.pups_born - a.pups_born,
+        b.pups_independent - a.pups_independent,
+        b.pups_starved - a.pups_starved,
+        b.pups_lost_other - a.pups_lost_other,
+        b.pup_swallowed_organic - a.pup_swallowed_organic,
+        b.pup_regurgitated_surplus - a.pup_regurgitated_surplus,
+        b.pup_regurgitated_lean - a.pup_regurgitated_lean,
+        b.provision_received_organic - a.provision_received_organic,
+        b.pup_upkeep_organic - a.pup_upkeep_organic,
+        b.provision_withheld_ticks - a.provision_withheld_ticks,
+    )
+}
+
 fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh) -> String {
     let i = VH.index();
     let v = sim.fauna().view();
@@ -571,6 +626,87 @@ fn vh_line(sim: &Sim, params: &Params, a: &FaunaLedger, b: &FaunaLedger, w: &Vh)
         adults.iter().filter(|x| x.reproduction.escrow.is_some()).count(),
         sim.world().year().map_or("-".to_string(), |y| format!("{}:{:.3}", y.number, y.phase)),
     )
+}
+
+/// HERD: exact age and posture at death, booked before the killed body is removed.
+fn age_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let x = &a.vigil.grazer_kills_by_posture[VH.index()];
+    let y = &b.vigil.grazer_kills_by_posture[VH.index()];
+    format!("vh_kills_juvenile={},vh_kills_adult={}", y[0] + y[1] - x[0] - x[1], y[2] + y[3] + y[4] - x[2] - x[3] - x[4])
+}
+
+/// Actual moving run time, response intent, and hunker time per awake grazer tick.
+/// Shelter denominator: all awake juvenile ticks while any adult in the herd is clamped;
+/// eligibility separately counts those with a same-height adult within shelter_seek_m.
+#[derive(Clone, Copy, Default)]
+struct HerdTime {
+    ticks: u64,
+    run: u64,
+    intent: u64,
+    hunker: u64,
+    young_hunker: u64,
+    sheltered: u64,
+    eligible: u64,
+}
+
+impl HerdTime {
+    fn tick(&mut self, sim: &Sim, params: &Params) {
+        let fauna = sim.fauna();
+        let animals = fauna.view().animals;
+        let vm = sim.world().config().voxel_m;
+        let ring = f64::from(sim.world().config().width) * vm;
+        let phys = params.fauna.founder(GRAZER);
+        let adult_hunker = animals.iter().any(|a| a.founder == Some(GRAZER) && a.body >= phys.core.birth_body && a.hunkered);
+        for a in animals.iter().filter(|a| a.founder == Some(GRAZER) && a.state != cubarium_voxel_fauna::State::Asleep) {
+            self.ticks += 1;
+            let running = fauna.percept(a.id).is_some_and(|p| p.vigil.running(fauna.tick()));
+            self.intent += u64::from(running);
+            self.run += u64::from(running && a.speed_m_s > 0.0 && !a.hunkered);
+            self.hunker += u64::from(a.hunkered);
+            if a.body < phys.core.birth_body && adult_hunker {
+                self.young_hunker += 1;
+                self.sheltered += u64::from(cubarium_voxel_fauna::vigil::sheltered(fauna, a, ring, vm));
+                self.eligible += u64::from(animals.iter().any(|o| {
+                    let (dx, dz) = wdelta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+                    o.founder == Some(GRAZER) && o.body >= phys.core.birth_body && o.hunkered &&
+                        matches!(cubarium_voxel_fauna::vigil::guard(&params.fauna, o, fauna.percept(o.id), fauna.tick()), cubarium_voxel_fauna::vigil::Guard::Shield(_)) &&
+                        dx.hypot(dz) <= phys.hunker.shelter_seek_m &&
+                        f64::from(a.sense_layer(vm).abs_diff(o.sense_layer(vm))) * vm <= phys.hunker.shelter_margin_m
+                }));
+            }
+        }
+    }
+
+    /// The control must hunker; HERD must also visibly run and use available shelter.
+    fn missing(&self, herd: bool) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        if herd && self.run == 0 { missing.push("no moving grazer run"); }
+        if self.hunker == 0 { missing.push("no grazer hunker"); }
+        if herd && self.eligible > 0 && self.sheltered == 0 {
+            missing.push("no juvenile shelter despite nearby closed adults");
+        }
+        missing
+    }
+
+    fn add(&mut self, o: &Self) {
+        self.ticks += o.ticks;
+        self.run += o.run;
+        self.intent += o.intent;
+        self.hunker += o.hunker;
+        self.young_hunker += o.young_hunker;
+        self.sheltered += o.sheltered;
+        self.eligible += o.eligible;
+    }
+
+    fn line(&self, a: &FaunaLedger, b: &FaunaLedger) -> String {
+        let share = |n: u64, d: u64| if d > 0 { n as f64 / d as f64 } else { f64::NAN };
+        let kills: Vec<u64> = (0..5).map(|i| b.vigil.grazer_kills_by_posture[VH.index()][i] - a.vigil.grazer_kills_by_posture[VH.index()][i]).collect();
+        format!("awake_ticks={},run_ticks={},hunker_ticks={},run_share={:.4},run_intent_share={:.4},hunker_share={:.4},runs_to_hunker={},juvenile_hunker_ticks={},juvenile_sheltered_ticks={},juvenile_eligible_ticks={},juvenile_shelter_share={:.4},juvenile_eligible_shelter_share={:.4},vh_kills_sheltered_juvenile={},vh_kills_exposed_juvenile={},vh_kills_hunkered_adult={},vh_kills_running_adult={},vh_kills_other_adult={}",
+            self.ticks, self.run, self.hunker, share(self.run, self.ticks), share(self.intent, self.ticks), share(self.hunker, self.ticks),
+            b.vigil.runs_to_hunker[GRAZER.index()] - a.vigil.runs_to_hunker[GRAZER.index()],
+            self.young_hunker, self.sheltered, self.eligible, share(self.sheltered, self.young_hunker), share(self.sheltered, self.eligible),
+            kills[0], kills[1], kills[2], kills[3], kills[4])
+    }
 }
 
 const GRAZER: Founder = Founder::Browser;
@@ -980,6 +1116,35 @@ fn run(args: &[String]) {
     fauna.replace_config(params.fauna.clone()).expect("the arm's animal config validates");
     cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("the heuristics go back on");
     eprintln!("{arm}: loaded {} at minute {minute0}: {}", dir.display(), counts(&fauna));
+    // PUP's scenario, on the loaded save before the run (dropped on a resume: the checkpoint
+    // carries it): `keep_grazers=N` takes every frondgrazer but the first N off the world
+    // (`Command::Remove` at its column: a lean world), and `litter=N` has every pack's breeder
+    // whelp N pups at its den now (`Fauna::whelp`).
+    if let Some(keep) = arg(args, "keep_grazers=").and_then(|n| n.parse::<usize>().ok()) {
+        let cols: Vec<(i64, u32)> = fauna.view().animals.iter().filter(|a| a.founder == Some(GRAZER)).skip(keep).map(|a| (i64::from(a.site.x), a.site.z)).collect();
+        for (x, z) in cols {
+            fauna.apply(&world, cubarium_voxel_fauna::Command::Remove { x, z });
+        }
+        eprintln!("{arm}: kept {keep} frondgrazers: {}", counts(&fauna));
+    }
+    if let Some(n) = arg(args, "litter=").and_then(|n| n.parse::<u32>().ok()).filter(|&n| n > 0) {
+        let packs: Vec<u64> = fauna.packs().iter().map(|p| p.id).collect();
+        for pack in packs {
+            match fauna.whelp(&world.view(), pack, n) {
+                Ok(ids) => eprintln!("{arm}: pack {pack}: a litter of {} whelped at minute {minute0}: {ids:?}", ids.len()),
+                Err(e) => eprintln!("{arm}: pack {pack}: no litter: {e}"),
+            }
+        }
+    }
+    if let Some(f) = arg(args, "pack_reserve=").and_then(|n| n.parse::<f64>().ok()) {
+        // Cuts only: a breeder already thinner from whelping stays so.
+        let p = params.fauna.founder(Founder::Chorister).core;
+        let ids: Vec<(u64, f64)> = fauna.view().animals.iter().filter(|a| a.pack.is_some_and(|m| !m.pup)).map(|a| (a.id, a.reserve / p.reserve_of(a.body).max(1e-300))).collect();
+        for (id, now) in ids {
+            fauna.set_reserve_fraction(id, f.min(now));
+        }
+        eprintln!("{arm}: pack adults' reserve cut to at most {f} of their caps");
+    }
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     let per_min = 60 * u64::from(TICK_HZ);
     let mut runner = stage(args, &mut sim, minute0, minute0 + (hours * 60.0).round() as u64);
@@ -1014,21 +1179,14 @@ fn run(args: &[String]) {
     let grazers0 = grazers_before;
     let mut before = prey_bodies(&sim);
     let mut kills_before = kills_by_lj(&sim.fauna().view().ledger);
-    // HUNKER's readout: the Veilhound's frondgrazer kills by the prey's age class (juvenile,
-    // adult), from the bodies that went in the tick a kill was booked (both arms).
-    let grazer_birth = params.fauna.founder(GRAZER).core.birth_body;
-    let vh_grazer_kills = |sim: &Sim| sim.fauna().view().ledger.departed_founder(GRAZER, Departure::Killed { by: VH });
-    let grazer_ages = |sim: &Sim| -> rustc_hash::FxHashMap<u64, bool> {
-        sim.fauna().view().animals.iter().filter(|a| a.founder == Some(GRAZER)).map(|a| (a.id, a.body < grazer_birth)).collect()
-    };
-    let mut ages = grazer_ages(&sim);
-    let mut vh_kills_before = vh_grazer_kills(&sim);
-    let (mut age_win, mut age_all) = ([0u64; 2], [0u64; 2]);
+    let (mut herd_win, mut herd_all) = (HerdTime::default(), HerdTime::default());
     let (mut meet_win, mut meet_all) = (LureMeet::default(), LureMeet::default());
     let mut hunts = Hunts { log: arg(args, "hunt_log=") == Some("1"), chase_kills: sim.fauna().view().ledger.pack_chase_kills, ..Hunts::default() };
     let (mut strk_win, mut strk_all, mut strk_on) = (Contact::default(), Contact::default(), rustc_hash::FxHashSet::default());
     let mut stuck = Stuck { log: arg(args, "wedge_log=") == Some("1"), ..Stuck::default() };
     let mut wedge = Wedge::default();
+    let mut fear = Fear::default();
+    let mut herd_checked = false;
     // EDGE: bodies born by lineage (a new id), against the ids standing at the start.
     let mut seen: rustc_hash::FxHashSet<u64> = sim.fauna().view().animals.iter().map(|a| a.id).collect();
     let mut born = [0u64; 9];
@@ -1076,19 +1234,7 @@ fn run(args: &[String]) {
                 }
             }
             kills_before = kills_now;
-            let vk = vh_grazer_kills(&sim);
-            let ages_now = grazer_ages(&sim);
-            if vk > vh_kills_before {
-                let mut left = vk - vh_kills_before;
-                for (id, &juvenile) in ages.iter() {
-                    if left > 0 && !ages_now.contains_key(id) {
-                        age_win[usize::from(!juvenile)] += 1;
-                        left -= 1;
-                    }
-                }
-            }
-            vh_kills_before = vk;
-            ages = ages_now;
+            herd_win.tick(&sim, &params);
             before = now;
             hunts.tick(&sim, &params);
             meet_win.tick(&sim);
@@ -1096,6 +1242,7 @@ fn run(args: &[String]) {
             ends.tick(&mut sim, &params);
             stuck.tick(&sim, &params);
             wedge.tick(&sim, &params);
+            fear.tick(&sim, &params);
         }
         if (minute - minute0) % every == 0 || minute == end {
             let ms = t0.elapsed().as_secs_f64() * 1000.0 / ticks_in_window.max(1) as f64;
@@ -1104,6 +1251,7 @@ fn run(args: &[String]) {
             println!("meal,{arm},{minute},{}", meal_line(&lw, &l, &meal_win));
             println!("route,{arm},{minute},{}", route_line(&lw, &l));
             println!("vh,{arm},{minute},{}", vh_line(&sim, &params, &lw, &l, &vh_win));
+            println!("pup,{arm},{minute},{}", pup_line(&sim, &params, &l0, &l));
             println!("snail,{arm},{minute},{}", snail_line(&sim, &lw, &l));
             // SNAIL-LAND: the shore census (land faces by distance to standing water).
             println!("shore,{arm},{minute},{}", shore_line(&sim));
@@ -1111,10 +1259,25 @@ fn run(args: &[String]) {
             let g_now = grazers(&sim);
             println!("graz,{arm},{minute},{}", graz_line(&lw, &l, grazers_before, g_now, win[GRAZER.index()].body_ticks));
             grazers_before = g_now;
-            println!("age,{arm},{minute},vh_kills_juvenile={},vh_kills_adult={}", age_win[0], age_win[1]);
-            age_all[0] += age_win[0];
-            age_all[1] += age_win[1];
-            age_win = [0; 2];
+            println!("age,{arm},{minute},{}", age_line(&lw, &l));
+            println!("herd,{arm},{minute},{}", herd_win.line(&lw, &l));
+            herd_all.add(&herd_win);
+            // The detached HERD check stops at its first short segment if the actual
+            // moving run, hunker, or available juvenile shelter never fired. The staged
+            // runner also checks controllers, movement/feeding, and conservation.
+            if !herd_checked && arg(args, "herd_check=") == Some("1") {
+                herd_checked = true;
+                let missing = herd_all.missing(params.fauna.founder(GRAZER).hunker.herd_enabled);
+                if !missing.is_empty() {
+                    let why = missing.join("; ");
+                    eprintln!("HERD liveness failed at m{minute}: {why}");
+                    if let Some(r) = runner.as_ref() {
+                        std::fs::write(r.dir().join("FAILED"), &why).expect("write failure");
+                        std::fs::write(r.dir().join("STOP"), &why).expect("stop at checkpoint");
+                    }
+                }
+            }
+            herd_win = HerdTime::default();
             /*HUNK{*/
             println!("hunk,{arm},{minute},{}", hunk_line(&lw, &l));
             println!("ffx,{arm},{minute},open_exits={},bared_entries={}", l.vigil.open_exits[GRAZER.index()] - lw.vigil.open_exits[GRAZER.index()], l.vigil.bared_entries[GRAZER.index()] - lw.vigil.bared_entries[GRAZER.index()]);
@@ -1149,6 +1312,8 @@ fn run(args: &[String]) {
             stuck.win = [0; 4];
             println!("wedge,{arm},{minute},{}", wedge.line(false));
             wedge.win = Default::default();
+            println!("fear,{arm},{minute},{}", fear.line(false));
+            fear.win = Default::default();
             strk_all.add(&strk_win);
             strk_win = Contact::default();
             hunts.win = HuntTally::default();
@@ -1185,10 +1350,13 @@ fn run(args: &[String]) {
     }
     vh_all.add(&vh_win);
     println!("sumvh,{arm},{},{}", minute0, vh_line(&sim, &params, &l0, &l, &vh_all));
+    println!("sumpup,{arm},{},{}", minute0, pup_line(&sim, &params, &l0, &l));
     println!("sumsnail,{arm},{},{}", minute0, snail_line(&sim, &l0, &l));
     println!("sumvig,{arm},{},{}", minute0, vig_line(&l0, &l));
     println!("sumgraz,{arm},{},{}", minute0, graz_line(&l0, &l, grazers0, grazers(&sim), track[GRAZER.index()].body_ticks));
-    println!("sumage,{arm},{},vh_kills_juvenile={},vh_kills_adult={}", minute0, age_all[0] + age_win[0], age_all[1] + age_win[1]);
+    println!("sumage,{arm},{},{}", minute0, age_line(&l0, &l));
+    herd_all.add(&herd_win);
+    println!("sumherd,{arm},{},{}", minute0, herd_all.line(&l0, &l));
     /*HUNK{*/
     println!("sumhunk,{arm},{},{}", minute0, hunk_line(&l0, &l));
     println!("sumffx,{arm},{},open_exits={},bared_entries={}", minute0, l.vigil.open_exits[GRAZER.index()] - l0.vigil.open_exits[GRAZER.index()], l.vigil.bared_entries[GRAZER.index()] - l0.vigil.bared_entries[GRAZER.index()]);
@@ -1205,6 +1373,7 @@ fn run(args: &[String]) {
     println!("sumstuck,{arm},{},{}", minute0, Stuck::line(&stuck.all, vh_cadence));
     println!("sumwedge,{arm},{},{}", minute0, wedge.line(true));
     println!("sumwedgewhy,{arm},{},{}", minute0, wedge.why_line());
+    println!("sumfear,{arm},{},{}", minute0, fear.line(true));
     // EDGE: per lineage, the founder-hours alive, the organic swallowed per alive hour (its
     // intake) and the bodies born over the run.
     {
@@ -3085,6 +3254,18 @@ fn trace_probe(args: &[String]) {
         }
         let fa = sim.fauna();
         let fv = fa.view();
+        // HERD diagnosis: the response, known threat and nearest adult beside every grazer.
+        for g in fv.animals.iter().filter(|g| g.founder == Some(GRAZER)) {
+            let birth = params.fauna.founder(GRAZER).core.birth_body;
+            let p = fa.percept(g.id).copied().unwrap_or_default();
+            let known = cubarium_voxel_fauna::vigil::threat_readout(&params.fauna, g, &p, fv.tick, ring, v);
+            let near = fv.animals.iter().filter(|o| o.id != g.id && o.founder == Some(GRAZER) && o.body >= birth)
+                .map(|o| { let (dx, dz) = wdelta(g.pose.x, g.pose.z, o.pose.x, o.pose.z, ring); ((dx * dx + dz * dz).sqrt(), o.id, o.hunkered) })
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            println!("  G,{}s,id={},young={},hunk={},flee={},bolt={},at=({:.2},{:.2},y{}),speed={:.3},adult={near:?},threat={known:?},pry={:.3},open={},kills={}",
+                t / hz, g.id, g.body < birth, g.hunkered, p.vigil.fleeing, p.vigil.running(fv.tick), g.pose.x, g.pose.z, g.site.y,
+                g.speed_m_s, p.vigil.pry, fv.tick < p.vigil.opened_until, fv.ledger.departed_founder(GRAZER, Departure::Killed { by: VH }));
+        }
         for r in fa.packs() {
             let o = r.target.and_then(|t| fv.animal(t)).copied();
             let ts = o.map(|o| {
@@ -3921,6 +4102,350 @@ fn edge_line(tally: &[[u64; 2]; 9], why: &[[u64; STEERS + 1]; 9]) -> String {
     out.join(",")
 }
 
+// ------------------------------------------------------------------ FEAR: what prey flee
+
+/// The prey lineages FEAR reads (`fear,` / `sumfear,`).
+const FEAR_PREY: [Founder; 5] = [Founder::Browser, Founder::Loftstrider, Founder::Seedporter, Founder::Bellwing, Founder::Capgnawer];
+/// What a fled hunter was doing: asleep, feeding (cropping a carcass), moving, still and sated
+/// (eating latch off, no strike), still and hungry, gone (no hunter of it known).
+const FEAR_FROM: [&str; 6] = ["asleep", "feeding", "moving", "still_sated", "still_hungry", "none"];
+
+#[derive(Clone, Copy, Default)]
+struct FearTally {
+    awake: u64,
+    flee: u64,
+    /// FEAR-2: in flight as the vigil's `fleeing` flag counts it, perched included (FEAR's readout).
+    flee_raw: u64,
+    /// FEAR-2: perched under a hunter: the refuge watch, or (before FEAR-2) a flight held in a perch.
+    refuge: u64,
+    calm: u64,
+    hunker: u64,
+    from: [u64; 6],
+}
+
+/// **FEAR's readout**: per prey lineage, awake ticks, ticks in flight (a ground response's
+/// flight, else the flee rule steering; FEAR-2: not perched, with `flee_raw` the flag as FEAR
+/// counted it and `refuge` the ticks perched under a hunter), ticks moving off a calm hunter (FEAR's margin walk),
+/// hunkered ticks, and the flight ticks by what the hunter it fled (its `flee_id`, else the
+/// nearest body that hunts it) was doing.
+#[derive(Default)]
+struct Fear {
+    win: [FearTally; 5],
+    all: [FearTally; 5],
+}
+
+/// What hunter `o` is doing, as [`FEAR_FROM`] indexes it.
+fn fear_from(params: &Params, o: &cubarium_voxel_fauna::Animal) -> usize {
+    use cubarium_voxel_fauna::State;
+    if o.state == State::Asleep {
+        0
+    } else if o.state == State::Cropping {
+        1
+    } else if cubarium_voxel_fauna::moved_recently(&params.fauna.predation, o) {
+        2
+    } else if !o.eating && o.strike.is_none() {
+        3
+    } else {
+        4
+    }
+}
+
+impl Fear {
+    fn tick(&mut self, sim: &Sim, params: &Params) {
+        let fa = sim.fauna();
+        let v = fa.view();
+        let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+        for a in v.animals.iter() {
+            let Some(f) = a.founder else { continue };
+            let Some(k) = FEAR_PREY.iter().position(|&p| p == f) else { continue };
+            if a.state == cubarium_voxel_fauna::State::Asleep {
+                continue;
+            }
+            let vg = fa.percept(a.id).map(|p| p.vigil).unwrap_or_default();
+            let vigil = params.fauna.founder(f).vigilance.mode != cubarium_voxel_fauna::VigilMode::None && params.fauna.founder(f).senses.live;
+            let raw = if vigil { vg.fleeing } else { fa.steer_of(a.id) == Some(cubarium_voxel_fauna::Steer::Flee) };
+            // FEAR-2's correction: a body perched in its refuge is not fleeing, whatever its flag.
+            let perched = a.mobility.mode == cubarium_voxel_fauna::MobilityMode::Perched;
+            let fleeing = raw && !perched;
+            let refuge = vigil && (vg.refuge || (vg.fleeing && perched));
+            let calm = vg.calm_walk;
+            let add = |t: &mut FearTally| {
+                t.awake += 1;
+                t.flee += u64::from(fleeing);
+                t.flee_raw += u64::from(raw);
+                t.refuge += u64::from(refuge);
+                t.calm += u64::from(calm);
+                t.hunker += u64::from(a.hunkered);
+            };
+            add(&mut self.win[k]);
+            add(&mut self.all[k]);
+            if !fleeing {
+                continue;
+            }
+            let hunts = |o: &&cubarium_voxel_fauna::Animal| o.founder.is_some_and(|of| params.fauna.founder(of).hunter.is_some_and(|h| h.hunts(f)));
+            let fled = (vg.flee_id != 0).then(|| v.animal(vg.flee_id)).flatten().filter(|o| hunts(o)).or_else(|| {
+                v.animals.iter().filter(hunts).min_by(|p, q| {
+                    let d = |o: &cubarium_voxel_fauna::Animal| {
+                        let (dx, dz) = wdelta(o.pose.x, o.pose.z, a.pose.x, a.pose.z, ring);
+                        dx * dx + dz * dz
+                    };
+                    d(p).total_cmp(&d(q))
+                })
+            });
+            let c = fled.map_or(5, |o| fear_from(params, o));
+            self.win[k].from[c] += 1;
+            self.all[k].from[c] += 1;
+        }
+    }
+
+    fn line(&self, all: bool) -> String {
+        let t = if all { &self.all } else { &self.win };
+        FEAR_PREY
+            .iter()
+            .enumerate()
+            .map(|(k, f)| {
+                let x = t[k];
+                let sh = |n: u64| n as f64 / x.awake.max(1) as f64;
+                let from = (0..6).map(|c| format!("{:.3}", x.from[c] as f64 / x.flee.max(1) as f64)).collect::<Vec<_>>().join(":");
+                format!(
+                    "{}=awake_h:{:.2}/flee:{:.3}/flee_raw:{:.3}/refuge:{:.3}/calm:{:.3}/hunker:{:.3}/from:{from}",
+                    f.name(),
+                    x.awake as f64 / f64::from(TICK_HZ) / 3600.0,
+                    sh(x.flee),
+                    sh(x.flee_raw),
+                    sh(x.refuge),
+                    sh(x.calm),
+                    sh(x.hunker)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+            + &format!(",from_order={}", FEAR_FROM.join(":"))
+    }
+}
+
+/// `fear load=DIR minutes=M [config=...] [set=...]` (FEAR's probe): runs a save and prints the
+/// per-lineage flight shares and what the fled hunters were doing (the `sumfear,` line).
+fn fear_probe(args: &[String]) {
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(10, |m| m.parse().unwrap());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let mut fear = Fear::default();
+    for _ in 0..minutes * 60 * u64::from(TICK_HZ) {
+        sim.step();
+        fear.tick(&sim, &params);
+    }
+    println!("sumfear,{},{minute0},{}", dir.display(), fear.line(true));
+}
+
+/// **FEAR-2's probe** (`hunter_study fear2 load=DIR minutes=M [save=DIR] [config=...] [set=...]`): runs a
+/// save and decomposes the seedporter's flight ticks (its vigil's `fleeing`) by mode (ground,
+/// climbing, perched and eating, perched otherwise), by what holds the flight (its start tick;
+/// an unwatched threat within `flee_stop_m`, the one it flees or another; the calm timer; the
+/// hunter it flees unknown and the body within `flee_stop_m` of where it last knew it), by the
+/// hunter it fled at the flight's start (asleep, feeding, moving, still and sated, still and
+/// hungry; still split by its state, whether its pack targets this body, and whether it faces
+/// it), and by the flight's duration; the still-and-hungry hunters held over flight ticks by
+/// what their pack is doing; and the frondgrazer's hunker by the nearest Veilhound within its
+/// hunker's `enter_m`.
+fn fear2_probe(args: &[String]) {
+    use cubarium_voxel_fauna::{MobilityMode, State};
+    use std::collections::HashMap;
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(10, |m| m.parse().unwrap());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let sp = Founder::Seedporter;
+    let vg = params.fauna.founder(sp).vigilance;
+    let stop = vg.flee_stop_m.max(vg.flee_start_m);
+    let calm_t = if vg.calm_s > 0.0 { cubarium_voxel::ticks_at_least_one(vg.calm_s) } else { 0 };
+    let hz = u64::from(TICK_HZ);
+    let enter = params.fauna.founder(Founder::Browser).hunker.enter_m;
+    let facing = |h: &cubarium_voxel_fauna::Animal, a: &cubarium_voxel_fauna::Animal, ring: f64| {
+        let (dx, dz) = wdelta(h.pose.x, h.pose.z, a.pose.x, a.pose.z, ring);
+        let d = (dx.atan2(dz) - h.pose.heading_rad).rem_euclid(std::f64::consts::TAU);
+        let off = if d > std::f64::consts::PI { std::f64::consts::TAU - d } else { d };
+        off <= 30f64.to_radians()
+    };
+    // The class of hunter `h` to prey `a`: FEAR_FROM, still split by state, target, facing.
+    let class_of = |sim: &Sim, h: Option<&cubarium_voxel_fauna::Animal>, a: &cubarium_voxel_fauna::Animal, ring: f64| -> String {
+        let Some(h) = h else { return "none".into() };
+        let c = fear_from(&params, h);
+        let base = FEAR_FROM[c];
+        if c < 3 {
+            return base.into();
+        }
+        let fa = sim.fauna();
+        let pk = h.pack.and_then(|m| fa.pack(m.pack));
+        let tgt = match pk {
+            Some(r) if r.target == Some(a.id) => "tgt_me",
+            Some(r) if r.drawn == Some(a.id) => "drawn_me",
+            Some(r) if r.target.is_some() => "tgt_other",
+            Some(r) if r.feast.is_some() => "feast",
+            _ => "no_tgt",
+        };
+        let st = match h.state {
+            State::Resting => "rest",
+            State::Walking => "walk",
+            _ => "other",
+        };
+        let pup = if h.pack.is_some_and(|m| m.pup) { "pup" } else { "adult" };
+        format!("{base}/{st}/{tgt}/{}/{pup}", if facing(h, a, ring) { "facing" } else { "away" })
+    };
+    struct Ep {
+        flee_tick: u64,
+        start: u64,
+        class: String,
+    }
+    let mut eps: HashMap<u64, Ep> = HashMap::new();
+    let (mut awake, mut flee, mut refuge) = (0u64, 0u64, 0u64);
+    let mut mode = [0u64; 5];
+    let mut hold: HashMap<String, u64> = HashMap::new();
+    let mut trig: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut held_by: HashMap<String, u64> = HashMap::new();
+    let bins = [10u64, 60, 300, 1800, u64::MAX];
+    let mut dur = [(0u64, 0u64); 5];
+    let mut hunker: HashMap<String, (u64, u64)> = HashMap::new();
+    let close = |e: &Ep, end: u64, trig: &mut HashMap<String, (u64, u64)>, dur: &mut [(u64, u64); 5]| {
+        let n = end.saturating_sub(e.start);
+        let b = bins.iter().position(|&x| n < x * hz).unwrap_or(4);
+        dur[b].0 += 1;
+        dur[b].1 += n;
+        let t = trig.entry(e.class.clone()).or_default();
+        t.0 += 1;
+        t.1 += n;
+    };
+    for _ in 0..minutes * 60 * hz {
+        sim.step();
+        let fa = sim.fauna();
+        let v = fa.view();
+        let now = fa.tick();
+        let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+        let vm = sim.world().config().voxel_m;
+        let mut seen = std::collections::HashSet::new();
+        for a in v.animals.iter() {
+            if a.founder == Some(Founder::Browser) && a.state != State::Asleep {
+                let near = v
+                    .animals
+                    .iter()
+                    .filter(|o| o.founder == Some(VH))
+                    .map(|o| {
+                        let (dx, dz) = wdelta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+                        ((dx * dx + dz * dz).sqrt(), o)
+                    })
+                    .filter(|&(d, _)| d <= enter)
+                    .min_by(|p, q| p.0.total_cmp(&q.0));
+                let c = near.map_or("none".to_string(), |(_, o)| FEAR_FROM[fear_from(&params, o)].to_string());
+                let t = hunker.entry(c).or_default();
+                t.0 += 1;
+                t.1 += u64::from(a.hunkered);
+            }
+            if a.founder != Some(sp) || a.state == State::Asleep {
+                continue;
+            }
+            awake += 1;
+            let Some(p) = fa.percept(a.id) else { continue };
+            let vi = p.vigil;
+            refuge += u64::from(vi.refuge);
+            if !vi.fleeing {
+                continue;
+            }
+            seen.insert(a.id);
+            flee += 1;
+            let m = match a.mobility.mode {
+                MobilityMode::Ground => 0,
+                MobilityMode::Climb => 1,
+                MobilityMode::Perched if a.state == State::Cropping => 2,
+                MobilityMode::Perched => 3,
+                _ => 4,
+            };
+            mode[m] += 1;
+            let th = cubarium_voxel_fauna::vigil::threat_readout(&params.fauna, a, p, now, ring, vm);
+            let h = if now == vi.flee_tick {
+                "start"
+            } else if let Some(t) = th.iter().find(|t| !t.3 && t.1 <= stop) {
+                if t.0 == vi.flee_id { "near_same" } else { "near_other" }
+            } else if now.saturating_sub(vi.close_tick) < calm_t {
+                "calm_timer"
+            } else if th.iter().any(|t| t.0 == vi.flee_id) {
+                "seen_far"
+            } else {
+                "unseen"
+            };
+            *hold.entry(format!("{h}/{}", if m >= 2 { "perched" } else { "ground" })).or_default() += 1;
+            if h == "near_same" || h == "near_other" {
+                let t = th.iter().find(|t| !t.3 && t.1 <= stop).unwrap();
+                let c = class_of(&sim, v.animal(t.0), a, ring);
+                *held_by.entry(c).or_default() += 1;
+            }
+            let new = eps.get(&a.id).is_none_or(|e| e.flee_tick != vi.flee_tick);
+            if new {
+                if let Some(e) = eps.remove(&a.id) {
+                    close(&e, now, &mut trig, &mut dur);
+                }
+                let class = class_of(&sim, v.animal(vi.flee_id), a, ring);
+                eps.insert(a.id, Ep { flee_tick: vi.flee_tick, start: now, class });
+            }
+        }
+        let ended: Vec<u64> = eps.keys().copied().filter(|id| !seen.contains(id)).collect();
+        for id in ended {
+            let e = eps.remove(&id).unwrap();
+            close(&e, now, &mut trig, &mut dur);
+        }
+    }
+    let now = sim.fauna().tick();
+    for (_, e) in eps.drain() {
+        close(&e, now, &mut trig, &mut dur);
+    }
+    let fl = flee.max(1) as f64;
+    println!(
+        "f2mode,{},{minute0},awake_h={:.2},refuge_watch={:.3},flee_raw={:.3},ground={:.3},climb={:.3},perch_eat={:.3},perch_other={:.3},other={:.3}",
+        dir.display(),
+        awake as f64 / hz as f64 / 3600.0,
+        refuge as f64 / awake.max(1) as f64,
+        flee as f64 / awake.max(1) as f64,
+        mode[0] as f64 / fl,
+        mode[1] as f64 / fl,
+        mode[2] as f64 / fl,
+        mode[3] as f64 / fl,
+        mode[4] as f64 / fl
+    );
+    let sorted = |m: &HashMap<String, u64>| {
+        let mut v: Vec<_> = m.iter().map(|(k, n)| (k.clone(), *n)).collect();
+        v.sort_by(|p, q| q.1.cmp(&p.1));
+        v
+    };
+    println!("f2hold,{}", sorted(&hold).iter().map(|(k, n)| format!("{k}={:.3}", *n as f64 / fl)).collect::<Vec<_>>().join(","));
+    let hb: u64 = held_by.values().sum();
+    println!("f2heldby,{}", sorted(&held_by).iter().map(|(k, n)| format!("{k}={:.3}", *n as f64 / hb.max(1) as f64)).collect::<Vec<_>>().join(","));
+    let tt: u64 = trig.values().map(|t| t.1).sum();
+    let mut tv: Vec<_> = trig.iter().collect();
+    tv.sort_by(|p, q| q.1.1.cmp(&p.1.1));
+    println!("f2trig,{}", tv.iter().map(|(k, t)| format!("{k}=n{}:t{:.3}", t.0, t.1 as f64 / tt.max(1) as f64)).collect::<Vec<_>>().join(","));
+    let names = ["<10s", "10-60s", "60-300s", "300-1800s", ">1800s"];
+    println!("f2dur,{}", (0..5).map(|b| format!("{}=n{}:t{:.3}", names[b], dur[b].0, dur[b].1 as f64 / tt.max(1) as f64)).collect::<Vec<_>>().join(","));
+    let mut hv: Vec<_> = hunker.iter().collect();
+    hv.sort();
+    println!("f2hunker,{}", hv.iter().map(|(k, t)| format!("{k}=awake{}:hunk{:.3}", t.0, t.1 as f64 / t.0.max(1) as f64)).collect::<Vec<_>>().join(","));
+    if let Some(out) = arg(args, "save=") {
+        let at = Path::new(out).join(format!("m{}", minute0 + minutes));
+        let (w, fl, fa) = sim.layers();
+        cubarium_voxel_sim::saved::save(&at, w, fl, fa, minute0 + minutes).unwrap_or_else(|e| panic!("save: {e}"));
+        println!("saved,{}", at.display());
+    }
+}
+
 /// The pack tactic's return for body `id` (PIT-2's probe): the source line of `pack.rs`'s
 /// return and the last point it walked at. The tactic does not record it; a probe build
 /// patched to (the PIT-2 worker's `diag.py`, which tags each return) reads it here. Unpatched:
@@ -4457,5 +4982,33 @@ fn film_hist(args: &[String]) {
     }
     for (ci, name) in ["water", "shore", "inland"].iter().enumerate() {
         println!("film,{name},total={:.4},faces<0.05={},<0.1={},<0.25={},<0.5={},>=0.5={}", tot[ci], h[ci][0], h[ci][1], h[ci][2], h[ci][3], h[ci][4]);
+    }
+}
+
+#[cfg(test)]
+mod herd_readout_tests {
+    use super::HerdTime;
+
+    #[test]
+    fn control_requires_hunkering_and_herd_also_requires_moving_running() {
+        let idle = HerdTime::default();
+        assert_eq!(idle.missing(false), vec!["no grazer hunker"]);
+        let mut clamped = idle;
+        clamped.hunker = 1;
+        assert!(clamped.missing(false).is_empty(), "the control deliberately has no runs");
+        assert_eq!(clamped.missing(true), vec!["no moving grazer run"]);
+        clamped.run = 1;
+        assert!(clamped.missing(true).is_empty());
+    }
+
+    #[test]
+    fn juvenile_shelter_is_required_only_when_closed_adults_are_reachable() {
+        let mut h = HerdTime { run: 1, hunker: 1, ..Default::default() };
+        assert!(h.missing(true).is_empty(), "no reachable calf shelter opportunity");
+        h.eligible = 1;
+        assert_eq!(h.missing(true), vec!["no juvenile shelter despite nearby closed adults"]);
+        assert!(h.missing(false).is_empty(), "the old comparison arm has no shelter behavior");
+        h.sheltered = 1;
+        assert!(h.missing(true).is_empty());
     }
 }

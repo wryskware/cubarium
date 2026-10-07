@@ -112,6 +112,7 @@ impl Web {
         flora.take = Take::default();
         flora.returns = Returns::default();
         fauna.t_s = flora.t_s;
+        fauna.habitat = Some(flora.habitat(fauna.phys(Founder::RippleSnail)));
         let sub = ((flora.p.dt / fauna.dt).round() as usize).max(1);
         fauna.dt = flora.p.dt / sub as f64;
         let mut w = Web { flora, fauna, sub, browse: [0.0; NS], ledger: Ledger::default(), held0: [0.0; 5], flows0: [0.0; 5] };
@@ -177,6 +178,7 @@ impl Web {
     fn step_recording(&mut self, rec: Option<&mut Vec<Supply>>) {
         // 1. Supply.
         self.flora.step();
+        self.fauna.habitat = Some(self.flora.habitat(self.fauna.phys(Founder::RippleSnail)));
         let offer = self.flora.offer();
         if let Some(r) = rec {
             r.push(offer.clone());

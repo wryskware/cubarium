@@ -681,6 +681,30 @@ pub struct Pack {
     /// than its reserve above the surplus floor funds.
     #[serde(default)]
     pub litter_by_condition: bool,
+    /// **The giver feeds itself first** (PUP): an adult at the den regurgitates its meal to a
+    /// pup only while its own reserve is at or above this fraction of its cap; below it, it
+    /// keeps the meal (wolves and lions in poor condition eat at the kill and carry home only
+    /// a surplus: Mech & Boitani 2003; Packer et al. 1988). 0: the old rule, the giver's
+    /// condition never matters.
+    #[serde(default)]
+    pub regurgitate_reserve_fraction: f64,
+    /// **Scramble provisioning** (PUP; a switch, no registry row): food at the den goes to the
+    /// strongest begging pup first (the largest body, then the fullest reserve, then the lowest
+    /// id) instead of the hungriest, so a short ration feeds the strong and the runt starves
+    /// (brood reduction: wolf and lion young compete for what is brought). Off: the old
+    /// hungriest-first rule, which shares a short ration out evenly.
+    #[serde(default)]
+    pub provision_scramble: bool,
+    /// **A pup lives on its reserve** (PUP; a switch, no registry row): a pup whose reserve is
+    /// spent and whose stomach is empty has starved. A growing young body has little fat and
+    /// no structure to spare: it starves within days of its last meal, where an adult lives
+    /// for weeks off its own tissue (wolf pups in a lean summer, Mech 1977; Fuller, Mech &
+    /// Cochrane 2003; lion cubs, Packer et al. 1988). Off: a pup starves as an adult does,
+    /// only when its structure falls under `body_min` — and a newborn's birth stores, built
+    /// into structure, outlast its whole dependence (PUP's diagnosis: an unfed newborn lives
+    /// 63,000 s, independence is 21,600 s).
+    #[serde(default)]
+    pub pup_starves_on_empty: bool,
     /// **The prey choice** (PACK-TUNE, [`crate::pack::prospect`]): a pack weighs each target
     /// it could take by its prospect — the chance-like share of a hunt on it that ends in a
     /// kill, from what it can see — times its meat, over its distance, and commits to the best.
@@ -858,6 +882,9 @@ impl Pack {
         stalk_freeze: true,
         breed_reserve_fraction: 0.6,
         litter_by_condition: true,
+        regurgitate_reserve_fraction: CHORISTER_REGURGITATE_RESERVE,
+        provision_scramble: true,
+        pup_starves_on_empty: true,
         // PACK-TUNE's prey choice, placeholders at the terrarium's scale. Wolves and lions
         // test prey and quit fast on healthy, defended animals; they take the young, the
         // isolated, the wounded and the unaware far more often than their share (Mech 1970,
@@ -912,6 +939,18 @@ pub const CHORISTER_INDEPENDENCE_S: f64 = 3.0 * 7200.0;
 pub const CHORISTER_GESTATION_S: f64 = 6000.0;
 /// The Veilhound's pregnancy upkeep factor (see [`CHORISTER_INDEPENDENCE_S`]).
 pub const CHORISTER_PREGNANCY_UPKEEP: f64 = 1.5;
+/// **The Veilhound's regurgitation floor** (PUP): an adult under half its reserve cap eats its
+/// meal itself and carries home only once it is back above half. Wolves in poor condition eat
+/// at the kill and provision less, and in a lean year the pack's adults keep the food while
+/// pups starve (Mech & Boitani 2003, ch. 2; Mech 1977, "Productivity, mortality and population
+/// trends of wolves in northeastern Minnesota"); lionesses in poor condition abandon or
+/// fail to feed cubs, which die of starvation in lean seasons (Packer et al. 1988; Packer &
+/// Pusey 1997). Half the cap sits under the provisioning line (0.6), so an adult above it
+/// regurgitates and gives reserve both, between them only regurgitates its fresh meal, and
+/// under it gives nothing. Together with [`Pack::provision_scramble`] (wolf pups compete for
+/// regurgitated food and the strongest beggar is fed first; lion cubs are displaced at the kill,
+/// the smallest starving first: Packer & Pusey 1995) and [`Pack::pup_starves_on_empty`].
+pub const CHORISTER_REGURGITATE_RESERVE: f64 = 0.5;
 
 /// A glider's table ([`FounderPhysiology::glider`], F3; the seedporter's numbers are
 /// predation-and-flight §3.5, §3.9 and the roster brief's Brief F3, placeholders).
