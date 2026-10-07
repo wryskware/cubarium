@@ -5073,6 +5073,9 @@ mod testpass4_pup_tests;
 #[cfg(test)]
 #[path = "testpass4_mimic_tests.rs"]
 mod testpass4_mimic_tests;
+#[cfg(test)]
+#[path = "testpass4_glowcap_tests.rs"]
+mod testpass4_glowcap_tests;
 
 #[cfg(test)]
 #[path = "mimic_tests.rs"]

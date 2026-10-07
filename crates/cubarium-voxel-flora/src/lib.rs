@@ -63,6 +63,8 @@ mod shared_face_tests;
 #[cfg(test)]
 mod glowcap_budget_tests;
 #[cfg(test)]
+mod testpass4_glowcap_tests;
+#[cfg(test)]
 mod contest_tests;
 #[cfg(test)]
 mod canopy_establish_tests;
