@@ -1360,7 +1360,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2071 rows)
+**`fauna.*`** (2098 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1527,6 +1527,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.littershredder.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.littershredder.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.littershredder.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.littershredder.drop.max_m` | 1.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.littershredder.drop.wound_per_m` | 0.02 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1735,6 +1738,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.frondgrazer.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.frondgrazer.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.frondgrazer.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.frondgrazer.drop.max_m` | 1.1 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.frondgrazer.drop.wound_per_m` | 0.15 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -1943,6 +1949,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.lanternjaw.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.lanternjaw.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.lanternjaw.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.lanternjaw.drop.max_m` | 1.8 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.lanternjaw.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2151,6 +2160,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.capgnawer.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.capgnawer.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.capgnawer.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.capgnawer.drop.max_m` | 1.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.capgnawer.drop.wound_per_m` | 0.03 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2359,6 +2371,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.loftstrider.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.loftstrider.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.loftstrider.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.loftstrider.drop.max_m` | 2.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.loftstrider.drop.wound_per_m` | 0.3 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2567,6 +2582,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.ripple-snail.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.ripple-snail.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.ripple-snail.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.ripple-snail.drop.max_m` | 0.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.ripple-snail.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2775,6 +2793,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.sprint.endurance_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.bellwing.sprint.recovery_s` | 0.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.bellwing.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.bellwing.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.bellwing.drop.max_m` | 0.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.bellwing.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -2983,6 +3004,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.sprint.endurance_s` | 10.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.seedporter.sprint.recovery_s` | 60.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.seedporter.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.seedporter.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.seedporter.drop.max_m` | 1.6 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.seedporter.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
@@ -3191,6 +3215,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.sprint.endurance_s` | 20.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds at top speed from rested to spent (0: no sprint) |
 | `fauna.founders.chorister.sprint.recovery_s` | 120.0 | s | [0, inf) |  | - | placeholder | GAIT: seconds off the sprint from spent to rested |
 | `fauna.founders.chorister.sprint.resume_fraction` | 0.5 | fraction | [0, 1] |  | - | placeholder | GAIT: a winded body sprints again once rested to this |
+| `fauna.founders.chorister.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
+| `fauna.founders.chorister.drop.max_m` | 3.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
+| `fauna.founders.chorister.drop.wound_per_m` | 0.08 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |

@@ -134,6 +134,7 @@ fn main() {
         Some("trace") => trace_probe(&args),
         Some("pit") => pit_probe(&args),
         Some("edge") => edge_probe(&args),
+        Some("drop") => drop_probe(&args),
         Some("pit2") => pit2_probe(&args),
         _ => panic!("usage: hunter_study found|run [...]"),
     }
@@ -484,6 +485,28 @@ fn gait_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
         b.sprint_ticks_by_founder[sp] - a.sprint_ticks_by_founder[sp],
         b.winded_by_founder[sp] - a.winded_by_founder[sp],
     )
+}
+
+/// DROP's window line, `a` → `b`: per lineage that jumped or fell, `name=drops/metres/wound/fell`
+/// (jumps down by trapped bodies, their metres and the wound they added, summed; deaths of a
+/// jump's wound).
+fn drop_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
+    let mut out = Vec::new();
+    for f in Founder::ALL {
+        let i = f.index();
+        let n = b.drops_by_founder[i] - a.drops_by_founder[i];
+        let fell = b.departed_founder(f, Departure::Fell) - a.departed_founder(f, Departure::Fell);
+        if n == 0 && fell == 0 {
+            continue;
+        }
+        out.push(format!(
+            "{}={n}/{:.2}/{:.3}/{fell}",
+            f.name(),
+            b.drop_m_by_founder[i] - a.drop_m_by_founder[i],
+            b.drop_wound_by_founder[i] - a.drop_wound_by_founder[i],
+        ));
+    }
+    out.join(",")
 }
 
 /// The Veilhound's window line, `a` → `b`.
@@ -1060,6 +1083,7 @@ fn run(args: &[String]) {
             meet_win = LureMeet::default();
             /*}HUNK*/
             println!("gait,{arm},{minute},{}", gait_line(&lw, &l));
+            println!("drop,{arm},{minute},{}", drop_line(&lw, &l));
             println!("hunt,{arm},{minute},{}", hunts.win.line());
             /*PT{*/
             println!("ptune,{arm},{minute},break_offs={},declined={},switches={}", l.pack_break_offs - lw.pack_break_offs, l.pack_declined - lw.pack_declined, l.pack_switches - lw.pack_switches);
@@ -3265,6 +3289,183 @@ fn pit_map(sim: &Sim, g: &cubarium_voxel_fauna::RouteGraph, site: cubarium_voxel
 /// steering layer and by z end. Also counted for every body (readout check): awake samples
 /// in each mobility mode, and the refused samples by mode, so a climbing or perched body's
 /// stillness shows whether it is in the wedged count or not.
+/// **DROP's probe** (`hunter_study drop load=DIR/mM [minutes=5] [search=24] [jump=1] [lineages=chorister,frondgrazer,loftstrider]`):
+/// reproduces the trapped pocket on a save. Each awake grounded body of the walking lineages
+/// named (no gliders: their glide-off is the motor's own question) is placed on the nearest face
+/// within `search` columns where its own body stands clear, off its lineage's route graph, with
+/// no walking way back on (`way_on` out to `teachers.way_on_m`): a pocket. Prints `pocket,` per
+/// body (where, the jump on offer by `drop_way` at its reach, in layers), runs `minutes`, and
+/// prints `out,` per body: got out (back on its graph or with a walking way) and when, its jumps
+/// (the ledger's per lineage), its wound, alive; and `dropsum,` per lineage.
+fn drop_probe(args: &[String]) {
+    use cubarium_voxel_fauna::{MobilityMode, RouteGraph, State, motor_probe, step_voxels};
+    let params = resolve(args);
+    let minutes: u64 = arg(args, "minutes=").map_or(5, |m| m.parse().unwrap());
+    let search: i64 = arg(args, "search=").map_or(24, |m| m.parse().unwrap());
+    // `jump=1`: only pockets the drop rule has a jump out of (the mechanism's own reach).
+    let want_jump = arg(args, "jump=").is_some_and(|s| s == "1");
+    let trace = arg(args, "trace=").is_some_and(|s| s == "1");
+    let names: Vec<String> = arg(args, "lineages=").map_or(vec!["chorister".into(), "frondgrazer".into(), "loftstrider".into()], |s| s.split(',').map(str::to_string).collect());
+    let dir = Path::new(arg(args, "load=").expect("load=DIR"));
+    let s = cubarium_voxel_sim::saved::load(dir, &[]).unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, mut flora, mut fauna, _minute0) = (s.world, s.flora, s.fauna, s.minute);
+    flora.replace_config(params.flora_for_world()).expect("plant config");
+    fauna.replace_config(params.fauna.clone()).expect("animal config");
+    cubarium_voxel_sim::saved::restore(&mut fauna, &[]).expect("heuristics");
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+    let wc = sim.world().config().clone();
+    let v = wc.voxel_m;
+    let margin = params.fauna.founding.clearance_margin_m;
+    let tc = params.fauna.teachers;
+    let cols = (tc.way_on_m / v).ceil() as u32;
+    let lineages: Vec<Founder> = Founder::ALL.into_iter().filter(|f| names.iter().any(|n| n == f.name())).collect();
+    let graphs: rustc_hash::FxHashMap<usize, RouteGraph> =
+        lineages.iter().map(|&f| (f.index(), RouteGraph::for_founder(&sim.world().view(), params.fauna.founder(f), margin))).collect();
+    // (id, lineage, start wound, pocket)
+    let mut placed: Vec<(u64, Founder, f64, cubarium_voxel_flora::Site)> = Vec::new();
+    let mut taken: rustc_hash::FxHashSet<cubarium_voxel_flora::Site> = Default::default();
+    let bodies: Vec<_> = sim.fauna().view().animals.to_vec();
+    for a in bodies {
+        let Some(f) = a.founder else { continue };
+        if !lineages.contains(&f) || a.state == State::Asleep || a.mobility.mode != MobilityMode::Ground || a.attached.is_some() {
+            continue;
+        }
+        let p = params.fauna.founder(f);
+        let body = p.body_at(a.body);
+        let r = body.footprint_radius();
+        let own = (r / v).ceil() as u32;
+        let step = p.step_limits(v);
+        let wade = p.wade_depth_m(&body);
+        let room = body.headroom_voxels(v);
+        let g = &graphs[&f.index()];
+        let view = sim.world().view();
+        let mut found = None;
+        'ring: for d in 1..=search {
+            for dz in -d..=d {
+                for dx in -d..=d {
+                    if dx.abs() != d && dz.abs() != d {
+                        continue;
+                    }
+                    let z = i64::from(a.site.z) + dz;
+                    if z < 0 || z >= i64::from(wc.depth) {
+                        continue;
+                    }
+                    let x = (i64::from(a.site.x) + dx).rem_euclid(i64::from(wc.width));
+                    for y in 1..wc.height.saturating_sub(1) {
+                        if !view.is_support(x, y, z as u32) {
+                            continue;
+                        }
+                        let site = cubarium_voxel_flora::Site { x: x as u32, y, z: z as u32 };
+                        let c = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+                        if taken.contains(&site) || g.node_near(site, c, own).is_some() || view.water_depth_m(x, y, z as u32) > wade {
+                            continue;
+                        }
+                        if !motor_probe(&view, c.0, c.1, (0.0, 1.0), y, 0.0, &body, wade, step).1 {
+                            continue;
+                        }
+                        if g.way_on(&view, site, r, room, step, wade, own, cols).is_some() {
+                            continue;
+                        }
+                        if want_jump && g.drop_way(&view, site, r, room, step, step_voxels(p.drop.reach_m(p, &body), v), wade, own, cols).is_none() {
+                            continue;
+                        }
+                        found = Some(site);
+                        break 'ring;
+                    }
+                }
+            }
+        }
+        let Some(site) = found else {
+            println!("pocket,id={},lineage={},none_within={search}", a.id, f.name());
+            continue;
+        };
+        let reach = step_voxels(p.drop.reach_m(p, &body), v);
+        let jump = g.drop_way(&view, site, r, room, step, reach, wade, own, cols);
+        println!(
+            "pocket,id={},lineage={},young={},from=({},{},{}),at=({},{},y{}),reach={reach},jump={}",
+            a.id,
+            f.name(),
+            a.body < p.core.birth_body,
+            a.site.x, a.site.y, a.site.z,
+            site.x, site.z, site.y,
+            jump.map_or("none".into(), |j| format!("{}layers->({},{},y{})", j.from.y - j.land.y, j.land.x, j.land.z, j.land.y)),
+        );
+        taken.insert(site);
+        if sim.fauna_mut().probe_place(a.id, site, v) {
+            placed.push((a.id, f, a.wound, site));
+        }
+    }
+    let l0 = sim.fauna().view().ledger.clone();
+    let hz = u64::from(TICK_HZ);
+    let mut out_at: rustc_hash::FxHashMap<u64, u64> = Default::default();
+    let mut wound_max: rustc_hash::FxHashMap<u64, f64> = Default::default();
+    for t in 0..minutes * 60 * hz {
+        sim.step();
+        let fv = sim.fauna().view();
+        for &(id, f, _, pocket) in &placed {
+            let Some(b) = fv.animal(id) else { continue };
+            if trace && t % (5 * hz) == 0 {
+                let (since, plan) = sim.fauna().drop_state(id);
+                let p = params.fauna.founder(f);
+                let body = p.body_at(b.body);
+                let dir = (b.pose.heading_rad.sin(), b.pose.heading_rad.cos());
+                let mp: Vec<String> = [0.01, 0.05, 0.1].iter().map(|&st| {
+                    let m = motor_probe(&sim.world().view(), b.pose.x, b.pose.z, dir, b.site.y, st, &body, p.wade_depth_m(&body), p.step_limits(v));
+                    format!("{}{}", u8::from(m.0), u8::from(m.1))
+                }).collect();
+                println!("dmotor,t={},id={id},r={:.3},probe={}", t / hz, body.footprint_radius(), mp.join("/"));
+                println!(
+                    "dtrace,t={},id={id},site=({},{},y{}),pose=({:.2},{:.2},h{:.2}),steer={:?},held={:.2}/{:.2},since={since:?},plan={plan:?},state={:?}",
+                    t / hz, b.site.x, b.site.z, b.site.y, b.pose.x, b.pose.z, b.pose.heading_rad,
+                    sim.fauna().steer_of(id), b.founder_state.held.forward, b.founder_state.held.turn, b.state,
+                );
+            }
+            let w = wound_max.entry(id).or_insert(0.0);
+            *w = w.max(b.wound);
+            if out_at.contains_key(&id) || t % hz != 0 || b.site == pocket {
+                continue;
+            }
+            let p = params.fauna.founder(f);
+            let body = p.body_at(b.body);
+            let r = body.footprint_radius();
+            let own = (r / v).ceil() as u32;
+            let g = &graphs[&f.index()];
+            let view = sim.world().view();
+            if g.node_near(b.site, (b.pose.x, b.pose.z), own).is_some()
+                || g.way_on(&view, b.site, r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, cols).is_some()
+            {
+                out_at.insert(id, t);
+            }
+        }
+    }
+    let l = sim.fauna().view().ledger.clone();
+    let fv = sim.fauna().view();
+    for &(id, f, w0, _) in &placed {
+        let b = fv.animal(id);
+        println!(
+            "out,id={id},lineage={},out_s={},wound_start={w0:.3},wound_max={:.3},wound_end={},alive={}",
+            f.name(),
+            out_at.get(&id).map_or("never".into(), |t| format!("{:.0}", *t as f64 / hz as f64)),
+            wound_max.get(&id).copied().unwrap_or(w0),
+            b.map_or("-".into(), |b| format!("{:.3}", b.wound)),
+            b.is_some(),
+        );
+    }
+    for f in lineages {
+        let i = f.index();
+        let n = placed.iter().filter(|p| p.1 == f).count();
+        let out = placed.iter().filter(|p| p.1 == f && out_at.contains_key(&p.0)).count();
+        println!(
+            "dropsum,lineage={},placed={n},out={out},drops={},metres={:.2},wound={:.3},fell={},minutes={minutes}",
+            f.name(),
+            l.drops_by_founder[i] - l0.drops_by_founder[i],
+            l.drop_m_by_founder[i] - l0.drop_m_by_founder[i],
+            l.drop_wound_by_founder[i] - l0.drop_wound_by_founder[i],
+            l.departed_founder(f, Departure::Fell) - l0.departed_founder(f, Departure::Fell),
+        );
+    }
+}
+
 fn edge_probe(args: &[String]) {
     use cubarium_voxel_fauna::{MobilityMode, State, Steer};
     let params = resolve(args);

@@ -520,6 +520,11 @@ pub struct FounderPhysiology {
     /// instead of flight. Off for every lineage but the frondgrazer.
     #[serde(default)]
     pub hunker: crate::Hunker,
+    /// **Its jump down when trapped** (DROP, [`crate::DropRule`]): off its route graph with no
+    /// walking way back on and no glide, it jumps down past its step, at a wound. No jump for
+    /// the bellwing and the ripple-snail.
+    #[serde(default)]
+    pub drop: crate::DropRule,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -1425,6 +1430,7 @@ impl FounderPhysiology {
         p.vigilance = crate::vigil::vigilance_of(founder);
         p.sprint = crate::gait::sprint_of(founder);
         p.hunker = crate::vigil::hunker_of(founder);
+        p.drop = crate::step::jump::drop_of(founder);
         p
     }
 
@@ -1528,6 +1534,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                drop: crate::DropRule::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1598,6 +1605,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                drop: crate::DropRule::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -1691,6 +1699,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                drop: crate::DropRule::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -2752,6 +2761,42 @@ pub fn motor_probe(
         advance_candidate(view, px, pz, dir, standing_y, step, r, wade_depth_m, headroom, step_limits, None).is_some(),
         pose_clear(view, px, pz, standing_y, r, headroom, step_limits),
     )
+}
+
+/// **DROP: the motor's own walk** of a disc of radius `r` from `(fx, fz)` on layer `standing_y`
+/// straight to `(tx, tz)` (no wrap: the caller's local coordinates, `tx` may run past the
+/// ring), in sub-steps of at most a quarter voxel and the radius, each one [`advance_candidate`]
+/// admits (no water rule): the layer it ends on, `None` when a sub-step is refused or falls
+/// short.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn motor_walk(
+    view: &VoxelView<'_>,
+    (fx, fz): (f64, f64),
+    (tx, tz): (f64, f64),
+    standing_y: u32,
+    r: f64,
+    wade_depth_m: f64,
+    headroom: u32,
+    step_limits: StepLimits,
+) -> Option<u32> {
+    let (dx, dz) = (tx - fx, tz - fz);
+    let len = (dx * dx + dz * dz).sqrt();
+    if !(len > 0.0) {
+        return Some(standing_y);
+    }
+    let dir = (dx / len, dz / len);
+    let sub = (0.25 * view.config.voxel_m).min(r.max(1e-3));
+    let n = (len / sub).ceil().max(1.0) as u32;
+    let width_m = f64::from(view.config.width) * view.config.voxel_m;
+    let (mut px, mut pz, mut y) = (fx.rem_euclid(width_m), fz, standing_y);
+    for _ in 0..n {
+        let (nx, nz, moved, ny) = advance_candidate(view, px, pz, dir, y, len / f64::from(n), r, wade_depth_m, headroom, step_limits, None)?;
+        if moved < 0.5 * len / f64::from(n) {
+            return None;
+        }
+        (px, pz, y) = (nx, nz, ny);
+    }
+    Some(y)
 }
 
 /// Whether a disc of radius `r` centred at `(cx, cz)`, standing on `standing_y`, is clear

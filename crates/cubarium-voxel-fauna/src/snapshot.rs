@@ -109,7 +109,10 @@ use crate::Fauna;
 //     route_detour, way_on_m}`; reflex walks take reachable stands by the route, a pressed walk
 //     re-plans, a flight turns along the strip's end, a body caught in solid steps out.
 // 59: FINDINGS-FIX-2 — `Strike::lure` (a lure kill is booked by the lure draw at the lunge).
-pub const SCHEMA: u32 = 59;
+// 60: DROP — `FounderPhysiology::drop` (`DropRule`), `Departure::Fell`, the ledger's
+//     `drops_by_founder`, `drop_m_by_founder` and `drop_wound_by_founder`; a trapped body jumps
+//     down past its step at a wound.
+pub const SCHEMA: u32 = 60;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
