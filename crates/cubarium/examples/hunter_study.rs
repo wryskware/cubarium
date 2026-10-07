@@ -1628,6 +1628,30 @@ fn detritus_budget(sim: &Sim, params: &Params, arm: &str, minute: u64) {
         cover[dark][2] += usize::from(plant && fungus);
     }
     println!("shared,{arm},{minute},plant_lit={},fungus_lit={},shared_lit={},plant_dark={},fungus_dark={},shared_dark={}", cover[0][0],cover[0][1],cover[0][2],cover[1][0],cover[1][1],cover[1][2]);
+    // GLOWCAP-2: the glowcap stands by their exposure (`Stand::light`, the sun reaching the
+    // cap, its own face's plant included), tenths of open sun: stands / of them dark
+    // (terrain) / of them shared with a plant / mean mycelium / mean caps.
+    let mut bins = [[0.0f64; 5]; 10];
+    for s in &glow {
+        let k = ((s.light.clamp(0.0, 1.0) * 10.0) as usize).min(9);
+        let sky = world.sky_visibility(i64::from(s.site.x), s.site.y, s.site.z);
+        let b = &mut bins[k];
+        b[0] += 1.0;
+        b[1] += f64::from(u8::from(params.flora.glowcap.darkness(sky) > 0.0));
+        b[2] += f64::from(u8::from(fv.stands_on(s.site).iter().any(|t| fv.config.species(t.species).trophic == Trophic::Photo)));
+        b[3] += s.wood;
+        b[4] += s.foliage;
+    }
+    println!(
+        "glowsite,{arm},{minute},sun_dried={:.6},death_desiccated={},{}",
+        l.sun_dried[g],
+        l.deaths_by_cause[DeathCause::Desiccated.index()][g],
+        bins.iter()
+            .enumerate()
+            .map(|(k, b)| format!("e{k}={}/{}/{}/{:.4}/{:.4}", b[0], b[1], b[2], b[3] / b[0].max(1.0), b[4] / b[0].max(1.0)))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     for f in [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail] {
         let i = f.index();
         let animals: Vec<_> = av.animals.iter().filter(|a| a.founder == Some(f)).collect();

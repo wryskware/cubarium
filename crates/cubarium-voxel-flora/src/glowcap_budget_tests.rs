@@ -60,6 +60,9 @@ fn config() -> FloraConfig {
     s.substrate_budgeted = true;
     s.substrate_required = true;
     s.mycelium_graze_fraction = 0.75;
+    // These fixtures stand in the open; the sun's cost is `glowcap_sun_tests`' subject.
+    s.sun_cap_loss_per_s = 0.0;
+    s.sun_mycelium_loss_per_s = 0.0;
     s.rooting_radius = 0;
     s.rooting_depth = 1;
     s.wood_max = 1.0;

@@ -133,9 +133,13 @@ fn assert_residuals(flora: &Flora, when: &str) {
 }
 
 /// A config whose glowcap preset is the shipped one unless a test says otherwise, with the
-/// five plants left exactly as they ship.
+/// five plants left exactly as they ship — but the sun's cost off: these fixtures lay logs
+/// under open sky, and the sun is `glowcap_sun_tests`' subject (GLOWCAP-2).
 fn config() -> FloraConfig {
-    FloraConfig::default()
+    let mut c = FloraConfig::default();
+    c.glowcap.sun_cap_loss_per_s = 0.0;
+    c.glowcap.sun_mycelium_loss_per_s = 0.0;
+    c
 }
 
 /// Lay a declared log on `site`: `organic` units of dead wood with the mineral and the
@@ -1372,7 +1376,7 @@ fn substrate_access_reaches_one_row_up_and_one_row_down() {
 /// and both would otherwise be added to, or subtracted from, the withdrawal being
 /// measured. The five plants are untouched, and so is every number the income rule reads.
 fn isolating() -> FloraConfig {
-    let mut c = FloraConfig::default();
+    let mut c = config();
     c.decomposition = 0.0;
     c.wood_decomposition = 0.0;
     c.glowcap.senescence = 0.0;

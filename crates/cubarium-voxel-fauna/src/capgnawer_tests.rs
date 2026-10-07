@@ -484,6 +484,9 @@ fn one_bite_finishes_regrown_caps_then_grazes_exposed_mycelium() {
         fc.glowcap.senescence = 0.0;
         fc.glowcap.propagule_rate = 0.0;
         fc.glowcap.dark_uptake_per_s = 0.0;
+        // Open sky: the fixture's arithmetic has no sun in it (GLOWCAP-2).
+        fc.glowcap.sun_cap_loss_per_s = 0.0;
+        fc.glowcap.sun_mycelium_loss_per_s = 0.0;
         let wood = fc.glowcap.wood_max;
         let reserve = fc.glowcap.reserve_cap * wood;
         let regrown = (0.25 * full_bite).min(0.25 * reserve / (1.0 + fc.glowcap.build));
