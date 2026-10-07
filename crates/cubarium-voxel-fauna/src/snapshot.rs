@@ -98,7 +98,10 @@ use crate::Fauna;
 // 54: PIT (the branch unmerged; the parent renumbers at merge) — `Pack::pit_search_m`.
 // 55: EDGE (the branch unmerged; the parent renumbers at merge) — `TeacherConfig::{press_replan_s,
 //     press_shun_s, route_refresh_s, route_detour, way_on_m}`.
-pub const SCHEMA: u32 = 55;
+// 57: DROP (the branch unmerged, on EDGE's 55; main's PIT-2 holds 56; the parent renumbers at
+//     merge) — `FounderPhysiology::drop` (`DropRule`), `Departure::Fell`, the ledger's
+//     `drops_by_founder`, `drop_m_by_founder` and `drop_wound_by_founder`.
+pub const SCHEMA: u32 = 57;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

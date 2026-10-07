@@ -99,6 +99,8 @@ pub(crate) use cubarium_voxel::KeyedRng as Rng;
 #[path = "glider.rs"]
 mod glider;
 pub(crate) use glider::{OffGraph, glider_fruit_in_reach, off_graph_exit};
+#[path = "jump.rs"]
+pub(crate) mod jump;
 
 /// The tick's sky, read once (F1): what a flyer's act needs of the weather and the clock.
 #[derive(Clone, Copy, Debug)]
@@ -363,6 +365,8 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
     for a in &gone {
         // As with a death: the body left the world, so its controller does too.
         fauna.controllers.take(a.id);
+        fauna.trapped.remove(&a.id);
+        fauna.drop_plans.remove(&a.id);
         fauna.book_removed(a);
         fauna.free_riders(a);
     }
@@ -1428,6 +1432,16 @@ fn controllers(
         if driven && fauna.controllers.flees(id) && actions.feed > 0.5 && actions.forward <= fauna.config.teachers.forage_stay_forward {
             fauna.ledger.feed_still_ticks_by_founder[founder.index()] += 1;
         }
+        // DROP: a body trapped off its route graph (no walking way back on, no glide) for its
+        // lineage's `drop.after_s` jumps down; last, as it is the only way out.
+        if driven {
+            if let Some(go) = jump::reflex(fauna, i, view, &fv) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Drop;
+            }
+        }
         fauna.steer.insert(id, src);
         // EDGE: a reflex walk overridden by a later layer is not the one held.
         fauna.walk_commit(id, founder, src);
@@ -1933,6 +1947,8 @@ fn founder_act(
             };
         }
     }
+    // DROP: walked to the edge its jump leaves from, facing the landing, it jumps down.
+    jump::take_off(fauna, i, founder, view, held);
     // The interval's motion feedback, attempted and delivered separately, plus the
     // motor respiration the interval paid — the per-interval counter the search driver's
     // score reads alongside the ledger's own split.
@@ -2607,6 +2623,8 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     }
     let a = fauna.animals.remove(j);
     fauna.controllers.take(a.id);
+    fauna.trapped.remove(&a.id);
+    fauna.drop_plans.remove(&a.id);
     fauna.free_riders(&a);
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
@@ -4282,6 +4300,10 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
                 Some((i, Departure::Desiccation))
             } else if a.lifespan_ticks > 0 && a.age_ticks >= a.lifespan_ticks {
                 Some((i, Departure::Aged))
+            } else if a.wound >= 1.0 {
+                // DROP: a hit that wounds to 1 kills at once (`apply_hit`); a wound of 1 here
+                // is a jump down's.
+                Some((i, Departure::Fell))
             } else {
                 None
             }
@@ -4307,6 +4329,8 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         // A dead body's controller goes with it. Ids are never reused, so a table that
         // only ever grows is a leak once the world breeds and buries.
         fauna.controllers.take(*id);
+        fauna.trapped.remove(id);
+        fauna.drop_plans.remove(id);
     }
     for (a, cause) in &dead {
         bury_corpse(fauna, flora, a, *cause);
@@ -4381,6 +4405,9 @@ mod ground_response_tests;
 #[cfg(test)]
 #[path = "edge_tests.rs"]
 mod edge_tests;
+#[cfg(test)]
+#[path = "drop_tests.rs"]
+mod drop_tests;
 #[cfg(test)]
 #[path = "hunker_tests.rs"]
 mod hunker_tests;
