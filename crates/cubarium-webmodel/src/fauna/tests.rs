@@ -273,7 +273,7 @@ fn busy(draws: Draws) -> (FaunaModel, Supply) {
         m.add(f, Cohort::founders(&p.fauna, f, n));
     }
     let lp = p.fauna.founder(Founder::Lanternjaw).core;
-    m.eggs.push(super::model::EggCohort { lineage: Founder::Lanternjaw, n: 3.0, organic: lp.reproduction.egg_organic, age_s: 0.0, dormant: true });
+    m.eggs.push(super::model::EggCohort { lineage: Founder::Lanternjaw, n: 3.0, organic: lp.reproduction.egg_organic, age_s: 0.0, dormant: true, ..Default::default() });
     let mut r = Cohort::new(1.0, lp.body_min, 0.01);
     r.host = Some(Founder::Browser);
     m.add(Founder::Lanternjaw, r);

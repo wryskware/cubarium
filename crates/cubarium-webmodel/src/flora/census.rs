@@ -48,6 +48,10 @@ pub struct StandRec {
     pub edible: f64,
     /// The stand's mineral inventory (`Stand::mineral`).
     pub mineral: f64,
+    pub nectar: f64,
+    pub fruit: f64,
+    pub fruit_age_s: f64,
+    pub fruit_rest_s: f64,
 }
 
 /// One support face.
@@ -75,6 +79,8 @@ pub struct Face {
     pub turf_saturated: f64,
     pub pad_saturated: f64,
     pub depth_m: f64,
+    /// Surface pore fill, distinct from a plant's root-box water reading.
+    pub pore: f64,
     /// The glowcap's darkness here and whether its gates pass with the ground's substrate.
     pub darkness: f64,
     pub glow_ok: bool,
@@ -124,6 +130,7 @@ impl Face {
             turf_saturated: 0.0,
             pad_saturated: 0.0,
             depth_m: 0.0,
+            pore: 1.0,
             darkness: 0.0,
             glow_ok: true,
             canopy: 1.0,
@@ -167,6 +174,10 @@ fn rec(fv: &cubarium_voxel_flora::FloraView<'_>, s: &cubarium_voxel_flora::Stand
         cured: s.cured,
         edible: fv.layers(s).map(|l| l.edible()).sum(),
         mineral: s.mineral,
+        nectar: s.nectar,
+        fruit: s.fruit,
+        fruit_age_s: s.fruit_age_s,
+        fruit_rest_s: s.fruit_rest_s,
     }
 }
 
@@ -254,6 +265,7 @@ pub fn census(world: &World, flora: &Flora, config: Option<&FloraConfig>) -> Vec
                     turf_saturated: turf_sat,
                     pad_saturated: pad_sat,
                     depth_m: depth,
+                    pore: view.pore_at(i64::from(x), y, z),
                     darkness: gsc.darkness(sky),
                     glow_ok: glow.passes(),
                     canopy: (-shade.tau(&fv, site, &[f64::from(y) + top; 8])[0].iter().map(|&v| f64::from(v)).sum::<f64>()).exp(),
@@ -478,6 +490,11 @@ pub fn face_row(f: &Face) -> String {
     c.extend(f.seeds.iter().map(u32::to_string));
     c.push(sparse(f.nb_tau.iter().enumerate().flat_map(|(k, row)| row.iter().enumerate().map(move |(j, &t)| (format!("{k}.{j}"), t)))));
     c.push(sparse(f.pl_tau.iter().enumerate().map(|(j, &t)| (j.to_string(), t))));
+    c.push(f.pore.to_string());
+    for r in [f.plant.map(|(_, r)| r), f.fungus] {
+        let r = r.unwrap_or_default();
+        c.extend([r.nectar, r.fruit, r.fruit_age_s, r.fruit_rest_s].map(|v| v.to_string()));
+    }
     c.join("\t")
 }
 
@@ -501,6 +518,10 @@ pub fn face_header() -> String {
     h.extend(Species::ALL.iter().map(|s| format!("seed_{}", s.name())));
     h.push("nb_tau(photo.shader=tau)".into());
     h.push("pl_tau(shader=tau)".into());
+    h.push("pore".into());
+    for p in ["p_", "f_"] {
+        h.extend(["nectar", "fruit", "fruit_age_s", "fruit_rest_s"].map(|k| format!("{p}{k}")));
+    }
     h.join("\t")
 }
 
@@ -527,6 +548,7 @@ pub fn face_of_row(line: &str) -> Result<Face, String> {
                 cured: flag(self.next()?)?,
                 edible: num(self.next()?)?,
                 mineral: num(self.next()?)?,
+                ..StandRec::default()
             })
         }
     }
@@ -631,6 +653,18 @@ pub fn face_of_row(line: &str) -> Result<Face, String> {
                 return Err(format!("census row: tau key `{j}` out of range"));
             }
             f.pl_tau[j] = num(v)?;
+        }
+    }
+    // Old censuses did not retain surface moisture or reproductive food stores.
+    // Keep them readable; new validation uses fresh censuses of the original saves.
+    f.pore = f.turf_water.unwrap_or(0.0);
+    if cur.i < cur.c.len() {
+        f.pore = num(cur.next()?)?;
+        for r in [&mut f.plant.as_mut().map(|(_, r)| r), &mut f.fungus.as_mut()] {
+            let values: [f64; 4] = [num(cur.next()?)?, num(cur.next()?)?, num(cur.next()?)?, num(cur.next()?)?];
+            if let Some(r) = r {
+                r.nectar = values[0]; r.fruit = values[1]; r.fruit_age_s = values[2]; r.fruit_rest_s = values[3];
+            }
         }
     }
     if cur.i != cur.c.len() {
