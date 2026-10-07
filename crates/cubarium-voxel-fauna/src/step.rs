@@ -4481,3 +4481,6 @@ mod testpass2_pack_tests;
 #[cfg(test)]
 #[path = "testpass2_life_tests.rs"]
 mod testpass2_life_tests;
+#[cfg(test)]
+#[path = "testpass2_light_tests.rs"]
+mod testpass2_light_tests;
