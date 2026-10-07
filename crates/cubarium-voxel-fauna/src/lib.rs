@@ -64,6 +64,8 @@ mod hot_path_tests;
 #[cfg(test)]
 mod herd_tests;
 #[cfg(test)]
+mod testpass4_herd_tests;
+#[cfg(test)]
 mod roster_tests;
 #[cfg(test)]
 mod roster_mechanics_tests;

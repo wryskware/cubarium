@@ -2079,3 +2079,7 @@ mod pit2_tests;
 #[cfg(test)]
 #[path = "testpass2_pack_unit_tests.rs"]
 mod testpass2_pack_unit_tests;
+
+#[cfg(test)]
+#[path = "testpass4_pup_unit_tests.rs"]
+mod testpass4_pup_unit_tests;
