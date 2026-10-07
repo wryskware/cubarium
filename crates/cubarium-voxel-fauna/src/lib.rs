@@ -40,6 +40,7 @@ pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
 mod gait;
 pub use gait::Sprint;
+pub use step::jump::DropRule;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
@@ -79,7 +80,7 @@ use serde::{Deserialize, Serialize};
 
 pub use body::{
     Amphibious, BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
-    disc_clear_on_face, effective_config, has_headroom, step_voxels, wall_ascent, wall_descent,
+    disc_clear_on_face, effective_config, has_headroom, motor_probe, step_voxels, wall_ascent, wall_descent,
 };
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
@@ -91,7 +92,7 @@ pub use predation::{
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use encounter::{
-    HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
+    DropWay, HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
     mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
     reachable_layers_of, route_components, standable_faces, surface_m, walkable_components,
@@ -1039,6 +1040,11 @@ pub enum DenChoice {
     FoundingPoint,
 }
 
+/// An unbounded distance (a serde default).
+fn far() -> f64 {
+    f64::INFINITY
+}
+
 /// A pack (roster R3): its den, its breeder, and the scripted pack tactic's state (its
 /// target, its chase clock, its carcass). Saved with the layer.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -1064,9 +1070,18 @@ pub struct PackRecord {
     /// **The pack target**: the prey every adult member is driving or flanking now.
     #[serde(default)]
     pub target: Option<u64>,
-    /// The tick the chase on `target` began ([`Pack::chase_give_up_s`]).
+    /// The tick the chase on `target` began.
     #[serde(default)]
     pub chase_since_tick: u64,
+    /// **CHURN, the chase's progress** ([`Pack::chase_give_up_s`]): the last tick the pack
+    /// made progress on `target`, its nearest member's distance to it so far, and the work
+    /// done on it (its wound plus its pry, plus 1 while it is turned over) last read.
+    #[serde(default)]
+    pub chase_progress_tick: u64,
+    #[serde(default = "far")]
+    pub chase_best_m: f64,
+    #[serde(default)]
+    pub chase_work: f64,
     /// The target's face when last seen: where its carcass lies if it was killed.
     #[serde(default)]
     pub target_site: Option<Site>,
@@ -1099,6 +1114,10 @@ pub struct PackRecord {
     /// [`PackRecord::drawn`] is.
     #[serde(default)]
     pub drawn_scent: bool,
+    /// **The pack's breeding season** (LIFE-HISTORY): the year of its last litter's
+    /// conception and the conceptions in it ([`Reproduction::litters_per_year`] per pack).
+    #[serde(default)]
+    pub season: Season,
 }
 
 /// Where a gut seed came from (F3): a stand's fruit (its species, e.g. lanternberry) or a
@@ -1328,6 +1347,32 @@ pub struct ReproductionState {
     /// ([`ReproductionState::brood_held`]).
     #[serde(default)]
     pub brood: f64,
+    /// **This body's breeding season** (LIFE-HISTORY, [`Reproduction::litters_per_year`]):
+    /// the year of its last conception and how many it has had in it. A pack lineage counts
+    /// on its [`PackRecord::season`] instead.
+    #[serde(default)]
+    pub season: Season,
+}
+
+/// **A breeding season's count** (LIFE-HISTORY): the Cubarium year of the last conception and
+/// the conceptions in it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Season {
+    pub year: i64,
+    pub litters: u32,
+}
+
+impl Season {
+    /// The conceptions already had in `year`.
+    pub fn used_in(&self, year: i64) -> u32 {
+        if self.year == year { self.litters } else { 0 }
+    }
+
+    /// Count one conception in `year`.
+    pub fn count(&mut self, year: i64) {
+        let used = self.used_in(year);
+        *self = Season { year, litters: used + 1 };
+    }
 }
 
 impl ReproductionState {
@@ -1513,6 +1558,31 @@ pub struct Reproduction {
     /// brood also does not sate: hunger counts only the reserve above it. 0 turns it off.
     #[serde(default)]
     pub brood_share: f64,
+    /// **Breeding seasons** (LIFE-HISTORY, Wrysk 2026-10-06): at most this many conceptions —
+    /// a gestation opened, or a clutch laid — per Cubarium year
+    /// ([`cubarium_voxel::weather::Climate::year`], the dry-season cycle), each inside the
+    /// window [`Reproduction::breeding_phase`] + [`Reproduction::breeding_window`]. A pack
+    /// lineage counts them per pack (the pack breeds, whoever its breeder is). **0: no season**
+    /// — the lineage breeds exactly as without these knobs; so does a seasonal lineage in a
+    /// world with no year (no season period).
+    #[serde(default)]
+    pub litters_per_year: u32,
+    /// The year phase, `[0, 1)`, at which the breeding window opens (phase 0 is a dry
+    /// season's start).
+    #[serde(default)]
+    pub breeding_phase: f64,
+    /// The breeding window's width, a share of the year (wrapping past its end; 1 or more is
+    /// the whole year).
+    #[serde(default)]
+    pub breeding_window: f64,
+    /// **Pregnancy upkeep**: a gestating body's basal upkeep is multiplied by this while its
+    /// escrow is open. 1 is no raise.
+    #[serde(default = "default_gestation_upkeep_factor")]
+    pub gestation_upkeep_factor: f64,
+}
+
+fn default_gestation_upkeep_factor() -> f64 {
+    1.0
 }
 
 fn default_surplus_share() -> f64 {
@@ -1641,6 +1711,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// The littershredder's egg placeholders.
@@ -1678,6 +1752,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// The lanternjaw's **dormant egg bank** (§2.13), revised with its metabolism in the
@@ -1708,6 +1786,10 @@ impl Reproduction {
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
+        litters_per_year: 0,
+        breeding_phase: 0.0,
+        breeding_window: 0.0,
+        gestation_upkeep_factor: 1.0,
     };
 
     /// What the **smallest** offspring package costs the parent's reserve, the price
@@ -1813,6 +1895,20 @@ impl Reproduction {
 
     pub fn incubation_ticks(&self) -> u64 {
         cubarium_voxel::ticks_at_least_one(self.incubation_s)
+    }
+
+    /// **The breeding season's gate** (LIFE-HISTORY): whether a conception may happen at
+    /// `year` with `season` counted so far — always, for a lineage with no season
+    /// (`litters_per_year` 0) or in a world with no year; else only inside the window and
+    /// while the year's conceptions are under `litters_per_year`.
+    pub fn season_allows(&self, year: Option<cubarium_voxel::weather::Year>, season: Season) -> bool {
+        if self.litters_per_year == 0 {
+            return true;
+        }
+        let Some(y) = year else {
+            return true;
+        };
+        y.in_window(self.breeding_phase, self.breeding_window) && season.used_in(y.number) < self.litters_per_year
     }
 }
 
@@ -2227,12 +2323,15 @@ pub enum Departure {
     /// An amphibious body's drying clock reached its lineage's `lethal_fraction`
     /// ([`crate::Amphibious`], AMPHIBIOUS-SNAIL). A corpse.
     Desiccation,
+    /// DROP: its wound reached 1 on a jump down ([`crate::DropRule`]). A corpse.
+    Fell,
 }
 
 impl Departure {
-    pub const ALL: [Departure; 5 + Founder::COUNT] = {
-        let mut all = [Departure::Starved; 5 + Founder::COUNT];
+    pub const ALL: [Departure; 6 + Founder::COUNT] = {
+        let mut all = [Departure::Starved; 6 + Founder::COUNT];
         all[4 + Founder::COUNT] = Departure::Desiccation;
+        all[5 + Founder::COUNT] = Departure::Fell;
         all[1] = Departure::Drowned;
         all[2] = Departure::Aged;
         all[3] = Departure::Removed;
@@ -2254,6 +2353,7 @@ impl Departure {
             Departure::Removed => 3,
             Departure::Killed { by } => 4 + by.index(),
             Departure::Desiccation => 4 + Founder::COUNT,
+            Departure::Fell => 5 + Founder::COUNT,
         }
     }
 
@@ -2269,6 +2369,7 @@ impl Departure {
             Departure::Aged => "aged",
             Departure::Removed => "removed",
             Departure::Desiccation => "desiccated",
+            Departure::Fell => "fell",
             Departure::Killed { by } => {
                 static NAMES: std::sync::OnceLock<[&'static str; Founder::COUNT]> =
                     std::sync::OnceLock::new();
@@ -2666,6 +2767,14 @@ pub struct FaunaLedger {
     pub sprint_ticks_by_founder: [u64; Founder::COUNT],
     #[serde(default)]
     pub winded_by_founder: [u64; Founder::COUNT],
+    /// DROP: jumps down past the step by a trapped body, their metres summed, and the wound
+    /// they added summed, by lineage.
+    #[serde(default)]
+    pub drops_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub drop_m_by_founder: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub drop_wound_by_founder: [f64; Founder::COUNT],
     /// Predation (`design/predation-and-flight-2026-09-28.md` §2.3), by the **striker's**
     /// lineage: strikes begun, and contacts resolved as a hit or a dodge.
     pub strikes_by_founder: [u64; Founder::COUNT],
@@ -2825,6 +2934,20 @@ pub struct FaunaLedger {
     pub pack_break_offs: u64,
     #[serde(default)]
     pub pack_declined: u64,
+    /// **CHURN**: pack targets given up for a better one (past `Pack::switch_margin`).
+    #[serde(default)]
+    pub pack_switches: u64,
+    /// **STRIKE**: member samples steered by the close-in ([`Pack::close_in_m`]); of them,
+    /// steps off from a prey inside the outline and pivots to face one; and chases broken off
+    /// as out of reach (no face beside the target puts it in the jaw band).
+    #[serde(default)]
+    pub pack_close_in_samples: u64,
+    #[serde(default)]
+    pub pack_step_offs: u64,
+    #[serde(default)]
+    pub pack_pivots: u64,
+    #[serde(default)]
+    pub pack_out_of_reach: u64,
     /// **The ground responses' readouts** (S2, [`vigil::VigilLedger`]).
     #[serde(default)]
     pub vigil: VigilLedger,
@@ -2881,6 +3004,14 @@ pub struct FaunaLedger {
     pub litters: u64,
     #[serde(default)]
     pub pups_born: u64,
+    /// Pups that came of age (reached [`Pack::independence_age_s`] alive) and joined their
+    /// pack (LIFE-HISTORY).
+    #[serde(default)]
+    pub pups_independent: u64,
+    /// Conceptions a breeding season refused (outside the window, or the year's litters
+    /// used), counted once per refused tick a ready body waited (LIFE-HISTORY).
+    #[serde(default)]
+    pub season_waits: u64,
     /// **The minimal gut's books** (repair 2 item 10). Raw food into stomachs (every bite,
     /// after any spill), out of them by digestion (into assimilation, egesta and the
     /// unfunded share's respiration), moved stomach to stomach by regurgitation (inside
@@ -3384,6 +3515,10 @@ pub struct Fauna {
     /// target changes face. Not saved.
     #[serde(skip)]
     pack_paths: FxHashMap<u64, PackPath>,
+    /// Per pack id (PIT): the route field to its den's node, as `pack_paths` (a member walks
+    /// home on it, not straight at the den). Not saved.
+    #[serde(skip)]
+    den_paths: FxHashMap<u64, PackPath>,
     /// Per hunter id (HUNTER-MEAL): the route field to the face it walks to, as
     /// `pack_paths`. Not saved.
     #[serde(skip)]
@@ -3416,7 +3551,116 @@ pub struct Fauna {
     /// against: pure terrain geometry, so derived and not saved.
     #[serde(skip)]
     face_sky: (Option<u64>, FxHashMap<(i64, u32, u32), f64>),
+    /// EDGE's readout: per founder id, which layer of the write side last set its held
+    /// actions ([`Steer`]). Session state for probes and studies: not saved.
+    #[serde(skip)]
+    steer: FxHashMap<u64, Steer>,
+    /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
+    /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
+    /// and the last tick it walked there. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) walk_targets: FxHashMap<u64, (u64, u64, u64)>,
+    /// EDGE: per body, the target the last reflex walk to succeed this sample took and the
+    /// layer it walks for; committed to `walk_targets` at the end of the body's write when
+    /// that layer is the one held ([`Fauna::walk_commit`]). Not saved.
+    #[serde(skip)]
+    pub(crate) walk_pending: FxHashMap<u64, (u64, Steer)>,
+    /// EDGE: per grounded founder, the ticks it has **pressed** without a break: controller
+    /// intervals in which it held forward and its motor delivered under
+    /// `teachers.motor_refused` of what it attempted. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) pressed: FxHashMap<u64, u64>,
+    /// EDGE: per body, the targets it gave up for pressing and the tick it may try each
+    /// again, at most [`WALK_SHUN_SLOTS`]. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) walk_shun: FxHashMap<u64, Vec<(u64, u64)>>,
+    /// EDGE: per body, the flight (its `Vigil::flee_tick`) in which it was cornered: the rest
+    /// of that flight goes by its route graph. Session state: not saved.
+    #[serde(skip)]
+    pub(crate) route_flee: FxHashMap<u64, u64>,
+    /// DROP: per grounded body, its trapped clock (`step::jump::Trapped`). Session state:
+    /// not saved.
+    #[serde(skip)]
+    pub(crate) trapped: FxHashMap<u64, step::jump::Trapped>,
+    /// DROP: per trapped body, the jump down it is taking (`step::jump::DropPlan`). Session
+    /// state: not saved.
+    #[serde(skip)]
+    pub(crate) drop_plans: FxHashMap<u64, step::jump::DropPlan>,
 }
+
+/// **Which layer set a founder's held actions** on its last controller sample (EDGE's
+/// readout, [`Fauna::steer_of`]): its own heuristic, or the reflex that overrode it last.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Steer {
+    /// Not driven (no controller, or a non-finite observation): rest.
+    Rest,
+    /// Its controller's own actions.
+    Heuristic,
+    /// A glider's fruit search (`glider::fruit_reflex`).
+    Fruit,
+    /// The flee rule or the ground response (herd, arboreal refuge or away, freeze).
+    Flee,
+    /// A glider's roost.
+    Roost,
+    /// Fed perching.
+    FedRest,
+    /// The shallows reflex.
+    Shallows,
+    /// An amphibious body's roam or water reflex.
+    Roam,
+    /// The lanternjaw's patrol.
+    Patrol,
+    /// A carcass yield.
+    Yield,
+    /// The pack tactic.
+    Pack,
+    /// The light, loom or glow steering.
+    Light,
+    /// DROP: a trapped body's jump down.
+    Drop,
+}
+
+impl Steer {
+    /// Every source, in a fixed order for tables.
+    pub const ALL: [Steer; 13] = [
+        Steer::Rest,
+        Steer::Heuristic,
+        Steer::Fruit,
+        Steer::Flee,
+        Steer::Roost,
+        Steer::FedRest,
+        Steer::Shallows,
+        Steer::Roam,
+        Steer::Patrol,
+        Steer::Yield,
+        Steer::Pack,
+        Steer::Light,
+        Steer::Drop,
+    ];
+
+    /// A short name for tables.
+    pub fn name(self) -> &'static str {
+        match self {
+            Steer::Rest => "rest",
+            Steer::Heuristic => "heuristic",
+            Steer::Fruit => "fruit",
+            Steer::Flee => "flee",
+            Steer::Roost => "roost",
+            Steer::FedRest => "fed_rest",
+            Steer::Shallows => "shallows",
+            Steer::Roam => "roam",
+            Steer::Patrol => "patrol",
+            Steer::Yield => "yield",
+            Steer::Pack => "pack",
+            Steer::Light => "light",
+            Steer::Drop => "drop",
+        }
+    }
+}
+
+/// The most targets a body keeps given up at once ([`Fauna::walk_shun`]): a memory bound,
+/// not a knob; the soonest to lapse goes first.
+pub(crate) const WALK_SHUN_SLOTS: usize = 8;
 
 /// The most gut-seed void events [`Fauna`] keeps undrained.
 pub const SEED_VOID_LOG_MAX: usize = 65_536;
@@ -3436,9 +3680,12 @@ pub(crate) struct PackPath {
 pub enum PackEvent {
     /// A pack took a target, with this many participants (the taker and its
     /// participating mates within `pack_radius_m`).
-    ChaseStart { tick: u64, pack: u64, participants: u32 },
-    /// A pack's target was dropped, and why.
-    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd },
+    /// `taker` is the member that chose `target` and `score` its choice score; `prev` is the
+    /// pack's last target dropped alive with the score the taker gave it now (`None` when it
+    /// does not sense it), the re-target's comparison (CHURN's readout).
+    ChaseStart { tick: u64, pack: u64, participants: u32, taker: u64, target: u64, score: f64, prev: Option<u64>, prev_score: Option<f64> },
+    /// A pack's target was dropped, and why; `by` is the member whose sampling dropped it.
+    ChaseEnd { tick: u64, pack: u64, why: ChaseEnd, target: u64, by: u64 },
     /// A pack's feast ended, with the carrion its members ate there, and why.
     FeastEnd { tick: u64, pack: u64, site: Site, eaten: f64, why: FeastEnd },
 }
@@ -3461,6 +3708,8 @@ pub enum ChaseEnd {
     Lost,
     /// Its prospect fell under `Pack::break_off_below` (PACK-TUNE: the test went badly).
     BrokeOff,
+    /// Another target scored past `Pack::switch_margin` of it and took the hunt (CHURN).
+    Switched,
 }
 
 /// Why a feast ended ([`PackEvent::FeastEnd`]).
@@ -3579,6 +3828,26 @@ impl Fauna {
         (graph, field)
     }
 
+    /// Pack `pack`'s route field to its den's node `goal` on lineage `founder`'s graph (PIT),
+    /// over the whole graph: cached until the graph is rebuilt or the node changes.
+    pub(crate) fn den_path(
+        &mut self,
+        view: &VoxelView<'_>,
+        founder: Founder,
+        pack: u64,
+        goal: usize,
+    ) -> (std::sync::Arc<encounter::RouteGraph>, std::sync::Arc<FxHashMap<usize, u32>>) {
+        let graph = self.pack_routes(view, founder);
+        if let Some(p) = self.den_paths.get(&pack) {
+            if std::sync::Arc::ptr_eq(&p.graph, &graph) && p.goal == goal {
+                return (graph, p.field.clone());
+            }
+        }
+        let field = std::sync::Arc::new(graph.distances(goal, u32::MAX));
+        self.den_paths.insert(pack, PackPath { graph: graph.clone(), goal, steps: u32::MAX, field: field.clone() });
+        (graph, field)
+    }
+
     /// The open air under `flight`'s band, rebuilt from `view` when older than its
     /// `egg_air_refresh_s` (or never built).
     pub(crate) fn open_air(&mut self, view: &VoxelView<'_>, flight: &Flight) -> std::sync::Arc<flight::OpenAir> {
@@ -3626,6 +3895,7 @@ impl Fauna {
             pack_routes: FxHashMap::default(),
             open_air: None,
             pack_paths: FxHashMap::default(),
+            den_paths: FxHashMap::default(),
             percepts: FxHashMap::default(),
             scent: scent::ScentField::default(),
             beacons: light::Beacons::default(),
@@ -3634,7 +3904,86 @@ impl Fauna {
             packs: Vec::new(),
             next_pack: 0,
             face_sky: (None, FxHashMap::default()),
+            steer: FxHashMap::default(),
+            walk_targets: FxHashMap::default(),
+            walk_pending: FxHashMap::default(),
+            pressed: FxHashMap::default(),
+            trapped: FxHashMap::default(),
+            drop_plans: FxHashMap::default(),
+            walk_shun: FxHashMap::default(),
+            route_flee: FxHashMap::default(),
         })
+    }
+
+    /// EDGE's readout: which layer set the founder `id`'s held actions on its last
+    /// controller sample, `None` before its first.
+    pub fn steer_of(&self, id: u64) -> Option<Steer> {
+        self.steer.get(&id).copied()
+    }
+
+    /// EDGE's readout: the ticks founder `id` has pressed without a break, the target its
+    /// reflex walk last took (key, set out, last walked) and the targets it has given up.
+    pub fn press_of(&self, id: u64) -> (u64, Option<(u64, u64, u64)>, Vec<(u64, u64)>) {
+        (
+            self.pressed.get(&id).copied().unwrap_or(0),
+            self.walk_targets.get(&id).copied(),
+            self.walk_shun.get(&id).cloned().unwrap_or_default(),
+        )
+    }
+
+    /// EDGE: the key a reflex walk's target goes by: a stand by its id, a face by its
+    /// coordinates under the top bit.
+    pub(crate) fn walk_key_face(site: Site) -> u64 {
+        (1 << 63) | u64::from(site.x) | (u64::from(site.y) << 21) | (u64::from(site.z) << 42)
+    }
+
+    /// **EDGE, a pressed walk re-plans** — call first in a reflex walk's sample for body
+    /// `id` of `founder`: when the target it has walked to for `teachers.press_replan_s`
+    /// (taken again at least every two controller periods) has had it pressing that long
+    /// without a break ([`Fauna::pressed`]), that target is given up for
+    /// `teachers.press_shun_s`. Returns the targets given up now.
+    pub(crate) fn walk_shunned(&mut self, id: u64, founder: Founder) -> Vec<u64> {
+        let now = self.tick;
+        let tc = self.config.teachers;
+        let ticks = |s: f64| if s.is_finite() && s > 0.0 { cubarium_voxel::ticks_at_least_one(s) } else { u64::MAX };
+        let press = ticks(tc.press_replan_s);
+        let gap = 2 * founder.manifest().cadence_ticks().max(1);
+        if let Some(&(t, since, last)) = self.walk_targets.get(&id) {
+            let pressed = self.pressed.get(&id).copied().unwrap_or(0);
+            if now.saturating_sub(last) <= gap && now.saturating_sub(since) >= press && pressed >= press {
+                let until = now.saturating_add(ticks(tc.press_shun_s).min(u64::MAX / 2));
+                let list = self.walk_shun.entry(id).or_default();
+                list.retain(|&(k, u)| k != t && now < u);
+                if list.len() >= WALK_SHUN_SLOTS {
+                    list.sort_by_key(|&(_, u)| std::cmp::Reverse(u));
+                    list.truncate(WALK_SHUN_SLOTS - 1);
+                }
+                list.push((t, until));
+                self.walk_targets.remove(&id);
+            }
+        }
+        self.walk_shun.get(&id).map_or(Vec::new(), |l| l.iter().filter(|&&(_, u)| now < u).map(|&(k, _)| k).collect())
+    }
+
+    /// EDGE: a reflex walk for layer `kind` takes body `id` to target `key` this sample.
+    pub(crate) fn walking_to(&mut self, id: u64, key: u64, kind: Steer) {
+        self.walk_pending.insert(id, (key, kind));
+    }
+
+    /// EDGE: the end of body `id`'s write, `held` the layer whose actions it holds: a walk
+    /// that layer took starts or continues [`Fauna::walk_shunned`]'s clock.
+    pub(crate) fn walk_commit(&mut self, id: u64, founder: Founder, held: Steer) {
+        let Some((key, kind)) = self.walk_pending.remove(&id) else { return };
+        if kind != held {
+            return;
+        }
+        let now = self.tick;
+        let gap = 2 * founder.manifest().cadence_ticks().max(1);
+        let since = match self.walk_targets.get(&id) {
+            Some(&(t, since, last)) if t == key && now.saturating_sub(last) <= gap => since,
+            _ => now,
+        };
+        self.walk_targets.insert(id, (key, since, now));
     }
 
     /// The terrain sky visibility of face `(x, y, z)` ([`VoxelView::sky_visibility`]),
@@ -3781,6 +4130,7 @@ impl Fauna {
         self.config = config;
         self.pack_routes.clear();
         self.pack_paths.clear();
+        self.den_paths.clear();
         self.open_air = None;
         Ok(())
     }
@@ -3792,6 +4142,31 @@ impl Fauna {
     /// Turn births on or off. An isolated arena turns them off; the live world never does.
     pub fn set_births_enabled(&mut self, enabled: bool) {
         self.births_enabled = enabled;
+    }
+
+    /// DROP's readout for body `id`: the tick its trapped clock started (if it is cornered now),
+    /// and the jump it is taking (`from`, `land`).
+    pub fn drop_state(&self, id: u64) -> (Option<u64>, Option<(Site, Site)>) {
+        (
+            self.trapped.get(&id).filter(|t| t.cornered).map(|t| t.since),
+            self.drop_plans.get(&id).map(|p| (p.from, p.land)),
+        )
+    }
+
+    /// **A probe's placement** (DROP's `hunter_study drop`): the grounded body `id` stands on
+    /// `site`, centred on its column, its trapped clock and jump cleared. No check of the face:
+    /// the probe picks it. `false` when there is no such body.
+    pub fn probe_place(&mut self, id: u64, site: Site, voxel_m: f64) -> bool {
+        let Ok(i) = self.animals.binary_search_by_key(&id, |a| a.id) else { return false };
+        let a = &mut self.animals[i];
+        a.site = site;
+        a.pose.x = (f64::from(site.x) + 0.5) * voxel_m;
+        a.pose.z = (f64::from(site.z) + 0.5) * voxel_m;
+        a.pose.y_m = surface_m(site.y, voxel_m);
+        a.mobility = Mobility::default();
+        self.trapped.remove(&id);
+        self.drop_plans.remove(&id);
+        true
     }
 
     pub fn tick(&self) -> u64 {
@@ -3893,6 +4268,9 @@ impl Fauna {
             last_litter_tick: None,
             target: None,
             chase_since_tick: 0,
+            chase_progress_tick: 0,
+            chase_best_m: f64::INFINITY,
+            chase_work: 0.0,
             target_site: None,
             feast: None,
             feast_eaten: 0.0,
@@ -3900,6 +4278,7 @@ impl Fauna {
             shunned: [(0, 0); 4],
             drawn: None,
             drawn_scent: false,
+            season: Season::default(),
         });
         Some(id)
     }
@@ -4424,8 +4803,9 @@ mod starting_stores_tests {
             // the grazing lineages' reserve cap of 0.5; the lanternjaw's is 1.0).
             let full = sc.body_max + sc.reserve_of(sc.body_max);
             assert!(
-                // The chorister (roster R3) keeps the lanternjaw's reserve cap.
-                matches!(founder, Founder::Lanternjaw | Founder::Chorister) ||
+                // The chorister (roster R3) keeps the lanternjaw's reserve cap; the bellwing
+                // (BELLWING) carries an egg load.
+                matches!(founder, Founder::Lanternjaw | Founder::Chorister | Founder::Bellwing) ||
                 ((full - body) - sc.body_max).abs() < 1e-15,
                 "{founder:?}: headroom {} is not one body_max",
                 full - body

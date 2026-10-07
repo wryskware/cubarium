@@ -40,6 +40,10 @@ pub struct Strike {
     /// The striker's centre when the lunge began: the jaw sweeps forward from here.
     pub from_x: f64,
     pub from_z: f64,
+    /// FINDINGS-FIX-2: the prey was drawn to a lure ([`crate::light::drawn_to_lure`]) when
+    /// the strike began or at its lunge, before the lunge's loom closed its visit — the
+    /// lure-kill readout reads this.
+    pub lure: bool,
 }
 
 /// Why a body is at rest ([`crate::Animal::rest`], `Some` exactly while its state is
@@ -72,6 +76,8 @@ pub struct Hit {
     pub by: Founder,
     /// The striker's id (HUNTER-MEAL: a kill marks its place productive in its memory).
     pub striker: u64,
+    /// FINDINGS-FIX-2: the strike's [`Strike::lure`].
+    pub lure: bool,
 }
 
 /// Whether `hunter` would take `prey` (§2.1): its lineage is on the hunter's list and its

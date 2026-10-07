@@ -1232,15 +1232,15 @@ pub(super) fn void_gut_seeds(fauna: &mut Fauna, flora: &mut Flora) {
 /// heuristic's actions (nothing to climb in reach, or already perched and not asked to
 /// move, or gliding).
 pub(super) fn roost_reflex(
-    fauna: &Fauna,
+    fauna: &mut Fauna,
     i: usize,
     view: &VoxelView<'_>,
     fv: &FloraView<'_>,
     sky: &Sky,
 ) -> Option<Actions> {
-    let a = &fauna.animals[i];
+    let a = fauna.animals[i];
     let founder = a.founder?;
-    let phys = fauna.config.founder(founder);
+    let phys = *fauna.config.founder(founder);
     let glider = phys.glider?;
     let sleepy = !phys.active.awake(sky.clock_on, sky.daylight, &fauna.config.life) && !a.emergency;
     if !(sleepy || sky.downpour) {
@@ -1258,21 +1258,8 @@ pub(super) fn roost_reflex(
             ..still
         }),
         MobilityMode::Ground => {
-            let c = view.config;
-            let v = c.voxel_m;
-            let ring = f64::from(c.width) * v;
-            let mut best: Option<(f64, f64, f64)> = None;
-            for stand in fv.stands.iter().filter(|s| climbable(fv, s, &glider)) {
-                let sx = (f64::from(stand.site.x) + 0.5) * v;
-                let sz = (f64::from(stand.site.z) + 0.5) * v;
-                let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
-                let d = (dx * dx + dz * dz).sqrt();
-                if d <= glider.roost_search_m && best.is_none_or(|(b, _, _)| d < b) {
-                    best = Some((d, dx, dz));
-                }
-            }
-            let (_, dx, dz) = best?;
-            Some(walk_toward(a, dx, dz, 0.0))
+            let cands = stands_within(view, fv, &a, glider.roost_search_m, |s| climbable(fv, s, &glider));
+            walk_to_stand(fauna, i, view, fv, &cands, glider.roost_search_m, 0.0, crate::Steer::Roost).map(|(go, _)| go)
         }
         _ => None,
     }
@@ -1305,9 +1292,9 @@ pub(super) fn walk_toward(a: &Animal, dx: f64, dz: f64, feed: f64) -> Actions {
 ///
 /// **S2**: a glider whose table is live finds fruit by sight instead ([`fruit_by_sight`]).
 pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<Actions> {
-    let a = &fauna.animals[i];
+    let a = fauna.animals[i];
     let founder = a.founder?;
-    let phys = fauna.config.founder(founder);
+    let phys = *fauna.config.founder(founder);
     let glider = phys.glider?;
     if a.mobility.mode != MobilityMode::Ground || a.state == State::Asleep {
         return None;
@@ -1317,27 +1304,14 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     if !a.eating {
         return None;
     }
-    if glider_fruit_in_reach(view, fv, a, phys).is_some() {
+    if glider_fruit_in_reach(view, fv, &a, &phys).is_some() {
         return None;
     }
     if phys.senses.live {
         return fruit_by_sight(fauna, i, view, fv, day);
     }
-    let c = view.config;
-    let v = c.voxel_m;
-    let ring = f64::from(c.width) * v;
-    let mut best: Option<(f64, f64, f64)> = None;
-    for stand in fv.stands.iter().filter(|s| s.fruit > 0.0 && climbable(fv, s, &glider)) {
-        let sx = (f64::from(stand.site.x) + 0.5) * v;
-        let sz = (f64::from(stand.site.z) + 0.5) * v;
-        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
-        let d = (dx * dx + dz * dz).sqrt();
-        if d <= glider.fruit_search_m && best.is_none_or(|(b, _, _)| d < b) {
-            best = Some((d, dx, dz));
-        }
-    }
-    let (_, dx, dz) = best?;
-    Some(walk_toward(a, dx, dz, 1.0))
+    let cands = stands_within(view, fv, &a, glider.fruit_search_m, |s| s.fruit > 0.0 && climbable(fv, s, &glider));
+    walk_to_stand(fauna, i, view, fv, &cands, glider.fruit_search_m, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
 }
 
 /// **Fruit by sight** (S2, review §1: the seedporter's still-object recognition): the nearest
@@ -1377,60 +1351,231 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
         }
     }
     seen.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
-    let sighted = seen.into_iter().find(|s| crate::perception::line_clear(view, a.id, origin, s.3));
-    let p = fauna.percepts.entry(a.id).or_default();
+    // EDGE: of those it sees, the nearest it can walk to on its route graph.
+    let clear: Vec<(f64, u64, Site, (f64, f64, f64))> = seen.into_iter().filter(|s| crate::perception::line_clear(view, a.id, origin, s.3)).collect();
+    let cands: Vec<(f64, u64, Site)> = clear.iter().map(|s| (s.0, s.1, s.2)).collect();
+    if let Some((go, k)) = walk_to_stand(fauna, i, view, fv, &cands, range, 1.0, crate::Steer::Fruit) {
+        let (d, id, site, (sx, _, sz)) = clear[k];
+        let p = fauna.percepts.entry(a.id).or_default();
+        let food = crate::perception::class::FOOD as usize;
+        p.best[food] = crate::Track {
+            known: true,
+            id,
+            class: crate::perception::class::FOOD,
+            modes: crate::perception::SIGHT,
+            x: sx,
+            z: sz,
+            y_m: crate::surface_m(site.y, v),
+            site: (site.x, site.y, site.z),
+            d_m: d,
+            tick: now,
+            ..crate::Track::default()
+        };
+        return Some(go);
+    }
+    // None it sees and can reach: the one it last saw, for the pursuit's memory while that
+    // stand still fruits.
     let food = crate::perception::class::FOOD as usize;
-    let target = match sighted {
-        Some((d, id, site, (sx, _, sz))) => {
-            p.best[food] = crate::Track {
-                known: true,
-                id,
-                class: crate::perception::class::FOOD,
-                modes: crate::perception::SIGHT,
-                x: sx,
-                z: sz,
-                y_m: crate::surface_m(site.y, v),
-                site: (site.x, site.y, site.z),
-                d_m: d,
-                tick: now,
-                ..crate::Track::default()
-            };
-            Some((sx, sz))
-        }
-        None => {
-            let m = p.best[food];
-            let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
-            let fruits = |id: u64| fv.stands.iter().any(|s| s.id == id && s.fruit > 0.0);
-            (m.known && now.saturating_sub(m.tick) <= memory && fruits(m.id)).then_some((m.x, m.z))
-        }
-    };
-    let (tx, tz) = target?;
-    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
-    Some(walk_toward(&a, dx, dz, 1.0))
+    let m = fauna.percepts.get(&a.id).map(|p| p.best[food]).unwrap_or_default();
+    let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
+    let fruits = |id: u64| fv.stands.iter().any(|s| s.id == id && s.fruit > 0.0);
+    if !(m.known && now.saturating_sub(m.tick) <= memory && fruits(m.id)) {
+        return None;
+    }
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, m.x, m.z, ring);
+    let site = Site { x: m.site.0, y: m.site.1, z: m.site.2 };
+    walk_to_stand(fauna, i, view, fv, &[((dx * dx + dz * dz).sqrt(), m.id, site)], range, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
 }
 
 /// **The arboreal refuge** (S2, [`crate::vigil`]): a grounded glider walks to the nearest stand
 /// it can climb within `search_m` (walking into the stem climbs it); `None` with none.
-pub(super) fn refuge_step(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, search_m: f64) -> Option<Actions> {
-    let a = &fauna.animals[i];
+pub(super) fn refuge_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, search_m: f64) -> Option<Actions> {
+    let a = fauna.animals[i];
     let glider = fauna.config.founder(a.founder?).glider?;
     if a.mobility.mode != MobilityMode::Ground {
         return None;
     }
+    let cands = stands_within(view, fv, &a, search_m, |s| climbable(fv, s, &glider));
+    walk_to_stand(fauna, i, view, fv, &cands, search_m, 0.0, crate::Steer::Flee).map(|(go, _)| go)
+}
+
+/// The stands `keep` accepts within `search_m` of body `a` (straight, across the ring),
+/// nearest first: `(distance, id, site)`.
+fn stands_within(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    a: &Animal,
+    search_m: f64,
+    keep: impl Fn(&cubarium_voxel_flora::Stand) -> bool,
+) -> Vec<(f64, u64, Site)> {
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
-    let mut best: Option<(f64, f64, f64)> = None;
-    for stand in fv.stands.iter().filter(|s| climbable(fv, s, &glider)) {
-        let sx = (f64::from(stand.site.x) + 0.5) * v;
-        let sz = (f64::from(stand.site.z) + 0.5) * v;
-        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
-        let d = (dx * dx + dz * dz).sqrt();
-        if d <= search_m && best.is_none_or(|(b, _, _)| d < b) {
-            best = Some((d, dx, dz));
+    let mut out: Vec<(f64, u64, Site)> = fv
+        .stands
+        .iter()
+        .filter(|s| keep(s))
+        .filter_map(|s| {
+            let sx = (f64::from(s.site.x) + 0.5) * v;
+            let sz = (f64::from(s.site.z) + 0.5) * v;
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+            let d = (dx * dx + dz * dz).sqrt();
+            (d <= search_m).then_some((d, s.id, s.site))
+        })
+        .collect();
+    out.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+    out
+}
+
+/// The nodes ahead on a route a walk's waypoint looks along: a cost bound, not a knob.
+const ROUTE_LOOKAHEAD: usize = 12;
+
+/// The headings a body off its route graph tries for a glide off its ledge
+/// ([`off_graph_exit`]): a resolution, not a knob.
+const GLIDE_HEADINGS: u32 = 16;
+
+/// **EDGE-2: the way off a face off the route graph**, for a grounded body standing where its
+/// lineage's route graph has no node within its own reach:
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum OffGraph {
+    /// It is on its graph.
+    On,
+    /// The first face of its own body's walking way back onto it ([`crate::RouteGraph::way_on`],
+    /// out to `teachers.way_on_m`).
+    Way(Site),
+    /// With no walking way, a glider's heading off its ledge: walking that way, the edge
+    /// starts a glide ([`glide_off_edge`]); of those, the nearest to the direction it wants.
+    Glide(f64),
+    /// Neither: it is cornered, and holds still.
+    Cornered,
+}
+
+/// [`OffGraph`] for body `a`, wanting to go along `(want_x, want_z)` (any length; zero for
+/// no preference).
+pub(crate) fn off_graph_exit(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, want: (f64, f64)) -> OffGraph {
+    let Some(founder) = a.founder else { return OffGraph::On };
+    let tc = fauna.config.teachers;
+    let phys = *fauna.config.founder(founder);
+    let graph = fauna.routes(view, founder, tc.route_refresh_s);
+    let v = view.config.voxel_m;
+    let body = phys.body_at(a.body);
+    let r = body.footprint_radius();
+    let own = (r / v).ceil().max(0.0) as u32;
+    if graph.node_near(a.site, (a.pose.x, a.pose.z), own).is_some() {
+        return OffGraph::On;
+    }
+    let cols = if tc.way_on_m.is_finite() && tc.way_on_m > 0.0 { (tc.way_on_m / v).ceil() as u32 } else { 0 };
+    if let Some(f) = graph.way_on(view, a.site, r, body.headroom_voxels(v), phys.step_limits(v), phys.wade_depth_m(&body), own, cols) {
+        return OffGraph::Way(f);
+    }
+    if let Some(glider) = phys.glider {
+        let s = shape(&phys, a.body);
+        let want_h = if want.0 * want.0 + want.1 * want.1 > 0.0 { Some(want.0.atan2(want.1)) } else { None };
+        let mut best: Option<(f64, f64)> = None;
+        for k in 0..GLIDE_HEADINGS {
+            let h = f64::from(k) * std::f64::consts::TAU / f64::from(GLIDE_HEADINGS);
+            let mut b = *a;
+            b.pose.heading_rad = h;
+            if glide_off_edge(view, fv, &b, s, &glider, &phys).is_none() {
+                continue;
+            }
+            let off = want_h.map_or(0.0, |w| {
+                let d = (h - w).rem_euclid(std::f64::consts::TAU);
+                d.min(std::f64::consts::TAU - d)
+            });
+            if best.is_none_or(|(o, _)| off < o) {
+                best = Some((off, h));
+            }
+        }
+        if let Some((_, h)) = best {
+            return OffGraph::Glide(h);
         }
     }
-    let (_, dx, dz) = best?;
-    Some(walk_toward(a, dx, dz, 0.0))
+    OffGraph::Cornered
+}
+
+/// **EDGE: a reflex's walk to a stand** (the refuge, the roost, the fruit search): of
+/// `cands` (`(distance, id, site)`, nearest first), the first the body can walk to on its
+/// lineage's route graph — a node within its stem reach (its radius and half a voxel) of the
+/// stem, on the stand's layer or one either side, routed from the body's node in at most
+/// `teachers.route_detour × search_m` — and the actions that walk it there: straight at the
+/// stem when the line is walkable, else toward the farthest of the next route nodes it can
+/// walk straight to. A body off its graph walks straight, as before.
+///
+/// **A pressed walk re-plans**: a target walked to for `teachers.press_replan_s` while the
+/// body has pressed that long without a break (held forward, its motor delivering under
+/// `teachers.motor_refused`) is given up for `teachers.press_shun_s`, and the next is taken. Returns the actions and the index in
+/// `cands`; `None` when it can reach none of them.
+#[allow(clippy::too_many_arguments)]
+fn walk_to_stand(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    _fv: &FloraView<'_>,
+    cands: &[(f64, u64, Site)],
+    search_m: f64,
+    feed: f64,
+    kind: crate::Steer,
+) -> Option<(Actions, usize)> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let tc = fauna.config.teachers;
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let shunned = fauna.walk_shunned(a.id, founder);
+    if cands.is_empty() {
+        return None;
+    }
+    let graph = fauna.routes(view, founder, tc.route_refresh_s);
+    let r = phys.body_at(a.body).footprint_radius();
+    let own = (r / v).ceil().max(0.0) as u32;
+    let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own);
+    // EDGE-2: off its graph, it does not walk straight at a stem over a drop or into a wall:
+    // it takes its own way back on, else glides off its ledge, else it can reach none.
+    if from.is_none() {
+        let &(_, id, site) = cands.iter().find(|c| !shunned.contains(&c.1))?;
+        let stem = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
+        let (sx, sz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, stem.0, stem.1, ring);
+        let (dx, dz) = match off_graph_exit(fauna, view, _fv, &a, (sx, sz)) {
+            OffGraph::On => (sx, sz),
+            OffGraph::Way(f) => crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, ring),
+            OffGraph::Glide(h) => (h.sin(), h.cos()),
+            OffGraph::Cornered => return None,
+        };
+        let k = cands.iter().position(|c| c.1 == id).expect("a candidate");
+        fauna.walking_to(a.id, id, kind);
+        return Some((walk_toward(&a, dx, dz, feed), k));
+    }
+    let reach = ((r + 0.5 * v) / v).floor().max(1.0) as u32;
+    let steps = tc.route_detour.max(0.0) * search_m / v;
+    let max_steps = if steps.is_finite() { steps.ceil().min(f64::from(u32::MAX)) as u32 } else { u32::MAX };
+    for (k, &(_, id, site)) in cands.iter().enumerate() {
+        if shunned.contains(&id) {
+            continue;
+        }
+        let stem = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
+        let aim = match from {
+            None => unreachable!("handled above"),
+            Some(from) => {
+                let Some(goal) = graph.node_near_where(site, stem, reach, |f| f.y.abs_diff(site.y) <= 1) else {
+                    continue;
+                };
+                if graph.components[goal] != graph.components[from] {
+                    continue;
+                }
+                if goal == from || graph.walk_line(from, (a.pose.x, a.pose.z), stem) {
+                    Some(stem)
+                } else {
+                    graph.path(from, goal, max_steps).and_then(|p| graph.waypoint(&p, (a.pose.x, a.pose.z), ROUTE_LOOKAHEAD))
+                }
+            }
+        };
+        let Some((tx, tz)) = aim else { continue };
+        fauna.walking_to(a.id, id, kind);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+        return Some((walk_toward(&a, dx, dz, feed), k));
+    }
+    None
 }
 
 impl Fauna {

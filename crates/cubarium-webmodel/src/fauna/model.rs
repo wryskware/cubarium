@@ -158,6 +158,11 @@ pub struct LineageLedger {
     pub provision_given: f64,
     pub provision_loss: f64,
     pub litters: f64,
+    /// Pups that reached `independence_age_s` alive (LIFE-HISTORY).
+    pub pups_independent: f64,
+    /// Litters conceived (LIFE-HISTORY), and the young they carry.
+    pub conceived: f64,
+    pub conceived_young: f64,
     /// Body-seconds alive and awake (free bodies), and body-seconds of structure alive: the
     /// sim's `alive_ticks_by_founder`, `awake_ticks_by_founder` over 20 Hz, and its
     /// body-days readout.
@@ -189,6 +194,8 @@ pub struct Census {
 #[derive(Clone, Copy, Debug)]
 pub struct PackState {
     pub last_litter_s: f64,
+    /// Its breeding season's count (LIFE-HISTORY, `PackRecord::season`).
+    pub season: cubarium_voxel_fauna::Season,
 }
 
 /// The model's whole state and its numbers.
@@ -199,6 +206,8 @@ pub struct FaunaModel {
     /// fresh-kill carcass decays at it.
     pub carrion_decomposition: f64,
     pub day: DayClock,
+    /// The world's climate: its season period is the Cubarium year (LIFE-HISTORY).
+    pub climate: cubarium_voxel::weather::Climate,
     pub fits: Fits,
     /// Seconds since the world was founded (tick 0, the clock's `start_hour`).
     pub t_s: f64,
@@ -316,6 +325,7 @@ impl FaunaModel {
             config: params.fauna.clone(),
             carrion_decomposition: params.flora.carrion_decomposition,
             day: params.world.day.clone(),
+            climate: params.world.climate,
             fits,
             t_s: 0.0,
             dt,
@@ -339,6 +349,12 @@ impl FaunaModel {
             last_daylight: None,
             merge_clock: 0.0,
         }
+    }
+
+    /// The Cubarium year now ([`cubarium_voxel::weather::Climate::year`] at the model's clock).
+    pub fn year(&self) -> Option<cubarium_voxel::weather::Year> {
+        let tick = (self.t_s * f64::from(cubarium_voxel_fauna::TICK_HZ)).round().max(0.0) as u64;
+        self.climate.year(&self.day, tick)
     }
 
     pub fn phys(&self, f: Founder) -> &FounderPhysiology {
@@ -472,7 +488,14 @@ impl FaunaModel {
             let mut matured = (0.0, 0.0);
             let mut aw = Vec::with_capacity(self.pops[f.index()].len());
             let mut lsum = (0.0, 0.0, 0.0);
+            let independence = phys.pack.map(|p| p.independence_age_s);
+            let mut came_of_age = 0.0;
             for c in self.pops[f.index()].iter_mut() {
+                if let Some(ind) = independence {
+                    if c.native && c.host.is_none() && c.age_s < ind && c.age_s + dt >= ind {
+                        came_of_age += c.n;
+                    }
+                }
                 c.age_s += dt;
                 c.b.emergency = laws::emergency(&phys, &c.b);
                 let a = if c.host.is_some() || c.b.emergency { 1.0 } else { phase };
@@ -486,7 +509,9 @@ impl FaunaModel {
                     c.b.eating = true;
                 }
                 let mut fl = Flows::default();
-                let up = laws::upkeep_per_s(&phys, c.b.body, a) * dt;
+                // LIFE-HISTORY: a gestating cohort pays the pregnancy upkeep factor on its basal.
+                let preg = if c.escrow.is_some() { phys.core.reproduction.gestation_upkeep_factor.max(0.0) } else { 1.0 };
+                let up = laws::upkeep_per_s(&phys, c.b.body, a) * preg * dt;
                 let (paid, fb) = laws::respire(&phys.core, &mut c.b, up);
                 fl.upkeep += paid;
                 fl.from_body += fb;
@@ -510,6 +535,7 @@ impl FaunaModel {
             }
             awake_of[f.index()] = aw;
             let l = &mut self.ledger[f.index()];
+            l.pups_independent += came_of_age;
             l.flows += acc;
             l.matured += matured.0;
             l.maturation_age_s += matured.1;
@@ -1170,7 +1196,7 @@ impl FaunaModel {
         let v = &mut self.packs[f.index()];
         if v.is_empty() && adults > 0.0 {
             let n = (adults / t.pack_size.max(1) as f64).round().max(1.0) as usize;
-            v.extend(std::iter::repeat_n(PackState { last_litter_s: f64::NEG_INFINITY }, n));
+            v.extend(std::iter::repeat_n(PackState { last_litter_s: f64::NEG_INFINITY, season: cubarium_voxel_fauna::Season::default() }, n));
         }
         let keep = (adults - 1e-9).ceil().max(0.0) as usize;
         if v.len() > keep {
@@ -1204,8 +1230,14 @@ impl FaunaModel {
         let rule = sc.reproduction;
         let package = rule.package_cost(&sc);
         let hi = t.litter_size_max.max(1);
-        let lo = hi.min(2);
+        let lo = if t.litter_by_condition { 1 } else { hi.min(2) };
+        let year = self.year();
+        let floor = t.breed_reserve_fraction.clamp(0.0, 1.0);
         for k in 0..self.packs[f.index()].len() {
+            // LIFE-HISTORY: the pack's breeding season.
+            if !rule.season_allows(year, self.packs[f.index()][k].season) {
+                continue;
+            }
             if self.pops[f.index()].iter().any(|c| c.breeder_of == Some(k)) {
                 continue;
             }
@@ -1229,6 +1261,7 @@ impl FaunaModel {
                         && !self.is_pup(f, c)
                         && c.b.body >= sc.birth_body
                         && c.b.reserve >= rule.surplus_reserve(&sc)
+                        && c.b.reserve >= floor * sc.reserve_of(c.b.body)
                         && c.window.count_for(hold_steps) >= required
                 })
                 .max_by(|a, b| a.1.b.reserve.partial_cmp(&b.1.b.reserve).unwrap())
@@ -1236,7 +1269,11 @@ impl FaunaModel {
             let Some(i) = pick else { continue };
             let reserve = self.pops[f.index()][i].b.reserve;
             let funds = if package > 0.0 { ((reserve - rule.surplus_floor) / package).floor().max(0.0) } else { f64::from(hi) };
-            let young = if self.draws.is_twin() {
+            let young = if t.litter_by_condition {
+                let r = reserve / sc.reserve_of(self.pops[f.index()][i].b.body).max(1e-300);
+                let n = f64::from(t.condition_litter(r)).min(funds);
+                if n < 1.0 { 0.0 } else { n }
+            } else if self.draws.is_twin() {
                 let u = self.draws.unit();
                 let drawn = f64::from(lo) + (u * f64::from(hi - lo + 1)).floor().min(f64::from(hi - lo));
                 let n = drawn.min(funds);
@@ -1249,6 +1286,11 @@ impl FaunaModel {
             if !(young > 0.0) {
                 continue;
             }
+            if let Some(y) = year.filter(|_| rule.litters_per_year > 0) {
+                self.packs[f.index()][k].season.count(y.number);
+            }
+            self.ledger[f.index()].conceived += 1.0;
+            self.ledger[f.index()].conceived_young += young;
             let c = &mut self.pops[f.index()][i];
             let take = c.n.min(1.0);
             let mut b = c.clone();
