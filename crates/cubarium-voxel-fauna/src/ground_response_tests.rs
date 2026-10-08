@@ -86,6 +86,19 @@ fn cruise(fauna: &Fauna, f: Founder) -> f64 {
     fauna.config.manifest(f).cruise_m_per_s
 }
 
+/// The lanternjaw made an active hunter of the shredder (FROZEN-PREY's cases set it here
+/// rather than read the shipped prey list), and the frondgrazer no hunter at all.
+pub(super) fn shredder_hunted(c: &mut FaunaConfig) -> Founder {
+    let lj = Founder::Lanternjaw;
+    let phys = &mut c.founders[lj.index()];
+    phys.opportunist = false;
+    let mut h = phys.hunter.expect("the lanternjaw has a hunter table");
+    h.prey[Founder::Blind.index()] = true;
+    phys.hunter = Some(h);
+    c.founders[GRAZER.index()].hunter = None;
+    lj
+}
+
 // ------------------------------------------------------------------ the herd alarm
 
 /// A grazer that hears a neighbour bolt bolts too, along the neighbour's heading; one whose
@@ -361,26 +374,35 @@ fn a_prey_whose_record_holds_the_striker_gets_the_aware_dodge() {
 
 // ------------------------------------------------------------------ the shredder
 
-/// A littershredder freezes on a tremor at its freeze line — no step, no bite — and does not
-/// flee; at its withdraw line it also turns away in place.
+/// A littershredder freezes on a hunter's tremor at its freeze line — no step, no bite — and
+/// does not flee; at its withdraw line it also turns away in place. **FROZEN-PREY**: the same
+/// footfall from a grazer that does not hunt it leaves it at its work.
 #[test]
 fn a_shredder_freezes_on_a_tremor_and_does_not_flee() {
     let world = world(29);
     let flora = Flora::new(FloraConfig::default());
-    let c = config();
+    let mut c = config();
+    let hunter = shredder_hunted(&mut c);
     let vg = c.founders[Founder::Blind.index()].vigilance;
     assert_eq!(vg.mode, VigilMode::Freeze, "the shipped shredder freezes");
-    let mut fauna = Fauna::new(c);
-    fauna.set_births_enabled(false);
-    let s = body(&mut fauna, &world, Founder::Blind, 2.0, EAST, 0.0);
-    let sp = cruise(&fauna, GRAZER);
-    let walker = body(&mut fauna, &world, GRAZER, 2.4, EAST, sp);
-    let felt = crate::tremor_of(&animal(&fauna, walker), 0.4, fauna.config.predation.tremor_near_m);
-    assert!(felt >= vg.freeze_tremor, "the scene's footfall reaches the freeze line ({felt})");
-    let act = respond(&mut fauna, &world, &flora, s, Actions { forward: 1.0, turn: 0.0, feed: 1.0 }).expect("it freezes");
-    assert_eq!((act.forward, act.feed), (0.0, 0.0), "no step, no bite");
-    assert_eq!(act.turn != 0.0, felt >= vg.withdraw_tremor, "turns away only at the withdraw line");
-    assert_eq!(fauna.ledger.vigil.freezes[Founder::Blind.index()], 1);
+    for (walker_of, freezes) in [(hunter, true), (GRAZER, false)] {
+        let mut fauna = Fauna::new(c.clone());
+        fauna.set_births_enabled(false);
+        let s = body(&mut fauna, &world, Founder::Blind, 2.0, EAST, 0.0);
+        let sp = cruise(&fauna, walker_of);
+        let walker = body(&mut fauna, &world, walker_of, 2.4, EAST, sp);
+        sense(&mut fauna, &world);
+        let felt = crate::tremor_of(&animal(&fauna, walker), 0.4, fauna.config.predation.tremor_near_m);
+        assert!(felt >= vg.freeze_tremor, "{}: the scene's footfall reaches the freeze line ({felt})", walker_of.name());
+        let act = respond(&mut fauna, &world, &flora, s, Actions { forward: 1.0, turn: 0.0, feed: 1.0 });
+        assert_eq!(act.is_some(), freezes, "{}: freezes only on its hunter", walker_of.name());
+        assert_eq!(fauna.ledger.vigil.freezes[Founder::Blind.index()], u64::from(freezes));
+        if let Some(act) = act {
+            let held = fauna.percept(s).and_then(|p| p.track(walker)).map_or(0.0, |t| t.felt);
+            assert_eq!((act.forward, act.feed), (0.0, 0.0), "no step, no bite");
+            assert_eq!(act.turn != 0.0, held >= vg.withdraw_tremor, "turns away only at the withdraw line");
+        }
+    }
 }
 
 // ------------------------------------------------------------------ the seedporter's eyes
@@ -433,15 +455,17 @@ fn each_lineage_live_switch_off_restores_s1() {
         let cfg = &fauna.config;
         assert_eq!(crate::vigil::awareness(cfg, &prey, Some(&holds), vh, fauna.tick), cfg.predation.awareness(prey.state), "{}", f.name());
     }
-    // The shredder: S1 flees its tremor, S2 freezes.
+    // The shredder: S1 flees its tremor, S2 freezes (on its hunter's, FROZEN-PREY).
     for live in [false, true] {
         let mut c = config();
         c.founders[Founder::Blind.index()].senses.live = live;
+        let hunter = shredder_hunted(&mut c);
         let mut fauna = Fauna::new(c);
         fauna.set_births_enabled(false);
         let s = body(&mut fauna, &world, Founder::Blind, 2.0, EAST, 0.0);
-        let sp = 4.0 * cruise(&fauna, GRAZER);
-        body(&mut fauna, &world, GRAZER, 2.3, EAST, sp);
+        let sp = 4.0 * cruise(&fauna, hunter);
+        body(&mut fauna, &world, hunter, 2.3, EAST, sp);
+        sense(&mut fauna, &world);
         let i = fauna.animals.iter().position(|a| a.id == s).unwrap();
         let act = super::flee(&mut fauna, i, &world.view(), &flora.view(), None, CROP).expect("it answers the tremor");
         assert_eq!(act.forward > 0.0, !live, "live {live}: forward {}", act.forward);
