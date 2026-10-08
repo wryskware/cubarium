@@ -486,15 +486,45 @@ impl Console {
 
 /// **Whole world ticks per clock tick** from the console's speed and pause: a fractional
 /// speed carries its remainder over, a paused run steps only the steps asked for, one per
-/// clock tick. Shared by `cubarium voxel`'s frame clock and a session's loop.
+/// clock tick. Shared by `cubarium voxel`'s frame clock and a session's loop. Hosts
+/// observe each command with [`Pacer::sync`] and take batches one tick at a time.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Pacer {
     debt: f64,
+    remaining: u32,
+    controls: Option<(f64, bool)>,
 }
 
 impl Pacer {
+    /// Start pacing a console whose initial controls are already installed.
+    pub fn new(console: &Console) -> Self {
+        Self {
+            controls: Some((console.speed, console.paused)),
+            ..Self::default()
+        }
+    }
+
+    /// Observe each command separately, so even pause followed immediately by resume
+    /// drops the old work. The host resets its clock when this returns `true`.
+    pub fn sync(&mut self, console: &mut Console) -> bool {
+        let controls = (console.speed, console.paused);
+        let changed = self.controls.is_some_and(|before| before != controls);
+        if changed {
+            if self.controls.is_some_and(|(_, paused)| paused) {
+                // A paused batch reserved one explicitly requested step in `due`.
+                // Put it back if a command cancels that batch before it runs.
+                console.pending_steps = console.pending_steps.saturating_add(self.remaining);
+            }
+            self.debt = 0.0;
+            self.remaining = 0;
+        }
+        self.controls = Some(controls);
+        changed
+    }
+
     /// The world ticks due on this clock tick, taking any pending single step.
     pub fn due(&mut self, console: &mut Console) -> u32 {
+        self.sync(console);
         if console.paused {
             // A single `s` still advances exactly one world tick per clock tick.
             if console.pending_steps > 0 {
@@ -509,6 +539,70 @@ impl Pacer {
             self.debt -= n;
             n as u32
         }
+    }
+
+    /// Begin a clock tick's work. Take it one world tick at a time, with a command point
+    /// before every tick: a control change can then cancel the rest of the batch.
+    pub fn begin(&mut self, console: &mut Console) {
+        self.remaining = self.due(console);
+    }
+
+    pub fn take_tick(&mut self) -> bool {
+        if self.remaining == 0 {
+            return false;
+        }
+        self.remaining -= 1;
+        true
+    }
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::*;
+
+    #[test]
+    fn control_changes_discard_fractional_debt_and_unfinished_ticks() {
+        let mut console = Console::new(0.75, (1, 1, 1));
+        let mut pacer = Pacer::new(&console);
+        pacer.begin(&mut console);
+        assert!(!pacer.take_tick());
+        console.paused = true;
+        assert!(pacer.sync(&mut console));
+        console.paused = false;
+        assert!(pacer.sync(&mut console));
+        let mut fresh = Pacer::new(&console);
+        for _ in 0..4 {
+            assert_eq!(pacer.due(&mut console), fresh.due(&mut console));
+        }
+
+        pacer.begin(&mut console);
+        pacer.begin(&mut console);
+        console.speed = 2.5;
+        assert!(pacer.sync(&mut console));
+        assert!(!pacer.take_tick(), "a speed change drops the unfinished batch");
+        let mut fresh = Pacer::new(&console);
+        for _ in 0..4 {
+            assert_eq!(pacer.due(&mut console), fresh.due(&mut console));
+        }
+    }
+
+    #[test]
+    fn resetting_a_reserved_step_keeps_the_requested_count() {
+        let mut console = Console::new(1.0, (1, 1, 1));
+        console.paused = true;
+        console.pending_steps = 2;
+        let mut pacer = Pacer::new(&console);
+        pacer.begin(&mut console);
+        console.speed = 0.5;
+        assert!(pacer.sync(&mut console));
+        assert!(!pacer.take_tick());
+        assert_eq!(console.pending_steps, 2, "the unperformed step is still owed");
+        for _ in 0..2 {
+            pacer.begin(&mut console);
+            assert!(pacer.take_tick());
+            assert!(!pacer.take_tick());
+        }
+        assert_eq!(console.pending_steps, 0);
     }
 }
 

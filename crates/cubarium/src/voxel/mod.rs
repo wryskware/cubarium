@@ -1143,7 +1143,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let mut budget = Budget::default();
     budget.mark(out.draw_split());
     let mut ctl = Control::new(speed, proj);
-    let mut pacer = Pacer::default();
+    let mut pacer = Pacer::new(&ctl);
     // Whether the world or the plant layer has moved since the last frame drawn. The CPU
     // presenter re-reads the world every frame and does not care; the GPU packs one
     // texture per *tick*, so it needs to be told.
@@ -1223,54 +1223,26 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             since_presented = out.presented().map_or(0, |(shown, _)| shown);
         }
 
-        while let Ok(line) = commands.try_recv() {
-            let at = Instant::now();
-            sim.with_layers_mut(|world, flora, fauna| ctl.handle(world, flora, fauna, &line));
-            budget.commands_ns += at.elapsed().as_nanos() as u64;
-            // A command may have moved a cell, seeded a stand or loaded a world; which
-            // ones did is the command's business, and one extra pack is cheaper than a
-            // rule here that has to be kept in step with `Control::handle`.
-            moved = true;
-            if let Some(o) = observatory.as_mut() {
-                o.observer.request();
-            }
-        }
-        // The observatory's readers: the same console path, at the same point.
-        if let Some(o) = observatory.as_mut() {
-            while let Ok(command) = o.commands.try_recv() {
-                let line = console_line(command);
-                sim.with_layers_mut(|world, flora, fauna| ctl.handle(world, flora, fauna, &line));
-                o.observer.request();
-            }
-        }
+        let mut point = CommandPoint {
+            commands: &commands,
+            observatory: &mut observatory,
+            on_demand: &mut on_demand,
+            out: &mut out,
+            #[cfg(test)]
+            after_tick: None,
+        };
+        moved |= point.drain(&mut sim, &mut ctl, &mut pacer, &mut clock, &mut budget);
         if ctl.quit {
             break;
         }
-        let asked = ctl.save_to.take().or_else(|| {
-            let now = std::time::SystemTime::now();
-            (save::take_save_signal() || out.take_save_request())
-                .then(|| save::default_save_dir(now, sim.world().tick()))
-        });
-        if let Some(dir) = asked {
-            let (world, flora, fauna) = sim.layers();
-            on_demand.save_whole_to(dir, world, flora, fauna);
-        }
 
-        match clock.next_step(now) {
+        match clock.next_step(Instant::now()) {
             Step::Tick => {
-                // The world ticks this clock tick owes: the speed's, or a pending `s`.
-                for _ in 0..pacer.due(&mut ctl) {
-                    let (at, before) = (Instant::now(), Phases::now());
-                    sim.step();
-                    let ns = at.elapsed().as_nanos() as u64;
-                    budget.tick(ns, before);
-                    if let Some(o) = observatory.as_mut() {
-                        o.observer.after_tick(sim.world(), sim.fauna(), ns);
-                    }
-                    ticks += 1;
-                    since_ticks += 1;
-                    moved = true;
-                }
+                let (stepped, command_moved) = point.tick(&mut sim, &mut ctl, &mut pacer, &mut clock, &mut budget);
+                ticks += stepped;
+                since_ticks += stepped;
+                moved |= command_moved || stepped > 0;
+                drop(point);
                 out.observe_tick(sim.world().tick());
                 if let Some(o) = observatory.as_mut() {
                     o.maybe_publish(&sim, &ctl);
@@ -2026,6 +1998,83 @@ struct Control {
     console: Console,
 }
 
+/// The same command point before clock work and between the ticks of a speed batch.
+struct CommandPoint<'a> {
+    commands: &'a Receiver<String>,
+    observatory: &'a mut Option<Observatory>,
+    on_demand: &'a mut SnapshotWriter,
+    out: &'a mut Out,
+    #[cfg(test)]
+    after_tick: Option<Box<dyn FnMut(u64)>>,
+}
+
+impl CommandPoint<'_> {
+    /// A clock tick's work, interruptible at every world tick's command point.
+    fn tick(&mut self, sim: &mut Sim, ctl: &mut Control, pacer: &mut Pacer, clock: &mut Clock, budget: &mut Budget) -> (u64, bool) {
+        pacer.begin(ctl);
+        let (mut ticks, mut moved) = (0, false);
+        loop {
+            moved |= self.drain(sim, ctl, pacer, clock, budget);
+            if ctl.quit || !pacer.take_tick() {
+                break;
+            }
+            let (at, before) = (Instant::now(), Phases::now());
+            sim.step();
+            let ns = at.elapsed().as_nanos() as u64;
+            budget.tick(ns, before);
+            if let Some(o) = self.observatory.as_mut() {
+                o.observer.after_tick(sim.world(), sim.fauna(), ns);
+            }
+            ticks += 1;
+            #[cfg(test)]
+            if let Some(hook) = &mut self.after_tick {
+                hook(sim.world().tick());
+            }
+        }
+        (ticks, moved)
+    }
+
+    fn drain(
+        &mut self,
+        sim: &mut Sim,
+        ctl: &mut Control,
+        pacer: &mut Pacer,
+        clock: &mut Clock,
+        budget: &mut Budget,
+    ) -> bool {
+        let mut moved = false;
+        while let Ok(line) = self.commands.try_recv() {
+            let at = Instant::now();
+            ctl.paced_handle(sim, pacer, clock, &line);
+            budget.commands_ns += at.elapsed().as_nanos() as u64;
+            moved = true;
+            if let Some(o) = self.observatory.as_mut() {
+                o.observer.request();
+            }
+        }
+        if let Some(o) = self.observatory.as_mut() {
+            while let Ok(command) = o.commands.try_recv() {
+                ctl.paced_handle(sim, pacer, clock, &console_line(command));
+                o.observer.request();
+                moved = true;
+            }
+        }
+        if ctl.quit {
+            return moved;
+        }
+        let asked = ctl.save_to.take().or_else(|| {
+            let now = std::time::SystemTime::now();
+            (save::take_save_signal() || self.out.take_save_request())
+                .then(|| save::default_save_dir(now, sim.world().tick()))
+        });
+        if let Some(dir) = asked {
+            let (world, flora, fauna) = sim.layers();
+            self.on_demand.save_whole_to(dir, world, flora, fauna);
+        }
+        moved
+    }
+}
+
 impl std::ops::Deref for Control {
     type Target = Console;
     fn deref(&self) -> &Console {
@@ -2051,6 +2100,13 @@ impl Control {
         self.console.handle(world, flora, fauna, line);
         for said in self.console.take_said() {
             eprintln!("cubarium voxel: {said}");
+        }
+    }
+
+    fn paced_handle(&mut self, sim: &mut Sim, pacer: &mut Pacer, clock: &mut Clock, line: &str) {
+        sim.with_layers_mut(|world, flora, fauna| self.handle(world, flora, fauna, line));
+        if pacer.sync(self) {
+            clock.rebase_now(Instant::now());
         }
     }
 }
@@ -2134,6 +2190,96 @@ mod tests {
     struct CountingSink {
         frames: std::sync::Arc<std::sync::atomic::AtomicU64>,
         brightest: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    fn command_test_world() -> (Sim, Control, Out) {
+        let cfg = VoxelConfig {
+            sim: SimParams {
+                threads: 1,
+                world: cubarium_voxel::Config { width: 8, height: 4, depth: 2, ..Default::default() },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let proj = Projection::new(30.0, 4, 0, &cfg.sim.world).unwrap();
+        let sim = cubarium_session::create::ready_sim(
+            World::empty(cfg.sim.world.clone()),
+            Flora::new(Default::default()),
+            Fauna::new(FaunaConfig::placeholder()),
+            cfg.sim.sim_config(),
+        );
+        let ctl = Control::new(8.0, proj);
+        let out = Out::cpu(
+            Box::new(CountingSink {
+                frames: Default::default(),
+                brightest: Default::default(),
+            }),
+            cfg,
+            proj,
+            None,
+        );
+        (sim, ctl, out)
+    }
+
+    #[test]
+    fn catchup_commands_interrupt_a_speed_batch_within_one_tick() {
+        for lines in [vec!["p on"], vec!["speed 0.5"], vec!["s 1"], vec!["p on", "p off"]] {
+            let (mut sim, mut ctl, mut out) = command_test_world();
+            let mut pacer = Pacer::new(&ctl);
+            let period = Duration::from_secs_f64(crate::clock::DT);
+            let mut clock = Clock::new(Instant::now() - period * 4);
+            let (tx, commands) = mpsc::channel();
+            let mut observatory = None;
+            let mut writer = SnapshotWriter::new(PathBuf::new());
+            let mut budget = Budget::default();
+            let mut point = CommandPoint {
+                commands: &commands,
+                observatory: &mut observatory,
+                on_demand: &mut writer,
+                out: &mut out,
+                after_tick: Some(Box::new(move |_| {
+                    for line in &lines {
+                        tx.send((*line).to_string()).unwrap();
+                    }
+                })),
+            };
+            let command_at = Instant::now();
+            let (ticks, _) = point.tick(&mut sim, &mut ctl, &mut pacer, &mut clock, &mut budget);
+            assert_eq!(ticks, 1, "the command interrupts the batch at the next tick");
+            assert!(!matches!(clock.next_step(command_at), Step::Tick), "the clock drops the backlog");
+            assert!(!pacer.take_tick(), "the old batch was dropped");
+        }
+    }
+
+    #[test]
+    fn catchup_save_captures_the_next_tick_and_catchup_continues() {
+        let (mut sim, mut ctl, mut out) = command_test_world();
+        let mut pacer = Pacer::new(&ctl);
+        let mut clock = Clock::new(Instant::now() - Duration::from_secs_f64(crate::clock::DT) * 4);
+        let (tx, commands) = mpsc::channel();
+        let dir = StateDir::new("catchup-command-save");
+        let target = dir.0.join("saved");
+        let line = format!("save {}", target.display());
+        let mut observatory = None;
+        let mut writer = SnapshotWriter::new(PathBuf::new());
+        let mut budget = Budget::default();
+        let mut point = CommandPoint {
+            commands: &commands,
+            observatory: &mut observatory,
+            on_demand: &mut writer,
+            out: &mut out,
+            after_tick: Some(Box::new(move |tick| {
+                if tick == 1 {
+                    tx.send(line.clone()).unwrap();
+                }
+            })),
+        };
+        let (ticks, _) = point.tick(&mut sim, &mut ctl, &mut pacer, &mut clock, &mut budget);
+        drop(point);
+        writer.wait();
+        assert!(ticks > 1, "saving does not stop catch-up");
+        let meta = cubarium_session::store::read_meta(&target).unwrap();
+        assert_eq!(meta.tick, 1, "the save is taken at the next command point");
     }
 
     impl crate::sink::FrameSink for CountingSink {
