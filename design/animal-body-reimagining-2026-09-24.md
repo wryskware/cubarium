@@ -79,8 +79,9 @@ with twin tail lures, refined in a Blender/voxel round:
 lure and a sudden capture, but needs a body whose jaw, supports and lure stay
 distinct. Keep the 1.0 × 0.25 × 0.45 m body, approximately 8 × 2 × 3.5 voxels:
 32–48 px long and 14–21 px high. It patrols and ambushes eligible small prey,
-strikes and scavenges; its paid lure also mimics daytime flowers. Newborn loftstriders
-as prey are *not in the sim yet*: the current prey list excludes their lineage. At this
+strikes and scavenges; its paid lure also mimics daytime flowers. Loftstriders, even
+newborn, are too big for it (Wrysk, 2026-10-08); bellwings it takes when it catches one
+at rest. At this
 scale a dark capture cleft and one cyan endpoint carry more than many fine claws.
 
 ### Sim state
@@ -88,7 +89,7 @@ scale a dark capture cleft and one cyan endpoint carry more than many fine claws
 - synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
 - code_id: `lanternjaw`; display name Lanternjaw (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-observatory/src/query.rs:20`)
 - status: live founder in the desktop terrarium: 3 dormant clutches; code default 3 dormant clutches (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:1930`)
-- diet: carrion from kills or scavenging; eligible prey list is littershredder, frondgrazer, capgnawer, ripple-snail, bellwing and grounded seedporter (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:1539`)
+- diet: carrion from kills or scavenging; eligible prey list is littershredder, frondgrazer, capgnawer, ripple-snail, bellwing (at rest only) and grounded seedporter (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:1539`)
 - size: adult length × width × height 1.0 × 0.25 × 0.45 m; juvenile dimensions scale with cube root of body / body_max (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:2510`)
 - body: core.body_min 0.102, breeding threshold 0.63, full size 1.05 org-units in the desktop preset; shipped mass scale 30 × placeholder quantities, not 30 × physical dimensions (sources: `config/desktop/terrarium.toml` → `fauna.founders.lanternjaw.core`; `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/lib.rs:2308`)
 - activity: dark-active, with daytime flower mimicry enabled (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:1930`)
@@ -99,7 +100,7 @@ scale a dark capture cleft and one cyan endpoint carry more than many fine claws
 - movement_habitat: ground patrol, ambush, strike, handle and carcass feeding; daytime flower ambush; adult step 0.45 m (source: `crates/cubarium-voxel-fauna/src/body.rs:1930`)
 - defence: armour 0, agility 0 (source: `crates/cubarium-voxel-fauna/src/body.rs:1930`)
 - predators: Veilhound; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)
-- not_in_sim_yet: newborn loftstriders as prey (retained body-dossier intent; absent from Hunter::LANTERNJAW.prey; source: `crates/cubarium-voxel-fauna/src/body.rs:1539`)
+- not_prey: loftstriders of any age, too big for it (Wrysk 2026-10-08; matches Hunter::LANTERNJAW.prey, source: `crates/cubarium-voxel-fauna/src/body.rs:1539`)
 
 ### LJ-D2 · Low scorpid with a sheltered lure
 
