@@ -101,14 +101,7 @@ struct Poses<'l> {
 /// The unit `(dx, dz)` from a climbing body's column into the face it is on: the wall
 /// ahead on the way up, the cliff it hangs from (behind the way it walked) on the way
 /// down.
-fn wall_toward(climb: &cubarium_voxel_fauna::WallClimb) -> (i32, i32) {
-    let (dx, dz) = (i32::from(climb.dir.0), i32::from(climb.dir.1));
-    if climb.ascending {
-        (dx, dz)
-    } else {
-        (-dx, -dz)
-    }
-}
+pub use cubarium_session::view_state::wall_toward;
 
 /// The interim body colour: a placeholder, and chosen to look like one.
 ///
@@ -262,9 +255,7 @@ impl AnimalKey {
 
 /// Whether an animal shows as starving: reserve empty and body under 0.015 (D3's
 /// starving flag).
-pub fn is_starving(animal: &Animal) -> bool {
-    animal.reserve <= 0.001 && animal.body <= 0.015
-}
+pub use cubarium_session::view_state::is_starving;
 
 /// Whether an animal shows as wounded (predation §2.4): any wound it has not healed.
 pub fn is_wounded(animal: &Animal) -> bool {

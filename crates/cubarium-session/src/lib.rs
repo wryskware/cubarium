@@ -22,7 +22,10 @@ pub mod founders;
 pub mod params;
 mod session;
 pub mod store;
+pub mod view_state;
 
+#[cfg(test)]
+mod feed_tests;
 #[cfg(test)]
 mod tests;
 
@@ -87,8 +90,24 @@ pub fn species_table() -> Value {
             "yielding": feed::FLAG_YIELDING,
             "alert": feed::FLAG_ALERT,
             "wounded": feed::FLAG_WOUNDED,
+            "starving": feed::FLAG_STARVING,
         },
         "materials": ["air", "bedrock", "rock", "soil"],
+        "plant_ripe_at": view_state::RIPE_AT,
+        "mark_kinds": feed::MARK_KINDS,
+        "decay_states": feed::DECAY_STATES,
+        "wilt_levels": (0..view_state::WILT_LEVELS).map(|level| format!("wilt_{level}")).collect::<Vec<_>>(),
+        "vine_directions": cubarium_voxel_flora::FaceDir::ALL.map(|dir| match dir {
+            cubarium_voxel_flora::FaceDir::PosX => "pos_x", cubarium_voxel_flora::FaceDir::NegX => "neg_x",
+            cubarium_voxel_flora::FaceDir::PosZ => "pos_z", cubarium_voxel_flora::FaceDir::NegZ => "neg_z",
+            cubarium_voxel_flora::FaceDir::Down => "down",
+        }),
+        "vine_densities": view_state::vine::Density::ALL.map(|d| d.name()),
+        "vine_accents": ([view_state::vine::Accent::None, view_state::vine::Accent::Bud,
+            view_state::vine::Accent::Flower, view_state::vine::Accent::Fruit].map(|a| a.name())),
+        "vine_flags": { "rooted": feed::VINE_ROOTED, "hanging": feed::VINE_HANGING, "emissive": feed::VINE_EMISSIVE },
+        "vine_tiles": { "columns": 256, "sets": ["plain", "climbing", "hanging"],
+            "densities_per_set": view_state::vine::Density::ALL.len(), "accent_row": view_state::vine::ACCENT_ROW },
         "chunk": feed::CHUNK,
     })
 }

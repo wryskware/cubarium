@@ -374,7 +374,7 @@ fn the_first_take_after_a_load_returns_every_chunk() {
     let save = dir.0.join("slot");
     session.save_blocking(&save, Duration::from_secs(30)).expect("saves");
     // Drain whatever is pending, so only the load can fill the next take.
-    let _ = take_current(&session);
+    let before = take_current(&session);
     session.load_blocking(&save, Duration::from_secs(30)).expect("loads");
     let v = take_current(&session);
     let [cx, cy, cz] = v.chunk_dims;
@@ -382,6 +382,12 @@ fn the_first_take_after_a_load_returns_every_chunk() {
     assert_eq!(v.chunks.len(), (cx * cy * cz) as usize, "every chunk");
     assert!(v.chunks.iter().all(|c| c.bytes.len() == 3 * CHUNK_CELLS));
     assert!(v.frame.is_some(), "and the organisms");
+    assert_eq!(
+        v.chunks.iter().map(|c| (&c.at, &c.marks, &c.vines)).collect::<Vec<_>>(),
+        before.chunks.iter().map(|c| (&c.at, &c.marks, &c.vines)).collect::<Vec<_>>(),
+        "full surface replacement lists travel with the reset"
+    );
+    assert_eq!(v.frame.as_ref().unwrap().carcasses, before.frame.as_ref().unwrap().carcasses);
     let next = session.take_view();
     assert!(!next.full && next.chunks.len() < v.chunks.len(), "only the first take is whole");
 }
@@ -473,4 +479,37 @@ fn every_listed_preset_is_one_a_spec_can_name() {
     assert!(!terrain.iter().any(|t| t == unlisted));
     assert!(with(Some(unlisted), None).sim_params().is_err(), "an unlisted landform is refused");
     assert!(with(None, Some(unlisted)).sim_params().is_err(), "an unlisted climate is refused");
+}
+
+#[test]
+fn a_hand_built_surface_and_carcass_survive_a_full_take_after_load() {
+    use cubarium_voxel_flora::{Carcass, DepositKind};
+    let scratch = Scratch::new("surfaces-load");
+    let mut world = crate::feed_tests::world();
+    let mut flora = crate::feed_tests::flora();
+    crate::feed_tests::deposit(&mut flora, 20, DepositKind::DeadWood, 1.0);
+    crate::feed_tests::deposit(&mut flora, 3, DepositKind::Carrion, 1.0);
+    assert!(flora.lay_carcass(cubarium_voxel_flora::Site { x: 3, y: 1, z: 1 },
+        Carcass { lineage: cubarium_voxel_fauna::Founder::Browser.index() as u8, heading_rad: 0.0, organic: 1.0 }));
+    crate::feed_tests::vine(&mut world, &mut flora);
+    let session = Session::new(options());
+    session.install(crate::Prepared { world, flora, fauna: cubarium_voxel_fauna::Fauna::new(Default::default()),
+        exec: options().exec, label: "fixture".into() });
+    wait(&session, "installed", |s| s.running);
+    pause(&session);
+    let before = take_current(&session);
+    assert!(before.chunks.iter().any(|c| !c.marks.is_empty()));
+    assert!(before.chunks.iter().any(|c| !c.vines.is_empty()));
+    assert!(!before.frame.as_ref().unwrap().carcasses.ids.is_empty());
+    let save = scratch.0.join("slot");
+    session.save_blocking(&save, Duration::from_secs(30)).unwrap();
+    session.load_blocking(&save, Duration::from_secs(30)).unwrap();
+    let after = take_current(&session);
+    assert!(after.full);
+    assert!(after.generation > before.generation);
+    assert_eq!(after.chunks.len(), before.chunks.len());
+    for (a, b) in after.chunks.iter().zip(&before.chunks) {
+        assert_eq!((&a.at, &a.marks, &a.vines), (&b.at, &b.marks, &b.vines));
+    }
+    assert_eq!(after.frame.as_ref().unwrap().carcasses, before.frame.as_ref().unwrap().carcasses);
 }

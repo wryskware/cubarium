@@ -648,10 +648,7 @@ pub fn animal_emission(founder: Founder, material: u8, accent: bool) -> Option<R
 
 /// The emissive colour of a latticevine accent: the flower's bell mouth.
 pub fn vine_emission(accent: super::vine::Accent) -> Option<Rgb> {
-    match accent {
-        super::vine::Accent::Flower => Some(BELL_MOUTH),
-        _ => None,
-    }
+    accent.emissive().then_some(BELL_MOUTH)
 }
 
 /// A body colour with its hue-shifted shadow and a glint.

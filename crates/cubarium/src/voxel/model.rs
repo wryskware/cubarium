@@ -596,22 +596,11 @@ pub const MAGENTA: u8 = named("magenta");
 
 /// How many wilt tints a foliage cell can take, `0` (turgid) to `WILT_LEVELS − 1` (at
 /// `μ = 0`). Quantised so a meadow shares a handful of styles: the GPU path holds 256.
-pub const WILT_LEVELS: u8 = 5;
-
-/// The wilt level of a stand at moisture `μ`.
-pub fn wilt_level(moisture: f64) -> u8 {
-    let wilt = 1.0 - moisture.clamp(0.0, 1.0);
-    let top = f64::from(WILT_LEVELS - 1);
-    if wilt.is_finite() {
-        (wilt * top).round().clamp(0.0, top) as u8
-    } else {
-        0
-    }
-}
+pub use cubarium_session::view_state::{WILT_LEVELS, wilt_level};
 
 /// The ripe fraction at which a bloom opens: a parcel holding half a package
 /// (`design/art-direction/species-dossiers-2026-09-21.md`, "ripe").
-pub const RIPE_AT: f64 = 0.5;
+pub use cubarium_session::view_state::RIPE_AT;
 
 /// The hash layer lanternberry fruit is thinned under, apart from every foliage index.
 pub const FRUIT_LAYER: u8 = 0xff;
