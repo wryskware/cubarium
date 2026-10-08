@@ -56,8 +56,8 @@ void main() {
             wsum += w;
             ivec2 q = p + dir * i;
             if (q.y < 0 || q.y >= size.y) { continue; }
-            q.x = q.x % size.x;
-            if (q.x < 0) { q.x += size.x; }
+            // `%` of a negative is undefined in GLSL (world.glsl's `wrapMod`).
+            q.x = q.x >= 0 ? q.x % size.x : size.x - 1 - (-1 - q.x) % size.x;
             s += texelFetch(src, q, 0).rgb * w;
         }
         outColour = vec4(s / wsum, 1.0);

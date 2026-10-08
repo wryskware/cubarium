@@ -58,8 +58,9 @@ void main() {
             for (int dx = -R; dx <= R; ++dx) {
                 float d = length(vec2(dx, dy));
                 if (d > reach) { continue; }
-                int x = (p.x + dx) % CW;
-                if (x < 0) { x += CW; }
+                // `%` of a negative is undefined in GLSL (world.glsl's `wrapMod`).
+                int x = p.x + dx;
+                x = x >= 0 ? x % CW : CW - 1 - (-1 - x) % CW;
                 vec3 e = texelFetch(src, ivec2(x, y), 0).rgb;
                 float w = 1.0 - d / float(R + 1);
                 float q = ceil(w * STEPS - 1e-3) / STEPS;
