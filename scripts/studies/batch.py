@@ -21,6 +21,7 @@ from pathlib import Path
 import re
 import resource
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -115,7 +116,7 @@ def mem_available():
 
 def execute(out, jobs, parallel, groups, threads, mem_per_run_gb=3):
     active = {}
-    pending = list(jobs)
+    pending = [job for job in jobs if job["state"] == "queued"]
     while active or pending:
         while len(active) < parallel and pending:
             # Unequal L3 groups must not be oversubscribed by the global budget.
@@ -129,7 +130,7 @@ def execute(out, jobs, parallel, groups, threads, mem_per_run_gb=3):
                 break
             job = pending.pop(index)
             root = out / job["arm"] / f's{job["seed"]}'
-            root.mkdir(parents=True)
+            root.mkdir(parents=True, exist_ok=True)
             cpus = groups[job["slot"] % len(groups)]
 
             def confine():
@@ -180,16 +181,72 @@ def detach(out):
     return True
 
 
+def resume(out, binary, wrapper, parallel, groups, threads, mem_per_run_gb):
+    """Continue incomplete children; completed children and their telemetry stay intact."""
+    manifest = json.loads((out / "batch.json").read_text())
+    if sha256(binary) != manifest["binary_sha256"]:
+        raise ValueError("resume binary differs from batch.json")
+    identity = manifest["identity"]
+    for item in (identity.get("config"), identity.get("required")):
+        if item and sha256(item["path"]) != item["sha256"]:
+            raise ValueError(f"resume input changed: {item['path']}")
+    for policies in identity["policies"].values():
+        for item in policies.values():
+            if sha256(item["path"]) != item["sha256"]:
+                raise ValueError(f"resume policy changed: {item['path']}")
+    for path, digest in identity.get("genomes", {}).items():
+        if sha256(path) != digest:
+            raise ValueError(f"resume genome changed: {path}")
+    for seed, hashes in identity["starts"].items():
+        for name, digest in hashes.items():
+            if sha256(Path(manifest["starts"][seed]) / name) != digest:
+                raise ValueError(f"resume start changed: seed {seed}/{name}")
+    jobs = manifest["runs"]
+    for job in jobs:
+        root = out / job["arm"] / f's{job["seed"]}'
+        run = root / "run"
+        if (run / "DONE").exists() and not (run / "FAILED").exists():
+            job["state"] = "done"
+            continue
+        # A failed liveness check needs investigation, not an automatic retry.
+        if (run / "FAILED").exists():
+            job["state"] = "failed"
+            continue
+        command = job["command"]
+        job.setdefault("original_command", command)
+        prefix = [sys.executable, str(wrapper), "--slot", str(job["slot"]), "--"]
+        if any((run / "ckpt").glob("m*/minute")):
+            job["command"] = prefix + ["chrt", "-i", "0", "nice", "-n", "19", str(binary),
+                                        f"resume={run}", f"threads={threads}"]
+        else:
+            # Only task-owned incomplete outputs with no committed checkpoint.
+            if root.exists():
+                shutil.rmtree(root)
+            original = job["original_command"]
+            tail = original[original.index("--") + 1:]
+            tail[tail.index("19") + 1] = str(binary)
+            tail = [f"threads={threads}" if a.startswith("threads=") else a for a in tail]
+            job["command"] = prefix + tail
+        job["state"] = "queued"
+    manifest.update(runs=jobs, l3_groups=groups, max_parallel=parallel)
+    atomic(out / "batch.json", json.dumps(manifest, indent=2) + "\n")
+    for marker in ("DONE", "PAUSED", "STOP"):
+        (out / marker).unlink(missing_ok=True)
+    write_state(out, jobs)
+    execute(out, jobs, parallel, groups, threads, mem_per_run_gb)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("out", type=Path)
     parser.add_argument("--bin", required=True, type=Path)
-    parser.add_argument("--arm", required=True, action="append", metavar='NAME="ARGS"')
-    sources = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument("--arm", action="append", metavar='NAME="ARGS"')
+    parser.add_argument("--resume", action="store_true")
+    sources = parser.add_mutually_exclusive_group()
     sources.add_argument("--starts", metavar="GLOB")
     sources.add_argument("--config", type=Path)
     parser.add_argument("--seeds", default="1-8")
-    parser.add_argument("--hours", required=True, type=float)
+    parser.add_argument("--hours", type=float)
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--max-parallel", type=int)
     parser.add_argument("--slot-base", type=int, default=0)
@@ -200,6 +257,15 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     try:
+        if args.resume:
+            if args.arm or args.starts or args.config or args.required or args.hours is not None or args.detach:
+                raise ValueError("resume uses saved inputs; pass only bin, threads, max-parallel and memory options")
+            manifest = json.loads((args.out / "batch.json").read_text())
+            args.hours = manifest["args"]["hours"]
+            args.threads = manifest["args"]["threads"]
+            args.mem_per_run_gb = manifest["args"]["mem_per_run_gb"]
+        elif not args.arm or not (args.starts or args.config) or args.hours is None:
+            raise ValueError("new batches need --arm, --hours and --config or --starts")
         if args.threads < 1 or args.slot_base < 0 or not math.isfinite(args.hours) or args.hours <= 0:
             raise ValueError("require positive threads/hours and nonnegative slot-base")
         binary = args.bin.resolve(strict=True)
@@ -221,6 +287,9 @@ def main(argv=None):
         parallel = min(parallel, memory_cap)
         print(f"parallel cap: {parallel} (CPU ceiling {ceiling}, memory cap {memory_cap}; "
               f"{args.mem_per_run_gb:g} GiB/run, 80% of {available / 1024**3:.2f} GiB MemAvailable)", flush=True)
+        if args.resume:
+            resume(args.out.resolve(), binary, wrapper, parallel, groups, args.threads, args.mem_per_run_gb)
+            return
         starts = {}
         load_minutes = {}
         required = read_required(args.required.resolve(strict=True)) if args.required else None
@@ -282,6 +351,9 @@ def main(argv=None):
                                            for name in ("world.bin", "flora.bin", "fauna.bin")}
                                 for seed, path in starts.items()},
                         policies=policies,
+                        genomes={str(Path(arg[len("genome="):]).resolve(strict=True)):
+                                 sha256(Path(arg[len("genome="):]))
+                                 for extra in arms.values() for arg in extra if arg.startswith("genome=")},
                         required=dict(path=str(args.required.resolve()), sha256=sha256(args.required)) if args.required else None)
         stage = shlex.split(args.stage)
         if any(not re.fullmatch(r"(check_min|segment_min|keep)=[1-9]\d*", arg) for arg in stage):

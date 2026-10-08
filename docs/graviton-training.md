@@ -14,45 +14,103 @@ host is terminated and everything on it is lost. So: spot for runs that checkpoi
 you can afford to rerun), on-demand only if a run must not be interrupted. The account may run
 two spot 64-core hosts at once (128 vCPU quota) or one on-demand one (64 vCPU).
 
-## Runbook (next training session)
+## Running today's study tools on Graviton
 
-Prerequisites: `aws` logged in (it is), region us-east-1. Everything is `scripts/aws-graviton.sh`.
+Prepared 2026-10-08; this package made **no AWS calls and launched no hosts**.
+`graviton-studies.py` uses one independent named job per host. `batch` and `eco`
+run their census children through host-local `run-study.py` slots; wrapping the
+batch dispatcher would incorrectly hide the other L3 groups. `live` wraps the
+whole trainer in slot 0, with at most 16 threads. Every job is detached, nice 19,
+has a 64 GiB address-space ceiling and a wall deadline. Censuses use one thread,
+at most 57 workers on 64 vCPUs, and batch.py further limits concurrency to 80% of
+MemAvailable / `--mem-per-run-gb` (default 3 GiB). Measure mature-world peak memory
+and throughput with vitals/checkpoints before filling the queue; 57 is a ceiling.
+
+Prerequisites: Python 3.11+ (including tomllib), rsync, SSH key, ARM binaries from
+this build, and validated inputs. AL2023 bootstrap installs Python/rsync/util-linux.
+AWS login is needed only for `up`, `status`, `down`; `plan` and `kit` are offline.
+Remote commands use `python3.11`, not AL2023's potentially older `python3` default.
+The existing recipe was **native compilation via `aws-graviton.sh ship`**, not a
+local cross recipe. This preparation cross-builds locally with Zig 0.13's C/linker
+and `rustup target add aarch64-unknown-linux-gnu`, `cargo build --locked --release
+--target aarch64-unknown-linux-gnu -p cubarium-search`, then `-p cubarium --example
+voxel_census`. The compiler wrapper drops cc-rs's redundant `--target=` and Zig's
+unsupported `-Wl,--fix-cortex-a53-843419`; Rust's target is unchanged. The binaries
+land in the normal repository cache at `target/aarch64-graviton2/`.
+
+The JSON examples are job specifications, **not chosen ecological experiments**.
+The eco example is 16 candidates × 8 seeds plus 8 baseline worlds: 136 evaluations,
+3 CPU waves at 57 workers, plus holdouts. `screen-2h` requires **mature saved starts**:
+prepare `runs/graviton-starts/s1` … `s16` as actual checkpoint directories (each
+has minute/world.bin/flora.bin/fauna.bin), retaining founding census/roster evidence
+where needed. Put them in the kit with `--input runs/graviton-starts`; run `plan`
+with that same option. The paired-batch example uses fresh configs and identical
+base/candidate arms as a launcher smoke template: supply the intended candidate's
+`set=` arguments before a real study. Its two hosts each evaluate 2 arms × 8 seeds.
 
 ```sh
-scripts/aws-graviton.sh up                 # c7g.16xlarge spot; falls back to c6g.16xlarge
-scripts/aws-graviton.sh status             # wait for "running"
-scripts/aws-graviton.sh ship               # native build on host 1 (~1.5 min), saves binary locally
-scripts/aws-graviton.sh put runs/x/centre.json config/foo.toml   # inputs untracked by git
-scripts/aws-graviton.sh run 1 mytrain -- voxel-train ...         # nohup, all cores, log on host
-scripts/aws-graviton.sh logs 1 mytrain 40
-scripts/aws-graviton.sh fetch 1            # pull ~/cubarium/runs/ into runs/aws-<ip>/
-scripts/aws-graviton.sh down               # ALWAYS, when done or the run has died
+G=scripts/graviton-studies.py
+S=config/training/graviton-eco.json # or graviton-batches.json
+python3 "$G" plan --spec "$S" --price-per-host-hour 0.75 --hours 12 --worlds-per-worker-hour 2.4 --input runs/graviton-starts
+python3 "$G" kit --bin-dir /home/wrysk/wryskware/cubarium/target/aarch64-graviton2 --input runs/graviton-starts
+# Only AFTER Wrysk's go for this specific launch:
+python3 "$G" up --spec "$S" --hours 12 --go
+scripts/aws-graviton.sh status # obtain IPs; no automated sleep/poll loop
+python3 "$G" ship --spec "$S" --host ec2-user@IP1 # add --host ec2-user@IP2 for two jobs
+python3 "$G" run --spec "$S" --host ec2-user@IP1 --hours 12
+python3 "$G" fetch --spec "$S" --host ec2-user@IP1 --dest runs/graviton-fetch
+python3 "$G" down # ALWAYS, even after a failed run or fetch
 ```
 
-- `up -n 2` launches two hosts (a second host is a second independent run: mode A does not
-  split one run across hosts). `up -t c6g.16xlarge` forces a type; `--ondemand` skips spot;
-  `--hours H` sets the self-terminate timer (default 12; the host powers off and is deleted).
-- `ship` sends the tracked files as they are on disk, uncommitted edits included, so the AWS
-  build matches your working tree. The host builds natively; the stripped binary is saved to
-  `target/aarch64-graviton2/cubarium-search` and lands on the host at
-  `~/cubarium-train/cubarium-search` (and `~/cubarium/target/release/cubarium-search`).
-- `run` starts `cubarium-search ARGS` from `~/cubarium` (so repo-relative `config/...` paths
-  work), with `CUBARIUM_WORKER_RESERVE=0`, so all 64 cores are workers. Untracked inputs
-  (warm-start centres under `runs/`) must be `put` first. Write outputs under `runs/` so
-  `fetch` finds them.
-- Cost guards: the self-terminate timer, spot by default, ssh from your current IP only, no
-  IAM role on the hosts, EBS deleted on terminate. A forgotten host costs about $17/day on
-  spot, $52/day on-demand: run `status` at the end of a session.
-- **Interruptions:** a reclaimed spot host kills the run. Start runs with checkpoints
-  (`--save-every` on `voxel-live-train`; check `voxel-train`'s option) and `fetch` periodically;
-  otherwise rerun.
-- Leftover resources by design: key pair `cubarium-aws` (private key `~/.ssh/cubarium-aws.pem`)
-  and security group `cubarium-train-ssh`. Both are free and reused.
+For batches omit the mature-start `--input`. For custom jobs write a JSON `jobs`
+list with `name`, `kind` (`batch`, `eco`, `live`) and an `args` string array. The
+launcher owns output, binary, threads, concurrency, detach, resume and wall limits;
+batch's `--hours` is the simulated horizon, separate from host `--hours`.
+A live spec supplies `--centre LINEAGE=config/...json`, `--world config/...toml`,
+`--worlds`, `--pairs`, `--generations` and any other training options. Additional
+policies/starts outside config must be kit `--input` paths inside this checkout.
+Configs and tools are copied and hashed along with both ARM ELF binaries.
+Never ship a changed kit over a running job. On-host log/PID: `runs/NAME.log`,
+`runs/NAME.pid`; output `runs/NAME/`, with `HOST_EXIT` recording the process exit.
+Inspect STATE.tsv/status/FAILED: a batch DONE only says its children ended.
+After launch inspect every thread's `/proc/PID/task/*/status` Cpus_allowed_list:
+batch.py verifies its census children; live trainer threads must stay in slot 0's
+reported L3 group. Check existing host load before starting another campaign.
 
-Code change made for this (uncommitted at the time of writing, `task.rs`):
-`MAX_EPISODE_WORKERS` 32 → 64, and `CUBARIUM_WORKER_RESERVE=N` replaces the ten-percent CPU
-reserve with "leave N free". The desktop and the Tachyon leave it unset, so nothing changes
-there (28 workers on the 32-thread desktop).
+**Interruption recovery: fetch → relaunch elsewhere → resume.** Fetch periodically
+by explicitly invoking `fetch`, before terminating hosts; recovery uses the last
+successful off-host fetch, without a notice or final save. Fetch stages a copy and
+checks its committed checkpoint hashes before replacing the previous local copy;
+if a checkpoint rolls during transfer, it fails and retains that copy. Fetch again
+at a quiet boundary. Only the latest complete checkpoint per census and live
+trainer's committed slot are retained; temporary/older checkpoints are excluded.
+A run lost before its first checkpoint is restarted; completed and failed censuses
+are retained. `eco_search --resume` now continues its interrupted batch instead of
+deleting it. Live resume restores optimizer, worlds and familiarity together.
+
+After obtaining Wrysk's go for the replacement launch, `up`, obtain its new IP,
+ship the **same kit and inputs**, then:
+```sh
+python3 "$G" restore --spec "$S" --host ec2-user@NEW_IP --dest runs/graviton-fetch
+python3 "$G" run --spec "$S" --host ec2-user@NEW_IP --resume --hours 12
+python3 "$G" down # ALWAYS on every launched/replacement host
+```
+Use the same host order in spec/fetch/restore and the fixed remote root
+`/home/ec2-user/cubarium-kit`: manifests contain absolute paths. No path relocation
+or cross-version migration is implied. A failed liveness check stays failed for
+inspection. A hard kill may lose work since the last checkpoint/fetch.
+
+Offline cost: **hosts × wall hours × user-supplied price/host-hour**, plus storage
+and transfer. At an explicitly assumed 2.4 two-hour worlds/worker-hour, 57 workers
+mean ≤136.8 worlds/hour and ~75 min per 136-world generation (3 waves), before
+setup/holdouts. The two 16-world batch jobs have only 32 occupied worker slots:
+≤76.8 worlds/hour total under that same assumption. These are planning assumptions,
+not current measurements or price quotes. One host ×12 h ×$0.75 = $9; two = $18.
+Wrysk's go is required **per launch**. `up --dry-run` is not an offline plan: the
+old helper performs key/security-group setup. Always `down`; it now includes
+stopped/stopping as well as pending/running tagged instances and terminates them.
+The shutdown timer and delete-on-termination volumes remain secondary guards.
+Legacy `aws-graviton.sh run` is retired because it bypassed resource policy.
 
 ## Checked in the end-to-end run (c7g.16xlarge, spot, us-east-1)
 

@@ -1,0 +1,10 @@
+{
+  "jobs": [{
+    "name": "eco-16x8", "kind": "eco",
+    "args": ["--genome", "config/training/search/roster.toml",
+             "--profile", "screen-2h", "--required", "config/training/required-d72.toml",
+             "--starts", "runs/graviton-starts/s*",
+             "--lambda", "16", "--seeds-per-gen", "8", "--seed-pool", "1-8",
+             "--holdout", "9-16", "--generations", "16"]
+  }]
+}

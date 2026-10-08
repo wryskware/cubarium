@@ -10,8 +10,7 @@
 #                        target/aarch64-graviton2/, push it to every host
 #   put FILE...          copy files (repo-relative paths, e.g. a warm-start centre under runs/)
 #                        to ~/cubarium/ on every host
-#   run N NAME -- ARGS   start `cubarium-search ARGS` on host N under nohup, cwd ~/cubarium,
-#                        log ~/cubarium/runs/NAME.log, all cores used (CUBARIUM_WORKER_RESERVE=0)
+#   run                  retired: use scripts/graviton-studies.py run (bounded study kit)
 #   logs N NAME [LINES]  tail that log
 #   fetch N              pull ~/cubarium/runs/ from host N into runs/aws-<ip>/
 #   status               hosts: n, id, ip, state, market, launch time, type
@@ -38,6 +37,11 @@ hosts() { # id, ip, state, market, launch time, type
 		--filters "Name=tag:project,Values=$TAG" Name=instance-state-name,Values=pending,running \
 		--query 'Reservations[].Instances[].[InstanceId,PublicIpAddress,State.Name,InstanceLifecycle,LaunchTime,InstanceType]' \
 		--output text | sort -k5
+}
+all_host_ids() { # down must also find stopped/stopping instances, not just running ones.
+	aws_ ec2 describe-instances \
+		--filters "Name=tag:project,Values=$TAG" Name=instance-state-name,Values=pending,running,stopping,stopped \
+		--query 'Reservations[].Instances[].InstanceId' --output text
 }
 ips() { hosts | awk '$3=="running" && $2!="None" {print $2}'; }
 host_ip() {
@@ -101,9 +105,10 @@ cmd_up() {
 	ud=$(mktemp)
 	cat >"$ud" <<EOF
 #!/bin/bash
-dnf install -y gcc gcc-c++ git tar make pkgconf-pkg-config > /var/log/bootstrap.log 2>&1
-mkdir -p /home/ec2-user/cubarium-train && chown ec2-user /home/ec2-user/cubarium-train
+set -euo pipefail
 shutdown -h +$((hours * 60))
+dnf install -y gcc gcc-c++ git tar make pkgconf-pkg-config python3.11 rsync util-linux > /var/log/bootstrap.log 2>&1
+mkdir -p /home/ec2-user/cubarium-train && chown ec2-user /home/ec2-user/cubarium-train
 touch /var/tmp/ready
 EOF
 	for type in ${types//,/ }; do
@@ -135,7 +140,8 @@ EOF
 wait_ready() {
 	local ip
 	for ip in $(ips); do
-		until ssh "${ssh_opts[@]}" -o ConnectTimeout=5 "ec2-user@$ip" 'test -f /var/tmp/ready' 2>/dev/null; do sleep 5; done
+		ssh "${ssh_opts[@]}" -o ConnectTimeout=5 "ec2-user@$ip" 'test -f /var/tmp/ready' ||
+			{ echo "$ip not ready yet; retry ship once bootstrap is complete" >&2; return 1; }
 	done
 }
 
@@ -186,15 +192,8 @@ cmd_put() {
 }
 
 cmd_run() {
-	local n=$1 name=$2 ip
-	shift 2
-	[ "${1:-}" = -- ] && shift
-	ip=$(host_ip "$n")
-	# Quote each arg for the remote shell.
-	local q
-	q=$(printf '%q ' "$@")
-	ssh "${ssh_opts[@]}" "ec2-user@$ip" "cd ~/cubarium && mkdir -p runs && CUBARIUM_WORKER_RESERVE=0 nohup ~/cubarium-train/cubarium-search $q > runs/$name.log 2>&1 < /dev/null & echo started pid \$!"
-	echo "log: $0 logs $n $name"
+	echo "legacy run retired: use scripts/graviton-studies.py run --spec JOBS.json --host ec2-user@IP (see docs/graviton-training.md)" >&2
+	return 2
 }
 
 cmd_logs() {
@@ -221,7 +220,7 @@ cmd_ssh() {
 
 cmd_down() {
 	local ids
-	ids=$(hosts | awk '{print $1}')
+	ids=$(all_host_ids)
 	[ -n "$ids" ] || { echo "nothing running"; return; }
 	# shellcheck disable=SC2086
 	aws_ ec2 terminate-instances --instance-ids $ids --query 'TerminatingInstances[].[InstanceId,CurrentState.Name]' --output text
