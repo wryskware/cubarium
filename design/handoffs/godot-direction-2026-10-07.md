@@ -1,11 +1,16 @@
 ---
-status: open
+status: superseded in part
+superseded_by: design/handoffs/hybrid-renderer-2026-10-07.md (D-0005)
 date: 2026-10-07
 owner: orchestrator in a new thread with Wrysk; packages A–C below go to workers
 supersedes: design/handoffs/app-shell-2026-10-07.md
 ---
 
 # Godot direction: Rust is the simulation, Godot is everything you see and touch
+
+> **Rendering superseded (D-0005, 2026-10-07).** The Rust renderer draws the world inside the
+> Godot app; Godot owns the app. See `design/handoffs/hybrid-renderer-2026-10-07.md`. The shell
+> packages (A, C) and the WorldView contract stand.
 
 Wrysk, 2026-10-07, after weighing egui against Godot:
 - "if it fully moved into godot, we'd give it the voxel meshes and have it do all the rigging

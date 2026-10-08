@@ -6,6 +6,7 @@ decision_refs:
   - D-0002
   - D-0003
   - D-0004
+  - D-0005
 ---
 
 # Cubarium decision ledger
@@ -60,3 +61,15 @@ Only decisions already authorized in the owner's request are accepted below.
 - **Consequences:** No new features go into the Rust GPU presentation; fixes only until parity. The Tachyon panel does not constrain this direction. The visual style (voxel or illustrated pixel art) is not decided by this entry. Packages, checks and names in the canonical source remain proposals.
 - **Supersedes:** None
 - **Canonical sources:** [Godot direction handoff](../handoffs/godot-direction-2026-10-07.md), section "The split"
+
+## D-0005 — Godot owns the app; the Rust renderer draws the world
+
+- **Date:** 2026-10-07
+- **Status:** Accepted
+- **Scope:** The engine and the split between simulation, world rendering and application, for the ambient piece and the future game
+- **Decided by:** Wrysk, 2026-10-07, after the Godot built-in lighting comparison ("dude the new one looks like absolute fucking dogshit ... its not even CLOSE to parity with the old renderer"): "agree" to keeping the Rust renderer for the world inside the Godot app; "the pixel effect was a lot more load bearing to the look than i had realized. definitely keep it"; "the smooth movement and rotations and interpolation was the one thing about godot that was like, oooh this is good. so yeah i think we should get that working in our renderer"
+- **Decision:** Godot is the application layer: menus, save slots, presets, seed picking, inspect, input and gamepad, audio, platform export, and animation authoring tools. The world is drawn by the Rust renderer (`cubarium-gpu`) in its pixel-scale look, running inside the GDExtension and shown in Godot's view under the app's UI. Organisms gain smooth interpolated movement and free rotation (later rigging) inside the Rust renderer, lit by its own lighting model. Rust remains the simulation behind the session API. Godot's own world rendering (meshes and built-in lighting) is not the presentation.
+- **Rationale:** The comparison showed that the look is the custom renderer (the voxel walk, face rules, lighting model and the pixel-scale raster with its nearest upscale); Godot's built-ins could not stand in, and porting meant rebuilding a working renderer. The shell already built in Godot keeps its value. The ambient displays keep the same renderer.
+- **Consequences:** The Rust GPU presentation is no longer retired: it gains a frame bridge into Godot, panning, picking, and a model pass for moving organisms; the pixel-scale raster is kept; the pack moves off the simulation's critical path. Godot's WorldView meshes and built-in lighting become a fallback to remove. Packages, checks and names in the canonical source remain proposals.
+- **Supersedes:** D-0004
+- **Canonical sources:** [Hybrid renderer handoff](../handoffs/hybrid-renderer-2026-10-07.md), section "The split"
