@@ -1,0 +1,14 @@
+# train-flat-nopred founding roster (seed 1, minute 0, main a67b64f8 era): no Veilhound pack,
+# no lanternjaw egg bank. Required for brain-curriculum gates on that map; N_ref = founders.
+[required]
+animals = ["bellwing", "capgnawer", "frondgrazer", "littershredder", "loftstrider", "ripple-snail", "seedporter"]
+plants = ["bloomcrown", "glowcap", "lanternberry", "siphonreed", "springturf", "stonecushion", "umbrellafrond", "vaulttree", "velvetpad"]
+
+[required.N_ref]
+"bellwing" = 6
+"capgnawer" = 6
+"frondgrazer" = 8
+"littershredder" = 8
+"loftstrider" = 2
+"ripple-snail" = 8
+"seedporter" = 4
