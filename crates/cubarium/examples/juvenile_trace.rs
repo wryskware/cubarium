@@ -29,6 +29,11 @@
 //! sample of each juvenile — with `adults`, of every body — (pose, held actions, steer,
 //! mobility, fullness, what its controller said the answer was for: `seek`); with `probe`,
 //! the walkable surface around each juvenile at the end (`lineage=NAME` narrows all of it).
+//! With `ids=A,B,..` (and `every=N` samples): every N-th controller sample of those bodies,
+//! whatever their stage or latch (`body` lines: pose, held actions, steer, state, mobility,
+//! the DROP trapped clock, the FORAGE-LEAVE stay, the hunt mode), and at the end each one's
+//! motor at 16 headings, whether it stands clear, and the air over the columns round it;
+//! `drop` adds its route-graph standing and DROP's jump (`RouteGraph::drop_way`).
 //!
 //! Measurement only: it changes nothing in the run.
 
@@ -77,6 +82,10 @@ fn main() {
     let mut dumped: HashMap<u64, u64> = HashMap::new();
     // `adults`: the dump covers the adults too.
     let adults = args.iter().any(|a| a == "adults");
+    // `ids=A,B,...`: every controller sample of these bodies, whatever their stage or latch
+    // (stderr `body ...` lines): pose, held actions, steer, state and mobility.
+    let ids: Vec<u64> = get("ids=").map_or_else(Vec::new, |s| s.split(',').map(|x| x.parse().expect("ids=")).collect());
+    let every: u64 = get("every=").map_or(1, |s| s.parse().expect("every="));
     cubarium_voxel::set_thread_override(threads);
 
     let driven = if heuristic { Vec::new() } else { cubarium::voxel::policy_founders(&[]) };
@@ -116,6 +125,19 @@ fn main() {
         let config = fauna.config();
         for a in fauna.view().animals {
             let Some(f) = a.founder else { continue };
+            if ids.contains(&a.id) && a.age_ticks % (f.manifest().cadence_ticks() * every) == 0 {
+                let h = a.founder_state.held;
+                let m = a.mobility;
+                let fbk = a.founder_state.feedback;
+                eprintln!(
+                    "body t={} id={} {} x={:.3} z={:.3} y={} ym={:.3} hd={:.2} fwd={:.2} turn={:.2} feed={:.0} lift={:.1} steer={:?} state={:?} mode={:?} eat={} emerg={} full={:.3} body={:.3} thirsty={} ashore={} dry={:.2} retract={} climb={} perch={} falling={} att={:.4} got={:.4} trapped={:?} stay={:?} hunt={:?}",
+                    fauna.view().tick, a.id, f.name(), a.pose.x, a.pose.z, a.site.y, a.pose.y_m, a.pose.heading_rad,
+                    h.forward, h.turn, h.feed, a.founder_state.lift, fauna.steer_of(a.id), a.state, m.mode,
+                    a.eating, a.emergency, a.reserve / config.founder(f).core.reserve_of(a.body).max(1e-12), a.body,
+                    m.thirsty, m.ashore, m.dryness, m.retract_ticks, m.climb.is_some(), m.perch.is_some(), m.falling,
+                    fbk.attempted_equivalent, fbk.delivered_equivalent, fauna.trapped_of(a.id), fauna.forage_stays().into_iter().find(|s| s.0 == a.id), a.hunt.mode
+                );
+            }
             if only.as_deref().is_some_and(|l| l != f.name()) {
                 continue;
             }
@@ -206,6 +228,70 @@ fn main() {
                 if a.state == State::Cropping {
                     e.bit += 1.0;
                 }
+            }
+        }
+    }
+    // With `ids=`: each traced body's motor at the end, at 16 headings (`+` a sub-step of
+    // half a radius taken, `.` refused), whether it stands clear now, and the air over each
+    // column round it (voxels to the first solid above its surface, `+` for 30 or more).
+    if !ids.is_empty() {
+        let w = sim.world().view();
+        let c = w.config;
+        for a in sim.fauna().view().animals.iter().filter(|a| ids.contains(&a.id)) {
+            let Some(f) = a.founder else { continue };
+            let phys = sim.fauna().config().founder(f);
+            let g = phys.body_at(a.body);
+            let (r, head) = (g.footprint_radius(), g.headroom_voxels(c.voxel_m));
+            let mut ring = String::new();
+            let mut clear = false;
+            for step in [0.5 * r, 0.02] {
+                ring.push(' ');
+                for k in 0..16 {
+                    let h = k as f64 * std::f64::consts::TAU / 16.0;
+                    let (ok, now) = cubarium_voxel_fauna::motor_probe(&w, a.pose.x, a.pose.z, (h.sin(), h.cos()), a.site.y, step, &g, phys.wade_depth_m(&g), phys.step_limits(c.voxel_m));
+                    ring.push(if ok { '+' } else { '.' });
+                    clear = now;
+                }
+            }
+            eprintln!(
+                "motor id={} {} r={r:.3} headroom={head} site=({},{},{}) pose=({:.3},{:.3}) water={:.3} wade={:.3} clear_now={clear} headings(0=+z,4=+x; half radius, 2 cm)={ring}",
+                a.id, f.name(), a.site.x, a.site.y, a.site.z, a.pose.x, a.pose.z,
+                w.water_depth_m(i64::from(a.site.x), a.site.y, a.site.z), phys.wade_depth_m(&g)
+            );
+            if args.iter().any(|a| a == "drop") {
+                let cfg = sim.fauna().config();
+                let graph = cubarium_voxel_fauna::RouteGraph::for_founder(&w, phys, cfg.founding.clearance_margin_m);
+                let v = c.voxel_m;
+                let step = phys.step_limits(v);
+                let reach = cubarium_voxel_fauna::step_voxels(phys.drop.reach_m(phys, &g), v);
+                let own = (r / v).ceil() as u32;
+                let cols = (cfg.teachers.way_on_m / v).ceil() as u32;
+                eprintln!("graph: node_near={:?} way_on={:?}", graph.node_near(a.site, (a.pose.x, a.pose.z), own), graph.way_on(&w, a.site, r, head, step, phys.wade_depth_m(&g), own, cols));
+                let way = graph.drop_way(&w, a.site, r, head, step, reach, phys.wade_depth_m(&g), own, cols);
+                eprintln!("drop_way: {way:?}");
+            }
+            let (cx, cz) = ((a.pose.x / c.voxel_m).floor() as i64, (a.pose.z / c.voxel_m).floor() as i64);
+            for dz in -4i64..=4 {
+                let mut line = String::new();
+                for dx in -4i64..=4 {
+                    let (x, z) = ((cx + dx).rem_euclid(i64::from(c.width)), cz + dz);
+                    if z < 0 || z >= i64::from(c.depth) {
+                        line.push_str("  | ");
+                        continue;
+                    }
+                    let y0 = i64::from(a.site.y);
+                    let solid = |yy: i64| yy >= 0 && yy < i64::from(c.height) && w.is_solid(x, yy as u32, z as u32);
+                    let surf = (0..=9i64).flat_map(|d| [d, -d]).find(|d| solid(y0 + d) && !solid(y0 + d + 1));
+                    let cell = match surf {
+                        None => "##".to_string(),
+                        Some(d) => {
+                            let gap = (1..30i64).find(|g| solid(y0 + d + g)).map_or("+".to_string(), |g| (g - 1).to_string());
+                            format!("{d:+}/{gap}")
+                        }
+                    };
+                    line.push_str(&format!("{cell:>6}{}", if dx == 0 && dz == 0 { '*' } else { ' ' }));
+                }
+                eprintln!("  {line}");
             }
         }
     }

@@ -541,7 +541,9 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
                 vigour_mean_end=number(pr[-1], 'vigour_mean') if pr else None,
                 vigour_trend_per_minute=slope(pr, 'minute', 'vigour_mean', end) if pr else None,
                 observations=len(pr))
-        roles = {'litter': 'shredders: access and intake', 'dead_wood': 'decomposers: recycling',
+        # Litter is decomposition-limited: shredder guts take a tiny share of its
+        # flow at any plausible population (SHREDDER-PLATEAU, 2026-10-08).
+        roles = {'litter': 'decomposition (shredders take a minor share)', 'dead_wood': 'decomposers: recycling',
                  'carrion': 'scavengers: actual meals', 'standing_foliage': 'browser demand, woody competition and habitat',
                  'stored': 'organic stores: recycling pathways'}
         for key, role in roles.items():
