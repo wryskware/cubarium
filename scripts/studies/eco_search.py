@@ -275,17 +275,22 @@ class Search:
 
     def run_batch(self, directory, arms, seeds):
         """One batch.py batch in the foreground; returns its STATE rows."""
-        if directory.exists():
-            shutil.rmtree(directory)  # an interrupted batch is redone whole
+        resuming = (directory / "batch.json").is_file()
         directory.parent.mkdir(parents=True, exist_ok=True)
         a = self.a
         command = [sys.executable, str(HERE / "batch.py"), str(directory), "--bin", a["bin"],
                    "--hours", repr(a["hours"]), "--threads", str(a["threads"]),
                    "--max-parallel", str(a["max_parallel"]), "--required", a["required"],
                    "--stage", a["stage"]]
-        for name, extra in arms.items():
-            command += ["--arm", f"{name}={shlex.join(extra)}"]
-        if a["config"]:
+        if resuming:
+            command = [sys.executable, str(HERE / "batch.py"), str(directory), "--bin", a["bin"],
+                       "--resume", "--max-parallel", str(a["max_parallel"])]
+        else:
+            for name, extra in arms.items():
+                command += ["--arm", f"{name}={shlex.join(extra)}"]
+        if resuming:
+            pass
+        elif a["config"]:
             command += ["--config", a["config"], "--seeds", ",".join(map(str, seeds))]
         else:
             links = directory.parent / (directory.name + "-starts")

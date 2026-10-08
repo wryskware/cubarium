@@ -1,0 +1,12 @@
+{
+  "jobs": [
+    {"name": "paired-a", "kind": "batch", "args": [
+      "--config", "config/desktop/terrarium-d72.toml",
+      "--required", "config/training/required-d72.toml",
+      "--arm", "base=", "--arm", "candidate=", "--seeds", "1-8", "--hours", "2"]},
+    {"name": "paired-b", "kind": "batch", "args": [
+      "--config", "config/desktop/terrarium-d72.toml",
+      "--required", "config/training/required-d72.toml",
+      "--arm", "base=", "--arm", "candidate=", "--seeds", "9-16", "--hours", "2"]}
+  ]
+}
