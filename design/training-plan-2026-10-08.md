@@ -197,9 +197,16 @@ and `runs/pilot-end-2026-10-08/{flat,d72}`, profile `gate-1h`, 8 seeds, 1 h fres
   litter (§1b).
 - P calls it a win: on flat 6/8 against C1 (median Δ −0.30); on d72 5/8 (median Δ −0.04,
   a tie). V carries it.
-- This is the reward's curiosity share (0.5 of the energy spread) or a noise-driven drift;
-  this pilot can't tell which. Either way, the brain reward and P both paid for motion
-  over food.
+- The cause is either the reward's curiosity share (0.5 of the energy spread) or a
+  noise-driven drift. Either way, the brain reward and P both paid for motion over food.
+- The reward split points to curiosity:
+  - over generations 16–21 the frondgrazer's curiosity term rose from 0.15 to 0.21 while its
+    energy term fell from 0.80 to 0.70;
+  - curiosity's spread across bodies is 0.15–0.23 against energy's 0.4–0.5, enough for
+    the search to trade one for the other.
+- **Control running:** `p3-zero` on eidolon is the same training with curiosity 0, then the
+  same flat gate (results about 20:30). If its frondgrazers keep C1's intake, curiosity
+  caused the drift, and the share should drop to about 0.1 or fade with age.
 
 **What it means:**
 - Brain gradients need more signal than 8 pairs × 10-min windows give: more worlds (EC2), longer
