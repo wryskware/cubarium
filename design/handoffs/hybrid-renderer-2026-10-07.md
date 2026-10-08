@@ -129,8 +129,10 @@ candidates (rerolls nearly free), and only the picked one is founded, with a pro
   by a cheap feasibility check during candidate generation and never shown.
 - Candidate generation can be cancelled; founding reports progress.
 - **Water slider** (Wrysk 2026-10-08: "add a slider that lets you choose how much water each
-  world has (low/med/high) for the .375, .75, 1.5 levels"): Low / Medium / High set the
-  terrarium's `water_level_m` to 0.375 / 0.75 / 1.5 m for the candidates and the founded world.
+  world has (low/med/high) for the .375, .75, 1.5 levels", then "the other thread had used
+  1.125, not 1.5"): Low / Medium / High set the terrarium's `water_level_m` to 0.375 / 0.75 /
+  1.125 m (the tables he compared, `config/desktop/terrarium-wide.toml`) for the candidates
+  and the founded world.
 
 ## H4: rigging (later)
 
