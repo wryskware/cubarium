@@ -17,6 +17,12 @@ in the loop."
 Wrysk decides look. Agents generate candidates, show them, and implement his picks
 (WORKING_POLICY "Art direction"; `design/art-direction/`).
 
+## Answered 2026-10-07
+
+Three states (full/browsed/stripped) with a cross-fade by foliage fraction; bloomcrown and
+umbrellafrond first; no interim bottom-up cut, so wait for the variants; calf proportions on the same
+rig, blended with age. Round 1 (candidates only): `foliage-variants-and-calf-round1-2026-10-07.md`.
+
 ## Questions for the thread
 
 1. **Reduced-foliage variants.** How many states per species (for example full, browsed,
