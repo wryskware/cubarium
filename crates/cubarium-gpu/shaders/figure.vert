@@ -7,6 +7,8 @@
 // (q - P) projected, less the tile's origin. So the tile holds the same pixels wherever the
 // figure stands, and the composite pass places it at P's exact projection: the figure moves
 // with no crawling pixels, and only a turn or a pose changes which pixels it covers.
+// At odd S/RISE, an equal and opposite half-texel phase in tile and composite keeps
+// quarter-heading face samples centred on the stamped world's texels.
 //
 // A cell (dx, dy, dz) of the model spans x in dx -+ 1/2, y in dy .. dy + 1, z in dz -+ 1/2
 // of the model's own frame (forward +x, up +y, side +z), turned about its anchor column as
@@ -22,15 +24,21 @@ layout(location = 1) out vec3 vNormal;
 // Across the face, 0..1, and down it from its top edge (a side), or from its far edge (a
 // top or a bottom).
 layout(location = 2) out vec2 vFace;
-// The palette entry (absolute), the glyph, whether the cell's top is open, the face.
+// The palette entry, glyph (0: baked model), open above, local face + crease mask.
 layout(location = 3) flat out ivec4 vInfo;
+layout(location = 4) flat out ivec2 vFaceSize;
+layout(location = 5) out vec3 vRimWorld;
+layout(location = 6) out vec2 vRimFace;
+layout(location = 7) flat out ivec2 vCapSize;
+
+ivec2 faceSize(Tile t, int face) {
+    if (face < 2) { return t.faceSize.zy; }
+    if (face < 4) { return t.faceSize.xz; }
+    return t.faceSize.xy;
+}
 
 // Each face: a corner, the axis across it and the axis up it, in the cell's unit box.
 // Faces: -x, +x, -y, +y, -z, +z (the open mask's bits, in this order).
-const vec3 FACE_O[6] = vec3[](vec3(0, 0, 1), vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 0, 0), vec3(1, 0, 1));
-const vec3 FACE_U[6] = vec3[](vec3(0, 0, -1), vec3(0, 0, 1), vec3(1, 0, 0), vec3(1, 0, 0), vec3(1, 0, 0), vec3(-1, 0, 0));
-const vec3 FACE_V[6] = vec3[](vec3(0, 1, 0), vec3(0, 1, 0), vec3(0, 0, -1), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 1, 0));
-const vec3 FACE_N[6] = vec3[](vec3(-1, 0, 0), vec3(1, 0, 0), vec3(0, -1, 0), vec3(0, 1, 0), vec3(0, 0, -1), vec3(0, 0, 1));
 // Two triangles of the unit square.
 const vec2 CORNER[6] = vec2[](vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 0), vec2(1, 1), vec2(0, 1));
 
@@ -38,7 +46,7 @@ int sbyte(uint v, int at) { return int(bitfieldExtract(int(v), at, 8)); }
 
 void main() {
     Tile t = tiles[pc.k.x];
-    uvec2 cell = vox[gl_InstanceIndex];
+    uvec4 cell = vox[gl_InstanceIndex];
     int face = gl_VertexIndex / 6;
     vec2 ab = CORNER[gl_VertexIndex % 6];
     int cls = int(cell.y & 7u);
@@ -55,6 +63,9 @@ void main() {
         vNormal = vec3(0.0, 1.0, 0.0);
         vFace = vec2(0.0);
         vInfo = ivec4(0);
+        vFaceSize = vCapSize = ivec2(1);
+        vRimWorld = vec3(0.0);
+        vRimFace = vec2(0.0);
         return;
     }
     vec3 c = vec3(float(sbyte(cell.x, 0)), float(sbyte(cell.x, 8)), float(sbyte(cell.x, 16)));
@@ -76,11 +87,21 @@ void main() {
     vec3 q = t.pos.xyz + rel;
     // Screen pixels from P's projection, then the tile's texels, then the atlas.
     vec2 screen = vec2(rel.x * float(pc.k.y), -(rel.y * float(pc.k.y) + rel.z * float(pc.k.z)));
+    // Half-voxel bounds otherwise sit on pixel centres at odd scales. Use the
+    // stamp's sampling phase; pack adds it to the composite anchor before snap.
+    screen -= vec2(pc.k.y & 1, pc.k.z & 1) * 0.5;
     vec2 atlas = vec2(t.rect.xy) + screen - vec2(t.orig.xy);
     float depth = clamp(0.5 + rel.z * t.depth.y, 0.0, 1.0);
     gl_Position = vec4(atlas / pc.atlas.xy * 2.0 - 1.0, depth, 1.0);
     vWorld = q;
+    vFaceSize = faceSize(t, face);
+    vCapSize = faceSize(t, 3);
+    // The nearest cap texel to this side, as shadeTop uses for the stamp's rim.
+    float inward = 0.5 / float(min(vCapSize.x, vCapSize.y));
+    vec3 rim = unit - FACE_N[face] * inward;
+    vRimWorld = q + t.ay.xyz * (y1 - local.y) - n * inward;
+    vRimFace = vec2(rim.x, 1.0 - rim.z);
     vNormal = n;
     vFace = vec2(ab.x, 1.0 - ab.y);
-    vInfo = ivec4(t.orig.z + int(cell.x >> 24), glyph, int((open >> 3) & 1u), face);
+    vInfo = ivec4(t.orig.z + int(cell.x >> 24), glyph, int((open >> 3) & 1u), face | int(((cell[2 + face / 4] >> (8 * (face % 4))) & 255u) << 3) | int((cell.z >> 24) << 11));
 }

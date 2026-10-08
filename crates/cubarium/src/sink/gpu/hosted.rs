@@ -660,6 +660,7 @@ impl Hosted {
     pub fn new(options: HostedOptions) -> Result<Hosted> {
         let mut cfg = load_config(&options.config)
             .with_context(|| format!("the presentation config {}", options.config.display()))?;
+        cfg.figures.apply_env_overrides()?;
         let rooted = |p: &Path| if p.is_relative() { options.root.join(p) } else { p.to_path_buf() };
         cfg.models_dir = rooted(&cfg.models_dir);
         cfg.textures_dir = rooted(&cfg.textures_dir);

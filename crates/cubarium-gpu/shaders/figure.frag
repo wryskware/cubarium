@@ -2,20 +2,13 @@
 // The model pass's tile raster, shading (H2): one figure's visible faces, lit by the walk's
 // own light at the texel's world point and with its real normal.
 //
-// The stamped animal drew its front faces under the front light and its caps under the
-// top light, its front's top row (the open rim) leaning toward the top light. Here a face's
-// light is the same `litBy` of the same terms — the sky plane and the canopy over the open
-// cell in front of the face, the sun march from the texel toward the sun times N·L, the
-// emitters' glow half a voxel out, the haze at its depth — with N the face's own normal, so
-// a model facing the default way draws what the stamp drew, a turned one is lit as it now
-// faces, and a sunlit flank is the side toward the sun. The rim stays: a side face's top
-// pixel row under a cell open above leans toward the light an up-facing face there would
-// have, by PLANT_RIM. The animal is not in the voxel volume any more, so it shadows neither
-// itself nor the ground (`figures.rs` names the hook); its faces' AO crease is not drawn.
-//
-// A glyph cell (the dev-mode bodies, `cubarium::voxel::appearance`) reads its face texels
-// from the walk's glyph atlas as the walk did: pigment and tone, markings and eyes as
-// authored, on every side face and the cap.
+// Each baked model cell samples the stamped cell's glyph (animal part 5, glyph 1):
+// an open top rim and plain other rows. Glyph bodies also keep their outline, lit and
+// gain tones from the same atlas. Face coordinates and open-plane crease masks are
+// local to the model, so they follow its turns. AO uses the walk's crease width and
+// strength, before the light ladder. Terrain/plant neighbours are not in these masks.
+// The figures' sun map shadows terrain, plants, other figures and their own faces;
+// its resolution and low-sun cutoff differ from the stamped volume's sun march.
 
 #include "world.glsl"
 #include "figure.glsl"
@@ -30,20 +23,24 @@ layout(location = 0) in vec3 vWorld;
 layout(location = 1) in vec3 vNormal;
 layout(location = 2) in vec2 vFace;
 layout(location = 3) flat in ivec4 vInfo;
+layout(location = 4) flat in ivec2 vFaceSize;
+layout(location = 5) in vec3 vRimWorld;
+layout(location = 6) in vec2 vRimFace;
+layout(location = 7) flat in ivec2 vCapSize;
 
 layout(location = 0) out vec4 outColour;
 layout(location = 1) out vec4 outEmit;
 layout(location = 2) out float outZ;
 
 // The light a face with normal n gets at world point p (lit tier).
-vec3 litFace(vec3 base, vec3 p, vec3 n) {
+vec3 litFace(vec3 base, vec3 p, vec3 n, float ao) {
     ivec3 c = ivec3(floor(p + n * 0.5));
     float ndl = max(dot(n, u.sunK.xyz), 0.0);
     float sun = 0.0;
     if (ndl > 0.0 && u.sunK.y > 0.0) {
         sun = sunReaches(p + n * 0.01, c);
     }
-    float a = skyOpen(c.x, c.y, c.z) * canopyAt(c.x, c.z, int(floor(p.y)));
+    float a = skyOpen(c.x, c.y, c.z) * ao * canopyAt(c.x, c.z, int(floor(p.y - n.y * 0.01)));
     return litBy(base, a, sun, ndl, glowAt(p + n * 0.5));
 }
 
@@ -64,31 +61,28 @@ void main() {
 
     vec3 n = normalize(vNormal);
     vec3 p = vWorld;
-    bool top = n.y > 0.7;
-    bool side = abs(n.y) <= 0.7;
+    bool top = (vInfo.w & 7) == 3 || (vInfo.w & 7) == 2;
     bool openUp = vInfo.z != 0;
     int entry = vInfo.x;
     int glyph = vInfo.y;
     float hz = hazeAt(p.z);
     outZ = p.z;
 
-    // The texel's pigment and tone: a model cell is its palette colour, plain, its side
-    // faces' top row the open rim; a glyph cell reads its atlas.
-    int tone = 0;
-    int pigment = 0;
-    // The first pixel row under a face's top edge (the rim row of the stamp).
-    bool topRow = side && vFace.y < max(fwidth(vFace.y), 1e-3);
-    if (glyph != 0) {
-        int dx = clamp(int(vFace.x * float(S)), 0, S - 1);
-        int row = top ? S + clamp(int(vFace.y * float(RISE)), 0, RISE - 1)
-                      : clamp(int(vFace.y * float(S)), 0, S - 1);
-        uint q = texelFetch(glyphTex, ivec2(dx, (ANIMAL_INTERIM * 8 + glyph) * (S + RISE) + row), 0).r;
-        pigment = int(q & 3u);
-        tone = int(q >> 2);
-        if (tone == 63) { discard; }
-    } else if (topRow && openUp) {
-        tone = 2;
-    }
+    // Atlas rows are in face space, with the cap's RISE rows after the S side rows.
+    int face = vInfo.w & 7;
+    bool cap = face == 2 || face == 3;
+    int rows = cap ? RISE : S;
+    int dx = clamp(int(vFace.x * float(S)), 0, S - 1);
+    int dy = clamp(int(vFace.y * float(rows)), 0, rows - 1);
+    int stampGlyph = glyph == 0 ? 1 : glyph;
+    uint q = glyphTexel(ANIMAL_INTERIM, stampGlyph, dx, (cap ? S : 0) + dy);
+    int pigment = glyph == 0 ? 0 : int(q & 3u);
+    int tone = int(q >> 2);
+    if (tone == 63) { discard; }
+    ivec2 aoTexel = clamp(ivec2(vFace * vec2(vFaceSize)), ivec2(0), vFaceSize - 1);
+    float ao = modelCrease((uint(vInfo.w) >> 3) & 255u, aoTexel.x, aoTexel.y, vFaceSize);
+    ivec2 capTexel = clamp(ivec2(vRimFace * vec2(vCapSize)), ivec2(0), vCapSize - 1);
+    float capAo = modelCrease((uint(vInfo.w) >> 11) & 255u, capTexel.x, capTexel.y, vCapSize);
     Pal pe = pal[entry + pigment];
     vec3 base = pe.base.rgb;
 
@@ -105,9 +99,9 @@ void main() {
 
     vec3 c;
     if (LIT) {
-        vec3 up = vec3(0.0, 1.0, 0.0);
+        vec3 up = tiles[pc.k.x].ay.xyz;
         if (top) {
-            c = litFace(base, p, n);
+            c = litFace(base, p, n, ao);
             if (tone == 1) {
                 c *= u.plantA.w;
             } else if (tone >= 32 && tone <= 47) {
@@ -115,7 +109,7 @@ void main() {
                 c = mix(c, c / u.plantA.x * gain, u.shadeB.y);
             }
         } else if (tone == 3) {
-            c = litFace(base, p, up);
+            c = litFace(base, vRimWorld, up, capAo);
         } else {
             if (tone == 1) {
                 base *= u.shadeB.x;
@@ -125,9 +119,9 @@ void main() {
             } else if (tone >= 16 && tone <= 31) {
                 base *= 0.5 + float(tone & 15) / 16.0;
             }
-            c = litFace(base, p, n);
+            c = litFace(base, p, n, ao);
             if (tone == 2 && openUp) {
-                c = mix(c, litFace(base, p, up), u.plantA.z);
+                c = mix(c, litFace(base, vRimWorld, up, capAo), u.plantA.z);
             }
         }
     } else {

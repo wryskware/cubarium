@@ -99,12 +99,16 @@ pub const CLASS_LEG2: u8 = 4;
 
 /// One cell of a figure model, as `figure.vert` reads it: its offset in the model's frame,
 /// its palette entry (from the figure's first), its pose class, whether it is the head, the
-/// faces with no cell of the model beside them, and its face glyph (0: a plain model cell).
+/// faces with no cell beside them, its glyph (0: the stamped baked-model glyph), and
+/// each face's open-plane crease neighbours.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct FigureVoxel {
     pub cell: u32,
     pub bits: u32,
+    /// Eight occluders per face in its open plane: left, right, low, high, LL, RL, LH, RH.
+    /// Four faces in the first word, two in the second, as `figure.vert` reads them.
+    pub creases: [u32; 2],
 }
 
 impl FigureVoxel {
@@ -119,7 +123,15 @@ impl FigureVoxel {
                 | u32::from(head) << 3
                 | u32::from(open & 63) << 4
                 | u32::from(glyph & 15) << 10,
+            creases: [0; 2],
         }
+    }
+
+    pub fn with_creases(mut self, faces: [u8; 6]) -> Self {
+        for (face, mask) in faces.into_iter().enumerate() {
+            self.creases[face / 4] |= u32::from(mask) << (8 * (face % 4));
+        }
+        self
     }
 
     pub fn offset(self) -> [i8; 3] {
@@ -141,6 +153,64 @@ impl FigureVoxel {
     pub fn open(self) -> u8 {
         ((self.bits >> 4) & 63) as u8
     }
+}
+
+/// Occluding neighbours in each face's open plane, in the model's own frame. An
+/// adjacent coplanar cell does not make a crease; a cell one step outward does.
+/// These axes match `FACE_U/V/N` in `figure.glsl` (V points toward the high edge).
+pub fn crease_masks(cells: &[[i8; 3]]) -> Vec<[u8; 6]> {
+    const N: [[i16; 3]; 6] = [
+        [-1, 0, 0],
+        [1, 0, 0],
+        [0, -1, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+        [0, 0, 1],
+    ];
+    const U: [[i16; 3]; 6] = [
+        [0, 0, -1],
+        [0, 0, 1],
+        [1, 0, 0],
+        [1, 0, 0],
+        [1, 0, 0],
+        [-1, 0, 0],
+    ];
+    const V: [[i16; 3]; 6] = [
+        [0, 1, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+        [0, 0, 1],
+        [0, 1, 0],
+        [0, 1, 0],
+    ];
+    const EDGES: [[i16; 2]; 8] = [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1, 1],
+    ];
+    let set: std::collections::HashSet<[i16; 3]> = cells.iter().map(|c| c.map(i16::from)).collect();
+    cells
+        .iter()
+        .map(|c| {
+            std::array::from_fn(|f| {
+                EDGES.iter().enumerate().fold(0, |mask, (bit, &[du, dv])| {
+                    let neighbour = std::array::from_fn(|i| {
+                        i16::from(c[i]) + N[f][i] + du * U[f][i] + dv * V[f][i]
+                    });
+                    mask | if set.contains(&neighbour) {
+                        1 << bit
+                    } else {
+                        0
+                    }
+                })
+            })
+        })
+        .collect()
 }
 
 /// The open-face mask of every cell of a model: the faces with no other cell beside them.
@@ -301,6 +371,7 @@ struct TileGpu {
     rect: [i32; 4],
     orig: [i32; 4],
     depth: [f32; 4],
+    face_size: [i32; 4],
 }
 
 #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -374,6 +445,16 @@ pub fn pack(frame: &FigureFrame, s: u32, rise: u32, base: i32, raster_w: u32, vi
             rect: [x as i32, y as i32, b.w as i32, b.h as i32],
             orig: [b.ox, b.oy, t.palette as i32, t.first as i32],
             depth: [t.pos[2], 1.0 / span, t.pose[3], 0.0],
+            // Projected lengths of the model's axes, once per tile instead of per
+            // vertex. A quarter turn exchanges the cap's S and RISE dimensions.
+            face_size: {
+                let sizes = t.axes.map(|a| {
+                    let x = a[0] * s as f32;
+                    let y = a[1] * s as f32 + a[2] * rise as f32;
+                    x.hypot(y).round().max(1.0) as i32
+                });
+                [sizes[0], sizes[1], sizes[2], 0]
+            },
         });
         out.counts.push(t.count);
         out.casts.push(false);
@@ -389,6 +470,11 @@ pub fn pack(frame: &FigureFrame, s: u32, rise: u32, base: i32, raster_w: u32, vi
         let shown = if b >= 0 && f.weight_b >= 0.5 { b } else { a };
         out.casts[shown as usize] = f.alpha >= 0.5;
         let mut p = project(s, rise, base, f.a.pos);
+        // Centre a half-voxel box on the world's texel grid at odd scales. The
+        // vertex pass subtracts this phase; the composite adds it back before
+        // snapping, so quarter-heading samples land at the stamped texel centres.
+        p[0] += (s % 2) as f32 * 0.5;
+        p[1] += (rise % 2) as f32 * 0.5;
         if frame.whole_pixels {
             p = p.map(f32::round);
         }
@@ -1306,5 +1392,29 @@ mod tests {
         // The first cell has neighbours at +x (bit 1) and +y (bit 3).
         assert_eq!(open[0], 0b111111 & !(1 << 1) & !(1 << 3));
         assert_eq!(open[1], 0b111111 & !1);
+    }
+    #[test]
+    fn creases_are_only_occluders_in_the_faces_open_plane() {
+        // The front face (-z) stays flat beside a coplanar cell. A cell left and in
+        // front of it makes a left crease; above and in front makes a high crease.
+        let cells = [[0, 0, 0], [-1, 0, 0], [-1, 0, -1], [0, 1, -1]];
+        let masks = crease_masks(&cells);
+        assert_eq!(masks[0][4], 1 | 8);
+        assert_eq!(crease_masks(&cells[..2])[0][4], 0);
+        // A diagonal alone shades only its corner, not both entire edges.
+        assert_eq!(crease_masks(&[[0, 0, 0], [1, 1, -1]])[0][4], 1 << 7);
+        // The cap (+y) sees the same geometry rotated into its own x/z plane.
+        assert_eq!(
+            crease_masks(&[[0, 0, 0], [-1, 1, 0], [0, 1, 1]])[0][3],
+            1 | 8
+        );
+        // The packed mask survives all six face slots, including the second word.
+        let faces = [1, 2, 4, 8, 16, 32];
+        let voxel = FigureVoxel::default().with_creases(faces);
+        for (i, want) in faces.into_iter().enumerate() {
+            assert_eq!(((voxel.creases[i / 4] >> (8 * (i % 4))) & 255) as u8, want);
+        }
+        // Offset extremes must not wrap around and invent neighbours.
+        assert_eq!(crease_masks(&[[-128, 0, 0], [127, 0, -1]])[0][4], 0);
     }
 }

@@ -16,6 +16,7 @@ struct Tile {
     ivec4 orig;  // the screen offset from P's projection to its texel (0, 0); its first
                  // palette entry; -
     vec4 depth;  // the in-tile depth: z at depth 0.5 (P's), 1 / span; the head's breath; -
+    ivec4 faceSize; // projected lengths of the local x, y, z axes, in raster pixels
 };
 
 struct Fig {
@@ -24,6 +25,12 @@ struct Fig {
     vec4 k;      // how far it leans toward white (the highlight), -, -, -
 };
 
-layout(std430, set = 1, binding = 0) readonly buffer FigureVoxels { uvec2 vox[]; };
+layout(std430, set = 1, binding = 0) readonly buffer FigureVoxels { uvec4 vox[]; };
 layout(std430, set = 1, binding = 1) readonly buffer FigureTiles { Tile tiles[]; };
 layout(std430, set = 1, binding = 2) readonly buffer FigureFigs { Fig figs[]; };
+
+// Local face axes, also used when baking each face's open-plane crease neighbours.
+const vec3 FACE_O[6] = vec3[](vec3(0, 0, 1), vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 0, 0), vec3(1, 0, 1));
+const vec3 FACE_U[6] = vec3[](vec3(0, 0, -1), vec3(0, 0, 1), vec3(1, 0, 0), vec3(1, 0, 0), vec3(1, 0, 0), vec3(-1, 0, 0));
+const vec3 FACE_V[6] = vec3[](vec3(0, 1, 0), vec3(0, 1, 0), vec3(0, 0, -1), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 1, 0));
+const vec3 FACE_N[6] = vec3[](vec3(-1, 0, 0), vec3(1, 0, 0), vec3(0, -1, 0), vec3(0, 1, 0), vec3(0, 0, -1), vec3(0, 0, 1));

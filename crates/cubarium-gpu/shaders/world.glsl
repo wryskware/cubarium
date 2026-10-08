@@ -420,16 +420,34 @@ float occluder(int x, int y, int z) {
 // on a top face at most half its rows.
 int creaseWidth(int rows) { return min(max(1, (S + 4) / 8), max(1, rows / 2)); }
 
+// The shared appearance atlas: front rows followed by the receding cap rows.
+uint glyphTexel(int part, int glyph, int dx, int row) {
+    return texelFetch(glyphTex, ivec2(dx, (part * 8 + glyph) * (S + RISE) + row), 0).r;
+}
+
 // The crease factor at texel (du, dv) of a face nu x nv texels, dv = 0 on its `hi` side,
 // from its four side neighbours and four diagonals (lo/hi x left/right).
-float crease(float l, float r, float lo, float hi,
-             float cLL, float cRL, float cLH, float cRH, int du, int dv, int nu, int nv) {
-    int b = creaseWidth(nv);
+float creaseBands(float l, float r, float lo, float hi,
+             float cLL, float cRL, float cLH, float cRH, int du, int dv, int nu, int nv, int b) {
     bool inL = du < b, inR = du >= nu - b, inH = dv < b, inLo = dv >= nv - b;
     bool band = (inL && l > 0.5) || (inR && r > 0.5) || (inH && hi > 0.5) || (inLo && lo > 0.5)
         || (inL && inLo && cLL > 0.5) || (inR && inLo && cRL > 0.5)
         || (inL && inH && cLH > 0.5) || (inR && inH && cRH > 0.5);
     return band ? 1.0 - u.lightK.w : 1.0;
+}
+
+float crease(float l, float r, float lo, float hi,
+             float cLL, float cRL, float cLH, float cRH, int du, int dv, int nu, int nv) {
+    return creaseBands(l, r, lo, hi, cLL, cRL, cLH, cRH, du, dv, nu, nv, creaseWidth(nv));
+}
+
+// A figure face's baked open-plane occluders, in the same order as `crease`.
+float modelCrease(uint mask, int dx, int dy, ivec2 size) {
+    if (!AO) { return 1.0; }
+    return creaseBands(float(mask & 1u), float((mask >> 1) & 1u),
+        float((mask >> 2) & 1u), float((mask >> 3) & 1u),
+        float((mask >> 4) & 1u), float((mask >> 5) & 1u),
+        float((mask >> 6) & 1u), float((mask >> 7) & 1u), dx, dy, size.x, size.y, creaseWidth(min(size.x, size.y)));
 }
 
 // AO of a front face of (x, y, z) at texel (dx, dy), dy = 0 at the top: the open plane is
