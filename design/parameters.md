@@ -1465,7 +1465,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2404 rows)
+**`fauna.*`** (2405 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -3861,6 +3861,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.light.loom_tau_s` | 1.0 | s | [0, inf) | 0.2–3 | - | placeholder | S3b: a moving body looms only while it would reach the eye within this (distance / closing speed; 0: any moving body) |
 | `fauna.founding.arrival_body` | 1.0 | fraction of adult body | [0, 1] | 0.3–1 | - | decision | a seeded founder arrives at this fraction of its adult body |
 | `fauna.founding.arrival_reserve` | 1.0 | fraction of reserve cap | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its reserve cap |
+| `fauna.founding.arrival_stomach` | 1.0 | fraction of stomach capacity K | [0, 1] | 0–1 | - | decision | a seeded founder arrives with this fraction of its stomach capacity, of its first food |
 | `fauna.founding.starter_litter_organic` | 0.2 | organic units | [0, inf) | 0.05–1 | - | placeholder | leaf litter laid under each seeded littershredder |
 | `fauna.founding.starter_litter_mineral_fraction` | 0.02 | fraction of organic | [0, 1] | 0.005–0.1 | - | placeholder | mineral share of the starter litter |
 | `fauna.founding.starter_litter_energy_density` | 2.0 | energy per organic unit | [0, inf) | 0.5–4 | - | placeholder | retained energy density of the starter litter |

@@ -955,6 +955,12 @@ pub fn seed_pre_rolled(
         seeded.shortfall[founder.index()] = want.saturating_sub(seeded.founders[founder.index()]);
     }
 
+    // **Founders arrive fed** (the founding fix, 2026-10-08), as they arrive with a full
+    // reserve: every seeded founder's stomach at `founding.arrival_stomach · K`. On the
+    // introduction's `s0 · K` they sat on their appetite floor and every lineage opened
+    // with an eating bout, the Veilhound pack with a hunt in minute 1.
+    arrive_fed(fauna);
+
     seeded.imported_organic = flora.view().ledger.seeded_organic_in
         + flora.view().ledger.deposited_organic_in
         + fauna.view().ledger.introduced_organic_in
@@ -2041,6 +2047,17 @@ pub fn founder_arrival(founding: &cubarium_voxel_fauna::FoundingConfig) -> Start
     StartingStores {
         body: founding.arrival_body,
         reserve: founding.arrival_reserve,
+    }
+}
+
+/// Every founder body in `fauna` given its arrival stomach,
+/// [`cubarium_voxel_fauna::FoundingConfig::arrival_stomach`] of its capacity
+/// ([`Fauna::set_arrival_stomach`]). The seeder's last step.
+pub fn arrive_fed(fauna: &mut Fauna) {
+    let share = fauna.config().founding.arrival_stomach;
+    let ids: Vec<u64> = fauna.view().animals.iter().filter(|a| a.founder.is_some()).map(|a| a.id).collect();
+    for id in ids {
+        fauna.set_arrival_stomach(id, share);
     }
 }
 
@@ -3939,6 +3956,33 @@ mod tests {
         let arrival = founder_arrival(&cubarium_voxel_fauna::FoundingConfig::default());
         assert_eq!(arrival.body, 1.0);
         assert_eq!(arrival.reserve, knob);
+    }
+
+    /// Founders arrive fed (the founding fix, 2026-10-08): after [`arrive_fed`] every
+    /// founder's stomach is `founding.arrival_stomach` × its capacity, whatever the knob
+    /// says.
+    #[test]
+    fn a_seeded_founder_arrives_with_the_knobs_stomach() {
+        let world = plain(24, 6);
+        for share in [0.0, 0.5, 1.0] {
+            for founder in Founder::ALL {
+                let mut config = cubarium_voxel_fauna::FaunaConfig::default();
+                config.founding.arrival_stomach = share;
+                let mut fauna = Fauna::new(config);
+                install_heuristics(&mut fauna);
+                let stores = founder_arrival(&fauna.config().founding);
+                assert!(introduce_founder(&world, &mut fauna, founder, Site { x: 6, y: 2, z: 3 }, 0.0, stores));
+                arrive_fed(&mut fauna);
+                let a = fauna.view().animals[0];
+                let p = fauna.config().founder(founder);
+                let want = if p.diet.foods().next().is_some() { share * p.gut.capacity(a.body) } else { 0.0 };
+                assert!(
+                    (a.stomach.organic() - want).abs() < 1e-12,
+                    "{founder:?} at {share}: stomach {} want {want}",
+                    a.stomach.organic()
+                );
+            }
+        }
     }
 
     /// **PIT: a pack's den is on its route graph** (a den goes where the pack can come and

@@ -1421,3 +1421,43 @@ fn a_snapshot_keeps_a_mixed_stomach_and_refuses_a_bad_one() {
         assert!(Fauna::load(&broken.save()).is_err(), "a stomach mineral of {bad} is refused");
     }
 }
+
+/// The founding fix (2026-10-08): [`Fauna::set_arrival_stomach`] leaves a founder of any
+/// lineage with `share · K` of its first food, the books closed; and one left above its
+/// appetite (`S > s_start · K`) does not open with an eating bout.
+#[test]
+fn a_founder_given_its_arrival_stomach_holds_share_times_capacity() {
+    let world = clock_off(6);
+    let mut flora = Flora::new(FloraConfig::default());
+    for share in [0.0, 0.4, 1.0] {
+        for f in Founder::ALL {
+            let mut fauna = Fauna::new(hunting_config());
+            fauna.set_births_enabled(false);
+            let placed = fauna.apply(
+                &world,
+                Command::IntroduceFounder { x: 8, z: 6, founder: f, stores: StartingStores::FULL, heading_rad: 0.0 },
+            );
+            if !placed {
+                continue;
+            }
+            let id = fauna.animals.last().expect("just introduced").id;
+            assert!(fauna.set_arrival_stomach(id, share));
+            let a = animal(&fauna, id);
+            let p = *fauna.config.founder(f);
+            let k = p.gut.capacity(a.body);
+            let want = if p.diet.foods().next().is_some() { share * k } else { 0.0 };
+            assert!(
+                (a.stomach.organic() - want).abs() <= 1e-12 * k.max(1.0),
+                "{} at share {share}: stomach {} want {want}",
+                f.name(),
+                a.stomach.organic()
+            );
+            assert_books(&fauna, "after the arrival stomach", 0);
+            let s_start = p.gut.s_start(crate::step::hunger(&a, &p.core)) * k;
+            fauna.step_with(&world, &mut flora, 1);
+            if want > s_start {
+                assert!(!animal(&fauna, id).eating, "{} at share {share} opened with a bout", f.name());
+            }
+        }
+    }
+}
