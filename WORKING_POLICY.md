@@ -65,7 +65,15 @@ engineering. Iteration speed is priority one. Clean code, fast and dirty process
 - **The commit message is the report.** No evidence tables, no report file per
   package unless Wrysk asks. Briefs stay short.
 - **Astra review rounds are opt-in**: only when Wrysk says a thread should use
-  that workflow.
+  that workflow. Never route work to Astra on your own; it is not a lane in the
+  model routing. When asked, run it through codex-lane: `dispatch` with
+  `model: "gpt-6-astra"`, effort `high` (`xhigh` for the hardest reviews), and a
+  self-contained brief. Astra is for adversarial review of the most complex
+  work, for research, and for reviewing research; not for implementation. A
+  review brief says: read-only, don't edit or commit (this workspace runs
+  codex-lane under `danger-full-access`), and return findings ranked by
+  severity, each with its evidence. A research job may write its report to
+  `design/7_Research/astra-<topic>-<date>.md`.
 - **Worlds and snapshots are disposable.** Do not ask whether it is OK to reset
   a world; reset, redeploy, delete run output freely. Nothing on the cube or
   the panel is a production run.
@@ -74,6 +82,36 @@ engineering. Iteration speed is priority one. Clean code, fast and dirty process
   reload are undecided; restarting to reload is fine.
 
 ## Training resources — correction, 2026-09-18
+
+### Simulation study CPU placement — Wrysk, 2026-10-06
+
+Keep each multithreaded simulation study (censuses, probes, staged arms and soaks)
+within one shared L3 cache group. Distribute independent runs between groups;
+do not rely on the scheduler to keep a process's threads on one chiplet.
+
+- Launch through `scripts/run-study.py --slot N -- <headless command...>` on the
+  execution host. Use the zero-based arm/run index as `N`; it wraps over the
+  available groups. `--list` shows the topology. The wrapper detects sysfs L3
+  sharing, respects inherited CPU restrictions, and applies affinity before
+  execution so new threads and children inherit it. It refuses to launch if it
+  cannot determine the topology. Programs must not widen this inherited mask.
+- For SSH runs, invoke the wrapper **on the remote host**, with that host's copy
+  of the script; desktop CPU numbers must not be sent to eidolon. With standalone
+  uploaded study binaries, upload this wrapper alongside them.
+- Set the study's worker/pool options to fit its assigned group; wrapping does
+  not shrink an explicitly sized pool. Budget concurrency across simultaneous
+  runs, counting shared groups rather than granting each process the full host.
+  The existing CPU reserve, memory limit and staged-run rules still apply.
+- Slots distribute a batch; they do not reserve CPUs or coordinate separate
+  batches. Check existing jobs and the live world's affinity before choosing
+  slots or concurrency. On the desktop, prefer the other group when the live
+  world or a game occupies the V-cache group.
+- Verify every thread's `Cpus_allowed_list` after launch. Existing running jobs
+  are not changed automatically. A deliberately cross-chiplet benchmark may
+  bypass the wrapper, but state that choice in its command or brief.
+- Independent episode training is exempt: workers simulate separate worlds and
+  may use both chiplets under the existing resource budget and `--pin` policy.
+  The live world's existing host-profile placement remains in use.
 
 Wrysk authorizes explicitly launched offline training and parameter-search runs
 to use up to 90% of the machine's logical CPUs and 64 GiB of memory. Determine

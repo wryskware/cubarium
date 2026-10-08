@@ -206,7 +206,12 @@ plan sketch above in visual scope; niche, prey, lure cost and life history are u
 - **Simulation.** It shows two orbs where the simulation has one lure; the lure's glow
   source (the tail tip, above the body and ahead of the jaw) still matches.
 
-## 5. D17 · Chorister (*Lycochorus*, "the chorister"): the pack hunter, for decision
+## 5. D17 · Veilhound (originally Chorister, *Lycochorus*): the pack hunter
+
+> **Naming update (Wrysk, 2026-10-03):** the common name is now Veilhound.
+> See the [current body dossier](animal-body-reimagining-2026-09-24.md#veilhound-formerly-chorister)
+> for the naming direction and selected appearance. The September proposal below
+> retains Chorister and its original body sketch as design history.
 
 *Why it exists.* An adult loftstrider is too tall and too well armed for any one
 predator: the side spurs and a 3.5 m column. A pack can take it by working the stilts

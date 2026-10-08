@@ -3,6 +3,12 @@
 Read `WORKING_POLICY.md` before autonomous work, delegation, deployment or capture
 generation. It records Wrysk's cost, latest-build and no-archive corrections.
 
+Launch multithreaded simulation studies through `scripts/run-study.py --slot N --
+<headless command...>` on the execution host, including eidolon. This confines
+each run to one shared L3; distribute batch run indices across slots and size
+pools within that group. See WORKING_POLICY.md's simulation study CPU placement
+section for resource budgeting and the independent episode-training exception.
+
 Cubarium is a persistent ambient ecosystem for five connected 64×64 cube faces.
 Current repository status and next work are in README.md and
 design/implementation-plan.md. Plans do not imply an implementation exists.

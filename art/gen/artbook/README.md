@@ -35,7 +35,7 @@ These are Wrysk's selected visual references, retained alternatives and terrain 
 
 | Subject | Pick | Decision |
 | --- | --- | --- |
-| Chorister CH-A2 v3 | [violet stalker](chorister.png) | Accepted. |
+| Veilhound CH-A2 v3 | [violet stalker](chorister.png) | Accepted appearance. Wrysk chose Veilhound as the common name on 2026-10-03, formerly Chorister: the pale head veil and pack pursuit now anchor the name. Historical CH codes and asset filenames remain. |
 | Ripple-snail RS-D2 | [organic azure dome](ripple-snail-organic.png) | Selected concept; matte grown shell with two shallow growth ridges, pale mantle edge, dark foot and pink-tipped feeding palps. |
 | Capgnawer CG-D2 | [rose-mauve bark mantle](capgnawer-rose-bark.png) | Selected concept; rounded twin mantle with layered bark texture, six mandibles in three vertical pairs, and two rows of smooth pink sensor patches on each side (larger upper, smaller lower). Keep the patches light pink. |
 | Seedporter | [selected moss-green design](seedporter.png) | Selected exact tall-headed, open-mouthed image; six limbs, a small fruit-handling pair, larger membrane-bearing arms, rear gripping feet and a coiled prehensile tail. Keep the pictured proportions as the selected reference. Its model (`seedporter()`) is the climbing pose (Wrysk 2026-10-01); the three poses below share its body. Outer halo needs cleanup. |
