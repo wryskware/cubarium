@@ -262,3 +262,10 @@ think about behaviours that fix the problems as well, or whether the ecosystem i
   `cubarium-godot` (gdext's required `unsafe impl ExtensionLibrary`). It is either removed or
   listed here as approved; until then, no new `unsafe` lands anywhere.
 - Every brief that touches these crates restates this rule.
+- **Approved (Wrysk, 2026-10-08, "option 1 ... 2-4 above all sounds fine"):**
+  - Vulkan calls through `ash` inside `cubarium-gpu`, including new ones such as H2's model
+    pass, until the renderer moves to wgpu (backlog item 11). Only the FFI call itself sits in
+    the `unsafe` block; nothing else in that crate may use `unsafe`.
+  - `cubarium-godot`'s one `unsafe impl ExtensionLibrary`, which gdext requires.
+  - Everything else goes: CPU pinning, perf counters and topology move to safe wrapper crates,
+    and `save.rs`, `placement.rs`, `state.rs`, the web sink and `render_bench` become safe code.
