@@ -1,0 +1,21 @@
+# A smoke genome for scripts/studies/eco_search.py: four related multipliers (plant
+# production against consumer upkeep), only to exercise the search loop end to end.
+# Not a proposal for the real genome (that is Wrysk's call). x1 = today's world.
+
+[[gene]]
+name = "growth@turf"
+path = "flora.@turf.foliage_rate"
+range = [0.5, 2.0]
+what = "turf foliage regrowth cap"
+
+[[gene]]
+name = "growth@shrub"
+path = "flora.@shrub.foliage_rate"
+range = [0.5, 2.0]
+what = "shrub foliage regrowth cap"
+
+[[gene]]
+name = "upkeep"
+path = "fauna.founders.*.core.maintenance_per_s"
+range = [0.5, 2.0]
+what = "basal upkeep of every founded lineage together (walking cost follows by its tie)"

@@ -136,7 +136,7 @@ def profile_config(document, profile='screen-2h', text=None):
         raise ValueError('every active component needs required_data')
     if spec['aggregation'] != 'mean + sd_weight * sample_sd of soft P (L excluded); feasibility first':
         raise ValueError('unsupported aggregation')
-    if spec['start_kind'] != 'mature saved start':
+    if spec['start_kind'] not in ('mature saved start', 'fresh founding'):
         raise ValueError('unsupported start kind')
     if len(set(spec['active'])) != len(spec['active']):
         raise ValueError('duplicate active component')
@@ -653,6 +653,8 @@ def build_report(out, cfg, baseline=None, start=None, stop=None, allow_mixed_bin
     for out, manifest in zip(paths, manifests):
         if manifest.get('start_kind') == 'fresh founding' and cfg['profile']['start_kind'] == 'mature saved start':
             raise ValueError('this profile requires mature saved starts, not a fresh founding batch')
+        if manifest.get('start_kind') == 'saved start' and cfg['profile']['start_kind'] == 'fresh founding':
+            raise ValueError('this profile scores fresh foundings, not a saved-start batch')
         states = {}
         if (out / 'STATE.tsv').exists():
             with (out / 'STATE.tsv').open(newline='') as stream:

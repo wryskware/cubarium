@@ -83,3 +83,37 @@ count_drawdown = 0.0
 energy_trend = 0.0
 plant_stand_slope = 0.0
 plant_vigour_trend = 0.0
+
+# A plumbing smoke only (scripts/studies/eco_search.py's loop test): six simulated minutes
+# of a fresh founding. Not an objective; its scores say nothing about the ecology.
+[profiles.smoke-6m]
+from_minute = 0
+to_minute = 6
+active = ["L", "J", "A", "K", "V", "Z", "M", "G_b", "G_v", "H", "F", "S"]
+aggregation = "mean + sd_weight * sample_sd of soft P (L excluded); feasibility first"
+slow = ["chorister", "lanternjaw"]
+start_kind = "fresh founding"
+
+[profiles.smoke-6m.disabled]
+Q = "Off: no cycle books in a six-minute plumbing smoke."
+
+[profiles.smoke-6m.required_data]
+L = ["census:stocks"]
+J = ["vitals:breeding_eligible_n", "life:recruits", "census:lifecycle"]
+A = ["census:stocks"]
+K = ["census:stocks"]
+V = ["vitals:moving_share", "vitals:awake_body_s"]
+Z = ["census:stocks"]
+M = ["census:meadow_patch_max"]
+G_b = ["census:grove_patch_max"]
+G_v = ["census:recruits_vaulttree"]
+H = ["census:kills"]
+F = ["vitals:fullness_p10", "vitals:n"]
+S = ["vitals:stuck_n", "vitals:stuck_observed_n"]
+
+[profiles.smoke-6m.trend_weights]
+count_slope = 0.0
+count_drawdown = 0.0
+energy_trend = 0.0
+plant_stand_slope = 0.0
+plant_vigour_trend = 0.0

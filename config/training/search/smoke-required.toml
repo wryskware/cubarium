@@ -1,0 +1,17 @@
+# The required roster for the eco_search plumbing smoke on config/desktop/terrarium-d72.toml:
+# every lineage and plant the minute-0 census founds (seed 1), N_ref = founders + eggs.
+# Smoke only; the real roster is declared by Wrysk.
+[required]
+animals = ["littershredder", "frondgrazer", "lanternjaw", "capgnawer", "loftstrider", "ripple-snail", "bellwing", "seedporter", "chorister"]
+plants = ["bloomcrown", "umbrellafrond", "springturf", "stonecushion", "velvetpad", "glowcap", "vaulttree", "lanternberry", "siphonreed"]
+
+[required.N_ref]
+littershredder = 8
+frondgrazer = 8
+lanternjaw = 9
+capgnawer = 6
+loftstrider = 2
+ripple-snail = 8
+bellwing = 6
+seedporter = 4
+chorister = 4
