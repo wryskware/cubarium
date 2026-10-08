@@ -818,6 +818,12 @@ pub struct BrowserForager {
     wander_bias: f64,
     wander_ticks: u32,
     escape: u32,
+    /// JUVENILE-FOOD: radians turned on the spot while the front has stayed blocked, and
+    /// the samples left of a push straight on once that reaches a full turn.
+    blocked_turned: f64,
+    push: u32,
+    /// The manifest's `Self.delivered_turn` scale, radians per unit.
+    turn_reference_rad: f64,
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     cone: crate::manifest::Module,
@@ -861,6 +867,9 @@ impl BrowserForager {
             wander_bias: 1.0,
             wander_ticks: 0,
             escape: 0,
+            blocked_turned: 0.0,
+            push: 0,
+            turn_reference_rad: manifest.turn_reference_rad,
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
             cone: module_slot(&manifest, "Cone(3, foliage/body)"),
@@ -895,14 +904,59 @@ impl Controller for BrowserForager {
         let drop = self.reads_drops
             && (clear > cfg.flat_clear + cfg.half_ray
                 || (clear >= cfg.flat_clear - cfg.half_ray && proximity < cfg.drop_proximity));
+        // JUVENILE-FOOD: **a full turn on the spot is no box**. The contact probe sits a
+        // step's height up (`step_up_m`: three voxels at 0.125 m), over a small body's
+        // head, so under a low overhang it touches the ceiling at every heading; and on a
+        // narrow ledge the forward sector reads the drop beside the path at every heading.
+        // The blocked turn and the drop escape below circled such bodies on the spot for
+        // good (frondgrazer juveniles, s1 minute 63: 4 of 11 under one overhang and 3 on
+        // ledges, reserve 0). So once the front (or a drop reading) has held through a
+        // whole delivered turn while the motor still delivers, it walks straight on for
+        // `escape_samples`: the motion itself refuses a real wall or a drop deeper than
+        // the step, and that refusal turns it away through the escape.
+        let refused = o[7] < cfg.motor_refused;
+        if refused {
+            self.push = 0;
+            self.blocked_turned = 0.0;
+        } else if front > 0.5 || drop {
+            self.blocked_turned += o[6].abs() * self.turn_reference_rad;
+        } else {
+            self.blocked_turned = 0.0;
+        }
+        if self.push == 0 && self.blocked_turned >= std::f64::consts::TAU {
+            self.blocked_turned = 0.0;
+            self.push = cfg.escape_samples.max(1);
+            self.escape = 0;
+        }
+        if self.push > 0 {
+            self.push -= 1;
+            self.wander_ticks = 0;
+            return Response::Bounded(Actions {
+                forward: 1.0,
+                turn: 0.0,
+                feed,
+            });
+        }
         let away = self.wander_bias;
-        if let Some((forward, turn)) =
-            escape(&cfg, &mut self.escape, o[7] < cfg.motor_refused || drop, away)
-        {
+        if let Some((forward, turn)) = escape(&cfg, &mut self.escape, refused || drop, away) {
             self.wander_ticks = 0;
             return Response::Bounded(Actions {
                 forward,
                 turn,
+                feed,
+            });
+        }
+        // JUVENILE-FOOD: **stay on food**, as the blind forager does. It used to walk on at
+        // full forward while it cropped, so its mouth left the stand after a bite or two
+        // and it tasted food on 18% of its hungry samples (juveniles, whose mouth reaches
+        // least, worst; the C1 brain slows to ~0.17 and tastes it on 59%). Holding still
+        // while it tastes food also makes it the cropping grazer the scan pause and the
+        // giving-up rule (`crate::forage`) read; that rule walks it off a spent stand.
+        if feed > 0.5 {
+            self.wander_ticks = 0;
+            return Response::Bounded(Actions {
+                forward: cfg.forage_stay_forward.clamp(0.0, 1.0),
+                turn: 0.0,
                 feed,
             });
         }
@@ -959,6 +1013,8 @@ impl Controller for BrowserForager {
         self.wander_bias = 1.0;
         self.wander_ticks = 0;
         self.escape = 0;
+        self.blocked_turned = 0.0;
+        self.push = 0;
     }
 
     fn flees(&self) -> bool {
@@ -1790,6 +1846,93 @@ mod tests {
             o[contact.offset + side] = 1.0;
             let t = turns(&mut BrowserForager::new(), &o, n);
             assert!(t.iter().all(|&x| x.signum() == sign), "contact slot {side}: {t:?}");
+        }
+    }
+
+    /// JUVENILE-FOOD: **a browser tasting food stays on it** — the configured stay-on-food
+    /// forward, no turn, feeding — whatever its cone shows; tasting nothing (or crumbs under
+    /// the gate) it walks its search as before.
+    #[test]
+    fn a_browser_tasting_food_holds_still_and_feeds() {
+        for stay in [0.0, 0.3] {
+            let cfg = TeacherConfig { forage_stay_forward: stay, ..TeacherConfig::default() };
+            for founder in [Founder::Browser, Founder::Loftstrider] {
+                let manifest = founder.manifest();
+                let taste = module_slot(&manifest, "Taste(1)");
+                let cone = module_slot(&manifest, "Cone(3, foliage/body)");
+                let mut o = quiet(&manifest);
+                // Foliage off to one side, which the gaze would otherwise turn to.
+                o[cone.offset + 2] = 1.0;
+                o[taste.offset + 2] = 1.0;
+                o[taste.offset] = cfg.feed_gate * 2.0;
+                let mut c = BrowserForager::for_founder(founder, cfg);
+                let Response::Bounded(a) = c.drive(&o) else { panic!("bounded") };
+                assert_eq!((a.forward, a.turn, a.feed), (stay, 0.0, 1.0), "{founder:?} tasting");
+                o[taste.offset] = cfg.feed_gate * 0.5;
+                let Response::Bounded(a) = c.drive(&o) else { panic!("bounded") };
+                assert!(a.feed < 0.5 && a.forward > stay && a.turn != 0.0, "{founder:?} not tasting: {a:?}");
+            }
+        }
+    }
+
+    /// JUVENILE-FOOD: **a browser whose front (or drop reading) stays on through a whole
+    /// delivered turn walks straight on** for `escape_samples` samples, then turns again;
+    /// one that has not turned, or whose motor is refused, keeps turning, and a front that
+    /// clears starts the count afresh.
+    #[test]
+    fn a_full_blocked_turn_ends_in_a_push_straight_on() {
+        let cfg = TeacherConfig::default();
+        let manifest = Founder::Browser.manifest();
+        let contact = module_slot(&manifest, "Contact(4)");
+        let act = |c: &mut BrowserForager, o: &[f64]| match c.drive(o) {
+            Response::Bounded(a) => a,
+            _ => panic!("bounded"),
+        };
+        let mut blocked = quiet(&manifest);
+        blocked[contact.offset] = 1.0;
+        // Each interval delivered the most turn the channel reports.
+        let mut turning = blocked.clone();
+        turning[6] = 1.0;
+        let full = (std::f64::consts::TAU / manifest.turn_reference_rad).ceil() as usize;
+        let mut c = BrowserForager::new();
+        for k in 0..full - 1 {
+            let a = act(&mut c, &turning);
+            assert!(a.turn != 0.0 && a.forward < 1.0, "sample {k} still turns: {a:?}");
+        }
+        for k in 0..cfg.escape_samples.max(1) {
+            let a = act(&mut c, &turning);
+            assert_eq!((a.forward, a.turn), (1.0, 0.0), "push sample {k}");
+        }
+        let a = act(&mut c, &turning);
+        assert!(a.turn != 0.0 && a.forward < 1.0, "turns again after the push: {a:?}");
+        // No turn delivered, or a refused motor (a real obstacle): no push however long.
+        let mut refused = turning.clone();
+        refused[7] = 0.0;
+        for o in [&blocked, &refused] {
+            let mut c = BrowserForager::new();
+            for _ in 0..4 * full {
+                assert!(act(&mut c, o).forward < 1.0);
+            }
+        }
+        // The grazer's drop reading (its forward sector's rows clear past flat ground)
+        // counts as the blocked front does.
+        let cone = module_slot(&manifest, "Cone(3, foliage/body)");
+        let mut ledge = quiet(&manifest);
+        ledge[6] = 1.0;
+        ledge[cone.offset + 6] = 1.0;
+        let mut c = BrowserForager::new();
+        for k in 0..full - 1 {
+            assert!(act(&mut c, &ledge).forward < 1.0, "sample {k} turns from the drop");
+        }
+        assert_eq!(act(&mut c, &ledge).forward, 1.0, "a whole turn of drops: straight on");
+        // A clear front in between restarts the count.
+        let mut c = BrowserForager::new();
+        let open = quiet(&manifest);
+        for _ in 0..3 {
+            for _ in 0..full - 1 {
+                assert!(act(&mut c, &turning).forward < 1.0);
+            }
+            act(&mut c, &open);
         }
     }
 

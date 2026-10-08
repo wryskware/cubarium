@@ -588,7 +588,7 @@ fn knob_rows() -> Vec<Row> {
         t("bellwing_gaze_turn", "effort", fraction, "turn effort toward the sector with the most bloom").search(0.2, 1.0),
         t("bellwing_wander_forward", "effort", fraction, "forward effort of the bellwing's no-signal wander").search(0.2, 1.0),
         t("bellwing_roost_ceiling", "fraction of band", fraction, "going to rest, cover closer than this overhead is an underside to rise into").search(0.1, 0.8),
-        t("forage_stay_forward", "effort", fraction, "the blind forager's forward effort while it tastes food (0 stays on food, 1 walks across it)")
+        t("forage_stay_forward", "effort", fraction, "the blind and browser foragers' forward effort while they taste food (0 stays on food, 1 walks across it)")
             .search(0.0, 1.0).prov("decision"),
         t("forage_turn_back_samples", "samples", count, "samples the blind forager turns after leaving an exhausted patch (area-restricted search)")
             .search(0.0, 8.0),

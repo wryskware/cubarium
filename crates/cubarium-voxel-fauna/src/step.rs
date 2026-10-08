@@ -2409,7 +2409,8 @@ fn founder_act(
 /// **One flyer's tick** (F1, predation-and-flight §3.2–3.8), in place of a walker's act:
 ///
 /// 1. **The perch**: a perched flyer whose perch is gone (a crown eaten, a face uncovered)
-///    takes off when it is awake, the sky allows it and its reserve pays a takeoff; else
+///    takes off when it is awake, the sky allows it and it can pay a takeoff (its reserve
+///    and its body above `body_min`, as every motor cost is paid); else
 ///    it **drops** — straight down at the lift speed, paying nothing aloft — onto the
 ///    first perch below.
 /// 2. **Forced down**: in a downpour, grounded by rain ([`Mobility::rain_grounded`],
@@ -2464,7 +2465,13 @@ fn flyer_act(
     // Backlog §12: a downpour, or rain over its threshold (the latch), grounds it.
     let weather = sky.downpour || fauna.animals[i].mobility.rain_grounded;
     let grounded = weather || sleepy;
-    let can_pay = |a: &Animal| a.reserve >= takeoff_cost;
+    // JUVENILE-FOOD: a takeoff is paid like every other motor cost — out of the reserve,
+    // then out of the body above its death line (`body_min`). Gated on the reserve alone, a
+    // growing bellwing, whose growth spends its reserve down to nothing on the perch
+    // overnight, woke hungry and could never take off again: it sat perched beside full
+    // blooms until it starved (s1 minute 120: 3045 of ~3200 juvenile samples perched,
+    // eating latch and emergency on, stomach empty, lift up, never airborne).
+    let can_pay = |a: &Animal| a.reserve + (a.body - sc.body_min).max(0.0) >= takeoff_cost;
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
 
     // 1. The perch.

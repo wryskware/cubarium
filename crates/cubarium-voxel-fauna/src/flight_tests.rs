@@ -24,7 +24,8 @@
 //! - **An underside** is perched on by rising into it (lift up while touching the slab
 //!   from below); a crown top by descending onto it. A flyer moving level through a crown
 //!   passes through it at the foliage speed.
-//! - **"Can't pay a takeoff"** is an empty reserve.
+//! - **"Can't pay a takeoff"** is an empty reserve and a body at `body_min` (JUVENILE-FOOD:
+//!   a takeoff is paid out of the reserve, then the body above its death line).
 //! - **`ceiling`** in `Self` is the clear height above the body's base to the first solid
 //!   or water cell in its column, over `band_max_m`, capped at 1; **`altitude`** is the
 //!   base's height over the support face below, over `band_max_m`.
@@ -704,14 +705,17 @@ fn vine_wall(covered: bool, config: FloraConfig) -> (World, Flora, Vec<Face>) {
 /// **5. Its perch crown is eaten away: it takes off, or drops when it can't pay.** A
 /// bellwing lands on a full-grown bloomcrown's crown top; the crown's foliage is then
 /// taken whole (the species' graze refuge set to 0 so a take can strip it). With a full
-/// reserve it takes off within a few ticks and stays up (holding a hover). With an empty
-/// reserve — it cannot pay a takeoff — it drops to the ground below and perches there,
-/// never rising above the crown it lost.
+/// reserve — or an empty one and body to spare over `body_min` (JUVENILE-FOOD: the body
+/// pays what the reserve cannot) — it takes off within a few ticks and stays up (holding a
+/// hover). When a takeoff costs more than its reserve and spare body together — here a
+/// takeoff made dearer than the whole body — it drops to the ground below and perches
+/// there, never rising above the crown it lost.
 #[test]
 fn a_lost_crown_perch_means_a_takeoff_or_a_drop() {
-    for (stores, pays) in [
-        (StartingStores::FULL, true),
-        (StartingStores { body: 1.0, reserve: 0.0 }, false),
+    for (stores, dear, pays) in [
+        (StartingStores::FULL, false, true),
+        (StartingStores { body: 1.0, reserve: 0.0 }, false, true),
+        (StartingStores::FULL, true, false),
     ] {
         let world = plain(16, 20, 8);
         let mut config = FloraConfig::default();
@@ -719,7 +723,15 @@ fn a_lost_crown_perch_means_a_takeoff_or_a_drop() {
         let mut flora = Flora::new(config);
         let site = full_stand(&mut flora, &world, Plant::Bloomcrown, 8, 4);
         let top = crown_top(&flora, site);
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fconfig = FaunaConfig::default();
+        if dear {
+            let p = &mut fconfig.founders[Founder::Bellwing.index()];
+            let flight = p.flight.as_mut().expect("a flyer");
+            // Over the whole body and reserve: (body_max + its full reserve) over basal.
+            let basal = p.core.maintenance_per_s * p.core.body_max;
+            flight.takeoff_s = 2.0 * (1.0 + p.core.reserve_cap) * p.core.body_max / (flight.flight_factor * basal);
+        }
+        let mut fauna = Fauna::new(fconfig);
         let (x, z) = centre(8, 4);
         let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, stores);
         fly(&mut fauna, id, 0.0, 0.0, -1.0);
