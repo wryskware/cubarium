@@ -410,10 +410,61 @@ pub struct TeacherConfig {
     /// onto it (`RouteGraph::way_on`), metres.
     #[serde(default = "way_on_m")]
     pub way_on_m: f64,
+    /// **FORAGE-LEAVE, giving up a depleted patch** (`crate::step::forage`): a heuristic
+    /// body that has held still to feed for `give_up_min_s` gives the patch up when the
+    /// trailing offer of its bites falls under this fraction of the intake that fills its
+    /// stomach (`full_tolerance · K / τ`, its own gut; at 1 the patch could just end a
+    /// meal), a fraction. 0.5: a patch offering under half a filling rate — for a lineage
+    /// on the default bite (`b = 2k/τ`) a stock under about a third of its
+    /// `bite_half_stock` — never ends a meal, and is left. 0 turns the rule off.
+    #[serde(default = "give_up_fraction")]
+    pub give_up_fraction: f64,
+    /// The least time on a patch before it may be given up, seconds: a just-arrived body is
+    /// not pushed off. 20 s: about the time the default bite takes to fill a stomach from
+    /// its appetite floor on a rich patch at the seedporter's 60 s digestion, and under the
+    /// shredders' 120 s.
+    #[serde(default = "give_up_min_s")]
+    pub give_up_min_s: f64,
+    /// The trailing window the offer is averaged over, the time constant of its running
+    /// mean, seconds.
+    #[serde(default = "give_up_window_s")]
+    pub give_up_window_s: f64,
+    /// How long a patch given up stays given up (the body walks off it rather than feed
+    /// there, and the stand it fed from leaves the fruit search's list), seconds.
+    #[serde(default = "give_up_shun_s")]
+    pub give_up_shun_s: f64,
+    /// The patch's extent: a stay continues, and a given-up patch is avoided, within this
+    /// many of the body's current lengths of where the stay began, body lengths.
+    #[serde(default = "give_up_zone_bl")]
+    pub give_up_zone_bl: f64,
+    /// The walk off a patch just given up: for this long any feeding answer of its
+    /// heuristic (a stop, or a turn to food it sees — often the patch it left) becomes a
+    /// walk straight on without feeding, seconds.
+    #[serde(default = "give_up_leave_s")]
+    pub give_up_leave_s: f64,
 }
 
 fn way_on_m() -> f64 {
     4.0
+}
+
+fn give_up_fraction() -> f64 {
+    0.5
+}
+fn give_up_min_s() -> f64 {
+    20.0
+}
+fn give_up_window_s() -> f64 {
+    10.0
+}
+fn give_up_shun_s() -> f64 {
+    180.0
+}
+fn give_up_zone_bl() -> f64 {
+    2.0
+}
+fn give_up_leave_s() -> f64 {
+    3.0
 }
 
 fn press_replan_s() -> f64 {
@@ -505,6 +556,12 @@ impl Default for TeacherConfig {
             route_refresh_s: route_refresh_s(),
             route_detour: route_detour(),
             way_on_m: way_on_m(),
+            give_up_fraction: give_up_fraction(),
+            give_up_min_s: give_up_min_s(),
+            give_up_window_s: give_up_window_s(),
+            give_up_shun_s: give_up_shun_s(),
+            give_up_zone_bl: give_up_zone_bl(),
+            give_up_leave_s: give_up_leave_s(),
         }
     }
 }

@@ -104,6 +104,8 @@ mod glider;
 pub(crate) use glider::{OffGraph, glider_fruit_in_reach, off_graph_exit};
 #[path = "jump.rs"]
 pub(crate) mod jump;
+#[path = "forage.rs"]
+pub(crate) mod forage;
 
 /// The tick's sky, read once (F1): what a flyer's act needs of the weather and the clock.
 #[derive(Clone, Copy, Debug)]
@@ -1336,6 +1338,15 @@ fn controllers(
             if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv, day) {
                 actions = go;
                 src = crate::Steer::Fruit;
+            }
+        }
+        // FORAGE-LEAVE: a heuristic body holding still to feed on a patch that cannot end a
+        // meal gives it up and walks on (`forage`). Flight and the reflexes below still win.
+        if driven && (fauna.controllers.flees(id) || fauna.controllers.rests_when_fed(id)) {
+            let ring = f64::from(view.config.width) * view.config.voxel_m;
+            if let Some(go) = forage::leave(fauna, i, actions, ring) {
+                actions = go;
+                src = crate::Steer::Leave;
             }
         }
         // AMPHIBIOUS-SNAIL: a body that retracts (its lineage's `retract_hold_s`) does so
@@ -2639,6 +2650,7 @@ fn flyer_sip(
         fauna.ledger.sip_misses_by_founder[founder.index()] += 1;
         return false;
     };
+    forage::note_bite(fauna, i, phys, Food::Nectar, manifest.controller_period_s, effort, stock, None);
     let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
@@ -3411,6 +3423,8 @@ fn founder_feed(
         return false;
     };
     let food = meal.food();
+    // FORAGE-LEAVE: what this patch offers the mouth, for the giving-up rule.
+    forage::note_bite(fauna, i, phys, food, manifest.controller_period_s, effort, stock, None);
     // The bite this body, this stock and this stomach's room allow.
     let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
@@ -5001,6 +5015,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.controllers.take(*id);
         fauna.trapped.remove(id);
         fauna.drop_plans.remove(id);
+        fauna.forage.remove(id);
     }
     for (a, cause) in &dead {
         if a.pack.is_some_and(|m| m.pup) {

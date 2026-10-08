@@ -1465,7 +1465,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2414 rows)
+**`fauna.*`** (2420 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -3807,6 +3807,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | the walking route graph a reflex walk plans on is rebuilt after this |
 | `fauna.teachers.route_detour` | 2.0 | ratio | (0, inf) | 1–4 | - | placeholder | a target is in reach when its route is at most this times the reflex's search radius |
 | `fauna.teachers.way_on_m` | 4.0 | m | [0, inf) | 1–8 | - | placeholder | how far round itself a cornered body off its route graph looks for its own way back onto it |
+| `fauna.teachers.give_up_fraction` | 0.5 | fraction of the fill rate | [0, inf) | 0.1–1 | - | placeholder | a heuristic body still-feeding gives the patch up when its bites' trailing offer falls under this share of the intake that fills its stomach (0 off) |
+| `fauna.teachers.give_up_min_s` | 20.0 | s | [0, inf) | 5–120 log | - | placeholder | the least time on a patch before it may be given up |
+| `fauna.teachers.give_up_window_s` | 10.0 | s | [0, inf) | 2–60 log | - | placeholder | time constant of the trailing mean of a stay's bite offers |
+| `fauna.teachers.give_up_shun_s` | 180.0 | s | [0, inf) | 30–1800 log | - | placeholder | how long a patch given up is avoided |
+| `fauna.teachers.give_up_zone_bl` | 2.0 | body lengths | [0, inf) | 0.5–6 | - | placeholder | a stay continues, and a given-up patch is avoided, within this of where the stay began |
+| `fauna.teachers.give_up_leave_s` | 3.0 | s | [0, inf) | 0.5–15 log | - | placeholder | after giving a patch up, any feeding answer of the heuristic becomes a walk straight on for this long |
 | `fauna.hunt.cue_scan_m` | 6.0 | m | [0, inf) | 2–12 | - | placeholder | how far around itself a patroller reads its prey's food to choose the next patch |
 | `fauna.hunt.patch_m` | 1.0 | m | (0, inf) | 0.5–3 | - | placeholder | food cells are pooled into square patches this wide |
 | `fauna.hunt.patch_min_hop_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | the nearest a next patch may be |

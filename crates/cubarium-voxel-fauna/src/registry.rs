@@ -597,6 +597,12 @@ fn knob_rows() -> Vec<Row> {
         t("route_refresh_s", "s", pos, "the walking route graph a reflex walk plans on is rebuilt after this").search(10.0, 600.0).log(),
         t("route_detour", "ratio", pos, "a target is in reach when its route is at most this times the reflex's search radius").search(1.0, 4.0),
         t("way_on_m", "m", nonneg, "how far round itself a cornered body off its route graph looks for its own way back onto it").search(1.0, 8.0),
+        t("give_up_fraction", "fraction of the fill rate", nonneg, "a heuristic body still-feeding gives the patch up when its bites' trailing offer falls under this share of the intake that fills its stomach (0 off)").search(0.1, 1.0),
+        t("give_up_min_s", "s", nonneg, "the least time on a patch before it may be given up").search(5.0, 120.0).log(),
+        t("give_up_window_s", "s", nonneg, "time constant of the trailing mean of a stay's bite offers").search(2.0, 60.0).log(),
+        t("give_up_shun_s", "s", nonneg, "how long a patch given up is avoided").search(30.0, 1800.0).log(),
+        t("give_up_zone_bl", "body lengths", nonneg, "a stay continues, and a given-up patch is avoided, within this of where the stay began").search(0.5, 6.0),
+        t("give_up_leave_s", "s", nonneg, "after giving a patch up, any feeding answer of the heuristic becomes a walk straight on for this long").search(0.5, 15.0).log(),
     ]);
 
     // `fauna.hunt.*`: the lanternjaw's patrol (the detritus web D2), every one a plausible

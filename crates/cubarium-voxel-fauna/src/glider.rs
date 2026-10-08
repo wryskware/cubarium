@@ -1119,6 +1119,13 @@ fn glider_feed(
     let Some((source, stock)) = glider_fruit_in_reach(view, &flora.view(), &fauna.animals[i], phys) else {
         return false;
     };
+    // FORAGE-LEAVE: what this crown or vine offers the mouth; a crown is the stand the
+    // fruit search would walk back to.
+    let key = match source {
+        Bloom::Stand(site) => flora.view().stand_at(site).map(|s| s.id),
+        Bloom::Vine(_) => None,
+    };
+    super::forage::note_bite(fauna, i, phys, Food::Fruit, manifest.controller_period_s, effort, stock, key);
     let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;

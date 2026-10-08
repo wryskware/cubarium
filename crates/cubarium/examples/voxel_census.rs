@@ -792,6 +792,45 @@ fn run(
     weather.summary(sim);
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
+    forage_summary(sim);
+}
+
+/// FORAGE-LEAVE's readout over the run (it is session state, so a segment's own): one
+/// `forage:` line per lineage whose heuristic held still to feed — stays ended, seconds
+/// spent in stays, the longest ended stay, the stays still under way and the longest of
+/// them, the mean interval offer (a fraction of the rate that fills its stomach), the
+/// share of offers under `give_up_fraction`, patches given up and samples walked off one.
+fn forage_summary(sim: &Sim) {
+    let fauna = sim.fauna();
+    let tally = fauna.forage_tally();
+    let open = fauna.forage_stays();
+    let animals = fauna.view().animals;
+    for f in cubarium_voxel_fauna::Founder::ALL {
+        let t = tally[f.index()];
+        let mine: Vec<f64> = open
+            .iter()
+            .filter(|(id, _, _)| animals.iter().any(|a| a.id == *id && a.founder == Some(f)))
+            .map(|o| o.1)
+            .collect();
+        if t.stay_samples == 0 && mine.is_empty() {
+            continue;
+        }
+        let samples = t.offer_samples.max(1) as f64;
+        eprintln!(
+            "forage: {} stays={} stay_s={:.0} max_ended_s={:.0} open={} max_open_s={:.0} \
+             mean_offer={:.3} low_offer_share={:.3} give_ups={} leave_samples={}",
+            f.name(),
+            t.stays,
+            t.stay_s,
+            t.stay_max_s,
+            mine.len(),
+            mine.iter().copied().fold(0.0, f64::max),
+            t.offer_sum / samples,
+            t.offer_low as f64 / samples,
+            t.give_ups,
+            t.leave_samples,
+        );
+    }
 }
 
 /// Streaming deaths and minute snapshots; living life-table rows appear at run end.
