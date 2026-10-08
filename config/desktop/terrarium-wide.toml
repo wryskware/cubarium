@@ -26,6 +26,14 @@ voxel_m = 0.125
 
 [world.landform]
 preset = "terrarium"
+# More lake on the wide ring (Wrysk 2026-10-07, "more room for lake. even future aquatic
+# animals"; design/handoffs/wide-lake-2026-10-07.md), now as the one lake scalar
+# (design/handoffs/lake-shallows-and-scale-2026-10-07.md): 1.5x the preset's lake is 6-9 m
+# of lake per 32 m of ring (15-22 m here), 0.75 bay, 0.75 m deep (short of the bedrock
+# floor), and 1.5 m of reed shelf and 0.75 m of wet flat round it. The water table stays at
+# the preset's 0.375 m; the lake's surface area matches the raised-table lake it replaces.
+# The lake may sit on the seam: panning shows it whole (lake_clear_of_seam stays off).
+lake_scale = 1.5
 
 # The day clock (`design/handoffs/voxel-weather-2026-09-24.md`, Wrysk's decision 1).
 [world.day]
