@@ -549,6 +549,7 @@ fn run(
         eprintln!("staged run {} to minute {}", r.dir().display(), r.end_minute());
     }
     let save_min = save.map(|s| s.minute.unwrap_or(minute0 + total_ticks / TICKS_PER_MIN));
+    eprintln!("census: actual world seed {}", sim.world().config().seed);
     print_header();
     if minute0 == 0 {
         print_row(0, sim, 0.0, timing.patch_min);
@@ -1171,7 +1172,7 @@ fn print_header() {
     for (_, n) in PATCH_SPECIES {
         header.push_str(&format!(",{n}_patch_max,{n}_patch_share,{n}_patches"));
     }
-    header.push_str(",dry_season,drained_root_water");
+    header.push_str(",dry_season,drained_root_water,seed");
     println!("{header}");
 }
 
@@ -1433,6 +1434,8 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(u8::from(sim.world().in_dry_season()).to_string());
         row.push(format!("{drained_water:.4}"));
     }
+    // Read the kept world's seed, including fallback and loaded-world starts.
+    row.push(sim.world().config().seed.to_string());
     println!("{}", row.join(","));
 }
 

@@ -215,7 +215,7 @@ fn vine_fruit_feeds_at_the_yield_its_mineral_funds() {
     vine_only.latticevine.mineral_fraction = 0.01;
     let r = roster(&vine_only, &fauna, &w, &food_spec());
     let row = r.food.iter().find(|x| x.lineage == "seedporter").expect("a row");
-    let fruit = &row.foods[0];
+    let fruit = row.foods.iter().find(|x| x.food == Food::Fruit.name()).expect("fruit supply");
     assert!(fruit.per_day > 0.0, "{row:?}");
     let p = fauna.founder(Founder::Seedporter);
     let funded = mineral_limited_yield(p.yield_by_food[Food::Fruit.index()], 0.01, p.core.n_tissue);
