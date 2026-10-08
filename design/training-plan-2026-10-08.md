@@ -145,8 +145,16 @@ hour later, 2 h). This repeats bl3:
 - C1 keeps more frondgrazers alive (26.5 against 20.5) and is stuck less (S 3.3 % against
   4.9 %).
 - In both arms:
-  - littershredders barely move (moving share about 0.01). Their fullness sits at 0.18–0.19
-    for nearly every body, while litter grows by about 4,200 over 2 h;
+  - littershredders barely move (moving share about 0.01). This is a choice, not a failure
+    (`design/7_Research/shredder-plateau-2026-10-08.md`):
+    - a shredder that tastes litter holds still and feeds;
+    - its gut sets the rate;
+    - the 0.19 is a late-window average of a sawtooth that moves in step across seeds:
+      adults sleep through the lit two-thirds of the day, then refill;
+    - litter is decomposition-limited. Shredders eat about 0.02 % of the decay flow, and
+      even 41 shredders at full gut and full size would eat only about 0.15/min, so they
+      are not the litter sink at any plausible population;
+    - the scorer's litter role now says so;
   - bellwing fullness is effectively zero and 4–5 starve per seed after the founding hatch
     boom (§6 Q8);
   - every snail and capgnawer juvenile is under the 0.05 starving line. That is growth by
@@ -360,6 +368,11 @@ control and the reward accounting; display targets after seeing results.
        and world-state layout changes still refuse.
    - Recommended (b). It isn't migration: a loaded world already runs new code.
    - At least, a config change should bump the schema, so the loader refuses cleanly.
+11. **Shredders by day?** The heuristic shredder is DarkActive. It sleeps while its face is
+    lit, so adults lay about one egg per 2 h. Option: litter cover counts as dark, or a
+    shredder on food stays awake. Visible effect: shredders feed by day and eggs roughly
+    double. Litter is unchanged, since decay sets it. If you want to see litter eaten, that
+    is a new decomposer role (a litter mould), not more shredders.
 10. **The real ecology genome** for `eco_search.py`: which levers to search (Astra: 6–12
     related genes at first). That's Wrysk's call; only a 3-gene smoke genome exists.
 
