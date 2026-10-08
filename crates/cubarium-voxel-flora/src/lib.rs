@@ -3343,6 +3343,25 @@ impl FloraConfig {
         self
     }
 
+    /// The inverse of [`FloraConfig::rescaled_to`]: a config a world of cell size
+    /// `self.voxel_m` runs, expressed back on the reference 0.25 m voxel it was authored on
+    /// (each scale-tagged row divided by the same factor, the cell size the default's). A
+    /// rounded voxel distance comes back exactly: the forward factor is above 1, so the
+    /// rounding moved it by under one reference voxel. For a loaded layer whose parameters
+    /// are changed in their authored units.
+    pub fn authored(mut self) -> FloraConfig {
+        const REFERENCE_VOXEL_M: f64 = 0.25;
+        let voxel_m = self.voxel_m;
+        self.voxel_m = FloraConfig::default().voxel_m;
+        if !voxel_m.is_finite() || !(voxel_m > 0.0) || voxel_m >= REFERENCE_VOXEL_M {
+            return self;
+        }
+        registry()
+            .rescale(&mut self, voxel_m / REFERENCE_VOXEL_M)
+            .expect("every scale-tagged flora field rescales");
+        self
+    }
+
     /// Every species reduced to **one** `[0, 1.0]` foliage layer at the full crown
     /// radius with no porosity: the lollipop the model was before plants had layers.
     ///
