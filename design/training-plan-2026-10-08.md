@@ -139,6 +139,19 @@ JUVENILE-FOOD is diagnosing.
 - S is now stuck body-minutes over awake body-minutes: heuristic 9.5 %, C1 5.6 %.
 - These are search failures, most likely the root of the juvenile starvation (JUVENILE-FOOD).
 
+**Phase check at minute 120** (`runs/bl3b-m120-2026-10-08/report.md`, same starts loaded an
+hour later, 2 h). This repeats bl3:
+- C1 wins 2/8 (median Δ soft P +0.93 against C1). V again decides.
+- C1 keeps more frondgrazers alive (26.5 against 20.5) and is stuck less (S 3.3 % against
+  4.9 %).
+- In both arms:
+  - littershredders barely move (moving share about 0.01). Their fullness sits at 0.18–0.19
+    for nearly every body, while litter grows by about 4,200 over 2 h;
+  - bellwing fullness is effectively zero and 4–5 starve per seed after the founding hatch
+    boom (§6 Q8);
+  - every snail and capgnawer juvenile is under the 0.05 starving line. That is growth by
+    design (JUVENILE-FOOD), so for those lineages the starving count is not a health signal.
+
 ## 2. The fitness score
 
 One rule from both reviews: **a vector first, a scalar second.** Every evaluation prints:
