@@ -758,10 +758,7 @@ vec3 flowAt(ivec3 c) {
     return vec3(m > 0.0 ? f / m * q : vec2(0.0), 0.0);
 }
 
-int wrapI(int a, int m) {
-    int r = a % m;
-    return r < 0 ? r + m : r;
-}
+int wrapI(int a, int m) { return wrapMod(a, m); }
 
 // Steps in one flow-map cycle, and voxels the ripples move a step at full speed (one
 // voxel a second at 12 Hz). Two copies half a cycle apart take turns: a ripple line
@@ -1816,8 +1813,7 @@ int worldCol(int sx) {
 // Whether cell (x, y, z) is one of the highlighted animal's.
 bool highlighted(int x, int y, int z) {
     if (u.view.y == 0) { return false; }
-    int dxh = (x - u.hiMin.x) % W;
-    if (dxh < 0) { dxh += W; }
+    int dxh = wrapMod(x - u.hiMin.x, W);
     if (dxh > u.hiMax.x || y < u.hiMin.y || y > u.hiMax.y || z < u.hiMin.z || z > u.hiMax.z) {
         return false;
     }

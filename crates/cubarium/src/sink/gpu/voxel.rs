@@ -324,6 +324,11 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         self.renderer.read_raster(&self.gpu)
     }
 
+    /// Turn the picture `x` raster columns round the ring (the hosted view's pan).
+    pub fn set_view_x(&mut self, x: i32) {
+        self.renderer.set_view_x(x);
+    }
+
 
 
     /// Pack one tick's world into the renderer's staging buffer. Call it whenever the

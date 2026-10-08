@@ -7,7 +7,11 @@
 //!     [--config config/desktop/terrarium.toml] [--set LINE]... [--px N] \
 //!     [--variant NAME=SETLINE[;SETLINE]]... [--seconds 0] [--fps 60] [--warm 20] \
 //!     [--crop NAME=X0,Y0,X1,Y1]... [--every 1] [--mp4] [--comparison] [--costs-only]
+//!     [--view-x COLUMNS]
 //! ```
+//!
+//! `--view-x` turns the picture that many raster columns round the ring, as the hosted
+//! view's pan does (to put the world's seam mid-frame).
 //!
 //! `--mp4` pipes each variant's frames (and each crop's) to `ffmpeg` instead of PNGs:
 //! `NAME.mp4` and `NAME-CROP.mp4`, x264 yuv444p crf 12 at `--fps`, real time.
@@ -187,6 +191,7 @@ fn main() -> Result<()> {
     let mut specimen = None::<String>;
     let mut quarter = 0u8;
     let (mut mp4, mut comparison, mut costs_only) = (false, false, false);
+    let mut view_x = 0i32;
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut v = || it.next().context("missing value");
@@ -203,6 +208,7 @@ fn main() -> Result<()> {
             "--warm" => warm = v()?.parse()?,
             "--every" => every = v()?.parse()?,
             "--mp4" => mp4 = true,
+            "--view-x" => view_x = v()?.parse()?,
             "--comparison" => comparison = true,
             "--costs-only" => costs_only = true,
             "--variant" => {
@@ -288,6 +294,8 @@ fn main() -> Result<()> {
                 ..VoxelGpuSinkOptions::default()
             },
         )?;
+        let mut sink = sink;
+        sink.set_view_x(view_x);
         sinks.push(Variant {
             name: name.clone(),
             sink,

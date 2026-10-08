@@ -38,7 +38,9 @@ ivec2 cellOf(vec2 px) {
 float cellValue(sampler2D field, int channel, ivec2 cell) {
     int nx = int(u.grid.x);
     int ny = int(u.grid.y);
-    ivec2 c = ivec2((cell.x % nx + nx) % nx, clamp(cell.y, 0, ny - 1));
+    // `%` of a negative is undefined in GLSL: wrap without one.
+    int cx = cell.x >= 0 ? cell.x % nx : nx - 1 - (-1 - cell.x) % nx;
+    ivec2 c = ivec2(cx, clamp(cell.y, 0, ny - 1));
     return texelFetch(field, c, 0)[channel];
 }
 

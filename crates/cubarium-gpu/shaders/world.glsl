@@ -170,10 +170,16 @@ int S, RISE, BASE, W, H, D;
 
 // --- the world, as the packing stores it ---------------------------------------------
 
-int wrapX(int x) {
-    int m = x % W;
-    return m < 0 ? m + W : m;
+// `a` round a ring of `m`, in 0..m. GLSL leaves `%` undefined for a negative operand, and
+// NVIDIA's driver takes the unsigned remainder there: -1 % 640 came out 255, so on a ring
+// whose width is not a power of two every lookup one cell left of the seam read a column
+// 384 away (the sun march's shadows, the AO, the sky plane and the canopy at the seam).
+// Only non-negative operands reach `%` here.
+int wrapMod(int a, int m) {
+    return a >= 0 ? a % m : m - 1 - (-1 - a) % m;
 }
+
+int wrapX(int x) { return wrapMod(x, W); }
 
 bool inY(int y) { return y >= 0 && y < H; }
 

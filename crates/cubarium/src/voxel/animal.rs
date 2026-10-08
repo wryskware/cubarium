@@ -148,6 +148,9 @@ pub const LANTERNJAW_JAW_SRGB: u32 = 0x00FF_5A3C;
 pub const LANTERNJAW_LURE_SRGB: u32 = 0x00FF_E27A;
 /// A carcass is its body's colour at this brightness, lying flat.
 pub const CARCASS_DARKEN: f32 = 0.35;
+/// How many cells a carcass's footprint follows the ground up or down from its site's
+/// support: each cell lies on its own column's ground within this band.
+pub const CARCASS_DRAPE: u32 = 3;
 /// Remains (below 30 % of the body, §2.5): one small pale glyph.
 pub const REMAINS_SRGB: u32 = 0x00D8_D0C0;
 /// A wounded body takes the starving tint at half strength (the brief's item 11).
@@ -1620,11 +1623,15 @@ impl Animals {
                     if z < 0 {
                         continue;
                     }
-                    let cell = Cell {
-                        x: cx + a * step_x + c * side_x,
-                        y,
-                        z: z as u32,
+                    // Each cell lies on its own column's ground near the body's site, so
+                    // the body follows a slope instead of a flat slab standing out over
+                    // it (or sunk into it); a cell over a drop deeper than that is left out.
+                    let x = cx + a * step_x + c * side_x;
+                    let (lo, hi) = (g.site.y.saturating_sub(CARCASS_DRAPE), g.site.y + CARCASS_DRAPE);
+                    let Some(ground) = (lo..=hi).rev().find(|&yy| view.is_support(x, yy, z as u32)) else {
+                        continue;
                     };
+                    let cell = Cell { x, y: ground + 1, z: z as u32 };
                     self.place_if_empty(view, cell, AnimalPart::Model(style));
                 }
             }
@@ -2200,6 +2207,49 @@ mod tests {
                 tick += 1;
             }
             assert!(last.abs() < 1e-4, "{strength}: still leaning {last} after the fade");
+        }
+    }
+
+    /// A carcass lies on the ground under each of its cells: across a step down its cells
+    /// beyond the edge drop to the lower ground instead of standing out flat over it
+    /// (Wrysk's "teal water artifact", 2026-10-08: a loftstrider's body as a floating slab).
+    #[test]
+    fn a_carcass_follows_the_ground_under_each_cell() {
+        use cubarium_voxel_flora::{Carcass, Deposit, DepositKind, Flora, FloraConfig, Site};
+        let c = VoxelConfig { width: 32, height: 12, depth: 16, voxel_m: 0.125, ..VoxelConfig::default() };
+        let mut w = World::empty(c.clone());
+        // Ground tops at y 5 left of x 16, y 3 from x 16 on: a two-cell step down.
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                let top = if x < 16 { 5 } else { 3 };
+                for y in 0..=top {
+                    w.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Soil });
+                }
+            }
+        }
+        let cfg = FaunaConfig::placeholder();
+        let mut flora = Flora::new(FloraConfig::default());
+        let site = Site { x: 15, y: 5, z: 8 };
+        assert!(flora.deposit(site, Deposit { kind: DepositKind::Carrion, organic: 50.0, mineral: 0.0, energy: 0.0 }));
+        // Lying along +x across the step, as long as a grown body of its lineage.
+        let carcass = Carcass { lineage: Founder::Browser.index() as u8, heading_rad: std::f64::consts::FRAC_PI_2, organic: 50.0 };
+        assert!(flora.lay_carcass(site, carcass));
+        let view = w.view();
+        let mut grid = Animals::empty(0, 0, 0);
+        grid.rebuild(&view, None);
+        grid.stamp_carcasses(&view, &flora.view(), &cfg);
+        let mut cells = Vec::new();
+        for x in 0..i64::from(c.width) {
+            for y in 0..i64::from(c.height) {
+                if grid.at(x, y, 8) != AnimalPart::None {
+                    cells.push((x, y));
+                }
+            }
+        }
+        assert!(cells.iter().any(|&(x, _)| x < 16) && cells.iter().any(|&(x, _)| x >= 16), "{cells:?}");
+        for &(x, y) in &cells {
+            assert!(view.is_solid(x, y as u32 - 1, 8), "cell ({x}, {y}) lies on the ground: {cells:?}");
+            assert!(!view.is_solid(x, y as u32, 8), "cell ({x}, {y}) is not in the ground: {cells:?}");
         }
     }
 

@@ -483,3 +483,69 @@ fn lit_water_marks_exactly_the_flat_tiers_water_pixels() {
     let differ = masks[0].iter().zip(&masks[1]).filter(|(a, b)| a != b).count();
     assert_eq!(differ, 0, "{differ} of {count} water pixels differ between flat and lit");
 }
+
+/// The ring has no seam: a scene turned `k` columns round the ring draws the same picture
+/// turned `k · s` raster columns, its shadows, AO creases and sky included, on a ring whose
+/// width is not a power of two (every lookup across the seam wraps to the column it
+/// names: x = −1 reads x = W − 1). The pillar and the step stand once mid-strip and once on
+/// the seam, where the sun (toward −x) casts across it and the AO reads across it.
+#[test]
+fn a_scene_turned_round_the_ring_draws_the_same_picture_turned() {
+    let c = Config {
+        width: 20,
+        height: 10,
+        depth: 12,
+        ..Config::default()
+    };
+    let w = i64::from(c.width);
+    let scene = |at: i64| {
+        let mut world = World::empty(c.clone());
+        let mut set = |x: i64, y: u32, z: u32, material: Material| {
+            world.apply(Command::SetMaterial { x: x.rem_euclid(w), y, z, material });
+        };
+        for z in 0..c.depth {
+            for x in 0..w {
+                set(x, 0, z, Material::Bedrock);
+                set(x, 1, z, Material::Rock);
+            }
+        }
+        // A pillar, a step at its right and a ledge behind it, all within three columns.
+        for y in 2..7 {
+            set(at, y, 4, Material::Rock);
+        }
+        set(at + 1, 2, 5, Material::Rock);
+        set(at - 1, 2, 7, Material::Soil);
+        set(at, 2, 7, Material::Soil);
+        world
+    };
+    let cfg = VoxelConfig {
+        sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
+        px_per_voxel: 4,
+        haze: 0.3,
+        dither: 0.0,
+        sky_gradient: false,
+        lighting: Lighting::Lit,
+        light: LightConfig { sun: [-1.0, 1.5, -1.0], ..LightConfig::default() },
+        ..VoxelConfig::default()
+    };
+    let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &c).unwrap();
+    let (mid, seam) = (6i64, w - 1);
+    let Some(a) = lit_frame(&cfg, proj, &scene(mid)) else { return };
+    let Some(b) = lit_frame(&cfg, proj, &scene(seam)) else { return };
+    let rw = usize::from(proj.raster_w);
+    assert_eq!(rw, (c.width * proj.s) as usize, "the raster is the ring, no margin");
+    let shift = ((seam - mid) * i64::from(proj.s)) as usize;
+    let rows = a.len() / 4 / rw;
+    let mut off = 0;
+    for y in 0..rows {
+        for x in 0..rw {
+            let pa = &a[(y * rw + x) * 4..(y * rw + x) * 4 + 3];
+            let xb = (x + shift) % rw;
+            let pb = &b[(y * rw + xb) * 4..(y * rw + xb) * 4 + 3];
+            if pa.iter().zip(pb).any(|(p, q)| p.abs_diff(*q) > 2) {
+                off += 1;
+            }
+        }
+    }
+    assert_eq!(off, 0, "pixels that differ once the scene sits on the seam");
+}
