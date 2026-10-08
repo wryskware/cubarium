@@ -43,7 +43,8 @@
  "founders": {
   "littershredder": "littershredder.cvm",
   "frondgrazer": "frondgrazer.cvm",
-  "lanternjaw": "lanternjaw.cvm"
+  "lanternjaw": "lanternjaw.cvm",
+  "loftstrider": "loftstrider.cvm"
  },
  "detail": {
   "bloomcrown": {
@@ -2643,11 +2644,57 @@
    ]
   },
   "loftstrider": {
-   "bytes": 5114,
+   "bytes": 13820,
    "bins": [
     {
+     "length_m": 1.0211,
+     "cells": 190,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    },
+    {
+     "length_m": 1.3159,
+     "cells": 316,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    },
+    {
+     "length_m": 1.6106,
+     "cells": 502,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    },
+    {
+     "length_m": 1.9053,
+     "cells": 715,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    },
+    {
      "length_m": 2.2,
-     "cells": 1001
+     "cells": 1001,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
     }
    ]
   },

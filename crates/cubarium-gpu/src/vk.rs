@@ -343,7 +343,7 @@ impl Gpu {
         Ok(HostBuffer {
             buffer,
             memory,
-            ptr: ptr as *mut u8,
+            ptr: std::sync::atomic::AtomicPtr::new(ptr as *mut u8),
             size: req.size,
         })
     }
@@ -427,11 +427,19 @@ impl Gpu {
 pub struct HostBuffer {
     pub buffer: vk::Buffer,
     pub memory: vk::DeviceMemory,
-    pub ptr: *mut u8,
+    /// The mapping. In an `AtomicPtr`, which is `Send` and `Sync`, so a buffer can move to
+    /// the thread that records with it (the hosted renderer's presenter) with no manual
+    /// `Send` impl; every access goes through [`HostBuffer::ptr`].
+    ptr: std::sync::atomic::AtomicPtr<u8>,
     pub size: u64,
 }
 
 impl HostBuffer {
+    /// The mapped memory's first byte.
+    pub fn ptr(&self) -> *mut u8 {
+        self.ptr.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Copy a `Pod` slice into the buffer, truncated at its size.
     pub fn write<T: bytemuck::Pod>(&self, data: &[T]) {
         self.write_at(0, data);
@@ -447,7 +455,7 @@ impl HostBuffer {
         let bytes = bytemuck::cast_slice(data);
         let n = bytes.len().min((self.size as usize).saturating_sub(offset));
         if n > 0 {
-            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr.add(offset), n) };
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr().add(offset), n) };
         }
     }
 
@@ -461,7 +469,7 @@ impl HostBuffer {
         let bytes = bytemuck::cast_slice(data);
         let n = bytes.len().min((self.size as usize).saturating_sub(offset));
         if n > 0 {
-            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr.add(offset), n) };
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr().add(offset), n) };
         }
     }
 
@@ -470,7 +478,7 @@ impl HostBuffer {
     /// # Safety
     /// The caller must have waited for every GPU write into this buffer.
     pub unsafe fn bytes(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr, self.size as usize) }
+        unsafe { std::slice::from_raw_parts(self.ptr(), self.size as usize) }
     }
 
     pub fn destroy(&self, gpu: &Gpu) {

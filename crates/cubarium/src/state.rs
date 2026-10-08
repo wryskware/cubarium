@@ -149,20 +149,9 @@ impl StateLock {
 }
 
 /// `flock(fd, LOCK_EX | LOCK_NB)`. Contention arrives as [`io::ErrorKind::WouldBlock`].
-///
-/// The only `unsafe` in this crate. It is sound: `as_raw_fd` yields a descriptor the
-/// `File` keeps open for the duration of the call (and for the life of the [`StateLock`]),
-/// `flock` takes only that integer and a flag constant, and the return value is fully
-/// described by `errno`, which is read through `io::Error::last_os_error`.
-#[allow(unsafe_code)]
 fn flock_exclusive_nonblocking(file: &File) -> io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+    rustix::fs::flock(file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+        .map_err(Into::into)
 }
 
 // --- What a state directory already holds -------------------------------------------

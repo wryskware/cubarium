@@ -19,6 +19,10 @@ path = "src/main.rs"
 pack-profile = []
 
 [dependencies]
+# Byte views of `Pod` data with no `unsafe` (the pack's terrain compare).
+bytemuck = "1"
+# poll(2) for the Wayland target, with no `unsafe`.
+rustix = { version = "1", features = ["event"] }
 cube-proto = { workspace = true }
 cubarium-surface = { workspace = true }
 cubarium-render = { workspace = true }
@@ -60,6 +64,18 @@ toml = "0.8"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 ctrlc = "3"
-# OS advisory `flock(2)` for state ownership, and Unix `poll(2)` to accept viewer
-# connections promptly without a periodic 10ms request delay.
+# Constants retained for platform error checks.
 libc = "0.2"
+
+[lints]
+workspace = true
+
+# Safe OS wrappers for locks, readiness, scheduling and signal-driven saves.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", features = ["fs", "event", "process", "thread"] }
+signal-hook = "0.3"
+
+[dependencies.chrono]
+version = "0.4"
+default-features = false
+features = ["clock"]

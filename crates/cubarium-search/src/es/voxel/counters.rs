@@ -18,6 +18,11 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
+#[cfg(target_os = "linux")]
+use perf_event::Counter;
+#[cfg(not(target_os = "linux"))]
+type Counter = std::fs::File;
+
 /// `(name, perf type, config)`: PERF_TYPE_HARDWARE = 0, PERF_TYPE_RAW = 4.
 const EVENTS: [(&str, u32, u64); 6] = [
     ("cycles", 0, 0),
@@ -127,7 +132,7 @@ pub fn take() -> Sample {
 
 /// One worker thread's open counters. Dropping it adds the thread's counts to the tally.
 pub struct Probe {
-    fds: Vec<(usize, std::fs::File)>,
+    fds: Vec<(usize, Counter)>,
     pub ticks: u64,
     pub busy_s: f64,
 }
@@ -167,7 +172,7 @@ impl Drop for Probe {
             busy_s: self.busy_s,
             ..Sample::default()
         };
-        for (k, f) in &self.fds {
+        for (k, f) in &mut self.fds {
             let v = read(f);
             match EVENTS[*k].0 {
                 "cycles" => s.cycles = v,
@@ -182,79 +187,47 @@ impl Drop for Probe {
     }
 }
 
-/// `perf_event_attr` up to `config1` (`PERF_ATTR_SIZE_VER0`, 64 bytes).
-#[repr(C)]
-#[derive(Default)]
-struct Attr {
-    kind: u32,
-    size: u32,
-    config: u64,
-    sample_period: u64,
-    sample_type: u64,
-    read_format: u64,
-    flags: u64,
-    wakeup_events: u32,
-    bp_type: u32,
-    config1: u64,
-}
-
-/// `read_format`: the value, then time enabled and time running (for multiplex scaling).
-const FORMAT_TIMES: u64 = 1 | 2;
-/// `flags`: disabled = bit 0 is left clear (counting starts at open), exclude_kernel =
-/// bit 5, exclude_hv = bit 6.
-const FLAGS: u64 = (1 << 5) | (1 << 6);
-
 /// Open one counter on the calling thread, any CPU, user space only.
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited: perf_event_open on the calling thread; the fd is owned.
-fn open(kind: u32, config: u64) -> Option<std::fs::File> {
-    use std::os::fd::FromRawFd;
-    let attr = Attr {
-        kind,
-        size: std::mem::size_of::<Attr>() as u32,
-        config,
-        read_format: FORMAT_TIMES,
-        flags: FLAGS,
-        ..Attr::default()
+fn open(kind: u32, config: u64) -> Option<Counter> {
+    use perf_event::events::{Hardware, Raw};
+    use perf_event::{Builder, ReadFormat};
+    let mut builder = match kind {
+        0 => Builder::new(Hardware(config)),
+        4 => Builder::new(Raw::new(config)),
+        _ => return None,
     };
-    // SAFETY: `attr` is a valid PERF_ATTR_SIZE_VER0 attribute that outlives the call;
-    // pid 0 / cpu -1 count the calling thread on any CPU; no group, no flags.
-    let fd = unsafe {
-        libc::syscall(
-            libc::SYS_perf_event_open,
-            &attr as *const Attr,
-            0 as libc::pid_t,
-            -1 as libc::c_int,
-            -1 as libc::c_int,
-            0 as libc::c_ulong,
-        )
-    };
-    if fd < 0 {
-        return None;
-    }
-    // SAFETY: the kernel just returned this fd to us and nothing else owns it.
-    Some(unsafe { std::fs::File::from_raw_fd(fd as i32) })
+    builder
+        .observe_self()
+        .any_cpu()
+        .enabled(true)
+        .exclude_kernel(true)
+        .exclude_hv(true)
+        .read_format(ReadFormat::TOTAL_TIME_ENABLED | ReadFormat::TOTAL_TIME_RUNNING)
+        .build()
+        .ok()
 }
 
 #[cfg(not(target_os = "linux"))]
-fn open(_kind: u32, _config: u64) -> Option<std::fs::File> {
+fn open(_kind: u32, _config: u64) -> Option<Counter> {
     None
 }
 
 /// The counter's value scaled by enabled / running time.
-fn read(f: &std::fs::File) -> f64 {
-    use std::io::Read;
-    let mut buf = [0u8; 24];
-    let mut f = f;
-    if f.read_exact(&mut buf).is_err() {
+#[cfg(target_os = "linux")]
+fn read(counter: &mut Counter) -> f64 {
+    let Ok(sample) = counter.read_count_and_time() else {
+        return 0.0;
+    };
+    if sample.time_running == 0 {
         return 0.0;
     }
-    let word = |i: usize| u64::from_ne_bytes(buf[i * 8..i * 8 + 8].try_into().expect("8 bytes"));
-    let (value, enabled, running) = (word(0), word(1), word(2));
-    if running == 0 {
-        return 0.0;
-    }
-    value as f64 * enabled as f64 / running as f64
+    sample.count as f64 * sample.time_enabled as f64 / sample.time_running as f64
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read(_counter: &mut Counter) -> f64 {
+    0.0
 }
 
 /// Per-CPU `(busy, total)` jiffies from `/proc/stat`, indexed by CPU number: the machine's

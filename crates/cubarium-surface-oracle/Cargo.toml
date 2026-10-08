@@ -7,3 +7,6 @@ description = "Slow independent 3D reference for local surface queries; test sup
 
 [dependencies]
 cube-proto = { workspace = true }
+
+[lints]
+workspace = true

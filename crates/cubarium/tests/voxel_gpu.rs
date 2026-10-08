@@ -96,8 +96,13 @@ fn the_shaders_slab_lookup_names_the_voxel_the_projection_gave_the_pixel() {
 #[test]
 fn the_gpu_draws_the_same_small_world_as_the_cpu_presenter() {
     let c = config();
+    // The CPU presenter stamps its animals: the GPU's stamped path is the one it defines.
     let cfg = VoxelConfig {
         sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
+        figures: cubarium::voxel::figure::FigureConfig {
+            animals: cubarium::voxel::figure::AnimalDraw::Stamped,
+            ..Default::default()
+        },
         ..VoxelConfig::default()
     };
     let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &c).unwrap();
