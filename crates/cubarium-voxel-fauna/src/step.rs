@@ -3301,7 +3301,9 @@ fn climb_tick(
         fb.structural_loss += motor_body;
         fb.motor_respiration += motor_paid;
     }
-    a.state = State::Climbing;
+    // Holding on without going anywhere (no forward effort) is not climbing (LOAD-CLIMB):
+    // a walker's still tick is Resting.
+    a.state = if moved > 0.0 { State::Climbing } else { State::Resting };
     if climb.progress_m < climb.rise_m - 1e-12 {
         a.mobility.climb = Some(climb);
         return;

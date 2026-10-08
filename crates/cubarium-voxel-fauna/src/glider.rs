@@ -850,6 +850,9 @@ fn climb_tick(
         start_glide(fauna, i, true);
         return;
     };
+    // Metres along the stem or face this tick: a body holding on without going anywhere
+    // (stopped to eat, or sated at a fruiting crown) is not climbing (LOAD-CLIMB).
+    let mut went = 0.0;
     if effort > 0.0 {
         let cost = phys.motor_respiration_per_s * fauna.animals[i].body * effort * phys.wall_climb_cost_factor * DT;
         let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
@@ -960,11 +963,15 @@ fn climb_tick(
         fb.delivered_forward += moved;
         fb.structural_loss += body;
         fb.motor_respiration += paid;
+        went = moved;
     }
     let fed = due && held.feed > 0.0 && glider_feed(fauna, i, view, flora, manifest, phys, held.feed);
     let a = &mut fauna.animals[i];
+    // As a walker's: Climbing or Walking only for a tick it went somewhere, else Resting
+    // (the stand still counts as climbing time by its mode).
     a.state = match (fed, a.mobility.mode) {
         (true, _) => State::Cropping,
+        (false, _) if went <= 0.0 => State::Resting,
         (false, MobilityMode::Climb) => State::Climbing,
         (false, MobilityMode::Ground) => State::Walking,
         _ => State::Resting,
